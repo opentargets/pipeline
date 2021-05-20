@@ -22,7 +22,7 @@ resource "google_service_account" "gcp_service_acc_apis" {
 
 resource "google_compute_instance" "elasticsearch_etl" {
   // Good, we need randomness in case we make changes in the VM that will replace it
-  name = "${var.module_wide_prefix_scope}-elastic-search-server-${random_string.random.result}"
+  name = "${var.module_wide_prefix_scope}-server-${random_string.random.result}"
   //machine_type = "custom-${var.vm_elastic_search_vcpus}-${var.vm_elastic_search_mem}"
   // We are launching only one VM, so we can externalise the machine type computation
   machine_type = local.vm_machine_type
