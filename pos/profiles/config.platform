@@ -1,36 +1,34 @@
-# Variables for Sync data
-# This one is used to feed BigQuery Dev
-release_id_dev      = "ricardo/23.04.1"
-# This one is used to feed BigQuery Prod, and as destination folder in the public release bucket
-release_id_prod     = "23.04"
-# This variable is used in the script as source for the data syncronization to the public release bucket and the EBI FTP
-gs_sync_from        = "open-targets-pre-data-releases/ricardo/23.04.1"
+# POS pipelines configuration file for Open Targets Platform
+# This is the prefix that will be used for all the resources created in the cloud for running the pipelines
+resources_prefix   = "platform"
+# This is the prefix that will be used for all the data images created in the cloud for running the pipelines
+data_images_prefix = "platform"
+
+# Data release configuration
+data_location_source     = "open-targets-pre-data-releases/23.06"
+data_location_production = "open-targets-data-releases/23.06"
+
+# GCP config to use
+project_id         = "open-targets-eu-dev"
+gcp_default_region = "europe-west1"
+gcp_default_zone   = "europe-west1-d"
+
+# POS pipeline configuration
+# Use default value for machine type
+# vm_pos_machine_type = "n1-highcpu-32"
+# Variables for creating VMs
+config_vm_pos_boot_image   = "debian-11"
+pos_logs_path_root  = "gs://open-targets-ops/logs/platform-pos"
+
+# Publishing configuration
+# This flag indicates whether the data images can be made publicly available
+is_public_data_images = true
+# This flag indicates whether this is a PPP profile
 is_partner_instance = false
 
-# Variable for creating IMAGES : ElasticSearch and Clickhouse
-# This one is used to produce the web application static data context
-config_direct_json  = "open-targets-pre-data-releases/ricardo/23.04.1"
-# This value is used to feed BigQuery Production and Clickhouse image
-config_gs_etl       = "open-targets-pre-data-releases/ricardo/23.04.1/output"
-config_script_name  = "posprod"
-config_release_name = "platform2304"
-
-# Project dev info
-config_project_id         = "open-targets-eu-dev"
-config_gcp_default_region = "europe-west1"
-config_gcp_default_zone   = "europe-west1-d"
-
-config_vm_elastic_search_vcpus          = "4"
-config_vm_elastic_search_mem            = "32768"
-config_vm_elastic_search_boot_disk_size = 64
-config_vm_elastic_search_version        = "7.10.2"
-
-config_vm_clickhouse_vcpus          = "4"
-config_vm_clickhouse_mem            = "26624"
-config_vm_clickhouse_boot_disk_size = 64
-
-config_vm_pos_machine_type = "n1-standard-8"
-config_vm_pos_boot_image   = "debian-10"
-config_vm_pos_boot_disk_size                = 750
-
+# Variables for Sync data
+# This one is used to feed BigQuery Dev
+release_id_dev = "23.06"
+# This one is used to feed BigQuery Prod, and as destination folder in the public release bucket
+release_id_prod = "23.06"
 
