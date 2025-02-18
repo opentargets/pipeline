@@ -1,7 +1,10 @@
 from pathlib import Path
+
 import polars as pl
 from loguru import logger
+
 from pts.schemas.openfda import schema
+
 
 def openfda(source: Path, destination: Path) -> None:
     df = pl.read_json(source, schema=schema)

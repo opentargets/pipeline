@@ -1,26 +1,81 @@
 # PTS — Open Targets Pipeline Transformation Stage
 
-Simple CLI tool that transforms ontologies and other input data into The format
-used by the Open Targets pipeline.
+Convert files into formats and structures used by the Open Targets data pipeline.
 
-## Running
 
-### Locally
+## Summary
 
-[Install uv](https://docs.astral.sh/uv/getting-started/installation/).
+This application uses the [Otter](http://github.com/opentargets/otter) library to
+convert some input files into parquet, and transform some ontologies we use into
+structures suitable for the Open Targets pipeline.
+
+Check out the [config.yaml](config.yaml) file to see the steps and the tasks that
+make them up.
+
+
+## Installation and running
+
+PTS uses [UV](https://docs.astral.sh/uv/) as its package manager. It is compatible
+with PIP, so you can also fall back to it if you feel more comfortable.
+
 
 ```bash
-uv run pts --help
+uv run pts -h
 ```
 
-### Docker
+> [!TIP]
+> You can also use PTS with [Make](https://www.gnu.org/software/make/). Running
+> `make` without any target shows help.
+
+
+### Running with Docker
+
+You can also launch PTS with Docker:
+```bash
+docker run ghcr.io/opentargets/pts:latest -h
+```
+
+PTS can upload the files it fetches into different cloud storage services. Open
+Targets uses Google Cloud. To enable it in a docker container, you must have a
+credentials file. Assuming you do, you can run the following command:
+
+```bash
+docker run \
+  -v /path/to/credentials.json:/app/credentials.json \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
+  ghcr.io/opentargets/pts:latest -h
+```
+
+To build your own Docker image, run the following command from the root of the
+repository:
 
 ```bash
 docker build -t pts .
-docker run pts --help
 ```
 
+
+## Development
+
+> [!IMPORTANT]
+> Remember to run `make dev` before starting development. This will set up a very
+> simple git hook that does a few checks before committing.
+
+Development of PTS can be done straight away in the local environment. You can run
+the application just like before (`uv run pts`) to check the changes you make.
+
+> [!TIP]
+> Take a look at the [Otter docs](https://opentargets.github.io/otter), it is a
+> very helpful guide when developing new tasks.
+
+You can test the changes by running a small step, like `so`:
+
+```bash
+uv run pts --step so
+```
+
+
 ## Copyright
+
 Copyright 2014-2024 EMBL - European Bioinformatics Institute, Genentech, GSK,
 MSD, Pfizer, Sanofi and Wellcome Sanger Institute
 
