@@ -32,16 +32,11 @@ steps:
 
   #: OPENFDA STEP :#################################################################################
   openfda:
-    - name: explode_glob unzip and convert ${match_path}${match_stem}
+    - name: explode_glob transform openfda drug events
       glob: input/openfda/**/*.zip
       do:
-        - name: unzip ${match_path}${match_stem}
-          source: ${prefix}${match_path}${match_stem}${match_ext}
-          destination: intermediate/openfda/${match_path}${match_stem}
         - name: transform ${match_path}${match_stem}
-          requires:
-            - unzip ${match_path}${match_stem}
-          source: intermediate/openfda/${match_path}${match_stem}
+          source: ${prefix}${match_path}${match_stem}${match_ext}
           destination: intermediate/openfda/${uuid}.parquet
           transformer: openfda
   ##################################################################################################
