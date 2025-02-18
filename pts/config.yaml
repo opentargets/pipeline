@@ -77,7 +77,7 @@ steps:
     - name: csv_to_parquet essentiality matrix
       requires:
         - unzip essentiality matrix
-      source: intermediate/target/04_binaryDepScores.tsv
+      source: intermediate/target/project-scores/04_binaryDepScores.tsv
       destination: intermediate/target/project-scores/04_binaryDepScores.parquet
       separator: "\t"
 

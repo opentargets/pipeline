@@ -16,5 +16,5 @@ htmlcov
 .idea
 .DS_Store
 
-# input dir can be used for tests
-input
+# output working directory
+work/
