@@ -36,7 +36,7 @@ steps:
       glob: input/openfda/**/*.zip
       do:
         - name: transform ${match_path}${match_stem}
-          source: ${prefix}${match_path}${match_stem}${match_ext}
+          source: ${uri}
           destination: intermediate/openfda/${uuid}.parquet
           transformer: openfda
   ##################################################################################################
@@ -94,7 +94,7 @@ steps:
       glob: input/target/homologue/gene_dictionary/*.json
       do:
         - name: transform ${match_stem} to parquet
-          source: ${prefix}${match_path}${match_stem}${match_ext}
+          source: ${uri}
           destination: intermediate/target/homologue/gene_dictionary/${match_path}${match_stem}.parquet
           transformer: homology
   ##################################################################################################
