@@ -75,6 +75,7 @@ class Transform(Task):
                 source.append(str(src_local))
                 logger.debug(f'using local source {src_local}')
             else:
+                check_destination(src_local)
                 remote_storage = get_remote_storage(src_remote)
                 remote_storage.download_to_file(src_remote, src_local)
                 source.append(src_remote)
