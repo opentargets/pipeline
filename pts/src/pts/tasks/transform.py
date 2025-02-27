@@ -8,13 +8,13 @@ from otter.manifest.model import Artifact
 from otter.storage import get_remote_storage
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.fs import check_destination, check_source
+from otter.util.fs import check_destination
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
 
 class TransformSpec(Spec):
-    source: str
+    source: str | list[str]
     destination: str
     transformer: str
     """A string with the name of a transformer function.
@@ -33,49 +33,60 @@ class Transform(Task):
         super().__init__(spec, context)
         self.spec: TransformSpec
 
-        self.src_local = context.config.work_path / spec.source
-        self.src_remote: str | None = None
-        if not self.src_local.is_file():
-            if not self.context.config.release_uri:
-                raise FileNotFoundError(f'{self.src_local} not found and no release uri provided')
-            self.src_remote = f'{self.context.config.release_uri}/{spec.source}'
+        # sources
+        source_list = spec.source if isinstance(spec.source, list) else [spec.source]
+        srcs_local = [context.config.work_path / s for s in source_list]
 
-        self.dst_local: Path = context.config.work_path / spec.destination
-        self.dst_remote: str | None = None
-        if self.context.config.release_uri:
-            self.dst_remote = f'{self.context.config.release_uri}/{self.spec.destination}'
+        # if release_uri is not provided, check all files are available locally
+        if not context.config.release_uri:
+            for s in srcs_local:
+                if not s.is_file():
+                    raise FileNotFoundError(f'{s} not found locally and no release_uri provided')
 
-        self.source = self.src_remote or str(self.src_local)
-        self.destination = self.dst_remote or str(self.dst_local)
+        # build a map of local to remote sources
+        self.l2r = {self.context.config.work_path / s: f'{context.config.release_uri}/{s}' for s in source_list}
 
-        self.transformer: Callable[[Path, Path], None] = self.load_transformer(spec.transformer)
+        # destinations
+        self.dst_local = context.config.work_path / spec.destination
+        self.dst_remote = f'{context.config.release_uri}/{spec.destination}' if context.config.release_uri else None
+
+        # transformation function to run
+        self.transformer = self.load_transformer(spec.transformer)
 
     @staticmethod
-    def load_transformer(transformer_name: str) -> Callable[[Path, Path], None]:
+    def load_transformer(transformer_name: str) -> Callable[[Path | list[Path], Path], None]:
         try:
             module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
-            transformer: Callable[[Path, Path], None] = getattr(module, transformer_name)
+            transformer: Callable[[Path | list[Path], Path], None] = getattr(module, transformer_name)
             if not callable(transformer):
-                raise TypeError(f'{transformer_name} is not callable')
+                raise TypeError(f'{transformer_name} is not a callable')
             return transformer
         except ImportError:
             raise ModuleNotFoundError(f'{transformer_name} not found in {TRANSFORMER_PACKAGE}')
 
     @report
     def run(self) -> Self:
-        # download the source from remote storage
-        if self.src_remote:
-            check_destination(self.src_local)
-            remote_storage = get_remote_storage(self.src_remote)
-            remote_storage.download_to_file(self.src_remote, self.src_local)
-            logger.debug(f'downloaded {self.src_remote} to {self.src_local}')
-        else:
-            check_source(self.src_local)
+        # source list for the artifact metadata
+        source = []
+
+        # download the sources from remote storage if they are not present locally
+        for src_local, src_remote in self.l2r.items():
+            if src_local.is_file():
+                source.append(str(src_local))
+                logger.debug(f'using local source {src_local}')
+            else:
+                remote_storage = get_remote_storage(src_remote)
+                remote_storage.download_to_file(src_remote, src_local)
+                source.append(src_remote)
+                logger.debug(f'using remote source {src_remote} (downloaded to {src_local})')
 
         check_destination(self.dst_local, delete=True)
 
         # run the transformation
-        self.transformer(self.src_local, self.dst_local)
+        s = list(self.l2r.keys())
+        if len(s) == 1:
+            s = s[0]
+        self.transformer(s, self.dst_local)
 
         # upload the result to remote storage
         if self.dst_remote:
@@ -83,6 +94,6 @@ class Transform(Task):
             remote_storage.upload(self.dst_local, self.dst_remote)
             logger.debug('upload successful')
 
-        self.artifacts = [Artifact(source=self.source, destination=self.destination)]
+        self.artifacts = [Artifact(source=source[0], destination=self.dst_remote or str(self.dst_local))]
 
         return self

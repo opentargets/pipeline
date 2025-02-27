@@ -3,10 +3,10 @@ from pathlib import Path
 import polars as pl
 from loguru import logger
 
-from pts.schemas.ontology import schema
+from pts.schemas.ontology import node
 
 
-def disease_efo(source: Path, destination: Path) -> None:
+def disease(source: Path, destination: Path) -> None:
     # load the ontology
     logger.debug('loading efo')
     initial = pl.read_json(source)
@@ -16,10 +16,11 @@ def disease_efo(source: Path, destination: Path) -> None:
     # prepare dataframes
     n = pl.DataFrame(
         initial['graphs'][0][0]['nodes'],
-        schema=schema,
-        strict=False,
+        schema=node,
     )
-    e = pl.DataFrame(initial['graphs'][0][0]['edges'])
+    e = pl.DataFrame(
+        initial['graphs'][0][0]['edges'],
+    )
 
     # clean the nodes
     n_clean = (
@@ -69,6 +70,7 @@ def disease_efo(source: Path, destination: Path) -> None:
         )
         .group_by('id')
         .agg(pl.col('directLocationIds').drop_nulls())
+        .drop('directLocationIds')
     )
     n_location_ids = n_parents.join(location_ids, on='id', how='left')
 
@@ -84,31 +86,80 @@ def disease_efo(source: Path, destination: Path) -> None:
     synonyms = (
         n_location_ids['id', 'synonyms']
         .explode('synonyms')
-        .filter(pl.col('synonyms').struct['pred'].is_in(synonym_columns))
+        .filter(
+            pl.col('synonyms').struct['pred'].is_in(synonym_columns),
+        )
         .unnest('synonyms')
-        .with_columns(val=pl.col('val').str.replace_all('\n', '').str.strip_chars())
-        .group_by(['id', 'pred'])
+        .with_columns(
+            val=pl.col('val').str.replace_all('\n', '').str.strip_chars(),
+        )
+        .group_by([
+            'id',
+            'pred',
+        ])
         .agg(pl.col('val').unique())
-        .pivot(values='val', index='id', columns='pred', aggregate_function='first')
-        .with_columns(synonyms=pl.struct({k: pl.col(k).fill_null([]) for k in synonym_columns}))
+        .pivot(
+            values='val',
+            index='id',
+            columns='pred',
+            aggregate_function='first',
+        )
+        .with_columns(
+            synonyms=pl.struct({k: pl.col(k).fill_null([]) for k in synonym_columns}),
+        )
         .select(['id', 'synonyms'])
     )
     n_synonyms = n_location_ids.drop('synonyms').join(synonyms, on='id', how='left')
 
-    # get obsolete terms by getting deprecated nodes with a 'IAO_0100001' predicate
-    obsolete_terms = (
+    # get obsolete ids by getting deprecated nodes with a 'IAO_0100001' predicate
+    obsolete_ids = (
         n.unnest('meta')
         .explode('basicPropertyValues')
         .unnest('basicPropertyValues')
-        .filter(pl.col('deprecated'), pl.col('pred') == 'http://purl.obolibrary.org/obo/IAO_0100001')
-        .with_columns(
-            code=pl.col('val'),
+        .filter(
+            pl.col('deprecated'),
+            pl.col('pred') == 'http://purl.obolibrary.org/obo/IAO_0100001',
+        )
+        .select(
+            pl.col('id'),
+            pl.col('val').alias('code'),
+        )
+    )
+
+    # Get the obsolete terms
+    obsolete_terms = (
+        obsolete_ids.with_columns(
+            code=pl.col('code'),
             obsoleteTerms=pl.col('id').str.split('/').list.last(),
         )
         .group_by('code')
         .agg(pl.col('obsoleteTerms'))
     )
-    n_obsolete_terms = n_synonyms.join(obsolete_terms, on='code', how='left')
+
+    # Get the xrefs for all the obsolete terms
+    obsolete_xrefs = (
+        n.unnest('meta')
+        .filter(pl.col('xrefs').is_not_null())
+        .select(pl.col('id'), pl.col('xrefs'))
+        .join(obsolete_ids, on='id')
+        .explode('xrefs')
+        .unnest('xrefs')
+        .select(pl.col('code'), pl.col('val'))
+        .group_by('code')
+        .agg(pl.col('val').alias('obsoleteXRefs'))
+    )
+
+    # join obsolete term list and obsolete xref list to the ids of the entities that
+    # make them obsolete
+    n_obsolete_terms = n_synonyms.join(
+        obsolete_terms,
+        on='code',
+        how='left',
+    ).join(
+        obsolete_xrefs,
+        on='code',
+        how='left',
+    )
 
     # get children by exploding the parents column, making it the new id and
     # then aggregating by the old id
@@ -145,7 +196,11 @@ def disease_efo(source: Path, destination: Path) -> None:
             break
 
         next_level = (
-            current_level.join(n_children.select(['id', 'parents']), left_on='ancestor', right_on='id')
+            current_level.join(
+                n_children.select(['id', 'parents']),
+                left_on='ancestor',
+                right_on='id',
+            )
             .filter(pl.col('parents').is_not_null())
             .explode('parents')
             .select(pl.col('id'), pl.col('parents').alias('ancestor'))
@@ -157,10 +212,16 @@ def disease_efo(source: Path, destination: Path) -> None:
         all_ancestors = pl.concat([all_ancestors, next_level])
         current_level = next_level
 
-    ancestors_grouped = all_ancestors.group_by('id').agg(pl.col('ancestor').drop_nulls().unique().alias('ancestors'))
+    ancestors_grouped = all_ancestors.group_by('id').agg(
+        pl.col('ancestor').drop_nulls().unique().alias('ancestors'),
+    )
 
     therapeutic_area_ancestors = (
-        all_ancestors.join(n_children.select(['id', 'isTherapeuticArea']), left_on='ancestor', right_on='id')
+        all_ancestors.join(
+            n_children.select(['id', 'isTherapeuticArea']),
+            left_on='ancestor',
+            right_on='id',
+        )
         .filter(pl.col('isTherapeuticArea'))
         .join(n_children.select('id'), left_on='ancestor', right_on='id', how='inner')
         .select(pl.col('id'), pl.col('ancestor'))
@@ -169,33 +230,55 @@ def disease_efo(source: Path, destination: Path) -> None:
     therapeutic_area_selfreferences = (
         n_children.filter(pl.col('isTherapeuticArea'))
         .with_columns(ancestor=pl.col('id'))
-        .select(pl.col('id'), pl.col('ancestor'))
+        .select(
+            pl.col('id'),
+            pl.col('ancestor'),
+        )
     )
 
     all_therapeutic_area_ancestors = (
-        pl.concat([therapeutic_area_ancestors, therapeutic_area_selfreferences])
+        pl.concat([
+            therapeutic_area_ancestors,
+            therapeutic_area_selfreferences,
+        ])
         .group_by('id')
         .agg(pl.col('ancestor').drop_nulls().unique().alias('therapeuticAreas'))
     )
 
-    n_ancestors = n_children.join(ancestors_grouped, on='id', how='left').join(
-        all_therapeutic_area_ancestors, on='id', how='left'
+    n_ancestors = n_children.join(
+        ancestors_grouped,
+        on='id',
+        how='left',
+    ).join(
+        all_therapeutic_area_ancestors,
+        on='id',
+        how='left',
     )
 
     # get descendants by exploding the ancestors column, making it the new id and then aggregating by the old id
     descendants_grouped = (
-        all_ancestors.select(pl.col('ancestor').alias('id'), pl.col('id').alias('descendant'))
+        all_ancestors.select(
+            pl.col('ancestor').alias('id'),
+            pl.col('id').alias('descendant'),
+        )
         .group_by('id')
         .agg(pl.col('descendant').drop_nulls().unique().alias('descendants'))
     )
-    n_descendants = n_ancestors.join(descendants_grouped, on='id', how='left')
+    n_descendants = n_ancestors.join(
+        descendants_grouped,
+        on='id',
+        how='left',
+    )
 
     # create the ontology struct by putting there some stuff already present outside
     n_ontology = n_descendants.with_columns(
         ontology=pl.struct(
             isTherapeuticArea=pl.col('isTherapeuticArea'),
             leaf=pl.col('descendants').is_null(),
-            sources=pl.struct(url=pl.col('code'), name=pl.col('id')),
+            sources=pl.struct(
+                url=pl.col('code'),
+                name=pl.col('id'),
+            ),
         )
     ).drop('isTherapeuticArea')
 
