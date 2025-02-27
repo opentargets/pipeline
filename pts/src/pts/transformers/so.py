@@ -3,7 +3,7 @@ from pathlib import Path
 import polars as pl
 from loguru import logger
 
-from pts.schemas.ontology import schema
+from pts.schemas.ontology import node
 
 
 def so(source: Path, destination: Path) -> None:
@@ -14,7 +14,7 @@ def so(source: Path, destination: Path) -> None:
     # prepare node data
     node_list = pl.DataFrame(
         initial['graphs'][0][0]['nodes'],
-        schema=schema,
+        schema=node,
         strict=False,
     ).filter(
         pl.col('type') == 'CLASS',
