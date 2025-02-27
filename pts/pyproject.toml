@@ -1,12 +1,12 @@
 [project]
 name = "PTS"
-version = "25.0.0-alpha.8"
+version = "25.0.0-alpha.9"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "loguru==0.7.3",
-  "opentargets-otter>=25.0.0a12",
+  "opentargets-otter>=25.0.0a13",
   "polars==1.22.0",
 ]
 
