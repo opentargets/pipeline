@@ -3,6 +3,7 @@ from pathlib import Path
 import polars as pl
 from loguru import logger
 
+from pts.schemas.disease import synonym_schema
 from pts.schemas.ontology import node
 
 
@@ -35,7 +36,9 @@ def disease(source: Path, destination: Path) -> None:
             name=pl.col('lbl'),
             isTherapeuticArea=pl.col('subsets').list.contains('"therapeutic_area"'),
             description=pl.col('definition').struct['val'],
-            dbXRefs=pl.col('xrefs').list.eval(pl.element().struct.field('val').unique()),
+            dbXRefs=pl.col('xrefs')
+            .list.eval(pl.element().struct.field('val').unique())
+            .fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
         )
         .drop(
             'basicPropertyValues',
@@ -59,7 +62,9 @@ def disease(source: Path, destination: Path) -> None:
         .group_by('id')
         .agg(pl.col('parents').drop_nulls())
     )
-    n_parents = n_clean.join(parents, on='id', how='left')
+    n_parents = n_clean.join(parents, on='id', how='left').with_columns(
+        parents=pl.col('parents').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
+    )
 
     # get location_ids by filtering edges with 'located_in' predicate
     location_ids = (
@@ -105,11 +110,23 @@ def disease(source: Path, destination: Path) -> None:
             aggregate_function='first',
         )
         .with_columns(
-            synonyms=pl.struct({k: pl.col(k).fill_null([]) for k in synonym_columns}),
+            **{k: pl.col(k).fill_null([]) for k in synonym_columns},
+        )
+        .with_columns(
+            synonyms=pl.struct({k: pl.col(k) for k in synonym_columns}),
         )
         .select(['id', 'synonyms'])
     )
-    n_synonyms = n_location_ids.drop('synonyms').join(synonyms, on='id', how='left')
+
+    empty_struct = {k: [] for k in synonym_columns}
+
+    n_synonyms = (
+        n_location_ids.drop('synonyms')
+        .join(synonyms, on='id', how='left')
+        .with_columns(
+            synonyms=pl.col('synonyms').fill_null(pl.Series([empty_struct], dtype=pl.Struct(synonym_schema))),
+        )
+    )
 
     # get obsolete ids by getting deprecated nodes with a 'IAO_0100001' predicate
     obsolete_ids = (
@@ -151,14 +168,21 @@ def disease(source: Path, destination: Path) -> None:
 
     # join obsolete term list and obsolete xref list to the ids of the entities that
     # make them obsolete
-    n_obsolete_terms = n_synonyms.join(
-        obsolete_terms,
-        on='code',
-        how='left',
-    ).join(
-        obsolete_xrefs,
-        on='code',
-        how='left',
+    n_obsolete_terms = (
+        n_synonyms.join(
+            obsolete_terms,
+            on='code',
+            how='left',
+        )
+        .join(
+            obsolete_xrefs,
+            on='code',
+            how='left',
+        )
+        .with_columns(
+            obsoleteTerms=pl.col('obsoleteTerms').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+            obsoleteXRefs=pl.col('obsoleteXRefs').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+        )
     )
 
     # get children by exploding the parents column, making it the new id and
@@ -170,7 +194,9 @@ def disease(source: Path, destination: Path) -> None:
         .agg(pl.col('id').alias('children'))
         .rename({'parents': 'id'})
     )
-    n_children = n_obsolete_terms.join(children, on='id', how='left')
+    n_children = n_obsolete_terms.join(children, on='id', how='left').with_columns(
+        children=pl.col('children').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
+    )
 
     # get ancestors and therapeutic areas:
     # 1. explode the parents column into direct relationships
@@ -245,14 +271,20 @@ def disease(source: Path, destination: Path) -> None:
         .agg(pl.col('ancestor').drop_nulls().unique().alias('therapeuticAreas'))
     )
 
-    n_ancestors = n_children.join(
-        ancestors_grouped,
-        on='id',
-        how='left',
-    ).join(
-        all_therapeutic_area_ancestors,
-        on='id',
-        how='left',
+    n_ancestors = (
+        n_children.join(
+            ancestors_grouped,
+            on='id',
+            how='left',
+        )
+        .join(
+            all_therapeutic_area_ancestors,
+            on='id',
+            how='left',
+        )
+        .with_columns(
+            ancestors=pl.col('ancestors').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+        )
     )
 
     # get descendants by exploding the ancestors column, making it the new id and then aggregating by the old id
@@ -268,6 +300,8 @@ def disease(source: Path, destination: Path) -> None:
         descendants_grouped,
         on='id',
         how='left',
+    ).with_columns(
+        descendants=pl.col('descendants').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
     )
 
     # create the ontology struct by putting there some stuff already present outside

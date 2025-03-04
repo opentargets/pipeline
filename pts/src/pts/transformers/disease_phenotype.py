@@ -167,7 +167,7 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
         .otherwise(
             pl.lit(False),
         ),
-        references=pl.col('reference').str.split(';'),
+        references=pl.col('reference').str.split(';').fill_null([]),
         sex=pl.col('sex'),
         resource=pl.lit('HPO'),
     ).drop(

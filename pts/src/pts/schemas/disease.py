@@ -1,5 +1,12 @@
 import polars as pl
 
+synonym_schema = pl.Schema({
+    'hasExactSynonym': pl.List(pl.String()),
+    'hasRelatedSynonym': pl.List(pl.String()),
+    'hasBroadSynonym': pl.List(pl.String()),
+    'hasNarrowSynonym': pl.List(pl.String()),
+})
+
 schema = pl.Schema({
     'id': pl.String(),
     'code': pl.String(),
@@ -7,12 +14,7 @@ schema = pl.Schema({
     'description': pl.String(),
     'dbXRefs': pl.List(pl.String()),
     'parents': pl.List(pl.String()),
-    'synonyms': pl.Struct({
-        'hasExactSynonym': pl.List(pl.String()),
-        'hasRelatedSynonym': pl.List(pl.String()),
-        'hasBroadSynonym': pl.List(pl.String()),
-        'hasNarrowSynonym': pl.List(pl.String()),
-    }),
+    'synonyms': pl.Struct(synonym_schema),
     'obsoleteTerms': pl.List(pl.String()),
     'obsoleteXRefs': pl.List(pl.String()),
     'children': pl.List(pl.String()),
