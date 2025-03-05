@@ -157,8 +157,8 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
         diseaseFromSource=pl.col('disease_name'),
         evidenceType=pl.col('evidence'),
         frequency=pl.col('frequency'),
-        modifiers=pl.col('modifier'),
-        onset=pl.col('onset'),
+        modifiers=pl.col('modifier').str.split(';'),
+        onset=pl.col('onset').str.split(';'),
         qualifier=pl.col('qualifier'),
         qualifierNot=pl.when(pl.col('qualifier').is_not_null())
         .then(
@@ -167,7 +167,7 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
         .otherwise(
             pl.lit(False),
         ),
-        references=pl.col('reference').str.split(';').fill_null([]),
+        references=pl.col('reference').str.split(';'),
         sex=pl.col('sex'),
         resource=pl.lit('HPO'),
     ).drop(
@@ -226,11 +226,11 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
             pl.col('diseaseName'),
             pl.col('evidenceType'),
             pl.col('frequency'),
-            pl.col('modifiers'),
-            pl.col('onset'),
+            pl.col('modifiers').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+            pl.col('onset').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
             pl.col('qualifier'),
             pl.col('qualifierNot'),
-            pl.col('references'),
+            pl.col('references').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
             pl.col('sex'),
             pl.col('resource'),
         ).alias('evidence'),
