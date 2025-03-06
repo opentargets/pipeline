@@ -24,6 +24,12 @@ steps:
         - input/disease/mondo.json
       destination: output/disease/disease_phenotype.parquet
       transformer: disease_phenotype
+    - name: transform disease_efo for webapp
+      requires:
+        - transform disease_efo
+      source: output/disease/disease.parquet
+      destination: webapp/disease.jsonl
+      transformer: disease_efo_webapp
 
   ##################################################################################################
 
