@@ -253,7 +253,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-otter"
-version = "25.0.0a13"
+version = "25.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -264,9 +264,9 @@ dependencies = [
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/7b/c7184dd1b328ad41765a5b1254fd25dbcda55a3cf6b1b30789e1e0c82e96/opentargets_otter-25.0.0a13.tar.gz", hash = "sha256:3f46906f5b3512338b41b4e479daeaa571db63f0f8c474022b36d334a2cb473e", size = 74427 }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/4f/8401436ac006a4db9610865c9c1e19fca15380d1e09d9ba23f8899b875b8/opentargets_otter-25.0.1.tar.gz", hash = "sha256:f126c4659e48bd63ce0dbb5528cfde9b3160bb3ae1306ec7b1603c46850a41fa", size = 74453 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/d9/b113b265dc855ffb5e164a09b0b1a9ff8badec760c1db1fe69f82d83bf0d/opentargets_otter-25.0.0a13-py3-none-any.whl", hash = "sha256:d7dafeb764a7653495604c9e8de846e632c912d783bfa08bf406c88a6e7c1fbb", size = 49413 },
+    { url = "https://files.pythonhosted.org/packages/6a/6d/b17b7c5caa9684433aa0fb4867900a7b34170b7c2cfd421e49a06d3d7d16/opentargets_otter-25.0.1-py3-none-any.whl", hash = "sha256:6b7454d95241f05e758ab060aa1356c2cc1be3d92be03cb907f50236fd548857", size = 49417 },
 ]
 
 [[package]]
@@ -329,7 +329,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "25.0.0a12"
+version = "25.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
@@ -354,7 +354,7 @@ dev = [
 requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = "==7.6.10" },
     { name = "loguru", specifier = "==0.7.3" },
-    { name = "opentargets-otter", specifier = ">=25.0.0a13" },
+    { name = "opentargets-otter", specifier = ">=25.0.1" },
     { name = "polars", specifier = "==1.22.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.3.4" },
     { name = "pytest-mock", marker = "extra == 'test'", specifier = "==3.14.0" },

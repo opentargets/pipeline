@@ -210,12 +210,12 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
     ).rename({'id_right': 'disease'})
 
     # merge the phenotype.hpoa phenotypes with the mondo phenotypes
-    merged_phenotypes = pl.concat([phenotypes_with_disease, trim_mondo], how='diagonal')
+    # merged_phenotypes = pl.concat([phenotypes_with_disease, trim_mondo], how='diagonal')
 
     # grouping
     # join all the rows with the same disease id, by creating a list of
     # evidences that contain structs with most fields
-    structed_phenotypes = merged_phenotypes.select(
+    structed_phenotypes = phenotypes_with_disease.select(
         pl.col('disease'),
         pl.col('phenotype'),
         pl.struct(
@@ -225,7 +225,7 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
             pl.col('diseaseFromSource'),
             pl.col('diseaseName'),
             pl.col('evidenceType'),
-            pl.col('frequency'),
+            pl.col('frequency').str.replace(':', '_'),
             pl.col('modifiers').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
             pl.col('onset').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
             pl.col('qualifier'),
