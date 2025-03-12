@@ -245,5 +245,5 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
 
     # write the result locally
     # raise NotImplementedError
-    grouped_phenotypes.write_parquet(destination)
+    grouped_phenotypes.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

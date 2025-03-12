@@ -38,5 +38,5 @@ def homology(source: Path, destination: Path) -> None:
     gc.collect()
 
     # write the result locally
-    df.write_parquet(destination)
+    df.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

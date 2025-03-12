@@ -15,5 +15,5 @@ def openfda(source: Path, destination: Path) -> None:
             output = df.select('results').explode('results').unnest('results')
 
             # write the result locally
-            output.write_parquet(destination)
+            output.write_parquet(destination, compression='gzip')
             logger.info('transformation complete')

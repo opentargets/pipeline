@@ -50,7 +50,7 @@ class CsvToParquet(Task):
         check_destination(self.dst_local, delete=True)
 
         df = pl.read_csv(self.src_local, has_header=True, separator=self.spec.separator)
-        df.write_parquet(self.dst_local)
+        df.write_parquet(self.dst_local, compression='gzip')
         logger.info('transformation complete')
 
         # upload the result to remote storage

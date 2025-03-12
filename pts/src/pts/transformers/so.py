@@ -30,5 +30,5 @@ def so(source: Path, destination: Path) -> None:
     )
 
     # write the result locally
-    output.write_parquet(destination)
+    output.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

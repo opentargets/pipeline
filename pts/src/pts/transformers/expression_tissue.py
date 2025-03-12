@@ -18,5 +18,5 @@ def expression_tissue(source: Path, destination: Path) -> None:
     output = pl.concat(tissue_list)
 
     # write the result locally
-    output.write_parquet(destination)
+    output.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

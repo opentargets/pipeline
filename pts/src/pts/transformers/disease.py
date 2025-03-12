@@ -317,5 +317,5 @@ def disease(source: Path, destination: Path) -> None:
     ).drop('isTherapeuticArea')
 
     # write the result locally
-    n_ontology.write_parquet(destination)
+    n_ontology.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

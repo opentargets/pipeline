@@ -81,4 +81,4 @@ def disease_hpo(source: Path, destination: Path) -> None:
     )
 
     logger.debug('writing processed hpo data')
-    n_complete.write_parquet(destination)
+    n_complete.write_parquet(destination, compression='gzip')
