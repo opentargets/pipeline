@@ -1,29 +1,28 @@
 ---
 work_path: ./work
 log_level: TRACE
-release_uri: gs://open-targets-pre-data-releases/jamesh/pos
-
+#release_uri: ${RELEASE_URI}
 scratchpad:
-  release: 25.03
+  release: ${RELEASE}
   # temp file locations
   local_data: release_data
   prepared_data: prepared_data
   # opensearch
-  opensearch_version: 2.19.0
-  opensearch_java_opts: -Xms2g -Xmx4g
+  opensearch_version: ${OPENSEARCH_VERSION}
+  opensearch_java_opts: ${OPENSEARCH_JAVA_OPTS}
   opensearch_data: /mnt/opensearch/data
-  opensearch_logs: logs/opensearch
-  opensearch_disk_name: pos-os-250311a
-  opensearch_disk_snapshot_name: pos-250311-os
+  opensearch_logs: /var/log/pos/opensearch
+  opensearch_disk_name: ${OPENSEARCH_DISK_NAME}
+  opensearch_disk_snapshot_name: ${OPENSEARCH_DISK_SNAPSHOT_NAME}
   # clickhouse
-  clickhouse_version: 23.3.1.2823
+  clickhouse_version: ${CLICKHOUSE_VERSION}
   clickhouse_data: /mnt/clickhouse/data
-  clickhouse_logs: logs/clickhouse
-  clickhouse_disk_name: pos-ch-250311a
-  clickhouse_disk_snapshot_name: pos-250311-ch
+  clickhouse_logs: /var/log/pos/clickhouse
+  clickhouse_disk_name: ${CLICKHOUSE_DISK_NAME}
+  clickhouse_disk_snapshot_name: ${CLICKHOUSE_DISK_SNAPSHOT_NAME}
   # bigquery
   bq_prod_project_id: open-targets-prod
-  bq_parquet_path: gs://open-targets-data-releases/25.03
+  bq_parquet_path: gs://open-targets-data-releases/${RELEASE}
 
 steps:
   ################################################################################################
