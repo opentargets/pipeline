@@ -1,10 +1,10 @@
 [project]
 name = "PTS"
-version = "25.0.0"
+version = "25.0.1"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["loguru==0.7.3", "opentargets-otter>=25.0.1", "polars==1.22.0"]
+dependencies = ["loguru==0.7.3", "opentargets-otter>=25.0.2", "polars==1.22.0"]
 
 [dependency-groups]
 dev = ["deptry>=0.23.0", "ruff>=0.9.6"]
