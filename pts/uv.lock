@@ -253,7 +253,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-otter"
-version = "25.0.1"
+version = "25.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -264,9 +264,9 @@ dependencies = [
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/4f/8401436ac006a4db9610865c9c1e19fca15380d1e09d9ba23f8899b875b8/opentargets_otter-25.0.1.tar.gz", hash = "sha256:f126c4659e48bd63ce0dbb5528cfde9b3160bb3ae1306ec7b1603c46850a41fa", size = 74453 }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/80/c545a56fad0de0e6c662da14e53bb76bab26b48bf70b11d3445db53be7e5/opentargets_otter-25.0.2.tar.gz", hash = "sha256:43bd07a29a8affc74d3c0951e3b61f9419e8524cc6118bbc1739bdb9896ffe6d", size = 74529 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/6d/b17b7c5caa9684433aa0fb4867900a7b34170b7c2cfd421e49a06d3d7d16/opentargets_otter-25.0.1-py3-none-any.whl", hash = "sha256:6b7454d95241f05e758ab060aa1356c2cc1be3d92be03cb907f50236fd548857", size = 49417 },
+    { url = "https://files.pythonhosted.org/packages/36/7b/447c0f76e8d4a7b0dbcf8798ecef32c6b79b94011751b741afabc971ebd9/opentargets_otter-25.0.2-py3-none-any.whl", hash = "sha256:0b0552723bf84e747cf525ec5d20646a07df5a514806e5a6991aef049f27b8c7", size = 49500 },
 ]
 
 [[package]]
@@ -329,7 +329,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "25.0.0"
+version = "25.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
@@ -354,7 +354,7 @@ dev = [
 requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = "==7.6.10" },
     { name = "loguru", specifier = "==0.7.3" },
-    { name = "opentargets-otter", specifier = ">=25.0.1" },
+    { name = "opentargets-otter", specifier = ">=25.0.2" },
     { name = "polars", specifier = "==1.22.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.3.4" },
     { name = "pytest-mock", marker = "extra == 'test'", specifier = "==3.14.0" },
