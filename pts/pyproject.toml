@@ -1,16 +1,16 @@
 [project]
 name = "PTS"
-version = "25.0.2-beta.1"
+version = "25.0.2-beta.2"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["loguru==0.7.3", "opentargets-otter>=25.0.2", "polars==1.22.0"]
+dependencies = ["loguru==0.7.3", "opentargets-otter>=25.0.2", "polars==1.29.0"]
 
 [dependency-groups]
-dev = ["deptry>=0.23.0", "ruff>=0.9.6"]
+dev = ["deptry>=0.23.0", "ruff>=0.11.10"]
 
 [project.optional-dependencies]
-test = ["pytest==8.3.4", "coverage==7.6.10", "pytest-mock==3.14.0"]
+test = ["pytest==8.3.5", "coverage==7.8.0", "pytest-mock==3.14.0"]
 
 [project.scripts]
 pts = "pts.core:main"

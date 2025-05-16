@@ -1,7 +1,7 @@
 ---
 work_path: ./work
 log_level: DEBUG
-release_uri: gs://open-targets-pre-data-releases/uo_test_otter
+# release_uri:
 pool: 8
 
 steps:
