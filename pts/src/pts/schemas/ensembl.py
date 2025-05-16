@@ -625,25 +625,43 @@ schema_114 = pl.Schema({
 
 schema_ndjson = pl.Schema({
     'id': pl.String(),
+    'approvedSymbol': pl.String(),
     'biotype': pl.String(),
     'description': pl.String(),
-    'end': pl.String(),
-    'start': pl.String(),
-    'strand': pl.String(),
     'chromosome': pl.String(),
-    'approvedSymbol': pl.String(),
+    'strand': pl.String(),
+    'start': pl.String(),
+    'end': pl.String(),
+    'SignalP': pl.List(pl.String()),
+    'Uniprot/uniprot_trembl': pl.List(pl.String()),
+    'uniprot_swissprot': pl.List(pl.String()),
     'transcripts': pl.List(
         pl.Struct({
             'id': pl.String(),
+            'approvedSymbol': pl.String(),
             'biotype': pl.String(),
             'description': pl.String(),
-            'end': pl.String(),
-            'start': pl.String(),
-            'strand': pl.String(),
             'chromosome': pl.String(),
+            'strand': pl.String(),
+            'start': pl.String(),
+            'end': pl.String(),
             'SignalP': pl.List(pl.String()),
             'Uniprot/uniprot_trembl': pl.List(pl.String()),
             'uniprot_swissprot': pl.List(pl.String()),
+            'exons': pl.List(
+                pl.Struct({
+                    'id': pl.String(),
+                    'start': pl.String(),
+                    'end': pl.String(),
+                    'strand': pl.String(),
+                    'chromosome': pl.String(),
+                }),
+            ),
+            'translations': pl.List(
+                pl.Struct({
+                    'id': pl.String(),
+                }),
+            ),
         })
     ),
 })
