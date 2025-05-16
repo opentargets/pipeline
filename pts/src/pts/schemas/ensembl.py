@@ -633,7 +633,7 @@ schema_ndjson = pl.Schema({
     'start': pl.String(),
     'end': pl.String(),
     'SignalP': pl.List(pl.String()),
-    'Uniprot/uniprot_trembl': pl.List(pl.String()),
+    'uniprot_trembl': pl.List(pl.String()),
     'uniprot_swissprot': pl.List(pl.String()),
     'transcripts': pl.List(
         pl.Struct({
@@ -646,7 +646,7 @@ schema_ndjson = pl.Schema({
             'start': pl.String(),
             'end': pl.String(),
             'SignalP': pl.List(pl.String()),
-            'Uniprot/uniprot_trembl': pl.List(pl.String()),
+            'uniprot_trembl': pl.List(pl.String()),
             'uniprot_swissprot': pl.List(pl.String()),
             'exons': pl.List(
                 pl.Struct({

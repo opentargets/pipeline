@@ -20,7 +20,7 @@ def ensembl(source: Path, destination: Path) -> None:
             start: .start,
             end: .end,
             SignalP: .SignalP,
-            "Uniprot/uniprot_trembl": ."Uniprot/SPTREMBL",
+            "uniprot_trembl": ."Uniprot/SPTREMBL",
             "uniprot_swissprot": ."Uniprot/SWISSPROT",
             transcripts: [(.transcripts // [])[] | {
                 id: .id,
@@ -32,7 +32,7 @@ def ensembl(source: Path, destination: Path) -> None:
                 start: .start,
                 end: .end,
                 SignalP: .SignalP,
-                "Uniprot/uniprot_trembl": ."Uniprot/SPTREMBL",
+                "uniprot_trembl": ."Uniprot/SPTREMBL",
                 "uniprot_swissprot": ."Uniprot/SWISSPROT",
                 "exons": [(.exons // [])[] | {
                     id: .id,
