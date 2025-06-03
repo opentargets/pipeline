@@ -307,7 +307,7 @@ def disease(source: Path, destination: Path) -> None:
     # create the ontology struct by putting there some stuff already present outside
     n_ontology = n_descendants.with_columns(
         ontology=pl.struct(
-            isTherapeuticArea=pl.col('isTherapeuticArea'),
+            isTherapeuticArea=pl.col('isTherapeuticArea').fill_null(False),
             leaf=pl.col('descendants').is_null(),
             sources=pl.struct(
                 url=pl.col('code'),
