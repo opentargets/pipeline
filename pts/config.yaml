@@ -1,7 +1,7 @@
 ---
 work_path: ./work
 log_level: DEBUG
-# release_uri:
+# release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
 pool: 8
 
 steps:
@@ -48,6 +48,19 @@ steps:
       source: input/expression/map_with_efos.json
       destination: intermediate/expression/tissue-translation-map.parquet
       transformer: expression_tissue
+  ##################################################################################################
+
+  #: MOUSE_PHENOTYPES STEP :########################################################################
+  mouse_phenotype:
+    - name: pyspark separate into output and excluded
+      source:
+        target: output/target
+        mouse_phenotype: input/mouse_phenotype/mouse_phenotypes.json.gz
+      destination:
+        output: output/mouse_phenotype
+        excluded: excluded/mouse_phenotype
+      pyspark: mouse_phenotype
+
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################
