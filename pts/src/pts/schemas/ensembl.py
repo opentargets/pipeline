@@ -635,6 +635,8 @@ schema_ndjson = pl.Schema({
     'SignalP': pl.List(pl.String()),
     'uniprot_trembl': pl.List(pl.String()),
     'uniprot_swissprot': pl.List(pl.String()),
+    'uniprot_isoform': pl.List(pl.String()),
+    'alphafold': pl.List(pl.String()),
     'transcripts': pl.List(
         pl.Struct({
             'id': pl.String(),
@@ -648,6 +650,8 @@ schema_ndjson = pl.Schema({
             'SignalP': pl.List(pl.String()),
             'uniprot_trembl': pl.List(pl.String()),
             'uniprot_swissprot': pl.List(pl.String()),
+            'uniprot_isoform': pl.List(pl.String()),
+            'alphafold': pl.List(pl.String()),
             'exons': pl.List(
                 pl.Struct({
                     'id': pl.String(),
