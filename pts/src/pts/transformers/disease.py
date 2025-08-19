@@ -87,7 +87,12 @@ def disease(source: Path, destination: Path) -> None:
     # 5. pivoting the values into columns
     # 6. creating a struct with the synonyms, first filling nulls
     # 7. selecting the columns
-    synonym_columns = ['hasExactSynonym', 'hasRelatedSynonym', 'hasNarrowSynonym', 'hasBroadSynonym']
+    synonym_columns = [
+        'hasExactSynonym',
+        'hasRelatedSynonym',
+        'hasNarrowSynonym',
+        'hasBroadSynonym',
+    ]
     synonyms = (
         n_location_ids['id', 'synonyms']
         .explode('synonyms')
@@ -113,7 +118,7 @@ def disease(source: Path, destination: Path) -> None:
             **{k: pl.col(k).fill_null([]) for k in synonym_columns},
         )
         .with_columns(
-            synonyms=pl.struct({k: pl.col(k) for k in synonym_columns}),
+            synonyms=pl.struct(**{k: pl.col(k) for k in synonym_columns}),
         )
         .select(['id', 'synonyms'])
     )

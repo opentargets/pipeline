@@ -1,12 +1,12 @@
 [project]
 name = "PTS"
-version = "25.2.0-alpha.1"
+version = "25.2.1-rc.1"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "loguru==0.7.3",
-  "opentargets-otter>=25.0.2",
+  "opentargets-otter>=25.0.4",
   "polars==1.31.0",
   "pyspark>=4.0.0",
 ]
@@ -141,6 +141,9 @@ extend-safe-fixes = [
   'SIM110',  # ^ likewise
   'PERF102', # ^ likewise
 ]
+
+[tool.deptry]
+pep621_dev_dependency_groups = ['test']
 
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = 'single'
