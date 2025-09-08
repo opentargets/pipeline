@@ -56,6 +56,18 @@ steps:
       pyspark: mouse_phenotype
   ##################################################################################################
 
+  #: CHEMICAL PROBES STEP :#########################################################################
+  chemical_probes:
+    - name: pyspark chemical probes
+      source:
+        probes_excel: input/target/chemicalprobes/probes.xlsx
+        drugs_csv: input/target/chemicalprobes/probes_links.csv
+      destination:
+        output: intermediate/chemical_probes_evidence.parquet
+      pyspark: chemical_probes
+
+  ##################################################################################################
+
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
     - name: pyspark coding_variant view
