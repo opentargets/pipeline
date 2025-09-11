@@ -153,3 +153,15 @@ steps:
           destination: intermediate/target/homologue/gene_dictionary/${match_path}${match_stem}.parquet
           transformer: homology
   ##################################################################################################
+
+  #: EVIDENCE STEP :################################################################################
+  evidence:
+    - name: pyspark project_score
+      source:
+        gene_scores: input/evidence/project_score/mapped_diseases.tsv
+        cell_types: input/evidence/project_score/cell_types.tsv
+        cell_passport: input/evidence/cell_passport.csv.gz
+        cell_line_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
+      destination: intermediate/evidence/project_score.parquet
+      pyspark: project_score
+  ##################################################################################################
