@@ -120,6 +120,22 @@ steps:
       destination: intermediate/target/hpa/subcellular_locations_ssl.parquet
       separator: "\t"
 
+    - name: pyspark gene_essentiality
+      source:
+        models: input/target/gene-essentiality/depmap/Model.csv
+        essential_genes: input/target/gene-essentiality/depmap/CRISPRInferredCommonEssentials.csv
+        gene_effects: input/target/gene-essentiality/depmap/CRISPRGeneEffect.csv
+        gene_expression: input/target/gene-essentiality/depmap/OmicsExpressionProteinCodingGenesTPMLogp1.csv
+        mutation_hotspots: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixHotspot.csv
+        mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
+        depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
+      destination: intermediate/target/gene-essentiality/essentiality.parquet
+      properties:
+        keep_only_essentials: 'true'
+        spark.driver.memory: 4g
+        spark.executor.memory: 2g
+      pyspark: gene_essentiality
+
     - name: unzip essentiality matrix
       source: input/target/project-scores/essentiality_matrices.zip
       inner_file: EssentialityMatrices/04_binaryDepScores.tsv
