@@ -205,3 +205,13 @@ steps:
         drug_indications: input/drug/chembl_drug_indication.jsonl
       destination: intermediate/evidence/chembl.parquet
       pyspark: chembl
+
+    - name: pyspark cancer_biomarkers
+      source:
+        associations: input/evidence/cancerbiomarkers/associations.tsv
+        source: input/evidence/cancerbiomarkers/sources.jsonl
+        disease: input/evidence/cancerbiomarkers/diseases.jsonl
+        drugs: output/drug_molecule
+      destination: intermediate/evidence/cancer_biomarkers.parquet
+      pyspark: cancer_biomarkers
+  ##################################################################################################
