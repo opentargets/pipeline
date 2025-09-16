@@ -470,7 +470,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "25.3.0.dev3"
+version = "25.3.0.dev4"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
@@ -499,7 +499,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = "==7.9.1" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "opentargets-otter", specifier = "==25.0.12" },
-    { name = "pandas", specifier = ">=2.0.0" },
+    { name = "pandas", specifier = ">=2.3.2" },
     { name = "polars", specifier = "==1.31.0" },
     { name = "psutil", specifier = ">=7.1.1" },
     { name = "pyspark", specifier = ">=4.0.0" },

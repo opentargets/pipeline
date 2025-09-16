@@ -164,4 +164,21 @@ steps:
         cell_line_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
       destination: intermediate/evidence/project_score.parquet
       pyspark: project_score
+
+    - name: pyspark gene_burden
+      source:
+        az_binary: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-binary
+        az_quantitative: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-quantitative
+        az_genes: input/evidence/gene_burden/astrazeneca/azphewas_com_genes_UK_Biobank_470k.csv
+        az_phenotypes: input/evidence/gene_burden/astrazeneca/azphewas_com_phenotypes_UK_Biobank_470k.csv
+        finngen: input/evidence/gene_burden/finngen/finngen.txt.gz
+        finngen_phenotypes: input/evidence/gene_burden/finngen/phenos
+        genebass: input/evidence/gene_burden/genebass/**.parquet
+        cvdi: input/evidence/gene_burden/cvdi.xlsx
+        curated_studies: input/ot_curation/gene_burden/curated_evidence.tsv
+        disease_mappings: input/ot_curation/mappings/disease/manual_string.tsv
+      destination: intermediate/evidence/gene_burden.parquet
+      properties:
+        finngen_release: R12
+      pyspark: gene_burden
   ##################################################################################################
