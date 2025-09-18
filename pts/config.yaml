@@ -197,4 +197,11 @@ steps:
       properties:
         finngen_release: R12
       pyspark: gene_burden
-  ##################################################################################################
+
+    - name: pyspark chembl
+      source:
+        chembl_evidence: input/evidence/chembl/chembl.json.gz
+        stop_reasons: input/evidence/chembl/stop_reasons.json
+        drug_indications: input/drug/chembl_drug_indication.jsonl
+      destination: intermediate/evidence/chembl.parquet
+      pyspark: chembl
