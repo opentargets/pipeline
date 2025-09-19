@@ -1,14 +1,16 @@
 [project]
 name = "PTS"
-version = "25.3.0-dev.12"
+version = "25.3.0-dev.13"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "loguru==0.7.3",
-  "openpyxl>=3.1.5",
-  "opentargets-otter==25.0.15",
+  "numpy>=1.24.0",
+  "ontoma>=1.0.0",
+  "opentargets-otter>=25.0.4",
   "pandas>=2.3.2",
+  "pandarallel>=1.6.0",
   "polars==1.31.0",
   "pyspark>=4.0.0",
 ]
@@ -17,7 +19,7 @@ dependencies = [
 dev = ["deptry==0.23.0", "pre-commit>=4.3.0", "pytest>=8.4.1", "ruff==0.12.2"]
 
 [project.optional-dependencies]
-test = ["pytest==8.4.1", "coverage==7.9.1", "pytest-mock==3.14.1"]
+test = ["pytest==8.4.1", "coverage==7.9.1"]
 
 [project.scripts]
 pts = "pts.core:main"
@@ -28,6 +30,17 @@ build-backend = "hatchling.build"
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+
+[tool.deptry]
+pep621_dev_dependency_groups = ['test']
+exclude = ["src/test/**", "src/conftest.py"]
+
+[tool.deptry.package_module_name_map]
+opentargets-otter = 'otter'
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ['openpyxl', 'coverage']
+DEP004 = ['pytest']
 
 [tool.pytest.ini_options]
 testpaths = ["src/test"]
@@ -143,16 +156,6 @@ extend-safe-fixes = [
   'SIM110',  # ^ likewise
   'PERF102', # ^ likewise
 ]
-
-[tool.deptry]
-pep621_dev_dependency_groups = ['test']
-exclude = ["src/test/**", "src/conftest.py"]
-
-[tool.deptry.per_rule_ignores]
-DEP002 = ['openpyxl']
-
-[tool.deptry.package_module_name_map]
-opentargets-otter = 'otter'
 
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = 'single'
