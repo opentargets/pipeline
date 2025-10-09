@@ -1,16 +1,19 @@
 # Clickhouse backup task
-from dataclasses import asdict, dataclass
-from string import Template
 from urllib.parse import urljoin
 
-from clickhouse_connect.driver.client import Client
 from clickhouse_connect.driver.exceptions import DatabaseError
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.clickhouse import ClickhouseInstanceManager
+from pos.services.clickhouse import (
+    ClickhouseBackupQueryParameters,
+    ClickhouseInstanceManager,
+    backup_table,
+    export_to_s3,
+    get_table_engine,
+)
 
 
 class ClickhouseBackupError(OtterError):
@@ -24,14 +27,6 @@ class ClickhouseBackupSpec(Spec):
     clickhouse_database: str = 'ot'
     table: str
     gcs_base_path: str
-
-
-@dataclass
-class ClickhouseBackupQueryParameters:
-    database: str
-    table: str
-    backup_path: str
-    export_path: str
 
 
 class ClickhouseBackup(Task):
@@ -55,76 +50,18 @@ class ClickhouseBackup(Task):
         client = ClickhouseInstanceManager(name=self.spec.service_name, database=self.spec.clickhouse_database).client()
         if not client:
             raise ClickhouseBackupError(f'Clickhouse service {self.spec.service_name} failed to start')
-        parameters = asdict(
-            ClickhouseBackupQueryParameters(
-                database=self.spec.clickhouse_database,
-                table=self.spec.table,
-                backup_path=self.backup_url,
-                export_path=self.export_url,
-            )
+        parameters = ClickhouseBackupQueryParameters(
+            database=self.spec.clickhouse_database,
+            table=self.spec.table,
+            backup_path=self.backup_url,
+            export_path=self.export_url,
         )
-        self.backup_table_query(client, parameters)
-        table_engine = self._get_table_engine(client, self.spec.clickhouse_database, self.spec.table)
-        if table_engine == 'EmbeddedRocksDB':
-            # insert into s3 table because BACKUP does not support this engine
-            self.export_to_s3_query(client, parameters)
+        try:
+            backup_table(client, parameters)
+            table_engine = get_table_engine(client, self.spec.clickhouse_database, self.spec.table)
+            if table_engine == 'EmbeddedRocksDB':
+                # insert into s3 table because BACKUP does not support this engine
+                export_to_s3(client, parameters)
+        except DatabaseError as db_err:
+            raise ClickhouseBackupError(f'Clickhouse backup failed: {db_err}') from db_err
         return self
-
-    def backup_table_query(self, client: Client, parameters: dict) -> None:
-        """Backup ClickHouse table to S3 compatible storage (GCS).
-
-        Args:
-            client (Client): ClickHouse client instance.
-            parameters (dict): Dictionary containing query parameters.
-
-        Raises:
-            ClickhouseBackupError: If the backup operation fails
-            e.g. if the backup path already exists.
-        """
-        query = Template("BACKUP TABLE `${database}`.`${table}` TO S3('${backup_path}')").substitute(parameters)
-        try:
-            client.query(query=query)
-        except DatabaseError as db_err:
-            raise ClickhouseBackupError(f'Clickhouse backup to S3 failed: {db_err}') from db_err
-
-    def export_to_s3_query(self, client: Client, parameters: dict) -> None:
-        """Export ClickHouse table to S3 compatible storage (GCS).
-
-        This is used for tables with the EmbeddedRocksDB engine which
-        is not supported by the BACKUP command.
-
-        Args:
-            client (Client): ClickHouse client instance.
-            parameters (dict): Dictionary containing query parameters.
-
-        Raises:
-            ClickhouseBackupError: If the export operation fails.
-        """
-        query = Template(
-            """INSERT INTO FUNCTION s3(\
-                '${export_path}', Parquet) \
-                SELECT * FROM `${database}`.`${table}`"""
-        ).substitute(parameters)
-        try:
-            client.query(query)
-        except DatabaseError as db_err:
-            raise ClickhouseBackupError(f'Clickhouse export to S3 failed: {db_err}') from db_err
-
-    def _get_table_engine(self, client: Client, database: str, table: str) -> str | None:
-        """Get the engine type of a ClickHouse table.
-
-        Args:
-            client (Client): ClickHouse client instance.
-            database (str): Name of the database.
-            table (str): Name of the table.
-
-        Returns:
-            str | None: The engine type of the table, or None if not found.
-        """
-        query = Template(
-            """SELECT engine \
-        FROM system.tables \
-        WHERE database='${database}' AND name='${table}'"""
-        ).substitute({'database': database, 'table': table})
-        table_engine_query = client.query(query=query).first_row
-        return table_engine_query[0] if table_engine_query else None
