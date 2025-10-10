@@ -1,44 +1,12 @@
 # Data prep task
 
-from dataclasses import dataclass
 
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.opensearch import OpenSearchInstanceManager
-
-
-@dataclass
-class SnapshotRepository:
-    """Snapshot repository configuration fields.
-
-    Args:
-        name: Repository name
-        type: Repository type (default: '')
-        bucket: Bucket name (default: '')
-        base_path: Base path (default: '')
-        client: Client name (default: 'default')
-    """
-
-    name: str
-    type: str = ''
-    bucket: str = ''
-    base_path: str = ''
-    client: str = 'default'
-
-    def body(self) -> dict:
-        """Return the snapshot repository body."""
-        return {
-            'type': self.type,
-            'settings': {
-                'bucket': self.bucket,
-                'base_path': self.base_path,
-                'client': self.client,
-                'shard_path_type': 'FIXED',
-            },
-        }
+from pos.services.opensearch import OpenSearchInstanceManager, SnapshotRepository
 
 
 class OpenSearchSnapshotError(OtterError):
