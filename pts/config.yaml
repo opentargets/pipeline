@@ -218,7 +218,17 @@ steps:
       destination: intermediate/evidence/cancer_biomarkers.parquet
   ##################################################################################################
 
-  #: TIMESERIES STEP :########################################################################
+  #: EVIDENCE_PPP STEP :############################################################################
+  evidence_ppp:
+    - name: pyspark ot_crispr
+      pyspark: ot_crispr
+      source:
+        study_table: input/evidence/ot_crispr/config.tsv
+        ot_crispr_data: input/evidence/ot_crispr
+      destination: intermediate/evidence/ot_crispr.parquet
+  ##################################################################################################
+
+  #: TIMESERIES STEP :##############################################################################
   timeseries:
     - name: pyspark timeseries
       pyspark: timeseries
