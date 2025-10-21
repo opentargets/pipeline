@@ -54,7 +54,23 @@ steps:
         output: output/mouse_phenotype
         excluded: excluded/mouse_phenotype
       pyspark: mouse_phenotype
+  ##################################################################################################
 
+  #: CODING VARIANT STEP :##########################################################################
+  coding_variant:
+    - name: pyspark coding_variant view
+      source:
+        variant: output/variant
+        target: output/target
+        disease: output/disease
+        evidence_eva: output/evidence/sourceId=eva
+        evidence_eva_somatic: output/evidence/sourceId=eva_somatic
+        evidence_uniprot_variant: output/evidence/sourceId=uniprot_variants
+        evidence_gwas_credible_set: output/evidence/sourceId=gwas_credible_sets
+        credible_set: output/credible_set
+        pharmacogenetics: output/pharmacogenetics
+      destination: view/coding_variant
+      pyspark: coding_variant
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################

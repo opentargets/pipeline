@@ -1,6 +1,6 @@
 from loguru import logger
 
-from pts.pyspark.common.session import Session
+from pts.pyspark.common import Session
 
 
 def mouse_phenotype(
