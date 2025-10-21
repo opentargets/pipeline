@@ -4,20 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Self, ClassVar
+from typing import ClassVar, Self
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 from pyspark.sql.window import Window
 
-from .association import Association
-from .dataset import Dataset
+from pts.pyspark.timeseries_utils.association import Association
+from pts.pyspark.timeseries_utils.dataset import Dataset
 
 
 @dataclass
 class Evidence(Dataset):
     """Methods applied on evidence data."""
+
     # This is the default set of columns we group evidence by, used for association calculation:
     GROUPBY_COLUMNS: list[str] = field(
         default_factory=lambda: ['diseaseId', 'targetId', 'aggregationType', 'aggregationValue']
@@ -27,13 +28,18 @@ class Evidence(Dataset):
     MAX_SCORE: float = 1.64493
 
     # These are the columns we are working on:
-    MANDATORY_COLUMNS: ClassVar[list[str]] = ['targetId', 'diseaseId', 'score', 'datasourceId', 'datatypeId', 'id', 'year']
-
+    MANDATORY_COLUMNS: ClassVar[list[str]] = [
+        'targetId',
+        'diseaseId',
+        'score',
+        'datasourceId',
+        'datatypeId',
+        'id',
+        'year',
+    ]
 
     # List of aggregation types:
-    SUPPORTED_AGGREGATION_TYPES: list[str] = field(
-        default_factory=lambda: ['datasourceId', 'datatypeId', 'overall']
-    )
+    SUPPORTED_AGGREGATION_TYPES: list[str] = field(default_factory=lambda: ['datasourceId', 'datatypeId', 'overall'])
 
     @staticmethod
     def _evidence_date_to_year(evidence_date: Column) -> Column:
@@ -150,11 +156,13 @@ class Evidence(Dataset):
 
         Returns:
             Column: float normalised harmonic sum of the input array
-        
+
         Examples:
             >>> (
             ...     spark.createDataFrame([([0.1, 0.5, 0.1, 0.1, 0.9, 0.85],)], ['evidenceScores'])
-            ...     .select(Evidence._get_harmonic_sum(f.col("evidenceScores"), Evidence.MAX_SCORE).alias('associationScore'))
+            ...     .select(
+            ...         Evidence._get_harmonic_sum(f.col("evidenceScores"),
+            ...         Evidence.MAX_SCORE).alias('associationScore'))
             ...     .show()
             ... )
             +------------------+
@@ -171,11 +179,10 @@ class Evidence(Dataset):
         indices = Evidence._get_score_indices(sorted_filtered_scores)
 
         weighted_scores = f.transform(
-            f.arrays_zip(sorted_filtered_scores, indices), 
-            lambda pair: pair.scores / f.pow(pair.indices, f.lit(2))
+            f.arrays_zip(sorted_filtered_scores, indices), lambda pair: pair.scores / f.pow(pair.indices, f.lit(2))
         )
 
-        return f.aggregate(weighted_scores, f.lit(0.0), lambda acc, x: acc + x) / max_value
+        return f.aggregate(weighted_scores, f.lit(0.0), lambda acc, x: acc + x) / max_value  # noqa: FURB118  # PySpark requires a lambda here
 
     def apply_datasource_weight(self: Evidence, datasource_weights: DataFrame) -> Evidence:
         """Apply weight on scores based on a provided weight for each datasourceId.
@@ -193,18 +200,15 @@ class Evidence(Dataset):
         )
 
     def aggregate_evidence(
-            self: Evidence, 
-            aggregation_type: str | None = 'overall', 
-            last_year_only: bool = False
-        ):
-        # ) -> Association:
+        self: Evidence, aggregation_type: str = 'overall', last_year_only: bool = False
+    ) -> Association:
         """Compute association scores from the evidence scores.
 
         If aggregate column is not provided overall assocation score is calculated.
 
         Args:
-            aggregate_column (str|None): name of the column to association by. Optional.
-            max_score (float): theoretical maximum of the harmonic sum. Defaults to 1.62
+            aggregation_type (str): name of the column to association by
+            last_year_only (bool): all years will be collapsed into a single year
 
         Returns:
             Association: Calculated association dataset
@@ -214,25 +218,23 @@ class Evidence(Dataset):
         """
         # Make sure the right aggregation type is requested:
         if aggregation_type not in self.SUPPORTED_AGGREGATION_TYPES:
-            raise ValueError(f'provided aggregation type is not supported. (Accepted aggregations: {",".join(self.SUPPORTED_AGGREGATION_TYPES)})')
-        
+            allowed = ', '.join(self.SUPPORTED_AGGREGATION_TYPES)
+            raise ValueError(f'unsupported aggregation_type: {aggregation_type!r}. Accepted aggregations: {allowed}')
+
         # For overall association score calculation a fake column needs to be added:
         if aggregation_type == 'overall':
             self._df = self.df.withColumn('overall', f.lit(None).cast(t.StringType()))
-
 
         # Dropping historic data if no timeseries are interesting:
         if last_year_only:
             self._df = self.df.withColumn('year', f.lit(datetime.now().year))
 
         # Unifying data schema:
-        self._df = (
-            self.df
-            .withColumn('aggregationType', f.lit(aggregation_type))
-            .withColumnRenamed(aggregation_type, 'aggregationValue')
+        self._df = self.df.withColumn('aggregationType', f.lit(aggregation_type)).withColumnRenamed(
+            aggregation_type, 'aggregationValue'
         )
 
-        # prepare partition: all evidence accumulated for each disease-target-datasource-year triplet until the given year
+        # Partitioning: all evidence accumulated for each disease-target-datasource-year triplet until the given year
         window_for_collapsing_scores = (
             Window.partitionBy(*self.GROUPBY_COLUMNS).orderBy('year').rangeBetween(Window.unboundedPreceding, 0)
         )
@@ -243,9 +245,7 @@ class Evidence(Dataset):
             # Grouping evidence by the relevant columns:
             .groupBy(*self.GROUPBY_COLUMNS, 'year')
             # Collect scores into an array:
-            .agg(
-                f.collect_list('score').alias('yearlyEvidenceScores')
-            )
+            .agg(f.collect_list('score').alias('yearlyEvidenceScores'))
             # Collate scores for previous years:
             .withColumn(
                 'retrospectiveEvidenceScores',
@@ -255,6 +255,8 @@ class Evidence(Dataset):
                 'yearlyAssociationScore',
                 self._get_harmonic_sum(f.col('retrospectiveEvidenceScores'), self.MAX_SCORE),
             )
+            # Dropping the combined evidence column, as we no longer need it:
+            .drop('retrospectiveEvidenceScores')
             .orderBy(f.col('aggregationValue'), f.col('year'))
             # Reconverting Nulls in the aggregation column:
             .repartition(200, f.col('year'))
@@ -264,6 +266,4 @@ class Evidence(Dataset):
         if last_year_only:
             association = association.filter(f.col('year') == datetime.now().year)
 
-        return Association(
-            association
-        )
+        return Association(association)

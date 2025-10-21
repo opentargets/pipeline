@@ -1,18 +1,11 @@
 """Application to generate timeseries data."""
 
-import os
 from typing import Any
-from venv import logger
 
 from loguru import logger
-from pyspark.sql import DataFrame
 
 from pts.pyspark.common.session import Session
-
-from .timeseries_utils.evidence import Evidence
-from .timeseries_utils.utils import get_weight_for_datasource, read_yaml_config
-
-from pyspark.sql import SparkSession
+from pts.pyspark.timeseries_utils.evidence import Evidence
 
 
 def timeseries(
@@ -38,22 +31,73 @@ def timeseries(
     raw_evidence = session.load_data(source['evidence'])
 
     # Reading disease data to generate indirect evidence:
-    disease = session.load_data(source['disease'])
+    disease_df = session.load_data(source['disease'])
 
     # Extracting datasource weights:
     datasource_weights = session.spark.createDataFrame(properties['datasource_weights'])
 
-    # Calculate novelty based on overall direct associations over the years:
-    logger.info('Calculating overall direct timeseries:')
-    (
-        Evidence.from_raw_evidence(raw_evidence)
-        .apply_datasource_weight(datasource_weights)
-        .aggregate_evidence(aggregation_type='overall')
-        .compute_novelty(
-            novelty_scale=novelty_scale,
-            novelty_shift=novelty_shift,
-            novelty_window=novelty_shift,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['overall_direct'])
-    )
+    # We might not request all outputs:
+    for data_output, output_path in destination.items():
+        # Timeseries for overall, direct associations:
+        if data_output == 'overall_direct':
+            logger.info('calculating overall direct timeseries')
+            (
+                Evidence.from_raw_evidence(raw_evidence)
+                .apply_datasource_weight(datasource_weights)
+                .aggregate_evidence(aggregation_type='overall')
+                .compute_novelty(
+                    novelty_scale=novelty_scale,
+                    novelty_shift=novelty_shift,
+                    novelty_window=novelty_window,
+                )
+                .write.mode('overwrite')
+                .parquet(output_path)
+            )
+
+        # Timeseries for overall, indirect associations:
+        elif data_output == 'overall_indirect':
+            logger.info('calculating overall indirect timeseries')
+            (
+                Evidence.from_raw_evidence(raw_evidence)
+                .expand_disease(disease_df)
+                .apply_datasource_weight(datasource_weights)
+                .aggregate_evidence(aggregation_type='overall')
+                .compute_novelty(
+                    novelty_scale=novelty_scale,
+                    novelty_shift=novelty_shift,
+                    novelty_window=novelty_window,
+                )
+                .write.mode('overwrite')
+                .parquet(output_path)
+            )
+
+        # Timeseries for datasource specific, direct associations:
+        elif data_output == 'by_datasource_direct':
+            logger.info('calculating datasource specific direct timeseries')
+            (
+                Evidence.from_raw_evidence(raw_evidence)
+                .aggregate_evidence(aggregation_type='datasourceId')
+                .compute_novelty(
+                    novelty_scale=novelty_scale,
+                    novelty_shift=novelty_shift,
+                    novelty_window=novelty_window,
+                )
+                .write.mode('overwrite')
+                .parquet(output_path)
+            )
+
+        # Timeseries for datasource specific, indirect associations:
+        elif data_output == 'by_datasource_indirect':
+            logger.info('calculating datasource specific indirect timeseries')
+            (
+                Evidence.from_raw_evidence(raw_evidence)
+                .expand_disease(disease_df)
+                .aggregate_evidence(aggregation_type='datasourceId')
+                .compute_novelty(
+                    novelty_scale=novelty_scale,
+                    novelty_shift=novelty_shift,
+                    novelty_window=novelty_window,
+                )
+                .write.mode('overwrite')
+                .parquet(output_path)
+            )

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Self
 
 from pyspark.sql import Column, DataFrame, SparkSession
-from pyspark.sql import functions as f
 
 
 @dataclass
@@ -14,9 +13,6 @@ class Dataset:
     """Base class of all datamodels."""
 
     _df: DataFrame
-
-    # This is the default set of columns we group evidence by, used for overall associations:
-    GROUPBY_COLUMNS: list[str] = field(default_factory=lambda: ['diseaseId', 'targetId', 'year'])
 
     # This is the default set of columns we window over when combining scores from different years:
     WINDOW_COLUMNS: list[str] = field(default_factory=lambda: ['diseaseId', 'targetId'])
@@ -99,19 +95,6 @@ class Dataset:
             raise ValueError(f'Parquet file is empty: {path}')
 
         return cls(df)
-
-    @staticmethod
-    def _windowing_around_peak(peak: Column, window: int) -> Column:
-        """Window around peak.
-
-        Args:
-            peak (Column): peak column to window.
-            window (int): size of the window.
-
-        Returns:
-            Column: windowed peak.
-        """
-        return f.posexplode(f.sequence(peak, peak + f.lit(window))).alias('year-peakYear', 'year')
 
     def filter(self: Self, filter_expression: Column) -> Self:
         """Filter dataset based on a spark expression.
