@@ -178,21 +178,22 @@ class Association(Dataset):
             .withColumn('peak', Association._get_peak(f.col('yearlyAssociationScore'), window_spec))
             .withColumnRenamed('year', 'associationYear')
             # Drawing around the window:
-            .select(
-                '*', Association._windowing_around_peak(f.col('associationYear'), novelty_window).alias('year-peakYear')
-            )
+            .select('*', Association._windowing_around_peak(f.col('associationYear'), novelty_window))
             # Grouping data again:
             .groupBy([*groupby_columns, 'year'])
             .agg(
                 Association.calculate_logistic_decay(
-                    f.col('peak'), f.col('year-peakYear'), f.lit(novelty_scale), novelty_shift
+                    score_value=f.col('peak'),
+                    window_difference=f.col('year-peakYear'),
+                    sigmoid_midpoint=novelty_shift,
+                    decay_steepness=novelty_scale,
                 ).alias('novelty')
             )
         )
 
     @staticmethod
     def calculate_logistic_decay(
-        score_value: Column, window_difference: Column, sigmoid_midpoint: Column, decay_steepness: float
+        score_value: Column, window_difference: Column, sigmoid_midpoint: float, decay_steepness: float
     ) -> Column:
         """Calculate change of novelty over the years.
 
@@ -203,7 +204,7 @@ class Association(Dataset):
         Args:
             score_value (Column): the latest score shift registered
             window_difference (Column): year difference when the last score shift was registered
-            sigmoid_midpoint (Column): sigmoid decay curve midpoint
+            sigmoid_midpoint (float): sigmoid decay curve midpoint
             decay_steepness (float): the logistic growth rate or steepness of the decay curve
 
         Returns:
@@ -220,7 +221,7 @@ class Association(Dataset):
             >>> df = spark.createDataFrame(data, ["group", "year", "peak", "year-peakYear"])
             >>> df.groupBy("group", "year").agg(
             ...     Association.calculate_logistic_decay(
-            ...        f.col("peak"), f.col("year-peakYear"), f.lit(1.0), 0.5
+            ...        f.col("peak"), f.col("year-peakYear"), 1.0, 0.5
             ...     ).alias("novelty")
             ... ).show(truncate=False)
             +-----+----+-------------------+

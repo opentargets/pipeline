@@ -1,5 +1,7 @@
 """Parser to the gene-essentiality dataset."""
 
+from typing import Any
+
 from loguru import logger
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as f
@@ -10,11 +12,12 @@ from pts.pyspark.common.session import Session
 def gene_essentiality(
     source: dict[str, str],
     destination: str,
+    settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
     """Loads and processes inputs to generate the Gene Essentiality annotation."""
     spark = Session(app_name='chemical_probes', properties=properties)
-    keep_only_essentials = properties.get('keep_only_essentials', 'true').lower() == 'true'
+    keep_only_essentials = settings.get('keep_only_essentials', True)
 
     logger.debug(f'loading data from: {source}')
     models_df = spark.load_data(source['models'], format='csv', sep=',', header=True)

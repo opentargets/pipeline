@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from importlib import import_module
-from typing import Self
+from typing import Any, Self
 
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
@@ -11,16 +11,12 @@ PYSPARK_PACKAGE = 'pts.pyspark'
 type path_or_paths = str | dict[str, str]
 
 type pyspark_entrypoint = Callable[
-    [path_or_paths, path_or_paths, dict[str, str] | None],
+    [path_or_paths, path_or_paths, dict[str, Any] | None, dict[str, str] | None],
     None,
 ]
 
 
 class PysparkSpec(Spec):
-    source: path_or_paths
-    """A string or a dictionary with the source paths."""
-    destination: path_or_paths
-    """A string or a dictionary with the destination paths."""
     pyspark: str
     """A string with the entry point of the pyspark program.
 
@@ -31,6 +27,12 @@ class PysparkSpec(Spec):
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
     """
+    source: path_or_paths
+    """A string or a dictionary with the source paths."""
+    destination: path_or_paths
+    """A string or a dictionary with the destination paths."""
+    settings: dict[str, Any] | None = None
+    """A dictionary with settings to pass to the pyspark job."""
     properties: dict[str, str] | None = None
     """A dictionary with the properties to pass to the pyspark job."""
 
@@ -70,7 +72,7 @@ class Pyspark(Task):
         logger.debug(f'running pyspark job with spec: {self.spec}')
 
         # run the pyspark job
-        self.pyspark(src, dst, self.spec.properties)
+        self.pyspark(src, dst, self.spec.settings, self.spec.properties)
         logger.info('pyspark job completed successfully')
 
         # TODO: figure out artifacts

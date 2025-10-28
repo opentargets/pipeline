@@ -1,4 +1,5 @@
 from functools import partial, reduce
+from typing import Any
 
 import pandas as pd
 import pyspark.sql.functions as f
@@ -40,6 +41,7 @@ CURATION_SCHEMA = t.StructType([
 def gene_burden(
     source: dict[str, str],
     destination: str,
+    settings: dict[str, Any],
     properties: dict[str, str],
 ) -> DataFrame:
     spark = Session(app_name='gene_burden', properties=properties)
@@ -54,7 +56,7 @@ def gene_burden(
     )
     finngen_manifest_df = spark.load_data(source['finngen_phenotypes'], format='json')
     finngen_df = spark.load_data(source['finngen'], format='csv', header=True, sep='\t')
-    finngen_version = properties['finngen_release']
+    finngen_version = settings['finngen_release']
     genebass_df = spark.load_data(source['genebass'])
     cvdi_associations_df = pd.read_excel(
         source['cvdi'],
@@ -303,44 +305,40 @@ def process_finngen_gene_burden(
 
 def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
     """Process manual gene burden evidence."""
-    return (
-        burden_curation_df
-        .select(
-            f.lit('gene_burden').alias('datasourceId'),
-            f.lit('genetic_association').alias('datatypeId'),
-            'projectId',
-            'targetFromSourceId',
-            'diseaseFromSource',
-            'diseaseFromSourceMappedId',
-            'resourceScore',
-            'pValueMantissa',
-            'pValueExponent',
-            'oddsRatio',
-            f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(
-                'oddsRatioConfidenceIntervalLower'
-            ),
-            f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(
-                'oddsRatioConfidenceIntervalUpper'
-            ),
-            'beta',
-            f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),
-            f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),
-            f.split(f.col('sex'), ', ').alias('sex'),
-            'ancestry',
-            'ancestryId',
-            'cohortId',
-            'studySampleSize',
-            'studyCases',
-            'studyCasesWithQualifyingVariants',
-            f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(
-                'allelicRequirements'
-            ),
-            'statisticalMethod',
-            'statisticalMethodOverview',
-            f.array(f.col('literature')).alias('literature'),
-        )
-        .distinct()
-    )
+    return burden_curation_df.select(
+        f.lit('gene_burden').alias('datasourceId'),
+        f.lit('genetic_association').alias('datatypeId'),
+        'projectId',
+        'targetFromSourceId',
+        'diseaseFromSource',
+        'diseaseFromSourceMappedId',
+        'resourceScore',
+        'pValueMantissa',
+        'pValueExponent',
+        'oddsRatio',
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(
+            'oddsRatioConfidenceIntervalLower'
+        ),
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(
+            'oddsRatioConfidenceIntervalUpper'
+        ),
+        'beta',
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),
+        f.split(f.col('sex'), ', ').alias('sex'),
+        'ancestry',
+        'ancestryId',
+        'cohortId',
+        'studySampleSize',
+        'studyCases',
+        'studyCasesWithQualifyingVariants',
+        f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(
+            'allelicRequirements'
+        ),
+        'statisticalMethod',
+        'statisticalMethodOverview',
+        f.array(f.col('literature')).alias('literature'),
+    ).distinct()
 
 
 def process_az_gene_burden(

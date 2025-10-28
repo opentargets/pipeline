@@ -1,10 +1,9 @@
 [project]
 name = "PTS"
-version = "25.3.0-dev.7"
+version = "25.3.0-dev.9"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = "==3.13.*"
-
 dependencies = [
   "loguru==0.7.3",
   "opentargets-otter==25.0.12",
@@ -15,12 +14,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-  "deptry==0.23.0",
-  "pre-commit>=4.3.0",
-  "pytest>=8.4.1",
-  "ruff==0.12.2",
-]
+dev = ["deptry==0.23.0", "pre-commit>=4.3.0", "pytest>=8.4.1", "ruff==0.12.2"]
 
 [project.optional-dependencies]
 test = ["pytest==8.4.1", "coverage==7.9.1", "pytest-mock==3.14.1"]

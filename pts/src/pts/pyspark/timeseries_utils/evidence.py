@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import ClassVar, Self
 
 from pyspark.sql import Column, DataFrame
@@ -34,7 +33,6 @@ class Evidence(Dataset):
         'score',
         'datasourceId',
         'datatypeId',
-        'id',
         'year',
     ]
 
@@ -50,8 +48,24 @@ class Evidence(Dataset):
 
         Returns:
             Column: year, which should never be null.
+
+        Examples:
+            >>> (spark.createDataFrame([('1999-12-31',), ('2021-02-11',), (None,), ("Batman-Robin",)], ['date'])
+            ... .select('date', Evidence._evidence_date_to_year(f.col('date')).alias('year'))
+            ... .show())
+            +------------+----+
+            |        date|year|
+            +------------+----+
+            |  1999-12-31|1999|
+            |  2021-02-11|2021|
+            |        NULL|NULL|
+            |Batman-Robin|NULL|
+            +------------+----+
+            <BLANKLINE>
         """
-        return f.when(evidence_date.isNotNull(), f.split(evidence_date, '-')[0].cast(t.IntegerType()))
+        return f.when(
+            evidence_date.isNotNull(), f.regexp_extract(evidence_date, r'^(\d{4})-', 1).try_cast(t.IntegerType())
+        )
 
     @classmethod
     def from_raw_evidence(cls: type[Self], raw_evidence_input: DataFrame) -> Evidence:
@@ -116,7 +130,7 @@ class Evidence(Dataset):
             >>> assert df.first() == t.Row(scores=0.9)
             >>> assert df.count() == 3
         """
-        return f.slice(f.reverse(f.array_sort(collected_scores)), 1, max_array_size).alias('scores')
+        return f.slice(f.reverse(f.array_sort(collected_scores)), 1, max_array_size).alias('sorted_filtered_scores')
 
     @staticmethod
     def _get_score_indices(sorted_filtered_scores: Column) -> Column:
@@ -130,12 +144,19 @@ class Evidence(Dataset):
 
         Examples:
             >>> df = (
-            ...     spark.createDataFrame([([0.1, 0.5, 0.1, 0.1, 0.9, 0.85],)], ['value'])
-            ...     .select(f.explode(Evidence._get_top_high_scores(f.col("value"), 3).alias('returned')))
-            ...     .persist()
+            ...     spark.createDataFrame([([0.1, 0.5, 0.2],)], ['scores'])
+            ...     .select(Evidence._get_score_indices(f.col('scores')))
             ... )
-            >>> assert df.first() == t.Row(scores=0.9)
-            >>> assert df.count() == 3
+            >>> df.first()
+            Row(indices=[1, 2, 3])
+
+            >>> # works with larger arrays as well
+            >>> df2 = (
+            ...     spark.createDataFrame([([0.9, 0.85, 0.5, 0.2],)], ['scores'])
+            ...     .select(Evidence._get_score_indices(f.col('scores')))
+            ... )
+            >>> df2.first()
+            Row(indices=[1, 2, 3, 4])
         """
         return f.sequence(f.lit(1), f.size(sorted_filtered_scores)).alias('indices')
 
@@ -179,7 +200,8 @@ class Evidence(Dataset):
         indices = Evidence._get_score_indices(sorted_filtered_scores)
 
         weighted_scores = f.transform(
-            f.arrays_zip(sorted_filtered_scores, indices), lambda pair: pair.scores / f.pow(pair.indices, f.lit(2))
+            f.arrays_zip(sorted_filtered_scores, indices),
+            lambda pair: pair.sorted_filtered_scores / f.pow(pair.indices, f.lit(2)),
         )
 
         return f.aggregate(weighted_scores, f.lit(0.0), lambda acc, x: acc + x) / max_value  # noqa: FURB118  # PySpark requires a lambda here
@@ -199,16 +221,13 @@ class Evidence(Dataset):
             .drop('weight')
         )
 
-    def aggregate_evidence(
-        self: Evidence, aggregation_type: str = 'overall', last_year_only: bool = False
-    ) -> Association:
+    def aggregate_evidence(self: Evidence, aggregation_type: str = 'overall') -> Association:
         """Compute association scores from the evidence scores.
 
         If aggregate column is not provided overall assocation score is calculated.
 
         Args:
             aggregation_type (str): name of the column to association by
-            last_year_only (bool): all years will be collapsed into a single year
 
         Returns:
             Association: Calculated association dataset
@@ -224,10 +243,6 @@ class Evidence(Dataset):
         # For overall association score calculation a fake column needs to be added:
         if aggregation_type == 'overall':
             self._df = self.df.withColumn('overall', f.lit(None).cast(t.StringType()))
-
-        # Dropping historic data if no timeseries are interesting:
-        if last_year_only:
-            self._df = self.df.withColumn('year', f.lit(datetime.now().year))
 
         # Unifying data schema:
         self._df = self.df.withColumn('aggregationType', f.lit(aggregation_type)).withColumnRenamed(
@@ -258,12 +273,7 @@ class Evidence(Dataset):
             # Dropping the combined evidence column, as we no longer need it:
             .drop('retrospectiveEvidenceScores')
             .orderBy(f.col('aggregationValue'), f.col('year'))
-            # Reconverting Nulls in the aggregation column:
             .repartition(200, f.col('year'))
         )
-
-        # Dropping historic data if no timeseries are interesting:
-        if last_year_only:
-            association = association.filter(f.col('year') == datetime.now().year)
 
         return Association(association)

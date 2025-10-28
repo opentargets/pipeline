@@ -11,19 +11,21 @@ from pts.pyspark.timeseries_utils.evidence import Evidence
 def timeseries(
     source: dict[str, str],
     destination: dict[str, str],
+    settings: dict[str, Any],
     properties: dict[str, Any],
 ) -> None:
     """Main function to generate timeseries data.
 
     Args:
-        source (dict[str, str]): list of .
+        source (dict[str, str]): list of inputs.
         destination (dict[str, str]): list of outputs of this parser.
+        settings (dict[str, Any]): list of settings for this step.
         properties (dict[str, Any]): list of properties for this step.
     """
     # Extract novelty parameters:
-    novelty_scale = properties['novelty_scale']
-    novelty_window = properties['novelty_window']
-    novelty_shift = properties['novelty_shift']
+    novelty_scale = settings['novelty_scale']
+    novelty_window = settings['novelty_window']
+    novelty_shift = settings['novelty_shift']
     # start spark session
     session = Session(app_name='timeseries', properties=properties)
 
@@ -34,7 +36,10 @@ def timeseries(
     disease_df = session.load_data(source['disease'])
 
     # Extracting datasource weights:
-    datasource_weights = session.spark.createDataFrame(properties['datasource_weights'])
+    datasource_weights = (
+        session.spark.createDataFrame(settings['datasource_weights'])
+        .withColumnRenamed('id', 'datasourceId')
+    )
 
     # We might not request all outputs:
     for data_output, output_path in destination.items():

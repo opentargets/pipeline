@@ -47,30 +47,31 @@ steps:
   #: MOUSE_PHENOTYPES STEP :########################################################################
   mouse_phenotype:
     - name: pyspark separate into output and excluded
+      pyspark: mouse_phenotype
       source:
         target: output/target
         mouse_phenotype: input/mouse_phenotype/mouse_phenotypes.json.gz
       destination:
         output: output/mouse_phenotype
         excluded: excluded/mouse_phenotype
-      pyspark: mouse_phenotype
   ##################################################################################################
 
   #: CHEMICAL PROBES STEP :#########################################################################
   chemical_probes:
     - name: pyspark chemical probes
+      pyspark: chemical_probes
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
       destination:
         output: intermediate/chemical_probes_evidence.parquet
-      pyspark: chemical_probes
 
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
     - name: pyspark coding_variant view
+      pyspark: coding_variant
       source:
         variant: output/variant
         target: output/target
@@ -82,7 +83,6 @@ steps:
         credible_set: output/credible_set
         pharmacogenetics: output/pharmacogenetics
       destination: view/coding_variant
-      pyspark: coding_variant
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################
@@ -121,6 +121,7 @@ steps:
       separator: "\t"
 
     - name: pyspark gene_essentiality
+      pyspark: gene_essentiality
       source:
         models: input/target/gene-essentiality/depmap/Model.csv
         essential_genes: input/target/gene-essentiality/depmap/CRISPRInferredCommonEssentials.csv
@@ -130,11 +131,8 @@ steps:
         mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
       destination: intermediate/target/gene-essentiality/essentiality.parquet
-      properties:
-        keep_only_essentials: 'true'
-        spark.driver.memory: 4g
-        spark.executor.memory: 2g
-      pyspark: gene_essentiality
+      settings:
+        keep_only_essentials: true
 
     - name: unzip essentiality matrix
       source: input/target/project-scores/essentiality_matrices.zip
@@ -173,15 +171,16 @@ steps:
   #: EVIDENCE STEP :################################################################################
   evidence:
     - name: pyspark project_score
+      pyspark: project_score
       source:
         gene_scores: input/evidence/project_score/mapped_diseases.tsv
         cell_types: input/evidence/project_score/cell_types.tsv
         cell_passport: input/evidence/cell_passport.csv.gz
         cell_line_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
       destination: intermediate/evidence/project_score.parquet
-      pyspark: project_score
 
     - name: pyspark gene_burden
+      pyspark: gene_burden
       source:
         az_binary: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-binary
         az_quantitative: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-quantitative
@@ -194,26 +193,25 @@ steps:
         curated_studies: input/ot_curation/gene_burden/curated_evidence.tsv
         disease_mappings: input/ot_curation/mappings/disease/manual_string.tsv
       destination: intermediate/evidence/gene_burden.parquet
-      properties:
+      settings:
         finngen_release: R12
-      pyspark: gene_burden
 
     - name: pyspark chembl
+      pyspark: chembl
       source:
         chembl_evidence: input/evidence/chembl/chembl.json.gz
         stop_reasons: input/evidence/chembl/stop_reasons.json
         drug_indications: input/drug/chembl_drug_indication.jsonl
       destination: intermediate/evidence/chembl.parquet
-      pyspark: chembl
 
     - name: pyspark cancer_biomarkers
+      pyspark: cancer_biomarkers
       source:
         associations: input/evidence/cancerbiomarkers/associations.tsv
         source: input/evidence/cancerbiomarkers/sources.jsonl
         disease: input/evidence/cancerbiomarkers/diseases.jsonl
         drugs: output/drug_molecule
       destination: intermediate/evidence/cancer_biomarkers.parquet
-      pyspark: cancer_biomarkers
   ##################################################################################################
 
   #: TIMESERIES STEP :########################################################################
@@ -228,10 +226,10 @@ steps:
         overall_indirect: view/timeseries_overall_indirect
         by_datasource_direct: view/timeseries_by_datasource_direct
         by_datasource_indirect: view/timeseries_by_datasource_indirect
-      properties:
-        novelty_scale: 2  # 2 for long tailed slow decays
-        novelty_shift: 3  # 3 for long tailed slow decays
-        novelty_window: 10 
+      settings:
+        novelty_scale: 2 # 2 for long tailed slow decays
+        novelty_shift: 3 # 3 for long tailed slow decays
+        novelty_window: 10
         datasource_weights:
           - id: gwas_credible_sets
             weight: 1.0

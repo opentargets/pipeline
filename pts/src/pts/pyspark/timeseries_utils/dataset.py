@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Self
 
 from pyspark.sql import Column, DataFrame, SparkSession
@@ -13,12 +13,6 @@ class Dataset:
     """Base class of all datamodels."""
 
     _df: DataFrame
-
-    # This is the default set of columns we window over when combining scores from different years:
-    WINDOW_COLUMNS: list[str] = field(default_factory=lambda: ['diseaseId', 'targetId'])
-
-    # Optional aggregate column:
-    AGGREGATE_COLUMN: str | None = None
 
     def __post_init__(
         self: Dataset,
