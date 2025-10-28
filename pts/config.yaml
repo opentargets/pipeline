@@ -215,3 +215,68 @@ steps:
       destination: intermediate/evidence/cancer_biomarkers.parquet
       pyspark: cancer_biomarkers
   ##################################################################################################
+
+  #: TIMESERIES STEP :########################################################################
+  timeseries:
+    - name: pyspark timeseries
+      pyspark: timeseries
+      source:
+        evidence: output/evidence
+        disease: output/disease
+      destination:
+        overall_direct: view/timeseries_overall_direct
+        overall_indirect: view/timeseries_overall_indirect
+        by_datasource_direct: view/timeseries_by_datasource_direct
+        by_datasource_indirect: view/timeseries_by_datasource_indirect
+      properties:
+        novelty_scale: 2  # 2 for long tailed slow decays
+        novelty_shift: 3  # 3 for long tailed slow decays
+        novelty_window: 10 
+        datasource_weights:
+          - id: gwas_credible_sets
+            weight: 1.0
+          - id: eva
+            weight: 1.0
+          - id: gene_burden
+            weight: 1.0
+          - id: genomics_england
+            weight: 1.0
+          - id: gene2phenotype
+            weight: 1.0
+          - id: uniprot_literature
+            weight: 1.0
+          - id: uniprot_variants
+            weight: 1.0
+          - id: orphanet
+            weight: 1.0
+          - id: clingen
+            weight: 1.0
+          - id: cancer_gene_census
+            weight: 1.0
+          - id: intogen
+            weight: 1.0
+          - id: eva_somatic
+            weight: 1.0
+          - id: cancer_biomarkers
+            weight: 1.0
+          - id: chembl
+            weight: 1.0
+          - id: crispr_screen
+            weight: 1.0
+          - id: crispr
+            weight: 1.0
+          - id: slapenrich
+            weight: 0.5
+          - id: progeny
+            weight: 0.5
+          - id: reactome
+            weight: 1.0
+          - id: sysbio
+            weight: 0.5
+          - id: europepmc
+            weight: 0.2
+          - id: expression_atlas
+            weight: 0.2
+          - id: impc
+            weight: 0.2
+  ##################################################################################################

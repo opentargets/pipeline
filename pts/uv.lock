@@ -1,6 +1,10 @@
 version = 1
 revision = 2
+<<<<<<< HEAD
 requires-python = "==3.13.*"
+=======
+requires-python = ">=3.13"
+>>>>>>> 69ad4cd (add logic to generate timeseries)
 
 [[package]]
 name = "annotated-types"
@@ -440,6 +444,7 @@ test = [
 [package.dev-dependencies]
 dev = [
     { name = "deptry" },
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
@@ -460,6 +465,7 @@ provides-extras = ["test"]
 [package.metadata.requires-dev]
 dev = [
     { name = "deptry", specifier = "==0.23.0" },
+    { name = "pytest", specifier = ">=8.4.1" },
     { name = "ruff", specifier = "==0.12.2" },
 ]
 
