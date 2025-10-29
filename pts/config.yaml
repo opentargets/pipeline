@@ -175,6 +175,9 @@ steps:
       destination: intermediate/target/gene-essentiality/essentiality.parquet
       settings:
         keep_only_essentials: true
+      properties:
+        spark.driver.memory: 4g
+        spark.executor.memory: 2g
 
     - name: unzip essentiality matrix
       source: input/target/project-scores/essentiality_matrices.zip

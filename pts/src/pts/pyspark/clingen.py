@@ -1,5 +1,7 @@
 """Evidence parser for ClinGen's Gene Validity Curations."""
 
+from typing import Any
+
 import pyspark.sql.functions as f
 from loguru import logger
 
@@ -10,7 +12,7 @@ from pts.utils.ontology import add_efo_mapping
 def clingen(
     source: dict[str, str],
     destination: str,
-    settings: dict[str, str],
+    settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
     spark = Session(app_name='clingen', properties=properties)

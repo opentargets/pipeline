@@ -6,13 +6,14 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "loguru==0.7.3",
+  "opentargets-otter==25.0.16",
+  "pandas>=2.3.2",
   "numpy>=1.24.0",
   "ontoma>=1.0.0",
-  "opentargets-otter>=25.0.4",
-  "pandas>=2.3.2",
   "pandarallel>=1.6.0",
   "polars==1.31.0",
   "pyspark>=4.0.0",
+  "defusedxml>=0.7.1",
   "pronto>=2.7.0",
 ]
 

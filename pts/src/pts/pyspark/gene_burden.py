@@ -56,7 +56,7 @@ def gene_burden(
     )
     finngen_manifest_df = spark.load_data(source['finngen_phenotypes'], format='json')
     finngen_df = spark.load_data(source['finngen'], format='csv', header=True, sep='\t')
-    finngen_version = settings['finngen_release']
+    finngen_version = settings.get('finngen_release')
     genebass_df = spark.load_data(source['genebass'])
     cvdi_associations_df = pd.read_excel(
         source['cvdi'],
