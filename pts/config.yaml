@@ -211,6 +211,17 @@ steps:
           source: ${match_prefix}/${match_path}${match_stem}.${match_ext}
           destination: intermediate/target/homologue/gene_dictionary/${match_path}${match_stem}.parquet
           transformer: homology
+
+    - name: pyspark safety
+      pyspark: target_safety
+      source:
+        adverse_events: input/target/safety/adverse_effects.tsv
+        safety_risks: input/target/safety/safety_risks.tsv
+        brennan: input/target/safety/secondary_pharmacology.json
+        toxcast: input/target/safety/toxcast.tsv
+        aopwiki: input/target/safety/aopwiki.json
+        pharmacogenetics: intermediate/pharmacogenetics.parquet
+      destination: intermediate/target/safety.parquet
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
