@@ -3,6 +3,10 @@ work_path: ./work
 log_level: DEBUG
 release_uri: gs://open-targets-pre-data-releases/jferrer/test-edp-dataproc
 pool_size: 8
+pool: 8
+
+scratchpad:
+  efo_version: v3.81.0
 
 steps:
   #: DISEASE STEP :#################################################################################
@@ -11,10 +15,12 @@ steps:
       source: input/disease/efo_otar_slim.json
       destination: output/disease/disease.parquet
       transformer: disease
+
     - name: transform disease_hpo
       source: input/disease/hp-full.json
       destination: output/disease_hpo/disease_hpo.parquet
       transformer: disease_hpo
+
     - name: transform disease_phenotype
       requires:
         - transform disease_efo
@@ -86,7 +92,6 @@ steps:
       properties:
         spark.driver.memory: 10g
         spark.executor.memory: 10g
-      pyspark: coding_variant
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################
@@ -216,6 +221,15 @@ steps:
         disease: input/evidence/cancerbiomarkers/diseases.jsonl
         drugs: output/drug_molecule
       destination: intermediate/evidence/cancer_biomarkers.parquet
+
+    - name: pyspark clingen
+      source:
+        evidence: input/evidence/clingen.csv
+      destination: intermediate/evidence/clingen.parquet
+      settings:
+        efo_version: ${efo_version}
+        ontology_cores: 1
+      pyspark: clingen
   ##################################################################################################
 
   #: EVIDENCE_PPP STEP :############################################################################
