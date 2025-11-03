@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import psutil
@@ -22,10 +23,12 @@ class Session:
         properties: dict[str, str] | None = None,
     ) -> None:
         """Initializes a Spark Session."""
+        self.is_dataproc = 'DATAPROC_CLUSTER_NAME' in os.environ
+
         self.spark: SparkSession = (
             SparkSession.Builder()
             .config(conf=self._create_config(properties))
-            .master(spark_uri)
+            .master('yarn' if self.is_dataproc else spark_uri)
             .appName(app_name)
             .getOrCreate()
         )
@@ -42,7 +45,8 @@ class Session:
 
         logger.info(f'using {spark_memory} memory for the spark driver')
 
-        default_properties = {
+        dataproc_properties = {}
+        local_properties = {
             'spark.driver.memory': spark_memory,
             'spark.driver.maxResultSize': '0',
             'spark.debug.maxToStringFields': '2000',
@@ -68,7 +72,7 @@ class Session:
             'spark.hadoop.fs.gs.auth.type': 'APPLICATION_DEFAULT',
         }
 
-        properties = {**default_properties, **properties}
+        properties = {**(dataproc_properties if self.is_dataproc else local_properties), **properties}
 
         return SparkConf().setAll(list(properties.items()))
 

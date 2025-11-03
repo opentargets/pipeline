@@ -2,7 +2,7 @@
 work_path: ./work
 log_level: DEBUG
 # release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
-pool: 8
+pool_size: 8
 
 steps:
   #: DISEASE STEP :#################################################################################
