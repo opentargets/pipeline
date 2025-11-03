@@ -10,7 +10,6 @@ dependencies = [
   "opentargets-otter==25.0.15",
   "pandas>=2.3.2",
   "polars==1.31.0",
-  "psutil>=7.1.1",
   "pyspark>=4.0.0",
 ]
 
@@ -148,6 +147,9 @@ extend-safe-fixes = [
 [tool.deptry]
 pep621_dev_dependency_groups = ['test']
 exclude = ["src/test/**", "src/conftest.py"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ['openpyxl']
 
 [tool.deptry.package_module_name_map]
 opentargets-otter = 'otter'

@@ -64,7 +64,8 @@ steps:
         drugs_csv: input/target/chemicalprobes/probes_links.csv
       destination:
         output: intermediate/chemical_probes_evidence.parquet
-
+      properties:
+        spark.driver.memory: 8g
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
