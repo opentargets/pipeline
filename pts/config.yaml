@@ -1,7 +1,7 @@
 ---
 work_path: ./work
 log_level: DEBUG
-# release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
+release_uri: gs://open-targets-pre-data-releases/jferrer/test-edp-dataproc
 pool_size: 8
 
 steps:
@@ -24,7 +24,6 @@ steps:
         - input/disease/mondo.json
       destination: output/disease_phenotype/disease_phenotype.parquet
       transformer: disease_phenotype
-
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################

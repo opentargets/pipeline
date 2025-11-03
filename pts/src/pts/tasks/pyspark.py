@@ -69,6 +69,8 @@ class Pyspark(Task):
             elif isinstance(dst, dict):
                 dst = {k: f'{prefix}/{v}' for k, v in dst.items()}
 
+        logger.info(f'source paths: {src}')
+        logger.info(f'destination paths: {dst}')
         logger.info(f'running pyspark job with spec: {self.spec}')
 
         # run the pyspark job

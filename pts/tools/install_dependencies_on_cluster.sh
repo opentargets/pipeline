@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 
-set -exo pipefail
+set -euo pipefail
+
+set -x
+
+
 
 PTS_REF=$(/usr/share/google/get_metadata_value attributes/PTS_REF)
 readonly PTS_REF
 readonly REPO_URI="https://github.com/opentargets/pts"
+DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
+readonly DATAPROC_CLUSTER_NAME
+echo "export DATAPROC_CLUSTER_NAME=${DATAPROC_CLUSTER_NAME}" >> /etc/profile.d/custom_env_vars.sh
+
 function err() {
     echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2
     exit 1
