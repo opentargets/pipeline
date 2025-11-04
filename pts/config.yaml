@@ -309,7 +309,7 @@ steps:
         mp_ontology: input/evidence/impc/mp.owl
       destination: intermediate/evidence/impc.parquet
       settings:
-        efo_version: v3.81.0
+        efo_version: ${efo_version}
         ontology_cores: 1
         score_cutoff: 0.41
       properties:
@@ -325,6 +325,21 @@ steps:
         studies_dir: input/evidence/crispr_screens/brain_studies
         disease_mapping: input/ot_curation/mappings/disease/brain_crispr_studies.tsv
       destination: output/crispr_screens
+
+    - name: pyspark gene2phenotype
+      pyspark: gene2phenotype
+      source:
+        cancer_panel: input/evidence/gene2phenotype/cancer.csv
+        cardiac_panel: input/evidence/gene2phenotype/cardiac.csv
+        developmental_panel: input/evidence/gene2phenotype/dd.csv
+        ear_panel: input/evidence/gene2phenotype/ear.csv
+        eye_panel: input/evidence/gene2phenotype/eye.csv
+        skeletal_panel: input/evidence/gene2phenotype/skeletal.csv
+        skin_panel: input/evidence/gene2phenotype/skin.csv
+      destination: intermediate/evidence/gene2phenotype.parquet
+      settings:
+        efo_version: ${efo_version}
+        ontology_cores: 1
 
     - name: pyspark ot_crispr
       pyspark: ot_crispr

@@ -725,7 +725,7 @@ wheels = [
 
 [[package]]
 name = "pronto"
-version = "2.7.1"
+version = "2.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chardet" },
@@ -733,9 +733,9 @@ dependencies = [
     { name = "networkx" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/7d/d686cc16d7dd266f5ba8cfd9bcd87c333084ef67d3aa51860d2044788f70/pronto-2.7.1.tar.gz", hash = "sha256:c169ff9e0bcef03aec7b75934353dd18d67e55d9461c8878c1041f57148f477f", size = 64162, upload-time = "2025-10-25T20:06:23.902Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/9d/1d5f94ad60b05086c13d211c812684a17f1a61a289da683a62d3182e41ab/pronto-2.7.2.tar.gz", hash = "sha256:ba3a07d4d84f71deb56ff4dea987ea513c21ad9c3ce172375647ff2471982b36", size = 63108, upload-time = "2025-11-10T12:45:44.222Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/49/ae39d148aa0b855cdded774e24b2ccd974d868a69e026d3e6f3554904e7b/pronto-2.7.1-py3-none-any.whl", hash = "sha256:e35bb06691bb881bc90952b38efa483af7a1a912d8c1d7efc4ee86cf77cfb8a8", size = 63317, upload-time = "2025-10-25T20:06:22.332Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/79/217ae7eb2462ef254aab95b3610d85105a86f4ec8b43863788e32c0d5369/pronto-2.7.2-py3-none-any.whl", hash = "sha256:9c4b037ae1f9598398f38a55306eb1af7c3cdf8be7d535925500b978b32d1450", size = 62212, upload-time = "2025-11-10T12:45:42.969Z" },
 ]
 
 [[package]]
