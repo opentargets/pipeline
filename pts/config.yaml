@@ -81,8 +81,12 @@ steps:
         evidence_uniprot_variant: output/evidence/sourceId=uniprot_variants
         evidence_gwas_credible_set: output/evidence/sourceId=gwas_credible_sets
         credible_set: output/credible_set
-        pharmacogenetics: output/pharmacogenetics
+        pharmacogenetics: output/pharmacogenomics
       destination: view/coding_variant
+      properties:
+        spark.driver.memory: 10g
+        spark.executor.memory: 10g
+      pyspark: coding_variant
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################
