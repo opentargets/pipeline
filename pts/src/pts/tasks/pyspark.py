@@ -11,7 +11,7 @@ PYSPARK_PACKAGE = 'pts.pyspark'
 path_or_paths = str | dict[str, str]
 
 pyspark_entrypoint = Callable[
-    [path_or_paths, path_or_paths, dict[str, str] | None],
+    [path_or_paths, path_or_paths, dict[str, Any], dict[str, str]],
     None,
 ]
 
@@ -69,10 +69,10 @@ class Pyspark(Task):
             elif isinstance(dst, dict):
                 dst = {k: f'{prefix}/{v}' for k, v in dst.items()}
 
-        logger.debug(f'running pyspark job with spec: {self.spec}')
+        logger.info(f'running pyspark job with spec: {self.spec}')
 
         # run the pyspark job
-        self.pyspark(src, dst, self.spec.settings, self.spec.properties)
+        self.pyspark(src, dst, self.spec.settings or {}, self.spec.properties or {})
         logger.info('pyspark job completed successfully')
 
         # TODO: figure out artifacts
