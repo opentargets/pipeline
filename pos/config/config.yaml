@@ -1,50 +1,52 @@
 ---
+# Platform Output Support Configuration File - PLATFORM
 work_path: ./work
-log_level: ${LOG_LEVEL}
-release_uri: ${RELEASE_URI}
+log_level: DEBUG
+release_uri: gs://open-targets-pipeline-runs/szsz/25.06-testrun-4 # e.g gs://open-targets-pipeline-runs/szsz/25.06-testrun-4
 scratchpad:
-  release: ${RELEASE}
-  product: ${PRODUCT}
-  data_source: ${RELEASE_URI}
+  # ================================= SET THESE VALUES ====================================
+  release: 25.12 # e.g. 25.12
+  data_source: gs://open-targets-pipeline-runs/szsz/25.06-testrun-4 # same as release_uri 
+  database_namespace: platform2512 # e.g. platform2512 
+ 
+  # Google disk snapshot variables
+  opensearch_disk_name: platform-2512dev-os
+  opensearch_disk_snapshot_name: platform-2512dev-os
+  clickhouse_disk_name: platform-2512dev-ch
+  clickhouse_disk_snapshot_name: platform-2512dev-ch
+  # ========================= THESE VALUES RARELY NEED CHANGING ===========================  
+  disk_snapshot_project_id: open-targets-eu-dev
+  release_gcs_bucket: gs://open-targets-data-releases
+
   # temp file locations
   local_data: release_data
   prepared_data: prepared_data
-  # croissant
-  release_ftp_output: ${RELEASE_FTP_OUTPUT}
-  release_gcs_output: ${RELEASE_GCS_OUTPUT}
-  # database namespace
-  database_namespace: ${DATABASE_NAMESPACE}
+
   # opensearch
-  opensearch_version: ${OPENSEARCH_VERSION}
-  opensearch_java_opts: ${OPENSEARCH_JAVA_OPTS}
+  opensearch_version: 3.1.0
+  opensearch_java_opts: -Xms300g -Xmx302g
   opensearch_data: /mnt/opensearch/data
   opensearch_logs: /var/log/pos/opensearch
-  opensearch_disk_name: ${OPENSEARCH_DISK_NAME}
-  opensearch_disk_snapshot_name: ${OPENSEARCH_DISK_SNAPSHOT_NAME}
-  opensearch_snapshot_repository: ${OPENSEARCH_SNAPSHOT_REPOSITORY}
-  opensearch_snapshot_bucket: ${OPENSEARCH_SNAPSHOT_BUCKET}
-  opensearch_snapshot_base_path: ${OPENSEARCH_SNAPSHOT_BASE_PATH}
+  opensearch_snapshot_repository: ot-os-snapshots
+  opensearch_snapshot_bucket: open-targets-data-backends
+  opensearch_snapshot_base_path: opensearch
+  opensearch_indices_to_restore: '*,-.*'  # e.g. '*,-.*' to restore all except hidden indices
+
   # clickhouse
-  clickhouse_version: ${CLICKHOUSE_VERSION}
+  clickhouse_version: 25.6.3.116
   clickhouse_data: /mnt/clickhouse/data
   clickhouse_logs: /var/log/pos/clickhouse
-  clickhouse_disk_name: ${CLICKHOUSE_DISK_NAME}
-  clickhouse_disk_snapshot_name: ${CLICKHOUSE_DISK_SNAPSHOT_NAME}
-  clickhouse_backup_base_path: ${CLICKHOUSE_BACKUP_BASE_PATH}
+  clickhouse_backup_base_path: https://storage.googleapis.com/open-targets-data-backends/clickhouse/
+
   # bigquery
   bq_prod_project_id: open-targets-prod
-  bq_parquet_path: ${BQ_DATA_SOURCE}
-  # gcs sync
-  gcs_sync_source: ${RELEASE_URI} # must have trailing slash
-  gcs_sync_destination: ${RELEASE_GCS_OUTPUT} # must have trailing slash
+
   # ftp sync
-  ftp_sync_source_data: ${RELEASE_URI} 
-  ftp_sync_release_id: ${RELEASE}
-  ftp_sync_path_gcs_credentials_file: ${GCS_CREDENTIALS_FILE
+  ftp_sync_path_gcs_credentials_file: gs://open-targets-ops/credentials/pis-service_account.json
 
 steps:
   ##################################################################################################
-  # Full data backend
+  # Full platform backend
   ##################################################################################################
   backend:
     # sync data
@@ -58,8 +60,8 @@ steps:
     - name: ot_croissant generate release metadata
       requires:
         - sync_bucket etl output files
-      ftp_address: ${release_ftp_output}
-      gcp_address: ${release_gcs_output}
+      ftp_address: http://ftp.ebi.ac.uk/pub/databases/opentargets/platform/${release}/output/
+      gcp_address: ${release_gcs_bucket}/${release}/output/
       dataset_path: ${local_data}/output
       output: croissant.json
       prepared_data_parent: ${prepared_data}
@@ -92,7 +94,6 @@ steps:
         - evidence_clingen
         - evidence_crispr
         - evidence_crispr_screen
-        # - evidence_encore
         - evidence_europepmc
         - evidence_eva
         - evidence_eva_somatic
@@ -104,8 +105,6 @@ steps:
         - evidence_impc
         - evidence_intogen
         - evidence_orphanet
-        # - evidence_ot_crispr
-        # - evidence_ot_crispr_validation
         - evidence_progeny
         - evidence_reactome
         - evidence_slapenrich
@@ -126,7 +125,6 @@ steps:
         - mechanism_of_action
         - mouse_phenotypes
         - openfda_faers
-        # - otar_projects
         - pharmacogenomics
         - protein_coding_coords
         - reactome
@@ -162,13 +160,13 @@ steps:
       snapshot_repository_name: ${opensearch_snapshot_repository}
       snapshot_name: ${database_namespace}
       snapshot_bucket: ${opensearch_snapshot_bucket}
-      snapshot_base_path: ${opensearch_snapshot_base_path}
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
     - name: open_search_stop data loading instance
       requires:
         - open_search_snapshot data loading instance
       service_name: os-pos
     - name: create_gcp_disk_snapshot opensearch
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${opensearch_disk_name}
       gcp_snapshot_name: ${opensearch_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -227,7 +225,7 @@ steps:
     - name: create_gcp_disk_snapshot clickhouse
       requires:
         - clickhouse_stop data loading instance
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${clickhouse_disk_name}
       gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -245,9 +243,10 @@ steps:
         - explode_data_prep search_ebi_associations
       source: ${prepared_data}/search_ebi_associations/search_ebi_associations.json
       destination: etc/export/search_ebi_associations/search_ebi_associations.json
-    - name: copy epmc_cooccurrence
+    - name: sync_bucket epmc_cooccurrence
       source: ${data_source}/intermediate/literature_epmc_cooccurrence
-      destination: etc/export/epmc_cooccurrence
+      destination: ${data_source}/etc/export/epmc_cooccurrence
+
   ################################################################################################
   # Tarballs
   ################################################################################################
@@ -280,8 +279,8 @@ steps:
     - name: ot_croissant generate release metadata
       requires:
         - sync_bucket etl output files
-      ftp_address: ${release_ftp_output}
-      gcp_address: ${release_gcs_output}
+      ftp_address: http://ftp.ebi.ac.uk/pub/databases/opentargets/platform/${release}/output/
+      gcp_address: ${release_gcs_bucket}/${release}/output/
       dataset_path: ${local_data}/output
       output: croissant.json
       prepared_data_parent: ${prepared_data}
@@ -339,13 +338,13 @@ steps:
       snapshot_repository_name: ${opensearch_snapshot_repository}
       snapshot_name: ${database_namespace}
       snapshot_bucket: ${opensearch_snapshot_bucket}
-      snapshot_base_path: ${opensearch_snapshot_base_path}
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
     - name: open_search_stop data loading instance
       requires:
         - open_search_snapshot data loading instance
       service_name: os-pos
     - name: create_gcp_disk_snapshot opensearch
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${opensearch_disk_name}
       gcp_snapshot_name: ${opensearch_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -363,7 +362,7 @@ steps:
       opensearch_java_opts: ${opensearch_java_opts}
   opensearch_disk_snapshot:
     - name: create_gcp_disk_snapshot opensearch
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${opensearch_disk_name}
       gcp_snapshot_name: ${opensearch_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -380,14 +379,14 @@ steps:
       snapshot_repository_name: ${opensearch_snapshot_repository}
       snapshot_name: ${database_namespace}
       snapshot_bucket: ${opensearch_snapshot_bucket}
-      snapshot_base_path: ${opensearch_snapshot_base_path}
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
   opensearch_restore:
     - name: open_search_restore indices
       snapshot_repository_name: ${opensearch_snapshot_repository}
       snapshot_name: ${database_namespace}
       snapshot_bucket: ${opensearch_snapshot_bucket}
-      snapshot_base_path: ${opensearch_snapshot_base_path}
-      indices: '*,-.*'
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
+      indices: ${opensearch_indices_to_restore}
   opensearch_stop:
     - name: open_search_stop data loading instance
       service_name: os-pos
@@ -496,7 +495,7 @@ steps:
     - name: create_gcp_disk_snapshot clickhouse
       requires:
         - clickhouse_stop data loading instance
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${clickhouse_disk_name}
       gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -516,7 +515,7 @@ steps:
       destination: disk_images/clickhouse.tgz
   clickhouse_disk_snapshot:
     - name: create_gcp_disk_snapshot clickhouse
-      gcp_project_id: open-targets-eu-dev
+      gcp_project_id: ${disk_snapshot_project_id}
       gcp_disk_name: ${clickhouse_disk_name}
       gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
       gcp_disk_zone: europe-west1-d
@@ -635,7 +634,6 @@ steps:
         - evidence_clingen
         - evidence_crispr
         - evidence_crispr_screen
-        - evidence_encore
         - evidence_europepmc
         - evidence_eva
         - evidence_eva_somatic
@@ -682,7 +680,7 @@ steps:
           project_id: open-targets-eu-dev
           location: eu
           table: ${each}
-          base_uri: ${bq_parquet_path}
+          base_uri: ${release_gcs_bucket}/${release}
   bigquery_prod_load_all:
     - name: bigquery_reset prod
       project_id: open-targets-prod
@@ -699,8 +697,7 @@ steps:
           project_id: open-targets-prod
           location: eu
           table: ${each}
-          base_uri: ${bq_parquet_path}
-
+          base_uri: ${release_gcs_bucket}/${release}
   exports:
     # EBI Search
     - name: sync_bucket search_ebi_associations
@@ -720,17 +717,20 @@ steps:
       source: ${prepared_data}/search_ebi_associations/search_ebi_associations.json
       destination: etc/export/search_ebi_associations/search_ebi_associations.json
     # EPMC Co-occurrence
-    - name: copy epmc_cooccurrence
+    - name: sync_bucket epmc_cooccurrence
       source: ${data_source}/intermediate/literature_epmc_cooccurrence
-      destination: etc/export/epmc_cooccurrence 
+      destination: ${data_source}/etc/export/epmc_cooccurrence
   # gcs_sync
   gcs_sync:
     - name: sync_bucket gcs release data
-      source: ${gcs_sync_source} 
-      destination: ${gcs_sync_destination} 
+      source: ${data_source}/ 
+      destination: ${release_gcs_bucket}/${release}/ 
   # ftp_sync
   ftp_sync:
     - name: ftp_sync release data to ftp server
-      source_data: ${ftp_sync_source_data}
-      release_id: ${ftp_sync_release_id}
+      source_data: ${data_source}
+      release_id: ${release}
       gcs_credentials_file: ${ftp_sync_path_gcs_credentials_file}
+  test:
+    - name: hello_world test
+      who: Hello, Open Targets Platform Output Support!
