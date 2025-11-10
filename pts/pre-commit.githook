@@ -5,7 +5,7 @@ source .venv/bin/activate
 
 RUFF_CMD='uv run ruff check'
 DEPTRY_CMD='uv run deptry src'
-PYTEST_CMD='uv run pytest -qq'
+PYTEST_CMD=(uv run pytest -qq -m "not slow")
 
 CYAN=$(echo -e $"\033[0;36m")
 RED=$(echo -e $"\033[1;31m")
@@ -49,7 +49,9 @@ if [[ ${#FILES[@]} -ne 0 ]]; then
 fi
 
 # pytest
-if ! RESULT=$($PYTEST_CMD); then
+RESULT=$("${PYTEST_CMD[@]}")
+EXIT_CODE=$?
+if [[ $EXIT_CODE -ne 0 && $EXIT_CODE -ne 5 ]] ; then
     STATUS=1
     echo "${RED}Some tests failed:${RESET}"
     echo

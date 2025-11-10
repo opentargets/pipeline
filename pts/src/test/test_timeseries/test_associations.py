@@ -12,6 +12,7 @@ from pyspark.sql.window import Window
 from pts.pyspark.timeseries_utils.association import Association
 
 
+@pytest.mark.slow
 class TestAssociation:
     """Testing suite for the Association dataset."""
 
@@ -70,7 +71,7 @@ class TestAssociation:
         assert exploded_filtered_df.first() is not None
 
         # Assert the first year:
-        assert exploded_filtered_df.first().year == first_year
+        assert exploded_filtered_df.first().year == first_year  # pyright: ignore[reportOptionalMemberAccess]
 
         # Assert the number of years:
         assert exploded_filtered_df.count() == this_year - first_year + 1

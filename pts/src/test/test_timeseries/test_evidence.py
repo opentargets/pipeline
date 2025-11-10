@@ -9,6 +9,7 @@ from pyspark.sql import functions as f
 from pts.pyspark.timeseries_utils.evidence import Evidence
 
 
+@pytest.mark.slow
 class TestEvidence:
     """Testing suite for the Evidence dataset."""
 

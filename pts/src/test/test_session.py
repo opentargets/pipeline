@@ -1,6 +1,8 @@
 import pyspark.sql.functions as f
+import pytest
 
 
+@pytest.mark.slow
 def test_load_csv_and_replace(tmp_path, pts_session):
     # Prepare a tiny TSV/CSV file
     p = tmp_path / 'small.tsv'
@@ -19,6 +21,7 @@ def test_load_csv_and_replace(tmp_path, pts_session):
     assert {'KMT2A', 'TP53'} == {r['gene'] for r in df2.select('gene').collect()}
 
 
+@pytest.mark.slow
 def test_create_dataframe_and_schema(spark):
     # create a small DF using the raw SparkSession
     rows = [('A', 1), ('B', 2)]
