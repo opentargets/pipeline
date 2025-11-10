@@ -1,14 +1,15 @@
 """Evidence parser for Orphanet's gene-disease associations."""
 
 from itertools import chain
+from typing import Any
 
 import defusedxml.ElementTree as eT
 from loguru import logger
 from pyspark.sql import DataFrame, Row
 from pyspark.sql.functions import array_distinct, col, create_map, lit, split
 
+from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
-from pts.utils.ontology import add_efo_mapping
 
 # The rest of the types are assigned to -> germline for allele origins
 EXCLUDED_ASSOCIATIONTYPES = [
@@ -36,11 +37,13 @@ def orphanet(
     properties: dict[str, str],
 ) -> None:
     spark = Session(app_name='orphanet', properties=properties)
-    efo_version = properties['efo_version']
-    cores = int(properties.get('ontology_cores', 1))
+
+    # Pop OnToma LUT paths from the sources dict
+    disease_label_lut_path = source.pop('disease_label_lut')
+    disease_id_lut_path = source.pop('disease_id_lut')
 
     logger.info(f'parse XML from {source} into a list of dictionaries')
-    orphanet_disorders = parse_orphanet_xml(source)
+    orphanet_disorders = parse_orphanet_xml(source['evidence'])
     orphanet_df = spark.spark.createDataFrame(Row(**x) for x in orphanet_disorders)
 
     logger.info('process evidence strings')
@@ -48,13 +51,14 @@ def orphanet(
 
     logger.info('add EFO mappings')
     evidence_df = add_efo_mapping(
-        evidence_strings=evidence_df, spark_instance=spark.spark, efo_version=efo_version, cores=cores
+        spark=spark.spark,
+        evidence_df=evidence_df,
+        disease_label_lut_path=disease_label_lut_path,
+        disease_id_lut_path=disease_id_lut_path,
     )
 
     logger.info(f'write evidence strings to {destination}')
     evidence_df.write.mode('overwrite').parquet(destination)
-
-    return evidence_df
 
 
 def parse_orphanet_xml(orphanet_file: str) -> list[dict]:

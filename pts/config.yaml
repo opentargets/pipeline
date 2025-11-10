@@ -229,6 +229,8 @@ steps:
       source:
         clinpgx: input/pharmacogenetics/clinpgx_annotation.json.gz
         phenotypes: input/pharmacogenetics/phenotypes.json
+        disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
       destination:
         associations: intermediate/pharmacogenetics.parquet
         phenotypes: intermediate/pharmacogenetics/phenotypes.json
@@ -236,6 +238,8 @@ steps:
         efo_version: ${efo_version}
         ontology_cores: 1
         openai_token_filename: /var/run/secrets/openai_token
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
   #: EVIDENCE STEP :################################################################################
@@ -287,18 +291,20 @@ steps:
       pyspark: orphanet
       source:
         evidence: input/evidence/orphanet.xml
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/orphanet.parquet
-      settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
 
     - name: pyspark clingen
       source:
         evidence: input/evidence/clingen.csv
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/clingen.parquet
-      settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
       pyspark: clingen
 
     - name: pyspark impc evidence strings
@@ -314,17 +320,16 @@ steps:
         mouse_gene_mappings: input/evidence/impc/MGI_Gene_Model_Coord.rpt
         mouse_pubmed_refs: input/evidence/impc/MGI_PhenoGenoMP.rpt
         mp_ontology: input/evidence/impc/mp.owl
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/impc.parquet
       settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
         score_cutoff: 0.41
       properties:
         spark.driver.memory: 4g
         spark.executor.memory: 2g
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
 
-  #: EVIDENCE PPP STEP :############################################################################
-  evidence_ppp:
     - name: pyspark crispr screens
       pyspark: crispr_screens
       source:
@@ -343,10 +348,11 @@ steps:
         eye_panel: input/evidence/gene2phenotype/eye.csv
         skeletal_panel: input/evidence/gene2phenotype/skeletal.csv
         skin_panel: input/evidence/gene2phenotype/skin.csv
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/gene2phenotype.parquet
-      settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
   #: EVIDENCE PPP STEP :############################################################################

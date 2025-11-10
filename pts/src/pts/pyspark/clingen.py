@@ -5,8 +5,8 @@ from typing import Any
 import pyspark.sql.functions as f
 from loguru import logger
 
+from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
-from pts.utils.ontology import add_efo_mapping
 
 
 def clingen(
@@ -16,8 +16,6 @@ def clingen(
     properties: dict[str, str],
 ) -> None:
     spark = Session(app_name='clingen', properties=properties)
-    efo_version = settings.get('efo_version')
-    cores = int(settings.get('ontology_cores', 1))
 
     logger.info(f'load data from {source}')
     # Load CSV without header since we need to skip metadata rows
@@ -63,7 +61,10 @@ def clingen(
 
     logger.info('map clingen disease labels')
     mapped_evidence_df = add_efo_mapping(
-        evidence_strings=evidence_df, spark_instance=spark.spark, efo_version=efo_version, cores=cores
+        spark=spark.spark,
+        evidence_df=evidence_df,
+        disease_label_lut_path=source['ontoma_disease_label_lut'],
+        disease_id_lut_path=source['ontoma_disease_id_lut'],
     )
 
     logger.info(f'write clingen evidence strings to {destination}')

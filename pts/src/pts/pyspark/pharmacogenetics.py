@@ -10,8 +10,8 @@ from openai import OpenAI
 from pyspark.sql import DataFrame
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
+from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
-from pts.utils.ontology import add_efo_mapping
 
 
 def pharmacogenetics(
@@ -26,8 +26,6 @@ def pharmacogenetics(
     if not openai_token_filename:
         raise ValueError('openai_token_filename field missing in settings')
     openai_key = Path(openai_token_filename).read_text().strip()
-    efo_version = properties['efo_version']
-    cores = int(properties.get('ontology_cores', 1))
 
     logger.info(f'load data from {source}')
     pgx_phenotypes_df = spark.load_data(source['phenotypes'], format='json')
@@ -60,18 +58,13 @@ def pharmacogenetics(
     logger.info('parse variantId')
     pgx_w_variantid_df = add_variantid_column(annotated_pgx_df)
     logger.info('add efo mappings')
-    mapped_pgx_df = (
-        add_efo_mapping(
-            evidence_strings=pgx_w_variantid_df.withColumns({
-                'diseaseFromSource': f.col('phenotypeText'),
-                'diseaseFromSourceId': f.lit(None).cast('string'),
-            }),
-            efo_version=efo_version,
-            cores=cores,
-        )
-        .withColumnRenamed('diseaseFromSourceMappedId', 'phenotypeFromSourceId')
-        .drop('diseaseFromSource', 'diseaseFromSourceId')
-    )
+    mapped_pgx_df = add_efo_mapping(
+        spark=spark.spark,
+        evidence_df=pgx_w_variantid_df,
+        label_col_name='phenotypeText',
+        disease_label_lut_path=source['ontoma_disease_label_lut'],
+        id_col_name=None,
+    ).withColumnRenamed('diseaseFromSourceMappedId', 'phenotypeFromSourceId')
     logger.info(f'save associations to {destination["associations"]}')
     mapped_pgx_df.write.parquet(destination['associations'], mode='overwrite')
 
