@@ -51,14 +51,47 @@ steps:
 
   #: MOUSE_PHENOTYPES STEP :########################################################################
   mouse_phenotype:
-    - name: pyspark separate into output and excluded
+    - name: pyspark generate from IMPC and validate with target
       pyspark: mouse_phenotype
       source:
         target: output/target
-        mouse_phenotype: input/mouse_phenotype/mouse_phenotypes.json.gz
+        # IMPC source files
+        solr_gene_gene: input/evidence/impc/impc_solr_gene_gene.csv
+        solr_mouse_model: input/evidence/impc/impc_solr_mouse_model.csv
+        solr_disease_model_summary: input/evidence/impc/impc_solr_disease_model_summary.csv
+        solr_ontology: input/evidence/impc/impc_solr_ontology.csv
+        hgnc_gene_mappings: input/target/genenames/hgnc_complete_set.txt
+        mouse_gene_mappings: input/evidence/impc/MGI_Gene_Model_Coord.rpt
+        mouse_pubmed_refs: input/evidence/impc/MGI_PhenoGenoMP.rpt
+        mp_ontology: input/evidence/impc/mp.owl
       destination:
         output: output/mouse_phenotype
         excluded: excluded/mouse_phenotype
+      properties:
+        spark.driver.memory: 2g
+        spark.executor.memory: 1g
+
+    - name: pyspark impc evidence strings
+      pyspark: impc
+      source:
+        solr_gene_gene: input/evidence/impc/gene_gene.csv
+        solr_ontology_ontology: input/evidence/impc/ontology_ontology.csv
+        solr_mouse_model: input/evidence/impc/mouse_model.csv
+        solr_disease: input/evidence/impc/disease.csv
+        solr_disease_model_summary: input/evidence/impc/disease_model_summary.csv
+        solr_ontology: input/evidence/impc/ontology.csv
+        hgnc_gene_mappings: input/target/genenames/hgnc_complete_set.txt
+        mouse_gene_mappings: input/evidence/impc/MGI_Gene_Model_Coord.rpt
+        mouse_pubmed_refs: input/evidence/impc/MGI_PhenoGenoMP.rpt
+        mp_ontology: input/evidence/impc/mp.owl
+      destination: intermediate/evidence/impc.parquet
+      properties:
+        spark.driver.memory: 4g
+        spark.executor.memory: 2g
+      settings:
+        efo_version: ${efo_version}
+        ontology_cores: 1
+        score_cutoff: 0.41
   ##################################################################################################
 
   #: CHEMICAL PROBES STEP :#########################################################################
@@ -230,9 +263,30 @@ steps:
         efo_version: ${efo_version}
         ontology_cores: 1
       pyspark: clingen
-  ##################################################################################################
 
-  #: EVIDENCE_PPP STEP :############################################################################
+    - name: pyspark impc evidence strings
+      pyspark: impc
+      source:
+        solr_gene_gene: input/evidence/impc/gene_gene.csv
+        solr_ontology_ontology: input/evidence/impc/ontology_ontology.csv
+        solr_mouse_model: input/evidence/impc/mouse_model.csv
+        solr_disease: input/evidence/impc/disease.csv
+        solr_disease_model_summary: input/evidence/impc/disease_model_summary.csv
+        solr_ontology: input/evidence/impc/ontology.csv
+        hgnc_gene_mappings: input/target/genenames/hgnc_complete_set.tsv
+        mouse_gene_mappings: input/evidence/impc/MGI_Gene_Model_Coord.rpt
+        mouse_pubmed_refs: input/evidence/impc/MGI_PhenoGenoMP.rpt
+        mp_ontology: input/evidence/impc/mp.owl
+      destination: intermediate/evidence/impc.parquet
+      settings:
+        efo_version: v3.81.0
+        ontology_cores: 1
+        score_cutoff: 0.41
+      properties:
+        spark.driver.memory: 4g
+        spark.executor.memory: 2g
+
+  #: EVIDENCE PPP STEP :############################################################################
   evidence_ppp:
     - name: pyspark ot_crispr
       pyspark: ot_crispr
