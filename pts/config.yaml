@@ -359,6 +359,22 @@ steps:
       destination: intermediate/evidence/ot_crispr.parquet
   ##################################################################################################
 
+  #: ONTOMA STEP :##################################################################################
+  ontoma:
+    - name: pyspark ontoma generate lookup tables
+      pyspark: ontoma_lut_generation
+      source:
+        disease_index: output/disease/disease.parquet
+        ot_disease_curation: input/ontoma/ot_disease_curation.tsv
+        eva_clinvar: input/ontoma/eva_clinvar.txt
+        clinvar_xrefs: input/ontoma/clinvar_xrefs.txt
+      destination:
+        disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
+  ##################################################################################################
+
   #: TIMESERIES STEP :##############################################################################
   timeseries:
     - name: pyspark timeseries
