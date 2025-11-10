@@ -9,6 +9,7 @@ This dataset consist of a series of OTAR projects studying various diseases usin
 import operator
 import os
 from functools import reduce
+from typing import Any
 
 from loguru import logger
 from pyspark.sql import Column, DataFrame, Row
@@ -310,8 +311,9 @@ class EvidenceParser:
 def ot_crispr(
     source: dict[str, str],
     destination: str,
-    properties: dict[str, str] | None,
-) -> DataFrame:
+    settings: dict[str, Any],
+    properties: dict[str, str],
+) -> None:
     spark = Session(app_name='ot_crispr', properties=properties)
 
     logger.info(f'loading data from: {source}')
@@ -353,5 +355,3 @@ def ot_crispr(
         )
     )
     evidence_df.write.parquet(destination, mode='overwrite')
-
-    return evidence_df

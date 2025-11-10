@@ -1,5 +1,7 @@
 """This module adds the category of why a clinical trial has stopped early to the ChEMBL evidence."""
 
+from typing import Any
+
 import pyspark.sql.functions as f
 from loguru import logger
 from pyspark.sql.dataframe import DataFrame
@@ -10,8 +12,9 @@ from pts.pyspark.common.session import Session
 def chembl(
     source: dict[str, str],
     destination: str,
+    settings: dict[str, Any],
     properties: dict[str, str],
-) -> DataFrame:
+) -> None:
     """This module adds the studyStopReasonCategories to the ChEMBL evidence as a result of the.
 
     categorisation of the clinical trial reason to stop.
@@ -61,7 +64,6 @@ def chembl(
 
     logger.info(f'write chembl evidence strings to {destination}')
     filtered_chembl_df.write.parquet(destination, mode='overwrite')
-    return filtered_chembl_df
 
 
 def prettify_subclasses(predictions_df: DataFrame) -> DataFrame:

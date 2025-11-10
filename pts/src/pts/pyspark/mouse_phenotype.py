@@ -1,5 +1,7 @@
 """Mouse phenotype dataset generation and filtering."""
 
+from typing import Any
+
 import pronto
 import pyspark.sql.functions as f
 from loguru import logger
@@ -19,7 +21,8 @@ from pts.pyspark.common.session import Session
 def mouse_phenotype(
     source: dict[str, str],
     destination: dict[str, str],
-    properties: dict[str, str] | None,
+    settings: dict[str, Any],
+    properties: dict[str, str],
 ) -> None:
     """Generate mouse phenotypes dataset from IMPC data and filter by target."""
     # start spark session

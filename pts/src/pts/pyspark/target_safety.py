@@ -15,7 +15,7 @@ def target_safety(
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
-) -> DataFrame:
+) -> None:
     """This module puts together data from different sources that describe target safety liabilities."""
     spark = Session(app_name='target_safety', properties=properties)
 
@@ -83,8 +83,6 @@ def target_safety(
     )
     logger.info(f'save associations to {destination}')
     safety_df.write.mode('overwrite').parquet(destination)
-
-    return safety_df
 
 
 def process_aop(aopwik_df: DataFrame) -> DataFrame:

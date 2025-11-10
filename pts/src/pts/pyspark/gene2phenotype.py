@@ -51,7 +51,7 @@ def gene2phenotype(
     source: dict[str, str],
     destination: str,
     settings: dict[str, Any],
-    properties: dict[str, str] | None,
+    properties: dict[str, str],
 ) -> None:
     spark = Session(app_name='gene2phenotype', properties=properties)
     efo_version = settings.get('efo_version')

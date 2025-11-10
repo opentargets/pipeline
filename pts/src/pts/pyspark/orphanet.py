@@ -30,10 +30,11 @@ CONSEQUENCE_MAP = {
 
 
 def orphanet(
-    source: str,
+    source: dict[str, str],
     destination: str,
+    settings: dict[str, Any],
     properties: dict[str, str],
-) -> DataFrame:
+) -> None:
     spark = Session(app_name='orphanet', properties=properties)
     efo_version = properties['efo_version']
     cores = int(properties.get('ontology_cores', 1))

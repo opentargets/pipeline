@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
@@ -13,12 +14,17 @@ from pts.pyspark.common.session import Session
 from pts.utils.ontology import add_efo_mapping
 
 
-def pharmacogenetics(source: dict[str, str], destination: dict[str, str], properties: dict[str, str]) -> DataFrame:
+def pharmacogenetics(
+    source: dict[str, str],
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    properties: dict[str, str],
+) -> None:
     spark = Session(app_name='pharmacogenetics', properties=properties)
     # Read OpenAI API key from the source path (automatically resolved by PySpark task)
-    openai_token_filename = source.get('openai_api_key_filename')
+    openai_token_filename = source.get('openai_token_filename')
     if not openai_token_filename:
-        raise ValueError('openai_api_key_filename field missing in settings')
+        raise ValueError('openai_token_filename field missing in settings')
     openai_key = Path(openai_token_filename).read_text().strip()
     efo_version = properties['efo_version']
     cores = int(properties.get('ontology_cores', 1))

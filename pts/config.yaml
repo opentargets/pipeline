@@ -3,7 +3,6 @@ work_path: ./work
 log_level: DEBUG
 release_uri: gs://open-targets-pre-data-releases/jferrer/test-edp-dataproc
 pool_size: 8
-pool: 8
 
 scratchpad:
   efo_version: v3.81.0
@@ -101,8 +100,7 @@ steps:
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
-      destination:
-        output: intermediate/chemical_probes_evidence.parquet
+      destination: intermediate/chemical_probes_evidence.parquet
       properties:
         spark.driver.memory: 8g
   ##################################################################################################
@@ -237,7 +235,7 @@ steps:
       settings:
         efo_version: ${efo_version}
         ontology_cores: 1
-        openai_api_key_filename: /var/run/secrets/openai_token
+        openai_token_filename: /var/run/secrets/openai_token
   ##################################################################################################
 
   #: EVIDENCE STEP :################################################################################
@@ -284,6 +282,15 @@ steps:
         disease: input/evidence/cancerbiomarkers/diseases.jsonl
         drugs: output/drug_molecule
       destination: intermediate/evidence/cancer_biomarkers.parquet
+
+    - name: pyspark orphanet
+      pyspark: orphanet
+      source:
+        evidence: input/evidence/orphanet.xml
+      destination: intermediate/evidence/orphanet.parquet
+      settings:
+        efo_version: ${efo_version}
+        ontology_cores: 1
 
     - name: pyspark clingen
       source:
@@ -340,7 +347,10 @@ steps:
       settings:
         efo_version: ${efo_version}
         ontology_cores: 1
+  ##################################################################################################
 
+  #: EVIDENCE PPP STEP :############################################################################
+  evidence_ppp:
     - name: pyspark ot_crispr
       pyspark: ot_crispr
       source:

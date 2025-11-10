@@ -1,5 +1,7 @@
 """Parser to process chemical probes data and generate evidence."""
 
+from typing import Any
+
 import pandas as pd
 from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as f
@@ -32,23 +34,17 @@ PROBES_SETS = [
 
 def chemical_probes(
     source: dict[str, str],
-    destination: dict[str, str],
-    properties: dict[str, str] | None,
+    destination: str,
+    settings: dict[str, Any],
+    properties: dict[str, str],
 ) -> None:
-    """Process chemical probes data and generate evidence.
-
-    Args:
-        source (dict[str, str]): Source paths for input datasets.
-        destination (dict[str, str]): Destination paths for output datasets.
-        properties (dict[str, str] | None): Spark session properties.
-    """
+    """Process chemical probes data and generate evidence."""
     # Starting spark session
     session = Session(app_name='chemical_probes', properties=properties)
 
     # Extract input dataset locations from config
     probes_excel = source['probes_excel']
     drugs_csv = source['drugs_csv']
-    output_dataset = destination['output']
 
     # Process chemical probes data from Excel and CSV files
     probes_data = process_probes_data(session.spark, probes_excel)
@@ -63,7 +59,7 @@ def chemical_probes(
     )
 
     # Write the final evidence dataset
-    evidence.write.mode('overwrite').parquet(output_dataset)
+    evidence.write.mode('overwrite').parquet(destination)
 
 
 def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destination_col: str) -> DataFrame:

@@ -12,7 +12,7 @@ def timeseries(
     source: dict[str, str],
     destination: dict[str, str],
     settings: dict[str, Any],
-    properties: dict[str, Any],
+    properties: dict[str, str],
 ) -> None:
     """Main function to generate timeseries data.
 

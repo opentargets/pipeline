@@ -23,12 +23,10 @@ def impc(
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
-) -> DataFrame:
+) -> None:
     """Generate IMPC evidence strings."""
     spark = Session(app_name='impc', properties=properties)
-    score_cutoff = float(settings.get('score_cutoff', 0.0))
-    efo_version = settings.get('efo_version')
-    mapping_cores = int(settings.get('ontology_cores', 1))
+    score_cutoff = float(settings.get('score_cutoff', 0))
 
     # Load and prepare all required datasets for evidence generation
     datasets = _load_impc_datasets_for_evidence(spark, source)
@@ -74,8 +72,6 @@ def impc(
     # Write evidence data
     logger.info('write impc evidence')
     final_evidence.write.mode('overwrite').parquet(destination)
-
-    return final_evidence
 
 
 def _load_impc_datasets_for_evidence(spark: Session, source: dict[str, str]) -> dict[str, DataFrame]:

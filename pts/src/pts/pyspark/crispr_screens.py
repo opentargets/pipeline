@@ -25,7 +25,7 @@ def crispr_screens(
     source: dict[str, str],
     destination: str,
     settings: dict[str, Any],
-    properties: dict[str, str] | None,
+    properties: dict[str, str],
 ) -> None:
     """Process CRISPR Brain inputs into target/disease evidence.
 

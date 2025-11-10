@@ -1,5 +1,7 @@
 """Parser to generate view on coding variants and their effects."""
 
+from typing import Any
+
 from loguru import logger
 from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as f
@@ -12,15 +14,10 @@ from pts.pyspark.common import Session
 def coding_variant(
     source: dict[str, str],
     destination: str,
-    properties: dict[str, str] | None,
+    settings: dict[str, Any],
+    properties: dict[str, str],
 ) -> None:
-    """Generate view on coding variants with their functional context.
-
-    Args:
-        source (dict[str, str]): Source paths for input datasets.
-        destination (str): Destination path for output dataset.
-        properties (dict[str, str] | None): Spark session properties.
-    """
+    """Generate view on coding variants with their functional context."""
     session = Session(app_name='coding_variant_view', properties=properties)
 
     # Extracting variants with amino acid change:

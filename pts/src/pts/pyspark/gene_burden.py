@@ -43,7 +43,7 @@ def gene_burden(
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
-) -> DataFrame:
+) -> None:
     spark = Session(app_name='gene_burden', properties=properties)
 
     logger.info(f'load data from {source}')
@@ -90,7 +90,6 @@ def gene_burden(
     union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
     evd_df = reduce(union_by_diff_schema, burden_evidence_sets).distinct()
     evd_df.write.parquet(destination, mode='overwrite')
-    return evd_df
 
 
 def process_cvdi_gene_burden(

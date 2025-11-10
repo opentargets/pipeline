@@ -1,6 +1,7 @@
 """Evidence parser for the Cancer Biomarkers database."""
 
 import re
+from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
@@ -40,7 +41,8 @@ GENENAMESOVERRIDE: dict = {
 def cancer_biomarkers(
     source: dict[str, str],
     destination: str,
-    properties: dict[str, str] | None,
+    settings: dict[str, Any],
+    properties: dict[str, str],
 ) -> None:
     """Loads and processes inputs to generate the Cancer Biomarkers evidence strings."""
     spark = Session(app_name='chemical_probes', properties=properties)
