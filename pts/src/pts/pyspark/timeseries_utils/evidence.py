@@ -50,7 +50,8 @@ class Evidence(Dataset):
             Column: year, which should never be null.
 
         Examples:
-            >>> (spark.createDataFrame([('1999-12-31',), ('2021-02-11',), (None,), ("Batman-Robin",)], ['date'])
+            >>> (spark.createDataFrame([('1999-12-31',), ('2021-02-11',), (None,),
+            ... ("Batman-Robin",), ("2021",)], ['date'])
             ... .select('date', Evidence._evidence_date_to_year(f.col('date')).alias('year'))
             ... .show())
             +------------+----+
@@ -60,12 +61,13 @@ class Evidence(Dataset):
             |  2021-02-11|2021|
             |        NULL|NULL|
             |Batman-Robin|NULL|
+            |        2021|2021|
             +------------+----+
             <BLANKLINE>
         """
-        return f.when(
-            evidence_date.isNotNull(), f.regexp_extract(evidence_date, r'^(\d{4})-', 1).try_cast(t.IntegerType())
-        )
+        maybe_year = f.when(evidence_date.isNotNull(), f.trim(f.regexp_extract(evidence_date, r'^(\d{4})(?:\D|$)', 1)))
+
+        return f.when(maybe_year != '', maybe_year.cast(t.IntegerType()))  # noqa: PLC1901
 
     @classmethod
     def from_raw_evidence(cls: type[Self], raw_evidence_input: DataFrame) -> Evidence:

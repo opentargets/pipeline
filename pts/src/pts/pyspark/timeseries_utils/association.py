@@ -60,6 +60,7 @@ class Association(Dataset):
             ...         ['label', 'year', 'score']
             ...    )
             ...    .select("*", Association._get_peak(f.col('score'), w).alias('col'))
+            ...    .orderBy('label', 'year')
             ...    .show()
             ... )
             +-----+----+-----+---+
@@ -223,7 +224,7 @@ class Association(Dataset):
             ...     Association.calculate_logistic_decay(
             ...        f.col("peak"), f.col("year-peakYear"), 1.0, 0.5
             ...     ).alias("novelty")
-            ... ).show(truncate=False)
+            ... ).orderBy('year').show(truncate=False)
             +-----+----+-------------------+
             |group|year|novelty            |
             +-----+----+-------------------+
