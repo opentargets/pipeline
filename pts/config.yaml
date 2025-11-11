@@ -4,9 +4,6 @@ log_level: DEBUG
 release_uri: gs://open-targets-pre-data-releases/jferrer/test-edp-dataproc
 pool_size: 8
 
-scratchpad:
-  efo_version: v3.81.0
-
 steps:
   #: DISEASE STEP :#################################################################################
   disease:
@@ -88,8 +85,6 @@ steps:
         spark.driver.memory: 4g
         spark.executor.memory: 2g
       settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
         score_cutoff: 0.41
   ##################################################################################################
 
@@ -229,14 +224,11 @@ steps:
       source:
         clinpgx: input/pharmacogenetics/clinpgx_annotation.json.gz
         phenotypes: input/pharmacogenetics/phenotypes.json
-        disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
       destination:
         associations: intermediate/pharmacogenetics.parquet
         phenotypes: intermediate/pharmacogenetics/phenotypes.json
       settings:
-        efo_version: ${efo_version}
-        ontology_cores: 1
         openai_token_filename: /var/run/secrets/openai_token
       properties:
         spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3

@@ -29,8 +29,8 @@ def impc(
     score_cutoff = float(settings.get('score_cutoff', 0))
 
     # Pop OnToma LUT paths from the sources dict
-    disease_label_lut_path = source.pop('disease_label_lut')
-    disease_id_lut_path = source.pop('disease_id_lut')
+    ontoma_disease_label_lut = source.pop('ontoma_disease_label_lut')
+    ontoma_disease_id_lut = source.pop('ontoma_disease_id_lut')
 
     # Load and prepare all required datasets for evidence generation (last two sources are not impc datasets)
     datasets = _load_impc_datasets_for_evidence(spark, source)
@@ -69,8 +69,8 @@ def impc(
     mapped_evidence_df = add_efo_mapping(
         spark=spark.spark,
         evidence_df=evidence,
-        disease_label_lut_path=disease_label_lut_path,
-        disease_id_lut_path=disease_id_lut_path,
+        disease_label_lut_path=ontoma_disease_label_lut,
+        disease_id_lut_path=ontoma_disease_id_lut,
     )
 
     # Finalize evidence strings

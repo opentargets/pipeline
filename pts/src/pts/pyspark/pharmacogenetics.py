@@ -22,7 +22,7 @@ def pharmacogenetics(
 ) -> None:
     spark = Session(app_name='pharmacogenetics', properties=properties)
     # Read OpenAI API key from the source path (automatically resolved by PySpark task)
-    openai_token_filename = source.get('openai_token_filename')
+    openai_token_filename = settings.get('openai_token_filename')
     if not openai_token_filename:
         raise ValueError('openai_token_filename field missing in settings')
     openai_key = Path(openai_token_filename).read_text().strip()

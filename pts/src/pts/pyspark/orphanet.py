@@ -38,11 +38,7 @@ def orphanet(
 ) -> None:
     spark = Session(app_name='orphanet', properties=properties)
 
-    # Pop OnToma LUT paths from the sources dict
-    disease_label_lut_path = source.pop('disease_label_lut')
-    disease_id_lut_path = source.pop('disease_id_lut')
-
-    logger.info(f'parse XML from {source} into a list of dictionaries')
+    logger.info(f'parse XML from {source["evidence"]} into a list of dictionaries')
     orphanet_disorders = parse_orphanet_xml(source['evidence'])
     orphanet_df = spark.spark.createDataFrame(Row(**x) for x in orphanet_disorders)
 
@@ -53,8 +49,8 @@ def orphanet(
     evidence_df = add_efo_mapping(
         spark=spark.spark,
         evidence_df=evidence_df,
-        disease_label_lut_path=disease_label_lut_path,
-        disease_id_lut_path=disease_id_lut_path,
+        disease_label_lut_path=source['ontoma_disease_label_lut'],
+        disease_id_lut_path=source['ontoma_disease_id_lut'],
     )
 
     logger.info(f'write evidence strings to {destination}')

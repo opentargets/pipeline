@@ -56,8 +56,8 @@ def gene2phenotype(
     spark = Session(app_name='gene2phenotype', properties=properties)
 
     # Pop OnToma LUT paths from the sources dict
-    disease_label_lut_path = source.pop('disease_label_lut')
-    disease_id_lut_path = source.pop('disease_id_lut')
+    ontoma_disease_label_lut = source.pop('ontoma_disease_label_lut')
+    ontoma_disease_id_lut = source.pop('ontoma_disease_id_lut')
 
     logger.info(f'load data from {source}')
     g2p_panel_files = list(source.values())
@@ -68,8 +68,8 @@ def gene2phenotype(
     mapped_evidence_df = add_efo_mapping(
         spark=spark.spark,
         evidence_df=evidence_df,
-        disease_label_lut_path=disease_label_lut_path,
-        disease_id_lut_path=disease_id_lut_path,
+        disease_label_lut_path=ontoma_disease_label_lut,
+        disease_id_lut_path=ontoma_disease_id_lut,
     )
 
     logger.info(f'write gene2phenotype evidence strings to {destination}')
