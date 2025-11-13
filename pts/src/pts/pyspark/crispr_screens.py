@@ -1,5 +1,3 @@
-import gzip
-import io
 import json
 import re
 from functools import reduce
@@ -41,8 +39,8 @@ def crispr_screens(
     logger.debug(f'reading study files from: {studies_glob}')
     genes_df = spark.load_data(studies_glob, format='csv', header=True, inferSchema=True)
     disease_mapping_df = spark.load_data(source['disease_mapping'], format='csv', sep='\t', header=True)
-    with gzip.open(source['screens'], 'rb') as fh:
-        screens_obj = json.load(io.TextIOWrapper(fh))
+
+    screens_obj = json.loads(spark.spark.read.text(source['screens'], wholetext=True).collect()[0][0])
 
     logger.info('processing crispr screens into evidence')
     screen_rows = [{**v, **v.get('metadata', {})} for v in screens_obj.values() if isinstance(v, dict)]
