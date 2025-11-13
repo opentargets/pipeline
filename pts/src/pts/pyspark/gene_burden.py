@@ -202,18 +202,15 @@ def process_cvdi_gene_burden(
             f.lit('UK Biobank 450k/All of Us/MGB').alias('cohortId'),
             f.translate('phenotype', '_', ' ').alias('diseaseFromSource'),
             f.col('Gene ID Ensembl').alias('targetFromSourceId'),
-            f.when(f.col('cMAC') == 0, f.lit(None))
-            .otherwise(f.col('cMAC'))
-            .try_cast('int')
-            .alias('studyCasesWithQualifyingVariants'),
             f.lit(748879).alias('studySampleSize'),
             f.col('resourceScore'),
-            f.regexp_extract(f.col('OR [95%CI]'), r'(\d+\.\d+)', 1).try_cast('double').alias('oddsRatio'),
+            f.col('cMAC').cast(t.IntegerType()).alias('studyCasesWithQualifyingVariants'),
+            f.regexp_extract(f.col('OR [95%CI]'), r'(\d+\.\d+)', 1).cast('double').alias('oddsRatio'),
             f.regexp_extract(f.col('OR [95%CI]'), r'\[(\d+\.\d+)', 1)
-            .try_cast('double')
+            .cast('double')
             .alias('oddsRatioConfidenceIntervalLower'),
             f.regexp_extract(f.col('OR [95%CI]'), r'; (\d+\.\d+)\]', 1)
-            .try_cast('double')
+            .cast('double')
             .alias('oddsRatioConfidenceIntervalUpper'),
             f.col('method_name').alias('statisticalMethod'),
             f.col('statisticalMethodOverview'),
@@ -230,9 +227,9 @@ def process_cvdi_gene_burden(
                 )
             ).alias('urls'),
             f.array(f.lit(cvdi_pub)).alias('literature'),
-            (f.log10(f.col('resourceScore')).try_cast('int') - f.lit(1)).alias('pValueExponent'),
+            (f.log10(f.col('resourceScore')).cast('int') - f.lit(1)).alias('pValueExponent'),
             f.round(
-                f.col('resourceScore') / f.pow(f.lit(10), (f.log10(f.col('resourceScore')).try_cast('int') - f.lit(1))),
+                f.col('resourceScore') / f.pow(f.lit(10), (f.log10(f.col('resourceScore')).cast('int') - f.lit(1))),
                 3,
             ).alias('pValueMantissa'),
         )
@@ -271,9 +268,9 @@ def process_finngen_gene_burden(
             f.lit('gene_burden').alias('datasourceId'),
             f.lit('finnish').alias('ancestry'),
             f.lit('HANCESTRO_0321').alias('ancestryId'),
-            f.col('BETA').try_cast('double').alias('beta'),
-            (f.col('BETA') - f.col('SE')).try_cast('double').alias('betaConfidenceIntervalLower'),
-            (f.col('BETA') + f.col('SE')).try_cast('double').alias('betaConfidenceIntervalUpper'),
+            f.col('BETA').cast('double').alias('beta'),
+            (f.col('BETA') - f.col('SE')).cast('double').alias('betaConfidenceIntervalLower'),
+            (f.col('BETA') + f.col('SE')).cast('double').alias('betaConfidenceIntervalUpper'),
             f.lit('FinnGen R12').alias('cohortId'),
             f.lit('genetic_association').alias('datatypeId'),
             f.col('diseaseFromSource'),
@@ -281,11 +278,11 @@ def process_finngen_gene_burden(
             f.col('diseaseFromSourceMappedId'),
             f.lit('FinnGen').alias('projectId'),
             f.array(f.lit(finngen_pub)).alias('literature'),
-            (10 ** -f.col('LOG10P').try_cast('double')).alias('resourceScore'),
-            (f.log10(10 ** -f.col('LOG10P').try_cast('double')).try_cast('int') - f.lit(1)).alias('pValueExponent'),
+            (10 ** -f.col('LOG10P').cast('double')).alias('resourceScore'),
+            (f.log10(10 ** -f.col('LOG10P').cast('double')).cast('int') - f.lit(1)).alias('pValueExponent'),
             f.round(
-                (10 ** -f.col('LOG10P').try_cast('double'))
-                / f.pow(f.lit(10), (f.log10(10 ** -f.col('LOG10P').try_cast('double')).try_cast('int') - f.lit(1))),
+                (10 ** -f.col('LOG10P').cast('double'))
+                / f.pow(f.lit(10), (f.log10(10 ** -f.col('LOG10P').cast('double')).cast('int') - f.lit(1))),
                 3,
             ).alias('pValueMantissa'),
             f.lit(finngen_release).alias('releaseVersion'),
@@ -571,10 +568,10 @@ def process_genebass_gene_burden(genebass_df: DataFrame, disease_mappings_df: Da
             f.col('phenocode').alias('diseaseFromSourceId'),
             f.col('diseaseFromSourceMappedId'),
             f.round(
-                f.col('Pvalue_Burden') / f.pow(f.lit(10), (f.log10(f.col('Pvalue_Burden')).try_cast('int') - f.lit(1))),
+                f.col('Pvalue_Burden') / f.pow(f.lit(10), (f.log10(f.col('Pvalue_Burden')).cast('int') - f.lit(1))),
                 3,
             ).alias('pValueMantissa'),
-            (f.log10(f.col('Pvalue_Burden')).try_cast('int') - f.lit(1)).alias('pValueExponent'),
+            (f.log10(f.col('Pvalue_Burden')).cast('int') - f.lit(1)).alias('pValueExponent'),
             f.col('BETA_Burden').alias('beta'),
             (f.col('BETA_Burden') - f.col('SE_Burden')).alias('betaConfidenceIntervalLower'),
             (f.col('BETA_Burden') + f.col('SE_Burden')).alias('betaConfidenceIntervalUpper'),
