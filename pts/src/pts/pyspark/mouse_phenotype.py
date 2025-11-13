@@ -10,7 +10,6 @@ from pyspark.sql import DataFrame
 from pts.pyspark.common.impc import (
     build_gene_mapping,
     cleanup_model_identifier,
-    create_mp_classification,
     format_disease_model_associations,
     process_literature_references,
     process_ontology_terms,
@@ -35,7 +34,7 @@ def mouse_phenotype(
     datasets = _prepare_impc_datasets_for_mouse_phenotypes(datasets)
 
     # Process ontology terms and classifications (need spark instance)
-    datasets['mp_class'] = create_mp_classification(datasets['mp_ontology'], spark)
+    datasets['mp_class'] = _create_mp_classification(datasets['mp_ontology'], spark)
 
     # Generate mouse phenotypes dataset
     mouse_phenotypes_df = generate_mouse_phenotypes_dataset(
@@ -187,3 +186,18 @@ def _prepare_impc_datasets_for_mouse_phenotypes(datasets: dict[str, DataFrame]) 
     )
 
     return datasets
+
+
+def _create_mp_classification(mp_ontology, spark: Session) -> DataFrame:
+    """Process MP definitions to extract high level classes for each term."""
+    logger.info('process MP definitions to extract high level classes for each term.')
+    high_level_classes = set(mp_ontology['MP:0000001'].subclasses(distance=1)) - {mp_ontology['MP:0000001']}
+    mp_class_data = [
+        [term.id, mp_high_level_class.id, mp_high_level_class.name]
+        for mp_high_level_class in high_level_classes
+        for term in mp_high_level_class.subclasses()
+    ]
+    return spark.spark.createDataFrame(
+        data=mp_class_data,
+        schema=['modelPhenotypeId', 'modelPhenotypeClassId', 'modelPhenotypeClassLabel'],
+    )

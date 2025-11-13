@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "25.3.1-dev.8"
+version = "25.3.1-dev.9"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -42,7 +42,7 @@ exclude = ["src/test/**", "src/conftest.py"]
 opentargets-otter = 'otter'
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ['openpyxl', 'coverage']
+DEP002 = ['openpyxl', 'coverage', 'setuptools']
 DEP004 = ['pytest']
 
 [tool.pytest.ini_options]

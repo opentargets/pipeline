@@ -4,8 +4,6 @@ import pyspark.sql.functions as f
 from loguru import logger
 from pyspark.sql import Column, DataFrame
 
-from pts.pyspark.common.session import Session
-
 
 def format_disease_model_associations(disease_model_summary: DataFrame) -> DataFrame:
     """Format disease model associations with proper column names."""
@@ -30,21 +28,6 @@ def process_ontology_terms(ontology: DataFrame) -> tuple[DataFrame, ...]:
         .withColumnRenamed('phenotype_term', f'{ontology_name.lower()}_term')
         .select(f'{ontology_name.lower()}_id', f'{ontology_name.lower()}_term')
         for ontology_name in ('MP', 'HP')
-    )
-
-
-def create_mp_classification(mp_ontology, spark: Session) -> DataFrame:
-    """Process MP definitions to extract high level classes for each term."""
-    logger.info('process MP definitions to extract high level classes for each term.')
-    high_level_classes = set(mp_ontology['MP:0000001'].subclasses(distance=1)) - {mp_ontology['MP:0000001']}
-    mp_class_data = [
-        [term.id, mp_high_level_class.id, mp_high_level_class.name]
-        for mp_high_level_class in high_level_classes
-        for term in mp_high_level_class.subclasses()
-    ]
-    return spark.spark.createDataFrame(
-        data=mp_class_data,
-        schema=['modelPhenotypeId', 'modelPhenotypeClassId', 'modelPhenotypeClassLabel'],
     )
 
 

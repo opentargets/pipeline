@@ -315,7 +315,6 @@ steps:
         hgnc_gene_mappings: input/target/genenames/hgnc_complete_set.tsv
         mouse_gene_mappings: input/evidence/impc/MGI_Gene_Model_Coord.rpt
         mouse_pubmed_refs: input/evidence/impc/MGI_PhenoGenoMP.rpt
-        mp_ontology: input/evidence/impc/mp.owl
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/impc.parquet
