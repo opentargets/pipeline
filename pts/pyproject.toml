@@ -8,7 +8,7 @@ dependencies = [
   "loguru==0.7.3",
   "opentargets-otter==25.0.16",
   "pandas>=2.3.2",
-  "ontoma==2.1.0",
+  "ontoma==2.1.1",
   "polars==1.31.0",
   "pyspark==3.5.7",
   "openai>=2.7.2",
