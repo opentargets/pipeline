@@ -39,7 +39,7 @@ def orphanet(
     spark = Session(app_name='orphanet', properties=properties)
 
     logger.info(f'parse XML from {source["evidence"]} into a list of dictionaries')
-    orphanet_disorders = parse_orphanet_xml(source['evidence'])
+    orphanet_disorders = parse_orphanet_xml(spark.spark.read.text(source['evidence'], wholetext=True).collect()[0][0])
     orphanet_df = spark.spark.createDataFrame(Row(**x) for x in orphanet_disorders)
 
     logger.info('process evidence strings')
@@ -57,10 +57,10 @@ def orphanet(
     evidence_df.write.mode('overwrite').parquet(destination)
 
 
-def parse_orphanet_xml(orphanet_file: str) -> list[dict]:
+def parse_orphanet_xml(xml_string: str) -> list[dict]:
     """Function to parse Orphanet xml dump and return the parsed data as a list of dictionaries."""
     # defusedxml.ElementTree.parse() returns the root element directly, not an ElementTree object
-    root = eT.parse(orphanet_file)
+    root = eT.fromstring(xml_string)
 
     # Type checking to ensure we have the correct element
     if not hasattr(root, 'find'):
