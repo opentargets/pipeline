@@ -356,6 +356,20 @@ steps:
         spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
+  #: EVIDENCE_PANELAPP STEP :#######################################################################
+  evidence_panelapp:
+    - name: pyspark panel_app
+      pyspark: panel_app
+      source:
+        evidence: input/evidence/panelapp/panel_app.tsv
+        panels: input/evidence/panelapp/panels.jsonl
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+        ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
+      destination: intermediate/evidence/panel_app.parquet
+      properties:
+        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
+  ##################################################################################################
+
   #: EVIDENCE PPP STEP :############################################################################
   evidence_ppp:
     - name: pyspark ot_crispr
@@ -442,13 +456,12 @@ steps:
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
   evidence_postprocess:
-
     # GWAS Credible set evidence:
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 8g
-      source: 
+      source:
         evidence_path: intermediate/evidence/l2g_evidence
         target_path: output/target
         disease_path: output/disease/
@@ -492,31 +505,31 @@ steps:
           - contrast
           - studyId
         excluded_biotypes:
-          - "IG_C_pseudogene"
-          - "IG_J_pseudogene"
-          - "IG_pseudogene"
-          - "IG_V_pseudogene"
-          - "polymorphic_pseudogene"
-          - "processed_pseudogene"
-          - "pseudogene"
-          - "rRNA"
-          - "rRNA_pseudogene"
-          - "snoRNA"
-          - "snRNA"
-          - "transcribed_processed_pseudogene"
-          - "transcribed_unitary_pseudogene"
-          - "transcribed_unprocessed_pseudogene"
-          - "TR_J_pseudogene"
-          - "TR_V_pseudogene"
-          - "unitary_pseudogene"
-          - "unprocessed_pseudogene"
+          - 'IG_C_pseudogene'
+          - 'IG_J_pseudogene'
+          - 'IG_pseudogene'
+          - 'IG_V_pseudogene'
+          - 'polymorphic_pseudogene'
+          - 'processed_pseudogene'
+          - 'pseudogene'
+          - 'rRNA'
+          - 'rRNA_pseudogene'
+          - 'snoRNA'
+          - 'snRNA'
+          - 'transcribed_processed_pseudogene'
+          - 'transcribed_unitary_pseudogene'
+          - 'transcribed_unprocessed_pseudogene'
+          - 'TR_J_pseudogene'
+          - 'TR_V_pseudogene'
+          - 'unitary_pseudogene'
+          - 'unprocessed_pseudogene'
 
     # ClinVar
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 8g
-      source: 
+      source:
         evidence_path: input/evidence/eva.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -591,7 +604,7 @@ steps:
           ELSE null
           END
         direction_on_target_expression: |
-          CASE 
+          CASE
             WHEN variantFunctionalConsequenceId IN (
               'SO_0001589',
               'SO_0001587',
@@ -609,7 +622,7 @@ steps:
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 8g
-      source: 
+      source:
         evidence_path: input/evidence/eva.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -684,7 +697,7 @@ steps:
           ELSE null
           END
         direction_on_target_expression: |
-          CASE 
+          CASE
             WHEN variantFunctionalConsequenceId IN (
               'SO_0001589',
               'SO_0001587',
@@ -700,7 +713,7 @@ steps:
     # Uniprot variants
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/uniprot_variants.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -732,7 +745,7 @@ steps:
     # Uniprot literature
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/uniprot_literature.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -761,7 +774,7 @@ steps:
     # Clingen
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/clingen.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -797,7 +810,7 @@ steps:
     # cancer_biomarkers
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/cancerbiomarkers.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -808,7 +821,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: cancer_biomarkers
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -897,7 +910,7 @@ steps:
     # reactome
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/reactome.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -908,7 +921,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: reactome
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -923,7 +936,7 @@ steps:
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 8g
-      source: 
+      source:
         evidence_path: input/evidence/impc.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -934,7 +947,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: impc
-        score_expression: "resourceScore / 100"
+        score_expression: 'resourceScore / 100'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -950,7 +963,7 @@ steps:
     # orphanet
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/orphanet.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -970,7 +983,7 @@ steps:
           - diseaseFromSourceId
         direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
         direction_on_target_expression: |
-          CASE  
+          CASE
             WHEN variantFunctionalConsequenceId == 'SO_0002053' THEN 'GoF'
             WHEN variantFunctionalConsequenceId == 'SO_0002054' THEN 'LoF'
             ELSE null
@@ -979,7 +992,7 @@ steps:
     # gene2phenotype
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/gene2phenotype.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1011,7 +1024,7 @@ steps:
           - studyId
         direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
         direction_on_target_expression: |
-          CASE  
+          CASE
             WHEN variantFunctionalConsequenceId == 'SO_0002315' THEN 'GoF'
             WHEN variantFunctionalConsequenceId == 'SO_0002317' THEN 'LoF'
             ELSE null
@@ -1020,7 +1033,7 @@ steps:
     # gene_burden
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/gene_burden.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1052,7 +1065,7 @@ steps:
     # crispr_brain
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/crispr_screen.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1076,7 +1089,7 @@ steps:
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 12g
-      source: 
+      source:
         evidence_path: intermediate/evidence/literature_epmc
         target_path: output/target
         disease_path: output/disease/
@@ -1098,7 +1111,7 @@ steps:
     # genomics_england
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/genomics_england.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1128,7 +1141,7 @@ steps:
     # intogen
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/intogen.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1152,7 +1165,7 @@ steps:
             WHEN mutatedSamples IS NOT NULL AND
               exists(
                 transform(
-                  mutatedSamples, 
+                  mutatedSamples,
                   x -> x.functionalConsequenceId
                 ), y -> y IN ("SO_0002054")
               )
@@ -1160,7 +1173,7 @@ steps:
             WHEN mutatedSamples IS NOT NULL AND
               exists(
                 transform(
-                  mutatedSamples, 
+                  mutatedSamples,
                   x -> x.functionalConsequenceId
                 ), y -> y IN ("SO_0002053")
               )
@@ -1170,7 +1183,7 @@ steps:
     # crispr - Project score
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/crispr.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1193,7 +1206,7 @@ steps:
       pyspark: evidence_postprocess
       properties:
         spark.driver.memory: 8g
-      source: 
+      source:
         evidence_path: input/evidence/cosmic.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1212,7 +1225,7 @@ steps:
           - datasourceId
         direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
         direction_on_target_expression: |
-          CASE 
+          CASE
             WHEN TSorOncogene == 'oncogene' THEN 'GoF'
             WHEN TSorOncogene == 'tsg' THEN 'LoF'
             ELSE null
@@ -1221,7 +1234,7 @@ steps:
     # PPP - ot_crispr
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/ot_crispr.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1232,7 +1245,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: ot_crispr
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1247,7 +1260,7 @@ steps:
     # PPP - encore
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/encore.json.gz
         target_path: output/target
         disease_path: output/disease/
@@ -1272,7 +1285,7 @@ steps:
     # PPP - validation lab
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
-      source: 
+      source:
         evidence_path: input/evidence/validation_lab.json.gz
         target_path: output/target
         disease_path: output/disease/
