@@ -288,6 +288,17 @@ steps:
         spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
+  #: EVIDENCE_INTOGEN STEP :#######################################################################
+  evidence_intogen:
+    - name: pyspark intogen
+      pyspark: intogen
+      source:
+        genes: input/evidence/intogen/Compendium_Cancer_Genes.tsv
+        cohorts: input/evidence/intogen/cohorts.tsv
+        disease_mapping: input/evidence/intogen/cancer2EFO_mappings.tsv
+      destination: intermediate/evidence/intogen.parquet
+  ##################################################################################################
+
   #: EVIDENCE_CLINGEN STEP :#######################################################################
   evidence_clingen:
     - name: pyspark clingen
