@@ -18,6 +18,27 @@ LITERATURE_MAPPING = [
     ('https://pubmed.ncbi.nlm.nih.gov/30449619/', ['30449619']),
 ]
 
+GENES_SCHEMA = t.StructType([
+    t.StructField('Gene', t.StringType(), True),
+    t.StructField('TSS', t.StringType(), True),
+    t.StructField('Phenotype', t.DoubleType(), True),
+    t.StructField('P Value', t.FloatType(), True),
+    t.StructField('Gene Score', t.FloatType(), True),
+    t.StructField('Hit Class', t.StringType(), True),
+    t.StructField('P Value (-Log10)', t.DoubleType(), True),
+    t.StructField('P Value (Signed -Log10)', t.DoubleType(), True),
+    t.StructField('Gene Rank', t.FloatType(), True),
+    t.StructField('Gene Score (Size)', t.FloatType(), True),
+    t.StructField('Phenotype (Size)', t.FloatType(), True),
+    t.StructField('P Value (-Log10) (Size)', t.FloatType(), True),
+])
+
+EXPERIMENT_SCHEMA = t.StructType([
+    t.StructField('title', t.StringType()),
+    t.StructField('experiment', t.StringType()),
+    t.StructField('analysis', t.StringType()),
+])
+
 
 def crispr_screens(
     source: dict[str, str],
@@ -31,25 +52,34 @@ def crispr_screens(
       - screens: path to gzipped JSON screens payload
       - studies_dir: directory with per-study CSV.GZ files
       - disease_mapping: TSV with studyId -> EFOs and contrast
+
+    Args:
+        source (dict[str,str]): pts source configuration
+        destination (str): evidence output
+        settings (dict[str,str]): pts evidence specific configuration
+        properties (dict[str,str]): pts spark session configuration
     """
-    spark = Session(app_name='crispr_screens', properties=properties)
+    session = Session(app_name='crispr_screens', properties=properties)
+
+    # Register udf:
+    session.spark.udf.register('parsing_experiment', parsing_experiment, EXPERIMENT_SCHEMA)
 
     logger.info(f'loading data from: {source}')
     studies_glob = f'{source["studies_dir"].rstrip("/")}/**.csv.gz'
     logger.debug(f'reading study files from: {studies_glob}')
-    genes_df = spark.load_data(studies_glob, format='csv', header=True, inferSchema=True)
-    disease_mapping_df = spark.load_data(source['disease_mapping'], format='csv', sep='\t', header=True)
+    genes_df = session.load_data(studies_glob, format='csv', header=True, schema=GENES_SCHEMA)
+    disease_mapping_df = session.load_data(source['disease_mapping'], format='csv', sep='\t', header=True)
 
-    screens_obj = json.loads(spark.spark.read.text(source['screens'], wholetext=True).collect()[0][0])
+    screens_obj = json.loads(session.spark.read.text(source['screens'], wholetext=True).collect()[0][0])
 
     logger.info('processing crispr screens into evidence')
     screen_rows = [{**v, **v.get('metadata', {})} for v in screens_obj.values() if isinstance(v, dict)]
-    screens_df = spark.spark.createDataFrame(screen_rows)
-    screens_df = screens_df.withColumn('studySummary', _parsing_experiment(f.col('Description')))
+    screens_df = session.spark.createDataFrame(screen_rows)
+    screens_df = screens_df.withColumn('studySummary', f.expr('parsing_experiment("Description")'))
     studies_df = (
         screens_df.join(
             # Build literature references
-            spark.spark.createDataFrame(
+            session.spark.createDataFrame(
                 LITERATURE_MAPPING,
                 ['Reference Link', 'literature'],
             ),
@@ -74,13 +104,18 @@ def crispr_screens(
         .drop('Phenotype')
         # QC and filter for studies that have disease mapping
         .filter(f.col('diseaseFromSourceMappedId').isNotNull())
+        .distinct()
     )
+
     genes_df = (
         genes_df
         # derive studyId from filename
         .withColumn('input_file', f.input_file_name())
-        .withColumn('studyId', f.regexp_extract('input_file', r'([^/]+)\.csv\.gz$', 1))
-        .filter(f.col('Hit Class') != 'Non-Hit')
+        .withColumn('studyId', f.regexp_replace(f.regexp_extract('input_file', r'([^/]+)\.csv\.gz$', 1), r'%20', ' '))
+        .filter(
+            f.col('Hit Class').isNotNull()
+            & ((f.col('Hit Class') == 'Positive Hit') | (f.col('Hit Class') == 'Negative Hit'))
+        )
         .select(
             f.col('Gene').alias('targetFromSourceId'),
             f.col('P Value').alias('resourceScore'),
@@ -90,9 +125,9 @@ def crispr_screens(
             f.col('Phenotype').alias('log2FoldChangeValue'),
             'studyId',
         )
+        .distinct()
     )
-
-    evidence_df = studies_df.join(genes_df, on='studyId', how='left').withColumn(
+    evidence_df = studies_df.join(genes_df, on='studyId', how='inner').withColumn(
         'diseaseFromSourceMappedId', f.explode(f.split(f.col('diseaseFromSourceMappedId'), ', '))
     )
 
@@ -100,14 +135,43 @@ def crispr_screens(
     evidence_df.write.parquet(destination)
 
 
-@f.udf(
-    t.StructType([
-        t.StructField('title', t.StringType()),
-        t.StructField('experiment', t.StringType()),
-        t.StructField('analysis', t.StringType()),
-    ])
-)
-def _parsing_experiment(description: str) -> dict:
+def parsing_experiment(description: str) -> dict:
+    r"""Parse experimental details from descriptoin.
+
+    Args:
+        description (str): string representation of the experiment description.
+
+    Returns:
+        dic[str, str]: parsed description
+
+    Examples:
+        >>> import json
+        >>> s = '''## iAstrocyte-LAMP1-Veh-CRISPRi
+        ...
+        ... CRISPRi FACS screen for cell-surface LAMP1 (marker of lysosome
+        ... exocytosis) in human iPSC-derived astrocytes (iAstrocytes) treated with
+        ... vehicle control.
+        ...
+        ... ## Experiment
+        ...
+        ... To screen against the druggable genome or genes involved in vesicular
+        ... trafficking, we used the H1 and H4 sub-libraries from Horlbeck et al.
+        ... The H1 and H4 sublibraries were packaged into lentivirus as previously
+        ... described. For each experimental replicate, ~10 million iAstrocytes were
+        ... plated..., transduced, treated and sorted as described in the study.
+        ...
+        ... ## Analysis
+        ...
+        ... We analyzed the data from the pooled CRISPRi screens using the
+        ... MAGeCK-iNC bioinformatic pipeline previously described.
+        ... '''
+        >>> print(json.dumps(parsing_experiment(s),indent=2))
+        {
+          "title": "iAstrocyte-LAMP1-Veh-CRISPRi",
+          "experiment": "To screen against the druggable genome or genes involved in vesicular",
+          "analysis": "We analyzed the data from the pooled CRISPRi screens using the"
+        }
+    """
     # Clean
     repl_patterns = [(r'\*+', ''), (r'\r', ''), (r'\t', ''), (r'\n+', '\n')]
     description = reduce(lambda s, p: re.sub(p[0], p[1], s), repl_patterns, description or '')
