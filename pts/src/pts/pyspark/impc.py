@@ -187,6 +187,7 @@ def generate_impc_evidence_strings(
         .withColumnRenamed('disease_id', 'diseaseFromSourceId')
         .withColumnRenamed('disease_term', 'diseaseFromSource')
         .withColumn('biologicalModelId', cleanup_model_identifier(f.col('model_id')))
+        .drop('model_id', 'disease_model_avg_norm')
     )
 
 
