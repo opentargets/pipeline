@@ -10,7 +10,8 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 from pyspark.sql.window import Window
 
-from pts.pyspark.common.utils import required_columns, update_quality_flag
+from pts.pyspark.common.cast_to_schema import harmonise_to_schema
+from pts.pyspark.common.utils import parse_spark_schema, required_columns, update_quality_flag
 
 
 class EvidenceFlags(StrEnum):
@@ -45,6 +46,9 @@ class Evidence:
         # Initialise QC column if not given:
         if self.QC_COLUMN not in self.df.columns:
             self._df = self._df.withColumn(self.QC_COLUMN, f.lit([]).cast(t.ArrayType(t.StringType())))
+
+        evidence_schema = parse_spark_schema('evidence.json')
+        self._df = harmonise_to_schema(self._df, evidence_schema)
 
     @required_columns(['targetFromSourceId'])
     def validate_target(self: Evidence, target_lut: DataFrame, invalid_biotypes: list[str] | None = None) -> Evidence:

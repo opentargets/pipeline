@@ -21,6 +21,7 @@ def evidence_postprocess(
     """Post-process evidence.
 
     Process:
+        0. Harmonise to common evidence schema
         1. Validate disease
         2. Validate target
         3. Validate datasource
