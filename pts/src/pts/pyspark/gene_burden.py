@@ -7,6 +7,7 @@ import pyspark.sql.types as t
 from loguru import logger
 from pyspark.sql.dataframe import DataFrame
 
+from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
 
 CURATION_SCHEMA = t.StructType([
@@ -46,8 +47,10 @@ def gene_burden(
 ) -> None:
     spark = Session(app_name='gene_burden', properties=properties)
 
+    ontoma_disease_label_lut = source.pop('ontoma_disease_label_lut')
+    ontoma_disease_id_lut = source.pop('ontoma_disease_id_lut', None)
+
     logger.info(f'load data from {source}')
-    disease_mappings_df = spark.load_data(source['disease_mappings'], format='csv', header=True, sep='\t')
     az_binary_df = spark.load_data(source['az_binary'])
     az_quantitative_df = spark.load_data(source['az_quantitative'])
     az_genes_df = spark.load_data(source['az_genes'], format='csv', header=False, schema='gene STRING, link STRING')
@@ -76,20 +79,30 @@ def gene_burden(
         source['curated_studies'], header=True, sep='\t', format='csv', schema=CURATION_SCHEMA
     )
 
-    disease_mappings_df = disease_mappings_df.select(
-        f.col('PROPERTY_VALUE').alias('diseaseFromSource'),
-        f.element_at(f.split(f.col('SEMANTIC_TAG'), '/'), -1).alias('diseaseFromSourceMappedId'),
-    )
     burden_evidence_sets = [
-        process_az_gene_burden(az_binary_df, az_quantitative_df, az_genes_df, az_phenotypes_df, disease_mappings_df),
+        process_az_gene_burden(az_binary_df, az_quantitative_df, az_genes_df, az_phenotypes_df),
         process_gene_burden_curation(burden_curation),
-        process_genebass_gene_burden(genebass_df, disease_mappings_df),
-        process_finngen_gene_burden(finngen_df, finngen_manifest_df, disease_mappings_df, finngen_version),
+        process_genebass_gene_burden(genebass_df),
+        process_finngen_gene_burden(finngen_df, finngen_manifest_df, finngen_version),
         process_cvdi_gene_burden(spark, cvdi_associations_df, cvdi_p_value_cutoff_df),
     ]
     union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
     evd_df = reduce(union_by_diff_schema, burden_evidence_sets).distinct()
-    evd_df.write.parquet(destination, mode='overwrite')
+
+    mapped_evd_df = add_efo_mapping(
+        spark=spark.spark,
+        evidence_df=evd_df,
+        disease_label_lut_path=ontoma_disease_label_lut,
+        disease_id_lut_path=ontoma_disease_id_lut,
+    )
+
+    if 'curatedDiseaseFromSourceMappedId' in mapped_evd_df.columns:
+        mapped_evd_df = mapped_evd_df.withColumn(
+            'diseaseFromSourceMappedId',
+            f.coalesce('diseaseFromSourceMappedId', 'curatedDiseaseFromSourceMappedId'),
+        ).drop('curatedDiseaseFromSourceMappedId')
+
+    mapped_evd_df.write.parquet(destination, mode='overwrite')
 
 
 def process_cvdi_gene_burden(
@@ -250,7 +263,7 @@ def apply_bonferroni_correction(n_tests: int) -> float:
 
 
 def process_finngen_gene_burden(
-    finngen_df: DataFrame, finngen_manifest_df: DataFrame, disease_mappings_df: DataFrame, finngen_release: str
+    finngen_df: DataFrame, finngen_manifest_df: DataFrame, finngen_release: str
 ) -> DataFrame:
     """Process Finngen's loss of function burden results."""
     finngen_pub = '36653562'
@@ -258,13 +271,9 @@ def process_finngen_gene_burden(
     finngen_df = (
         finngen_df
         # Bring description of Finngen's endpoint from manifest
-        .join(finngen_manifest_df.selectExpr('phenocode as PHENO', 'phenostring as diseaseFromSource'), 'PHENO', 'left')
         .join(
-            disease_mappings_df,
-            on='diseaseFromSource',
-            how='left',
-        )
-        .select(
+            finngen_manifest_df.selectExpr('phenocode as PHENO', 'phenostring as diseaseFromSource'), 'PHENO', 'left'
+        ).select(
             f.lit('gene_burden').alias('datasourceId'),
             f.lit('finnish').alias('ancestry'),
             f.lit('HANCESTRO_0321').alias('ancestryId'),
@@ -275,7 +284,6 @@ def process_finngen_gene_burden(
             f.lit('genetic_association').alias('datatypeId'),
             f.col('diseaseFromSource'),
             f.col('PHENO').alias('diseaseFromSourceId'),
-            f.col('diseaseFromSourceMappedId'),
             f.lit('FinnGen').alias('projectId'),
             f.array(f.lit(finngen_pub)).alias('literature'),
             (10 ** -f.col('LOG10P').cast('double')).alias('resourceScore'),
@@ -307,7 +315,8 @@ def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
         'projectId',
         'targetFromSourceId',
         'diseaseFromSource',
-        'diseaseFromSourceMappedId',
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('diseaseFromSourceMappedId').alias('curatedDiseaseFromSourceMappedId'),
         'resourceScore',
         'pValueMantissa',
         'pValueExponent',
@@ -342,7 +351,6 @@ def process_az_gene_burden(
     az_quantitative_df: DataFrame,
     az_genes_links_df: DataFrame,
     az_phenotypes_links_df: DataFrame,
-    disease_mappings_df: DataFrame,
 ) -> DataFrame:
     """Process AZ gene burden data matching the original implementation."""
 
@@ -415,11 +423,6 @@ def process_az_gene_burden(
         .withColumn('cohortId', f.lit('UK Biobank 470k'))
         .withColumnRenamed('Gene', 'targetFromSourceId')
         .withColumnRenamed('Phenotype', 'diseaseFromSource')
-        .join(
-            disease_mappings_df,
-            on='diseaseFromSource',
-            how='left',
-        )
         .withColumn('resourceScore', f.col('pValue'))
         .withColumn('pValueExponent', f.log10(f.col('pValue')).cast('int') - f.lit(1))
         .withColumn(
@@ -482,7 +485,6 @@ def process_az_gene_burden(
             'allelicRequirements',
             'targetFromSourceId',
             'diseaseFromSource',
-            'diseaseFromSourceMappedId',
             'pValueMantissa',
             'pValueExponent',
             'beta',
@@ -509,12 +511,11 @@ def process_az_gene_burden(
     )
 
 
-def process_genebass_gene_burden(genebass_df: DataFrame, disease_mappings_df: DataFrame):
+def process_genebass_gene_burden(genebass_df: DataFrame):
     """Parse Genebass's disease/target evidence.
 
     Args:
         genebass_df: DataFrame with Genebass's portal data
-        disease_mappings_df: DataFrame with curated mapping between disease and EFO IDs
 
     Returns:
         evd_df: DataFrame with Genebass's data following the t/d evidence schema.
@@ -555,18 +556,12 @@ def process_genebass_gene_burden(genebass_df: DataFrame, disease_mappings_df: Da
         )
         .distinct()
         .withColumnRenamed('description', 'diseaseFromSource')
-        .join(
-            disease_mappings_df,
-            on='diseaseFromSource',
-            how='left',
-        )
         .select(
             f.lit('gene_burden').alias('datasourceId'),
             f.lit('genetic_association').alias('datatypeId'),
             f.col('gene_id').alias('targetFromSourceId'),
             f.col('diseaseFromSource'),
             f.col('phenocode').alias('diseaseFromSourceId'),
-            f.col('diseaseFromSourceMappedId'),
             f.round(
                 f.col('Pvalue_Burden') / f.pow(f.lit(10), (f.log10(f.col('Pvalue_Burden')).cast('int') - f.lit(1))),
                 3,
