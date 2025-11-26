@@ -5,6 +5,7 @@ from typing import Any
 from loguru import logger
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.timeseries_utils.evidence import Evidence
 
 
@@ -30,15 +31,14 @@ def timeseries(
     session = Session(app_name='timeseries', properties=properties)
 
     # Reading evidence data:
-    raw_evidence = session.load_data(source['evidence'])
+    raw_evidence = session.load_data(source['evidence'], schema=parse_spark_schema('evidence.json'))
 
     # Reading disease data to generate indirect evidence:
     disease_df = session.load_data(source['disease'])
 
     # Extracting datasource weights:
-    datasource_weights = (
-        session.spark.createDataFrame(settings['datasource_weights'])
-        .withColumnRenamed('id', 'datasourceId')
+    datasource_weights = session.spark.createDataFrame(settings['datasource_weights']).withColumnRenamed(
+        'id', 'datasourceId'
     )
 
     # We might not request all outputs:
