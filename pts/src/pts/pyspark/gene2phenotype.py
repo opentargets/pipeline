@@ -37,13 +37,16 @@ G2P_INPUT_SCHEMA = (
     .add('variant consequence', t.StringType())
     .add('variant types', t.StringType())
     .add('molecular mechanism', t.StringType())
+    .add('molecular mechanism support', t.StringType())
     .add('molecular mechanism categorisation', t.StringType())
     .add('molecular mechanism evidence', t.StringType())
     .add('phenotypes', t.StringType())
     .add('publications', t.StringType())
+    .add('additional mined publications', t.StringType())
     .add('panel', t.StringType())
     .add('comments', t.StringType())
     .add('date of last review', t.StringType())
+    .add('review', t.StringType())
 )
 
 
