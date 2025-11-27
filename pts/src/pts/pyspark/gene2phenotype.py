@@ -83,7 +83,10 @@ def process_gene2phenotype(gene2phenotype_df: DataFrame) -> DataFrame:
     """Format raw G2P data into evidence strings."""
     return gene2phenotype_df.select(
         # Split pubmed IDs to list when not null:
-        f.when(f.col('publications').isNotNull(), f.split(f.col('publications'), ';')).alias('literature'),
+        f.when(
+            f.col('publications').isNotNull(),
+            f.transform(f.split(f.col('publications'), ';'), lambda pmid: f.trim(pmid)),
+        ).alias('literature'),
         # Renaming a few columns:
         f.col('gene symbol').alias('targetFromSourceId'),
         f.col('panel').alias('studyId'),
