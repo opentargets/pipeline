@@ -186,7 +186,7 @@ steps:
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
       destination: intermediate/target/gene-essentiality/essentiality.parquet
       settings:
-        keep_only_essentials: true
+        keep_only_essentials: false
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
@@ -301,7 +301,7 @@ steps:
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/impc.parquet
       settings:
-        score_cutoff: 0.41
+        score_cutoff: 41
   ##################################################################################################
 
   #: EVIDENCE PANEL APP STEP :#######################################################################
@@ -314,8 +314,6 @@ steps:
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/panel_app.parquet
-      properties:
-        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
   #: EVIDENCE_CRISPR_SCREENS STEP :#################################################################
@@ -344,8 +342,6 @@ steps:
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/gene2phenotype.parquet
-      properties:
-        spark.jars.packages: com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3
   ##################################################################################################
 
   #: EVIDENCE_INTOGEN STEP :#######################################################################
@@ -388,7 +384,7 @@ steps:
     - name: pyspark timeseries
       pyspark: timeseries
       source:
-        evidence: output/evidence
+        evidence: output/evidence_*
         disease: output/disease
       destination:
         overall_direct: view/timeseries_overall_direct
@@ -474,8 +470,6 @@ steps:
       destination:
         failed_evidence: excluded/evidence/expression_atlas
         evidence: output/evidence_expression_atlas
-      properties:
-        spark.driver.memory: 16g
       settings:
         evidence_format: json
         datasource_id: expression_atlas
@@ -488,24 +482,24 @@ steps:
           - contrast
           - studyId
         excluded_biotypes:
-          - 'IG_C_pseudogene'
-          - 'IG_J_pseudogene'
-          - 'IG_pseudogene'
-          - 'IG_V_pseudogene'
-          - 'polymorphic_pseudogene'
-          - 'processed_pseudogene'
-          - 'pseudogene'
-          - 'rRNA'
-          - 'rRNA_pseudogene'
-          - 'snoRNA'
-          - 'snRNA'
-          - 'transcribed_processed_pseudogene'
-          - 'transcribed_unitary_pseudogene'
-          - 'transcribed_unprocessed_pseudogene'
-          - 'TR_J_pseudogene'
-          - 'TR_V_pseudogene'
-          - 'unitary_pseudogene'
-          - 'unprocessed_pseudogene'
+          - "IG_C_pseudogene"
+          - "IG_J_pseudogene"
+          - "IG_pseudogene"
+          - "IG_V_pseudogene"
+          - "polymorphic_pseudogene"
+          - "processed_pseudogene"
+          - "pseudogene"
+          - "rRNA"
+          - "rRNA_pseudogene"
+          - "snoRNA"
+          - "snRNA"
+          - "transcribed_processed_pseudogene"
+          - "transcribed_unitary_pseudogene"
+          - "transcribed_unprocessed_pseudogene"
+          - "TR_J_pseudogene"
+          - "TR_V_pseudogene"
+          - "unitary_pseudogene"
+          - "unprocessed_pseudogene"
 
   evidence_postprocess_clinvar:
     - name: pyspark evidence_postprocess
@@ -799,7 +793,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: cancer_biomarkers
-        score_expression: '1.0'
+        score_expression: "1.0"
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -882,7 +876,7 @@ steps:
           - datasourceId
           - drugId
           - urls
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'protect' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'protect' END
         direction_on_target_expression: moaType
 
   evidence_postprocess_reactome:
@@ -899,7 +893,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: reactome
-        score_expression: '1.0'
+        score_expression: "1.0"
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -923,7 +917,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: impc
-        score_expression: 'resourceScore / 100'
+        score_expression: "resourceScore / 100"
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -933,8 +927,8 @@ steps:
           - targetInModel
           - biologicalModelAllelicComposition
           - diseaseFromSource
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
-        direction_on_target_expression: CASE WHEN diseaseId IS NOT NULL THEN 'Lof' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
+        direction_on_target_expression: CASE WHEN diseaseId IS NOT NULL THEN 'LoF' END
 
   evidence_postprocess_orphanet:
     - name: pyspark evidence_postprocess
@@ -957,11 +951,11 @@ steps:
           - diseaseId
           - datasourceId
           - diseaseFromSourceId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
         direction_on_target_expression: |
           CASE
-            WHEN variantFunctionalConsequenceId == 'SO_0002315' THEN 'GoF'
-            WHEN variantFunctionalConsequenceId == 'SO_0002317' THEN 'LoF'
+            WHEN variantFunctionalConsequenceId == 'SO_0002053' THEN 'GoF'
+            WHEN variantFunctionalConsequenceId == 'SO_0002054' THEN 'LoF'
             ELSE null
           END
 
@@ -998,7 +992,7 @@ steps:
           - diseaseFromSource
           - allelicRequirements
           - studyId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
         direction_on_target_expression: |
           CASE
             WHEN variantFunctionalConsequenceId == 'SO_0002315' THEN 'GoF'
@@ -1027,7 +1021,7 @@ steps:
           - diseaseId
           - datasourceId
           - cohortShortName
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
         direction_on_target_expression: |
           CASE
             WHEN mutatedSamples IS NOT NULL AND
@@ -1106,7 +1100,7 @@ steps:
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
       source:
-        evidence_path: intermediate/literature_cooccurrence
+        evidence_path: intermediate/evidence/literature_epmc
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
@@ -1114,7 +1108,7 @@ steps:
         failed_evidence: excluded/evidence/europepmc
         evidence: output/evidence_europepmc
       settings:
-        evidence_format: parquet
+        evidence_format: json
         datasource_id: europepmc
         score_expression: array_min(array(resourceScore / 100.0, 1.0))
         unique_fields:
@@ -1179,7 +1173,7 @@ steps:
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
       source:
-        evidence_path: input/evidence/cosmic.json
+        evidence_path: input/evidence/cosmic.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
@@ -1195,7 +1189,7 @@ steps:
           - targetFromSourceId
           - diseaseId
           - datasourceId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' ELSE 'noEvaluable' END
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
         direction_on_target_expression: |
           CASE
             WHEN TSorOncogene == 'oncogene' THEN 'GoF'
@@ -1217,7 +1211,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: ot_crispr
-        score_expression: '1.0'
+        score_expression: "1.0"
         unique_fields:
           - targetId
           - targetFromSourceId
