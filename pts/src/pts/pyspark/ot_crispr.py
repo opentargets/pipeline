@@ -7,7 +7,6 @@ This dataset consist of a series of OTAR projects studying various diseases usin
 """
 
 import operator
-import os
 from functools import reduce
 from typing import Any
 
@@ -142,7 +141,7 @@ class EvidenceParser:
         """Read and filter MAGeCK files based on the provided threshold applied on the specified column.
 
         Args:
-            mageck_file (str): A list of files to be read.
+            mageck_file (str): path to a MAGeCK file to read.
             filter_columns (list[str]): A filter column name.
             threshold (float): A threshold to filter the data.
 
@@ -152,9 +151,8 @@ class EvidenceParser:
         Raises:
             ValueError: If the label separator is not recognized.
         """
-        # Reading input data and immediately fix the headers:
-        mageck_file_path = os.path.join(self.data_path, mageck_file)
-        raw_data = self.adjust_column_names(self.spark.load_data(mageck_file_path, format='csv', header=True, sep='\t'))
+        logger.info(f'reading MAGeCK file: {mageck_file}')
+        raw_data = self.adjust_column_names(self.spark.load_data(mageck_file, format='csv', header=True, sep='\t'))
 
         # Converting filter columns to float:
         return (
