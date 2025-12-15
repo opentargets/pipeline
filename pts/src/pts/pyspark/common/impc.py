@@ -67,8 +67,8 @@ def process_literature_references(
 ) -> DataFrame:
     """Process literature references for model-gene combinations."""
     mgi_pubmed_exploded = (
-        mgi_pubmed.withColumn('literature', f.explode(f.split(f.col('literature'), r'\\|')))
-        .withColumn('targetInModelMgiId', f.explode(f.split(f.col('targetInModelMgiId'), r'\\|')))
+        mgi_pubmed.withColumn('literature', f.explode(f.split(f.col('literature'), r'\|')))
+        .withColumn('targetInModelMgiId', f.explode(f.split(f.col('targetInModelMgiId'), r'\|')))
         .select('mp_id', 'literature', 'targetInModelMgiId')
         .distinct()
     )
