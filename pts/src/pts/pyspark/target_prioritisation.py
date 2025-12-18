@@ -28,11 +28,12 @@ def target_prioritisation(
             - mouse_phenotypes: Mouse phenotype parquet
             - molecule: Drug molecule parquet
             - mechanism_of_action: Mechanism of action parquet
-            - hpa_data: HPA normal tissue TSV
+            - baseline_expression: Aggregated baseline expression parquet (with
+              tissue + celltype specificity/distribution scores)
             - uniprot_slterms: UniProt subcellular location terms TSV
             - mouse_pheno_scores: Mouse phenotype scores parquet
         destination: Path to write the output parquet file.
-        _settings: Custom settings (not used).
+        _settings: Unused settings dictionary (reserved for future use).
         properties: Spark configuration options.
     """
     spark = Session(app_name='target_prioritisation', properties=properties)
@@ -42,7 +43,7 @@ def target_prioritisation(
     mouse_df = spark.load_data(source['mouse_phenotypes'])
     molecule_df = spark.load_data(source['molecule'])
     moa_df = spark.load_data(source['mechanism_of_action'])
-    hpa_df = spark.load_data(source['hpa_data'], format='json')
+    baseline_expression_df = spark.load_data(source['baseline_expression'], format='parquet')
     uniprot_df = spark.load_data(source['uniprot_slterms'], format='csv', sep='\t', header=True)
     mouse_pheno_scores_df = spark.load_data(source['mouse_pheno_scores'], format='csv', header=True)
 
@@ -52,7 +53,7 @@ def target_prioritisation(
         mouse_df,
         molecule_df,
         moa_df,
-        hpa_df,
+        baseline_expression_df,
         uniprot_df,
         mouse_pheno_scores_df,
     )
@@ -67,7 +68,7 @@ def compute_target_prioritisation(
     mouse_phenotypes: DataFrame,
     molecule: DataFrame,
     mechanism_of_action: DataFrame,
-    hpa_data: DataFrame,
+    baseline_expression: DataFrame,
     uniprot_slterms: DataFrame,
     mouse_pheno_scores: DataFrame,
 ) -> DataFrame:
@@ -78,7 +79,8 @@ def compute_target_prioritisation(
         mouse_phenotypes: Mouse phenotype data.
         molecule: Drug molecule data.
         mechanism_of_action: Mechanism of action data.
-        hpa_data: HPA normal tissue data.
+        baseline_expression: Aggregated baseline expression dataframe with
+            specificity/distribution scores per (target, biosample).
         uniprot_slterms: UniProt subcellular location terms.
         mouse_pheno_scores: Mouse phenotype scores.
 
@@ -106,7 +108,7 @@ def compute_target_prioritisation(
         .transform(lambda df: _mouse_model_query(df, mouse_phenotypes, mouse_pheno_scores))
         .transform(lambda df: _chemical_probes_query(df, targets))
         .transform(lambda df: _clin_trials_query(df, mechanism_of_action, molecule))
-        .transform(lambda df: _tissue_specific_query(df, hpa_data))
+        .transform(lambda df: _baseline_query(df, baseline_expression))
     )
 
     # Select final columns with renamed output
@@ -128,6 +130,8 @@ def compute_target_prioritisation(
         f.col('inClinicalTrials').alias('maxClinicalStage'),
         f.col('Nr_specificity').alias('tissueSpecificity'),
         f.col('Nr_distribution').alias('tissueDistribution'),
+        f.col('Nr_ct_specificity').alias('celltypeSpecificity'),
+        f.col('Nr_ct_distribution').alias('celltypeDistribution'),
     )
 
 
@@ -784,33 +788,47 @@ def _clin_trials_query(
     )
 
 
-def _tissue_specific_query(queryset: DataFrame, hpa_data: DataFrame) -> DataFrame:
-    """Compute tissue specificity and distribution from HPA data."""
-    hpa = (
-        hpa_data
-        .select(
-            'Ensembl',
-            f.col('RNA tissue distribution').alias('Tissue_distribution_RNA'),
-            f.col('RNA tissue specificity').alias('Tissue_specificity_RNA'),
+def _baseline_query(
+    queryset: DataFrame,
+    baseline_expression: DataFrame,
+) -> DataFrame:
+    """Compute tissue and cell type specificity/distribution from baseline expression.
+
+    For each target, picks the highest-specificity row per biosample type
+    (tissue / celltype) across all non-excluded datasources, then projects
+    capped specificity and (1 - distribution) scores. Output column shape
+    mirrors the legacy HPA-based step but adds celltype equivalents.
+    """
+    typed = (
+        baseline_expression
+        .filter(
+            f.lower(f.col('datasourceId')).isin(['gtex', 'tabula_sapiens'])
+            & ~(f.col('tissueBiosampleId').isNotNull() & f.col('celltypeBiosampleId').isNotNull())
+            & f.col('specificity_score').isNotNull()
         )
         .withColumn(
-            'Nr_specificity',
-            f
-            .when(f.col('Tissue_specificity_RNA') == 'Tissue enriched', f.lit(1))
-            .when(f.col('Tissue_specificity_RNA') == 'Group enriched', f.lit(0.75))
-            .when(f.col('Tissue_specificity_RNA') == 'Tissue enhanced', f.lit(0.5))
-            .when(f.col('Tissue_specificity_RNA') == 'Low tissue specificity', f.lit(-1))
-            .when(f.col('Tissue_specificity_RNA') == 'Not detected', f.lit(None)),
+            'biosample_type',
+            f.when(f.col('tissueBiosampleId').isNotNull(), f.lit('tissue')).when(
+                f.col('celltypeBiosampleId').isNotNull(), f.lit('celltype')
+            ),
         )
-        .withColumn(
-            'Nr_distribution',
-            f
-            .when(f.col('Tissue_distribution_RNA') == 'Detected in single', f.lit(1))
-            .when(f.col('Tissue_distribution_RNA') == 'Detected in some', f.lit(0.5))
-            .when(f.col('Tissue_distribution_RNA') == 'Detected in many', f.lit(0))
-            .when(f.col('Tissue_distribution_RNA') == 'Detected in all', f.lit(-1))
-            .when(f.col('Tissue_distribution_RNA') == 'Not detected', f.lit(None)),
-        )
+        .filter(f.col('biosample_type').isNotNull())
     )
 
-    return queryset.join(hpa, queryset['targetid'] == hpa['Ensembl'], 'left')
+    rank_window = Window.partitionBy('targetId', 'biosample_type').orderBy(f.col('specificity_score').desc())
+    best = typed.withColumn('rank', f.row_number().over(rank_window)).filter(f.col('rank') == 1).drop('rank')
+
+    def _project(kind: str, spec_alias: str, dist_alias: str) -> DataFrame:
+        return best.filter(f.col('biosample_type') == kind).select(
+            f.col('targetId').alias('targetid'),
+            (f.lit(2.0) * f.col('specificity_score') - f.lit(1.0)).alias(spec_alias),
+            f
+            .when(f.col('distribution_score') == 1, f.lit(-1.0))
+            .otherwise(1 - f.col('distribution_score'))
+            .alias(dist_alias),
+        )
+
+    tissue = _project('tissue', 'Nr_specificity', 'Nr_distribution')
+    celltype = _project('celltype', 'Nr_ct_specificity', 'Nr_ct_distribution')
+
+    return queryset.join(tissue, on='targetid', how='left').join(celltype, on='targetid', how='left')

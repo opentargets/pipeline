@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.06.18"
+version = "26.06.19"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -14,6 +14,7 @@ dependencies = [
   "defusedxml>=0.7.1",
   "openpyxl>=3.1.5",
   "setuptools>=80.9.0",
+  "numpy>=2.4.4",
   "obonet>=0.3.1",
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
@@ -23,8 +24,7 @@ dependencies = [
   "pdfplumber>=0.11.9",
   "clinical-mining",
   "huggingface-hub>=0.32.4",
-  "networkx>=3.6.1",
-  "numpy>=2.4.4",
+  "networkx>=3.6.1"
 ]
 
 [[tool.uv.index]]
@@ -36,12 +36,18 @@ explicit = true
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.4.0" }
-
+cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [dependency-groups]
 dev = ["ruff==0.15.2", "ty==0.0.17", "deptry==0.24.0", "pre-commit>=4.3.0"]
 
 [project.optional-dependencies]
+baseline_expression = [
+  "pandas<3",
+  "setuptools<81",
+  "scanpy>=1.10.0",
+  "cellex"
+]
 test = [
   "coverage==7.13.4",
   "freezegun==1.5.5",
@@ -210,3 +216,4 @@ parametrize-values-row-type = 'tuple'
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+ignore-decorators = ["pts.tasks.report", "pts.manifest.task_reporter.report"]

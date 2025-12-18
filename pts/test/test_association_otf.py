@@ -82,6 +82,7 @@ class TestComputeFacetClasses:
         """Only l1 and l2 levels should appear in facetClasses."""
         t1_row = self.result.filter(f.col('targetId') == 'T1').first()
         facet_classes = t1_row['facetClasses']  # ty:ignore[not-subscriptable]
+
         # T1 has 2 valid id groups (id=1, id=2); id=3 is l3-only and filtered
         assert len(facet_classes) == 2
 
