@@ -8,12 +8,7 @@ from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
 
 
-def disease_phenotype(source: list[Path], destination: Path) -> None:
-    # source definition
-    disease_path = source[0]
-    phenotype_path = source[1]
-    mondo_path = source[2]
-
+def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
     # NOTE: This code is horrible. We have to figure out a way to make this in
     # a better way. Ontologies are very messy. Relationships are all over the
     # place, ids have different forms, links are indirect, etc.
@@ -25,16 +20,16 @@ def disease_phenotype(source: list[Path], destination: Path) -> None:
 
     # load the sources
     logger.debug('loading disease dataset')
-    df_disease = pl.read_parquet(disease_path)
+    df_disease = pl.read_parquet(source['disease_path'])
     logger.debug('loading phenotype dataset')
     df_phenotype = pl.read_csv(
-        phenotype_path,
+        source['phenotype_path'],
         separator='\t',
         has_header=True,
         comment_prefix='#',
     )
     logger.debug('loading mondo dataset')
-    df_mondo = pl.read_json(mondo_path, schema=ontology_schema)
+    df_mondo = pl.read_json(source['mondo_path'], schema=ontology_schema)
 
     ############################################################################
     # mondo dataset

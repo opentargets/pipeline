@@ -12,10 +12,15 @@ from otter.util.fs import check_destination
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
+path_or_paths = str | dict[str, str]
+transformer_type = Callable[[Path | dict[str, Path], Path | dict[str, Path]], None]
+
 
 class TransformSpec(Spec):
-    source: str | list[str]
-    destination: str
+    source: path_or_paths
+    """A string or a dictionary with the source paths."""
+    destination: path_or_paths
+    """A string or a dictionary with the destination paths."""
     transformer: str
     """A string with the name of a transformer function.
 
@@ -33,31 +38,33 @@ class Transform(Task):
         super().__init__(spec, context)
         self.spec: TransformSpec
 
-        # sources
-        source_list = spec.source if isinstance(spec.source, list) else [spec.source]
-        srcs_local = [context.config.work_path / s for s in source_list]
+        source_dict = spec.source if isinstance(spec.source, dict) else {'default': spec.source}
+        self.srcs_local: dict[str, Path] = {k: context.config.work_path / v for k, v in source_dict.items()}
+        self.l2r = {context.config.work_path / v: f'{context.config.release_uri}/{v}' for v in source_dict.values()}
 
         # if release_uri is not provided, check all files are available locally
         if not context.config.release_uri:
-            for s in srcs_local:
+            for s in self.srcs_local.values():
                 if not s.is_file():
                     raise FileNotFoundError(f'{s} not found locally and no release_uri provided')
 
-        # build a map of local to remote sources
-        self.l2r = {self.context.config.work_path / s: f'{context.config.release_uri}/{s}' for s in source_list}
-
-        # destinations
-        self.dst_local = context.config.work_path / spec.destination
-        self.dst_remote = f'{context.config.release_uri}/{spec.destination}' if context.config.release_uri else None
+        destination_dict = spec.destination if isinstance(spec.destination, dict) else {'default': spec.destination}
+        self.dsts_local: dict[str, Path] = {k: context.config.work_path / v for k, v in destination_dict.items()}
+        self.dsts_remote = {}
+        if context.config.release_uri:
+            self.dsts_remote = {k: f'{context.config.release_uri}/{v}' for k, v in destination_dict.items()}
 
         # transformation function to run
         self.transformer = self.load_transformer(spec.transformer)
 
     @staticmethod
-    def load_transformer(transformer_name: str) -> Callable[[Path | list[Path], Path], None]:
+    def load_transformer(transformer_name: str) -> transformer_type:
         try:
             module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
-            transformer: Callable[[Path | list[Path], Path], None] = getattr(module, transformer_name)
+            transformer: transformer_type = getattr(
+                module,
+                transformer_name,
+            )
             if not callable(transformer):
                 raise TypeError(f'{transformer_name} is not a callable')
             return transformer
@@ -81,20 +88,27 @@ class Transform(Task):
                 source.append(src_remote)
                 logger.debug(f'using remote source {src_remote} (downloaded to {src_local})')
 
-        check_destination(self.dst_local, delete=True)
+        # check destinations
+        for dst_local in self.dsts_local.values():
+            check_destination(dst_local, delete=True)
 
-        # run the transformation
-        s = list(self.l2r.keys())
-        if len(s) == 1:
-            s = s[0]
-        self.transformer(s, self.dst_local)
+        # run the transformation - pass dict or single Path based on whether input was dict
+        s = self.srcs_local if isinstance(self.spec.source, dict) else self.srcs_local['default']
+        d = self.dsts_local if isinstance(self.spec.destination, dict) else self.dsts_local['default']
+        self.transformer(s, d)
 
-        # upload the result to remote storage
-        if self.dst_remote:
-            remote_storage = get_remote_storage(self.dst_remote)
-            remote_storage.upload(self.dst_local, self.dst_remote)
-            logger.debug('upload successful')
+        # upload the results to remote storage
+        if self.dsts_remote:
+            for key, dst_local in self.dsts_local.items():
+                dst_remote = self.dsts_remote[key]
+                remote_storage = get_remote_storage(dst_remote)
+                remote_storage.upload(dst_local, dst_remote)
+                logger.debug(f'upload successful: {dst_remote}')
 
-        self.artifacts = [Artifact(source=source[0], destination=self.dst_remote or str(self.dst_local))]
+        # build artifacts list
+        self.artifacts = [
+            Artifact(source=source[0], destination=self.dsts_remote.get(k) or str(v))
+            for k, v in self.dsts_local.items()
+        ]
 
         return self
