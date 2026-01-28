@@ -7,6 +7,130 @@ from pts.schemas.disease import synonym_schema
 from pts.schemas.ontology import node
 
 
+def pool_synonyms(synonym_column: pl.Expr, field: str) -> pl.Expr:
+    """Pool synonym annotations from different rows.
+
+    We need to extract data from a list of struct of lists and based
+    on the name of the struct field, then return unique elements as a list.
+
+    Args:
+        synonym_column (pl.Expr): polars column expression to extract data from.
+        field (str): name of the struct withing the synonym structure.
+
+    Returns:
+        pl.Expr: column expression with the pooled data.
+
+    Example:
+        >>> pl.DataFrame(
+        ...     [
+        ...         (
+        ...             '1',
+        ...             [
+        ...                 {'exact': ['apple', 'fruit'], 'related': ['food']},
+        ...                 {'exact': ['fruit', 'produce'], 'related': ['item']},
+        ...             ],
+        ...         )
+        ...     ],
+        ...     schema=['id', 'synonyms'],
+        ...     orient='row',
+        ... ).select(pool_synonyms(pl.col('synonyms'), 'exact').list.sort())
+        shape: (1, 1)
+        ┌───────────────────────────────┐
+        │ literal                       │
+        │ ---                           │
+        │ list[str]                     │
+        ╞═══════════════════════════════╡
+        │ ["apple", "fruit", "produce"] │
+        └───────────────────────────────┘
+    """
+    # Fold allows to iterate over an array and create a new column:
+    return pl.fold(
+        # Initial value is an empty list of strings:
+        acc=pl.lit([], dtype=pl.List(pl.String)),
+        # Applying function:
+        function=lambda acc, x: acc.list.concat(x).list.unique().drop_nulls(),
+        # Extracting these keys of each struct element of the list:
+        exprs=synonym_column.list.eval(pl.element().struct.field(field).flatten().drop_nulls()),
+    )
+
+
+def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
+    """De-duplicate disease table where rows contain the same label or differ only in casing.
+
+    Args:
+        disease: disease index DataFrame
+
+    Returns:
+        DataFrame with deduplicated diseases
+    """
+    # column names to keep first:
+    keep_first_expression = [
+        pl.first(col_name).alias(col_name) for col_name in ['id', 'code', 'name', 'description', 'ontology']
+    ]
+
+    # array columns to be flattened and de-duplicated:
+    flatten_dedup_expression = [
+        pl.col(col_name).flatten().unique().drop_nulls().alias(col_name)
+        for col_name in [
+            'parents',
+            'children',
+            'ancestors',
+            'therapeuticAreas',
+            'descendants',
+            'obsoleteTerms',
+            'obsoleteXRefs',
+            'dbXRefs',
+        ]
+    ]
+
+    # Pooling synonyms:
+    pool_synonym_expression = [
+        pool_synonyms(pl.col('synonyms_list'), synonym_type).alias(synonym_type)
+        for synonym_type in ['hasExactSynonym', 'hasRelatedSynonym', 'hasNarrowSynonym', 'hasBroadSynonym']
+    ]
+
+    # To prioritise certain terms upon de-duplication, we consider their ontology pre-fix:
+    ontology_weights = pl.DataFrame(
+        [('efo', 1), ('mondo', 2), ('oba', 3), ('orphanet', 4), ('hp', 100)],
+        schema=['prefix', 'prefixRank'],
+        orient='row',
+    )
+
+    # Step 1: Add prefix and label columns
+    disease_prepared = (
+        disease.with_columns([
+            pl.col('id').str.to_lowercase().str.split('_').list.first().alias('prefix'),
+            pl.col('name').str.to_lowercase().alias('label'),
+        ])
+        .join(ontology_weights, on='prefix', how='left')
+        .with_columns(pl.col('prefixRank').fill_null(99))
+    )
+
+    # Sort and then group by label and perform aggregation:
+    return (
+        disease_prepared.sort('label', 'prefixRank')  # Sort to ensure first row has best rank
+        .group_by('label', maintain_order=True)
+        .agg([
+            # Keep columns from the first row (best prefix rank):
+            *keep_first_expression,
+            # Merge array columns: flatten list of lists and deduplicate:
+            *flatten_dedup_expression,
+            # Collect all IDs to fill in obsoleted terms:
+            pl.col('id').alias('all_ids_in_group'),
+            # Collect synonyms:
+            pl.col('synonyms').alias('synonyms_list'),
+        ])
+        .with_columns(
+            # Existing obsoleted terms are merged with potentially de-duplicated terms:
+            obsoleteTerms=pl.col('obsoleteTerms').list.set_union(pl.col('all_ids_in_group').list.slice(1)),
+            # Flatten and merge synonyms:
+            synonyms=pl.struct(pool_synonym_expression),
+        )
+        # cleaning added data:
+        .drop('synonyms_list', 'label', 'all_ids_in_group')
+    )
+
+
 def disease(source: Path, destination: Path) -> None:
     # load the ontology
     logger.debug('loading efo')
@@ -321,6 +445,9 @@ def disease(source: Path, destination: Path) -> None:
         )
     ).drop('isTherapeuticArea')
 
+    # De-duplication of labels:
+    dedup_disease_index = deduplicate_disease(n_ontology)
+
     # write the result locally
-    n_ontology.write_parquet(destination, compression='gzip')
+    dedup_disease_index.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')
