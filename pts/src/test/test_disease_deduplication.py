@@ -19,7 +19,16 @@ class TestDiseaseDeduplication:
     def _setup(self: TestDiseaseDeduplication) -> None:
         """Reading raw disease index."""
         script_path = os.path.dirname(os.path.realpath(__file__))
-        self.disease_df = pl.read_parquet(f'{script_path}/test_data/test_disease_w_duplication.parquet')
+        self.disease_df = (
+            pl.read_parquet(f'{script_path}/test_data/test_disease_w_duplication.parquet')
+            .unnest('synonyms')
+            .rename({
+                'hasExactSynonym': 'exactSynonyms',
+                'hasRelatedSynonym': 'relatedSynonyms',
+                'hasNarrowSynonym': 'narrowSynonyms',
+                'hasBroadSynonym': 'broadSynonyms',
+            })
+        )
 
         self.deduplicated = deduplicate_disease(self.disease_df)
 
