@@ -423,7 +423,7 @@ def clean_phenotype_to_describe_safety_event(phenotype_col_name: Column) -> Colu
 
     cleaned_col = f.regexp_replace(phenotype_col_name, words_to_remove, '')
     cleaned_col = f.regexp_extract(cleaned_col, pattern, 1)
-    cleaned_col = f.trim(f.regexp_replace(cleaned_col, '\\s+', ' '))
+    cleaned_col = f.trim(f.regexp_replace(cleaned_col, r'\s+', ' '))
 
     for original, replacement in replacements.items():
         cleaned_col = f.when(cleaned_col == original, f.lit(replacement)).otherwise(cleaned_col)

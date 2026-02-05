@@ -143,14 +143,14 @@ def _load_impc_datasets_for_mouse_phenotypes(spark: Session, source: dict[str, s
             format='csv',
             schema='_0 string, _1 string, _2 string, mp_id string, literature string, targetInModelMgiId string',
             nullValue='null',
-            sep='\\t',
+            sep='\t',
         ),
         'mgi_gene_id_to_ensembl_mouse_gene_id': spark.load_data(
-            source['mouse_gene_mappings'], format='csv', header=True, nullValue='null', sep='\\t'
+            source['mouse_gene_mappings'], format='csv', header=True, nullValue='null', sep='\t'
         ),
         'mouse_to_human_gene': spark.load_data(source['solr_gene_gene'], format='csv', header=True),
         'hgnc_gene_id_to_ensembl_human_gene_id': spark.load_data(
-            source['hgnc_gene_mappings'], format='csv', header=True, nullValue='null', sep='\\t'
+            source['hgnc_gene_mappings'], format='csv', header=True, nullValue='null', sep='\t'
         ),
     }
 

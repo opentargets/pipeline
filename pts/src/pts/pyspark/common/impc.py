@@ -87,4 +87,4 @@ def process_literature_references(
 def cleanup_model_identifier(model_id_col: Column):
     """Cleanup model identifier by stripping modifiers and filtering MGI namespace."""
     cleaned_id = f.split(model_id_col, '#').getItem(0)
-    return f.when(cleaned_id.rlike(r'^MGI:\\d+$'), cleaned_id)
+    return f.when(cleaned_id.rlike(r'^MGI:\d+$'), cleaned_id)
