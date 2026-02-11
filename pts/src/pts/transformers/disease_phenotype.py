@@ -210,25 +210,42 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
     # grouping
     # join all the rows with the same disease id, by creating a list of
     # evidences that contain structs with most fields
-    structed_phenotypes = phenotypes_with_disease.select(
-        pl.col('disease'),
-        pl.col('phenotype'),
-        pl.struct(
-            pl.col('aspect'),
-            pl.col('bioCuration'),
-            pl.col('diseaseFromSourceId'),
-            pl.col('diseaseFromSource'),
-            pl.col('diseaseName'),
-            pl.col('evidenceType'),
-            pl.col('frequency').str.replace(':', '_'),
-            pl.col('modifiers').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
-            pl.col('onset').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
-            pl.col('qualifier'),
-            pl.col('qualifierNot'),
-            pl.col('references').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
-            pl.col('sex'),
-            pl.col('resource'),
-        ).alias('evidence'),
+    structed_phenotypes = (
+        phenotypes_with_disease.select(
+            pl.col('disease'),
+            pl.col('phenotype'),
+            pl.struct(
+                pl.col('aspect'),
+                pl.col('bioCuration'),
+                pl.col('diseaseFromSourceId'),
+                pl.col('diseaseFromSource'),
+                pl.col('diseaseName'),
+                pl.col('evidenceType'),
+                pl.col('frequency').str.replace(':', '_'),
+                pl.col('modifiers').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+                pl.col('onset').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+                pl.col('qualifier'),
+                pl.col('qualifierNot'),
+                pl.col('references').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+                pl.col('sex'),
+                pl.col('resource'),
+            ).alias('evidence'),
+        )
+        # Validating phenotypes against our disease index:
+        # Replace phenotypes that were obsoleted in our disease index with their new term
+        # Any other case, we keep what is coming from HPO
+        .join(
+            df_disease.filter(pl.col('therapeuticAreas').list.contains('EFO_0000651'))
+            .select(
+                pl.col('id').alias('phenotypeNew'),
+                pl.concat_list(pl.col('obsoleteTerms'), pl.col('id')).alias('phenotype'),
+            )
+            .explode('phenotype'),
+            on='phenotype',
+            how='left',
+        )
+        .with_columns(phenotype=pl.coalesce(pl.col('phenotypeNew'), pl.col('phenotype')))
+        .drop('phenotypeNew')
     )
 
     grouped_phenotypes = structed_phenotypes.group_by(
