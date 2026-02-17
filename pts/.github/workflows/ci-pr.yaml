@@ -84,7 +84,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: run tests
-        run: uv run pytest src/test --doctest-modules src/pts
+        run: uv run pytest test --doctest-modules src/pts
 
   lint:
     name: Check code style

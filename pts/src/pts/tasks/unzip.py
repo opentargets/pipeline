@@ -1,59 +1,55 @@
+"""Unzip a file and store locally."""
+
 import zipfile
 from pathlib import Path
 from typing import Self
 
 from loguru import logger
 from otter.manifest.model import Artifact
-from otter.storage import get_remote_storage
+from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.fs import check_destination, check_source
+from otter.util.fs import check_destination
 
 
 class UnzipSpec(Spec):
+    """Specification for the unzip task."""
+
     source: str
+    """The source URI of the file to unzip."""
     inner_file: str | None = None
-    destination: Path
+    """A string with the name of the file inside the zip to extract. If it is not
+        provided, it defaults to the name of the zip file without the extension."""
+    destination: str
+    """A string with the path to the destination. It will be appended to the
+        :py:obj:`otter.config.model.Config.work_path`."""
 
 
 class Unzip(Task):
-    """Unzip a file and store locally (no upload)."""
+    """Unzip a file and store locally."""
 
     def __init__(self, spec: UnzipSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
         self.spec: UnzipSpec
-
-        self.src_local = context.config.work_path / spec.source
-        self.src_remote: str | None = None
-        if not self.src_local.is_file():
-            if not self.context.config.release_uri:
-                raise FileNotFoundError(f'{self.src_local} not found and no release uri provided')
-            self.src_remote = f'{self.context.config.release_uri}/{spec.source}'
-
-        self.source = self.src_remote or str(self.src_local)
-        self.inner_file = spec.inner_file or Path(self.spec.source).stem
-        self.destination = context.config.work_path / self.spec.destination
+        self.inner_file = spec.inner_file or str(Path(self.spec.source).stem)
 
     @report
     def run(self) -> Self:
-        # download the source from remote storage
-        if self.src_remote:
-            check_destination(self.src_local)
-            remote_storage = get_remote_storage(self.src_remote)
-            remote_storage.download_to_file(self.src_remote, self.src_local)
-            logger.debug(f'downloaded {self.src_remote} to {self.src_local}')
-        else:
-            check_source(self.src_local)
+        check_destination(self.spec.destination, delete=True)
 
-        check_destination(self.destination, delete=True)
+        s = StorageHandle(self.spec.source, config=self.context.config)
+        f = s.open('rb')
+        logger.debug(f'unzipping {self.inner_file} from {self.spec.source} to {self.spec.destination}')
 
-        with zipfile.ZipFile(self.src_local) as zip_file:
+        with zipfile.ZipFile(f) as zip_file:
             if self.inner_file not in zip_file.namelist():
                 raise FileNotFoundError(f'{self.inner_file} not found in {self.spec.source}')
             with zip_file.open(self.inner_file) as file:
-                Path(self.destination).write_bytes(file.read())
+                d = StorageHandle(self.spec.destination, config=self.context.config, force_local=True)
+                with d.open('wb') as dest_file:
+                    dest_file.write(file.read())
         logger.debug('unzip completed')
 
-        self.artifacts = [Artifact(source=str(self.source), destination=str(self.destination))]
+        self.artifacts = [Artifact(source=s.absolute, destination=d.absolute)]
 
         return self

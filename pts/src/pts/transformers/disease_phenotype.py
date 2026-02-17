@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import polars as pl
 from loguru import logger
 
@@ -8,7 +6,7 @@ from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
 
 
-def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
+def disease_phenotype(source: dict[str, str], destination: str) -> None:
     # NOTE: This code is horrible. We have to figure out a way to make this in
     # a better way. Ontologies are very messy. Relationships are all over the
     # place, ids have different forms, links are indirect, etc.
@@ -52,7 +50,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
 
     # get phenotypes
     phenotype_xrefs_by_id = (
-        mondo_phenotypes.filter(pl.col('xrefs').is_not_null())
+        mondo_phenotypes
+        .filter(pl.col('xrefs').is_not_null())
         .select('id', pl.col('xrefs').alias('phenotype_xrefs'))
         .explode('phenotype_xrefs')
         .group_by('id')
@@ -64,7 +63,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
 
     # then modify mondo_clean definition to join on the short id
     mondo_clean = (
-        mondo_nodes_with_short_id.filter(
+        mondo_nodes_with_short_id
+        .filter(
             pl.col('type') == 'CLASS',
             ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
         )
@@ -78,11 +78,13 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
         .with_columns(
             diseaseFromSourceId=pl.col('short_id'),
             xrefs=pl.concat_list([
-                pl.col('xrefs')
+                pl
+                .col('xrefs')
                 .list.eval(pl.element().struct.field('val').str.replace(':', '_').unique())
                 .fill_null([]),
                 pl.col('definition').struct.field('xrefs').list.eval(pl.element().str.replace(':', '_')).fill_null([]),
-                pl.when(pl.col('phenotype_xrefs').is_not_null())
+                pl
+                .when(pl.col('phenotype_xrefs').is_not_null())
                 .then(pl.col('phenotype_xrefs').list.eval(pl.element().str.replace(':', '_')))
                 .otherwise(pl.lit([])),
             ]),
@@ -125,7 +127,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
 
     # then, filter again by the mondo ids that have phenotypes
     trim_mondo = (
-        trim_mondo.join(
+        trim_mondo
+        .join(
             mondo_phenotypes,
             left_on='diseaseFromSourceId',
             right_on='id',
@@ -155,7 +158,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
         modifiers=pl.col('modifier').str.split(';'),
         onset=pl.col('onset').str.split(';'),
         qualifier=pl.col('qualifier'),
-        qualifierNot=pl.when(pl.col('qualifier').is_not_null())
+        qualifierNot=pl
+        .when(pl.col('qualifier').is_not_null())
         .then(
             pl.col('qualifier') == 'NOT',
         )
@@ -187,7 +191,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
     )
 
     explode_disease = (
-        cut_disease.with_columns(
+        cut_disease
+        .with_columns(
             XRefs=pl.concat_list(
                 pl.col('dbXRefs').fill_null([]),
                 pl.col('obsoleteXRefs').fill_null([]),
@@ -211,7 +216,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
     # join all the rows with the same disease id, by creating a list of
     # evidences that contain structs with most fields
     structed_phenotypes = (
-        phenotypes_with_disease.select(
+        phenotypes_with_disease
+        .select(
             pl.col('disease'),
             pl.col('phenotype'),
             pl.struct(
@@ -235,7 +241,8 @@ def disease_phenotype(source: dict[str, Path], destination: Path) -> None:
         # Replace phenotypes that were obsoleted in our disease index with their new term
         # Any other case, we keep what is coming from HPO
         .join(
-            df_disease.filter(pl.col('therapeuticAreas').list.contains('EFO_0000651'))
+            df_disease
+            .filter(pl.col('therapeuticAreas').list.contains('EFO_0000651'))
             .select(
                 pl.col('id').alias('phenotypeNew'),
                 pl.concat_list(pl.col('obsoleteTerms'), pl.col('id')).alias('phenotype'),

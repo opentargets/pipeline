@@ -1,18 +1,17 @@
 {
+  "editor.formatOnSave": true,
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.tabSize": 4,
     "editor.codeActionsOnSave": {
-      "source.organizeImports": "explicit",
-      "source.fixAll": "explicit",
-    }
+      "source.organizeImports": "explicit"
+    },
   },
   "ruff.nativeServer": true,
   "ruff.lint.enable": true,
   "ruff.organizeImports": true,
-  "python.analysis.autoImportCompletions": true,
-  "python.analysis.typeCheckingMode": "standard",
-  "python.languageServer": "Pylance",
+  "ruff.lineLength": 120,
+  "python.languageServer": "None",
   "files.exclude": {
     "**/__pycache__": true,
     "**/.pytest_cache": true,
@@ -20,12 +19,8 @@
     "*.egg-info": true,
     "build": true,
   },
-  "autoDocstring.docstringFormat": "sphinx",
   "yaml.schemas": {
-    "https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
-      "config.yaml"
-    ]
+    "https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": "config.yaml"
   },
   "yaml.format.singleQuote": true,
-  "editor.formatOnSave": true
 }

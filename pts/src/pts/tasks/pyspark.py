@@ -1,8 +1,12 @@
+"""Task to run a pyspark job."""
+
 from collections.abc import Callable
 from importlib import import_module
 from typing import Any, Self
 
 from loguru import logger
+from otter.manifest.model import Artifact
+from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
@@ -17,6 +21,8 @@ pyspark_entrypoint = Callable[
 
 
 class PysparkSpec(Spec):
+    """Specification for a pyspark task."""
+
     pyspark: str
     """A string with the entry point of the pyspark program.
 
@@ -38,6 +44,8 @@ class PysparkSpec(Spec):
 
 
 class Pyspark(Task):
+    """Task to run a pyspark job."""
+
     def __init__(self, spec: PysparkSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
         self.spec: PysparkSpec
@@ -56,28 +64,25 @@ class Pyspark(Task):
 
     @report
     def run(self) -> Self:
-        src, dst = self.spec.source, self.spec.destination
+        self.srcs = make_absolute(self.spec.source, self.context.config)
+        self.dsts = make_absolute(self.spec.destination, self.context.config)
 
-        # build paths based on release_uri or work_path
-        if prefix := self.context.config.release_uri or self.context.config.work_path:
-            if isinstance(src, str):
-                src = f'{prefix}/{src}'
-            elif isinstance(src, dict):
-                src = {k: f'{prefix}/{v}' for k, v in src.items()}
-            if isinstance(dst, str):
-                dst = f'{prefix}/{dst}'
-            elif isinstance(dst, dict):
-                dst = {k: f'{prefix}/{v}' for k, v in dst.items()}
+        logger.info(f'source paths: {self.srcs}')
+        logger.info(f'destination paths: {self.dsts}')
+        logger.info(f'settings: {self.spec.settings}')
+        logger.info(f'properties: {self.spec.properties}')
+        logger.info(f'launching pyspark job: {self.spec.pyspark}')
 
-        logger.info(f'source paths: {src}')
-        logger.info(f'destination paths: {dst}')
-        logger.info(f'running pyspark job with spec: {self.spec}')
-
-        # run the pyspark job
-        self.pyspark(src, dst, self.spec.settings or {}, self.spec.properties or {})
+        self.pyspark(
+            self.srcs,
+            self.dsts,
+            self.spec.settings or {},
+            self.spec.properties or {},
+        )
         logger.info('pyspark job completed successfully')
 
-        # TODO: figure out artifacts
-        self.artifacts = []
+        srcs = list(self.srcs.values()) if isinstance(self.srcs, dict) else self.srcs
+        dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
+        self.artifacts = [Artifact(source=srcs, destination=dsts)]
 
         return self

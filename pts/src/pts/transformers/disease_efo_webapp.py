@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import polars as pl
 from loguru import logger
 
 
-def disease_efo_webapp(source: Path, destination: Path) -> None:
+def disease_efo_webapp(source: str, destination: str) -> None:
     # load the ontology
     logger.debug('loading efo')
     initial = pl.read_parquet(source)

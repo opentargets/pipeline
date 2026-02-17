@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import polars as pl
 from loguru import logger
 
 
-def expression_tissue(source: Path, destination: Path) -> None:
+def expression_tissue(source: str, destination: str) -> None:
     # load the ontology
     logger.debug('loading expression tissue')
     initial = pl.read_json(source)

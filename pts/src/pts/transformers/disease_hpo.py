@@ -2,6 +2,7 @@ from pathlib import Path
 
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
 
@@ -9,7 +10,9 @@ from pts.schemas.ontology import edge, node, schema
 def disease_hpo(source: Path, destination: Path) -> None:
     # load the ontology
     logger.debug('loading hpo ontology')
-    initial = pl.read_json(source, schema=schema)
+    h = StorageHandle(source)
+    f = h.open()
+    initial = pl.read_json(f, schema=schema)
 
     # prepare dataframes
     n = pl.DataFrame(
@@ -20,7 +23,8 @@ def disease_hpo(source: Path, destination: Path) -> None:
 
     # get parents for each term
     parents = (
-        pl.DataFrame(initial['graphs'][0][0]['edges'], schema=edge)
+        pl
+        .DataFrame(initial['graphs'][0][0]['edges'], schema=edge)
         .filter(pl.col('pred') == 'is_a')
         .with_columns(
             id=pl.col('sub').str.split('/').list.last(),
@@ -32,7 +36,8 @@ def disease_hpo(source: Path, destination: Path) -> None:
 
     # get obsolete terms by getting deprecated nodes
     obsolete_terms = (
-        n.unnest('meta')
+        n
+        .unnest('meta')
         .explode('basicPropertyValues')
         .unnest('basicPropertyValues')
         .filter(pl.col('pred') == 'http://www.geneontology.org/formats/oboInOwl#hasAlternativeId')
@@ -46,7 +51,8 @@ def disease_hpo(source: Path, destination: Path) -> None:
 
     # clean the nodes
     n_clean = (
-        n.filter(
+        n
+        .filter(
             pl.col('type') == 'CLASS',
             ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
         )

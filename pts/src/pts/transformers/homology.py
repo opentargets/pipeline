@@ -1,9 +1,9 @@
 import gc
 import json
-from pathlib import Path
 
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 
 
 class FilteredJSONDecoder(json.JSONDecoder):
@@ -24,14 +24,17 @@ class FilteredJSONDecoder(json.JSONDecoder):
         super().__init__(*args, **kwargs, object_hook=self.filter_keys)
 
     def filter_keys(self, obj: dict) -> dict:
+        """Modified filter that keeps only certain roots."""
         if self.root_key in obj:
             return {self.root_key: obj[self.root_key]}
         return {k: v for k, v in obj.items() if k in self.allowed_keys}
 
 
-def homology(source: Path, destination: Path) -> None:
-    # load the homology and parse the json with our decoder
-    data = json.loads(source.read_bytes(), cls=FilteredJSONDecoder)
+def homology(source: str, destination: str) -> None:
+    s = StorageHandle(source)
+    f = s.open()
+
+    data = json.loads(f.read(), cls=FilteredJSONDecoder)
     df = pl.from_dicts(data['genes'])
     # free up memory
     del data

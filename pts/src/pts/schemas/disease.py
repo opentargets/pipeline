@@ -1,3 +1,5 @@
+"""Schemas used in the disease dataset."""
+
 import polars as pl
 
 synonym_struct_schema = pl.Schema({

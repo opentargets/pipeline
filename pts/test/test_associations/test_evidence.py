@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isclose
+
 import pytest
 from pyspark.sql import DataFrame, Row, SparkSession
 from pyspark.sql import functions as f
@@ -137,7 +139,7 @@ class TestEvidence:
         year = 1990
 
         # get scores:
-        harmoinc_sum = (
+        harmonic_sum = (
             self.evidence.df.filter(
                 (f.col('targetId') == target_id) & (f.col('diseaseId') == disease_id) & (f.col('year') == year)
             )
@@ -154,5 +156,5 @@ class TestEvidence:
             .df.first()['associationScore']
         )
 
-        assert harmoinc_sum == 0.6472222225533591
-        assert harmoinc_sum / self.evidence.MAX_HARMONIC_SUM == normalised_harmonic_sum
+        assert isclose(harmonic_sum, 0.6472222225533591)
+        assert harmonic_sum / self.evidence.MAX_HARMONIC_SUM == normalised_harmonic_sum

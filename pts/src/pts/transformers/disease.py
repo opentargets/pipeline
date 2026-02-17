@@ -1,7 +1,6 @@
-from pathlib import Path
-
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
 
@@ -48,7 +47,8 @@ def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
 
     # Step 1: Add prefix and label columns
     disease_prepared = (
-        disease.with_columns([
+        disease
+        .with_columns([
             pl.col('id').str.to_lowercase().str.split('_').list.first().alias('prefix'),
             pl.col('name').str.to_lowercase().alias('label'),
         ])
@@ -58,7 +58,8 @@ def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
 
     # Sort and then group by label and perform aggregation:
     return (
-        disease_prepared.sort('label', 'prefixRank')  # Sort to ensure first row has best rank
+        disease_prepared
+        .sort('label', 'prefixRank')  # Sort to ensure first row has best rank
         .group_by('label', maintain_order=True)
         .agg([
             # Keep columns from the first row (best prefix rank):
@@ -77,10 +78,12 @@ def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def disease(source: Path, destination: Path) -> None:
+def disease(source: str, destination: str) -> None:
     # load the ontology
     logger.debug('loading efo')
-    initial = pl.read_json(source)
+    h = StorageHandle(source)
+    f = h.open()
+    initial = pl.read_json(f)
 
     logger.debug('starting transformation')
 
@@ -95,7 +98,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # clean the nodes
     n_clean = (
-        n.filter(
+        n
+        .filter(
             pl.col('type') == 'CLASS',
             ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
         )
@@ -106,7 +110,8 @@ def disease(source: Path, destination: Path) -> None:
             name=pl.col('lbl'),
             isTherapeuticArea=pl.col('subsets').list.contains('"therapeutic_area"'),
             description=pl.col('definition').struct['val'],
-            dbXRefs=pl.col('xrefs')
+            dbXRefs=pl
+            .col('xrefs')
             .list.eval(pl.element().struct.field('val').unique())
             .fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
         )
@@ -124,7 +129,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # get parents, by filtering edges with 'is_a' predicate
     parents = (
-        e.filter(pl.col('pred') == 'is_a')
+        e
+        .filter(pl.col('pred') == 'is_a')
         .with_columns(
             id=pl.col('sub').str.split('/').list.last(),
             parents=pl.col('obj').str.split('/').list.last(),
@@ -138,7 +144,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # get location_ids by filtering edges with 'located_in' predicate
     location_ids = (
-        e.filter(pl.col('pred') == 'http://purl.obolibrary.org/obo/BFO_0000050')
+        e
+        .filter(pl.col('pred') == 'http://purl.obolibrary.org/obo/BFO_0000050')
         .with_columns(
             id=pl.col('sub').str.split('/').list.last(),
             directLocationIds=pl.col('obj').str.split('/').list.last(),
@@ -188,9 +195,9 @@ def disease(source: Path, destination: Path) -> None:
         .pivot(
             values='val',
             index='id',
-            columns='pred',
+            columns='pred',  # ty:ignore[unknown-argument]
             aggregate_function='first',
-        )
+        )  # ty:ignore[missing-argument]
         .with_columns(
             **{k: pl.col(k).fill_null([]) for k in synonym_predicates},
         )
@@ -199,7 +206,8 @@ def disease(source: Path, destination: Path) -> None:
     )
 
     n_synonyms = (
-        n_location_ids.drop('synonyms')
+        n_location_ids
+        .drop('synonyms')
         .join(synonyms, on='id', how='left')
         .with_columns(
             **{col: pl.col(col).fill_null(pl.Series([[]], dtype=pl.List(pl.String))) for col in synonym_columns},
@@ -208,7 +216,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # get obsolete ids by getting deprecated nodes with a 'IAO_0100001' predicate
     obsolete_ids = (
-        n.unnest('meta')
+        n
+        .unnest('meta')
         .explode('basicPropertyValues')
         .unnest('basicPropertyValues')
         .filter(
@@ -223,7 +232,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # Get the obsolete terms
     obsolete_terms = (
-        obsolete_ids.with_columns(
+        obsolete_ids
+        .with_columns(
             code=pl.col('code'),
             obsoleteTerms=pl.col('id').str.split('/').list.last(),
         )
@@ -233,7 +243,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # Get the xrefs for all the obsolete terms
     obsolete_xrefs = (
-        n.unnest('meta')
+        n
+        .unnest('meta')
         .filter(pl.col('xrefs').is_not_null())
         .select(pl.col('id'), pl.col('xrefs'))
         .join(obsolete_ids, on='id')
@@ -247,7 +258,8 @@ def disease(source: Path, destination: Path) -> None:
     # join obsolete term list and obsolete xref list to the ids of the entities that
     # make them obsolete
     n_obsolete_terms = (
-        n_synonyms.join(
+        n_synonyms
+        .join(
             obsolete_terms,
             on='code',
             how='left',
@@ -266,7 +278,8 @@ def disease(source: Path, destination: Path) -> None:
     # get children by exploding the parents column, making it the new id and
     # then aggregating by the old id
     children = (
-        n_obsolete_terms.explode('parents')
+        n_obsolete_terms
+        .explode('parents')
         .filter(pl.col('parents').is_not_null())
         .group_by('parents')
         .agg(pl.col('id').alias('children'))
@@ -287,7 +300,8 @@ def disease(source: Path, destination: Path) -> None:
     # 7. group 5 and 6
     # 8. join both ancestors and therapeutic areas with the original dataframe
     direct_relationships = (
-        n_children.select(['id', 'parents'])
+        n_children
+        .select(['id', 'parents'])
         .filter(pl.col('parents').is_not_null())
         .explode('parents')
         .rename({'parents': 'ancestor'})
@@ -300,7 +314,8 @@ def disease(source: Path, destination: Path) -> None:
             break
 
         next_level = (
-            current_level.join(
+            current_level
+            .join(
                 n_children.select(['id', 'parents']),
                 left_on='ancestor',
                 right_on='id',
@@ -321,7 +336,8 @@ def disease(source: Path, destination: Path) -> None:
     )
 
     therapeutic_area_ancestors = (
-        all_ancestors.join(
+        all_ancestors
+        .join(
             n_children.select(['id', 'isTherapeuticArea']),
             left_on='ancestor',
             right_on='id',
@@ -332,7 +348,8 @@ def disease(source: Path, destination: Path) -> None:
     )
 
     therapeutic_area_selfreferences = (
-        n_children.filter(pl.col('isTherapeuticArea'))
+        n_children
+        .filter(pl.col('isTherapeuticArea'))
         .with_columns(ancestor=pl.col('id'))
         .select(
             pl.col('id'),
@@ -341,7 +358,8 @@ def disease(source: Path, destination: Path) -> None:
     )
 
     all_therapeutic_area_ancestors = (
-        pl.concat([
+        pl
+        .concat([
             therapeutic_area_ancestors,
             therapeutic_area_selfreferences,
         ])
@@ -350,7 +368,8 @@ def disease(source: Path, destination: Path) -> None:
     )
 
     n_ancestors = (
-        n_children.join(
+        n_children
+        .join(
             ancestors_grouped,
             on='id',
             how='left',
@@ -367,7 +386,8 @@ def disease(source: Path, destination: Path) -> None:
 
     # get descendants by exploding the ancestors column, making it the new id and then aggregating by the old id
     descendants_grouped = (
-        all_ancestors.select(
+        all_ancestors
+        .select(
             pl.col('ancestor').alias('id'),
             pl.col('id').alias('descendant'),
         )
@@ -404,6 +424,6 @@ def disease(source: Path, destination: Path) -> None:
         )
     )
 
-    # write the result locally
+    # write the result
     dedup_disease_index.write_parquet(destination, compression='gzip')
     logger.info('transformation complete')

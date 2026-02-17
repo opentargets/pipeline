@@ -1,9 +1,9 @@
 ---
 work_path: ./work
-log_level: INFO
+log_level: DEBUG
 pool_size: 32
 
-# release_uri: gs://open-targets-pre-data-releases/jferrer/test-edp-dataproc
+# release_uri: gs://open-targets-pipeline-runs/jferrer/otterfs
 scratchpad: {}
 
 steps:
@@ -101,7 +101,7 @@ steps:
       glob: input/openfda/**/*.zip
       do:
         - name: transform ${match_path}${match_stem}
-          source: ${match_prefix}/${match_path}${match_stem}.${match_ext}
+          source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
           destination: intermediate/openfda/${uuid}.parquet
           transformer: openfda
   ##################################################################################################
@@ -154,7 +154,7 @@ steps:
       glob: input/target/homologue/gene_dictionary/*.json
       do:
         - name: transform ${match_stem} to parquet
-          source: ${match_prefix}/${match_path}${match_stem}.${match_ext}
+          source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
           destination: intermediate/target/homologue/gene_dictionary/${match_path}${match_stem}.parquet
           transformer: homology
   ##################################################################################################
@@ -361,7 +361,7 @@ steps:
       pyspark: ot_crispr
       source:
         study_table: input/evidence/ot_crispr/config.tsv
-        ot_crispr_data: input/evidence/ot_crispr
+        ot_crispr_data: input/evidence/ot_crispr/data
       destination: intermediate/evidence/ot_crispr.parquet
   ##################################################################################################
 
@@ -379,7 +379,7 @@ steps:
         disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
   ##################################################################################################
 
-  #: TIMESERIES STEP :##############################################################################
+  #: ASSOCIATION STEP :##############################################################################
   association:
     - name: pyspark association
       pyspark: association
@@ -516,24 +516,24 @@ steps:
           - contrast
           - studyId
         excluded_biotypes:
-          - "IG_C_pseudogene"
-          - "IG_J_pseudogene"
-          - "IG_pseudogene"
-          - "IG_V_pseudogene"
-          - "polymorphic_pseudogene"
-          - "processed_pseudogene"
-          - "pseudogene"
-          - "rRNA"
-          - "rRNA_pseudogene"
-          - "snoRNA"
-          - "snRNA"
-          - "transcribed_processed_pseudogene"
-          - "transcribed_unitary_pseudogene"
-          - "transcribed_unprocessed_pseudogene"
-          - "TR_J_pseudogene"
-          - "TR_V_pseudogene"
-          - "unitary_pseudogene"
-          - "unprocessed_pseudogene"
+          - 'IG_C_pseudogene'
+          - 'IG_J_pseudogene'
+          - 'IG_pseudogene'
+          - 'IG_V_pseudogene'
+          - 'polymorphic_pseudogene'
+          - 'processed_pseudogene'
+          - 'pseudogene'
+          - 'rRNA'
+          - 'rRNA_pseudogene'
+          - 'snoRNA'
+          - 'snRNA'
+          - 'transcribed_processed_pseudogene'
+          - 'transcribed_unitary_pseudogene'
+          - 'transcribed_unprocessed_pseudogene'
+          - 'TR_J_pseudogene'
+          - 'TR_V_pseudogene'
+          - 'unitary_pseudogene'
+          - 'unprocessed_pseudogene'
 
   evidence_postprocess_clinvar:
     - name: pyspark evidence_postprocess
@@ -718,6 +718,7 @@ steps:
             ) THEN 'LoF'
             ELSE null
           END
+
   evidence_postprocess_uniprot_variants:
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
@@ -829,7 +830,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: cancer_biomarkers
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -929,7 +930,7 @@ steps:
       settings:
         evidence_format: json
         datasource_id: reactome
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -953,7 +954,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: impc
-        score_expression: "resourceScore / 100"
+        score_expression: 'resourceScore / 100'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1247,7 +1248,7 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: ot_crispr
-        score_expression: "1.0"
+        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1311,12 +1312,12 @@ steps:
           - primaryProjectId
   ##################################################################################################
 
-  #: Association on the fly STEP :#######################################################################
+  #: Association on the fly STEP :##################################################################
   association_otf:
     - name: pyspark association_otf
       pyspark: association_otf
       properties:
-        spark.driver.memory: "20g"
+        spark.driver.memory: '20g'
       source:
         disease: output/disease
         evidence: output/evidence_*
@@ -1336,7 +1337,7 @@ steps:
         l2g_table: output/l2g_prediction
         biosample: output/biosample
       destination:
-        vep_data_header:  intermediate/vep_view_header.tsv
+        vep_data_header: intermediate/vep_view_header.tsv
         vep_data_all: intermediate/vep_view
         vep_data_gwas: intermediate/vep_view_gwas
         vep_data_qtl: intermediate/vep_view_qtl

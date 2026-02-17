@@ -1,12 +1,10 @@
-from pathlib import Path
-
 import polars as pl
 from loguru import logger
 
 from pts.schemas.ontology import node
 
 
-def so(source: Path, destination: Path) -> None:
+def so(source: str, destination: str) -> None:
     # load the ontology
     logger.debug('loading so')
     initial = pl.read_json(source)

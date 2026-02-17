@@ -1,47 +1,50 @@
+"""Task that gzips a file."""
+
 import gzip
 from pathlib import Path
 from typing import Self
 
 from loguru import logger
 from otter.manifest.model import Artifact
-from otter.storage import get_remote_storage
+from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.fs import check_destination, check_source
+from otter.util.fs import check_source
 
 
 class GzipSpec(Spec):
+    """Specification for the gzip task."""
+
     source: Path
-    destination: Path
+    """A string with the path, relative to work_dir, for the file to gzip. It will
+        be appended with the :py:obj:`otter.config.model.Config.work_path`."""
+
+    destination: str
+    """The destination for the file, relative to the release root."""
 
 
 class Gzip(Task):
+    """Task that gzips a file."""
+
     def __init__(self, spec: GzipSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
         self.spec: GzipSpec
-        self.source: Path = context.config.work_path / spec.source
-        self.local_path: Path = context.config.work_path / spec.destination
-        self.remote_uri: str | None = None
-        if self.context.config.release_uri:
-            self.remote_uri = f'{self.context.config.release_uri}/{self.spec.destination}'
-        self.destination = self.remote_uri or self.local_path
 
     @report
     def run(self) -> Self:
-        check_source(self.source)
-        check_destination(self.local_path, delete=True)
 
-        with gzip.open(self.local_path, 'wb') as gzip_file:
-            gzip_file.write(self.source.read_bytes())
+        check_source(self.context.config.work_path / self.spec.source)
 
-        logger.debug(f'gzipped {self.source} to {self.local_path}')
+        s = StorageHandle(self.spec.source, config=self.context.config, force_local=True)
+        sf = s.open('rb')
 
-        # upload the result to remote storage
-        if self.remote_uri:
-            remote_storage = get_remote_storage(self.remote_uri)
-            remote_storage.upload(self.local_path, self.remote_uri)
-            logger.debug('upload successful')
+        d = StorageHandle(self.spec.destination, config=self.context.config)
+        df = d.open('wb')
+        with gzip.open(df, mode='wb') as gzip_file:
+            gzip_file.write(sf.read())
 
-        self.artifacts = [Artifact(source=str(self.source), destination=str(self.destination))]
+        logger.debug(f'gzipped {s.absolute} to {d.absolute}')
+
+        self.artifacts = [Artifact(source=str(s.absolute), destination=d.absolute)]
 
         return self

@@ -1,3 +1,5 @@
+"""Schemas used in the openfda dataset."""
+
 import polars as pl
 
 schema = pl.Schema({

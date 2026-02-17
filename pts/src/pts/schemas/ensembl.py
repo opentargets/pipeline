@@ -1,4 +1,4 @@
-# ENSEMBL_1
+"""Ensembl schemas."""
 
 import polars as pl
 

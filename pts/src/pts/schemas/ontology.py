@@ -1,3 +1,5 @@
+"""Schemas used in the ontology dataset."""
+
 import polars as pl
 
 node_dict = {
