@@ -60,7 +60,7 @@ def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> 
         +-----+---------------+---------+
         <BLANKLINE>
     """
-    qc = f.when(qc.isNull(), f.array()).otherwise(qc)
+    qc = f.when(qc.isNull(), f.array()).otherwise(qc)  # ty:ignore[missing-argument]
     return f.when(
         flag_condition,
         f.array_sort(f.array_distinct(f.array_union(qc, f.array(f.lit(flag_text.value))))),

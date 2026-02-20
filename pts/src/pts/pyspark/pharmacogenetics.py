@@ -34,7 +34,8 @@ def pharmacogenetics(
     logger.info('overwrite phenotypeText column with parsed phenotypes')
     annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
     unparsed_texts = (
-        annotated_pgx_df.filter(f.col('phenotypeText').isNull())
+        annotated_pgx_df
+        .filter(f.col('phenotypeText').isNull())  # ty:ignore[missing-argument]
         .select('genotypeAnnotationText')
         .distinct()
         .toPandas()['genotypeAnnotationText']
@@ -123,6 +124,9 @@ def parse_phenotype_with_gpt(
     )
     try:
         generated_text = completion.choices[0].message.content
+        if not generated_text:
+            logger.warning(f'No content generated for text: {genotype_text}')
+            return None
         json_obj = json.loads(generated_text)
         return json_obj.get('gptExtractedPhenotype', [])
     except Exception as e:
@@ -164,7 +168,8 @@ def annotate_phenotype(pgx_evidence_df: DataFrame, extracted_phenotypes_df: Data
         extracted_phenotypes_df: Dataframe containing the phenotypes extracted from `genotypeAnnotationText`.
     """
     return (
-        pgx_evidence_df.drop('phenotypeText', 'phenotypeFromSourceId')
+        pgx_evidence_df
+        .drop('phenotypeText', 'phenotypeFromSourceId')
         .join(extracted_phenotypes_df, on='genotypeAnnotationText', how='left')
         .withColumn('phenotypeText', f.explode_outer('phenotypeText'))
         .distinct()

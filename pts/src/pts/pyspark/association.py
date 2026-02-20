@@ -47,7 +47,8 @@ def association(
     # Save direct association by datasource:
     logger.info('Processing direct association stratified by datasource.')
     (
-        association_by_datasource.compute_novelty(
+        association_by_datasource
+        .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
@@ -59,7 +60,8 @@ def association(
     # Save direct overall association:
     logger.info('Processing direct overall association.')
     (
-        association_by_datasource.aggregate_overall(datasource_weights)
+        association_by_datasource
+        .aggregate_overall(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
@@ -72,7 +74,8 @@ def association(
     # Save direct association by datatype:
     logger.info('Processing direct associations stratified by datatype.')
     (
-        association_by_datasource.aggregate_by_datatype(datasource_weights)
+        association_by_datasource
+        .aggregate_by_datatype(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
@@ -89,7 +92,8 @@ def association(
     # parquet file and re-used for all downstream aggregation (instead of persisting):
     logger.info('Processing indirect associations...')
     (
-        Evidence.from_raw_evidence(raw_evidence)
+        Evidence
+        .from_raw_evidence(raw_evidence)
         .expand_disease(disease_index=disease_df)
         .aggregate_evidence_by_datasource()
         .df.write.mode('overwrite')

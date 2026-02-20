@@ -1,6 +1,7 @@
 """Evidence parser for Gene2Phenotype's disease panels."""
 
 from collections import OrderedDict
+from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
@@ -22,7 +23,8 @@ G2P_mutationCsq2functionalCsq = OrderedDict([
 ])
 
 G2P_INPUT_SCHEMA = (
-    t.StructType()
+    t
+    .StructType()
     .add('g2p id', t.StringType())
     .add('gene symbol', t.StringType())
     .add('gene mim', t.IntegerType())
@@ -84,7 +86,7 @@ def process_gene2phenotype(gene2phenotype_df: DataFrame) -> DataFrame:
     return gene2phenotype_df.select(
         # Split pubmed IDs to list when not null:
         f.when(
-            f.col('publications').isNotNull(),
+            f.col('publications').isNotNull(),  # ty:ignore[missing-argument]
             f.transform(f.split(f.col('publications'), ';'), lambda pmid: f.trim(pmid)),
         ).alias('literature'),
         # Renaming a few columns:
@@ -93,13 +95,14 @@ def process_gene2phenotype(gene2phenotype_df: DataFrame) -> DataFrame:
         f.col('confidence'),
         # Parsing allelic requirements:
         f.when(
-            f.col('allelic requirement').isNotNull(),
+            f.col('allelic requirement').isNotNull(),  # ty:ignore[missing-argument]
             f.array(f.col('allelic requirement')),
         ).alias('allelicRequirements'),
         # Parsing disease from source identifier:
-        f.when(f.col('disease MONDO').isNotNull(), f.col('disease MONDO'))
+        f
+        .when(f.col('disease MONDO').isNotNull(), f.col('disease MONDO'))  # ty:ignore[missing-argument]
         .when(
-            (~f.col('disease mim').contains('No disease mim')) & (f.col('disease mim').isNotNull()),
+            (~f.col('disease mim').contains('No disease mim')) & (f.col('disease mim').isNotNull()),  # ty:ignore[missing-argument, invalid-argument-type]
             f.concat(f.lit('OMIM:'), f.col('disease mim')),
         )
         .otherwise(f.lit(None))
@@ -116,7 +119,7 @@ def process_gene2phenotype(gene2phenotype_df: DataFrame) -> DataFrame:
     )
 
 
-def parse_functional_consequence(mapping: dict[str, str]) -> f.udf:
+def parse_functional_consequence(mapping: dict[str, str]) -> Callable:
     """Map semicolon separated list of consequence terms to SO codes."""
     order = list(mapping.values())
 

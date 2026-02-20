@@ -74,7 +74,8 @@ class Evidence(Dataset):
 
         # Exploding evidence for all ancestors:
         return Evidence(
-            self.df.join(f.broadcast(processed_disease), on='diseaseId', how='inner')
+            self.df
+            .join(f.broadcast(processed_disease), on='diseaseId', how='inner')
             .drop('diseaseId')
             .withColumnRenamed('specificDiseaseId', 'diseaseId')
             .persist(StorageLevel.DISK_ONLY)
@@ -95,7 +96,8 @@ class Evidence(Dataset):
         )
 
         association_df = (
-            self.df.groupby(*self.GROUPBY_COLUMNS, 'year')
+            self.df
+            .groupby(*self.GROUPBY_COLUMNS, 'year')
             # Collect all evidence scores for a year:
             .agg(f.collect_list('score').alias('yearlyEvidenceScores'))
             # Pool all evidence scores together:
@@ -145,6 +147,6 @@ class Evidence(Dataset):
             +------------+----+
             <BLANKLINE>
         """
-        maybe_year = f.when(evidence_date.isNotNull(), f.trim(f.regexp_extract(evidence_date, r'^(\d{4})(?:\D|$)', 1)))
+        maybe_year = f.when(evidence_date.isNotNull(), f.trim(f.regexp_extract(evidence_date, r'^(\d{4})(?:\D|$)', 1)))  # ty:ignore[missing-argument]
 
         return f.when(maybe_year != '', maybe_year.cast(t.IntegerType())).otherwise(next_year)  # noqa: PLC1901

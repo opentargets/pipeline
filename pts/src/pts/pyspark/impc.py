@@ -143,9 +143,10 @@ def _finalise_evidence_strings(mapped_evidence: DataFrame) -> DataFrame:
         'diseaseFromSourceMappedId',  # EFO mapped disease ID.
         'targetFromSourceId',  # Ensembl mapped human gene ID.
     ]
-    w = Window.partitionBy([f.col(c) for c in unique_fields]).orderBy(f.col('resourceScore').desc())
+    w = Window.partitionBy([f.col(c) for c in unique_fields]).orderBy(f.col('resourceScore').desc())  # ty:ignore[missing-argument]
     return (
-        mapped_evidence.withColumn('row', f.row_number().over(w))
+        mapped_evidence
+        .withColumn('row', f.row_number().over(w))
         .filter(f.col('row') == 1)
         .drop('row')
         .select(
@@ -179,7 +180,8 @@ def generate_impc_evidence_strings(
 
     # Build final evidence strings
     return (
-        disease_model_summary.filter(~(f.col('resourceScore') < score_cutoff))
+        disease_model_summary
+        .filter(~(f.col('resourceScore') < score_cutoff))
         .join(gene_mapping, on='targetInModelMgiId', how='inner')
         .join(all_mouse_phenotypes, on='model_id', how='left')
         .join(matched_human_phenotypes, on=['model_id', 'disease_id'], how='left')
@@ -199,7 +201,8 @@ def map_model_mouse_phenotypes_to_human(model_mouse_phenotypes: DataFrame, pheno
 def aggregate_mouse_phenotypes(model_mouse_phenotypes: DataFrame, mp_terms: DataFrame) -> DataFrame:
     """Aggregate all mouse phenotypes for each model."""
     return (
-        model_mouse_phenotypes.join(mp_terms, on='mp_id', how='inner')
+        model_mouse_phenotypes
+        .join(mp_terms, on='mp_id', how='inner')
         .groupby('model_id')
         .agg(
             f.collect_set(f.struct(f.col('mp_id').alias('id'), f.col('mp_term').alias('label'))).alias(
@@ -218,7 +221,8 @@ def find_matched_human_phenotypes(
 ) -> DataFrame:
     """Find human phenotypes that are present in both disease and model (after MP->HP mapping)."""
     return (
-        disease_model_summary.select('model_id', 'disease_id')
+        disease_model_summary
+        .select('model_id', 'disease_id')
         .join(disease_human_phenotypes, on='disease_id', how='inner')
         .join(model_human_phenotypes, on=['model_id', 'hp_id'], how='inner')
         .join(hp_terms, on='hp_id', how='inner')

@@ -69,7 +69,8 @@ def process_credible_set(credible_set: DataFrame) -> DataFrame:
         f.col('tagVariant.posteriorProbability'),
         f.col('tagVariant.variantId'),
         'finemappingMethod',
-        f.when(f.col('variantId') == f.col('tagVariant.variantId'), f.lit(True))
+        f
+        .when(f.col('variantId') == f.col('tagVariant.variantId'), f.lit(True))
         .otherwise(f.lit(False))
         .alias('isLead'),
     )
@@ -138,11 +139,12 @@ def process_l2g(l2g: DataFrame) -> DataFrame:
             - `locus2geneScore` (score renamed inside the struct)
     """
     return (
-        l2g.select(
+        l2g
+        .select(
             'studyLocusId',
             'geneId',
             'score',
-            f.rank().over(Window.partitionBy('studyLocusId').orderBy(f.col('score').desc())).alias('rank'),
+            f.rank().over(Window.partitionBy('studyLocusId').orderBy(f.col('score').desc())).alias('rank'),  # ty:ignore[missing-argument]
         )
         .filter((f.col('rank') == 1) | (f.col('score') >= 0.5))
         .select('studyLocusId', f.col('geneId').alias('gwasGeneId'), f.col('score').alias('gwasLocusToGeneScore'))
@@ -181,7 +183,8 @@ def vep_view(
 
     # Join and procerss:
     vep_view = (
-        credible_set.join(l2g, on='studyLocusId', how='left')
+        credible_set
+        .join(l2g, on='studyLocusId', how='left')
         .join(study, on='studyId', how='left')
         .join(biosample, on='qtlBiosampleId', how='left')
         .select(
@@ -205,7 +208,7 @@ def vep_view(
             'qtlBiosampleName',
         )
         # Apply shared filter:
-        .filter(f.col('position').isNotNull() & (f.length(f.col('chromosome')) < 3))
+        .filter(f.col('position').isNotNull() & (f.length(f.col('chromosome')) < 3))  # ty:ignore[missing-argument]
         .persist()
     )
     # Save header:
@@ -220,7 +223,8 @@ def vep_view(
     # Write GWAS data:
     logger.info('Writing data for all')
     (
-        vep_view.filter(f.col('studyType') == 'gwas')
+        vep_view
+        .filter(f.col('studyType') == 'gwas')
         .orderBy('chromosome', 'position')
         .write.mode('overwrite')
         .csv(destination['vep_data_gwas'], sep='\t')
@@ -229,7 +233,8 @@ def vep_view(
     # Write QTL data:
     logger.info('Writing data for all')
     (
-        vep_view.filter(f.col('studyType') != 'gwas')
+        vep_view
+        .filter(f.col('studyType') != 'gwas')
         .orderBy('chromosome', 'position')
         .write.mode('overwrite')
         .csv(destination['vep_data_qtl'], sep='\t')

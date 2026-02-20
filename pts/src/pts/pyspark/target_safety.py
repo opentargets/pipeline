@@ -88,7 +88,8 @@ def target_safety(
 def process_aop(aopwik_df: DataFrame) -> DataFrame:
     """Loads and processes the AOPWiki input JSON."""
     return (
-        aopwik_df.withColumn(
+        aopwik_df
+        .withColumn(
             'study',
             f.struct(
                 f.lit(None).cast('string').alias('description'),
@@ -104,7 +105,8 @@ def process_aop(aopwik_df: DataFrame) -> DataFrame:
             f.transform(
                 f.col('effects'),
                 lambda x: f.struct(
-                    f.when(
+                    f
+                    .when(
                         x.direction == 'Activation',
                         f.lit('Activation/Increase/Upregulation'),
                     )
@@ -154,7 +156,8 @@ def process_adverse_events(adverse_events_df: DataFrame) -> DataFrame:
         'Urban et al. (2012)': 'clinical',
     }
     ae_df = (
-        adverse_events_df.select(
+        adverse_events_df
+        .select(
             f.col('ensemblId').alias('id'),
             f.col('symptom').alias('event'),
             f.col('efoId').alias('eventId'),
@@ -173,12 +176,13 @@ def process_adverse_events(adverse_events_df: DataFrame) -> DataFrame:
         .withColumn(
             'effects',
             f.struct(
-                f.when(
-                    f.col('effects')[0].contains('activation'),
+                f
+                .when(
+                    f.col('effects')[0].contains('activation'),  # ty:ignore[missing-argument, invalid-argument-type]
                     f.lit('Activation/Increase/Upregulation'),
                 )
                 .when(
-                    f.col('effects')[0].contains('inhibition'),
+                    f.col('effects')[0].contains('inhibition'),  # ty:ignore[missing-argument, invalid-argument-type]
                     f.lit('Inhibition/Decrease/Downregulation'),
                 )
                 .alias('direction'),
@@ -201,7 +205,8 @@ def process_adverse_events(adverse_events_df: DataFrame) -> DataFrame:
     # Multiple dosing effects need to be grouped in the same record.
     effects_df = ae_df.groupBy('id', 'event', 'datasource').agg(f.collect_set(f.col('effects')).alias('effects'))
     return (
-        ae_df.drop('effects')
+        ae_df
+        .drop('effects')
         .join(effects_df, on=['id', 'event', 'datasource'], how='left')
         .withColumn('supporting_variation', f.lit(None).cast('string'))  # Add missing column for schema consistency
     )
@@ -210,11 +215,13 @@ def process_adverse_events(adverse_events_df: DataFrame) -> DataFrame:
 def process_brennan(brennan_df: DataFrame) -> DataFrame:
     """Loads and processes the Brennan input JSON prepared by the Target Safety team."""
     return (
-        brennan_df.withColumn(
+        brennan_df
+        .withColumn(
             'effects',
             f.array(
                 f.struct(
-                    f.when(
+                    f
+                    .when(
                         f.col('effects.direction') == 'Activation',
                         f.lit('Activation/Increase/Upregulation'),
                     )
@@ -267,9 +274,10 @@ def process_safety_risk(safety_risk_df: DataFrame) -> DataFrame:
         study      | {Important for th...
     """
     return (
-        safety_risk_df.withColumn(
+        safety_risk_df
+        .withColumn(
             'studyType',
-            f.when(f.col('ref').contains('Force'), 'preclinical').when(f.col('ref').contains('Lamore'), 'cell-based'),
+            f.when(f.col('ref').contains('Force'), 'preclinical').when(f.col('ref').contains('Lamore'), 'cell-based'),  # ty:ignore[missing-argument, invalid-argument-type]
         )
         .select(
             f.col('ensemblId').alias('id'),
@@ -292,14 +300,16 @@ def process_safety_risk(safety_risk_df: DataFrame) -> DataFrame:
         )
         .withColumn(
             'event',
-            f.when(f.col('datasource').contains('Force'), 'heart disease').when(
-                f.col('datasource').contains('Lamore'), 'cardiac arrhythmia'
+            f.when(f.col('datasource').contains('Force'), 'heart disease').when(  # ty:ignore[missing-argument, invalid-argument-type]
+                f.col('datasource').contains('Lamore'),  # ty:ignore[missing-argument, invalid-argument-type]
+                'cardiac arrhythmia',
             ),
         )
         .withColumn(
             'eventId',
-            f.when(f.col('datasource').contains('Force'), 'EFO_0003777').when(
-                f.col('datasource').contains('Lamore'), 'EFO_0004269'
+            f.when(f.col('datasource').contains('Force'), 'EFO_0003777').when(  # ty:ignore[missing-argument, invalid-argument-type]
+                f.col('datasource').contains('Lamore'),  # ty:ignore[missing-argument, invalid-argument-type]
+                'EFO_0004269',
             ),
         )
         .withColumn('supporting_variation', f.lit(None).cast('string'))  # Add missing column for schema consistency
@@ -357,12 +367,12 @@ def process_pharmacogenetics(pgx_df: DataFrame) -> DataFrame:
         pgx_df
         # Only interested in the evidence that is related to toxicity
         .filter(f.col('pgxCategory') == 'toxicity')
-        .filter((f.col('targetFromSourceId').isNotNull()) & (f.col('phenotypeText').isNotNull()))
+        .filter((f.col('targetFromSourceId').isNotNull()) & (f.col('phenotypeText').isNotNull()))  # ty:ignore[missing-argument]
         # Safety liabilities extraction
         .filter(
             ~(
-                f.col('phenotypeText').contains('no significant association')
-                | f.col('phenotypeText').contains('not associated with')
+                f.col('phenotypeText').contains('no significant association')  # ty:ignore[missing-argument, invalid-argument-type]
+                | f.col('phenotypeText').contains('not associated with')  # ty:ignore[missing-argument, invalid-argument-type]
             )
         )
         .withColumn('event', clean_phenotype_to_describe_safety_event(f.col('phenotypeText')))

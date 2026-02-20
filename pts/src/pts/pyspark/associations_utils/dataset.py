@@ -32,7 +32,7 @@ class Dataset:
 
         # Validating required columns:
         if hasattr(self, 'MANDATORY_COLUMNS'):
-            self.validate_columns(self._df, self.MANDATORY_COLUMNS)
+            self.validate_columns(self._df, self.MANDATORY_COLUMNS)  # ty:ignore[invalid-argument-type]
 
     @staticmethod
     def validate_columns(df: DataFrame, required_columns: list[str]) -> None:

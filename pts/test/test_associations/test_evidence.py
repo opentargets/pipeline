@@ -113,7 +113,7 @@ class TestEvidence:
         assert isinstance(association, DataFrame)
         assert isinstance(association.agg(f.sum('yearlyEvidenceCount').alias('col')).first(), Row)
 
-        assert association.agg(f.sum('yearlyEvidenceCount').alias('col')).first()['col'] == self.evidence.df.count()
+        assert association.agg(f.sum('yearlyEvidenceCount').alias('col')).first()['col'] == self.evidence.df.count()  # ty:ignore[not-subscriptable]
 
     def test_score_calculation(self: TestEvidence) -> None:
         """Testing if the normalised harmoinc score is properly calculated.
@@ -140,20 +140,18 @@ class TestEvidence:
 
         # get scores:
         harmonic_sum = (
-            self.evidence.df.filter(
-                (f.col('targetId') == target_id) & (f.col('diseaseId') == disease_id) & (f.col('year') == year)
-            )
+            self.evidence.df
+            .filter((f.col('targetId') == target_id) & (f.col('diseaseId') == disease_id) & (f.col('year') == year))
             .groupBy(f.lit('x'))
             .agg(Dataset._get_harmonic_sum(f.collect_list('score')).alias('sum'))
-            .first()['sum']
+            .first()['sum']  # ty:ignore[not-subscriptable]
         )
 
         normalised_harmonic_sum = (
-            self.evidence.filter(
-                (f.col('targetId') == target_id) & (f.col('diseaseId') == disease_id) & (f.col('year') == year)
-            )
+            self.evidence
+            .filter((f.col('targetId') == target_id) & (f.col('diseaseId') == disease_id) & (f.col('year') == year))
             .aggregate_evidence_by_datasource()
-            .df.first()['associationScore']
+            .df.first()['associationScore']  # ty:ignore[not-subscriptable]
         )
 
         assert isclose(harmonic_sum, 0.6472222225533591)

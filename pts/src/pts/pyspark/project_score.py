@@ -49,7 +49,8 @@ def generate_project_score_evidence(project_score_cell_lines: DataFrame, project
         DataFrame: DataFrame containing evidence strings
     """
     return (
-        project_score_hits.select(
+        project_score_hits
+        .select(
             f.col('targetSymbol').alias('targetFromSource'),
             f.col('diseaseName').alias('diseaseFromSource'),
             f.col('diseaseId').alias('diseaseFromSourceMappedId'),
@@ -85,7 +86,8 @@ def get_disease_cell_lines(
 
     # Joining disease cell-lines dataframe for Project Score:
     disease_cell_lines = (
-        cell_line_data.select(
+        cell_line_data
+        .select(
             f.lower(f.col('CANCER_TYPE')).alias('cancerType'),
             f.col('CMP_ID').alias('id'),
         )
@@ -95,7 +97,7 @@ def get_disease_cell_lines(
     )
 
     # Are there any cancer types that are not in the cell line file?
-    missing_cancer_types = disease_cell_lines.filter(f.col('diseaseCellLines').isNull())
+    missing_cancer_types = disease_cell_lines.filter(f.col('diseaseCellLines').isNull())  # ty:ignore[missing-argument]
     if missing_cancer_types.count() > 0:
         logger.warning(f'the following cancer types are not in the cell line file: {missing_cancer_types.collect()}')
     else:
@@ -150,7 +152,8 @@ class GenerateDiseaseCellLines:
             * Tissue id is the UBERON identifier for the tissue, based on manual curation.
         """
         cell_df = (
-            self.cell_passport_data.select(
+            self.cell_passport_data
+            .select(
                 f.col('model_name').alias('name'),
                 f.col('model_id').alias('id'),
                 f.lower(f.col('tissue')).alias('tissueFromSource'),

@@ -27,12 +27,12 @@ DOI_TO_PMID_MAPPING = {
 
 
 def parse_source(source_column: Column) -> Column:
-    processed = f.when(source_column.startswith('WEB'), f.lit(None)).otherwise(f.trim(f.split(source_column, ':')[1]))
+    processed = f.when(source_column.startswith('WEB'), f.lit(None)).otherwise(f.trim(f.split(source_column, ':')[1]))  # ty:ignore[missing-argument, invalid-argument-type]
 
     map_udf = f.udf(lambda v: DOI_TO_PMID_MAPPING.get(v, v), t.StringType())
     mapped = map_udf(processed)
 
-    return f.when(mapped.isNotNull(), f.array(mapped))
+    return f.when(mapped.isNotNull(), f.array(mapped))  # ty:ignore[missing-argument]
 
 
 def generate_evidence(genes: DataFrame, cohorts: DataFrame, disease_mapping: DataFrame) -> DataFrame:
@@ -90,7 +90,8 @@ def generate_evidence(genes: DataFrame, cohorts: DataFrame, disease_mapping: Dat
     """
     # Joining cancer driver genes with cohorts:
     return (
-        genes.join(cohorts, on='COHORT', how='inner')
+        genes
+        .join(cohorts, on='COHORT', how='inner')
         .select(
             # Adding constant columns:
             f.lit('somatic_mutation').alias('datatypeId'),
@@ -107,7 +108,8 @@ def generate_evidence(genes: DataFrame, cohorts: DataFrame, disease_mapping: Dat
             f.array(
                 f.struct(
                     # Parse functional consequences:
-                    f.when(f.col('ROLE') == 'Act', 'SO_0002053')  # Gain of function
+                    f
+                    .when(f.col('ROLE') == 'Act', 'SO_0002053')  # Gain of function
                     .when(f.col('ROLE') == 'LoF', 'SO_0002054')  # Loss of function
                     .otherwise(None)
                     .alias('functionalConsequenceId'),

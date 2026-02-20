@@ -113,13 +113,15 @@ class Association(Dataset):
             Association object. associations with type of aggregation, with more or less rows.
         """
         collect_window = (
-            Window.partitionBy(['targetId', 'diseaseId', 'aggregationValue'])
-            .orderBy(f.col('year').asc())
+            Window
+            .partitionBy(['targetId', 'diseaseId', 'aggregationValue'])
+            .orderBy(f.col('year').asc())  # ty:ignore[missing-argument]
             .rowsBetween(Window.unboundedPreceding, 0)
         )
 
         return Association(
-            self.df.select(
+            self.df
+            .select(
                 'targetId',
                 'diseaseId',
                 'yearlyEvidenceCount',
@@ -260,7 +262,7 @@ class Association(Dataset):
         """
         peak_value = scores - f.lag(scores, offset=1).over(window)
 
-        return f.when(peak_value.isNull(), f.lit(0)).otherwise(peak_value)
+        return f.when(peak_value.isNull(), f.lit(0)).otherwise(peak_value)  # ty:ignore[missing-argument]
 
     @staticmethod
     def _create_yearly_view(df) -> DataFrame:
@@ -276,13 +278,15 @@ class Association(Dataset):
         """
         last_year = datetime.now().year + 1
         window_spec = (
-            Window.partitionBy('targetId', 'diseaseId')
+            Window
+            .partitionBy('targetId', 'diseaseId')
             .orderBy('year')
             .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         )
 
         return (
-            df.select(*Association.GROUPBY_COLUMNS, 'year')
+            df
+            .select(*Association.GROUPBY_COLUMNS, 'year')
             .distinct()
             .withColumn('first_evidence_year', f.min('year').over(window_spec))
             .select(*Association.GROUPBY_COLUMNS, 'first_evidence_year')
@@ -319,7 +323,8 @@ class Association(Dataset):
 
         return (
             # Create a table with all possible target/disease/{optional aggregation column}/year
-            Association._create_yearly_view(association_df)
+            Association
+            ._create_yearly_view(association_df)
             # Join with the complete association table - this join will leave multiple rows without association score.
             .join(association_df, on=[*Association.GROUPBY_COLUMNS, 'year'], how='left')
             # Filling missing association scores from previous non-null years:

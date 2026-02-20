@@ -26,7 +26,8 @@ def _compute_facet_classes(df: DataFrame) -> DataFrame:
         DataFrame: Original df with `targetClass` replaced by `facetClasses`.
     """
     fc_df = (
-        df.select(
+        df
+        .select(
             f.col('targetId'),
             f.explode(
                 f.filter(
@@ -76,7 +77,8 @@ def _compute_facet_therapeutic_areas(df: DataFrame, key_col: str, label_col: str
     labels = df.select(key_col, label_col).withColumnRenamed(key_col, ta_id)
 
     return (
-        tas.join(labels, [ta_id], 'left_outer')
+        tas
+        .join(labels, [ta_id], 'left_outer')
         .groupBy(f.col(key_col))
         .agg(f.collect_set(f.col(label_col)).alias(vec_col))
     )
@@ -99,7 +101,8 @@ def _compute_facet_tractability(df: DataFrame) -> DataFrame:
         return lambda c: (c['value'] == True) & (c['modality'] == modality)  # noqa: E712
 
     tractability_facets_df = (
-        df.select(
+        df
+        .select(
             f.col('targetId'),
             f.filter(f.col('tractability'), facet_filter('SM')).alias('sm'),
             f.filter(f.col('tractability'), facet_filter('AB')).alias('ab'),
@@ -147,13 +150,14 @@ def association_otf(
 
     # Process diseases: select relevant columns and compute therapeutic area facets.
     diseases = (
-        diseases_raw.select(
+        diseases_raw
+        .select(
             f.col('id').alias('diseaseId'),
             f.concat(f.col('id'), f.lit(' '), f.col('name')).alias('diseaseData'),
             f.col('therapeuticAreas'),
             f.col('name'),
         )
-        .orderBy(f.col('diseaseId').asc())
+        .orderBy(f.col('diseaseId').asc())  # ty:ignore[missing-argument]
         .persist()
     )
 
@@ -166,7 +170,8 @@ def association_otf(
     # Process targets: select relevant columns and compute class, tractability,
     # and reactome pathway facets.
     targets = (
-        targets_raw.select(
+        targets_raw
+        .select(
             f.col('id').alias('targetId'),
             f.concat(
                 f.col('id'),
@@ -179,7 +184,7 @@ def association_otf(
             f.col('pathways').alias('reactome'),
             f.col('tractability'),
         )
-        .orderBy(f.col('targetId').asc())
+        .orderBy(f.col('targetId').asc())  # ty:ignore[missing-argument]
         .persist()
     )
 
@@ -195,7 +200,8 @@ def association_otf(
     )
 
     final_targets = (
-        targets.transform(_compute_facet_classes)
+        targets
+        .transform(_compute_facet_classes)
         .transform(_compute_facet_tractability)
         .join(targets_facet_reactome, ['targetId'], 'left_outer')
         .drop('reactome', 'tractability')
@@ -219,7 +225,8 @@ def association_otf(
     )
 
     result = (
-        evidences.join(final_diseases, ['diseaseId'], 'left_outer')
+        evidences
+        .join(final_diseases, ['diseaseId'], 'left_outer')
         .join(final_targets, ['targetId'], 'left_outer')
         .join(novelty_direct, on=['diseaseId', 'targetId'], how='left')
         .join(novelty_indirect, on=['diseaseId', 'targetId'], how='left')

@@ -25,7 +25,8 @@ class Session:
         self.is_dataproc = 'DATAPROC_CLUSTER_NAME' in os.environ
 
         self.spark: SparkSession = (
-            SparkSession.Builder()
+            SparkSession
+            .Builder()
             .config(conf=self._create_config(properties))
             .master('yarn' if self.is_dataproc else spark_uri)
             .appName(app_name)

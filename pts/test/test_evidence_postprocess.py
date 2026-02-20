@@ -65,7 +65,8 @@ class TestEvidence:
     def id_evidence(self: TestEvidence) -> Evidence:
         """Generating identifier for evidence."""
         return (
-            self.evidence.validate_diseases(self.disease_lut)
+            self.evidence
+            .validate_diseases(self.disease_lut)
             .validate_target(self.target_lut)
             .assign_evidence_identifier([])
         )
@@ -119,7 +120,7 @@ class TestEvidence:
         df = scored_evidence.df
 
         flagged_count = df.filter(f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.NO_VALID_SCORE)).count()
-        bad_scores_count = df.filter(f.col('score').isNull() | (f.col('score') <= 0) | (f.col('score') > 1)).count()
+        bad_scores_count = df.filter(f.col('score').isNull() | (f.col('score') <= 0) | (f.col('score') > 1)).count()  # ty:ignore[missing-argument]
 
         assert flagged_count == bad_scores_count
 
@@ -145,8 +146,8 @@ class TestEvidence:
         """Testing if the validation flags evidence where no target is present."""
         problematic_rows = target_validated.df.withColumn(
             'problematic',
-            (f.col('targetId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET))
-            | (f.col('targetId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET)),
+            (f.col('targetId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET))  # ty:ignore[missing-argument]
+            | (f.col('targetId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET)),  # ty:ignore[missing-argument]
         ).filter(f.col('problematic'))
 
         assert problematic_rows.count() == 0
@@ -183,8 +184,8 @@ class TestEvidence:
         """Testing if disease validation flags correct evidence."""
         problematic_rows = disease_validated.df.withColumn(
             'problematic',
-            (f.col('diseaseId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE))
-            | (f.col('diseaseId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE)),
+            (f.col('diseaseId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE))  # ty:ignore[missing-argument]
+            | (f.col('diseaseId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE)),  # ty:ignore[missing-argument]
         ).filter(f.col('problematic'))
 
         assert problematic_rows.count() == 0

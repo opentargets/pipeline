@@ -32,7 +32,8 @@ def chembl(
     pretty_predictions_df = predictions_df.transform(prettify_subclasses).distinct()
     early_stopped_evd_df = (
         # Evidence with a given reason to stop is always supported by a single NCT ID
-        chembl_df.filter(f.col('studyStopReason').isNotNull())
+        chembl_df
+        .filter(f.col('studyStopReason').isNotNull())  # ty:ignore[missing-argument]
         .alias('chembl')
         .join(
             pretty_predictions_df.alias('predictions'),
@@ -48,14 +49,15 @@ def chembl(
     early_stopped_count = early_stopped_evd_df.count()
     if not 0.08 < early_stopped_count / total_count < 0.15:
         logger.warning(f'Fraction of early stopped evidence is not as expected ({early_stopped_count / total_count}).')
-    chembl_df_w_predictions = chembl_df.filter(f.col('studyStopReason').isNull()).unionByName(
+    chembl_df_w_predictions = chembl_df.filter(f.col('studyStopReason').isNull()).unionByName(  # ty:ignore[missing-argument]
         early_stopped_evd_df, allowMissingColumns=True
     )
     assert chembl_df_w_predictions.count() == chembl_df.count()
 
     logger.info('Removing T/D evidence from Phase IV trials that have not demonstrated efficacy')
     drug_approvals_df = (
-        chembl_indications_df.filter(f.col('max_phase_for_ind').cast('double').cast('int') == 4)
+        chembl_indications_df
+        .filter(f.col('max_phase_for_ind').cast('double').cast('int') == 4)
         .selectExpr('efo_id as diseaseFromSourceMappedId', 'molecule_chembl_id as drugId')
         .withColumn('diseaseFromSourceMappedId', f.translate('diseaseFromSourceMappedId', ':', '_'))
         .distinct()
@@ -92,7 +94,8 @@ def prettify_subclasses(predictions_df: DataFrame) -> DataFrame:
         f.array(*[f.struct(f.lit(k), f.lit(v)) for k, v in categories_mappings.items()])
     )
     return (
-        predictions_df.select('nct_id', 'subclasses', sub_mapping_col.alias('prettyStopReasonsMap'))
+        predictions_df
+        .select('nct_id', 'subclasses', sub_mapping_col.alias('prettyStopReasonsMap'))
         # Create a MapType column to convert each element of the subclasses array
         .withColumn(
             'studyStopReasonCategories', f.expr('transform(subclasses, x -> element_at(prettyStopReasonsMap, x))')
@@ -104,7 +107,8 @@ def prettify_subclasses(predictions_df: DataFrame) -> DataFrame:
 def remove_unvalidated_target_disease(evidence: DataFrame, drug_approvals_df: DataFrame) -> DataFrame:
     """Remove evidence from Phase IV trials where the target disease is not approved or investigational."""
     return (
-        evidence.join(
+        evidence
+        .join(
             drug_approvals_df.select('*', f.lit(True).alias('isApproved')),
             on=['drugId', 'diseaseFromSourceMappedId'],
             how='left',

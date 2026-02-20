@@ -75,20 +75,22 @@ class TestAssociation:
         # Exploding years:
         exploded_filtered_df = (
             # Explode evidence for years:
-            Association._create_yearly_view(self.association.df)
+            Association
+            ._create_yearly_view(self.association.df)
             .filter(
                 (f.col('diseaseId') == disease_id)
                 & (f.col('targetId') == target_id)
                 & (f.col('aggregationValue') == datasource_id)
             )
-            .orderBy(f.col('year').asc())
+            .orderBy(f.col('year').asc())  # ty:ignore[missing-argument]
         )
 
         # Assert df is not empty:
-        assert exploded_filtered_df.first() is not None
+        first = exploded_filtered_df.first()
+        assert first is not None
 
         # Assert the first year:
-        assert exploded_filtered_df.first().year == first_year  # pyright: ignore[reportOptionalMemberAccess]
+        assert first.year == first_year
 
         # Assert the number of years:
         assert exploded_filtered_df.count() == this_year - first_year + 2
@@ -103,8 +105,8 @@ class TestAssociation:
         """Test if the data propagation after explosion is good."""
         propagated_data = Association._back_fill_missing_years(self.association.df)
 
-        assert propagated_data.filter(f.col('associationScore').isNull()).count() == 0
-        assert propagated_data.filter(f.col('yearlyEvidenceScores').isNull()).count() > 0
+        assert propagated_data.filter(f.col('associationScore').isNull()).count() == 0  # ty:ignore[missing-argument]
+        assert propagated_data.filter(f.col('yearlyEvidenceScores').isNull()).count() > 0  # ty:ignore[missing-argument]
 
     def test_data_propagation_to_missing_years__association_score_always_grow(self: TestAssociation) -> None:
         """Test if yearlyAssociation score never decreases in subsequent years.  Within the same association window."""

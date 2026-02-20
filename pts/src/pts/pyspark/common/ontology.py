@@ -12,7 +12,7 @@ def add_efo_mapping(
     disease_label_lut_path: str,
     label_col_name: str = 'diseaseFromSource',
     disease_id_lut_path: str | None = None,
-    id_col_name: str | None = 'diseaseFromSourceId'
+    id_col_name: str | None = 'diseaseFromSourceId',
 ) -> DataFrame:
     """Adds a column containing EFO mappings to the provided dataframe.
 
@@ -45,19 +45,12 @@ def add_efo_mapping(
             label_mapped_df, 'idMappedResult', id_col_name, 'id', type_col=lit('DS')
         )
 
-        result_df = (
-            label_id_mapped_df
-            .withColumn(
-                'diseaseFromSourceMappedId',
-                _combine_result_columns(col('labelMappedResult'), col('idMappedResult'))
-            )
-            .drop('labelMappedResult', 'idMappedResult')
-        )
+        result_df = label_id_mapped_df.withColumn(
+            'diseaseFromSourceMappedId', _combine_result_columns(col('labelMappedResult'), col('idMappedResult'))
+        ).drop('labelMappedResult', 'idMappedResult')
     else:
-        result_df = (
-            label_mapped_df
-            .withColumn('diseaseFromSourceMappedId', explode_outer('labelMappedResult'))
-            .drop('labelMappedResult')
+        result_df = label_mapped_df.withColumn('diseaseFromSourceMappedId', explode_outer('labelMappedResult')).drop(
+            'labelMappedResult'
         )
 
     return result_df
@@ -73,11 +66,4 @@ def _combine_result_columns(label_col: Column, id_col: Column) -> Column:
     Returns:
         Column: Column combining the results from mapping labels and IDs.
     """
-    return (
-        explode_outer(
-            array_union(
-                coalesce(label_col, array()),
-                coalesce(id_col, array())
-            )
-        )
-    )
+    return explode_outer(array_union(coalesce(label_col, array()), coalesce(id_col, array())))

@@ -59,7 +59,7 @@ def gene_burden(
     )
     finngen_manifest_df = spark.load_data(source['finngen_phenotypes'], format='json')
     finngen_df = spark.load_data(source['finngen'], format='csv', header=True, sep='\t')
-    finngen_version = settings.get('finngen_release')
+    finngen_version = settings['finngen_release']
     genebass_df = spark.load_data(source['genebass'])
     cvdi_associations_df = pd.read_excel(
         source['cvdi'],
@@ -186,7 +186,8 @@ def process_cvdi_gene_burden(
     cvdi_p_value_cutoff_df = _process_cvdi_pvalues(cvdi_p_value_cutoff_df)
 
     associations_df = (
-        cvdi_associations_df.merge(cvdi_p_value_cutoff_df, left_on='method_name', right_on='Mask')
+        cvdi_associations_df
+        .merge(cvdi_p_value_cutoff_df, left_on='method_name', right_on='Mask')
         .drop('Mask', axis=1)
         .drop_duplicates()
         # Dropping rows with no odds ratio or invalid values:
@@ -197,7 +198,8 @@ def process_cvdi_gene_burden(
     )
 
     return (
-        spark.spark.createDataFrame(
+        spark.spark
+        .createDataFrame(
             associations_df,
         )
         .withColumn(
@@ -219,10 +221,12 @@ def process_cvdi_gene_burden(
             f.col('resourceScore'),
             f.col('cMAC').cast(t.IntegerType()).alias('studyCasesWithQualifyingVariants'),
             f.regexp_extract(f.col('OR [95%CI]'), r'(\d+\.\d+)', 1).cast('double').alias('oddsRatio'),
-            f.regexp_extract(f.col('OR [95%CI]'), r'\[(\d+\.\d+)', 1)
+            f
+            .regexp_extract(f.col('OR [95%CI]'), r'\[(\d+\.\d+)', 1)
             .cast('double')
             .alias('oddsRatioConfidenceIntervalLower'),
-            f.regexp_extract(f.col('OR [95%CI]'), r'; (\d+\.\d+)\]', 1)
+            f
+            .regexp_extract(f.col('OR [95%CI]'), r'; (\d+\.\d+)\]', 1)
             .cast('double')
             .alias('oddsRatioConfidenceIntervalUpper'),
             f.col('method_name').alias('statisticalMethod'),
@@ -321,15 +325,15 @@ def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
         'pValueMantissa',
         'pValueExponent',
         'oddsRatio',
-        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(  # ty:ignore[missing-argument]
             'oddsRatioConfidenceIntervalLower'
         ),
-        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(  # ty:ignore[missing-argument]
             'oddsRatioConfidenceIntervalUpper'
         ),
         'beta',
-        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),
-        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),  # ty:ignore[missing-argument]
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),  # ty:ignore[missing-argument]
         f.split(f.col('sex'), ', ').alias('sex'),
         'ancestry',
         'ancestryId',
@@ -337,7 +341,7 @@ def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
         'studySampleSize',
         'studyCases',
         'studyCasesWithQualifyingVariants',
-        f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(
+        f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(  # ty:ignore[missing-argument]
             'allelicRequirements'
         ),
         'statisticalMethod',
@@ -357,7 +361,8 @@ def process_az_gene_burden(
     def _get_az_release_version(gene_links: DataFrame) -> str:
         """Extract the release version from the gene links file."""
         return (
-            gene_links.select(
+            gene_links
+            .select(
                 f.regexp_extract(f.col('link'), r'https://azphewas.com/geneView/([^/]+)/', 1).alias('extracted_hash')
             )
             .limit(1)
@@ -416,7 +421,8 @@ def process_az_gene_burden(
 
     # Transform data according to original logic
     return (
-        az_phewas_df.withColumn('datasourceId', f.lit('gene_burden'))
+        az_phewas_df
+        .withColumn('datasourceId', f.lit('gene_burden'))
         .withColumn('datatypeId', f.lit('genetic_association'))
         .withColumn('literature', f.array(f.lit('34375979')))
         .withColumn('projectId', f.lit('AstraZeneca PheWAS Portal'))
@@ -530,7 +536,8 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
         f'There are {genebass_df.filter(f.col("Pvalue_Burden") == 0.0).count()} evidence with a p-value of 0.0.'
     )
     minimum_pvalue = (
-        genebass_df.filter(f.col('Pvalue_Burden') > 0.0)
+        genebass_df
+        .filter(f.col('Pvalue_Burden') > 0.0)
         .agg({'Pvalue_Burden': 'min'})
         .collect()[0]['min(Pvalue_Burden)']
     )
@@ -540,7 +547,8 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
     )
 
     return (
-        genebass_df.filter(f.col('Pvalue_Burden') <= 6.7e-7)
+        genebass_df
+        .filter(f.col('Pvalue_Burden') <= 6.7e-7)
         .filter(f.col('trait_type') != 'categorical')
         .select(
             'gene_id',
@@ -578,7 +586,8 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
             (f.col('n_cases') + f.coalesce('n_controls', f.lit(0))).alias('studySampleSize'),
             f.col('n_cases').alias('studyCases'),
             f.col('annotation').alias('statisticalMethod'),
-            f.when(f.col('annotation') == 'pLoF', f.lit('Burden test carried out with rare pLOF variants.'))
+            f
+            .when(f.col('annotation') == 'pLoF', f.lit('Burden test carried out with rare pLOF variants.'))
             .when(
                 f.col('annotation') == 'missense|LC',
                 f.lit(

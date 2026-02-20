@@ -107,8 +107,9 @@ class DepMapEssentiality:
                 'diseaseFromSource',
                 'tissueId',
                 f.coalesce(f.col('tissueName'), f.lit('other')).alias('tissueName'),
-                f.when(f.col('damagingMutation').isNotNull(), 'damaging')
-                .when(f.col('hotspotMutation').isNotNull(), 'hotspot')
+                f
+                .when(f.col('damagingMutation').isNotNull(), 'damaging')  # ty:ignore[missing-argument]
+                .when(f.col('hotspotMutation').isNotNull(), 'hotspot')  # ty:ignore[missing-argument]
                 .alias('mutation'),
                 'geneEffect',
                 'expression',
@@ -116,7 +117,7 @@ class DepMapEssentiality:
             )
             # Dropping rows with missing gene effect.
             # This can happen when there's no data for a gene in a given cell line:
-            .filter(f.col('geneEffect').isNotNull())
+            .filter(f.col('geneEffect').isNotNull())  # ty:ignore[missing-argument]
             .persist()
         )
 
@@ -153,7 +154,8 @@ class DepMapEssentiality:
         # Return grouped essentiality data:
         return (
             # Aggregating data by gene:
-            self.essentials.groupBy(
+            self.essentials
+            .groupBy(  # ty:ignore[unresolved-attribute]
                 'targetSymbol',
                 'isEssential',
                 'tissueId',
@@ -188,9 +190,9 @@ class DepMapEssentiality:
 
     def get_stats(self) -> None:
         """Print statistics on the essentiality dataset."""
-        logger.info(f'Number of entries: {self.essentials.count()}')
-        logger.info(f'Number of essential genes: {self.essentials.select("targetSymbol").distinct().count()}')
-        logger.info(f'Number of unique diseases: {self.essentials.select("diseaseFromSource").distinct().count()}')
+        logger.info(f'Number of entries: {self.essentials.count()}')  # ty:ignore[unresolved-attribute]
+        logger.info(f'Number of essential genes: {self.essentials.select("targetSymbol").distinct().count()}')  # ty:ignore[unresolved-attribute]
+        logger.info(f'Number of unique diseases: {self.essentials.select("diseaseFromSource").distinct().count()}')  # ty:ignore[unresolved-attribute]
 
     def _melt(self, df: DataFrame, value_name: str) -> DataFrame:
         """Melt a wide dataframe into a long format.
@@ -225,7 +227,8 @@ class DepMapEssentiality:
 
         # Transform dataset:
         return (
-            df.select('depmapId', f.expr(unpivot_expression))
+            df
+            .select('depmapId', f.expr(unpivot_expression))
             .select(
                 'depmapId',
                 self._extract_gene_symbol(f.col('gene_label')),
@@ -260,9 +263,10 @@ class DepMapEssentiality:
         return self.models_df.select(
             f.col('ModelID').alias('depmapId'),
             # If cell line name is provided, it's picked:
-            f.when(f.col('CellLineName').isNotNull(), f.col('CellLineName'))
+            f
+            .when(f.col('CellLineName').isNotNull(), f.col('CellLineName'))  # ty:ignore[missing-argument]
             # When not cell line name, but Cancer Cell Line Enciclopedia name is provided, that's picked:
-            .when(f.col('CCLEName').isNotNull(), f.col('CCLEName'))
+            .when(f.col('CCLEName').isNotNull(), f.col('CCLEName'))  # ty:ignore[missing-argument]
             # If none of these sources are available, the cell line name is generated from the disease name:
             .otherwise(f.concat(f.col('OncotreePrimaryDisease'), f.lit(' cells')))
             .alias('cellLineName'),

@@ -119,8 +119,10 @@ def process_scores(col_name: str) -> Column:
 def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the compound and the scores given by the different sources."""
     return (
-        spark.createDataFrame(
-            pd.read_excel(
+        spark
+        .createDataFrame(
+            pd
+            .read_excel(
                 probes_excel,
                 sheet_name='PROBES',
                 header=0,
@@ -161,8 +163,10 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
 def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Collection of targets associated with the probes and their scores."""
     return (
-        spark.createDataFrame(
-            pd.read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
+        spark
+        .createDataFrame(
+            pd
+            .read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
             # Probes that do not have an associated target are marked with "-"
             .query("gene_name != '-'")
             .reset_index()
@@ -191,9 +195,10 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
 def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the different sources of probes."""
     return (
-        spark.createDataFrame(pd.read_excel(probes_excel, sheet_name='COMPOUNDSETS', header=0, index_col=0))
+        spark
+        .createDataFrame(pd.read_excel(probes_excel, sheet_name='COMPOUNDSETS', header=0, index_col=0))
         .selectExpr('COMPOUNDSET as datasourceId', 'SOURCE_URL as url')
-        .filter(f.col('url').startswith('http'))
+        .filter(f.col('url').startswith('http'))  # ty:ignore[missing-argument, invalid-argument-type]
     )
 
 
@@ -207,9 +212,10 @@ def process_targets_xrefs(spark: SparkSession, probes_excel: str) -> DataFrame:
 def process_drugs_xrefs(spark: SparkSession, drugs_csv: str) -> DataFrame:
     """Look-up table between the probes IDs in P&Ds and ChEMBL."""
     return (
-        spark.read.csv(drugs_csv, header=True)
+        spark.read
+        .csv(drugs_csv, header=True)
         .selectExpr('pdid', 'ChEMBL as drugId')
-        .filter(f.col('drugId').isNotNull())
+        .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
     )
 
 
@@ -249,7 +255,8 @@ def generate_chemical_probes_evidence(
     ]
 
     return (
-        probes_targets_data.join(probes_data, on='pdid', how='left')
+        probes_targets_data
+        .join(probes_data, on='pdid', how='left')
         .join(targets_xref_data, on='targetFromSource', how='left')
         .join(probes_sets_data, on='datasourceId', how='left')
         .join(drugs_xref_data, on='pdid', how='left')

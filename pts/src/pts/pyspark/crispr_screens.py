@@ -77,7 +77,8 @@ def crispr_screens(
     screens_df = session.spark.createDataFrame(screen_rows)
     screens_df = screens_df.withColumn('studySummary', f.expr('parsing_experiment("Description")'))
     studies_df = (
-        screens_df.join(
+        screens_df
+        .join(
             # Build literature references
             session.spark.createDataFrame(
                 LITERATURE_MAPPING,
@@ -103,7 +104,7 @@ def crispr_screens(
         .withColumn('contrast', f.coalesce('contrast', 'Phenotype'))
         .drop('Phenotype')
         # QC and filter for studies that have disease mapping
-        .filter(f.col('diseaseFromSourceMappedId').isNotNull())
+        .filter(f.col('diseaseFromSourceMappedId').isNotNull())  # ty:ignore[missing-argument]
         .distinct()
     )
 
@@ -113,13 +114,14 @@ def crispr_screens(
         .withColumn('input_file', f.input_file_name())
         .withColumn('studyId', f.regexp_replace(f.regexp_extract('input_file', r'([^/]+)\.csv\.gz$', 1), r'%20', ' '))
         .filter(
-            f.col('Hit Class').isNotNull()
+            f.col('Hit Class').isNotNull()  # ty:ignore[missing-argument]
             & ((f.col('Hit Class') == 'Positive Hit') | (f.col('Hit Class') == 'Negative Hit'))
         )
         .select(
             f.col('Gene').alias('targetFromSourceId'),
             f.col('P Value').alias('resourceScore'),
-            f.when(f.col('Hit Class') == 'Positive Hit', f.lit('upper tail'))
+            f
+            .when(f.col('Hit Class') == 'Positive Hit', f.lit('upper tail'))
             .when(f.col('Hit Class') == 'Negative Hit', f.lit('lower tail'))
             .alias('statisticalTestTail'),
             f.col('Phenotype').alias('log2FoldChangeValue'),

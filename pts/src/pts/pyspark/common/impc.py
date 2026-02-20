@@ -23,7 +23,8 @@ def process_ontology_terms(ontology: DataFrame) -> tuple[DataFrame, ...]:
     """Process ontology information to enable MP and HP term lookup based on the ID."""
     logger.info('process ontology information to enable MP and HP term lookup based on the ID.')
     return tuple(
-        ontology.filter(f.col('ontology') == ontology_name)
+        ontology
+        .filter(f.col('ontology') == ontology_name)
         .withColumnRenamed('phenotype_id', f'{ontology_name.lower()}_id')
         .withColumnRenamed('phenotype_term', f'{ontology_name.lower()}_term')
         .select(f'{ontology_name.lower()}_id', f'{ontology_name.lower()}_term')
@@ -39,12 +40,13 @@ def build_gene_mapping(
     """Build complete gene mapping from MGI gene ID to human Ensembl ID."""
     logger.info('construct gene mapping.')
     return (
-        mgi_gene_id_to_ensembl_mouse_gene_id.selectExpr(
+        mgi_gene_id_to_ensembl_mouse_gene_id
+        .selectExpr(
             '`1. MGI accession id` as targetInModelMgiId',
             '`3. marker symbol` as targetInModel',
             '`11. Ensembl gene id` as targetInModelEnsemblId',
         )
-        .filter(f.col('targetInModelEnsemblId').isNotNull())
+        .filter(f.col('targetInModelEnsemblId').isNotNull())  # ty:ignore[missing-argument]
         .join(
             mouse_to_human_gene.selectExpr('gene_id as targetInModelMgiId', 'hgnc_gene_id'),
             on='targetInModelMgiId',
@@ -57,7 +59,7 @@ def build_gene_mapping(
             on='hgnc_gene_id',
             how='inner',
         )
-        .filter(f.col('targetFromSourceId').isNotNull())
+        .filter(f.col('targetFromSourceId').isNotNull())  # ty:ignore[missing-argument]
         .select('targetInModelMgiId', 'targetInModel', 'targetInModelEnsemblId', 'targetFromSourceId')
     )
 
@@ -67,14 +69,16 @@ def process_literature_references(
 ) -> DataFrame:
     """Process literature references for model-gene combinations."""
     mgi_pubmed_exploded = (
-        mgi_pubmed.withColumn('literature', f.explode(f.split(f.col('literature'), r'\|')))
+        mgi_pubmed
+        .withColumn('literature', f.explode(f.split(f.col('literature'), r'\|')))
         .withColumn('targetInModelMgiId', f.explode(f.split(f.col('targetInModelMgiId'), r'\|')))
         .select('mp_id', 'literature', 'targetInModelMgiId')
         .distinct()
     )
 
     return (
-        disease_model_summary.select('model_id', 'targetInModelMgiId')
+        disease_model_summary
+        .select('model_id', 'targetInModelMgiId')
         .distinct()
         .join(model_mouse_phenotypes, on='model_id', how='inner')
         .join(mgi_pubmed_exploded, on=['targetInModelMgiId', 'mp_id'], how='inner')

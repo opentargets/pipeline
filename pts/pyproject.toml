@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.03.0-dev.8"
+version = "26.03.0-dev.9"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff==0.15.1", "ty==0.0.17", "deptry==0.24.0", "pre-commit>=4.3.0"]
+dev = ["ruff==0.15.2", "ty==0.0.17", "deptry==0.24.0", "pre-commit>=4.3.0"]
 
 [project.optional-dependencies]
 test = [
@@ -191,6 +191,3 @@ parametrize-values-row-type = 'tuple'
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.ty.src]
-ignore = ["src/pts/pyspark/**", "test/**"]

@@ -1,10 +1,8 @@
 ---
-work_path: ./work
-log_level: DEBUG
-pool_size: 32
+work_path: ../pipeline_work
 
-# release_uri: gs://open-targets-pipeline-runs/jferrer/otterfs
-scratchpad: {}
+log_level: DEBUG
+pool_size: 4
 
 steps:
   #: DISEASE STEP :#################################################################################

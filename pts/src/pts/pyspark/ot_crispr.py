@@ -62,7 +62,7 @@ class StudyParser:
         return (
             self.study_table
             # Dropping studies with no OTAR project and the field description row:
-            .filter(f.col('projectId').startswith('OTAR'))
+            .filter(f.col('projectId').startswith('OTAR'))  # ty:ignore[missing-argument, invalid-argument-type]
             # Selecting relevant columns:
             .select(
                 'studyId',
@@ -88,7 +88,8 @@ class StudyParser:
                 'dataFile',
                 'ControlDataset',
                 # Adding replicate identifier when missing:
-                f.when(f.col('replicateNumber').isNull(), f.lit(1))
+                f
+                .when(f.col('replicateNumber').isNull(), f.lit(1))  # ty:ignore[missing-argument]
                 .otherwise(f.col('replicateNumber'))
                 .alias('replicateId'),
             )
@@ -177,14 +178,16 @@ class EvidenceParser:
                 # extract target name:
                 f.split(f.col('id'), '_')[0].alias('targetFromSourceId'),
                 # Extract log2Fold change value based on where the hit is coming from:
-                f.when(f.col('sourceLabel').contains('pos'), f.col('pos|lfc'))
-                .when(f.col('sourceLabel').contains('neg'), f.col('neg|lfc'))
+                f
+                .when(f.col('sourceLabel').contains('pos'), f.col('pos|lfc'))  # ty:ignore[missing-argument, invalid-argument-type]
+                .when(f.col('sourceLabel').contains('neg'), f.col('neg|lfc'))  # ty:ignore[missing-argument, invalid-argument-type]
                 .otherwise(None)
                 .cast(t.FloatType())
                 .alias('log2FoldChangeValue'),
                 # Extract which tail of distribution the hit is coming from:
-                f.when(f.col('sourceLabel').contains('pos'), f.lit('upper tail'))
-                .when(f.col('sourceLabel').contains('neg'), f.lit('lower tail'))
+                f
+                .when(f.col('sourceLabel').contains('pos'), f.lit('upper tail'))  # ty:ignore[missing-argument, invalid-argument-type]
+                .when(f.col('sourceLabel').contains('neg'), f.lit('lower tail'))  # ty:ignore[missing-argument, invalid-argument-type]
                 .alias('statisticalTestTail'),
                 'resourceScore',
             )
@@ -243,7 +246,8 @@ class EvidenceParser:
         if control_dataset:
             hits = hits.join(
                 (
-                    self._read_and_filter_mageck_file(control_dataset, filter_columns, threshold)
+                    self
+                    ._read_and_filter_mageck_file(control_dataset, filter_columns, threshold)
                     .select('targetFromSourceId')
                     .distinct()
                 ),

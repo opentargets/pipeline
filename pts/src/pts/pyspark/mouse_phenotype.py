@@ -69,7 +69,8 @@ def generate_mouse_phenotypes_dataset(
 
     mouse_phenotypes = (
         # Extract base model-target associations.
-        disease_model_summary.select(
+        disease_model_summary
+        .select(
             'model_id', 'biologicalModelAllelicComposition', 'biologicalModelGeneticBackground', 'targetInModelMgiId'
         )
         .distinct()

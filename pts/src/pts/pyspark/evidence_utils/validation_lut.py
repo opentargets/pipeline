@@ -77,7 +77,8 @@ class LookUpTables:
             DataFrame: dataframe with column `diseaseId` and `diseaseFromSourceMappedId`.
         """
         return (
-            df.select(
+            df
+            .select(
                 f.col('id').alias('diseaseId'),
                 f.explode(
                     f.concat(
@@ -89,7 +90,7 @@ class LookUpTables:
                     )
                 ).alias('diseaseFromSourceMappedId'),
             )
-            .orderBy(f.col('diseaseFromSourceMappedId').asc())
+            .orderBy(f.col('diseaseFromSourceMappedId').asc())  # ty:ignore[missing-argument]
             .repartition(f.col('diseaseFromSourceMappedId'))
         )
 
@@ -104,7 +105,8 @@ class LookUpTables:
             DataFrame: dataframe with column `targetId` and `targetFromSourceId`.
         """
         return (
-            df.select(
+            df
+            .select(
                 f.col('id').alias('targetId'),
                 'biotype',
                 f.array_distinct(
@@ -128,7 +130,7 @@ class LookUpTables:
                 f.explode('targetFromSourceIds').alias('targetFromSourceId'),
             )
             .distinct()
-            .orderBy(f.col('targetFromSourceId').asc())
+            .orderBy(f.col('targetFromSourceId').asc())  # ty:ignore[missing-argument]
             .repartition(f.col('targetFromSourceId'))
         )
 
@@ -173,15 +175,19 @@ class LookUpTables:
         flagged = f.array_distinct(
             f.transform(
                 hallmark_descriptions,
-                lambda desc: f.when(desc.contains('oncogene') & desc.contains('tsg'), f.lit('bivalent'))
-                .when(desc.contains('oncogene'), f.lit('oncogene'))
-                .when(desc.contains('tsg'), f.lit('tsg')),
+                lambda desc: (
+                    f
+                    .when(desc.contains('oncogene') & desc.contains('tsg'), f.lit('bivalent'))
+                    .when(desc.contains('oncogene'), f.lit('oncogene'))
+                    .when(desc.contains('tsg'), f.lit('tsg'))
+                ),
             )
         )
 
         # Resolving direction:
         return (
-            f.when(f.array_contains(flagged, 'bivalent'), f.lit('bivalent'))
+            f
+            .when(f.array_contains(flagged, 'bivalent'), f.lit('bivalent'))
             .when(
                 f.array_contains(flagged, 'oncogene') & f.array_contains(flagged, 'tsg'),
                 f.lit('bivalent'),
@@ -229,7 +235,8 @@ class LookUpTables:
             )
             .withColumn(
                 'moaType',
-                f.when(
+                f
+                .when(
                     f.array_contains('moaTypes', 'GoF') & f.array_contains('moaTypes', 'LoF'),
                     f.lit(None).cast(t.StringType()),
                 )

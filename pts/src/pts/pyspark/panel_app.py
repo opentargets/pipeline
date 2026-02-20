@@ -100,7 +100,8 @@ class PanelAppEvidenceGenerator:
     def generate_panelapp_evidence(self, panels=None) -> DataFrame:
         logger.info('filter and extract the necessary columns')
         panelapp_df = (
-            self.panelapp_df.withColumn(
+            self.panelapp_df
+            .withColumn(
                 # Panel version can be either a single number, or two numbers separated by a dot (e.g. 3.14).We cast
                 # either representation to float to ensure correct filtering below. (Note that conversion to float would
                 # not work in the general case, because 3.4 > 3.14, but we only need to compare relative to 1.0.)
@@ -186,7 +187,7 @@ class PanelAppEvidenceGenerator:
             # Choose one of the ontology identifiers, keeping OMIM as a priority.
             .withColumn(
                 'diseaseFromSourceId',
-                f.when(f.col('omim').isNotNull(), f.col('omim')).otherwise(f.col('ontology')),
+                f.when(f.col('omim').isNotNull(), f.col('omim')).otherwise(f.col('ontology')),  # ty:ignore[missing-argument]
             )
             .drop('ontology_namespace', 'ontology_id', 'ontology', 'omim_id', 'omim')
             # Clean up the final split phenotypes.
@@ -200,7 +201,7 @@ class PanelAppEvidenceGenerator:
                 f.when(f.col('diseaseFromSource') != '', f.col('diseaseFromSource')),  # noqa: PLC1901
             )
             # Remove low quality records, where the name of the phenotype string starts with a question mark.
-            .filter(~((f.col('diseaseFromSource').isNotNull()) & (f.col('diseaseFromSource').startswith('?'))))
+            .filter(~((f.col('diseaseFromSource').isNotNull()) & (f.col('diseaseFromSource').startswith('?'))))  # ty:ignore[missing-argument, invalid-argument-type]
             # Remove duplication caused by cases where multiple phenotypes within the same record fail to generate any
             # phenotype string or ontology identifier.
             .distinct()
@@ -209,7 +210,7 @@ class PanelAppEvidenceGenerator:
             .withColumn(
                 'diseaseFromSource',
                 f.when(
-                    (f.col('diseaseFromSource').isNull()) & (f.col('diseaseFromSourceId').isNull()),
+                    (f.col('diseaseFromSource').isNull()) & (f.col('diseaseFromSourceId').isNull()),  # ty:ignore[missing-argument]
                     f.col('Panel Name'),
                 ).otherwise(f.col('diseaseFromSource')),
             )
@@ -224,12 +225,13 @@ class PanelAppEvidenceGenerator:
 
         logger.info('drop unnecessary fields and populate the final evidence string structure')
         return (
-            panelapp_df.drop('Phenotypes', 'cleanedUpPhenotypes', 'phenotype')
+            panelapp_df
+            .drop('Phenotypes', 'cleanedUpPhenotypes', 'phenotype')
             # allelicRequirements requires a list, but we always only have one value from PanelApp.
             .withColumn(
                 'allelicRequirements',
                 f.when(
-                    f.col('Mode of inheritance').isNotNull(),
+                    f.col('Mode of inheritance').isNotNull(),  # ty:ignore[missing-argument]
                     f.array(f.col('Mode of inheritance')),
                 ),
             )
@@ -255,17 +257,17 @@ class PanelAppEvidenceGenerator:
             panels
             # only keep panels that returned a valid response
             .filter(
-                f.col('id').isNotNull() &
-                f.col('genes.gene_data').isNotNull() &
-                f.col('genes.gene_data.gene_symbol').isNotNull() &
-                f.col('genes.publications').isNotNull() &
-                (f.size('genes.publications') > 0)
+                f.col('id').isNotNull()  # ty:ignore[missing-argument]
+                & f.col('genes.gene_data').isNotNull()  # ty:ignore[missing-argument]
+                & f.col('genes.gene_data.gene_symbol').isNotNull()  # ty:ignore[missing-argument]
+                & f.col('genes.publications').isNotNull()  # ty:ignore[missing-argument]
+                & (f.size('genes.publications') > 0)
             )
             .select('id', f.explode_outer('genes').alias('gene'))
             .select(
                 f.col('id').alias('Panel Id'),
                 f.col('gene.gene_data.gene_symbol').alias('Symbol'),
-                f.explode('gene.publications').alias('publication_string')
+                f.explode('gene.publications').alias('publication_string'),
             )
             .withColumn('literature', f.explode(self.extract_pubmed_ids(f.col('publication_string'))))
             .groupby(['Panel Id', 'Symbol'])
@@ -278,13 +280,7 @@ class PanelAppEvidenceGenerator:
         unified_pmid_re = '|'.join([f'({pattern})' for pattern in self.PMID_RE])
 
         # trim and remove non-ASCII, newline, and carriage return characters
-        cleaned = f.trim(
-            f.regexp_replace(
-                publication_string,
-                r'[^\x00-\x7F]|\n|\r',
-                ''
-            )
-        ).alias('cleaned')
+        cleaned = f.trim(f.regexp_replace(publication_string, r'[^\x00-\x7F]|\n|\r', '')).alias('cleaned')
 
         # exclude the specified expression
         excluded = f.regexp_replace(cleaned, self.PMID_FILTER_OUT_RE, '').alias('excluded')
@@ -294,18 +290,10 @@ class PanelAppEvidenceGenerator:
 
         # extract digit sequences from the extracted occurrences
         extracted_pmids = f.flatten(
-            f.transform(
-                extracted_occurrences,
-                lambda x: f.regexp_extract_all(x, f.lit(r'(\d+)'), 1)
-            )
+            f.transform(extracted_occurrences, lambda x: f.regexp_extract_all(x, f.lit(r'(\d+)'), 1))
         ).alias('extracted_pmids')
 
         # deduplicate and exclude pmids if they are 0 (placeholder for a missing ID) or they are too long
-        return (
-            f.array_distinct(
-                f.filter(
-                    extracted_pmids,
-                    lambda x: (x != '0') & (f.length(x) <= 8)
-                )
-            )
-        ).alias('extracted_cleaned_pmids')
+        return (f.array_distinct(f.filter(extracted_pmids, lambda x: (x != '0') & (f.length(x) <= 8)))).alias(
+            'extracted_cleaned_pmids'
+        )

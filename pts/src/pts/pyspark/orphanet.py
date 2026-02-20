@@ -121,8 +121,9 @@ def process_orphanet(orphanet_df: DataFrame) -> DataFrame:
     so_mapping_expr = create_map([lit(x) for x in chain(*CONSEQUENCE_MAP.items())])
 
     return (
-        orphanet_df.filter(~col('associationType').isin(EXCLUDED_ASSOCIATIONTYPES))
-        .filter(~col('targetFromSourceId').isNull())
+        orphanet_df
+        .filter(~col('associationType').isin(EXCLUDED_ASSOCIATIONTYPES))
+        .filter(~col('targetFromSourceId').isNull())  # ty:ignore[missing-argument]
         .withColumn(
             'variantFunctionalConsequenceId',
             so_mapping_expr.getItem(col('associationType')),

@@ -55,7 +55,8 @@ def coding_variant(
 
     # Pooling all evidence together:
     variant_evidence = (
-        evidence_dataset.unionByName(gwas_evidence, allowMissingColumns=True)
+        evidence_dataset
+        .unionByName(gwas_evidence, allowMissingColumns=True)
         .unionByName(pharmacogenetics, allowMissingColumns=True)
         .unionByName(molqtl_credsets, allowMissingColumns=True)
     )
@@ -65,21 +66,25 @@ def coding_variant(
 
     # this window specification is used to group diseases for each variant and accumulate scores:
     wspec = (
-        Window.partitionBy('variantId', 'diseaseId')
-        .orderBy(f.col('score').desc())
+        Window
+        .partitionBy('variantId', 'diseaseId')
+        .orderBy(f.col('score').desc())  # ty:ignore[missing-argument]
         .rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing)
     )
     wspec_datasource = (
-        Window.partitionBy('variantId', 'datasourceId')
-        .orderBy(f.col('score').desc())
+        Window
+        .partitionBy('variantId', 'datasourceId')
+        .orderBy(f.col('score').desc())  # ty:ignore[missing-argument]
         .rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing)
     )
 
     (
-        variant_evidence.withColumns({
+        variant_evidence
+        .withColumns({
             'harmonic_sum': calculate_harmonic_sum(f.collect_list(f.col('score')).over(wspec)),
             'datasourceCount': f.size(f.collect_set('evidenceId').over(wspec_datasource)),
-            'datasourceNiceName': f.when(f.col('datasourceId') == 'eva', f.lit('ClinVar'))
+            'datasourceNiceName': f
+            .when(f.col('datasourceId') == 'eva', f.lit('ClinVar'))
             .when(f.col('datasourceId') == 'eva_somatic', f.lit('ClinVar-somatic'))
             .when(f.col('datasourceId') == 'uniprot_variants', f.lit('UniProt Variants'))
             .when(f.col('datasourceId') == 'mol_qtl', f.lit('molQTL'))
@@ -112,7 +117,7 @@ def coding_variant(
         .join(variants_with_amino_acid_effect, on='variantId', how='right')
         .filter(
             # Dropping varians without any evidence:
-            f.col('dataSources').isNotNull()
+            f.col('dataSources').isNotNull()  # ty:ignore[missing-argument]
         )
         # Removing source annotation if variant has only zero evidence:
         .withColumn(
@@ -123,7 +128,7 @@ def coding_variant(
         .withColumn(
             'uniprotAccessions',
             f.when(
-                f.col('uniprotAccessions').isNotNull() & f.col('refUniprotAccessions').isNotNull(),
+                f.col('uniprotAccessions').isNotNull() & f.col('refUniprotAccessions').isNotNull(),  # ty:ignore[missing-argument]
                 f.array_intersect(f.col('refUniprotAccessions'), f.col('uniprotAccessions')),
             ).otherwise(f.coalesce(f.col('uniprotAccessions'), f.col('refUniprotAccessions'))),
         )
@@ -144,7 +149,8 @@ def process_target_index(spark: SparkSession, source: str) -> DataFrame:
         DataFrame: DataFrame containing targetId and uniprotAccessions.
     """
     d = (
-        spark.read.parquet(source)
+        spark.read
+        .parquet(source)
         .select(
             f.col('id').alias('targetId'),
             f.transform(
@@ -250,7 +256,7 @@ def parse_variant_effect(variant_effect: Column) -> Column:
     vep = extract_method_value(variant_effect, 'VEP')
 
     # Preferentially pick a_missense:
-    return f.when(a_missense.getItem('value').isNotNull(), a_missense).otherwise(vep)
+    return f.when(a_missense.getItem('value').isNotNull(), a_missense).otherwise(vep)  # ty:ignore[missing-argument]
 
 
 def process_variants(spark: SparkSession, source: str) -> DataFrame:
@@ -264,17 +270,19 @@ def process_variants(spark: SparkSession, source: str) -> DataFrame:
         DataFrame: DataFrame containing variants with amino acid effects.
     """
     d = (
-        spark.read.parquet(source)
+        spark.read
+        .parquet(source)
         # Filter for certain variant consequence types:
         .withColumn('variantEffect', f.filter('variantEffect', lambda ve: ve.method == 'AlphaMissense'))
         # Exploding transcript consequences to extract amino acid consequences:
         .withColumn('exploded_consequences', f.explode('transcriptConsequences'))
         # Drop all consequences without amino acid change:
-        .filter(f.col('exploded_consequences.aminoAcidChange').isNotNull())
+        .filter(f.col('exploded_consequences.aminoAcidChange').isNotNull())  # ty:ignore[missing-argument]
         .select(
             'variantId',
             # Filter for AlphaMissense consequence or return None:
-            f.when(f.size(f.col('variantEffect')) > 0, f.col('variantEffect')[0].score)
+            f
+            .when(f.size(f.col('variantEffect')) > 0, f.col('variantEffect')[0].score)
             .otherwise(f.lit(None))
             .alias('variantEffect'),
             'exploded_consequences.targetId',
@@ -325,9 +333,10 @@ def process_evidence(
 
     # Reading evidence dataset:
     d = (
-        spark.read.parquet(source_evidence_eva, source_evidence_eva_somatic, source_evidence_uniprot_variant)
+        spark.read
+        .parquet(source_evidence_eva, source_evidence_eva_somatic, source_evidence_uniprot_variant)
         # Filtering for evidence supported by variants:
-        .filter(f.col('variantId').isNotNull())
+        .filter(f.col('variantId').isNotNull())  # ty:ignore[missing-argument]
         .select(*evidence_columns)
         # Adding therapeutic areas:
         .join(diseases, on='diseaseId', how='left')
@@ -369,14 +378,15 @@ def process_pharmacogenetics(spark: SparkSession, source: str) -> DataFrame:
         DataFrame: DataFrame containing pharmacogenetics evidence.
     """
     d = (
-        spark.read.parquet(source)
+        spark.read
+        .parquet(source)
         .select(
             'variantId',
             'datasourceId',
             f.monotonically_increasing_id().cast(t.StringType()).alias('evidenceId'),
             f.lit(False).alias('zeroEvidence'),
         )
-        .filter(f.col('variantId').isNotNull())
+        .filter(f.col('variantId').isNotNull())  # ty:ignore[missing-argument]
     )
     logger.info(f'processed {d.count()} pharmacogenetics evidences')
     return d
@@ -394,7 +404,8 @@ def process_qtls(spark: SparkSession, source: str) -> DataFrame:
     """
     d = (
         # Reading credible sets and explode:
-        spark.read.parquet(source)
+        spark.read
+        .parquet(source)
         .withColumn('col', f.explode('locus'))
         # Selecting only qtl evidence:
         .filter(f.col('studyType') != 'gwas')
@@ -431,7 +442,8 @@ def process_gwas_associations(
     """
     d = (
         # Reading evidence:
-        spark.read.parquet(source_evidence_gwas_credible_set)
+        spark.read
+        .parquet(source_evidence_gwas_credible_set)
         # Group by studyLocusId and select to strongest evidence:
         .withColumn(
             'maxScore',
