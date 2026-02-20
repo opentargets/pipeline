@@ -176,7 +176,6 @@ class Association(Dataset):
         novelty = self._get_novelty(
             intermediate_dataset, self.GROUPBY_COLUMNS, novelty_window, novelty_shift, novelty_scale
         )
-        novelty.write.mode('overwrite').parquet('novelty')
 
         # Next year:
         current_year = datetime.now().year

@@ -176,7 +176,7 @@ def vep_view(
     # Load input data:
     study = process_study(session.load_data(source['study_table']))
     credible_set = process_credible_set(session.load_data(source['credible_set']))
-    l2g = process_l2g(session.load_data(source['l2g_table']))
+    l2g = process_l2g(session.load_data(path=source['l2g_table'], recursiveFileLookup=True))
     biosample = process_biosample(session.load_data(source['biosample']))
 
     # Join and procerss:
