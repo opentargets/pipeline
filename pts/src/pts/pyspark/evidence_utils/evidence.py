@@ -38,7 +38,7 @@ class Evidence:
 
     # Columns we consider for dating evidence:
     EVIDENCE_DATE_COLUMNS: list[str] = field(
-        default_factory=lambda: ['publicationDate', 'curationDate', 'studyStartDate']
+        default_factory=lambda: ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
     )
 
     def __post_init__(self: Evidence) -> None:
@@ -309,8 +309,18 @@ class Evidence:
         if len(dating_columns) == 0:
             dating_columns = [f.lit(None).cast(t.StringType())]
 
-        # Assign date:
-        return Evidence(self.df.withColumn('evidenceDate', f.array_min(f.array(dating_columns))))
+        # Assign date - filter nulls before taking min, as array_min returns null if any element is null:
+        return Evidence(
+            self.df.withColumn(
+                'evidenceDate',
+                f.array_min(
+                    f.filter(
+                        f.array(dating_columns),
+                        lambda x: x.isNotNull()
+                    )
+                )
+            )
+        )
 
     def resolve_direction_of_effect(self: Evidence, mechanism_of_action: DataFrame) -> Evidence:
         raise NotImplementedError
