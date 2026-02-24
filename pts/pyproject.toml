@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.03.0-dev.9"
+version = "26.03.0-dev.10"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -15,6 +15,7 @@ dependencies = [
   "defusedxml>=0.7.1",
   "openpyxl>=3.1.5",
   "setuptools>=80.9.0",
+  "obonet>=0.3.1",
 ]
 
 [dependency-groups]

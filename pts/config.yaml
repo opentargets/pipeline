@@ -28,6 +28,13 @@ steps:
       transformer: disease_phenotype
   ##################################################################################################
 
+  #: GO STEP :######################################################################################
+  go:
+    - name: transform go
+      transformer: go
+      source: input/go/go.obo
+      destination: output/go/go.parquet
+
   #: EXPRESSION STEP :##############################################################################
   expression:
     - name: unzip normal tissue

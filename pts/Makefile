@@ -1,5 +1,5 @@
 ### HOUSEKEEPING TARGETS ###
-.PHONY: help clean
+.PHONY: help clean test coverage
 
 help:  ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-9s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -21,7 +21,7 @@ clean:  ## Clean up
 dev: .venv/bin/pytest .git/hooks/pre-commit  ## Install development dependencies and pre-commit hook
 
 test: .venv/bin/pytest  ## Run the tests
-	@uv run pytest
+	@uv run pytest test --doctest-modules src/pts
 
 coverage: .venv/bin/pytest  ## Generate and show coverage reports
 	@uv run coverage run  --source=src/pts -m pytest -qq --doctest-modules && uv run coverage xml && uv run coverage report -m
