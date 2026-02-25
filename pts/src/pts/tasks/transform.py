@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from importlib import import_module
-from typing import Self
+from typing import Any, Self
 
 from loguru import logger
 from otter.manifest.model import Artifact
@@ -14,16 +14,12 @@ from otter.util.fs import check_destination
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
 path_or_paths = str | dict[str, str]
-transformer_type = Callable[[str | dict[str, str], str | dict[str, str]], None]
+transformer_type = Callable[[str | dict[str, str], str | dict[str, str], dict[str, Any] | None], None]
 
 
 class TransformSpec(Spec):
     """Configuration for the Transform task."""
 
-    source: path_or_paths
-    """A string or a dictionary with the source paths."""
-    destination: path_or_paths
-    """A string or a dictionary with the destination paths."""
     transformer: str
     """A string with the name of a transformer function.
 
@@ -34,6 +30,12 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
     """
+    source: path_or_paths
+    """A string or a dictionary with the source paths."""
+    destination: path_or_paths
+    """A string or a dictionary with the destination paths."""
+    settings: dict[str, Any] | None = None
+    """A dictionary with settings to pass to the transformer."""
 
 
 class Transform(Task):
@@ -77,7 +79,7 @@ class Transform(Task):
         if not self.context.config.release_uri:
             self._prepare_dirs(self.dsts)
 
-        self.transformer(self.srcs, self.dsts)
+        self.transformer(self.srcs, self.dsts, self.spec.settings or {})
 
         srcs = list(self.srcs.values()) if isinstance(self.srcs, dict) else self.srcs
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
