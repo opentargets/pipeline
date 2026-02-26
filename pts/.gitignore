@@ -18,6 +18,3 @@ htmlcov
 
 # output working directory
 work/
-
-# test output
-novelty

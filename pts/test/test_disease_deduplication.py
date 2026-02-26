@@ -33,6 +33,7 @@ class TestDiseaseDeduplication:
 
         self.deduplicated = deduplicate_disease(self.disease_df)
 
+    @pytest.mark.slow
     def test_return_type(self: TestDiseaseDeduplication) -> None:
         """Testing if the returned dataset has the right type."""
         assert isinstance(self.deduplicated, pl.DataFrame)

@@ -286,13 +286,13 @@
     },
     {
       "metadata": {},
-      "name": "clinicalPhase",
+      "name": "clinicalReportId",
       "nullable": true,
-      "type": "double"
+      "type": "string"
     },
     {
       "metadata": {},
-      "name": "clinicalStatus",
+      "name": "clinicalStage",
       "nullable": true,
       "type": "string"
     },
@@ -314,13 +314,13 @@
     },
     {
       "metadata": {},
-      "name": "studyStopReason",
+      "name": "trialWhyStopped",
       "nullable": true,
       "type": "string"
     },
     {
       "metadata": {},
-      "name": "studyStopReasonCategories",
+      "name": "trialStopReasonCategories",
       "nullable": true,
       "type": {
         "containsNull": true,

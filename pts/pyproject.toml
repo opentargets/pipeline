@@ -8,7 +8,7 @@ dependencies = [
   "loguru==0.7.3",
   "opentargets-otter==26.0.1",
   "pandas>=2.3.2",
-  "ontoma==2.1.1",
+  "ontoma==2.3.0",
   "polars==1.38.1",
   "pyspark==3.5.7",
   "openai>=2.7.2",
@@ -16,7 +16,22 @@ dependencies = [
   "openpyxl>=3.1.5",
   "setuptools>=80.9.0",
   "obonet>=0.3.1",
+  "polars-hash>=0.5.6",
+  "clinical-mining",
+  "torch>=2.10.0",
+  "transformers>=5.1.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+clinical-mining = { git = "https://github.com/opentargets/clinical_mining" }
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
 
 [dependency-groups]
 dev = ["ruff==0.15.2", "ty==0.0.17", "deptry==0.24.0", "pre-commit>=4.3.0"]
