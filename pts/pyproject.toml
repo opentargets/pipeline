@@ -30,7 +30,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
-clinical-mining = { git = "https://github.com/opentargets/clinical_mining" }
+clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.3.0" }
 
 
 [dependency-groups]
