@@ -263,7 +263,7 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - INDICATION_NOT_VALIDATED
+          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
@@ -451,7 +451,7 @@ steps:
   clinical_report:
     - name: pyspark clinical_report
       source:
-        chembl_molecule: intermediate/chembl_molecule
+        chembl_molecule: intermediate/chembl_molecule/*.parquet
         disease: output/disease/disease.parquet
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
@@ -466,6 +466,7 @@ steps:
         chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
         chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
         chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
+        chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
@@ -490,7 +491,7 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - INDICATION_NOT_VALIDATED
+          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
@@ -507,7 +508,7 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - INDICATION_NOT_VALIDATED
+          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
@@ -1013,7 +1014,7 @@ steps:
             map(
               'APPROVAL', 1.0,
               'PHASE_4', 1.0,
-              'WITHDRAWN', 1.0,
+              'WITHDRAWAL', 1.0,
               'PREAPPROVAL', 0.8,
               'PHASE_3', 0.7,
               'PHASE_2_3', 0.5,

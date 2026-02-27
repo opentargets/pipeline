@@ -30,7 +30,7 @@ CLINICAL_STAGE_RANKS = {
 }
 
 # Stages that should be treated as APPROVAL when computing the max
-STAGE_FOR_MAX_MAPPING = {'WITHDRAWN': 'APPROVAL', 'PHASE_4': 'APPROVAL'}
+STAGE_FOR_MAX_MAPPING = {'WITHDRAWAL': 'APPROVAL', 'PHASE_4': 'APPROVAL'}
 
 STAGE_DISPLAY_NAMES = {
     'APPROVAL': 'approved',
@@ -221,7 +221,7 @@ def process_drug_index(
 def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
     """Compute the overall maximum clinical stage for each drug across all clinical reports.
 
-    Explodes the drugs array, maps WITHDRAWN/PHASE_4 to APPROVAL, ranks stages,
+    Explodes the drugs array, maps WITHDRAWAL/PHASE_4 to APPROVAL, ranks stages,
     and returns the best (most advanced) stage per drug.
 
     Args:
@@ -254,7 +254,7 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
             f.col('clinicalStage'),
         )
         .filter(f.col('id').isNotNull())  # ty:ignore[missing-argument]
-        # Normalize: map WITHDRAWN/PHASE_4 -> APPROVAL
+        # Normalize: map WITHDRAWAL/PHASE_4 -> APPROVAL
         .withColumn(
             'normalizedStage',
             f.coalesce(stage_mapping[f.col('clinicalStage')], f.col('clinicalStage')),

@@ -267,12 +267,12 @@ class TestComputeMaxPhasePerDrug:
         assert all(drug_id is not None for drug_id in ids)
 
     @pytest.mark.slow
-    def test_withdrawn_maps_to_approval(self, spark):
-        """WITHDRAWN stage should be treated as APPROVAL for max computation."""
+    def test_withdrawal_maps_to_approval(self, spark):
+        """WITHDRAWAL stage should be treated as APPROVAL for max computation."""
         data = [
             Row(
                 id='report_w',
-                clinicalStage='WITHDRAWN',
+                clinicalStage='WITHDRAWAL',
                 drugs=[Row(drugFromSource='Drug W', drugId='CHEMBL_W')],
                 diseases=[Row(diseaseFromSource='Disease', diseaseId='EFO_0001')],
                 qualityControls=[],
@@ -436,15 +436,15 @@ class TestGenerateDescription:
         )
         assert 'across all indications' in result
 
-    def test_no_withdrawn_or_blackbox_in_description(self):
-        """Description should not contain withdrawn or black box references."""
+    def test_no_withdrawal_or_blackbox_in_description(self):
+        """Description should not contain withdrawal or black box references."""
         result = _generate_description(
             'Small molecule',
             'approved',
             ['approved'],
             ['some disease'],
         )
-        assert 'withdrawn' not in result.lower()
+        assert 'withdrawal' not in result.lower()
         assert 'black box' not in result.lower()
 
 
@@ -672,7 +672,7 @@ class TestProcessDrugIndex:
         chembl888 = result.filter(f.col('id') == 'CHEMBL888').collect()[0]
         assert chembl888['maximumClinicalStage'] == 'unknown'
 
-    def test_no_blackbox_or_withdrawn_columns(
+    def test_no_blackbox_or_withdrawal_columns(
         self,
         spark,
         molecule_df,

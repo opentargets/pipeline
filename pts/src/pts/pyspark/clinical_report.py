@@ -16,7 +16,7 @@ from clinical_mining.data_sources.pmda import extract_clinical_report as extract
 from clinical_mining.data_sources.pmda import parse_pmda_approvals
 from clinical_mining.data_sources.ttd import extract_clinical_report as extract_ttd_clinical_report
 from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalReportType, ClinicalStageCategory
+from clinical_mining.schemas import ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
@@ -26,9 +26,9 @@ from pts.transformers.utils import update_quality_flag
 
 
 class ClinicalReportFlags(StrEnum):
-    PHASE_IV_NOT_APPROVED = 'phase_iv_not_approved'
-    HETEROGENEOUS_DISEASES = 'multiple_therapeutic_areas'
-    UNVALIDATED_INDICATION = 'indication_not_validated'
+    PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
+    HETEROGENEOUS_DISEASES = 'HETEROGENEOUS_DISEASES'
+    UNVALIDATED_INDICATION = 'UNVALIDATED_INDICATION'
 
 
 def clinical_report(
@@ -74,7 +74,9 @@ def clinical_report(
     chembl_indication_references = pl.read_parquet(source['chembl_indication_references']).select(
         'drugind_id', 'ref_type', 'ref_id', 'ref_url'
     )
-    chembl_molecule = pl.read_parquet(source['chembl_molecule']).select('molregno', 'chembl_id', 'pref_name')
+    chembl_molecule_dictionary = pl.read_parquet(source['chembl_molecule_dictionary']).select(
+        'molregno', 'chembl_id', 'pref_name'
+    )
     chembl_drug_warning = pl.read_parquet(source['chembl_drug_warning']).select(
         'warning_id', 'molregno', 'warning_type', 'warning_year', 'warning_country', 'efo_id', 'efo_term'
     )
@@ -104,12 +106,12 @@ def clinical_report(
         aact = ClinicalReport(df=aact.df.with_columns(trialStopReasonCategories=pl.lit(None, dtype=pl.List(pl.String))))
     chembl_indication = extract_chembl_clinical_report(
         drug_indication=chembl_indication,
-        molecule_dictionary=chembl_molecule,
+        molecule_dictionary=chembl_molecule_dictionary,
         indication_refs=chembl_indication_references,
     ).pipe(lambda self: ClinicalReport(filter_df(self.df, "source != 'ClinicalTrials'")))
     chembl_drug_warning = extract_drug_warning_clinical_report(
         drug_warning=chembl_drug_warning,
-        molecule_dictionary=chembl_molecule,
+        molecule_dictionary=chembl_molecule_dictionary,
         warning_refs=chembl_drug_warning_references,
     )
     ttd = extract_ttd_clinical_report(indications_path=source['ttd'])
@@ -134,7 +136,6 @@ def clinical_report(
         .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
         .pipe(create_title)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_heterogeneous_diseases, disease_index=pl.read_parquet(source['disease']))
         .pipe(flag_unvalidated_report)
     )
 
@@ -213,10 +214,6 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 .when(pl.col('diseases_count') == 1)
                 .then(pl.col('diseases').list.first().struct.field('diseaseFromSource').str.to_titlecase())
                 .otherwise(pl.concat_str(pl.col('diseases_count').cast(pl.String), pl.lit(' diseases'))),
-                _source_part=pl
-                .when(pl.col('type') == ClinicalReportType.REGULATORY.value)
-                .then(pl.concat_str(pl.lit(' by '), pl.col('source')))
-                .otherwise(pl.lit('')),
             )
             .with_columns(
                 title=pl
@@ -230,7 +227,6 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                         pl.col('_drug_part'),
                         pl.lit(' and '),
                         pl.col('_disease_part'),
-                        pl.col('_source_part'),
                         ignore_nulls=True,
                     )
                 )
@@ -243,7 +239,6 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 '_disease',
                 '_drug_part',
                 '_disease_part',
-                '_source_part',
             )
         )
     )
@@ -304,98 +299,6 @@ def flag_phase_iv_not_approved(reports: ClinicalReport) -> ClinicalReport:
                 & pl.col('id').is_in(phase_iv_flagged_ids['id'].to_list())
             ),
             flag_text=ClinicalReportFlags.PHASE_IV_NOT_APPROVED.value,
-        )
-    )
-
-
-THERAPEUTIC_AREA_PRIORITY = [
-    'MONDO_0045024',  # cell proliferation disorder,
-    'EFO_0005741',  # infectious disease
-    'OTAR_0000014',  # pregnancy or perinatal disease
-    'EFO_0005932',  # animal disease
-    'MONDO_0024458',  # disease of visual system
-    'EFO_0000319',  # cardiovascular disease
-    'EFO_0009605',  # pancreas disease
-    'EFO_0010282',  # gastrointestinal disease
-    'OTAR_0000017',  # reproductive system or breast disease
-    'EFO_0010285',  # integumentary system disease
-    'EFO_0001379',  # endocrine system disease
-    'OTAR_0000010',  # respiratory or thoracic disease
-    'EFO_0009690',  # urinary system disease
-    'OTAR_0000006',  # musculoskeletal or connective tissue disease
-    'MONDO_0021205',  # disease of ear
-    'EFO_0000540',  # immune system disease
-    'EFO_0005803',  # hematologic disease
-    'EFO_0000618',  # nervous system disease
-    'MONDO_0002025',  # psychiatric disorder
-    'OTAR_0000020',  # nutritional or metabolic disease
-    'OTAR_0000018',  # genetic, familial or congenital disease
-    'OTAR_0000009',  # injury, poisoning or other complication
-    'EFO_0000651',  # phenotype
-    'EFO_0001444',  # measurement
-    'GO_0008150',  # biological process
-]
-EXCLUDED_THERAPEUTIC_AREAS = ['EFO_0001444', 'EFO_0000651']
-
-
-def flag_heterogeneous_diseases(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:
-    """Flag reports where diseases span multiple therapeutic areas.
-
-    Args:
-        reports: Clinical reports
-        disease_index: Raw disease index with `id` and `therapeuticAreas` columns
-    """
-
-    def _prepare_disease_index(disease_index: pl.DataFrame) -> pl.DataFrame:
-        """Transform disease index so each disease ID maps to its single most important therapeutic area.
-
-        Args:
-            disease_index: DataFrame with columns `id` (str) and `therapeuticAreas` (list[str])
-
-        Returns:
-            DataFrame with columns `id` and `primaryTherapeuticArea`
-        """
-        priority_df = pl.DataFrame({
-            'therapeuticArea': THERAPEUTIC_AREA_PRIORITY,
-            'priority': list(range(len(THERAPEUTIC_AREA_PRIORITY))),
-        })
-
-        return (
-            disease_index
-            .explode('therapeuticAreas')
-            .rename({'therapeuticAreas': 'therapeuticArea'})
-            .join(priority_df, on='therapeuticArea', how='left')
-            # For each disease, keep only the therapeutic area with the lowest priority index
-            .sort('priority')
-            .group_by('id')
-            .agg(pl.col('therapeuticArea').first().alias('primaryTherapeuticArea'))
-        )
-
-    prepared_index = _prepare_disease_index(disease_index)
-
-    # For each report, collect the set of therapeutic areas across all disease IDs
-    flagged_ids = (
-        reports.df
-        .explode('diseases')
-        .with_columns(pl.col('diseases').struct.field('diseaseId'))
-        .filter(pl.col('diseaseId').is_not_null())
-        .select(['id', 'diseaseId'])
-        .join(prepared_index, left_on='diseaseId', right_on='id')
-        .filter(~pl.col('primaryTherapeuticArea').is_in(EXCLUDED_THERAPEUTIC_AREAS))
-        .group_by('id')
-        .agg(pl.col('primaryTherapeuticArea').n_unique().alias('n_therapeutic_areas'))
-        .filter(pl.col('n_therapeutic_areas') > 1)
-        .select('id')
-    )
-
-    return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=(
-                # Flag consists of reports with diseases spanning multiple therapeutic areas
-                pl.col('id').is_in(flagged_ids['id'].to_list())
-            ),
-            flag_text=ClinicalReportFlags.HETEROGENEOUS_DISEASES.value,
         )
     )
 

@@ -34,7 +34,9 @@ def clinical_target(source: dict[str, Path], destination: dict[str, Path], setti
     # Filter out clinical reports that fail QC
     invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
     if invalid_qc_reasons:
-        has_invalid_qc = pl.col('qualityControls').list.set_intersection(invalid_qc_reasons).list.len() > 0
+        has_invalid_qc = (
+            pl.col('qualityControls').fill_null([]).list.set_intersection(invalid_qc_reasons).list.len() > 0
+        )
         excluded = reports.filter(has_invalid_qc)
         reports = reports.filter(~has_invalid_qc)
     else:
@@ -44,7 +46,7 @@ def clinical_target(source: dict[str, Path], destination: dict[str, Path], setti
     excluded.write_parquet(destination['excluded'], mkdir=True)
 
     drug_max_stage = (
-        # TODO: bring this from drug molecule AND treat phase iv/withdrawn as approval
+        # TODO: bring this from drug molecule AND treat phase iv/withdrawal as approval
         reports
         .explode('drugs')
         .unnest('drugs')

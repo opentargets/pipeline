@@ -25,7 +25,9 @@ def clinical_indication(source: Path, destination: dict[str, Path], settings: di
     # Filter out clinical reports that fail QC
     invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
     if invalid_qc_reasons:
-        has_invalid_qc = pl.col('qualityControls').list.set_intersection(invalid_qc_reasons).list.len() > 0
+        has_invalid_qc = (
+            pl.col('qualityControls').fill_null([]).list.set_intersection(invalid_qc_reasons).list.len() > 0
+        )
         excluded = reports.filter(has_invalid_qc)
         reports = reports.filter(~has_invalid_qc)
     else:
@@ -35,7 +37,8 @@ def clinical_indication(source: Path, destination: dict[str, Path], settings: di
     excluded.write_parquet(destination['excluded'], mkdir=True)
 
     indications = (
-        ClinicalIndication.from_report(reports)
+        ClinicalIndication
+        .from_report(reports)
         .df.filter(pl.col('mappingStatus') == 'FULLY_MAPPED')
         .drop('drugName', 'diseaseName', 'mappingStatus')
     )
