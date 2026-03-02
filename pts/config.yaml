@@ -472,10 +472,6 @@ steps:
       destination:
         output: output/clinical_report/clinical_report.parquet
       settings:
-        aact_db_type: postgresql
-        aact_db_uri: localhost:5432/aact
-        chembl_db_type: postgresql
-        chembl_db_uri: localhost:5432/chembl_36
         ner_batch_size: 256
       pyspark: clinical_report
   ##################################################################################################
