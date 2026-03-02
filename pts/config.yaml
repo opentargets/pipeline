@@ -413,7 +413,7 @@ steps:
       source:
         chembl_mechanism: input/drug/chembl_mechanism.jsonl
         chembl_target: input/drug/chembl_target.jsonl
-        target: intermediate/target/ensembl
+        target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
