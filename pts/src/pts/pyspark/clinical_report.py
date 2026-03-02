@@ -310,7 +310,10 @@ def flag_unvalidated_report(reports: ClinicalReport) -> ClinicalReport:
     """
     high_confidence_indications = (
         reports.df
-        .filter((pl.col('diseases').list.len() == 1) | (pl.col('drugs').list.len() == 1))
+        .filter(
+            (pl.col('diseases').list.len() == 1) & (pl.col('drugs').list.len() == 1)
+            | pl.col('clinicalStage').is_in([ClinicalStageCategory.APPROVAL, ClinicalStageCategory.PREAPPROVAL])
+        )
         .explode('diseases')
         .explode('drugs')
         .with_columns(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
