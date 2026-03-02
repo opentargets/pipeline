@@ -1,4 +1,5 @@
 import zipfile
+from typing import Any
 
 import polars as pl
 from loguru import logger
@@ -7,7 +8,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.openfda import schema
 
 
-def openfda(source: str, destination: str) -> None:
+def openfda(source: str, destination: str, settings: dict[str, Any]) -> None:
     h = StorageHandle(source)
     f = h.open('rb')
 

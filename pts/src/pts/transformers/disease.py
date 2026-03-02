@@ -1,3 +1,5 @@
+from typing import Any
+
 import polars as pl
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
@@ -78,7 +80,7 @@ def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def disease(source: str, destination: str) -> None:
+def disease(source: str, destination: str, settings: dict[str, Any]) -> None:
     # load the ontology
     logger.debug('loading efo')
     h = StorageHandle(source)

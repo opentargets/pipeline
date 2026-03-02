@@ -1,8 +1,10 @@
+from typing import Any
+
 import polars as pl
 from loguru import logger
 
 
-def expression_tissue(source: str, destination: str) -> None:
+def expression_tissue(source: str, destination: str, settings: dict[str, Any]) -> None:
     # load the ontology
     logger.debug('loading expression tissue')
     initial = pl.read_json(source)

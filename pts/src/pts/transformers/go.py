@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TextIO, cast
+from typing import Any, TextIO, cast
 
 import obonet
 import polars as pl
@@ -72,7 +72,7 @@ def _rows_from_obo(graph) -> list[dict]:
     return rows
 
 
-def go(source: str, destination: str) -> None:
+def go(source: str, destination: str, settings: dict[str, Any]) -> None:
     logger.info('loading go obo file')
     h = StorageHandle(source)
     f = h.open('rt')

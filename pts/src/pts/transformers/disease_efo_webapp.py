@@ -1,8 +1,10 @@
+from typing import Any
+
 import polars as pl
 from loguru import logger
 
 
-def disease_efo_webapp(source: str, destination: str) -> None:
+def disease_efo_webapp(source: str, destination: str, settings: dict[str, Any]) -> None:
     # load the ontology
     logger.debug('loading efo')
     initial = pl.read_parquet(source)

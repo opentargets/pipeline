@@ -1,10 +1,12 @@
+from typing import Any
+
 import polars as pl
 from loguru import logger
 
 from pts.schemas.ontology import node
 
 
-def so(source: str, destination: str) -> None:
+def so(source: str, destination: str, settings: dict[str, Any]) -> None:
     # load the ontology
     logger.debug('loading so')
     initial = pl.read_json(source)

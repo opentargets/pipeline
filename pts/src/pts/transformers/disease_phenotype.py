@@ -1,3 +1,5 @@
+from typing import Any
+
 import polars as pl
 from loguru import logger
 
@@ -6,7 +8,7 @@ from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
 
 
-def disease_phenotype(source: dict[str, str], destination: str) -> None:
+def disease_phenotype(source: dict[str, str], destination: str, settings: dict[str, Any]) -> None:
     # NOTE: This code is horrible. We have to figure out a way to make this in
     # a better way. Ontologies are very messy. Relationships are all over the
     # place, ids have different forms, links are indirect, etc.

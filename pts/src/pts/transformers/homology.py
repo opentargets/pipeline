@@ -1,5 +1,6 @@
 import gc
 import json
+from typing import Any
 
 import polars as pl
 from loguru import logger
@@ -30,7 +31,7 @@ class FilteredJSONDecoder(json.JSONDecoder):
         return {k: v for k, v in obj.items() if k in self.allowed_keys}
 
 
-def homology(source: str, destination: str) -> None:
+def homology(source: str, destination: str, settings: dict[str, Any]) -> None:
     s = StorageHandle(source)
     f = s.open()
 

@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 from loguru import logger
@@ -9,7 +10,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ensembl import schema_ndjson
 
 
-def ensembl(source: str, destination: str) -> None:
+def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
     jq_query = """
         .genes[] | {
             id: .id,
