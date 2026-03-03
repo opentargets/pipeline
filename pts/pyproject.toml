@@ -64,7 +64,7 @@ exclude = ["test"]
 opentargets-otter = 'otter'
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ['openpyxl', 'coverage', 'setuptools']
+DEP002 = ['openpyxl', 'coverage', 'setuptools', 'gcsfs']
 DEP004 = ['pytest']
 
 [tool.pytest.ini_options]
