@@ -2,6 +2,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
@@ -29,7 +30,9 @@ def disease_phenotype(source: dict[str, str], destination: str, settings: dict[s
         comment_prefix='#',
     )
     logger.debug('loading mondo dataset')
-    df_mondo = pl.read_json(source['mondo_path'], schema=ontology_schema)
+    h = StorageHandle(source['mondo_path'])
+    f = h.open()
+    df_mondo = pl.read_json(f, schema=ontology_schema)
 
     ############################################################################
     # mondo dataset
