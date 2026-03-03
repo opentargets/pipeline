@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
@@ -342,7 +342,7 @@ wheels = [
 [[package]]
 name = "clinical-mining"
 version = "0.1.0"
-source = { git = "https://github.com/opentargets/clinical_mining#df0b59facdf206b041fd5324e1b56758776d142e" }
+source = { git = "https://github.com/opentargets/clinical_mining#806f91a55853412c85ebc4360ead83ff716d6491" }
 dependencies = [
     { name = "altair" },
     { name = "connectorx" },
@@ -2102,7 +2102,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.3.0.dev23"
+version = "26.3.0.dev24"
 source = { editable = "." }
 dependencies = [
     { name = "clinical-mining" },

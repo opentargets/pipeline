@@ -16,6 +16,7 @@ from clinical_mining.data_sources.ema import extract_clinical_report as extract_
 from clinical_mining.data_sources.pmda import extract_clinical_report as extract_pmda_clinical_report
 from clinical_mining.data_sources.pmda import parse_pmda_approvals
 from clinical_mining.data_sources.ttd import extract_clinical_report as extract_ttd_clinical_report
+from clinical_mining.data_sources.ttd import extract_indication as extract_ttd_indication
 from clinical_mining.dataset import ClinicalReport
 from clinical_mining.schemas import ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
@@ -118,7 +119,10 @@ def clinical_report(
         molecule_dictionary=chembl_molecule_dictionary,
         warning_refs=chembl_drug_warning_references,
     )
-    ttd = extract_ttd_clinical_report(indications_path=source['ttd'])
+    ttd_txt_handler = StorageHandle(source['ttd'])
+    ttd_txt_lines = ttd_txt_handler.open('r').read().split('\n')
+    ttd_indications = extract_ttd_indication(ttd_txt_lines)
+    ttd = extract_ttd_clinical_report(indications=ttd_indications)
     ema_excel_handler = StorageHandle(source['ema'])
     ema_excel = ema_excel_handler.open('rb').read()
     ema = extract_ema_clinical_report(ema_excel, spark)
