@@ -119,7 +119,9 @@ def clinical_report(
         warning_refs=chembl_drug_warning_references,
     )
     ttd = extract_ttd_clinical_report(indications_path=source['ttd'])
-    ema = extract_ema_clinical_report(indications_path=source['ema'], spark=spark)
+    ema_excel_handler = StorageHandle(source['ema'])
+    ema_excel = ema_excel_handler.open('rb').read()
+    ema = extract_ema_clinical_report(ema_excel, spark)
 
     reports = union_dfs([pmda.df, aact.df, chembl_indication.df, chembl_drug_warning.df, ttd.df, ema.df])
     logger.info('reports generated. map entities...')
