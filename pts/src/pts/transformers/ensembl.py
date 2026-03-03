@@ -1,6 +1,4 @@
 import subprocess
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -54,8 +52,8 @@ def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
         }
     """.replace('\n', ' ').replace(' ', '')
     logger.info('transforming ensembl data into a ndjson')
-    tmp_local_copy = Path(f'{tempfile.gettempdir()}/ensembl.jsonl')
-    tmp_local_result = Path(f'{tempfile.gettempdir()}/ensembl_transformed.jsonl')
+    tmp_local_copy = f'{source}.copy.tmp'
+    tmp_processed = f'{source}.processed.tmp'
 
     s = StorageHandle(source)
     t = StorageHandle(tmp_local_copy, force_local=True)
@@ -73,13 +71,13 @@ def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
         logger.error(f'jq error: {jq.stderr}')
         raise OSError(f'jq error: {jq.stderr}')
 
-    logger.info(f'jq transformation complete into {tmp_local_result.absolute}')
+    r = StorageHandle(tmp_processed, force_local=True)
+    logger.info(f'jq transformation complete into {r.absolute}')
 
-    r = StorageHandle(tmp_local_result, force_local=True)
     with r.open('wt') as tmp_contents:
         tmp_contents.write(jq.stdout)
 
     logger.info('transforming ndjson into parquet')
 
-    pl.read_ndjson(tmp_local_result, schema=schema_ndjson).write_parquet(destination)
+    pl.read_ndjson(tmp_processed, schema=schema_ndjson).write_parquet(destination)
     logger.info('transformation complete')
