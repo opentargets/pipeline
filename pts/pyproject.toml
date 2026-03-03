@@ -17,10 +17,11 @@ dependencies = [
   "obonet>=0.3.1",
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
-  "clinical-mining",
   "ontoma==2.3.1",
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
+  "clinical-mining",
+  "pdfplumber>=0.11.9",
 ]
 
 [[tool.uv.index]]
@@ -31,7 +32,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
-clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.3.0" }
+clinical-mining = { git = "https://github.com/opentargets/clinical_mining" }
 
 
 [dependency-groups]

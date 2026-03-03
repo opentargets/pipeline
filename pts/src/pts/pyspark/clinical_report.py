@@ -4,6 +4,7 @@ import os
 from enum import StrEnum
 from functools import lru_cache
 
+import pdfplumber
 import polars as pl
 import torch
 from clinical_mining.data_sources.aact import extract_clinical_report as extract_aact_clinical_report
@@ -20,6 +21,7 @@ from clinical_mining.schemas import ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from pts.transformers.utils import update_quality_flag
@@ -85,7 +87,9 @@ def clinical_report(
     )
 
     logger.info('extract clinical report')
-    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_path=source['pmda']), spark=spark)
+    pmda_pdf_handler = StorageHandle(source['pmda'])
+    pmda_pdf = pdfplumber.open(pmda_pdf_handler.open('rb'))
+    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), spark=spark)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
