@@ -24,7 +24,12 @@ class GzipSpec(Spec):
 
 
 class Gzip(Task):
-    """Task that gzips a file."""
+    """Task that gzips a file.
+
+    This will always use a local file as source (in the machine's filesystem), because
+    we should never gzip a file from the outside without first making a copy of it
+    with PIS.
+    """
 
     def __init__(self, spec: GzipSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
