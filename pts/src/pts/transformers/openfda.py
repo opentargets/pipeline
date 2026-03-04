@@ -3,12 +3,18 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.openfda import schema
 
 
-def openfda(source: str, destination: str, settings: dict[str, Any]) -> None:
+def openfda(
+    source: str,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     h = StorageHandle(source)
     f = h.open('rb')
 

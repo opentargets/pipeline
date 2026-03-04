@@ -5,6 +5,7 @@ from typing import Any, TextIO, cast
 import obonet
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
@@ -72,7 +73,12 @@ def _rows_from_obo(graph) -> list[dict]:
     return rows
 
 
-def go(source: str, destination: str, settings: dict[str, Any]) -> None:
+def go(
+    source: str,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     logger.info('loading go obo file')
     h = StorageHandle(source)
     f = h.open('rt')

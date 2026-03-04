@@ -4,6 +4,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 
@@ -31,7 +32,12 @@ class FilteredJSONDecoder(json.JSONDecoder):
         return {k: v for k, v in obj.items() if k in self.allowed_keys}
 
 
-def homology(source: str, destination: str, settings: dict[str, Any]) -> None:
+def homology(
+    source: str,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     s = StorageHandle(source)
     f = s.open()
 

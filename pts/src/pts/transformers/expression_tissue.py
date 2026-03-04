@@ -2,10 +2,16 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 
-def expression_tissue(source: str, destination: str, settings: dict[str, Any]) -> None:
+def expression_tissue(
+    source: str,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     # load the ontology
     logger.debug('loading expression tissue')
     h = StorageHandle(source)
