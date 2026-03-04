@@ -1,6 +1,5 @@
 ---
 work_path: ../pipeline_work
-
 log_level: DEBUG
 pool_size: 4
 
@@ -108,8 +107,8 @@ steps:
     - name: explode_glob transform openfda drug events
       glob: input/openfda/**/*.zip
       do:
-        - name: transform ${match_path}${match_stem}
-          source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
+        - name: transform ${match_path}/${match_stem}
+          source: ${uri}
           destination: intermediate/openfda/${uuid}.parquet
           transformer: openfda
   ##################################################################################################
@@ -167,8 +166,8 @@ steps:
       glob: input/target/homologue/gene_dictionary/*.json
       do:
         - name: transform ${match_stem} to parquet
-          source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
-          destination: intermediate/target/homologue/gene_dictionary/${match_path}${match_stem}.parquet
+          source: ${uri}
+          destination: intermediate/target/homologue/gene_dictionary/${match_path}/${match_stem}.parquet
           transformer: homology
   ##################################################################################################
 
@@ -219,7 +218,6 @@ steps:
         openai_token_filename: /var/run/secrets/openai_token
       properties:
         'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
-
   ##################################################################################################
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
@@ -522,18 +520,18 @@ steps:
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action
-        hpa_data: input/target_engine/proteinatlas.json.gz
-        uniprot_slterms: input/target_engine/uniprot_locations.tsv.gz
-        mouse_pheno_scores: input/target_engine/mouse_pheno_scores.csv
+        hpa_data: input/target_prioritisation/proteinatlas.json.gz
+        uniprot_slterms: input/target_prioritisation/uniprot_locations.tsv.gz
+        mouse_pheno_scores: input/target_prioritisation/mouse_pheno_scores.csv
       destination: output/target_prioritisation
       properties:
         spark.driver.memory: 16g
   ##################################################################################################
 
-  #: TIMESERIES STEP :##############################################################################
-  timeseries:
-    - name: pyspark timeseries
-      pyspark: timeseries
+  #: ASSOCIATION STEP :##############################################################################
+  association:
+    - name: pyspark association
+      pyspark: association
       source:
         evidence: output/evidence_*
         disease: output/disease
@@ -585,7 +583,8 @@ steps:
             datatypeId: somatic_mutation
           - datasourceId: cancer_biomarkers
             weight: 1.0
-          - id: clinical_precedence
+            datatypeId: affected_pathway
+          - datasourceId: clinical_precedence
             weight: 1.0
             datatypeId: known_drug
           - datasourceId: crispr_screen
