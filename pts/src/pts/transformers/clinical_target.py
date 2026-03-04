@@ -12,9 +12,15 @@ from clinical_mining.dataset.clinical_indication import (
     ClinicalStageCategory,
 )
 from loguru import logger
+from otter.config.model import Config
 
 
-def clinical_target(source: dict[str, Path], destination: dict[str, Path], settings: dict[str, Any]) -> None:
+def clinical_target(
+    source: dict[str, Path],
+    destination: dict[str, Path],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     """Generate clinical target dataset from clinical report and drug mechanism of action data.
 
     Args:
@@ -26,6 +32,7 @@ def clinical_target(source: dict[str, Path], destination: dict[str, Path], setti
             - excluded: Path to write excluded clinical reports
         settings: Dictionary with settings:
             - invalid_clinical_report_qc: List of QC reasons to exclude
+        config: Config object (not used in this transformer)
     """
     logger.info(f'Source paths: {source}')
     reports = pl.read_parquet(source['clinical_report'])

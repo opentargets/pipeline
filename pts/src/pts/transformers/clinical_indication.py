@@ -6,9 +6,15 @@ from typing import Any
 import polars as pl
 from clinical_mining.dataset import ClinicalIndication
 from loguru import logger
+from otter.config.model import Config
 
 
-def clinical_indication(source: Path, destination: dict[str, Path], settings: dict[str, Any]) -> None:
+def clinical_indication(
+    source: Path,
+    destination: dict[str, Path],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     """Generate clinical indication dataset from clinical report data.
 
     Args:
@@ -18,6 +24,7 @@ def clinical_indication(source: Path, destination: dict[str, Path], settings: di
             - excluded: Path to write excluded clinical reports
         settings: Dictionary with settings:
             - invalid_clinical_report_qc: List of QC reasons to exclude
+        config: Config object (not used in this transformer)
     """
     logger.info(f'Source path: {source}')
     reports = pl.read_parquet(source)

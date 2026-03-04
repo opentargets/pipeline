@@ -3,12 +3,18 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
 
 
-def disease_hpo(source: Path, destination: Path, settings: dict[str, Any]) -> None:
+def disease_hpo(
+    source: Path,
+    destination: Path,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     # load the ontology
     logger.debug('loading hpo ontology')
     h = StorageHandle(source)

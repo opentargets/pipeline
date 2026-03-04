@@ -3,12 +3,18 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ensembl import schema_ndjson
 
 
-def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
+def ensembl(
+    source: str,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
     jq_query = """
         .genes[] | {
             id: .id,
@@ -51,13 +57,10 @@ def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
             }],
         }
     """.replace('\n', ' ').replace(' ', '')
-    logger.info('transforming ensembl data into a ndjson')
-    tmp_local_copy = f'{source}.copy.tmp'
-    tmp_processed = f'{source}.processed.tmp'
-
-    s = StorageHandle(source)
-    t = StorageHandle(tmp_local_copy, force_local=True)
-    s.copy_to(t)
+    logger.info(f'transforming ensembl data from {source} and writing as parquet to {destination}')
+    # we get a local handle to the ensembl file
+    s = StorageHandle(source, config=config, force_local=True)
+    t = StorageHandle(f'{s.absolute}.transformed.ndjson', force_local=True)
 
     # we will have to do it like this for now, until polars fixes https://github.com/pola-rs/polars/issues/17677
     logger.debug(f'Running jq on file: {s.absolute}')
@@ -70,14 +73,13 @@ def ensembl(source: str, destination: str, settings: dict[str, Any]) -> None:
     if jq.returncode != 0:
         logger.error(f'jq error: {jq.stderr}')
         raise OSError(f'jq error: {jq.stderr}')
+    logger.debug('jq transformation complete')
 
-    r = StorageHandle(tmp_processed, force_local=True)
-    logger.info(f'jq transformation complete into {r.absolute}')
-
-    with r.open('wt') as tmp_contents:
+    logger.debug(f'writing transformed data into temporary file: {t.absolute}')
+    with t.open('wt') as tmp_contents:
         tmp_contents.write(jq.stdout)
+    logger.debug(f'transformed data written into {t.absolute}')
 
-    logger.info('transforming ndjson into parquet')
-
-    pl.read_ndjson(tmp_processed, schema=schema_ndjson).write_parquet(destination)
+    logger.debug(f'transforming ndjson into parquet at {destination}')
+    pl.read_ndjson(t.absolute, schema=schema_ndjson).write_parquet(destination)
     logger.info('transformation complete')

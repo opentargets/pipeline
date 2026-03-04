@@ -25,7 +25,11 @@ class TransformSpec(Spec):
 
         The function should be available in the package `pts.transformers`.
 
-        It takes two arguments: the source path and the destination path.
+        It takes four arguments:
+            * source: a string or a dict of source paths
+            * destination: a string or a dict of destination paths
+            * settings: a dict of settings to pass to the transformer
+            * config: the config object
 
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
@@ -79,7 +83,12 @@ class Transform(Task):
         if not self.context.config.release_uri:
             self._prepare_dirs(self.dsts)
 
-        self.transformer(self.srcs, self.dsts, self.spec.settings or {})
+        self.transformer(
+            self.srcs,
+            self.dsts,
+            self.spec.settings or {},
+            self.context.config,
+        )
 
         srcs = list(self.srcs.values()) if isinstance(self.srcs, dict) else self.srcs
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
