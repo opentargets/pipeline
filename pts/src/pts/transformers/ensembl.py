@@ -8,6 +8,9 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ensembl import schema_ndjson
 
+# Only focusing on canonical chromosomes:
+INCLUDED_CHROMOSOMES = [str(i) for i in range(1, 23)] + ['X', 'Y', 'MT']
+
 
 def ensembl(
     source: str,
@@ -81,5 +84,10 @@ def ensembl(
     logger.debug(f'transformed data written into {t.absolute}')
 
     logger.debug(f'transforming ndjson into parquet at {destination}')
-    pl.read_ndjson(t.absolute, schema=schema_ndjson).write_parquet(destination)
+    (
+        pl
+        .read_ndjson(t.absolute, schema=schema_ndjson)
+        .filter(pl.col('chromosome').is_in(INCLUDED_CHROMOSOMES))
+        .write_parquet(destination)
+    )
     logger.info('transformation complete')
