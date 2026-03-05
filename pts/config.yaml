@@ -446,7 +446,7 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - INDICATION_NOT_VALIDATED
+          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 

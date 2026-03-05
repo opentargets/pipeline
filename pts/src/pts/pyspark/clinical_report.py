@@ -30,8 +30,8 @@ from pts.transformers.utils import update_quality_flag
 
 class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
-    HETEROGENEOUS_DISEASES = 'HETEROGENEOUS_DISEASES'
     UNVALIDATED_INDICATION = 'UNVALIDATED_INDICATION'
+    INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
 
 
 def clinical_report(
@@ -147,6 +147,7 @@ def clinical_report(
         .pipe(create_title)
         .pipe(flag_phase_iv_not_approved)
         .pipe(flag_unvalidated_report)
+        .pipe(flag_indirect_primary_purpose)
     )
 
     logger.info(f'destination paths: {destination}')
@@ -351,6 +352,20 @@ def flag_unvalidated_report(reports: ClinicalReport) -> ClinicalReport:
                 pl.col('id').is_in(flagged_ids['id'].to_list())
             ),
             flag_text=ClinicalReportFlags.UNVALIDATED_INDICATION.value,
+        )
+    )
+
+
+def flag_indirect_primary_purpose(reports: ClinicalReport) -> ClinicalReport:
+    """Flag reports where the primary purpose is indirect."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=(
+                # Flag consists of reports where the primary purpose is indirect
+                pl.col('trialPrimaryPurpose').is_in(['DEVICE_FEASIBILITY', 'DIAGNOSTIC'])
+            ),
+            flag_text=ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE.value,
         )
     )
 
