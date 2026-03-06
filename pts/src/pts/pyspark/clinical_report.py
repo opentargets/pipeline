@@ -146,7 +146,7 @@ def clinical_report(
         .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
         .pipe(create_title)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_unvalidated_report)
+        .pipe(flag_unvalidated_indication)
         .pipe(flag_indirect_primary_purpose)
     )
 
@@ -314,31 +314,51 @@ def flag_phase_iv_not_approved(reports: ClinicalReport) -> ClinicalReport:
     )
 
 
-def flag_unvalidated_report(reports: ClinicalReport) -> ClinicalReport:
+def flag_unvalidated_indication(reports: ClinicalReport) -> ClinicalReport:
     """Adds flag to reports where any of the indications hasn't been seen in a simple study.
 
     Simple study: report with a single reported condition and drug
     """
-    high_confidence_indications = (
-        reports.df
-        .filter(
-            (pl.col('diseases').list.len() == 1) & (pl.col('drugs').list.len() == 1)
-            | pl.col('clinicalStage').is_in([ClinicalStageCategory.APPROVAL, ClinicalStageCategory.PREAPPROVAL])
-        )
-        .explode('diseases')
-        .explode('drugs')
-        .with_columns(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
-        .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
-    )
+    high_confidence_indications = pl.concat([
+        # INDICATIONS FROM TRIALS REPORTING A SINGLE DISEASE AND DRUG
+        (
+            reports.df
+            .explode('diseases')
+            .explode('drugs')
+            .unnest('drugs')
+            .unnest('diseases')
+            .group_by('id')
+            .agg(
+                pl.col('diseaseId').unique().alias('diseaseIds'),
+                pl.col('drugId').unique().alias('drugIds'),
+                pl.col('diseaseFromSource').unique().alias('diseaseFromSources'),
+                pl.col('drugFromSource').unique().alias('drugFromSources'),
+            )
+            .filter((pl.col('diseaseFromSources').list.len() == 1) & (pl.col('drugFromSources').list.len() == 1))
+            .select('diseaseIds', 'drugIds')
+            .explode('diseaseIds')
+            .explode('drugIds')
+            .rename({'diseaseIds': 'diseaseId', 'drugIds': 'drugId'})
+            .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
+        ),
+        # INDICATIONS FROM APPROVED/PREAPPROVED REPORTS
+        (
+            reports.df
+            .filter(pl.col('clinicalStage').is_in([ClinicalStageCategory.APPROVAL, ClinicalStageCategory.PREAPPROVAL]))
+            .explode('diseases')
+            .explode('drugs')
+            .select(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
+            .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
+        ),
+    ]).unique()
 
     # Flag reports where the drug/disease pair is NOT part of the high confidence set
     flagged_ids = (
         reports.df
         .explode('diseases')
         .explode('drugs')
-        .with_columns(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
+        .select(pl.col('id'), pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
         .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
-        .select(['id', 'diseaseId', 'drugId'])
         .join(high_confidence_indications, on=['diseaseId', 'drugId'], how='anti')
         .select('id')
         .unique()
