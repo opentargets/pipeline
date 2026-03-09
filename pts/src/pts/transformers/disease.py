@@ -8,6 +8,77 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import node
 
 
+def _replace_obsolete_in_column(
+    disease: pl.DataFrame,
+    col_name: str,
+    obsolete_map: pl.DataFrame,
+) -> pl.DataFrame:
+    """Replace obsolete terms in a single list column using the obsolete->current mapping.
+
+    Args:
+        disease: disease index DataFrame
+        col_name: name of the list column to process
+        obsolete_map: DataFrame with columns 'obsolete_term' and 'current_id'
+
+    Returns:
+        DataFrame with obsolete terms replaced in the specified column
+    """
+    fixed = (
+        disease
+        .select(['id', col_name])
+        .explode(col_name)
+        .join(
+            obsolete_map.rename({'obsolete_term': col_name}),
+            on=col_name,
+            how='left',
+        )
+        .with_columns(
+            pl.when(pl.col('current_id').is_not_null())
+            .then(pl.col('current_id'))
+            .otherwise(pl.col(col_name))
+            .alias(col_name)
+        )
+        .drop('current_id')
+        .unique()
+        .group_by('id')
+        .agg(pl.col(col_name).drop_nulls().unique())
+    )
+    return (
+        disease
+        .drop(col_name)
+        .join(fixed, on='id', how='left')
+        .with_columns(pl.col(col_name).fill_null(pl.Series([[]], dtype=pl.List(pl.String))))
+    )
+
+
+def replace_obsolete_terms(disease: pl.DataFrame) -> pl.DataFrame:
+    """Replace obsolete terms in relationship columns with their current IDs.
+
+    Any term listed in a row's `obsoleteTerms` that appears in `parents`,
+    `children`, `ancestors`, or `descendants` of any row is replaced with
+    the `id` that supersedes it.
+
+    Args:
+        disease: disease index DataFrame containing `obsoleteTerms` column
+
+    Returns:
+        DataFrame with obsolete terms replaced in all relationship columns
+    """
+    obsolete_map = (
+        disease
+        .select(['id', 'obsoleteTerms'])
+        .explode('obsoleteTerms')
+        .drop_nulls('obsoleteTerms')
+        .rename({'id': 'current_id', 'obsoleteTerms': 'obsolete_term'})
+    )
+
+    relationship_columns = ['parents', 'children', 'ancestors', 'descendants']
+    for col_name in relationship_columns:
+        disease = _replace_obsolete_in_column(disease, col_name, obsolete_map)
+
+    return disease
+
+
 def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
     """De-duplicate disease table where rows contain the same label or differ only in casing.
 
@@ -423,7 +494,7 @@ def disease(
     ).drop('isTherapeuticArea')
 
     # De-duplication of labels:
-    dedup_disease_index = deduplicate_disease(n_ontology).with_columns(
+    dedup_disease_index = replace_obsolete_terms(deduplicate_disease(n_ontology)).with_columns(
         synonyms=pl.struct(
             hasExactSynonym=pl.col('exactSynonyms'),
             hasRelatedSynonym=pl.col('relatedSynonyms'),
