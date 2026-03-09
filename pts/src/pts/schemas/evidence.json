@@ -20,6 +20,12 @@
     },
     {
       "metadata": {},
+      "name": "actionType",
+      "nullable": true,
+      "type": "string"
+    },
+    {
+      "metadata": {},
       "name": "biomarkerName",
       "nullable": true,
       "type": "string"

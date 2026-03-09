@@ -181,14 +181,12 @@ class Evidence:
     def assign_direction_on_target(
         self: Evidence,
         direction_on_target_expression: str | None,
-        mechanism_of_action_lut: DataFrame | None,
         target_lut: DataFrame | None,
     ) -> Evidence:
         """Assign direction of target for evidence.
 
         Args:
             direction_on_target_expression (str | None): spark sql expression to compute direction
-            mechanism_of_action_lut (DataFrame | None): drug mechanism of action look up table
             target_lut (DataFrame | None): target look up table
 
         Returns:
@@ -197,23 +195,13 @@ class Evidence:
         Raises:
             ValueError: if "drugId" column is missing if moa dataset is used.
         """
-        unused_columns = ['moaType', 'TSorOncogene']
+        unused_columns = ['actionType', 'TSorOncogene']
 
-        # If no expression is provided return evidence unchanged:
+        # If no expression is provided, return evidence unchanged:
         if direction_on_target_expression is None:
             return self
 
         evidence_df = self.df
-
-        # Mechanism of action requires the presence of drugId column:
-        if mechanism_of_action_lut:
-            if 'drugId' not in evidence_df.columns:
-                raise ValueError(
-                    'To use mechanism of action to annotate effect on target, "drugId" column must be in evidence.'
-                )
-
-            # Update evidence data frame, apply expression, and drop unused column:
-            evidence_df = evidence_df.join(mechanism_of_action_lut, on=['targetId', 'drugId'], how='left')
 
         if target_lut:
             evidence_df = evidence_df.join(
@@ -311,15 +299,7 @@ class Evidence:
 
         # Assign date - filter nulls before taking min, as array_min returns null if any element is null:
         return Evidence(
-            self.df.withColumn(
-                'evidenceDate',
-                f.array_min(
-                    f.filter(
-                        f.array(dating_columns),
-                        lambda x: x.isNotNull()
-                    )
-                )
-            )
+            self.df.withColumn('evidenceDate', f.array_min(f.filter(f.array(dating_columns), lambda x: x.isNotNull())))
         )
 
     def resolve_direction_of_effect(self: Evidence, mechanism_of_action: DataFrame) -> Evidence:

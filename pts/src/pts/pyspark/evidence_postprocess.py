@@ -76,7 +76,6 @@ def evidence_postprocess(
         .assign_direction_on_trait(settings.get('direction_on_trait_expression'))
         .assign_direction_on_target(
             direction_on_target_expression=settings.get('direction_on_target_expression'),
-            mechanism_of_action_lut=lookup_tables.mechanism_of_action_lut,
             target_lut=lookup_tables.target_lut,
         )
         # Hash long variant identifiers:

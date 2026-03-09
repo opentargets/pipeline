@@ -66,7 +66,7 @@ def clinical_precedence(
     )
 
     # Prepare drug_mechanism_of_action: explode chemblIds to get drugId, keep targets
-    drug_moa_exploded = drug_moa_df.select(f.explode('chemblIds').alias('drugId'), 'targets')
+    drug_moa_exploded = drug_moa_df.select(f.explode('chemblIds').alias('drugId'), 'targets', 'actionType')
 
     # Join and explode targets
     evidence = (
@@ -88,6 +88,7 @@ def clinical_precedence(
             'targetFromSourceId',
             f.lit('clinical_precedence').alias('datasourceId'),
             f.lit('clinical').alias('datatypeId'),
+            'actionType',
         )
     )
 
