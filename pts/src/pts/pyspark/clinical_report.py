@@ -109,12 +109,12 @@ def clinical_report(
         logger.info('categorise stop reasons... complete')
     else:
         aact = ClinicalReport(df=aact.df.with_columns(trialStopReasonCategories=pl.lit(None, dtype=pl.List(pl.String))))
-    chembl_indication = extract_chembl_clinical_report(
+    chembl_indication_report = extract_chembl_clinical_report(
         drug_indication=chembl_indication,
         molecule_dictionary=chembl_molecule_dictionary,
         indication_refs=chembl_indication_references,
-    ).pipe(lambda self: ClinicalReport(filter_df(self.df, "source != 'ClinicalTrials'")))
-    chembl_drug_warning = extract_drug_warning_clinical_report(
+    )
+    chembl_drug_warning_report = extract_drug_warning_clinical_report(
         drug_warning=chembl_drug_warning,
         molecule_dictionary=chembl_molecule_dictionary,
         warning_refs=chembl_drug_warning_references,
@@ -127,7 +127,15 @@ def clinical_report(
     ema_excel = ema_excel_handler.open('rb').read()
     ema = extract_ema_clinical_report(ema_excel, spark)
 
-    reports = union_dfs([pmda.df, aact.df, chembl_indication.df, chembl_drug_warning.df, ttd.df, ema.df])
+    reports = union_dfs([
+        pmda.df,
+        aact.df,
+        # Remove ClinicalTrials reports from ChEMBL indications as they are already included in AACT
+        chembl_indication_report.pipe(lambda self: ClinicalReport(filter_df(self.df, "source != 'ClinicalTrials'"))).df,
+        chembl_drug_warning_report.df,
+        ttd.df,
+        ema.df,
+    ])
     logger.info('reports generated. map entities...')
     output = (
         ClinicalReport
@@ -146,8 +154,8 @@ def clinical_report(
         .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
         .pipe(create_title)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_unvalidated_indication)
         .pipe(flag_indirect_primary_purpose)
+        .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
     logger.info(f'destination paths: {destination}')
@@ -314,7 +322,10 @@ def flag_phase_iv_not_approved(reports: ClinicalReport) -> ClinicalReport:
     )
 
 
-def flag_unvalidated_indication(reports: ClinicalReport) -> ClinicalReport:
+def flag_unvalidated_indication(
+    reports: ClinicalReport,
+    chembl_indication_report: ClinicalReport | None = None,
+) -> ClinicalReport:
     """Adds flag to reports where any of the indications hasn't been seen in a simple study.
 
     Simple study: report with a single reported condition and drug
@@ -349,6 +360,20 @@ def flag_unvalidated_indication(reports: ClinicalReport) -> ClinicalReport:
             .explode('drugs')
             .select(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
             .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
+        ),
+        # INDICATIONS FROM OFFICIAL CHEMBL RECORDS
+        (
+            chembl_indication_report.df
+            .explode('diseases')
+            .explode('drugs')
+            .select(
+                pl.col('diseases').struct.field('diseaseId'),
+                pl.col('drugs').struct.field('drugId'),
+            )
+            .drop_nulls()
+            .unique()
+            if chembl_indication_report is not None
+            else pl.DataFrame(schema={'diseaseId': pl.String, 'drugId': pl.String})
         ),
     ]).unique()
 
