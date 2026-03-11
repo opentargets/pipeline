@@ -8,32 +8,18 @@ to produce the final drug index. Filters to include only molecules that qualify 
 from typing import Any
 
 import pyspark.sql.functions as f
+from clinical_mining.dataset.clinical_indication import CATEGORY_RANKS_STR, RANK_TO_CATEGORY_STR
 from loguru import logger
 from pyspark.sql import DataFrame
 from pyspark.sql.types import StringType
 
 from pts.pyspark.common.session import Session
 
-# Stage ranking: lower rank = more advanced stage
-CLINICAL_STAGE_RANKS = {
-    'APPROVAL': 1,
-    'PREAPPROVAL': 2,
-    'PHASE_3': 3,
-    'PHASE_2_3': 4,
-    'PHASE_2': 5,
-    'PHASE_1_2': 6,
-    'PHASE_1': 7,
-    'EARLY_PHASE_1': 8,
-    'IND': 9,
-    'PRECLINICAL': 10,
-    'UNKNOWN': 11,
-}
-
 # Stages that should be treated as APPROVAL when computing the max
 STAGE_FOR_MAX_MAPPING = {'WITHDRAWAL': 'APPROVAL', 'PHASE_4': 'APPROVAL'}
 
 STAGE_DISPLAY_NAMES = {
-    'APPROVAL': 'approved',
+    'APPROVAL': 'approval',
     'PREAPPROVAL': 'pre-approval',
     'PHASE_3': 'phase III',
     'PHASE_2_3': 'phase II/III',
@@ -44,10 +30,7 @@ STAGE_DISPLAY_NAMES = {
     'IND': 'IND',
     'PRECLINICAL': 'preclinical',
     'UNKNOWN': 'unknown',
-}
-
-# Inverse mapping: rank -> stage string
-RANK_TO_STAGE = {v: k for k, v in CLINICAL_STAGE_RANKS.items()}
+}  # remove
 
 
 def drug_molecule(
@@ -236,11 +219,13 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
     ])
     # Build mapping expression for stage -> rank
     rank_mapping = f.create_map(*[
-        item for pair in CLINICAL_STAGE_RANKS.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
+        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
     ])
     # Build mapping expression for rank -> display name
     rank_to_display = f.create_map(*[
-        item for rank, stage in RANK_TO_STAGE.items() for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
+        item
+        for rank, stage in RANK_TO_CATEGORY_STR.items()
+        for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
     ])
 
     return (
@@ -262,7 +247,7 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
         # Map stage to rank
         .withColumn(
             'stageRank',
-            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(CLINICAL_STAGE_RANKS['UNKNOWN'])),
+            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(CATEGORY_RANKS_STR['UNKNOWN'])),
         )
         # Group by drug, take minimum rank (= best stage)
         .groupBy('id')
@@ -295,10 +280,12 @@ def _process_clinical_report_indications(
         item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
     ])
     rank_mapping = f.create_map(*[
-        item for pair in CLINICAL_STAGE_RANKS.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
+        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
     ])
     rank_to_display = f.create_map(*[
-        item for rank, stage in RANK_TO_STAGE.items() for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
+        item
+        for rank, stage in RANK_TO_CATEGORY_STR.items()
+        for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
     ])
 
     # Explode drugs and diseases, filter to rows with both IDs
@@ -323,7 +310,7 @@ def _process_clinical_report_indications(
         # Map to rank
         .withColumn(
             'stageRank',
-            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(CLINICAL_STAGE_RANKS['UNKNOWN'])),
+            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(RANK_TO_CATEGORY_STR['UNKNOWN'])),
         )
     )
 
@@ -445,9 +432,9 @@ def _generate_description(
 
         if approved and not investigational_count:
             if len(approved) <= 2:
-                indication_str = f' and is indicated for {_join_semantic(approved)}'
+                indication_str = f' and indicated for {_join_semantic(approved)}'
             else:
-                indication_str = f' and has {len(approved)} approved indications'
+                indication_str = f' and {len(approved)} approved indications'
         elif not approved and investigational_count:
             s = 's' if investigational_count > 1 else ''
             indication_str = f' and has {investigational_count} investigational indication{s}'
