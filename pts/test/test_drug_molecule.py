@@ -572,7 +572,7 @@ class TestProcessDrugIndex:
         )
         chembl3 = result.filter(f.col('id') == 'CHEMBL3').collect()[0]
         xrefs = {xref['source']: xref['ids'] for xref in chembl3['crossReferences']}
-        assert 'probes&drugs' in xrefs
+        assert 'Probes&Drugs' in xrefs
 
     @pytest.mark.slow
     def test_non_probe_has_no_probes_drugs_xref(
