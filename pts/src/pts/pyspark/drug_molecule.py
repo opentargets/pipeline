@@ -23,23 +23,17 @@ _DEFAULT_STAGE_NAME_VALUE = RANK_TO_CATEGORY_STR[_DEFAULT_STAGE_RANK_VALUE]
 
 @cache
 def _stage_normalization_map() -> Column:
-    return f.create_map(*[
-        item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
+    return f.create_map(*[item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))])
 
 
 @cache
 def _stage_rank_map() -> Column:
-    return f.create_map(*[
-        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
+    return f.create_map(*[item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))])
 
 
 @cache
 def _rank_to_stage_map() -> Column:
-    return f.create_map(*[
-        item for rank, stage in RANK_TO_CATEGORY_STR.items() for item in (f.lit(rank), f.lit(stage))
-    ])
+    return f.create_map(*[item for rank, stage in RANK_TO_CATEGORY_STR.items() for item in (f.lit(rank), f.lit(stage))])
 
 
 def _normalize_stage(stage: Column) -> Column:
@@ -55,27 +49,10 @@ def _stage_name_from_rank(rank: Column) -> Column:
     return f.coalesce(_rank_to_stage_map()[rank], f.lit(_DEFAULT_STAGE_NAME_VALUE))
 
 
-STAGE_DISPLAY_NAMES = {
-    'APPROVAL': 'approved',
-    'PREAPPROVAL': 'preapproval',
-    'PHASE_4': 'phase IV',
-    'PHASE_3': 'phase III',
-    'PHASE_2_3': 'phase II/III',
-    'PHASE_2': 'phase II',
-    'PHASE_1_2': 'phase I/II',
-    'PHASE_1': 'phase I',
-    'EARLY_PHASE_1': 'early phase I',
-    'IND': 'IND',
-    'PRECLINICAL': 'preclinical',
-    'UNKNOWN': 'unknown',
-    'WITHDRAWAL': 'withdrawal',
-}
-
-
 def _friendly_stage_label(stage: str | None) -> str | None:
     if stage is None:
         return None
-    return STAGE_DISPLAY_NAMES.get(stage, stage.lower())
+    return stage.replace('_', ' ').lower().title()
 
 
 def drug_molecule(
@@ -218,10 +195,7 @@ def process_drug_index(
     # - are present in clinical reports (maximumClinicalStage is not null), OR
     # - mechanism of action, OR
     # - are a chemical probe
-    has_valid_stage = (
-        f.col('maximumClinicalStage').isNotNull()
-        & (f.col('maximumClinicalStage') != 'UNKNOWN')
-    )
+    has_valid_stage = f.col('maximumClinicalStage').isNotNull() & (f.col('maximumClinicalStage') != 'UNKNOWN')
 
     is_drug = (
         f.expr("array_contains(transform(crossReferences, x -> x.source), 'drugbank')")
@@ -244,7 +218,6 @@ def process_drug_index(
             'hasMechanismOfAction',
             'indications',
         )
-        .transform(_cleanup)
         .dropDuplicates(['id'])
     )
 
@@ -435,23 +408,22 @@ def _generate_description(
 
         if approved and not investigational_count:
             if len(approved) <= 2:
-                indication_str = f' and indicated for {_join_semantic(approved)}'
+                indication_str = f', with an approval for {_join_semantic(approved)}'
             else:
-                indication_str = f' and {len(approved)} approved indications'
+                indication_str = f', with an approval for {len(approved)} indications'
         elif not approved and investigational_count:
             s = 's' if investigational_count > 1 else ''
-            indication_str = f' and has {investigational_count} investigational indication{s}'
+            indication_str = f', with {investigational_count} investigational indication{s}'
         elif approved and investigational_count:
             s = 's' if investigational_count > 1 else ''
             if len(approved) <= 2:
                 approved_str = _join_semantic(approved)
                 indication_str = (
-                    f' and is indicated for {approved_str}'
-                    f' and has {investigational_count} investigational indication{s}'
+                    f', with an approval for {approved_str} and {investigational_count} investigational indication{s}'
                 )
             else:
                 indication_str = (
-                    f' and has {len(approved)} approved and {investigational_count} investigational indication{s}'
+                    f', with {len(approved)} approved and {investigational_count} investigational indication{s}'
                 )
 
     return f'{main_note}{phase_str}{indication_str}.'
@@ -471,18 +443,3 @@ def _join_semantic(items: list[str]) -> str:
     if len(items) == 1:
         return items[0]
     return f'{", ".join(items[:-1])} and {items[-1]}'
-
-
-def _cleanup(df: DataFrame) -> DataFrame:
-    """Ensure array columns have empty arrays instead of nulls.
-
-    Args:
-        df: DataFrame to clean up.
-
-    Returns:
-        Cleaned DataFrame.
-    """
-    for column in ['tradeNames', 'synonyms']:
-        if column in df.columns:
-            df = df.withColumn(column, f.coalesce(f.col(column), f.array()))
-    return df

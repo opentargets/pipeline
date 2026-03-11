@@ -11,7 +11,6 @@ from pyspark.sql.types import (
 )
 
 from pts.pyspark.drug_molecule import (
-    _cleanup,
     _compute_max_phase_per_drug,
     _generate_description,
     _join_semantic,
@@ -369,8 +368,8 @@ class TestGenerateDescription:
             ['rheumatoid arthritis'],
         )
         assert 'Small molecule drug' in result
-        assert 'approved' in result
-        assert 'indicated for rheumatoid arthritis' in result
+        assert 'Approval' in result
+        assert 'approval for rheumatoid arthritis' in result
 
     def test_phase_3_drug(self):
         """Drug in phase III with one investigational indication."""
@@ -381,7 +380,7 @@ class TestGenerateDescription:
             ['breast cancer'],
         )
         assert 'Antibody drug' in result
-        assert 'phase III' in result
+        assert 'Phase 3' in result
         assert '1 investigational indication' in result
 
     def test_multiple_approved_indications(self):
@@ -392,7 +391,7 @@ class TestGenerateDescription:
             ['APPROVAL', 'APPROVAL', 'APPROVAL'],
             ['disease a', 'disease b', 'disease c'],
         )
-        assert '3 approved indications' in result
+        assert 'approval for 3 indications' in result
 
     def test_two_approved_indications_listed(self):
         """Drug with exactly two approved indications lists them."""
@@ -413,7 +412,7 @@ class TestGenerateDescription:
             ['APPROVAL', 'PHASE_2'],
             ['disease a', 'disease b'],
         )
-        assert 'indicated for disease a' in result
+        assert 'approval for disease a' in result
         assert '1 investigational indication' in result
 
     def test_none_drug_type(self):
@@ -463,37 +462,6 @@ class TestJoinSemantic:
 
     def test_three_items(self):
         assert _join_semantic(['a', 'b', 'c']) == 'a, b and c'
-
-
-# --- Tests for _cleanup ---
-
-
-class TestCleanup:
-    def test_null_arrays_become_empty(self, spark):
-        """Null tradeNames and synonyms should become empty arrays."""
-        data = [Row(id='CHEMBL1', tradeNames=None, synonyms=None)]
-        schema = StructType([
-            StructField('id', StringType()),
-            StructField('tradeNames', ArrayType(StringType())),
-            StructField('synonyms', ArrayType(StringType())),
-        ])
-        df = spark.createDataFrame(data, schema=schema)
-        result = _cleanup(df).collect()[0]
-        assert result['tradeNames'] == []
-        assert result['synonyms'] == []
-
-    def test_existing_arrays_preserved(self, spark):
-        """Non-null arrays should remain unchanged."""
-        data = [Row(id='CHEMBL1', tradeNames=['T1'], synonyms=['S1'])]
-        schema = StructType([
-            StructField('id', StringType()),
-            StructField('tradeNames', ArrayType(StringType())),
-            StructField('synonyms', ArrayType(StringType())),
-        ])
-        df = spark.createDataFrame(data, schema=schema)
-        result = _cleanup(df).collect()[0]
-        assert result['tradeNames'] == ['T1']
-        assert result['synonyms'] == ['S1']
 
 
 # --- Tests for process_drug_index ---
@@ -755,25 +723,3 @@ class TestProcessDrugIndex:
         total = result.count()
         distinct = result.select('id').distinct().count()
         assert total == distinct
-
-    def test_null_arrays_are_empty(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
-        """TradeNames and synonyms should never be null in output."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        null_trade = result.filter(f.col('tradeNames').isNull()).count()
-        null_syn = result.filter(f.col('synonyms').isNull()).count()
-        assert null_trade == 0
-        assert null_syn == 0
