@@ -485,7 +485,7 @@ steps:
       source: output/clinical_report/clinical_report.parquet
       destination:
         output: output/clinical_indication/clinical_indication.parquet
-        excluded: excluded/clinical_indication_failed_report.parquet
+        excluded: excluded/clinical_indication_failed_report/clinical_indication_failed_report.parquet
       transformer: clinical_indication
       settings:
         invalid_clinical_report_qc:
@@ -502,7 +502,7 @@ steps:
         drug_mechanism_of_action: output/drug_mechanism_of_action/*.parquet
       destination:
         output: output/clinical_target/clinical_target.parquet
-        excluded: excluded/clinical_target_failed_report.parquet
+        excluded: excluded/clinical_target_failed_report/clinical_target_failed_report.parquet
       transformer: clinical_target
       settings:
         invalid_clinical_report_qc:
@@ -1070,31 +1070,31 @@ steps:
           - drugId
           - clinicalReportId
         direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'protect' END
-        direction_on_target_expression: "CASE 
-            WHEN actionType IN (
-              'RNAI INHIBITOR', 
-              'NEGATIVE MODULATOR', 
-              'NEGATIVE ALLOSTERIC MODULATOR', 
-              'ANTAGONIST', 
-              'ANTISENSE INHIBITOR', 
-              'BLOCKER', 
-              'INHIBITOR', 
-              'DEGRADER', 
-              'INVERSE AGONIST', 
-              'ALLOSTERIC ANTAGONIST', 
-              'DISRUPTING AGENT'
-              'GENE EDITING NEGATIVE MODULATOR'
-            ) THEN 'LoF' 
-            WHEN actionType IN (
-              'PARTIAL AGONIST', 
-              'ACTIVATOR', 
-              'POSITIVE ALLOSTERIC MODULATOR', 
-              'POSITIVE MODULATOR', 
-              'AGONIST', 
-              'SEQUESTERING AGENT', 
-              'STABILISER'
-            ) THEN 'GoF' 
-            ELSE NULL 
+        direction_on_target_expression: "CASE
+          WHEN actionType IN (
+          'RNAI INHIBITOR',
+          'NEGATIVE MODULATOR',
+          'NEGATIVE ALLOSTERIC MODULATOR',
+          'ANTAGONIST',
+          'ANTISENSE INHIBITOR',
+          'BLOCKER',
+          'INHIBITOR',
+          'DEGRADER',
+          'INVERSE AGONIST',
+          'ALLOSTERIC ANTAGONIST',
+          'DISRUPTING AGENT'
+          'GENE EDITING NEGATIVE MODULATOR'
+          ) THEN 'LoF'
+          WHEN actionType IN (
+          'PARTIAL AGONIST',
+          'ACTIVATOR',
+          'POSITIVE ALLOSTERIC MODULATOR',
+          'POSITIVE MODULATOR',
+          'AGONIST',
+          'SEQUESTERING AGENT',
+          'STABILISER'
+          ) THEN 'GoF'
+          ELSE NULL
           END"
 
   evidence_postprocess_reactome:
