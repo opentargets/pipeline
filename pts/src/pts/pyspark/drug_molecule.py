@@ -5,22 +5,60 @@ to produce the final drug index. Filters to include only molecules that qualify 
 "drugs" and generates human-readable descriptions.
 """
 
+from functools import cache
 from typing import Any
 
 import pyspark.sql.functions as f
 from clinical_mining.dataset.clinical_indication import CATEGORY_RANKS_STR, RANK_TO_CATEGORY_STR
 from loguru import logger
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import StringType
 
 from pts.pyspark.common.session import Session
 
-# Stages that should be treated as APPROVAL when computing the max
 STAGE_FOR_MAX_MAPPING = {'WITHDRAWAL': 'APPROVAL', 'PHASE_4': 'APPROVAL'}
+_DEFAULT_STAGE_RANK_VALUE = CATEGORY_RANKS_STR['UNKNOWN']
+_DEFAULT_STAGE_NAME_VALUE = RANK_TO_CATEGORY_STR[_DEFAULT_STAGE_RANK_VALUE]
+
+
+@cache
+def _stage_normalization_map() -> Column:
+    return f.create_map(*[
+        item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
+    ])
+
+
+@cache
+def _stage_rank_map() -> Column:
+    return f.create_map(*[
+        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
+    ])
+
+
+@cache
+def _rank_to_stage_map() -> Column:
+    return f.create_map(*[
+        item for rank, stage in RANK_TO_CATEGORY_STR.items() for item in (f.lit(rank), f.lit(stage))
+    ])
+
+
+def _normalize_stage(stage: Column) -> Column:
+    return f.coalesce(_stage_normalization_map()[stage], stage)
+
+
+def _stage_rank(stage: Column) -> Column:
+    normalized_stage = _normalize_stage(stage)
+    return f.coalesce(_stage_rank_map()[normalized_stage], f.lit(_DEFAULT_STAGE_RANK_VALUE))
+
+
+def _stage_name_from_rank(rank: Column) -> Column:
+    return f.coalesce(_rank_to_stage_map()[rank], f.lit(_DEFAULT_STAGE_NAME_VALUE))
+
 
 STAGE_DISPLAY_NAMES = {
-    'APPROVAL': 'approval',
-    'PREAPPROVAL': 'pre-approval',
+    'APPROVAL': 'approved',
+    'PREAPPROVAL': 'preapproval',
+    'PHASE_4': 'phase IV',
     'PHASE_3': 'phase III',
     'PHASE_2_3': 'phase II/III',
     'PHASE_2': 'phase II',
@@ -30,7 +68,14 @@ STAGE_DISPLAY_NAMES = {
     'IND': 'IND',
     'PRECLINICAL': 'preclinical',
     'UNKNOWN': 'unknown',
-}  # remove
+    'WITHDRAWAL': 'withdrawal',
+}
+
+
+def _friendly_stage_label(stage: str | None) -> str | None:
+    if stage is None:
+        return None
+    return STAGE_DISPLAY_NAMES.get(stage, stage.lower())
 
 
 def drug_molecule(
@@ -154,6 +199,8 @@ def process_drug_index(
         .join(has_mechanism, on='id', how='left_outer')
     )
 
+    drug_df = drug_df.withColumn('maximumClinicalStage', f.coalesce(f.col('maximumClinicalStage'), f.lit('UNKNOWN')))
+
     # Append probes&drugs cross-reference when the molecule is a chemical probe
     drug_df = drug_df.withColumn(
         'crossReferences',
@@ -171,9 +218,14 @@ def process_drug_index(
     # - are present in clinical reports (maximumClinicalStage is not null), OR
     # - mechanism of action, OR
     # - are a chemical probe
+    has_valid_stage = (
+        f.col('maximumClinicalStage').isNotNull()
+        & (f.col('maximumClinicalStage') != 'UNKNOWN')
+    )
+
     is_drug = (
         f.expr("array_contains(transform(crossReferences, x -> x.source), 'drugbank')")
-        | f.col('maximumClinicalStage').isNotNull()  # ty:ignore[missing-argument]
+        | has_valid_stage  # ty:ignore[missing-argument]
         | f.col('hasMechanismOfAction').isNotNull()  # ty:ignore[missing-argument]
         | f.col('chemicalProbeDrugId').isNotNull()  # ty:ignore[missing-argument]
     )
@@ -185,10 +237,6 @@ def process_drug_index(
     return (
         drug_df
         .filter(is_drug)
-        .withColumn(
-            'maximumClinicalStage',
-            f.coalesce(f.col('maximumClinicalStage'), f.lit(STAGE_DISPLAY_NAMES['UNKNOWN'])),
-        )
         .drop(
             'chemicalProbeDrugId',
             '_probeXrefDrugId',
@@ -213,21 +261,6 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
     Returns:
         DataFrame with columns: id (drugId), maximumClinicalStage (string display name).
     """
-    # Build mapping expression for stage normalization
-    stage_mapping = f.create_map(*[
-        item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
-    # Build mapping expression for stage -> rank
-    rank_mapping = f.create_map(*[
-        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
-    # Build mapping expression for rank -> display name
-    rank_to_display = f.create_map(*[
-        item
-        for rank, stage in RANK_TO_CATEGORY_STR.items()
-        for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
-    ])
-
     return (
         clinical_report
         .select(
@@ -239,21 +272,12 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
             f.col('clinicalStage'),
         )
         .filter(f.col('id').isNotNull())  # ty:ignore[missing-argument]
-        # Normalize: map WITHDRAWAL/PHASE_4 -> APPROVAL
-        .withColumn(
-            'normalizedStage',
-            f.coalesce(stage_mapping[f.col('clinicalStage')], f.col('clinicalStage')),
-        )
-        # Map stage to rank
-        .withColumn(
-            'stageRank',
-            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(CATEGORY_RANKS_STR['UNKNOWN'])),
-        )
+        .withColumn('stageRank', _stage_rank(f.col('clinicalStage')))
         # Group by drug, take minimum rank (= best stage)
         .groupBy('id')
         .agg(f.min('stageRank').alias('bestRank'))
         # Map rank to display name
-        .withColumn('maximumClinicalStage', rank_to_display[f.col('bestRank')])
+        .withColumn('maximumClinicalStage', _stage_name_from_rank(f.col('bestRank')))
         .drop('bestRank')
     )
 
@@ -275,20 +299,6 @@ def _process_clinical_report_indications(
     Returns:
         DataFrame with columns: id (drugId), indications (array of structs).
     """
-    # Build mapping expressions
-    stage_mapping = f.create_map(*[
-        item for pair in STAGE_FOR_MAX_MAPPING.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
-    rank_mapping = f.create_map(*[
-        item for pair in CATEGORY_RANKS_STR.items() for item in (f.lit(pair[0]), f.lit(pair[1]))
-    ])
-    rank_to_display = f.create_map(*[
-        item
-        for rank, stage in RANK_TO_CATEGORY_STR.items()
-        for item in (f.lit(rank), f.lit(STAGE_DISPLAY_NAMES[stage]))
-    ])
-
-    # Explode drugs and diseases, filter to rows with both IDs
     exploded = (
         clinical_report
         .select(
@@ -302,24 +312,14 @@ def _process_clinical_report_indications(
             f.col('clinicalStage'),
         )
         .filter(f.col('drugId').isNotNull() & f.col('diseaseId').isNotNull())  # ty:ignore[missing-argument]
-        # Normalize stage
-        .withColumn(
-            'normalizedStage',
-            f.coalesce(stage_mapping[f.col('clinicalStage')], f.col('clinicalStage')),
-        )
-        # Map to rank
-        .withColumn(
-            'stageRank',
-            f.coalesce(rank_mapping[f.col('normalizedStage')], f.lit(RANK_TO_CATEGORY_STR['UNKNOWN'])),
-        )
+        .withColumn('stageRank', _stage_rank(f.col('clinicalStage')))
     )
 
-    # Best stage per (drugId, diseaseId)
     per_indication = (
         exploded
         .groupBy('drugId', 'diseaseId')
         .agg(f.min('stageRank').alias('bestRank'))
-        .withColumn('maxClinicalStage', rank_to_display[f.col('bestRank')])
+        .withColumn('maximumClinicalStagePerIndication', _stage_name_from_rank(f.col('bestRank')))
         .drop('bestRank')
     )
 
@@ -339,9 +339,10 @@ def _process_clinical_report_indications(
             f.struct(
                 f.col('diseaseId').alias('disease'),
                 f.col('efoName'),
-                f.col('maxClinicalStage'),
+                f.col('maximumClinicalStagePerIndication').alias('maxClinicalStage'),
             ),
         )
+        .drop('diseaseId', 'efoName', 'maximumClinicalStagePerIndication')
         .groupBy(f.col('drugId').alias('id'))
         .agg(f.collect_set('indication').alias('indications'))
     )
@@ -409,7 +410,7 @@ def _generate_description(
     if drug_type is None:
         drug_type = 'Unknown'
 
-    approved_display = STAGE_DISPLAY_NAMES['APPROVAL']
+    approved_stage_code = 'APPROVAL'
 
     main_note = f'{drug_type.capitalize()} drug'
 
@@ -418,7 +419,9 @@ def _generate_description(
     if max_phase is not None:
         label_count = len(indication_labels) if indication_labels else 0
         multi_indication = ' (across all indications)' if label_count > 1 else ''
-        phase_str = f' with a maximum clinical stage of {max_phase}{multi_indication}'
+        phase_label = _friendly_stage_label(max_phase)
+        phase_label = phase_label if phase_label is not None else max_phase
+        phase_str = f' with a maximum clinical stage of {phase_label}{multi_indication}'
 
     # Process indications
     indication_str = ''
@@ -427,8 +430,8 @@ def _generate_description(
         indications = [(stage, label) for stage, label in indications if stage is not None and label is not None]
         indications = list(set(indications))
 
-        approved = [label for stage, label in indications if stage == approved_display]
-        investigational_count = sum(1 for stage, _ in indications if stage != approved_display)
+        approved = [label for stage, label in indications if stage == approved_stage_code]
+        investigational_count = sum(1 for stage, _ in indications if stage != approved_stage_code)
 
         if approved and not investigational_count:
             if len(approved) <= 2:

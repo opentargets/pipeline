@@ -251,13 +251,13 @@ def mechanism_df(spark):
 class TestComputeMaxPhasePerDrug:
     @pytest.mark.slow
     def test_basic_max_phase(self, spark, clinical_report_df):
-        """CHEMBL1 has APPROVAL and PHASE_3 -> max should be 'approved'."""
+        """CHEMBL1 has APPROVAL and PHASE_3 -> max should be 'APPROVAL'."""
         result = _compute_max_phase_per_drug(clinical_report_df)
         rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
 
-        assert rows['CHEMBL1'] == 'approved'
-        assert rows['CHEMBL2'] == 'phase III'
-        assert rows['CHEMBL3'] == 'phase I'
+        assert rows['CHEMBL1'] == 'APPROVAL'
+        assert rows['CHEMBL2'] == 'PHASE_3'
+        assert rows['CHEMBL3'] == 'PHASE_1'
 
     @pytest.mark.slow
     def test_null_drug_ids_are_excluded(self, spark, clinical_report_df):
@@ -281,7 +281,7 @@ class TestComputeMaxPhasePerDrug:
         cr = spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
         result = _compute_max_phase_per_drug(cr)
         rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
-        assert rows['CHEMBL_W'] == 'approved'
+        assert rows['CHEMBL_W'] == 'APPROVAL'
 
     def test_phase_4_maps_to_approval(self, spark):
         """PHASE_4 stage should be treated as APPROVAL for max computation."""
@@ -297,7 +297,7 @@ class TestComputeMaxPhasePerDrug:
         cr = spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
         result = _compute_max_phase_per_drug(cr)
         rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
-        assert rows['CHEMBL_P4'] == 'approved'
+        assert rows['CHEMBL_P4'] == 'APPROVAL'
 
 
 # --- Tests for _process_clinical_report_indications ---
@@ -312,12 +312,12 @@ class TestProcessClinicalReportIndications:
 
         # CHEMBL1 should have indications for EFO_0001 (approved) and EFO_0002 (phase III)
         chembl1_indications = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL1']}
-        assert ('EFO_0001', 'approved') in chembl1_indications
-        assert ('EFO_0002', 'phase III') in chembl1_indications
+        assert ('EFO_0001', 'APPROVAL') in chembl1_indications
+        assert ('EFO_0002', 'PHASE_3') in chembl1_indications
 
         # CHEMBL3 should have one indication for EFO_0001 (phase I)
         chembl3_indications = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL3']}
-        assert ('EFO_0001', 'phase I') in chembl3_indications
+        assert ('EFO_0001', 'PHASE_1') in chembl3_indications
 
     def test_null_drug_or_disease_excluded(self, spark):
         """Rows where drugId or diseaseId is null should be excluded."""
@@ -364,8 +364,8 @@ class TestGenerateDescription:
         """Drug with approved stage and one approved indication."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved'],
+            'APPROVAL',
+            ['APPROVAL'],
             ['rheumatoid arthritis'],
         )
         assert 'Small molecule drug' in result
@@ -376,8 +376,8 @@ class TestGenerateDescription:
         """Drug in phase III with one investigational indication."""
         result = _generate_description(
             'Antibody',
-            'phase III',
-            ['phase III'],
+            'PHASE_3',
+            ['PHASE_3'],
             ['breast cancer'],
         )
         assert 'Antibody drug' in result
@@ -388,8 +388,8 @@ class TestGenerateDescription:
         """Drug with many approved indications shows count."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved', 'approved', 'approved'],
+            'APPROVAL',
+            ['APPROVAL', 'APPROVAL', 'APPROVAL'],
             ['disease a', 'disease b', 'disease c'],
         )
         assert '3 approved indications' in result
@@ -398,8 +398,8 @@ class TestGenerateDescription:
         """Drug with exactly two approved indications lists them."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved', 'approved'],
+            'APPROVAL',
+            ['APPROVAL', 'APPROVAL'],
             ['disease a', 'disease b'],
         )
         assert 'disease a' in result
@@ -409,8 +409,8 @@ class TestGenerateDescription:
         """Drug with both approved and investigational indications."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved', 'phase II'],
+            'APPROVAL',
+            ['APPROVAL', 'PHASE_2'],
             ['disease a', 'disease b'],
         )
         assert 'indicated for disease a' in result
@@ -418,7 +418,7 @@ class TestGenerateDescription:
 
     def test_none_drug_type(self):
         """None drug type defaults to 'Unknown'."""
-        result = _generate_description(None, 'phase I', [], [])
+        result = _generate_description(None, 'PHASE_1', [], [])
         assert result.startswith('Unknown drug')
 
     def test_no_phase_no_indications(self):
@@ -430,8 +430,8 @@ class TestGenerateDescription:
         """Drug with multiple indications includes 'across all indications'."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved', 'phase III'],
+            'APPROVAL',
+            ['APPROVAL', 'PHASE_3'],
             ['disease a', 'disease b'],
         )
         assert 'across all indications' in result
@@ -440,8 +440,8 @@ class TestGenerateDescription:
         """Description should not contain withdrawal or black box references."""
         result = _generate_description(
             'Small molecule',
-            'approved',
-            ['approved'],
+            'APPROVAL',
+            ['APPROVAL'],
             ['some disease'],
         )
         assert 'withdrawal' not in result.lower()
@@ -658,7 +658,7 @@ class TestProcessDrugIndex:
         clinical_report_df,
         disease_df,
     ):
-        """Drugs not in clinical reports should have maximumClinicalStage='unknown'."""
+        """Drugs not in clinical reports should have maximumClinicalStage='UNKNOWN'."""
         result = process_drug_index(
             molecule_df,
             chemical_probes_df,
@@ -670,7 +670,7 @@ class TestProcessDrugIndex:
         assert null_phases == 0
         # CHEMBL888 has drugbank xref but no clinical reports -> unknown
         chembl888 = result.filter(f.col('id') == 'CHEMBL888').collect()[0]
-        assert chembl888['maximumClinicalStage'] == 'unknown'
+        assert chembl888['maximumClinicalStage'] == 'UNKNOWN'
 
     def test_no_blackbox_or_withdrawal_columns(
         self,
