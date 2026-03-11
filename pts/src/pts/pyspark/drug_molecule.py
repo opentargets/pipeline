@@ -143,19 +143,14 @@ def process_drug_index(
     indications = _process_clinical_report_indications(clinical_report, disease)
 
     # Get all chemical probe drug IDs (for is_drug filter)
-    probe_drug_ids = (
-        chemical_probes
-        .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
-        .select(f.col('drugId').alias('chemicalProbeDrugId'))
-        .distinct()
-    )
+    probe_drug_ids = chemical_probes.select(f.col('drugId').alias('chemicalProbeDrugId')).dropna().distinct()
 
     # Get probe compound IDs grouped per drug (for cross-references)
     probe_xrefs = (
         chemical_probes
         .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
         .groupBy(f.col('drugId').alias('_probeXrefDrugId'))
-        .agg(f.collect_set('drugId').alias('_probeIds'))
+        .agg(f.collect_set('id').alias('_probeIds'))
     )
 
     # Get molecules with mechanism of action
@@ -185,7 +180,7 @@ def process_drug_index(
             f.col('_probeIds').isNotNull(),  # ty:ignore[missing-argument]
             f.concat(
                 f.coalesce(f.col('crossReferences'), f.array()),
-                f.array(f.struct(f.lit('probes&drugs').alias('source'), f.col('_probeIds').alias('ids'))),
+                f.array(f.struct(f.lit('Probes&Drugs').alias('source'), f.col('_probeIds').alias('ids'))),
             ),
         ).otherwise(f.col('crossReferences')),
     )
