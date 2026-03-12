@@ -32,6 +32,9 @@ class TestEvidence:
 
     DISEASE_DATA = [('d1', ['d3', 'd4']), ('d3', ['d4']), ('d2', ['d4'])]
 
+    # ds1 and ds2 are propagated; ds3 is not
+    DATASOURCE_WEIGHT_DATA = [('ds1', True), ('ds2', True), ('ds3', False)]
+
     @pytest.fixture(autouse=True)
     def _setup(self: TestEvidence, spark: SparkSession) -> None:
         """Setting up input datasets."""
@@ -45,6 +48,11 @@ class TestEvidence:
 
         # Create disease index:
         self.disease_df = spark.createDataFrame(self.DISEASE_DATA, 'id STRING, ancestors ARRAY<STRING>')
+
+        # Create datasource weight lookup:
+        self.datasource_weight_df = spark.createDataFrame(
+            self.DATASOURCE_WEIGHT_DATA, 'datasourceId STRING, evidencePropagated BOOLEAN'
+        )
 
         # Test return type:
         assert isinstance(self.evidence, Evidence)
@@ -69,24 +77,27 @@ class TestEvidence:
 
     def test_disease_expansion__type(self: TestEvidence) -> None:
         """Testing if diease expansion returns the same type."""
-        assert isinstance(self.evidence.expand_disease(self.disease_df), Evidence)
+        assert isinstance(self.evidence.expand_disease(self.disease_df, self.datasource_weight_df), Evidence)
 
     def test_disease_expansion__explosion(self: TestEvidence) -> None:
         """Testing if diease expansion indeed explodes evidence."""
-        assert self.evidence.expand_disease(self.disease_df).df.count() > self.evidence.df.count()
+        assert (
+            self.evidence.expand_disease(self.disease_df, self.datasource_weight_df).df.count()
+            > self.evidence.df.count()
+        )
 
     @pytest.mark.parametrize(
         ('target_id', 'disease_id', 'direct_count', 'expected_diseases'),
         [
-            ('t2', 'd1', 1, ['d1', 'd3', 'd4']),
-            ('t3', 'd2', 1, ['d2', 'd4']),
+            ('t2', 'd1', 1, ['d1', 'd3', 'd4']),  # ds1 is propagated -> expands to all ancestors
+            ('t3', 'd2', 1, ['d2', 'd4']),  # ds1 is propagated -> expands to all ancestors
         ],
     )
     def test_disease_expansion__explosion_correct(
         self: TestEvidence, target_id: str, disease_id: str, direct_count: int, expected_diseases: list[str]
     ) -> None:
         """Testing if diease expansion yields the expected diseases."""
-        exploded_evidence = self.evidence.expand_disease(self.disease_df)
+        exploded_evidence = self.evidence.expand_disease(self.disease_df, self.datasource_weight_df)
 
         # Make sure there's only one evidence before explosion:
         assert self.evidence.filter(f.col('targetId') == target_id).df.count() == direct_count
@@ -95,8 +106,61 @@ class TestEvidence:
         exploded_diseases = [
             row['diseaseId'] for row in exploded_evidence.filter(f.col('targetId') == target_id).df.collect()
         ]
-        # assert exploded_evidence.filter(filter_expression).df.count() == exploded_count
         assert set(exploded_diseases) == set(expected_diseases)
+
+    def test_disease_expansion__non_propagated_stays_direct(self: TestEvidence) -> None:
+        """Testing that evidence from non-propagated datasources is not expanded to ancestor diseases.
+
+        ds3 is evidencePropagated=False. The dataset has evidence for t1/d2/ds3 (row 6).
+        d2 has ancestor d4, so if propagation were applied it would also appear as t1/d4/ds3.
+        After expansion, only d2 should be present for that target/datasource combination.
+        """
+        exploded_evidence = self.evidence.expand_disease(self.disease_df, self.datasource_weight_df)
+
+        ds3_diseases = {
+            row['diseaseId']
+            for row in exploded_evidence.df.filter(
+                (f.col('targetId') == 't1') & (f.col('datasourceId') == 'ds3')
+            ).collect()
+        }
+
+        # d1 and d2 are the direct diseases for t1/ds3; d4 (ancestor of both) must not appear
+        assert 'd4' not in ds3_diseases
+        assert ds3_diseases == {'d1', 'd2'}
+
+    def test_disease_expansion__propagated_does_not_lose_direct(self: TestEvidence) -> None:
+        """Testing that the direct disease is still present after propagation for propagated datasources."""
+        exploded_evidence = self.evidence.expand_disease(self.disease_df, self.datasource_weight_df)
+
+        # t2/ds1 has direct evidence on d1; after expansion d1 must still be present alongside ancestors
+        ds1_diseases_t2 = {
+            row['diseaseId']
+            for row in exploded_evidence.df.filter(
+                (f.col('targetId') == 't2') & (f.col('datasourceId') == 'ds1')
+            ).collect()
+        }
+        assert 'd1' in ds1_diseases_t2
+
+    def test_disease_expansion__unknown_datasource_defaults_to_propagated(
+        self: TestEvidence, spark: SparkSession
+    ) -> None:
+        """Testing that evidence with a datasourceId absent from datasource_weight is not silently dropped.
+
+        After a left join, unknown datasources have evidencePropagated=null.  The coalesce defaults
+        null to True, so the evidence should be fully expanded to ancestor diseases.
+        """
+        unknown_ds_evidence = Evidence(
+            spark.createDataFrame(
+                [('t9', 'd1', 2010, 0.5, 'ds_unknown', 'dt1')],
+                'targetId STRING, diseaseId STRING, year INTEGER, score FLOAT, datasourceId STRING, datatypeId STRING',
+            )
+        )
+
+        expanded = unknown_ds_evidence.expand_disease(self.disease_df, self.datasource_weight_df)
+        expanded_diseases = {row['diseaseId'] for row in expanded.df.collect()}
+
+        # d1 has ancestors d3, d4 — all three must appear because unknown defaults to propagated=True
+        assert expanded_diseases == {'d1', 'd3', 'd4'}
 
     def test_aggregation__output_type(self: TestEvidence) -> None:
         """Testing if the evidence aggregation yields the right dataset."""

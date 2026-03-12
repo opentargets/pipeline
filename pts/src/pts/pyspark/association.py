@@ -94,7 +94,7 @@ def association(
     (
         Evidence
         .from_raw_evidence(raw_evidence)
-        .expand_disease(disease_index=disease_df)
+        .expand_disease(disease_index=disease_df, datasource_weight=datasource_weights)
         .aggregate_evidence_by_datasource()
         .df.write.mode('overwrite')
         .parquet(destination['temporary'])

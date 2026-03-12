@@ -551,72 +551,95 @@ steps:
           - datasourceId: gwas_credible_sets
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
           - datasourceId: eva
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
           - datasourceId: gene_burden
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
           - datasourceId: genomics_england
             weight: 1.0
             datatypeId: genetic_literature
+            evidencePropagated: true
           - datasourceId: gene2phenotype
             weight: 1.0
             datatypeId: genetic_literature
+            evidencePropagated: true
           - datasourceId: uniprot_literature
             weight: 1.0
             datatypeId: genetic_literature
+            evidencePropagated: true
           - datasourceId: uniprot_variants
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
           - datasourceId: orphanet
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
           - datasourceId: clingen
             weight: 1.0
             datatypeId: genetic_literature
+            evidencePropagated: true
           - datasourceId: cancer_gene_census
             weight: 1.0
             datatypeId: somatic_mutation
+            evidencePropagated: true
           - datasourceId: eva_somatic
             weight: 1.0
             datatypeId: somatic_mutation
+            evidencePropagated: true
           - datasourceId: cancer_biomarkers
             weight: 1.0
             datatypeId: affected_pathway
+            evidencePropagated: true
           - datasourceId: clinical_precedence
             weight: 1.0
             datatypeId: known_drug
+            evidencePropagated: true
           - datasourceId: crispr_screen
             weight: 1.0
             datatypeId: affected_pathway
+            evidencePropagated: true
           - datasourceId: intogen
             weight: 1.0
             datatypeId: somatic_mutation
+            evidencePropagated: true
           - datasourceId: crispr
             weight: 1.0
             datatypeId: affected_pathway
+            evidencePropagated: true
           - datasourceId: reactome
             weight: 1.0
             datatypeId: affected_pathway
+            evidencePropagated: true
           - datasourceId: europepmc
             weight: 0.2
             datatypeId: literature
+            evidencePropagated: true
           - datasourceId: expression_atlas
             weight: 0.2
             datatypeId: rna_expression
+            evidencePropagated: false
           - datasourceId: impc
             weight: 0.2
             datatypeId: animal_model
+            evidencePropagated: true
           - datasourceId: ot_crispr
             weight: 0.5
             datatypeId: ot_partner
+            evidencePropagated: true
           - datasourceId: ot_crispr_validation
             weight: 0.5
             datatypeId: ot_validation_lab
+            evidencePropagated: true
           - datasourceId: encore
             weight: 0.5
             datatypeId: ot_partner
+            evidencePropagated: true
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################

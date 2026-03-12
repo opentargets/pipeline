@@ -57,29 +57,44 @@ class Evidence(Dataset):
             )
         )
 
-    def expand_disease(self: Evidence, disease_index: DataFrame) -> Evidence:
+    def expand_disease(self: Evidence, disease_index: DataFrame, datasource_weight: DataFrame) -> Evidence:
         """Calculate indirect evidence based on the provided disease ontology.
 
         Args:
             disease_index (DataFrame): Open Targets disease index.
+            datasource_weight (DataFrame):
 
         Returns:
             Evidence: evidence exploded to indirect evidence.
         """
+        # Annotating evidence data if a given source is expected to be propagated or not.
+        # Unknown datasources (null after left join) default to True to preserve the original
+        # propagate-everything behaviour for any source not listed in datasource_weight.
+        evidence_with_flag = self.df.join(
+            f.broadcast(datasource_weight.select('datasourceId', 'evidencePropagated')),
+            on='datasourceId',
+            how='left',
+        ).withColumn('evidencePropagated', f.coalesce(f.col('evidencePropagated'), f.lit(True)))
+
+        # Splitting evidence based on which should be propagated an which not:
+        propagated = evidence_with_flag.filter('evidencePropagated').drop('evidencePropagated')
+        direct_only = evidence_with_flag.filter(~f.col('evidencePropagated')).drop('evidencePropagated')
+
         # Exploding disease ancestors:
         processed_disease = disease_index.select(
             f.col('id').alias('diseaseId'),
             f.explode(f.array_union(f.array(f.col('id')), f.col('ancestors'))).alias('specificDiseaseId'),
         )
 
-        # Exploding evidence for all ancestors:
-        return Evidence(
-            self.df
+        expanded = (
+            propagated
             .join(f.broadcast(processed_disease), on='diseaseId', how='inner')
             .drop('diseaseId')
             .withColumnRenamed('specificDiseaseId', 'diseaseId')
-            .persist(StorageLevel.DISK_ONLY)
         )
+
+        # Combining exploded and direct evidence:
+        return Evidence(expanded.unionByName(direct_only).persist(StorageLevel.DISK_ONLY))
 
     def aggregate_evidence_by_datasource(self: Evidence, persist: bool = False) -> Association:
         """Compute association scores from the evidence scores.
