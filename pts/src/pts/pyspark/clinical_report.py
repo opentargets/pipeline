@@ -81,7 +81,15 @@ def clinical_report(
         'molregno', 'chembl_id', 'pref_name'
     )
     chembl_drug_warning = pl.read_parquet(source['chembl_drug_warning']).select(
-        'warning_id', 'molregno', 'warning_type', 'warning_year', 'warning_country', 'efo_id', 'efo_term'
+        'warning_id',
+        'molregno',
+        'warning_type',
+        'warning_year',
+        'warning_country',
+        'warning_class',
+        'efo_id',
+        'efo_term',
+        'efo_id_for_warning_class',
     )
     chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
         'warning_id', 'ref_type', 'ref_id', 'ref_url'
