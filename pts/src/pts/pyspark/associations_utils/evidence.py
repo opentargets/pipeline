@@ -62,7 +62,8 @@ class Evidence(Dataset):
 
         Args:
             disease_index (DataFrame): Open Targets disease index.
-            datasource_weight (DataFrame):
+            datasource_weight (DataFrame): data frame with datasource specific weights and flags indicating
+                if evidence from a given datasource is allowed to propagated in the disease ontology.
 
         Returns:
             Evidence: evidence exploded to indirect evidence.

@@ -543,18 +543,60 @@ steps:
         by_datatype_direct: output/association_by_datatype_direct
         by_datatype_indirect: output/association_by_datatype_indirect
         temporary: intermediate/indirect_association_intermediate
+      properties:
+        spark.driver.memory: '12g'
       settings:
         novelty_scale: 2 # 2 for long tailed slow decays
         novelty_shift: 3 # 3 for long tailed slow decays
         novelty_window: 10
         datasource_weights:
-          - datasourceId: gwas_credible_sets
+          - datasourceId: cancer_biomarkers
+            weight: 0.5
+            datatypeId: affected_pathway
+            evidencePropagated: true
+          - datasourceId: cancer_gene_census
             weight: 1.0
-            datatypeId: genetic_association
+            datatypeId: somatic_mutation
+            evidencePropagated: true
+          - datasourceId: clingen
+            weight: 1.0
+            datatypeId: genetic_literature
+            evidencePropagated: true
+          - datasourceId: clinical_precedence
+            weight: 1.0
+            datatypeId: known_drug
+            evidencePropagated: true
+          - datasourceId: crispr
+            weight: 1.0
+            datatypeId: affected_pathway
+            evidencePropagated: true
+          - datasourceId: crispr_screen
+            weight: 1.0
+            datatypeId: affected_pathway
+            evidencePropagated: true
+          - datasourceId: encore
+            weight: 0.5
+            datatypeId: ot_partner
+            evidencePropagated: true
+          - datasourceId: europepmc
+            weight: 0.2
+            datatypeId: literature
             evidencePropagated: true
           - datasourceId: eva
             weight: 1.0
             datatypeId: genetic_association
+            evidencePropagated: true
+          - datasourceId: eva_somatic
+            weight: 1.0
+            datatypeId: somatic_mutation
+            evidencePropagated: true
+          - datasourceId: expression_atlas
+            weight: 0.2
+            datatypeId: rna_expression
+            evidencePropagated: false
+          - datasourceId: gene2phenotype
+            weight: 1.0
+            datatypeId: genetic_literature
             evidencePropagated: true
           - datasourceId: gene_burden
             weight: 1.0
@@ -564,69 +606,21 @@ steps:
             weight: 1.0
             datatypeId: genetic_literature
             evidencePropagated: true
-          - datasourceId: gene2phenotype
-            weight: 1.0
-            datatypeId: genetic_literature
-            evidencePropagated: true
-          - datasourceId: uniprot_literature
-            weight: 1.0
-            datatypeId: genetic_literature
-            evidencePropagated: true
-          - datasourceId: uniprot_variants
+          - datasourceId: gwas_credible_sets
             weight: 1.0
             datatypeId: genetic_association
             evidencePropagated: true
-          - datasourceId: orphanet
-            weight: 1.0
-            datatypeId: genetic_association
-            evidencePropagated: true
-          - datasourceId: clingen
-            weight: 1.0
-            datatypeId: genetic_literature
-            evidencePropagated: true
-          - datasourceId: cancer_gene_census
-            weight: 1.0
-            datatypeId: somatic_mutation
-            evidencePropagated: true
-          - datasourceId: eva_somatic
-            weight: 1.0
-            datatypeId: somatic_mutation
-            evidencePropagated: true
-          - datasourceId: cancer_biomarkers
-            weight: 1.0
-            datatypeId: affected_pathway
-            evidencePropagated: true
-          - datasourceId: clinical_precedence
-            weight: 1.0
-            datatypeId: known_drug
-            evidencePropagated: true
-          - datasourceId: crispr_screen
-            weight: 1.0
-            datatypeId: affected_pathway
+          - datasourceId: impc
+            weight: 0.2
+            datatypeId: animal_model
             evidencePropagated: true
           - datasourceId: intogen
             weight: 1.0
             datatypeId: somatic_mutation
             evidencePropagated: true
-          - datasourceId: crispr
+          - datasourceId: orphanet
             weight: 1.0
-            datatypeId: affected_pathway
-            evidencePropagated: true
-          - datasourceId: reactome
-            weight: 1.0
-            datatypeId: affected_pathway
-            evidencePropagated: true
-          - datasourceId: europepmc
-            weight: 0.2
-            datatypeId: literature
-            evidencePropagated: true
-          - datasourceId: expression_atlas
-            weight: 0.2
-            datatypeId: rna_expression
-            evidencePropagated: false
-          - datasourceId: impc
-            weight: 0.2
-            datatypeId: animal_model
+            datatypeId: genetic_association
             evidencePropagated: true
           - datasourceId: ot_crispr
             weight: 0.5
@@ -636,9 +630,17 @@ steps:
             weight: 0.5
             datatypeId: ot_validation_lab
             evidencePropagated: true
-          - datasourceId: encore
-            weight: 0.5
-            datatypeId: ot_partner
+          - datasourceId: reactome
+            weight: 1.0
+            datatypeId: affected_pathway
+            evidencePropagated: true
+          - datasourceId: uniprot_literature
+            weight: 1.0
+            datatypeId: genetic_literature
+            evidencePropagated: true
+          - datasourceId: uniprot_variants
+            weight: 1.0
+            datatypeId: genetic_association
             evidencePropagated: true
   ##################################################################################################
 
