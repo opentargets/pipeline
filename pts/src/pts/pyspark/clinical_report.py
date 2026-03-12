@@ -200,13 +200,20 @@ def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> Cl
         .drop('diseaseId_right')
     )
 
-    combined = pl.concat([null_ids, valid_ids, updated_ids])
     return ClinicalReport(
         df=(
-            # Reconstruct the nested disease structure
-            combined.group_by(reports.df.drop('diseases').columns, maintain_order=True).agg([
-                pl.struct(['diseaseFromSource', 'diseaseId']).unique().alias('diseases')
-            ])
+            pl
+            # combine all report dfs
+            .concat([null_ids, valid_ids, updated_ids])
+            # flag rows where disease info is null to avoid lists of empty elements
+            .with_columns(noDiseaseInfo=pl.col('diseaseFromSource').is_null())
+            .group_by(reports.df.drop('diseases').columns, maintain_order=True)
+            .agg(
+                pl.struct(['diseaseFromSource', 'diseaseId']).unique().alias('diseases'),
+                pl.col('noDiseaseInfo').any().alias('noDiseaseInfo'),
+            )
+            .with_columns(diseases=pl.when(pl.col('noDiseaseInfo')).then(pl.lit(None)).otherwise(pl.col('diseases')))
+            .drop('noDiseaseInfo')
         )
     )
 
