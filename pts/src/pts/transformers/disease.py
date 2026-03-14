@@ -152,6 +152,54 @@ def deduplicate_disease(disease: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def update_therapeutic_areas(disease: pl.DataFrame) -> pl.DataFrame:
+    """Recompute therapeutic areas by propagating TAs from ancestors.
+
+    For each disease, collects therapeutic areas from all its ancestors
+    (including itself), replacing the existing therapeuticAreas column.
+
+    Args:
+        disease: disease index DataFrame
+
+    Returns:
+        DataFrame with updated therapeuticAreas column
+    """
+    # (id, ancestor) pairs: self-reference + all ancestors
+    self_pairs = disease.select('id').with_columns(ancestor=pl.col('id'))
+    ancestor_pairs = (
+        disease
+        .select('id', 'ancestors')
+        .explode('ancestors')
+        .rename({'ancestors': 'ancestor'})
+        .drop_nulls('ancestor')
+    )
+    all_pairs = pl.concat([self_pairs, ancestor_pairs]).unique()
+
+    # therapeutic area membership per node
+    ta_per_ancestor = (
+        disease
+        .select(pl.col('id').alias('ancestor'), pl.col('therapeuticAreas'))
+        .explode('therapeuticAreas')
+        .drop_nulls('therapeuticAreas')
+    )
+
+    new_tas = (
+        all_pairs
+        .join(ta_per_ancestor, on='ancestor', how='left')
+        .group_by('id')
+        .agg(pl.col('therapeuticAreas').drop_nulls().unique())
+    )
+
+    return (
+        disease
+        .drop('therapeuticAreas')
+        .join(new_tas, on='id', how='left')
+        .with_columns(
+            pl.col('therapeuticAreas').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
+        )
+    )
+
+
 def disease(
     source: str,
     destination: str,
@@ -494,12 +542,15 @@ def disease(
     ).drop('isTherapeuticArea')
 
     # De-duplication of labels:
-    dedup_disease_index = replace_obsolete_terms(deduplicate_disease(n_ontology)).with_columns(
-        synonyms=pl.struct(
-            hasExactSynonym=pl.col('exactSynonyms'),
-            hasRelatedSynonym=pl.col('relatedSynonyms'),
-            hasNarrowSynonym=pl.col('narrowSynonyms'),
-            hasBroadSynonym=pl.col('broadSynonyms'),
+    dedup_disease_index = (
+        update_therapeutic_areas(replace_obsolete_terms(deduplicate_disease(n_ontology)))
+        .with_columns(
+            synonyms=pl.struct(
+                hasExactSynonym=pl.col('exactSynonyms'),
+                hasRelatedSynonym=pl.col('relatedSynonyms'),
+                hasNarrowSynonym=pl.col('narrowSynonyms'),
+                hasBroadSynonym=pl.col('broadSynonyms'),
+            )
         )
     )
 
