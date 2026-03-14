@@ -72,14 +72,14 @@ class Evidence(Dataset):
         # Unknown datasources (null after left join) default to True to preserve the original
         # propagate-everything behaviour for any source not listed in datasource_weight.
         evidence_with_flag = self.df.join(
-            f.broadcast(datasource_weight.select('datasourceId', 'evidencePropagated')),
+            f.broadcast(datasource_weight.select('datasourceId', 'toPropagate')),
             on='datasourceId',
             how='left',
-        ).withColumn('evidencePropagated', f.coalesce(f.col('evidencePropagated'), f.lit(True)))
+        ).withColumn('toPropagate', f.coalesce(f.col('toPropagate'), f.lit(True)))
 
         # Splitting evidence based on which should be propagated an which not:
-        propagated = evidence_with_flag.filter('evidencePropagated').drop('evidencePropagated')
-        direct_only = evidence_with_flag.filter(~f.col('evidencePropagated')).drop('evidencePropagated')
+        propagated = evidence_with_flag.filter('toPropagate').drop('toPropagate')
+        direct_only = evidence_with_flag.filter(~f.col('toPropagate')).drop('toPropagate')
 
         # Exploding disease ancestors:
         processed_disease = disease_index.select(

@@ -51,7 +51,7 @@ class TestEvidence:
 
         # Create datasource weight lookup:
         self.datasource_weight_df = spark.createDataFrame(
-            self.DATASOURCE_WEIGHT_DATA, 'datasourceId STRING, evidencePropagated BOOLEAN'
+            self.DATASOURCE_WEIGHT_DATA, 'datasourceId STRING, toPropagate BOOLEAN'
         )
 
         # Test return type:
@@ -111,7 +111,7 @@ class TestEvidence:
     def test_disease_expansion__non_propagated_stays_direct(self: TestEvidence) -> None:
         """Testing that evidence from non-propagated datasources is not expanded to ancestor diseases.
 
-        ds3 is evidencePropagated=False. The dataset has evidence for t1/d2/ds3 (row 6).
+        ds3 is toPropagate=False. The dataset has evidence for t1/d2/ds3 (row 6).
         d2 has ancestor d4, so if propagation were applied it would also appear as t1/d4/ds3.
         After expansion, only d2 should be present for that target/datasource combination.
         """
@@ -146,7 +146,7 @@ class TestEvidence:
     ) -> None:
         """Testing that evidence with a datasourceId absent from datasource_weight is not silently dropped.
 
-        After a left join, unknown datasources have evidencePropagated=null.  The coalesce defaults
+        After a left join, unknown datasources have toPropagate=null.  The coalesce defaults
         null to True, so the evidence should be fully expanded to ancestor diseases.
         """
         unknown_ds_evidence = Evidence(
