@@ -187,14 +187,13 @@ def process_drug_index(
 
     # Filter to only include "drugs" - molecules that have:
     # - a drugbank cross-reference, OR
-    # - are present in clinical reports (maximumClinicalStage is not null), OR
+    # - indication information from clinical reports, OR
     # - mechanism of action, OR
     # - are a chemical probe
-    has_valid_stage = f.col('maximumClinicalStage').isNotNull() & (f.col('maximumClinicalStage') != 'UNKNOWN')
 
     is_drug = (
         f.expr("array_contains(transform(crossReferences, x -> x.source), 'drugbank')")
-        | has_valid_stage  # ty:ignore[missing-argument]
+        | f.col('indications').isNotNull()  # ty:ignore[missing-argument]
         | f.col('hasMechanismOfAction').isNotNull()  # ty:ignore[missing-argument]
         | f.col('chemicalProbeDrugId').isNotNull()  # ty:ignore[missing-argument]
     )
