@@ -73,6 +73,7 @@ DISEASE_SCHEMA = StructType([
 
 CHEMICAL_PROBES_SCHEMA = StructType([
     StructField('id', StringType()),
+    StructField('drugFromSourceId', StringType()),
     StructField('drugId', StringType()),
 ])
 
@@ -229,8 +230,8 @@ def molecule_df(spark):
 def chemical_probes_df(spark):
     """Chemical probes data."""
     data = [
-        Row(id='A-1155463', drugId='CHEMBL3'),
-        Row(id='Some Compound', drugId=None),  # null drugId
+        Row(id='A-1155463', drugFromSourceId='PD001', drugId='CHEMBL3'),
+        Row(id='Some Compound', drugFromSourceId='PD002', drugId=None),  # null drugId
     ]
     return spark.createDataFrame(data, schema=CHEMICAL_PROBES_SCHEMA)
 

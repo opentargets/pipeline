@@ -150,7 +150,7 @@ def process_drug_index(
         chemical_probes
         .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
         .groupBy(f.col('drugId').alias('_probeXrefDrugId'))
-        .agg(f.collect_set('id').alias('_probeIds'))
+        .agg(f.collect_set('drugFromSourceId').alias('_probeIds'))
     )
 
     # Get molecules with mechanism of action
