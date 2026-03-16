@@ -145,7 +145,11 @@ def _chembl_target(target_df: DataFrame, gene_df: DataFrame) -> DataFrame:
 
     # Get gene IDs from gene data - explode proteinIds
     genes = gene_df.select(
-        f.col('id').alias('geneId'), f.array_union('uniprot_trembl', 'uniprot_swissprot').alias('uniprotIds')
+        f.col('id').alias('geneId'),
+        f.array_union(
+            f.coalesce(f.col('uniprot_trembl'), f.array().cast('array<string>')),
+            f.coalesce(f.col('uniprot_swissprot'), f.array().cast('array<string>')),
+        ).alias('uniprotIds'),
     ).select('geneId', f.explode('uniprotIds').alias('uniprot_id'))
 
     # Join target with genes on uniprot_id or geneId

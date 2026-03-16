@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.03.0-dev.40"
+version = "26.03.0-dev.41"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
