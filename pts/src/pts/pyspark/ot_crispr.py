@@ -7,6 +7,8 @@ This dataset consist of a series of OTAR projects studying various diseases usin
 """
 
 import operator
+from collections.abc import Callable
+from dataclasses import dataclass
 from functools import reduce
 from typing import Any
 
@@ -16,6 +18,58 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common.session import Session
+
+
+@dataclass
+class DataCheck:
+    """A single quality check to apply to the study table.
+
+    Attributes:
+        condition (Callable[[], Column]): A lazy factory returning the filter condition column.
+        name (str): Human-readable name for the check.
+        action (str): Action to take on failing rows; currently only 'drop' is supported.
+        report_fn (Callable[[DataFrame], Any]): Function to extract a summary from the failing rows.
+        message_fn (Callable[[Any], str]): Function to format the summary into a log message.
+    """
+
+    condition: Callable[[], Column]
+    name: str
+    action: str
+    report_fn: Callable[[DataFrame], Any]
+    message_fn: Callable[[Any], str]
+
+
+# This is the list of test that are run on the study table.
+STUDY_CHECKS = [
+    DataCheck(
+        name='StudyId assertion',
+        condition=lambda: f.col('studyId').isNull(),
+        action='drop',
+        report_fn=lambda df: df.count(),
+        message_fn=lambda result: f'Rows with missing studyId: {result}',
+    ),
+    DataCheck(
+        name='Disease id presence assertion',
+        condition=lambda: f.col('diseases').isNull(),
+        action='drop',
+        report_fn=lambda df: ', '.join([r['studyId'] for r in df.select('studyId').distinct().collect()]),
+        message_fn=lambda result: f'Studies with missing diseaseId: {result}',
+    ),
+    DataCheck(
+        name='DataFile presence assertion',
+        condition=lambda: f.col('dataFile').isNull(),
+        action='drop',
+        report_fn=lambda df: ', '.join([r['studyId'] for r in df.select('studyId').distinct().collect()]),
+        message_fn=lambda result: f'Studies with missing dataset: {result}',
+    ),
+    DataCheck(
+        name='Proper project id assertion',
+        condition=lambda: f.col('projectId').isNull() | (~f.col('projectId').startswith('OTAR')),
+        action='drop',
+        report_fn=lambda df: ', '.join([r['studyId'] for r in df.select('studyId').distinct().collect()]),
+        message_fn=lambda result: f'Studies with invalid projectId: {result}',
+    ),
+]
 
 
 class StudyParser:
@@ -36,6 +90,28 @@ class StudyParser:
             study_table (DataFrame): Table with study metadata
         """
         self.study_table = study_table
+
+    @staticmethod
+    def apply_check(study_table: DataFrame, check: DataCheck) -> DataFrame:
+        """Apply a single data quality check, logging a warning and dropping failing rows if needed.
+
+        Args:
+            study_table (DataFrame): The current study table to check.
+            check (DataCheck): The check to apply.
+
+        Returns:
+            DataFrame: The study table with failing rows removed if the check action is 'drop'.
+        """
+        condition = check.condition()
+        failing_df = study_table.filter(condition)
+        if result := check.report_fn(failing_df):
+            message = check.message_fn(result)
+            logger.warning(message)
+
+            if check.action == 'drop':
+                study_table = study_table.filter(~condition)
+
+        return study_table
 
     @staticmethod
     def split_column_value(col: Column, separator: str = r'\|') -> Column:
@@ -60,7 +136,7 @@ class StudyParser:
             DataFrame: A DataFrame with parsed study level metadata.
         """
         return (
-            self.study_table
+            reduce(self.apply_check, STUDY_CHECKS, self.study_table)
             # Dropping studies with no OTAR project and the field description row:
             .filter(f.col('projectId').startswith('OTAR'))  # ty:ignore[missing-argument, invalid-argument-type]
             # Selecting relevant columns:
@@ -128,7 +204,13 @@ class EvidenceParser:
     """
 
     def __init__(self, spark: Session, study_table: DataFrame, data_path: str) -> None:
-        """Initialise the evidence generator."""
+        """Initialise the evidence generator.
+
+        Args:
+            spark (Session): An active PySpark session.
+            study_table (DataFrame): Parsed study-level metadata from the study table.
+            data_path (str): Base path to the directory containing per-project MAGeCK data files.
+        """
         self.spark = spark
         self.study_table = study_table
         self.data_path = data_path
@@ -303,7 +385,11 @@ class EvidenceParser:
         )
 
     def parse_experiments(self) -> DataFrame:
-        """Extracts hits from the study table and puts them together."""
+        """Extract hits from every study in the study table and combine them into a single DataFrame.
+
+        Returns:
+            DataFrame: Combined evidence across all studies, with one row per target per study.
+        """
         return reduce(
             lambda df1, df2: df1.unionByName(df2),
             [self._process_study_table_row(study) for study in self.study_table.collect()],
@@ -316,6 +402,20 @@ def ot_crispr(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
+    """Generate OT CRISPR evidence and write it to parquet.
+
+    Reads the study metadata table and per-study MAGeCK data files, applies quality checks,
+    identifies significant hits across replicates, and joins study-level metadata to produce
+    the final evidence dataset.
+
+    Args:
+        source (dict[str, str]): Paths to input data. Expected keys:
+            - 'study_table': TSV file with study-level metadata.
+            - 'ot_crispr_data': Base directory containing per-project MAGeCK result files.
+        destination (str): Output path where the evidence parquet will be written.
+        settings (dict[str, Any]): Unused; reserved for future configuration.
+        properties (dict[str, str]): PySpark session properties passed to the Spark session.
+    """
     spark = Session(app_name='ot_crispr', properties=properties)
 
     logger.info(f'loading data from: {source}')
