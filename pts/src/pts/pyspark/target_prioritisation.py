@@ -162,55 +162,44 @@ def _find_parent_child_cousins(uniprot_df: DataFrame) -> DataFrame:
         f.split(f.col('Is_part_exploded'), ';').getItem(0).alias('Is_part_SL'),
     )
 
-    parental_df = (
-        first_df.select(
-            f.col('Name'),
-            f.col('SubcellID'),
-            f.col('Is_a_exploded_SL').alias('Is_a'),
-        )
-        .distinct()
-    )
+    parental_df = first_df.select(
+        f.col('Name'),
+        f.col('SubcellID'),
+        f.col('Is_a_exploded_SL').alias('Is_a'),
+    ).distinct()
 
     child_df = (
-        first_df.select('SubcellID', 'Is_a_exploded_SL')
+        first_df
+        .select('SubcellID', 'Is_a_exploded_SL')
         .distinct()
         .groupBy('Is_a_exploded_SL')
         .agg(f.collect_list(f.col('SubcellID')).alias('SubcellID_child'))
     )
 
-    parent_child_df = (
-        parental_df.join(
-            child_df,
-            parental_df['SubcellID'] == child_df['Is_a_exploded_SL'],
-            'left',
-        )
-        .select('Name', 'SubcellID', 'Is_a', 'SubcellID_child')
-    )
+    parent_child_df = parental_df.join(
+        child_df,
+        parental_df['SubcellID'] == child_df['Is_a_exploded_SL'],
+        'left',
+    ).select('Name', 'SubcellID', 'Is_a', 'SubcellID_child')
 
-    cousins_df = (
-        first_df.groupBy(f.col('Is_part_SL'))
-        .agg(f.collect_list('SubcellID').alias('SubcellID_are_part'))
-    )
+    cousins_df = first_df.groupBy(f.col('Is_part_SL')).agg(f.collect_list('SubcellID').alias('SubcellID_are_part'))
 
-    parent_child_cousins = (
-        parent_child_df.join(
-            cousins_df,
-            cousins_df['Is_part_SL'] == parent_child_df['SubcellID'],
-            'left',
-        )
-        .select(
-            f.col('Name'),
+    parent_child_cousins = parent_child_df.join(
+        cousins_df,
+        cousins_df['Is_part_SL'] == parent_child_df['SubcellID'],
+        'left',
+    ).select(
+        f.col('Name'),
+        f.col('SubcellID'),
+        f.col('Is_a'),
+        f.col('SubcellID_child').alias('Child_SLterms'),
+        f.col('SubcellID_are_part').alias('Contains_SLterms'),
+        f.concat_ws(
+            ',',
             f.col('SubcellID'),
-            f.col('Is_a'),
-            f.col('SubcellID_child').alias('Child_SLterms'),
-            f.col('SubcellID_are_part').alias('Contains_SLterms'),
-            f.concat_ws(
-                ',',
-                f.col('SubcellID'),
-                f.col('SubcellID_child'),
-                f.col('SubcellID_are_part'),
-            ).alias('concat'),
-        )
+            f.col('SubcellID_child'),
+            f.col('SubcellID_are_part'),
+        ).alias('concat'),
     )
 
     return parent_child_cousins.select(
@@ -224,7 +213,8 @@ def _biotype_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     pr_df = targets.select(
         f.col('id').alias('targetid'),
         f.col('biotype'),
-        f.when(f.col('biotype') == 'protein_coding', 1)
+        f
+        .when(f.col('biotype') == 'protein_coding', 1)
         .when(f.col('biotype') == '', None)  # noqa: PLC1901
         .otherwise(0)
         .alias('Nr_biotype'),
@@ -240,14 +230,16 @@ def _target_membrane_query(
     """Determine membrane and secreted status."""
     # Get membrane and secreted terms
     membrane_terms = (
-        parent_child_cousins.filter(f.col('Name') == 'Cell membrane')
+        parent_child_cousins
+        .filter(f.col('Name') == 'Cell membrane')
         .select(f.explode(f.col('toSearch')).alias('termSL'))
         .rdd.flatMap(lambda x: x)
         .collect()
     )
 
     secreted_terms = (
-        parent_child_cousins.filter(f.col('Name') == 'Secreted')
+        parent_child_cousins
+        .filter(f.col('Name') == 'Secreted')
         .select(f.explode(f.col('toSearch')).alias('termSL'))
         .rdd.flatMap(lambda x: x)
         .collect()
@@ -259,25 +251,20 @@ def _target_membrane_query(
         f.explode_outer(f.col('subcellularLocations')).alias('col'),
     )
 
-    location_info = (
-        subcellular_locations.select(
-            f.col('targetid'),
-            f.when(f.col('col.location').isNull(), f.lit('noInfo'))
-            .otherwise('hasInfo')
-            .alias('result'),
-        )
-        .dropDuplicates()
-    )
+    location_info = subcellular_locations.select(
+        f.col('targetid'),
+        f.when(f.col('col.location').isNull(), f.lit('noInfo')).otherwise('hasInfo').alias('result'),
+    ).dropDuplicates()
 
-    source_list = [
-        'HPA_1', 'HPA_secreted', 'HPA_add_1', 'uniprot_1', 'uniprot_secreted', 'HPA_dif'
-    ]
+    source_list = ['HPA_1', 'HPA_secreted', 'HPA_add_1', 'uniprot_1', 'uniprot_secreted', 'HPA_dif']
 
     membrane_grouped = (
-        subcellular_locations.select(f.col('targetid'), f.col('col.*'))
+        subcellular_locations
+        .select(f.col('targetid'), f.col('col.*'))
         .withColumn(
             'Count_mb',
-            f.when(
+            f
+            .when(
                 (f.col('source') == 'HPA_main') & f.col('termSL').isin(membrane_terms),
                 f.lit('HPA_1'),
             )
@@ -316,34 +303,37 @@ def _target_membrane_query(
 
     protein_classification = membrane_grouped.select(
         f.col('*'),
-        f.when(
-            f.array_contains(f.col('mb'), 'HPA_1')
-            | f.array_contains(f.col('mb'), 'HPA_add_1'),
+        f
+        .when(
+            f.array_contains(f.col('mb'), 'HPA_1') | f.array_contains(f.col('mb'), 'HPA_add_1'),
             f.lit('yes'),
         )
         .when(f.array_contains(f.col('mb'), 'HPA_dif'), f.lit('dif'))
         .otherwise(f.lit('no'))
         .alias('HPA_membrane'),
-        f.when(f.array_contains(f.col('mb'), 'HPA_secreted'), f.lit('yes'))
+        f
+        .when(f.array_contains(f.col('mb'), 'HPA_secreted'), f.lit('yes'))
         .otherwise(f.lit('no'))
         .alias('HPA_secreted'),
-        f.when(f.array_contains(f.col('mb'), 'uniprot_1'), f.lit('yes'))
+        f
+        .when(f.array_contains(f.col('mb'), 'uniprot_1'), f.lit('yes'))
         .otherwise(f.lit('no'))
         .alias('uniprot_membrane'),
-        f.when(f.array_contains(f.col('mb'), 'uniprot_secreted'), f.lit('yes'))
+        f
+        .when(f.array_contains(f.col('mb'), 'uniprot_secreted'), f.lit('yes'))
         .otherwise(f.lit('no'))
         .alias('uniprot_secreted'),
     )
 
     membrane_with_loc = protein_classification.withColumn(
         'loc',
-        f.when(
+        f
+        .when(
             (f.col('HPA_membrane') == 'yes') & (f.col('HPA_secreted') == 'no'),
             f.lit('inMembrane'),
         )
         .when(
-            ((f.col('HPA_membrane') == 'no') | (f.col('HPA_membrane') == 'dif'))
-            & (f.col('HPA_secreted') == 'yes'),
+            ((f.col('HPA_membrane') == 'no') | (f.col('HPA_membrane') == 'dif')) & (f.col('HPA_secreted') == 'yes'),
             f.lit('onlySecreted'),
         )
         .when(
@@ -352,7 +342,8 @@ def _target_membrane_query(
         )
         .when(
             (f.col('HPA_membrane') == 'no') & (f.col('HPA_secreted') == 'no'),
-            f.when(
+            f
+            .when(
                 (f.col('uniprot_membrane') == 'yes') & (f.col('uniprot_secreted') == 'no'),
                 f.lit('inMembrane'),
             )
@@ -368,14 +359,12 @@ def _target_membrane_query(
         .when(f.col('HPA_membrane') == 'dif', f.lit('noMembraneHPA')),
     )
 
-    joined = (
-        membrane_with_loc.join(queryset, on='targetid', how='right')
-        .join(location_info, on='targetid', how='left')
-    )
+    joined = membrane_with_loc.join(queryset, on='targetid', how='right').join(location_info, on='targetid', how='left')
 
     return joined.select(
         f.col('*'),
-        f.when(
+        f
+        .when(
             (f.col('loc') == 'secreted&inMembrane') | (f.col('loc') == 'inMembrane'),
             f.lit(1),
         )
@@ -385,7 +374,8 @@ def _target_membrane_query(
         )
         .when(f.col('loc').isNull() & (f.col('result') == 'hasInfo'), f.lit(0))
         .alias('Nr_mb'),
-        f.when(
+        f
+        .when(
             (f.col('loc') == 'secreted&inMembrane') | (f.col('loc') == 'onlySecreted'),
             f.lit(1),
         )
@@ -407,7 +397,8 @@ def _target_membrane_query(
 def _ligand_pocket_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Extract ligand, pocket, and small molecule binder status from tractability."""
     filtered_targets = (
-        targets.select(
+        targets
+        .select(
             f.col('id').alias('targetid'),
             f.explode_outer(f.col('tractability')).alias('new_struct'),
         )
@@ -423,15 +414,9 @@ def _ligand_pocket_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
         .agg(f.sum('presence'))
         .select(
             f.col('*'),
-            f.when(f.col('High-Quality Ligand') == 1, f.lit(1))
-            .otherwise(f.lit(0))
-            .alias('Nr_Ligand'),
-            f.when(f.col('High-Quality Pocket') == 1, f.lit(1))
-            .otherwise(f.lit(0))
-            .alias('Nr_Pocket'),
-            f.when(f.col('Small Molecule Binder') == 1, f.lit(1))
-            .otherwise(f.lit(0))
-            .alias('Nr_sMBinder'),
+            f.when(f.col('High-Quality Ligand') == 1, f.lit(1)).otherwise(f.lit(0)).alias('Nr_Ligand'),
+            f.when(f.col('High-Quality Pocket') == 1, f.lit(1)).otherwise(f.lit(0)).alias('Nr_Pocket'),
+            f.when(f.col('Small Molecule Binder') == 1, f.lit(1)).otherwise(f.lit(0)).alias('Nr_sMBinder'),
         )
     )
 
@@ -441,10 +426,10 @@ def _ligand_pocket_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
 def _safety_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Extract safety event information."""
     agg_events = (
-        targets.withColumn(
+        targets
+        .withColumn(
             'info',
-            f.when(f.size(f.col('safetyLiabilities')) > 0, f.lit('conInfo'))
-            .otherwise(f.lit('noReported')),
+            f.when(f.size(f.col('safetyLiabilities')) > 0, f.lit('conInfo')).otherwise(f.lit('noReported')),
         )
         .select(
             f.col('id').alias('targetid'),
@@ -458,8 +443,7 @@ def _safety_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
         )
         .withColumn(
             'hasSafetyEvent',
-            f.when((f.col('nEvents') > 0) & (f.col('info') == 'conInfo'), f.lit('Yes'))
-            .otherwise(f.lit(None)),
+            f.when((f.col('nEvents') > 0) & (f.col('info') == 'conInfo'), f.lit('Yes')).otherwise(f.lit(None)),
         )
         .withColumn(
             'Nr_Event',
@@ -474,7 +458,8 @@ def _constraint_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Compute genetic constraint score (LoF)."""
     # Get min and max upper rank for LoF constraint
     constraint_stats = (
-        targets.select(f.col('id').alias('constr_id'), f.explode(f.col('constraint')).alias('col'))
+        targets
+        .select(f.col('id').alias('constr_id'), f.explode(f.col('constraint')).alias('col'))
         .select(f.col('col.*'))
         .filter(f.col('constraintType') == 'lof')
         .groupBy('constraintType')
@@ -492,15 +477,15 @@ def _constraint_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     max_upper_rank = constraint_stats['upperRank']
 
     constraints = (
-        targets.select(f.col('id').alias('targetid'), f.explode(f.col('constraint')).alias('col'))
+        targets
+        .select(f.col('id').alias('targetid'), f.explode(f.col('constraint')).alias('col'))
         .select(f.col('targetid'), f.col('col.*'))
         .filter(f.col('constraintType') == 'lof')
         .select(
             f.col('targetid'),
-            (
-                f.lit(2) * ((f.col('upperRank') - min_upper_rank) / (max_upper_rank - min_upper_rank))
-                - f.lit(1)
-            ).alias('cal_score'),
+            (f.lit(2) * ((f.col('upperRank') - min_upper_rank) / (max_upper_rank - min_upper_rank)) - f.lit(1)).alias(
+                'cal_score'
+            ),
             f.col('constraintType'),
         )
     )
@@ -511,11 +496,10 @@ def _constraint_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
 def _paralogs_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Compute paralog maximum identity percentage."""
     exploded = (
-        targets.select(
+        targets
+        .select(
             f.col('id').alias('targetid'),
-            f.when(f.size(f.col('homologues')) > f.lit(0), f.lit('hasInfo'))
-            .otherwise('noInfo/null')
-            .alias('hasInfo'),
+            f.when(f.size(f.col('homologues')) > f.lit(0), f.lit('hasInfo')).otherwise('noInfo/null').alias('hasInfo'),
             f.explode(f.col('homologues')).alias('col'),
         )
         .withColumn(
@@ -535,13 +519,15 @@ def _paralogs_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     )
 
     paralog = (
-        exploded.filter(f.col('homoType').contains('paralog'))
+        exploded
+        .filter(f.col('homoType').contains('paralog'))
         .groupBy('targetid')
         .agg(f.max('queryPercentageIdentity').alias('max'))
         .withColumn(
             'Nr_paralogs',
-            f.when(f.col('max') < f.lit(60), f.lit(0))
-            .when(f.col('max') >= f.lit(60), -((f.col('max') - f.lit(60)) / f.lit(40))),
+            f.when(f.col('max') < f.lit(60), f.lit(0)).when(
+                f.col('max') >= f.lit(60), -((f.col('max') - f.lit(60)) / f.lit(40))
+            ),
         )
     )
 
@@ -551,13 +537,12 @@ def _paralogs_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
 def _orthologs_mouse_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Compute mouse ortholog maximum identity percentage."""
     orthologs = (
-        targets.select(f.col('id').alias('targetid'), f.explode(f.col('homologues')).alias('col'))
+        targets
+        .select(f.col('id').alias('targetid'), f.explode(f.col('homologues')).alias('col'))
         .select(f.col('targetid'), f.col('col.*'))
         .withColumn('homoType', f.split(f.col('homologyType'), '_').getItem(0))
         .withColumn('howmany', f.split(f.col('homologyType'), '_').getItem(1))
-        .filter(
-            f.col('homoType').contains('ortholog') & (f.col('speciesName') == 'Mouse')
-        )
+        .filter(f.col('homoType').contains('ortholog') & (f.col('speciesName') == 'Mouse'))
         .select(
             'targetid',
             'homoType',
@@ -570,8 +555,7 @@ def _orthologs_mouse_query(queryset: DataFrame, targets: DataFrame) -> DataFrame
         .agg(f.max('queryPercentageIdentity').alias('max'))
         .withColumn(
             'Nr_ortholog',
-            f.when(f.col('max') < 80, f.lit(0))
-            .when(f.col('max') >= 80, (f.col('max') - 80) / 20),
+            f.when(f.col('max') < 80, f.lit(0)).when(f.col('max') >= 80, (f.col('max') - 80) / 20),
         )
     )
 
@@ -581,21 +565,25 @@ def _orthologs_mouse_query(queryset: DataFrame, targets: DataFrame) -> DataFrame
 def _driver_gene_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     """Identify cancer driver genes."""
     oncotsg_list = [
-        'TSG', 'oncogene', 'Oncogene', 'oncogene,TSG', 'TSG,oncogene',
-        'fusion,oncogene', 'oncogene,fusion',
+        'TSG',
+        'oncogene',
+        'Oncogene',
+        'oncogene,TSG',
+        'TSG,oncogene',
+        'fusion,oncogene',
+        'oncogene,fusion',
     ]
 
     onco_targets = (
-        targets.select(
+        targets
+        .select(
             f.col('id').alias('targetid'),
             f.explode_outer(f.col('hallmarks.attributes')).alias('col'),
         )
         .select(
             f.col('targetid'),
             f.col('col.description'),
-            f.when(f.col('col.description').isin(oncotsg_list), f.lit(1))
-            .otherwise(f.lit(0))
-            .alias('annotation'),
+            f.when(f.col('col.description').isin(oncotsg_list), f.lit(1)).otherwise(f.lit(0)).alias('annotation'),
         )
         .groupBy('targetid')
         .agg(f.max(f.col('annotation')).alias('counts'))
@@ -613,7 +601,8 @@ def _tep_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     tep = targets.select(
         f.col('id').alias('targetid'),
         f.col('tep.*'),
-        f.when(
+        f
+        .when(
             f.col('tep.description').isNotNull() | (f.col('tep.description') != ''),  # noqa: PLC1901
             f.lit(1),
         )
@@ -664,7 +653,8 @@ def _mouse_model_query(
     )
 
     mouse_models_pheno_scores = (
-        mouse_models.join(
+        mouse_models
+        .join(
             pheno_scores,
             mouse_models['classes.id'] == pheno_scores['idLabel'],
             'left',
@@ -677,13 +667,11 @@ def _mouse_model_query(
         .withColumn('maximum', f.max(f.col('maxHarmonicSum')).over(Window.orderBy()).cast('double'))
         .withColumn(
             'scaledHarmonicSum',
-            f.when(f.col('maximum') > 0, f.col('harmonicSum') / f.col('maximum'))
-            .otherwise(f.lit(0)),
+            f.when(f.col('maximum') > 0, f.col('harmonicSum') / f.col('maximum')).otherwise(f.lit(0)),
         )
         .withColumn(
             'negScaledHarmonicSum',
-            f.when(f.col('scaledHarmonicSum') < low_threshold, f.lit(0))
-            .otherwise(
+            f.when(f.col('scaledHarmonicSum') < low_threshold, f.lit(0)).otherwise(
                 (f.col('scaledHarmonicSum') - low_threshold) * -1 / (1 - low_threshold)
             ),
         )
@@ -701,15 +689,15 @@ def _chemical_probes_query(queryset: DataFrame, targets: DataFrame) -> DataFrame
     probes = targets.select(
         f.col('id').alias('targetid'),
         f.explode_outer(f.col('chemicalProbes')).alias('col'),
-        f.when(f.size(f.col('chemicalProbes')) > f.lit(0), f.lit('hasInfo'))
-        .otherwise(f.lit('noInfo'))
-        .alias('info'),
+        f.when(f.size(f.col('chemicalProbes')) > f.lit(0), f.lit('hasInfo')).otherwise(f.lit('noInfo')).alias('info'),
     )
 
     grouped = (
-        probes.withColumn(
+        probes
+        .withColumn(
             'Nr_chprob',
-            f.when(
+            f
+            .when(
                 (f.col('info') == 'hasInfo') & (f.col('col.isHighQuality') == True),  # noqa: E712
                 f.lit(1),
             )
@@ -737,13 +725,10 @@ def _clin_trials_query(
     clinical stage names, then maps each to a 0-1 score and takes the max.
     """
     # Get drug-target relationships from MoA
-    drug_targets = (
-        mechanism_of_action.select(
-            f.explode(f.col('targets')).alias('target'),
-            f.explode(f.col('chemblIds')).alias('chemblId'),
-        )
-        .distinct()
-    )
+    drug_targets = mechanism_of_action.select(
+        f.explode(f.col('targets')).alias('target'),
+        f.explode(f.col('chemblIds')).alias('chemblId'),
+    ).distinct()
 
     # Get clinical trial phase from molecule data
     molecule_phase = molecule.select(
@@ -760,17 +745,28 @@ def _clin_trials_query(
 
     # Map clinical stage names to 0-1 scores and take max per target
     stage_score_map = f.create_map(
-        f.lit('approved'), f.lit(1.0),
-        f.lit('pre-approval'), f.lit(0.8),
-        f.lit('phase III'), f.lit(0.7),
-        f.lit('phase II/III'), f.lit(0.5),
-        f.lit('phase II'), f.lit(0.2),
-        f.lit('phase I/II'), f.lit(0.15),
-        f.lit('phase I'), f.lit(0.1),
-        f.lit('early phase I'), f.lit(0.05),
-        f.lit('IND'), f.lit(0.05),
-        f.lit('preclinical'), f.lit(0.01),
-        f.lit('unknown'), f.lit(0.01),
+        f.lit('APPROVAL'),
+        f.lit(1.0),
+        f.lit('PREAPPROVAL'),
+        f.lit(0.8),
+        f.lit('PHASE_3'),
+        f.lit(0.7),
+        f.lit('PHASE_2_3'),
+        f.lit(0.5),
+        f.lit('PHASE_2'),
+        f.lit(0.2),
+        f.lit('PHASE_1_2'),
+        f.lit(0.15),
+        f.lit('PHASE_1'),
+        f.lit(0.1),
+        f.lit('EARLY_PHASE_1'),
+        f.lit(0.05),
+        f.lit('IND'),
+        f.lit(0.05),
+        f.lit('PRECLINICAL'),
+        f.lit(0.01),
+        f.lit('UNKNOWN'),
+        f.lit(0.01),
     )
 
     max_phase_per_target = (
@@ -791,14 +787,16 @@ def _clin_trials_query(
 def _tissue_specific_query(queryset: DataFrame, hpa_data: DataFrame) -> DataFrame:
     """Compute tissue specificity and distribution from HPA data."""
     hpa = (
-        hpa_data.select(
+        hpa_data
+        .select(
             'Ensembl',
             f.col('RNA tissue distribution').alias('Tissue_distribution_RNA'),
             f.col('RNA tissue specificity').alias('Tissue_specificity_RNA'),
         )
         .withColumn(
             'Nr_specificity',
-            f.when(f.col('Tissue_specificity_RNA') == 'Tissue enriched', f.lit(1))
+            f
+            .when(f.col('Tissue_specificity_RNA') == 'Tissue enriched', f.lit(1))
             .when(f.col('Tissue_specificity_RNA') == 'Group enriched', f.lit(0.75))
             .when(f.col('Tissue_specificity_RNA') == 'Tissue enhanced', f.lit(0.5))
             .when(f.col('Tissue_specificity_RNA') == 'Low tissue specificity', f.lit(-1))
@@ -806,7 +804,8 @@ def _tissue_specific_query(queryset: DataFrame, hpa_data: DataFrame) -> DataFram
         )
         .withColumn(
             'Nr_distribution',
-            f.when(f.col('Tissue_distribution_RNA') == 'Detected in single', f.lit(1))
+            f
+            .when(f.col('Tissue_distribution_RNA') == 'Detected in single', f.lit(1))
             .when(f.col('Tissue_distribution_RNA') == 'Detected in some', f.lit(0.5))
             .when(f.col('Tissue_distribution_RNA') == 'Detected in many', f.lit(0))
             .when(f.col('Tissue_distribution_RNA') == 'Detected in all', f.lit(-1))
