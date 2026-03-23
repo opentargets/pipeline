@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.03.0-dev.44"
+version = "26.03.0"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -36,12 +36,7 @@ clinical-mining = { git = "https://github.com/opentargets/clinical_mining" }
 
 
 [dependency-groups]
-dev = [
-    "ruff==0.15.2",
-    "ty==0.0.17",
-    "deptry==0.24.0",
-    "pre-commit>=4.3.0",
-]
+dev = ["ruff==0.15.2", "ty==0.0.17", "deptry==0.24.0", "pre-commit>=4.3.0"]
 
 [project.optional-dependencies]
 test = [
