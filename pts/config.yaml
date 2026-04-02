@@ -1550,7 +1550,7 @@ steps:
       properties:
         spark.driver.memory: 16g
   ##################################################################################################
-  
+
   #: ASSOCIATION TIMESERIES VIEW STEP :#############################################################
   association_timeseries_view:
     - name: pyspark timeseries view
@@ -1563,4 +1563,32 @@ steps:
       destination: view/association_timeseries
       properties:
         spark.driver.memory: 12g
+  ##################################################################################################
+
+  #: RELEASE METRICS STEP :##########################################################################
+  release_metrics:
+    - name: transform release_metrics
+      transformer: release_metrics
+      source: {}
+      destination:
+        parquet: metrics.parquet
+      settings:
+        ot_release: '26.03-test4'
+        metric_scopes:
+          - /output/*
+          - /excluded/evidence/*
+        rich_dataset_whitelist:
+          - /output/evidence_*
+          - /excluded/evidence/*
+          - /output/association_by_datasource_direct
+          - /output/association_by_datasource_indirect
+          - /output/disease
+          - /output/target
+          - /output/drug_molecule
+          - /output/study
+          - /output/clinical_report
+        upload_to_hf_hub: false
+        hf_token_filename: /var/run/secrets/hf_token
+        hf_repo_id: opentargets/ot-release-metrics
+        hf_data_dir: metrics
   ##################################################################################################
