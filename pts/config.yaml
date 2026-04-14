@@ -218,6 +218,11 @@ steps:
           source: ${uri}
           destination: intermediate/target/homologue/gene_dictionary/${match_path}/${match_stem}.parquet
           transformer: homology
+
+    - name: transform uniprot
+      transformer: uniprot
+      source: input/target/uniprot/uniprot.txt.gz
+      destination: intermediate/target/uniprot/uniprot.parquet
   ##################################################################################################
 
   #: TARGET STEP (pyspark) :#######################################################################
@@ -234,7 +239,7 @@ steps:
         gene_ontology_rna_lookup: input/target/go/ensembl.tsv
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
-        hgnc: input/target/gennames/hgnc_complete_set.json
+        hgnc: input/target/genenames/hgnc_complete_set.json
         homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
         homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
         homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
@@ -248,7 +253,7 @@ steps:
         safety_evidence: intermediate/target/safety.parquet
         tep: input/target/tep/tep.json.gz
         tractability: input/target/tractability/tractability.tsv
-        uniprot: input/target/uniprot/uniprot-reviewed_human.xml.gz
+        uniprot: intermediate/target/uniprot/uniprot.parquet
         chembl: input/target/chembl/chembl_target.jsonl
         chemical_probes: intermediate/chemical_probes_evidence.parquet
       destination: output/target

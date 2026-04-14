@@ -3,14 +3,10 @@
 Ported from platform-etl-backend target step.
 """
 
-import pytest
 from pyspark.sql import Row
-from pyspark.sql import functions as f
 from pyspark.sql.types import (
     ArrayType,
-    BooleanType,
     DoubleType,
-    FloatType,
     IntegerType,
     LongType,
     StringType,
@@ -29,7 +25,6 @@ from pts.pyspark.target import (
     _filter_ensembl,
     _merge_hgnc_ensembl,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper builders
@@ -55,10 +50,15 @@ ENSEMBL_SCHEMA = StructType([
     StructField('strand', IntegerType()),
     StructField('description', StringType()),
     StructField('approvedSymbol', StringType()),
-    StructField('transcripts', ArrayType(StructType([
-        StructField('id', StringType()),
-        StructField('biotype', StringType()),
-    ]))),
+    StructField(
+        'transcripts',
+        ArrayType(
+            StructType([
+                StructField('id', StringType()),
+                StructField('biotype', StringType()),
+            ])
+        ),
+    ),
     StructField('uniprot_swissprot', ArrayType(StringType())),
     StructField('uniprot_trembl', ArrayType(StringType())),
     StructField('translations', ArrayType(StructType([StructField('id', StringType())]))),
@@ -130,39 +130,51 @@ def test_ensembl_filters_non_ensg(spark):
 # ---------------------------------------------------------------------------
 
 HGNC_SCHEMA = StructType([
-    StructField('response', StructType([
-        StructField('docs', ArrayType(StructType([
-            StructField('ensembl_gene_id', StringType()),
-            StructField('hgnc_id', StringType()),
-            StructField('symbol', StringType()),
-            StructField('name', StringType()),
-            StructField('uniprot_ids', ArrayType(StringType())),
-            StructField('alias_symbol', ArrayType(StringType())),
-            StructField('alias_name', ArrayType(StringType())),
-            StructField('prev_symbol', ArrayType(StringType())),
-            StructField('prev_name', ArrayType(StringType())),
-        ])))
-    ]))
+    StructField(
+        'response',
+        StructType([
+            StructField(
+                'docs',
+                ArrayType(
+                    StructType([
+                        StructField('ensembl_gene_id', StringType()),
+                        StructField('hgnc_id', StringType()),
+                        StructField('symbol', StringType()),
+                        StructField('name', StringType()),
+                        StructField('uniprot_ids', ArrayType(StringType())),
+                        StructField('alias_symbol', ArrayType(StringType())),
+                        StructField('alias_name', ArrayType(StringType())),
+                        StructField('prev_symbol', ArrayType(StringType())),
+                        StructField('prev_name', ArrayType(StringType())),
+                    ])
+                ),
+            )
+        ]),
+    )
 ])
 
 
 def test_hgnc_symbol_mapping(spark):
     """HGNC maps ensembl_gene_id to approvedSymbol and approvedName."""
-    data = [{
-        'response': {
-            'docs': [{
-                'ensembl_gene_id': 'ENSG00000141510',
-                'hgnc_id': 'HGNC:11998',
-                'symbol': 'TP53',
-                'name': 'tumor protein p53',
-                'uniprot_ids': ['P04637'],
-                'alias_symbol': None,
-                'alias_name': None,
-                'prev_symbol': None,
-                'prev_name': None,
-            }]
+    data = [
+        {
+            'response': {
+                'docs': [
+                    {
+                        'ensembl_gene_id': 'ENSG00000141510',
+                        'hgnc_id': 'HGNC:11998',
+                        'symbol': 'TP53',
+                        'name': 'tumor protein p53',
+                        'uniprot_ids': ['P04637'],
+                        'alias_symbol': None,
+                        'alias_name': None,
+                        'prev_symbol': None,
+                        'prev_name': None,
+                    }
+                ]
+            }
         }
-    }]
+    ]
     df = spark.createDataFrame(data, HGNC_SCHEMA)
     result = _build_hgnc(df)
     rows = result.collect()
@@ -188,13 +200,13 @@ GO_HUMAN_SCHEMA = StructType([
     StructField('_c7', StringType()),  # withOrFrom
     StructField('_c8', StringType()),  # aspect
     StructField('_c9', StringType()),  # dbObjectName
-    StructField('_c10', StringType()), # dbObjectSynonym
-    StructField('_c11', StringType()), # dbObjectType
-    StructField('_c12', StringType()), # taxon
-    StructField('_c13', StringType()), # date
-    StructField('_c14', StringType()), # assignedBy
-    StructField('_c15', StringType()), # annotationExtension
-    StructField('_c16', StringType()), # geneProductFormId
+    StructField('_c10', StringType()),  # dbObjectSynonym
+    StructField('_c11', StringType()),  # dbObjectType
+    StructField('_c12', StringType()),  # taxon
+    StructField('_c13', StringType()),  # date
+    StructField('_c14', StringType()),  # assignedBy
+    StructField('_c15', StringType()),  # annotationExtension
+    StructField('_c16', StringType()),  # geneProductFormId
 ])
 
 
@@ -252,13 +264,19 @@ def test_go_grouping_by_aspect(spark):
     ensembl_go_schema = StructType([
         StructField('id', StringType()),
         StructField('approvedSymbol', StringType()),
-        StructField('proteinIds', ArrayType(StructType([
-            StructField('id', StringType()),
-            StructField('source', StringType()),
-        ]))),
+        StructField(
+            'proteinIds',
+            ArrayType(
+                StructType([
+                    StructField('id', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
     ])
-    ensembl_go_data = [Row(id='ENSG00000141510', approvedSymbol='TP53',
-                           proteinIds=[Row(id='P04637', source='uniprot_swissprot')])]
+    ensembl_go_data = [
+        Row(id='ENSG00000141510', approvedSymbol='TP53', proteinIds=[Row(id='P04637', source='uniprot_swissprot')])
+    ]
     ensembl_df = spark.createDataFrame(ensembl_go_data, ensembl_go_schema)
 
     result = _build_gene_ontology(human_df, rna_df, rna_lookup_df, eco_df, ensembl_df)
@@ -275,6 +293,7 @@ def test_go_grouping_by_aspect(spark):
 # ---------------------------------------------------------------------------
 # 4. Homologue filtering by species whitelist
 # ---------------------------------------------------------------------------
+
 
 def test_homologue_whitelist_filtering(spark):
     """Only species in whitelist are included in homologues."""
@@ -308,25 +327,41 @@ def test_homologue_whitelist_filtering(spark):
         StructField('homology_id', StringType()),
     ])
     coding_proteins_data = [
-        Row(gene_stable_id='ENSG0001', protein_stable_id='P001',
-            species='homo_sapiens', identity=100.0,
+        Row(
+            gene_stable_id='ENSG0001',
+            protein_stable_id='P001',
+            species='homo_sapiens',
+            identity=100.0,
             homology_type='ortholog_one2one',
             homology_gene_stable_id='ENSMUSG0001',
             homology_protein_stable_id='P002',
             homology_species='mus_musculus',
-            homology_identity=88.0, dn=None, ds=None,
-            goc_score=None, wga_coverage=None,
-            is_high_confidence='1', homology_id='h001'),
+            homology_identity=88.0,
+            dn=None,
+            ds=None,
+            goc_score=None,
+            wga_coverage=None,
+            is_high_confidence='1',
+            homology_id='h001',
+        ),
         # rat — NOT in whitelist
-        Row(gene_stable_id='ENSG0001', protein_stable_id='P001',
-            species='homo_sapiens', identity=100.0,
+        Row(
+            gene_stable_id='ENSG0001',
+            protein_stable_id='P001',
+            species='homo_sapiens',
+            identity=100.0,
             homology_type='ortholog_one2one',
             homology_gene_stable_id='ENSRNOG0001',
             homology_protein_stable_id='P003',
             homology_species='rattus_norvegicus',
-            homology_identity=85.0, dn=None, ds=None,
-            goc_score=None, wga_coverage=None,
-            is_high_confidence='1', homology_id='h002'),
+            homology_identity=85.0,
+            dn=None,
+            ds=None,
+            goc_score=None,
+            wga_coverage=None,
+            is_high_confidence='1',
+            homology_id='h002',
+        ),
     ]
     coding_proteins_df = spark.createDataFrame(coding_proteins_data, coding_proteins_schema)
 
@@ -352,6 +387,7 @@ def test_homologue_whitelist_filtering(spark):
 # 5. Safety evidence aggregation
 # ---------------------------------------------------------------------------
 
+
 def test_safety_evidence_aggregation(spark):
     """Safety evidence is grouped by ENSG id into safetyLiabilities."""
     safety_schema = StructType([
@@ -359,39 +395,77 @@ def test_safety_evidence_aggregation(spark):
         StructField('targetFromSourceId', StringType()),
         StructField('event', StringType()),
         StructField('eventId', StringType()),
-        StructField('effects', ArrayType(StructType([
-            StructField('direction', StringType()),
-            StructField('dosing', StringType()),
-        ]))),
-        StructField('biosamples', ArrayType(StructType([
-            StructField('tissueLabel', StringType()),
-            StructField('tissueId', StringType()),
-            StructField('cellLabel', StringType()),
-            StructField('cellFormat', StringType()),
-        ]))),
+        StructField(
+            'effects',
+            ArrayType(
+                StructType([
+                    StructField('direction', StringType()),
+                    StructField('dosing', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'biosamples',
+            ArrayType(
+                StructType([
+                    StructField('tissueLabel', StringType()),
+                    StructField('tissueId', StringType()),
+                    StructField('cellLabel', StringType()),
+                    StructField('cellFormat', StringType()),
+                ])
+            ),
+        ),
         StructField('datasource', StringType()),
         StructField('literature', StringType()),
         StructField('url', StringType()),
-        StructField('studies', ArrayType(StructType([
-            StructField('name', StringType()),
-            StructField('description', StringType()),
-            StructField('type', StringType()),
-        ]))),
+        StructField(
+            'studies',
+            ArrayType(
+                StructType([
+                    StructField('name', StringType()),
+                    StructField('description', StringType()),
+                    StructField('type', StringType()),
+                ])
+            ),
+        ),
     ])
     safety_data = [
-        Row(id='ENSG00000141510', targetFromSourceId='TP53',
-            event='heart failure', eventId='EFO_0003777',
+        Row(
+            id='ENSG00000141510',
+            targetFromSourceId='TP53',
+            event='heart failure',
+            eventId='EFO_0003777',
             effects=[Row(direction='Activation/Increase/Upregulation', dosing='general')],
-            biosamples=None, datasource='TestSource',
-            literature='12345678', url=None, studies=None),
-        Row(id='ENSG00000141510', targetFromSourceId='TP53',
-            event='liver toxicity', eventId='EFO_0001234',
-            effects=None, biosamples=None, datasource='TestSource2',
-            literature=None, url=None, studies=None),
-        Row(id='ENSG00000012048', targetFromSourceId='BRCA1',
-            event='breast cancer', eventId='MONDO_0007254',
-            effects=None, biosamples=None, datasource='TestSource',
-            literature=None, url=None, studies=None),
+            biosamples=None,
+            datasource='TestSource',
+            literature='12345678',
+            url=None,
+            studies=None,
+        ),
+        Row(
+            id='ENSG00000141510',
+            targetFromSourceId='TP53',
+            event='liver toxicity',
+            eventId='EFO_0001234',
+            effects=None,
+            biosamples=None,
+            datasource='TestSource2',
+            literature=None,
+            url=None,
+            studies=None,
+        ),
+        Row(
+            id='ENSG00000012048',
+            targetFromSourceId='BRCA1',
+            event='breast cancer',
+            eventId='MONDO_0007254',
+            effects=None,
+            biosamples=None,
+            datasource='TestSource',
+            literature=None,
+            url=None,
+            studies=None,
+        ),
     ]
     safety_df = spark.createDataFrame(safety_data, safety_schema)
 
@@ -404,8 +478,7 @@ def test_safety_evidence_aggregation(spark):
         StructField('symbols', ArrayType(StringType())),
     ])
     lookup_data = [
-        Row(ensgId='ENSG00000141510', name=['P04637', 'TP53'],
-            uniprot=['P04637'], HGNC=['TP53'], symbols=['TP53']),
+        Row(ensgId='ENSG00000141510', name=['P04637', 'TP53'], uniprot=['P04637'], HGNC=['TP53'], symbols=['TP53']),
     ]
     lookup_df = spark.createDataFrame(lookup_data, lookup_schema)
 
@@ -428,6 +501,7 @@ def test_safety_evidence_aggregation(spark):
 # ---------------------------------------------------------------------------
 # 6. Genetic constraints
 # ---------------------------------------------------------------------------
+
 
 def test_genetic_constraints_structure(spark):
     """Genetic constraints are grouped as an array with syn/mis/lof entries."""
@@ -456,31 +530,33 @@ def test_genetic_constraints_structure(spark):
         StructField('lof.oe_ci.upper_rank', StringType()),
         StructField('lof.oe_ci.upper_bin_decile', StringType()),
     ])
-    constraint_data = [{
-        'gene_id': 'ENSG00000141510',
-        'canonical': 'true',
-        'transcript_type': 'protein_coding',
-        'syn.z_score': '1.23',
-        'syn.exp': '100.5',
-        'syn.obs': '95',
-        'syn.oe': '0.95',
-        'syn.oe_ci.lower': '0.8',
-        'syn.oe_ci.upper': '1.1',
-        'mis.z_score': '2.5',
-        'mis.exp': '200.0',
-        'mis.obs': '180',
-        'mis.oe': '0.9',
-        'mis.oe_ci.lower': '0.75',
-        'mis.oe_ci.upper': '1.05',
-        'lof.pLI': '0.99',
-        'lof.exp': '50.0',
-        'lof.obs': '5',
-        'lof.oe': '0.1',
-        'lof.oe_ci.lower': '0.05',
-        'lof.oe_ci.upper': '0.2',
-        'lof.oe_ci.upper_rank': '1000',
-        'lof.oe_ci.upper_bin_decile': '1',
-    }]
+    constraint_data = [
+        {
+            'gene_id': 'ENSG00000141510',
+            'canonical': 'true',
+            'transcript_type': 'protein_coding',
+            'syn.z_score': '1.23',
+            'syn.exp': '100.5',
+            'syn.obs': '95',
+            'syn.oe': '0.95',
+            'syn.oe_ci.lower': '0.8',
+            'syn.oe_ci.upper': '1.1',
+            'mis.z_score': '2.5',
+            'mis.exp': '200.0',
+            'mis.obs': '180',
+            'mis.oe': '0.9',
+            'mis.oe_ci.lower': '0.75',
+            'mis.oe_ci.upper': '1.05',
+            'lof.pLI': '0.99',
+            'lof.exp': '50.0',
+            'lof.obs': '5',
+            'lof.oe': '0.1',
+            'lof.oe_ci.lower': '0.05',
+            'lof.oe_ci.upper': '0.2',
+            'lof.oe_ci.upper_rank': '1000',
+            'lof.oe_ci.upper_bin_decile': '1',
+        }
+    ]
     df = spark.createDataFrame(constraint_data, constraint_schema)
     result = _build_genetic_constraints(df)
     rows = result.collect()
@@ -495,6 +571,7 @@ def test_genetic_constraints_structure(spark):
 # 7. Hallmarks
 # ---------------------------------------------------------------------------
 
+
 def test_hallmarks_split_cancer_vs_non_cancer(spark):
     """Hallmarks splits records into cancerHallmarks and attributes."""
     hallmark_schema = StructType([
@@ -505,10 +582,20 @@ def test_hallmarks_split_cancer_vs_non_cancer(spark):
         StructField('DESCRIPTION', StringType()),
     ])
     hallmark_data = [
-        Row(GENE_SYMBOL='TP53', PUBMED_PMID='12345', HALLMARK='angiogenesis',
-            IMPACT='promotes', DESCRIPTION='promotes tumour angiogenesis'),
-        Row(GENE_SYMBOL='TP53', PUBMED_PMID='67890', HALLMARK='apoptosis',
-            IMPACT='suppresses', DESCRIPTION='induces apoptosis'),
+        Row(
+            GENE_SYMBOL='TP53',
+            PUBMED_PMID='12345',
+            HALLMARK='angiogenesis',
+            IMPACT='promotes',
+            DESCRIPTION='promotes tumour angiogenesis',
+        ),
+        Row(
+            GENE_SYMBOL='TP53',
+            PUBMED_PMID='67890',
+            HALLMARK='apoptosis',
+            IMPACT='suppresses',
+            DESCRIPTION='induces apoptosis',
+        ),
     ]
     df = spark.createDataFrame(hallmark_data, hallmark_schema)
     result = _build_hallmarks(df)
@@ -528,6 +615,7 @@ def test_hallmarks_split_cancer_vs_non_cancer(spark):
 # 8. Reactome pathways
 # ---------------------------------------------------------------------------
 
+
 def test_reactome_pathways(spark):
     """Reactome groups pathways per Ensembl ID with topLevelTerm."""
     reactome_pathways_schema = StructType([
@@ -539,8 +627,14 @@ def test_reactome_pathways(spark):
         StructField('_c5', StringType()),  # species
     ])
     reactome_pathways_data = [
-        Row(_c0='ENSG00000141510', _c1='R-HSA-69278', _c2='https://reactome.org',
-            _c3='Cell Cycle', _c4='CC', _c5='Homo sapiens'),
+        Row(
+            _c0='ENSG00000141510',
+            _c1='R-HSA-69278',
+            _c2='https://reactome.org',
+            _c3='Cell Cycle',
+            _c4='CC',
+            _c5='Homo sapiens',
+        ),
     ]
     pathways_df = spark.createDataFrame(reactome_pathways_data, reactome_pathways_schema)
 
@@ -568,6 +662,7 @@ def test_reactome_pathways(spark):
 # 9. HGNC + Ensembl merge
 # ---------------------------------------------------------------------------
 
+
 def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
     """Merged dataframe uses HGNC approvedName/Symbol when available."""
     ensembl_schema = StructType([
@@ -575,18 +670,24 @@ def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
         StructField('biotype', StringType()),
         StructField('approvedName', StringType()),
         StructField('approvedSymbol', StringType()),
-        StructField('genomicLocation', StructType([
-            StructField('chromosome', StringType()),
-            StructField('start', LongType()),
-            StructField('end', LongType()),
-            StructField('strand', IntegerType()),
-        ])),
+        StructField(
+            'genomicLocation',
+            StructType([
+                StructField('chromosome', StringType()),
+                StructField('start', LongType()),
+                StructField('end', LongType()),
+                StructField('strand', IntegerType()),
+            ]),
+        ),
     ])
     ensembl_data = [
-        Row(id='ENSG00000141510', biotype='protein_coding',
+        Row(
+            id='ENSG00000141510',
+            biotype='protein_coding',
             approvedName='Ensembl approved name',
             approvedSymbol='TP53_ensembl',
-            genomicLocation=Row(chromosome='17', start=7661779, end=7687538, strand=-1)),
+            genomicLocation=Row(chromosome='17', start=7661779, end=7687538, strand=-1),
+        ),
     ]
     ensembl_df = spark.createDataFrame(ensembl_data, ensembl_schema)
 
@@ -594,34 +695,65 @@ def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
         StructField('ensemblId', StringType()),
         StructField('approvedSymbol', StringType()),
         StructField('approvedName', StringType()),
-        StructField('hgncId', ArrayType(StructType([
-            StructField('id', StringType()),
-            StructField('source', StringType()),
-        ]))),
-        StructField('hgncSynonyms', ArrayType(StructType([
-            StructField('label', StringType()),
-            StructField('source', StringType()),
-        ]))),
-        StructField('hgncSymbolSynonyms', ArrayType(StructType([
-            StructField('label', StringType()),
-            StructField('source', StringType()),
-        ]))),
-        StructField('hgncNameSynonyms', ArrayType(StructType([
-            StructField('label', StringType()),
-            StructField('source', StringType()),
-        ]))),
-        StructField('hgncObsoleteSymbols', ArrayType(StructType([
-            StructField('label', StringType()),
-            StructField('source', StringType()),
-        ]))),
-        StructField('hgncObsoleteNames', ArrayType(StructType([
-            StructField('label', StringType()),
-            StructField('source', StringType()),
-        ]))),
+        StructField(
+            'hgncId',
+            ArrayType(
+                StructType([
+                    StructField('id', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'hgncSynonyms',
+            ArrayType(
+                StructType([
+                    StructField('label', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'hgncSymbolSynonyms',
+            ArrayType(
+                StructType([
+                    StructField('label', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'hgncNameSynonyms',
+            ArrayType(
+                StructType([
+                    StructField('label', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'hgncObsoleteSymbols',
+            ArrayType(
+                StructType([
+                    StructField('label', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
+        StructField(
+            'hgncObsoleteNames',
+            ArrayType(
+                StructType([
+                    StructField('label', StringType()),
+                    StructField('source', StringType()),
+                ])
+            ),
+        ),
         StructField('uniprotIds', ArrayType(StringType())),
     ])
     hgnc_data = [
-        Row(ensemblId='ENSG00000141510',
+        Row(
+            ensemblId='ENSG00000141510',
             approvedSymbol='TP53',
             approvedName='tumor protein p53',
             hgncId=[Row(id='11998', source='HGNC')],
@@ -630,7 +762,8 @@ def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
             hgncNameSynonyms=None,
             hgncObsoleteSymbols=None,
             hgncObsoleteNames=None,
-            uniprotIds=['P04637']),
+            uniprotIds=['P04637'],
+        ),
     ]
     hgnc_df = spark.createDataFrame(hgnc_data, hgnc_schema)
 
@@ -671,4 +804,5 @@ REQUIRED_OUTPUT_COLUMNS = {
 def test_output_schema_has_required_columns(spark):
     """The target module exposes the required_output_columns constant."""
     from pts.pyspark.target import REQUIRED_OUTPUT_COLUMNS as ROC
+
     assert REQUIRED_OUTPUT_COLUMNS.issubset(ROC)
