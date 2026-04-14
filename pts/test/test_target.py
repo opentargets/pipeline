@@ -788,7 +788,7 @@ REQUIRED_OUTPUT_COLUMNS = {
     'transcripts',
     'genomicLocation',
     'pathways',
-    'geneOntology',
+    'go',
     'constraint',
     'safety',
     'tractability',

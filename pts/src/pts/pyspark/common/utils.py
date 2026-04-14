@@ -283,3 +283,11 @@ def rename_columns_to_camel_case(df: DataFrame) -> DataFrame:
 
     new_schema = _transform_schema(df.schema)
     return df.sparkSession.createDataFrame(df.rdd, new_schema)
+
+
+def safe_array_union(*cols: Column) -> Column:
+    """Return union of multiple array columns, treating nulls as empty arrays."""
+    result = f.coalesce(cols[0], f.array())
+    for col in cols[1:]:
+        result = f.array_union(result, f.coalesce(col, f.array()))
+    return result

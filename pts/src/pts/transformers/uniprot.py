@@ -38,6 +38,7 @@ def _parse_record(lines: list[str]) -> dict:
     db_xrefs: list[str] = []
     functions: list[str] = []
     locations: list[str] = []
+    gn_lines: list[str] = []  # accumulated across continuation lines
 
     # CC state machine
     cc_topic: str | None = None
@@ -47,17 +48,21 @@ def _parse_record(lines: list[str]) -> dict:
         if cc_topic is None:
             return
         text = ' '.join(cc_lines).strip()
-        text = _strip_braces(text)
         if cc_topic == 'FUNCTION':
             if text:
                 functions.append(text)
         elif cc_topic == 'SUBCELLULAR LOCATION':
-            # Split by period, skip Note= segments
+            text = _strip_braces(text)
+            # Split by period; stop at first Note= segment (its continuation
+            # sentences don't start with Note= but are still part of the note)
             parts = text.split('.')
             for part in parts:
                 p = part.strip()
-                if p and not p.startswith('Note=') and not p.startswith('Note '):
-                    locations.append(p)
+                if not p:
+                    continue
+                if p.startswith(('Note=', 'Note ')):
+                    break
+                locations.append(p)
 
     for raw in lines:
         if len(raw) < 2:
@@ -90,30 +95,14 @@ def _parse_record(lines: list[str]) -> dict:
             elif content_clean.startswith('AltName: CD_antigen='):
                 val = content_clean[len('AltName: CD_antigen=') :].rstrip(';').strip()
                 if val:
-                    synonyms.append(val)
+                    symbol_synonyms.append(val)
             elif content_clean.startswith('Short='):
-                # Short names go into synonyms
                 val = content_clean[len('Short=') :].rstrip(';').strip()
                 if val:
-                    synonyms.append(val)
+                    symbol_synonyms.append(val)
 
         elif code == 'GN':
-            # Collect all GN line content, then parse
-            content_clean = _strip_braces(content).strip()
-            # Parse key=value pairs split by ";"
-            for segment in content_clean.split(';'):
-                segment = segment.strip()
-                if not segment:
-                    continue
-                if '=' in segment:
-                    key, _, value = segment.partition('=')
-                    key = key.strip()
-                    value = value.strip()
-                    if key in ('Name', 'Synonyms', 'ORFNames'):
-                        for v in value.split(','):
-                            v = v.strip().rstrip(';')
-                            if v:
-                                symbol_synonyms.append(v)
+            gn_lines.append(content)
 
         elif code == 'DR':
             content_clean = _strip_braces(content).strip()
@@ -125,7 +114,12 @@ def _parse_record(lines: list[str]) -> dict:
 
         elif code == 'CC':
             content_clean = _strip_braces(content)
-            if content_clean.startswith('-!- '):
+            if content_clean.lstrip().startswith('-----'):
+                # Copyright separator — flush and stop CC parsing
+                _flush_cc()
+                cc_topic = None
+                cc_lines = []
+            elif content_clean.startswith('-!- '):
                 # Flush previous CC block
                 _flush_cc()
                 cc_lines = []
@@ -146,6 +140,23 @@ def _parse_record(lines: list[str]) -> dict:
                     cc_lines.append(continuation)
 
     _flush_cc()
+
+    # Parse accumulated GN lines as one block so _strip_braces handles
+    # multi-line {ECO:...} evidence codes correctly.
+    gn_text = _strip_braces(' '.join(gn_lines))
+    for segment in gn_text.split(';'):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if '=' in segment:
+            key, _, value = segment.partition('=')
+            key = key.strip()
+            value = value.strip()
+            if key in ('Name', 'Synonyms', 'ORFNames'):
+                for v in value.split(','):
+                    v = v.strip().rstrip(';')
+                    if v:
+                        symbol_synonyms.append(v)
 
     return {
         'id': entry_id,

@@ -32,6 +32,7 @@ from loguru import logger
 from pyspark.sql import DataFrame
 from pyspark.sql.types import (
     ArrayType,
+    BooleanType,
     DoubleType,
     FloatType,
     IntegerType,
@@ -43,6 +44,7 @@ from pyspark.sql.types import (
 from pyspark.sql.window import Window
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import safe_array_union as _safe_array_union
 
 # ---------------------------------------------------------------------------
 # Public constant — tested for schema compliance
@@ -53,9 +55,11 @@ REQUIRED_OUTPUT_COLUMNS = {
     'approvedName',
     'biotype',
     'transcripts',
+    'transcriptIds',
+    'canonicalExons',
     'genomicLocation',
     'pathways',
-    'geneOntology',
+    'go',
     'constraint',
     'safety',
     'tractability',
@@ -137,7 +141,7 @@ def target(
     go_rna_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_rna'])
     go_rna_lookup_raw = spark.read.option('sep', '\t').csv(source['gene_ontology_rna_lookup'])
     go_eco_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_eco_lookup'])
-    tep_raw = spark.read.option('multiline', 'true').json(source['tep'])
+    tep_raw = spark.read.json(source['tep'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
     ps_ids_raw = spark.read.parquet(source['project_scores_ids'])
@@ -167,27 +171,25 @@ def target(
     # produced by the pts_target pre-processing step (uniprot XML→parquet).
     # The pre-processing step writes a parquet with UniprotEntry fields.
     uniprot_raw = spark.read.parquet(source['uniprot'])
+    uniprot_ssl_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['uniprot_ssl'])
 
     # --- species whitelist from settings ------------------------------------
     hgnc_ortholog_species: list[str] = settings.get(
         'hgncOrthologSpecies',
         [
-            '9606-homo_sapiens',
-            '10090-mus_musculus',
-            '10116-rattus_norvegicus',
-            '9615-canis_lupus_familiaris',
-            '9823-sus_scrofa',
-            '9796-equus_caballus',
-            '9913-bos_taurus',
-            '9986-oryctolagus_cuniculus',
-            '13616-monodelphis_domestica',
-            '9258-ornithorhynchus_anatinus',
-            '9031-gallus_gallus',
-            '8364-xenopus_tropicalis',
-            '7955-danio_rerio',
-            '7227-drosophila_melanogaster',
-            '6239-caenorhabditis_elegans',
-            '4932-saccharomyces_cerevisiae',
+            '9606-human',
+            '9598-chimpanzee',
+            '9544-macaque',
+            '10090-mouse',
+            '10116-rat',
+            '9986-rabbit',
+            '10141-guineapig',
+            '9615-dog',
+            '9823-pig',
+            '8364-frog',
+            '7955-zebrafish',
+            '7227-fly',
+            '6239-worm',
         ],
     )
 
@@ -241,7 +243,7 @@ def target(
 
     # --- Uniprot (pre-processed parquet schema mirrors UniprotEntry) --------
     logger.info('Building Uniprot')
-    uniprot_df = _build_uniprot(uniprot_raw, hpa_sl_raw)
+    uniprot_df = _build_uniprot(uniprot_raw, uniprot_ssl_raw)
 
     # --- Merge ---------------------------------------------------------------
     logger.info('Merging HGNC + Ensembl + GO + ProjectScores + Hallmarks')
@@ -320,10 +322,6 @@ def target(
         .transform(_add_tss)
     )
 
-    # Rename go → geneOntology to match platform schema
-    if 'go' in targets_df.columns:
-        targets_df = targets_df.withColumnRenamed('go', 'geneOntology')
-
     logger.info(f'Writing target output to {destination["target"]}')
     targets_df.write.mode('overwrite').parquet(destination['target'])
 
@@ -331,19 +329,6 @@ def target(
     gene_essentiality_df = _build_gene_essentiality_output(gene_essentiality_raw, ensg_lookup)
     logger.info(f'Writing gene essentiality output to {destination["gene_essentiality"]}')
     gene_essentiality_df.write.mode('overwrite').parquet(destination['gene_essentiality'])
-
-
-# ===========================================================================
-# Helper: safe array union (mirrors Spark Helpers.safeArrayUnion in Scala)
-# ===========================================================================
-
-
-def _safe_array_union(*cols):
-    """Return union of multiple array columns, treating nulls as empty arrays."""
-    result = f.coalesce(cols[0], f.array())
-    for col in cols[1:]:
-        result = f.array_union(result, f.coalesce(col, f.array()))
-    return result
 
 
 # ===========================================================================
@@ -445,7 +430,16 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
                 if has_transcripts
                 else f.lit(None).cast(ArrayType(StructType([StructField('id', StringType())])))
             ).alias('transcripts_raw'),
-            f.col('signalP') if 'signalP' in df.columns else f.lit(None).alias('signalP'),
+            # transcriptIds: flat array of transcript IDs (Ensembl.scala line 45)
+            (f.col('transcripts.id') if has_transcripts else f.lit(None).cast(ArrayType(StringType()))).alias(
+                'transcriptIds'
+            ),
+            # exons: per-transcript exon arrays for canonicalExons computation
+            (f.col('transcripts.exons') if has_transcripts else f.lit(None)).alias('exons_raw'),
+            # translations: flatten transcripts[*].translations[*] into a top-level array
+            # so _refactor_ensembl_protein_ids can build ensembl_PRO protein IDs
+            (f.flatten(f.col('transcripts.translations')) if has_transcripts else f.lit(None)).alias('translations'),
+            f.col('SignalP').alias('signalP') if 'SignalP' in df.columns else f.lit(None).alias('signalP'),
             f.col('uniprot_trembl') if 'uniprot_trembl' in df.columns else f.lit(None).alias('uniprot_trembl'),
             f.col('uniprot_swissprot') if 'uniprot_swissprot' in df.columns else f.lit(None).alias('uniprot_swissprot'),
         )
@@ -490,16 +484,44 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
     # Build proteinIds from uniprot columns
     ensembl = _refactor_ensembl_protein_ids(ensembl)
 
-    # Build signalP
+    # Build signalP — cast to explicit array type first to handle VOID (all-null) columns
+    ensembl = ensembl.withColumn('signalP', f.col('signalP').cast(ArrayType(StringType())))
     ensembl = ensembl.withColumn(
         'signalP',
         f.when(
-            f.size(f.col('signalP')) >= 0,
+            f.col('signalP').isNotNull() & (f.size(f.col('signalP')) >= 0),
             f.transform(f.col('signalP'), lambda c: f.struct(c.alias('id'), f.lit('signalP').alias('source'))),
         ).cast(id_source_schema),
     )
 
-    # Parse transcripts into the structured format
+    # Build canonicalExons: flat array of (start, end) pairs for the canonical transcript
+    # Mirrors addCanonicalExons in Ensembl.scala
+    # Use expr because array_position(col, col) requires SQL expression syntax in PySpark
+    ensembl = ensembl.withColumn(
+        'exonIndex',
+        f.expr('array_position(transcriptIds, canonicalTranscript.id)'),
+    )
+    ensembl = ensembl.withColumn(
+        '_canon_exons_raw',
+        f.when(
+            f.col('exonIndex') > 0,
+            f.element_at(f.col('exons_raw'), f.col('exonIndex').cast(IntegerType())),
+        ),
+    )
+    ensembl = ensembl.withColumn(
+        'canonicalExons',
+        f.when(
+            f.col('_canon_exons_raw').isNotNull(),
+            f.flatten(
+                f.transform(
+                    f.col('_canon_exons_raw'),
+                    lambda x: f.array(x.getField('start'), x.getField('end')),
+                )
+            ),
+        ),
+    ).drop('exonIndex', 'exons_raw', '_canon_exons_raw')
+
+    # Parse transcripts into the structured format (also sets isEnsemblCanonical)
     ensembl = _parse_ensembl_transcripts(ensembl)
 
     return ensembl.select(
@@ -510,6 +532,8 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
         'genomicLocation',
         'approvedSymbol',
         'proteinIds',
+        'transcriptIds',
+        'canonicalExons',
         'transcripts',
         'signalP',
         'canonicalTranscript',
@@ -579,16 +603,18 @@ def _parse_ensembl_transcripts(df: DataFrame) -> DataFrame:
             StructField('transcriptId', StringType()),
             StructField('biotype', StringType()),
             StructField('uniprotId', StringType()),
-            StructField('isUniprotReviewed', StringType()),
+            StructField('isUniprotReviewed', BooleanType()),
             StructField('translationId', StringType()),
             StructField('alphafoldId', StringType()),
             StructField('uniprotIsoformId', StringType()),
-            StructField('isEnsemblCanonical', StringType()),
+            StructField('isEnsemblCanonical', BooleanType()),
         ])
     )
 
     if 'transcripts_raw' not in df.columns:
         return df.withColumn('transcripts', f.lit(None).cast(transcript_schema))
+
+    canon_id = f.col('canonicalTranscript.id')
 
     parsed = f.when(
         f.col('transcripts_raw').isNotNull(),
@@ -602,8 +628,8 @@ def _parse_ensembl_transcripts(df: DataFrame) -> DataFrame:
                 .when(tr.getField('uniprot_trembl').isNotNull(), f.element_at(tr.getField('uniprot_trembl'), 1))
                 .alias('uniprotId'),
                 f
-                .when(tr.getField('uniprot_swissprot').isNotNull(), f.lit('true'))
-                .when(tr.getField('uniprot_trembl').isNotNull(), f.lit('false'))
+                .when(tr.getField('uniprot_swissprot').isNotNull(), f.lit(True))
+                .when(tr.getField('uniprot_trembl').isNotNull(), f.lit(False))
                 .alias('isUniprotReviewed'),
                 f.when(
                     tr.getField('translations').isNotNull(),
@@ -617,7 +643,11 @@ def _parse_ensembl_transcripts(df: DataFrame) -> DataFrame:
                     tr.getField('uniprot_isoform').isNotNull(),
                     f.element_at(tr.getField('uniprot_isoform'), 1),
                 ).alias('uniprotIsoformId'),
-                f.lit(None).cast(StringType()).alias('isEnsemblCanonical'),
+                # isEnsemblCanonical: true when this transcript is the canonical one
+                f
+                .when(canon_id.isNotNull(), tr.getField('id') == canon_id)
+                .cast(BooleanType())
+                .alias('isEnsemblCanonical'),
             ),
         ),
     ).cast(transcript_schema)
@@ -1261,7 +1291,9 @@ def _build_homologues(
     from pyspark.sql import SparkSession
 
     spark = SparkSession.getActiveSession()
-    priority_df = spark.createDataFrame(priority_df_data, ['speciesId', 'priority'])
+    priority_df = spark.createDataFrame(priority_df_data, ['speciesId', 'priority']).withColumn(
+        'priority', f.col('priority').cast('int')
+    )
 
     homo_dict = homology_dict.select(
         f.col('#name').alias('name'),
@@ -1533,7 +1565,7 @@ def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame
         if 'Subcellular location ID' in ssl_df.columns
         else ssl_df.select(
             f.col('termSL'),
-            f.col('ssl_match'),
+            f.col('HPA_location').alias('ssl_match'),
             f.col('labelSL'),
         )
     )
