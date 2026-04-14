@@ -35,7 +35,8 @@ steps:
       transformer: go
       source: input/go/go.obo
       destination: output/go/go.parquet
-
+  ##################################################################################################
+  
   #: OTAR STEP :####################################################################################
   otar:
     - name: pyspark otar
@@ -45,6 +46,17 @@ steps:
         otar_meta: input/otar/otar_meta.csv
         otar_project_to_efo: input/otar/otar_project_to_efo.csv
       destination: output/otar
+  ##################################################################################################
+
+  #: REACTOME STEP :#################################################################################
+  reactome:
+    - name: pyspark reactome
+      pyspark: reactome
+      source:
+        pathways: input/reactome/ReactomePathways.txt
+        relations: input/reactome/ReactomePathwaysRelation.txt
+      destination: output/reactome
+
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
