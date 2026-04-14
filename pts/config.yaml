@@ -1574,6 +1574,22 @@ steps:
         spark.driver.memory: 16g
   ##################################################################################################
 
+  #: SEARCH EBI STEP :##############################################################################
+  search_ebi:
+    - name: pyspark search_ebi
+      pyspark: search_ebi
+      source:
+        disease: output/disease
+        target: output/target
+        association: output/association_overall_direct
+        evidence: output/evidence_gwas_credible_sets
+      destination:
+        associations: view/search_ebi_associations
+        evidence: view/search_ebi_evidence
+      properties:
+        spark.driver.memory: 8g
+  ##################################################################################################
+
   #: ASSOCIATION TIMESERIES VIEW STEP :#############################################################
   association_timeseries_view:
     - name: pyspark timeseries view
