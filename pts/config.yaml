@@ -1604,6 +1604,19 @@ steps:
         spark.driver.memory: 12g
   ##################################################################################################
 
+  #: SEARCH FACET STEP :###########################################################################
+  search_facet:
+    - name: pyspark search_facet
+      pyspark: search_facet
+      source:
+        diseases: output/disease
+        targets: output/target
+        go: output/go
+      destination:
+        targets: view/search_facet_target
+        diseases: view/search_facet_disease
+  ##################################################################################################
+
   #: RELEASE METRICS STEP :##########################################################################
   search:
     - name: pyspark search
