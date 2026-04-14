@@ -1605,6 +1605,30 @@ steps:
   ##################################################################################################
 
   #: RELEASE METRICS STEP :##########################################################################
+  search:
+    - name: pyspark search
+      pyspark: search
+      source:
+        association: output/association_overall_indirect
+        drug: output/drug_molecule
+        evidence: output/evidence_*
+        indication: output/clinical_indication
+        mechanism: output/drug_mechanism_of_action
+        target: output/target
+        credible_sets: output/credible_set
+        disease: output/disease
+        disease_hpo: output/disease_phenotype
+        hpo: output/disease_hpo
+        studies: output/study
+        variants: output/variant
+      destination:
+        diseases: view/search_disease
+        targets: view/search_target
+        drugs: view/search_drug
+        variants: view/search_variant
+        studies: view/search_study
+  ##################################################################################################
+
   release_metrics:
     - name: transform release_metrics
       transformer: release_metrics
