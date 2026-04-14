@@ -111,7 +111,7 @@ _PROTEIN_SOURCE_PRIORITY = {
 
 def target(
     source: dict[str, str],
-    destination: str,
+    destination: dict[str, str],
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
@@ -119,7 +119,7 @@ def target(
 
     Args:
         source: Mapping of logical input names to paths.
-        destination: Output path for the target parquet.
+        destination: Dict with keys 'target' and 'gene_essentiality' output paths.
         settings: Step settings (hgncOrthologSpecies list, etc.).
         properties: Spark properties.
     """
@@ -161,6 +161,7 @@ def target(
     safety_raw = spark.read.parquet(source['safety_evidence'])
     diseases_raw = spark.read.parquet(source['diseases'])
     chemical_probes_raw = spark.read.parquet(source['chemical_probes'])
+    gene_essentiality_raw = spark.read.parquet(source['gene_essentiality'])
 
     # Uniprot is a gzipped XML flat-file — we read a pre-processed parquet
     # produced by the pts_target pre-processing step (uniprot XML→parquet).
@@ -323,8 +324,13 @@ def target(
     if 'go' in targets_df.columns:
         targets_df = targets_df.withColumnRenamed('go', 'geneOntology')
 
-    logger.info(f'Writing target output to {destination}')
-    targets_df.write.mode('overwrite').parquet(destination)
+    logger.info(f'Writing target output to {destination["target"]}')
+    targets_df.write.mode('overwrite').parquet(destination['target'])
+
+    logger.info('Building gene essentiality output')
+    gene_essentiality_df = _build_gene_essentiality_output(gene_essentiality_raw, ensg_lookup)
+    logger.info(f'Writing gene essentiality output to {destination["gene_essentiality"]}')
+    gene_essentiality_df.write.mode('overwrite').parquet(destination['gene_essentiality'])
 
 
 # ===========================================================================
@@ -1783,6 +1789,47 @@ def _generate_ensg_lookup(df: DataFrame) -> DataFrame:
             'HGNC',
             'symbols',
         )
+    )
+
+
+def _build_gene_essentiality_output(
+    essentiality_df: DataFrame,
+    ensg_lookup: DataFrame,
+) -> DataFrame:
+    """Build gene essentiality output mapped to ENSG IDs.
+
+    Ports addGeneEssentiality from Target.scala.
+
+    Args:
+        essentiality_df: Gene essentiality intermediate with targetSymbol column.
+        ensg_lookup: ENSG→symbol lookup from _generate_ensg_lookup.
+
+    Returns:
+        DataFrame with [id, geneEssentiality] where geneEssentiality is a list
+        of essentiality structs per ENSG ID.
+    """
+    lookup = (
+        ensg_lookup
+        .select('ensgId', 'name')
+        .withColumn('approvedTarget', f.explode('name'))
+        .drop('name')
+        .orderBy('approvedTarget')
+    )
+    essentiality_cols = [c for c in essentiality_df.columns if c != 'targetSymbol']
+    essentiality_with_ensg = (
+        essentiality_df
+        .join(lookup, lookup['approvedTarget'] == essentiality_df['targetSymbol'], 'inner')
+        .drop(*[c for c in lookup.columns if c != 'ensgId'])
+        .drop('targetSymbol')
+    )
+    return (
+        essentiality_with_ensg
+        .select(
+            f.col('ensgId').alias('id'),
+            f.struct(*[f.col(c) for c in essentiality_cols]).alias('ts'),
+        )
+        .groupBy('id')
+        .agg(f.collect_list('ts').alias('geneEssentiality'))
     )
 
 

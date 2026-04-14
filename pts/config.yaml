@@ -256,7 +256,10 @@ steps:
         uniprot: intermediate/target/uniprot/uniprot.parquet
         chembl: input/target/chembl/chembl_target.jsonl
         chemical_probes: intermediate/chemical_probes_evidence.parquet
-      destination: output/target
+        gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
+      destination:
+        target: output/target
+        gene_essentiality: output/target_essentiality
   ##################################################################################################
 
   #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
