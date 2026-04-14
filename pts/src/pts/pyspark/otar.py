@@ -4,6 +4,7 @@ Ported from Otar.scala in platform-etl-backend.
 Joins OTAR project metadata with disease EFO mappings and propagates
 project info to disease ancestors.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -39,13 +40,15 @@ def _generate_otar_info(
         .withColumn('ancestor', f.explode(f.concat(f.array(f.col('id')), f.col('ancestors'))))
         .groupBy(f.col('ancestor').alias('efo_id'))
         .agg(
-            f.collect_set(f.struct(
-                f.col('otar_code'),
-                f.col('project_status').alias('status'),
-                f.col('project_name'),
-                f.col('integrates_in_PPP').cast('boolean').alias('integrates_data_PPP'),
-                f.concat(f.lit('http://home.opentargets.org/'), f.col('otar_code')).alias('reference'),
-            )).alias('projects')
+            f.collect_set(
+                f.struct(
+                    f.col('otar_code'),
+                    f.col('project_status').alias('status'),
+                    f.col('project_name'),
+                    f.col('integrates_in_PPP').cast('boolean').alias('integrates_data_PPP'),
+                    f.concat(f.lit('http://home.opentargets.org/'), f.col('otar_code')).alias('reference'),
+                )
+            ).alias('projects')
         )
     )
 

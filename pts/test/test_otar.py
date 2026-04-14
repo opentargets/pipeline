@@ -1,7 +1,7 @@
 """Tests for the otar PySpark module."""
+
 from __future__ import annotations
 
-import pytest
 from pyspark.sql import SparkSession
 
 from pts.pyspark.otar import _generate_otar_info
