@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import pyspark.sql.functions as f
 from pyspark.sql import Column, DataFrame
-from pyspark.sql.types import StructType
+from pyspark.sql.types import StructField, StructType
 
 from pts import schemas
 
@@ -236,3 +236,50 @@ def parse_spark_schema(schema_json: str) -> StructType:
         core_schema = json.load(schema)
 
     return StructType.fromJson(core_schema)
+
+
+def snake_to_lower_camel(name: str) -> str:
+    """Convert a snake_case string to lowerCamelCase.
+
+    >>> snake_to_lower_camel('evidence_score')
+    'evidenceScore'
+    >>> snake_to_lower_camel('already')
+    'already'
+    """
+    parts = name.split('_')
+    return parts[0] + ''.join(p.capitalize() for p in parts[1:])
+
+
+def rename_columns_to_camel_case(df: DataFrame) -> DataFrame:
+    """Recursively rename all columns and nested struct fields from snake_case to lowerCamelCase.
+
+    Handles:
+    - Top-level columns
+    - Nested struct fields (any depth)
+    - Array<struct> element fields
+
+    Args:
+        df: DataFrame with snake_case column/field names.
+
+    Returns:
+        DataFrame with all names converted to lowerCamelCase.
+    """
+    from pyspark.sql.types import ArrayType as SparkArrayType
+
+    def _transform_schema(schema: StructType) -> StructType:
+        new_fields = []
+        for field in schema.fields:
+            new_name = snake_to_lower_camel(field.name)
+            new_type = _transform_type(field.dataType)
+            new_fields.append(StructField(new_name, new_type, field.nullable, field.metadata))
+        return StructType(new_fields)
+
+    def _transform_type(dtype):
+        if isinstance(dtype, StructType):
+            return _transform_schema(dtype)
+        if isinstance(dtype, SparkArrayType):
+            return SparkArrayType(_transform_type(dtype.elementType), dtype.containsNull)
+        return dtype
+
+    new_schema = _transform_schema(df.schema)
+    return df.sparkSession.createDataFrame(df.rdd, new_schema)
