@@ -158,7 +158,7 @@ steps:
         fda_unfiltered: intermediate/openfda_adverse_drug_reactions
         fda_results: output/openfda_significant_adverse_drug_reactions
       settings:
-        montecarlo_permutations: 100
+        montecarlo_permutations: 500
         montecarlo_percentile: 0.95
   ##################################################################################################
 

@@ -24,6 +24,8 @@ import math
 import random
 from typing import Any
 
+import numpy as np
+import pandas as pd
 import pyspark.sql.functions as f
 from loguru import logger
 from pyspark.sql import DataFrame, Window
@@ -93,19 +95,17 @@ def _calculate_critical_values(
             remaining_n -= k
             cumulative_p += p[j]
 
-        # Compute LLR for this permutation
+        # Compute LLR for this permutation.
+        # Each reaction contributes two independent terms; compute each only when valid.
+        # When xi=0, term1 vanishes (0*log(0)=0) but term2 must still be included.
         perm_llrs: list[float] = []
         for j in range(size):
             xi = x[j]
             yi = float(n_i[j])
-            if yi <= 0 or xi <= 0 or (z - xi) <= 0 or (total_n - yi) <= 0:
-                perm_llrs.append(0.0)
-                continue
-            llr_j = (
-                xi * (math.log(xi) - math.log(yi))
-                + (z - xi) * (math.log(z - xi) - math.log(total_n - yi))
-            )
-            perm_llrs.append(llr_j)
+            c = z - xi
+            t1 = xi * (math.log(xi) - math.log(yi)) if xi > 0 and yi > 0 else 0.0
+            t2 = c * (math.log(c) - math.log(total_n - yi)) if c > 0 and total_n - yi > 0 else 0.0
+            perm_llrs.append(t1 + t2)
 
         max_llr = max(perm_llrs) if perm_llrs else 0.0
         max_llr += -z * math.log(z) + z * math.log(total_n) if z > 0 and total_n > 0 else 0.0
@@ -119,7 +119,65 @@ def _calculate_critical_values(
     return float(max_llrs_sorted[idx])
 
 
-_CRITICAL_VALUES_UDF = f.udf(_calculate_critical_values, DoubleType())
+@f.pandas_udf(DoubleType())
+def _critical_values_pandas_udf(
+    permutations_s: pd.Series,
+    n_j_s: pd.Series,
+    n_i_s: pd.Series,
+    total_s: pd.Series,
+    prob_s: pd.Series,
+) -> pd.Series:
+    """Vectorised pandas UDF for Monte Carlo critical value computation.
+
+    Processes rows in batches and uses numpy to vectorise the inner simulation:
+    - multinomial sampling replaces the sequential binomial for-loop
+    - LLR is computed with numpy broadcasting across all permutations at once
+    """
+
+    def _single(permutations: int, n_j, n_i, total, prob: float) -> float:
+        if n_j is None or total is None or n_i is None or len(n_i) == 0 or n_j <= 0 or total <= 0:
+            return 0.0
+
+        rng = np.random.default_rng(0)
+        total_n = float(total)
+        z = float(n_j)
+        n_i_arr = np.array(n_i, dtype=np.float64)
+
+        p = n_i_arr / total_n
+        p_sum = p.sum()
+        if p_sum <= 0:
+            return 0.0
+        p /= p_sum
+
+        # All permutation samples at once: shape (permutations, size)
+        samples = rng.multinomial(int(n_j), p, size=permutations).astype(np.float64)
+
+        yi = n_i_arr  # (size,)
+        xi = samples  # (permutations, size)
+
+        # Compute LLR as sum of two independent terms.
+        # term1 = xi*log(xi/yi):  valid when xi>0 and yi>0
+        # term2 = (z-xi)*log((z-xi)/(total_n-yi)):  valid when z-xi>0 and total_n-yi>0
+        # When xi=0 term1 vanishes by convention (0*log(0)=0) and term2 must still be
+        # computed correctly — the old code incorrectly set the whole inner sum to 0,
+        # which caused the constant correction to dominate every permutation.
+        t1_v = (xi > 0) & (yi > 0)
+        t2_v = ((z - xi) > 0) & ((total_n - yi) > 0)
+        term1 = np.where(t1_v, xi * (np.log(np.where(t1_v, xi, 1.0)) - np.log(yi)), 0.0)
+        term2 = np.where(t2_v, (z - xi) * (np.log(np.where(t2_v, z - xi, 1.0)) - np.log(total_n - yi)), 0.0)
+
+        max_llrs = (term1 + term2).max(axis=1)
+        max_llrs += -z * np.log(z) + z * np.log(total_n)
+        max_llrs = np.where(np.isfinite(max_llrs), max_llrs, 0.0)
+
+        idx = min(int(prob * permutations), permutations - 1)
+        return float(np.sort(max_llrs)[idx])
+
+    return pd.Series([
+        _single(perm, n_j, n_i, total, prob)
+        for perm, n_j, n_i, total, prob in zip(permutations_s, n_j_s, n_i_s, total_s, prob_s, strict=True)
+    ])
+
 
 # ---------------------------------------------------------------------------
 # Stage functions
@@ -454,7 +512,7 @@ def _run_montecarlo(
         )
         .withColumn(
             'criticalValue',
-            _CRITICAL_VALUES_UDF(
+            _critical_values_pandas_udf(
                 f.lit(permutations),
                 f.col(target_stats_col_id).cast('int'),
                 f.col('n_i'),
