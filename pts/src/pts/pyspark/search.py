@@ -92,9 +92,9 @@ def _search_index(
     if terms_col is None:
         terms_col = f.lit(None).cast('array<string>')
     if terms25_col is None:
-        terms25_col = f.lit(None).cast('array<string>')
+        terms25_col = f.array().cast('array<string>')
     if terms5_col is None:
-        terms5_col = f.lit(None).cast('array<string>')
+        terms5_col = f.array().cast('array<string>')
     if multiplier_col is None:
         multiplier_col = f.lit(0.01)
     return df.select(
@@ -201,18 +201,18 @@ def _build_disease_index(
         .agg(
             f.array_distinct(f.flatten(f.collect_list('target_labels'))).alias('target_labels'),
             f.array_distinct(f.flatten(f.collect_list('drug_labels'))).alias('drug_labels'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top25, f.col('target_labels'))
-            ))).alias('target_labels_25'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top25, f.col('drug_labels'))
-            ))).alias('drug_labels_25'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top5, f.col('target_labels'))
-            ))).alias('target_labels_5'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top5, f.col('drug_labels'))
-            ))).alias('drug_labels_5'),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top25, f.col('target_labels'))))).alias(
+                'target_labels_25'
+            ),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top25, f.col('drug_labels'))))).alias(
+                'drug_labels_25'
+            ),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top5, f.col('target_labels'))))).alias(
+                'target_labels_5'
+            ),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top5, f.col('drug_labels'))))).alias(
+                'drug_labels_5'
+            ),
             f.mean('score').alias('disease_relevance'),
         )
     )
@@ -309,46 +309,60 @@ def _build_target_index(
 
     # Drug labels per association
     drug_by_target = (
-        associations
-        .join(dr_lut, 'drugId', 'inner')
-        .groupBy('associationId')
-        .agg(f.array_distinct(f.flatten(f.collect_list('drug_labels'))).alias('drug_labels'))
-    ) if 'drugId' in associations.columns else (
-        associations
-        .limit(0)
-        .withColumn('drug_labels', f.lit(None).cast('array<string>'))
-        .select('associationId', 'drug_labels')
+        (
+            associations
+            .join(dr_lut, 'drugId', 'inner')
+            .groupBy('associationId')
+            .agg(f.array_distinct(f.flatten(f.collect_list('drug_labels'))).alias('drug_labels'))
+        )
+        if 'drugId' in associations.columns
+        else (
+            associations
+            .limit(0)
+            .withColumn('drug_labels', f.lit(None).cast('array<string>'))
+            .select('associationId', 'drug_labels')
+        )
     )
 
     # Variant labels per target
     variant_labels_df = (
         variants
         .withColumn('transcriptConsequences', f.explode(f.col('transcriptConsequences')))
-        .withColumn('consequenceScore',
-            f.when(f.col('transcriptConsequences.consequenceScore').isNotNull(),
-                   f.col('transcriptConsequences.consequenceScore')).otherwise(f.lit(1))
+        .withColumn(
+            'consequenceScore',
+            f.when(
+                f.col('transcriptConsequences.consequenceScore').isNotNull(),
+                f.col('transcriptConsequences.consequenceScore'),
+            ).otherwise(f.lit(1)),
         )
         .withColumn('targetId', f.col('transcriptConsequences.targetId'))
-        .withColumn('transcriptScore',
+        .withColumn(
+            'transcriptScore',
             (f.col('transcriptConsequences.consequenceScore') + f.lit(1))
-            * f.col('transcriptConsequences.distanceFromFootprint')
+            * f.col('transcriptConsequences.distanceFromFootprint'),
         )
-        .withColumn('variant_labels', _flatten_cat(
-            'array(variantId)', 'array(hgvsId)', 'dbXrefs.id', 'rsIds',
-        ))
+        .withColumn(
+            'variant_labels',
+            _flatten_cat(
+                'array(variantId)',
+                'array(hgvsId)',
+                'dbXrefs.id',
+                'rsIds',
+            ),
+        )
         .withColumn('variantTargetRank', f.rank().over(variant_window))
         .where(f.col('variantTargetRank') <= top50)
         .groupBy('targetId')
         .agg(
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('variantTargetRank') <= top50, f.col('variant_labels'))
-            ))).alias('variant_labels'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('variantTargetRank') <= top25, f.col('variant_labels'))
-            ))).alias('variant_labels_25'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('variantTargetRank') <= top5, f.col('variant_labels'))
-            ))).alias('variant_labels_5'),
+            f.array_distinct(
+                f.flatten(f.collect_list(f.when(f.col('variantTargetRank') <= top50, f.col('variant_labels'))))
+            ).alias('variant_labels'),
+            f.array_distinct(
+                f.flatten(f.collect_list(f.when(f.col('variantTargetRank') <= top25, f.col('variant_labels'))))
+            ).alias('variant_labels_25'),
+            f.array_distinct(
+                f.flatten(f.collect_list(f.when(f.col('variantTargetRank') <= top5, f.col('variant_labels'))))
+            ).alias('variant_labels_5'),
         )
     )
 
@@ -361,19 +375,19 @@ def _build_target_index(
         .groupBy('targetId')
         .agg(
             f.array_distinct(f.flatten(f.collect_list('disease_labels'))).alias('disease_labels'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top25, f.col('disease_labels'))
-            ))).alias('disease_labels_25'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top5, f.col('disease_labels'))
-            ))).alias('disease_labels_5'),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top25, f.col('disease_labels'))))).alias(
+                'disease_labels_25'
+            ),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top5, f.col('disease_labels'))))).alias(
+                'disease_labels_5'
+            ),
             f.array_distinct(f.flatten(f.collect_list('drug_labels'))).alias('drug_labels'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top25, f.col('drug_labels'))
-            ))).alias('drug_labels_25'),
-            f.array_distinct(f.flatten(f.collect_list(
-                f.when(f.col('rank') <= top5, f.col('drug_labels'))
-            ))).alias('drug_labels_5'),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top25, f.col('drug_labels'))))).alias(
+                'drug_labels_25'
+            ),
+            f.array_distinct(f.flatten(f.collect_list(f.when(f.col('rank') <= top5, f.col('drug_labels'))))).alias(
+                'drug_labels_5'
+            ),
             f.mean('score').alias('target_relevance'),
         )
     )
@@ -504,10 +518,11 @@ def _build_drug_index(
         .join(indication_labels, 'drugId', 'left_outer')
         .withColumn('target_labels', f.coalesce('target_labels', f.array()))
         .withColumn('disease_labels', f.coalesce('disease_labels', f.array()))
-        .withColumn('crossReferences',
-            f.sort_array(f.array_distinct(f.flatten(
-                f.transform(f.col('crossReferences'), lambda x: x.getField('ids'))
-            ))).alias('crossReferences')
+        .withColumn(
+            'crossReferences',
+            f.sort_array(
+                f.array_distinct(f.flatten(f.transform(f.col('crossReferences'), lambda x: x.getField('ids'))))
+            ).alias('crossReferences'),
         )
     )
 
@@ -550,12 +565,9 @@ def _build_variant_index(variants: DataFrame) -> DataFrame:
     """
     variant_df = (
         variants
-        .withColumn('locationUnderscore',
-            f.concat(f.col('chromosome'), f.lit('_'), f.col('position'), f.lit('_')))
-        .withColumn('locationDash',
-            f.concat(f.col('chromosome'), f.lit('-'), f.col('position'), f.lit('-')))
-        .withColumn('locationColon',
-            f.concat(f.col('chromosome'), f.lit(':'), f.col('position'), f.lit(':')))
+        .withColumn('locationUnderscore', f.concat(f.col('chromosome'), f.lit('_'), f.col('position'), f.lit('_')))
+        .withColumn('locationDash', f.concat(f.col('chromosome'), f.lit('-'), f.col('position'), f.lit('-')))
+        .withColumn('locationColon', f.concat(f.col('chromosome'), f.lit(':'), f.col('position'), f.lit(':')))
     )
     return _search_index(
         variant_df,
@@ -602,17 +614,13 @@ def _build_study_index(
     Returns:
         Search index DataFrame for studies.
     """
-    studies_with_targets = (
-        studies
-        .withColumnRenamed('geneId', 'targetId')
-        .join(targets.select('targetId', 'approvedSymbol'), 'targetId', 'left_outer')
+    studies_with_targets = studies.withColumnRenamed('geneId', 'targetId').join(
+        targets.select('targetId', 'approvedSymbol'), 'targetId', 'left_outer'
     )
 
     window = Window.orderBy(f.col('credibleSetCount').desc(), f.col('nSamples').desc())
-    studies_with_cred = (
-        studies_with_targets
-        .join(credible_sets, 'studyId', 'left_outer')
-        .withColumn('rank', f.rank().over(window))
+    studies_with_cred = studies_with_targets.join(credible_sets, 'studyId', 'left_outer').withColumn(
+        'rank', f.rank().over(window)
     )
 
     max_rank = studies_with_cred.agg(f.max('rank')).first()[0] or 1
@@ -625,20 +633,33 @@ def _build_study_index(
         entity_col=f.lit('study'),
         category_col=f.array(f.lit('study')),
         keywords_col=_flatten_cat(
-            'array(studyId)', 'array(pubmedId)', 'array(publicationFirstAuthor)',
+            'array(studyId)',
+            'array(pubmedId)',
+            'array(publicationFirstAuthor)',
         ),
         prefixes_col=_flatten_cat(
-            'array(studyId)', 'array(pubmedId)', 'array(publicationFirstAuthor)',
+            'array(studyId)',
+            'array(pubmedId)',
+            'array(publicationFirstAuthor)',
         ),
         ngrams_col=_flatten_cat('array(studyId)'),
         terms_col=_flatten_cat(
-            'array(traitFromSource)', 'diseaseIds', 'array(approvedSymbol)', 'array(targetId)',
+            'array(traitFromSource)',
+            'diseaseIds',
+            'array(approvedSymbol)',
+            'array(targetId)',
         ),
         terms25_col=_flatten_cat(
-            'array(traitFromSource)', 'diseaseIds', 'array(approvedSymbol)', 'array(targetId)',
+            'array(traitFromSource)',
+            'diseaseIds',
+            'array(approvedSymbol)',
+            'array(targetId)',
         ),
         terms5_col=_flatten_cat(
-            'array(traitFromSource)', 'diseaseIds', 'array(approvedSymbol)', 'array(targetId)',
+            'array(traitFromSource)',
+            'diseaseIds',
+            'array(approvedSymbol)',
+            'array(targetId)',
         ),
         multiplier_col=multiplier,
     )
@@ -687,7 +708,8 @@ def search(
 
     logger.info('Processing diseases')
     diseases = (
-        disease_raw.withColumnRenamed('id', 'diseaseId')
+        disease_raw
+        .withColumnRenamed('id', 'diseaseId')
         .transform(lambda df: _resolve_ta_labels(df, 'diseaseId', 'therapeutic_labels'))
         .orderBy('diseaseId')
     )
@@ -713,7 +735,10 @@ def search(
         .select(
             'id',
             f.struct(
-                'mechanismOfAction', 'references', 'targetName', 'targets',
+                'mechanismOfAction',
+                'references',
+                'targetName',
+                'targets',
             ).alias('rows'),
             'actionType',
             'targetType',
@@ -725,10 +750,8 @@ def search(
             f.collect_set('targetType').alias('uniqueTargetType'),
         )
     )
-    indications_grouped = (
-        indication
-        .groupBy(f.col('drugId').alias('id'))
-        .agg(f.collect_list('diseaseId').alias('indications'))
+    indications_grouped = indication.groupBy(f.col('drugId').alias('id')).agg(
+        f.collect_list('diseaseId').alias('indications')
     )
     drugs = (
         drug_raw
@@ -740,12 +763,22 @@ def search(
 
     logger.info('Processing variants and studies')
     variants = variants_raw.select(
-        'variantId', 'rsIds', 'hgvsId', 'dbXrefs', 'chromosome', 'position',
+        'variantId',
+        'rsIds',
+        'hgvsId',
+        'dbXrefs',
+        'chromosome',
+        'position',
         'transcriptConsequences',
     )
     studies = studies_raw.select(
-        'studyId', 'traitFromSource', 'pubmedId', 'publicationFirstAuthor',
-        'diseaseIds', 'nSamples', 'geneId',
+        'studyId',
+        'traitFromSource',
+        'pubmedId',
+        'publicationFirstAuthor',
+        'diseaseIds',
+        'nSamples',
+        'geneId',
     )
     credible_sets = (
         credible_sets_raw
@@ -757,29 +790,43 @@ def search(
     logger.info('Building lookup tables')
     d_lut = (
         diseases
-        .withColumn('disease_labels', _flatten_cat(
-            'array(name)',
-            'synonyms.hasBroadSynonym',
-            'synonyms.hasExactSynonym',
-            'synonyms.hasNarrowSynonym',
-            'synonyms.hasRelatedSynonym',
-        ))
+        .withColumn(
+            'disease_labels',
+            _flatten_cat(
+                'array(name)',
+                'synonyms.hasBroadSynonym',
+                'synonyms.hasExactSynonym',
+                'synonyms.hasNarrowSynonym',
+                'synonyms.hasRelatedSynonym',
+            ),
+        )
         .selectExpr('diseaseId', 'disease_labels', 'name as disease_name', 'therapeutic_labels')
         .orderBy('diseaseId')
     )
     dr_lut = (
         drugs
-        .withColumn('drug_labels', _flatten_cat(
-            'synonyms', 'tradeNames', 'array(name)', 'rows.mechanismOfAction',
-        ))
+        .withColumn(
+            'drug_labels',
+            _flatten_cat(
+                'synonyms',
+                'tradeNames',
+                'array(name)',
+                'rows.mechanismOfAction',
+            ),
+        )
         .select('drugId', 'drug_labels')
         .orderBy('drugId')
     )
     t_lut = (
         targets
-        .withColumn('target_labels', _flatten_cat(
-            'synonyms.label', 'array(approvedName)', 'array(approvedSymbol)',
-        ))
+        .withColumn(
+            'target_labels',
+            _flatten_cat(
+                'synonyms.label',
+                'array(approvedName)',
+                'array(approvedSymbol)',
+            ),
+        )
         .select('targetId', 'target_labels')
         .orderBy('targetId')
     )
@@ -814,34 +861,35 @@ def search(
         .select('associationId', 'drugId', 'drugIds', 'targetId', 'diseaseId', 'score')
     )
 
-    assoc_drugs = (
-        assoc_drugs_with_scores
-        .groupBy('drugId')
-        .agg(
-            f.collect_set('targetId').alias('targetIds'),
-            f.collect_set('diseaseId').alias('diseaseIds'),
-            f.mean('score').alias('meanScore'),
-            (f.count('associationId').cast(DoubleType()) / f.lit(float(total_assocs_with_drugs)))
-            .alias('drug_relevance'),
-        )
+    assoc_drugs = assoc_drugs_with_scores.groupBy('drugId').agg(
+        f.collect_set('targetId').alias('targetIds'),
+        f.collect_set('diseaseId').alias('diseaseIds'),
+        f.mean('score').alias('meanScore'),
+        (f.count('associationId').cast(DoubleType()) / f.lit(float(total_assocs_with_drugs))).alias('drug_relevance'),
     )
 
     logger.info('Building search index for diseases')
     search_diseases = _build_disease_index(
-        diseases, phenotype_names, association_scores, assoc_drugs_with_scores,
-        t_lut, dr_lut, studies,
+        diseases,
+        phenotype_names,
+        association_scores,
+        assoc_drugs_with_scores,
+        t_lut,
+        dr_lut,
+        studies,
     )
 
     logger.info('Building search index for targets')
     search_targets = _build_target_index(
-        targets, association_scores, d_lut, dr_lut, variants,
+        targets,
+        association_scores,
+        d_lut,
+        dr_lut,
+        variants,
     )
 
     logger.info('Building search index for drugs')
-    search_drugs = (
-        drugs
-        .transform(lambda df: _build_drug_index(df, assoc_drugs, t_lut, d_lut))
-    )
+    search_drugs = drugs.transform(lambda df: _build_drug_index(df, assoc_drugs, t_lut, d_lut))
 
     logger.info('Building search index for variants')
     search_variants = _build_variant_index(variants).repartition(100)
