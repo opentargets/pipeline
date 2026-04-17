@@ -90,7 +90,7 @@ def _search_index(
     if description_col is None:
         description_col = f.lit(None).cast('string')
     if terms_col is None:
-        terms_col = f.lit(None).cast('array<string>')
+        terms_col = f.array().cast('array<string>')
     if terms25_col is None:
         terms25_col = f.array().cast('array<string>')
     if terms5_col is None:
