@@ -36,7 +36,7 @@ steps:
       source: input/go/go.obo
       destination: output/go/go.parquet
   ##################################################################################################
-  
+
   #: OTAR STEP :####################################################################################
   otar:
     - name: pyspark otar
@@ -535,11 +535,6 @@ steps:
       destination:
         output: output/drug_molecule
         excluded: excluded/drug_molecule_failed_report
-      settings:
-        invalid_clinical_report_qc:
-          - PHASE_IV_NOT_APPROVED
-          - UNVALIDATED_INDICATION
-          - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
@@ -1703,7 +1698,7 @@ steps:
         interactions_unmatched: excluded/interaction
       settings:
         scorethreshold: 0
-        string_version: "12.0"
+        string_version: '12.0'
   ##################################################################################################
 
   #: RELEASE METRICS STEP :##########################################################################
