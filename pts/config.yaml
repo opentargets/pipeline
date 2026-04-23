@@ -1766,4 +1766,10 @@ steps:
         matches: intermediate/literature_match
       destination:
         literature_entity_lut: output/literature_entity_lut
+    - name: pyspark literature_embedding
+      pyspark: literature_embedding
+      source:
+        matches: intermediate/literature_match
+      destination:
+        model: etc/model/w2v_model
   ##################################################################################################
