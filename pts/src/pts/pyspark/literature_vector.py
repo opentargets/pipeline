@@ -48,14 +48,14 @@ def _compute_vectors(vectors: DataFrame) -> DataFrame:
     )
 
 
-def vectors(
+def literature_vector(
     source: dict[str, str] | str,
     destination: dict[str, str] | str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
     """Generate vector index from trained Word2Vec model."""
-    _spark = Session(app_name='vectors', properties=properties).spark
+    _spark = Session(app_name='literature_vector', properties=properties).spark
 
     model_path = source['model'] if isinstance(source, dict) else source
     logger.info(f'Loading Word2Vec model from {model_path}')

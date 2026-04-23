@@ -1774,8 +1774,8 @@ steps:
         model: etc/model/w2v_model
       properties:
         spark.sql.shuffle.partitions: '800'
-    - name: pyspark vectors
-      pyspark: vectors
+    - name: pyspark literature_vector
+      pyspark: literature_vector
       source:
         model: etc/model/w2v_model
       destination:
