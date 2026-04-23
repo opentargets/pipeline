@@ -1757,3 +1757,13 @@ steps:
         hf_repo_id: opentargets/ot-release-metrics
         hf_data_dir: metrics
   ##################################################################################################
+
+  #: LITERATURE STEP :#################################################################################
+  literature:
+    - name: pyspark literature_entity_lut
+      pyspark: literature_entity_lut
+      source:
+        matches: intermediate/literature_match
+      destination:
+        literature_entity_lut: output/literature_entity_lut
+  ##################################################################################################
