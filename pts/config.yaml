@@ -1774,4 +1774,10 @@ steps:
         model: etc/model/w2v_model
       properties:
         spark.sql.shuffle.partitions: '800'
+    - name: pyspark vectors
+      pyspark: vectors
+      source:
+        model: etc/model/w2v_model
+      destination:
+        vectors: output/literature_vector
   ##################################################################################################
