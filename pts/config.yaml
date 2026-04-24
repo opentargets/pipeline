@@ -1772,4 +1772,6 @@ steps:
         matches: intermediate/literature_match
       destination:
         model: etc/model/w2v_model
+      properties:
+        spark.sql.shuffle.partitions: '800'
   ##################################################################################################

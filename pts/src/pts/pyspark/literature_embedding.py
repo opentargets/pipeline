@@ -112,7 +112,6 @@ def literature_embedding(
     t0 = time.time()
     filtered = _filter_matches(matches)
     training = _regroup_matches(filtered, max_sentence_length)
-    training = training.repartition(num_partitions)
     training.persist()
 
     row_count = training.count()
