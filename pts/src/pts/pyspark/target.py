@@ -1076,9 +1076,10 @@ def _build_gene_with_location(df: DataFrame, sl_df: DataFrame) -> DataFrame:
         )
         .select('id', f.col('all_locations.location').alias('location'), f.col('all_locations.source').alias('source'))
         .join(sl_df, f.col('location') == sl_df['HPA_location'], 'left_outer')
+        .withColumn('targetModifier', f.lit(None).cast(StringType()))
         .select(
             'id',
-            f.struct('location', 'source', 'termSL', 'labelSL').alias('locations'),
+            f.struct('location', 'source', 'termSL', 'labelSL', 'targetModifier').alias('locations'),
         )
         .groupBy('id')
         .agg(f.collect_list('locations').alias('locations'))
@@ -1551,9 +1552,8 @@ def _build_uniprot(df: DataFrame, ssl_df: DataFrame) -> DataFrame:
 
 
 def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame:
-    """Map raw Uniprot location strings to SSL ontology terms."""
+    """Map pre-parsed Uniprot location structs to SSL ontology terms."""
     first_words_regex = r'^([\w\s]+)'
-    isoforms_regex = r'(\[.+\]:\s([\w\s]+))'
     last_after_comma_regex = r'.*,\s([\w\s]+)'
 
     ssl_onto = (
@@ -1572,29 +1572,27 @@ def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame
 
     loc_df = (
         df
-        .select('uniprotId', f.explode('locations').alias('location'))
+        .select('uniprotId', f.explode('locations').alias('loc_struct'))
         .select(
             'uniprotId',
-            f.trim(f.regexp_extract('location', first_words_regex, 0)).alias('loc1'),
-            f.trim(f.regexp_extract('location', isoforms_regex, 1)).alias('iso'),
-            f.trim(f.regexp_extract('location', isoforms_regex, 2)).alias('loc2'),
-            f.trim(f.regexp_extract('location', last_after_comma_regex, 1)).alias('loc3'),
+            f.col('loc_struct.location').alias('location'),
+            f.col('loc_struct.targetModifier').alias('targetModifier'),
         )
+        .withColumn('loc1', f.trim(f.regexp_extract('location', first_words_regex, 0)))
+        .withColumn('loc3', f.trim(f.regexp_extract('location', last_after_comma_regex, 1)))
         .withColumn(
             'ssl_match',
             f
             .when(f.col('loc1') != '', f.col('loc1'))  # noqa: PLC1901
-            .when(f.col('loc2') != '', f.col('loc2'))  # noqa: PLC1901
             .when(f.col('loc3') != '', f.col('loc3'))  # noqa: PLC1901
             .otherwise(f.lit(None)),
         )
-        .withColumn('location', f.when(f.col('iso') != '', f.col('iso')).otherwise(f.col('ssl_match')))  # noqa: PLC1901
-        .drop('iso', 'loc1', 'loc2', 'loc3')
+        .drop('loc1', 'loc3')
         .filter(f.col('location').isNotNull())
         .join(f.broadcast(ssl_onto), 'ssl_match', 'left_outer')
         .drop('ssl_match')
         .withColumn('source', f.lit('uniprot'))
-        .select('uniprotId', f.struct('location', 'source', 'termSL', 'labelSL').alias('loc'))
+        .select('uniprotId', f.struct('location', 'source', 'termSL', 'labelSL', 'targetModifier').alias('loc'))
         .groupBy('uniprotId')
         .agg(f.collect_list('loc').alias('subcellularLocations'))
     )

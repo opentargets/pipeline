@@ -17,13 +17,13 @@ _UNIPROT_SCHEMA = pl.Schema({
     'symbolSynonyms': pl.List(pl.String),
     'dbXrefs': pl.List(pl.String),
     'functions': pl.List(pl.String),
-    'locations': pl.List(pl.String),
+    'locations': pl.List(pl.Struct({'location': pl.String, 'targetModifier': pl.String})),
 })
 
 _DB_INTEREST = {'ChEMBL', 'DrugBank', 'PDB', 'Ensembl', 'GO', 'InterPro', 'Reactome'}
 
 _BRACES_RE = re.compile(r'\{[^}]*\}')
-
+_MODIFIER_RE = re.compile(r'^\[([^\]]+)\]:\s*(.+)$')
 
 def _strip_braces(text: str) -> str:
     return _BRACES_RE.sub('', text).strip()
@@ -37,7 +37,7 @@ def _parse_record(lines: list[str]) -> dict:
     symbol_synonyms: list[str] = []
     db_xrefs: list[str] = []
     functions: list[str] = []
-    locations: list[str] = []
+    locations: list[dict] = []
     gn_lines: list[str] = []  # accumulated across continuation lines
 
     # CC state machine
@@ -62,7 +62,11 @@ def _parse_record(lines: list[str]) -> dict:
                     continue
                 if p.startswith(('Note=', 'Note ')):
                     break
-                locations.append(p)
+                m = _MODIFIER_RE.match(p)
+                if m:
+                    locations.append({'location': m.group(2).strip(), 'targetModifier': m.group(1).strip()})
+                else:
+                    locations.append({'location': p, 'targetModifier': None})
 
     for raw in lines:
         if len(raw) < 2:

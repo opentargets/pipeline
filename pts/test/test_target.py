@@ -16,6 +16,7 @@ from pyspark.sql.types import (
 
 from pts.pyspark.target import (
     _build_gene_ontology,
+    _build_gene_with_location,
     _build_genetic_constraints,
     _build_hallmarks,
     _build_hgnc,
@@ -23,6 +24,7 @@ from pts.pyspark.target import (
     _build_reactome,
     _build_safety,
     _filter_ensembl,
+    _map_uniprot_locations_to_ssl,
     _merge_hgnc_ensembl,
 )
 
@@ -806,3 +808,80 @@ def test_output_schema_has_required_columns(spark):
     from pts.pyspark.target import REQUIRED_OUTPUT_COLUMNS as ROC
 
     assert REQUIRED_OUTPUT_COLUMNS.issubset(ROC)
+
+
+# ---------------------------------------------------------------------------
+# 11. Subcellular location struct schema alignment
+# ---------------------------------------------------------------------------
+
+
+def test_subcellular_location_struct_schema_alignment(spark):
+    """HPA and UniProt subcellular location paths must produce identical struct schemas.
+
+    Both arrays are merged via array_union, which requires matching element types.
+    This test catches a field added to one path without the other, without
+    enumerating the fields explicitly.
+    """
+    hpa_schema = StructType([
+        StructField('Gene', StringType()),
+        StructField('Main location', StringType()),
+        StructField('Additional location', StringType()),
+        StructField('Extracellular location', StringType()),
+    ])
+    hpa_df = spark.createDataFrame(
+        [('ENSG00000001', 'Cytoplasm', None, None)],
+        hpa_schema,
+    )
+
+    hpa_sl_schema = StructType([
+        StructField('HPA_location', StringType()),
+        StructField('termSL', StringType()),
+        StructField('labelSL', StringType()),
+    ])
+    hpa_sl_df = spark.createDataFrame(
+        [('Cytoplasm', 'SL-0086', 'Intracellular')],
+        hpa_sl_schema,
+    )
+
+    uniprot_schema = StructType([
+        StructField('uniprotId', StringType()),
+        StructField(
+            'locations',
+            ArrayType(StructType([
+                StructField('location', StringType()),
+                StructField('targetModifier', StringType()),
+            ])),
+        ),
+    ])
+    uniprot_df = spark.createDataFrame(
+        [('P12345', [('Cytoplasm', None), ('Nucleus', 'Isoform 2')])],
+        uniprot_schema,
+    )
+
+    ssl_schema = StructType([
+        StructField('Subcellular location ID', StringType()),
+        StructField('Name', StringType()),
+        StructField('Category', StringType()),
+    ])
+    ssl_df = spark.createDataFrame(
+        [('SL-0086', 'Cytoplasm', 'Intracellular'), ('SL-0191', 'Nucleus', 'Intracellular')],
+        ssl_schema,
+    )
+
+    hpa_result = _build_gene_with_location(hpa_df, hpa_sl_df)
+    uniprot_result = _map_uniprot_locations_to_ssl(uniprot_df, ssl_df)
+
+    hpa_struct = hpa_result.schema['locations'].dataType.elementType
+    uniprot_struct = uniprot_result.schema['subcellularLocations'].dataType.elementType
+
+    hpa_fields = {field.name: field.dataType for field in hpa_struct.fields}
+    uniprot_fields = {field.name: field.dataType for field in uniprot_struct.fields}
+
+    common_keys = hpa_fields.keys() & uniprot_fields.keys()
+    type_mismatches = {k: (hpa_fields[k], uniprot_fields[k]) for k in common_keys if hpa_fields[k] != uniprot_fields[k]}
+    assert hpa_fields == uniprot_fields, (
+        f'Schema mismatch between HPA and UniProt subcellularLocations structs.\n'
+        f'HPA-only fields:     {set(hpa_fields) - set(uniprot_fields)}\n'
+        f'UniProt-only fields: {set(uniprot_fields) - set(hpa_fields)}\n'
+        f'Type mismatches:     {type_mismatches}'
+    )

@@ -62,5 +62,18 @@ def test_parse_record_functions():
 
 def test_parse_record_locations():
     rec = _parse_record(_lines(MINIMAL_ENTRY))
-    assert 'Nucleus' in rec['locations']
-    assert 'Cytoplasm' in rec['locations']
+    locations = [loc['location'] for loc in rec['locations']]
+    assert 'Nucleus' in locations
+    assert 'Cytoplasm' in locations
+
+
+def test_parse_record_location_modifier():
+    entry = """\
+ID   PROT_HUMAN           Reviewed;         100 AA.
+AC   P12345;
+CC   -!- SUBCELLULAR LOCATION: [Isoform 4]: Cytoplasm. Nucleus.\
+"""
+    rec = _parse_record(_lines(entry))
+    by_location = {loc['location']: loc['targetModifier'] for loc in rec['locations']}
+    assert by_location['Cytoplasm'] == 'Isoform 4'
+    assert by_location['Nucleus'] is None
