@@ -115,7 +115,7 @@ class Association(Dataset):
         collect_window = (
             Window
             .partitionBy(['targetId', 'diseaseId', 'aggregationValue'])
-            .orderBy(f.col('year').asc())  # ty:ignore[missing-argument]
+            .orderBy(f.col('year').asc(), f.col('datasourceId').asc())  # ty:ignore[missing-argument]
             .rowsBetween(Window.unboundedPreceding, 0)
         )
 
