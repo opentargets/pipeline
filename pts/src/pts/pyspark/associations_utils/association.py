@@ -129,7 +129,7 @@ class Association(Dataset):
                 'year',
                 f.col('aggregationValue').alias('datasourceId'),
             )
-            .join(datasource_weights, on='datasourceId', how='inner')
+            .join(f.broadcast(datasource_weights), on='datasourceId', how='inner')
             .select(
                 'targetId',
                 'diseaseId',
