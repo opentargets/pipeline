@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.03.12"
+version = "26.03.14"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -24,6 +24,7 @@ dependencies = [
   "clinical-mining",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
+  "numpy>=2.4.4",
 ]
 
 [[tool.uv.index]]

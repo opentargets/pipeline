@@ -155,6 +155,7 @@ def _build_disease_index(
     t_lut: DataFrame,
     dr_lut: DataFrame,
     studies: DataFrame,
+    nct_by_disease: DataFrame,
 ) -> DataFrame:
     """Build the search index for diseases.
 
@@ -168,6 +169,7 @@ def _build_disease_index(
         t_lut: Target lookup with targetId and target_labels.
         dr_lut: Drug lookup with drugId and drug_labels.
         studies: Study DataFrame (studyId, diseaseIds).
+        nct_by_disease: NCT IDs by disease (diseaseId, nctIds).
 
     Returns:
         Search index DataFrame for diseases.
@@ -222,6 +224,8 @@ def _build_disease_index(
         .join(phenotype_names, 'diseaseId', 'left_outer')
         .join(assocs_with_labels, 'diseaseId', 'left_outer')
         .join(studies_by_disease, 'diseaseId', 'left_outer')
+        .join(nct_by_disease, 'diseaseId', 'left')
+        .withColumn('nctIds', f.coalesce('nctIds', f.array()))
         .withColumn('phenotype_labels', f.coalesce('phenotype_labels', f.array()))
         .withColumn('target_labels', f.coalesce('target_labels', f.array()))
         .withColumn('drug_labels', f.coalesce('drug_labels', f.array()))
@@ -242,6 +246,7 @@ def _build_disease_index(
             'synonyms.hasExactSynonym',
             'synonyms.hasNarrowSynonym',
             'synonyms.hasRelatedSynonym',
+            'nctIds',
         ),
         prefixes_col=_flatten_cat(
             'array(name)',
@@ -451,6 +456,7 @@ def _build_drug_index(
     assoc_drugs: DataFrame,
     t_lut: DataFrame,
     d_lut: DataFrame,
+    nct_by_drug: DataFrame,
 ) -> DataFrame:
     """Build the search index for drugs.
 
@@ -465,6 +471,7 @@ def _build_drug_index(
         t_lut: Target lookup (targetId, target_labels).
         d_lut: Disease lookup (diseaseId, disease_labels, therapeutic_labels,
             disease_name).
+        nct_by_drug: NCT IDs by drug (drugId, nctIds).
 
     Returns:
         Search index DataFrame for drugs.
@@ -509,6 +516,8 @@ def _build_drug_index(
 
     drug_df = (
         drugs
+        .join(nct_by_drug, 'drugId', 'left')
+        .withColumn('nctIds', f.coalesce('nctIds', f.array()))
         .join(assoc_drugs, drugs['drugId'] == assoc_drugs['drugId'], 'left_outer')
         .drop(assoc_drugs['drugId'])
         .withColumn('targetIds', f.coalesce('targetIds', f.array()))
@@ -534,12 +543,7 @@ def _build_drug_index(
         entity_col=f.lit('drug'),
         category_col=f.array(f.col('drugType')),
         keywords_col=_flatten_cat(
-            'synonyms',
-            'tradeNames',
-            'array(name)',
-            'array(drugId)',
-            'childChemblIds',
-            'crossReferences',
+            'synonyms', 'tradeNames', 'array(name)', 'array(drugId)', 'childChemblIds', 'crossReferences', 'nctIds'
         ),
         prefixes_col=_flatten_cat('synonyms', 'tradeNames', 'array(name)', 'descriptions'),
         ngrams_col=_flatten_cat('array(name)', 'synonyms', 'tradeNames', 'descriptions'),
@@ -665,6 +669,13 @@ def _build_study_index(
     )
 
 
+def _build_nct_map(indication: DataFrame) -> DataFrame:
+    """Process clinical indication dataset to generate a lookup of NCT IDs and relevant disease and drug IDs."""
+    return indication.select(
+        f.filter(f.col('clinicalReportIds'), lambda x: x.startswith('nct')).alias('nctIds'), 'drugId', 'diseaseId'
+    ).filter(f.size('nctIds') > 0)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -690,21 +701,21 @@ def search(
         settings: Unused; reserved for future configuration.
         properties: Spark session properties.
     """
-    spark = Session(app_name='search', properties=properties).spark
+    session = Session(app_name='search', properties=properties)
 
     logger.info('Loading input data')
-    disease_raw = spark.read.parquet(source['disease'])
-    target_raw = spark.read.parquet(source['target'])
-    drug_raw = spark.read.parquet(source['drug'])
-    mechanism = spark.read.parquet(source['mechanism'])
-    indication = spark.read.parquet(source['indication'])
-    association_raw = spark.read.parquet(source['association'])
-    evidence_raw = spark.read.parquet(source['evidence'])
-    disease_hpo = spark.read.parquet(source['disease_hpo'])
-    hpo = spark.read.parquet(source['hpo'])
-    studies_raw = spark.read.parquet(source['studies'])
-    variants_raw = spark.read.parquet(source['variants'])
-    credible_sets_raw = spark.read.parquet(source['credible_sets'])
+    disease_raw = session.load_data(source['disease'])
+    target_raw = session.load_data(source['target'])
+    drug_raw = session.load_data(source['drug'])
+    mechanism = session.load_data(source['mechanism'])
+    indication = session.load_data(source['indication'])
+    association_raw = session.load_data(source['association'])
+    evidence_raw = session.load_data(source['evidence'])
+    disease_hpo = session.load_data(source['disease_hpo'])
+    hpo = session.load_data(source['hpo'])
+    studies_raw = session.load_data(source['studies'])
+    variants_raw = session.load_data(source['variants'])
+    credible_sets_raw = session.load_data(source['credible_sets'])
 
     logger.info('Processing diseases')
     diseases = (
@@ -869,14 +880,13 @@ def search(
     )
 
     logger.info('Building search index for diseases')
+    nct_by_disease = (
+        _build_nct_map(indication)
+        .groupBy('diseaseId')
+        .agg(f.array_distinct(f.flatten(f.collect_list('nctIds'))).alias('nctIds'))
+    )
     search_diseases = _build_disease_index(
-        diseases,
-        phenotype_names,
-        association_scores,
-        assoc_drugs_with_scores,
-        t_lut,
-        dr_lut,
-        studies,
+        diseases, phenotype_names, association_scores, assoc_drugs_with_scores, t_lut, dr_lut, studies, nct_by_disease
     )
 
     logger.info('Building search index for targets')
@@ -889,7 +899,12 @@ def search(
     )
 
     logger.info('Building search index for drugs')
-    search_drugs = drugs.transform(lambda df: _build_drug_index(df, assoc_drugs, t_lut, d_lut))
+    nct_by_drug = (
+        _build_nct_map(indication)
+        .groupBy('drugId')
+        .agg(f.array_distinct(f.flatten(f.collect_list('nctIds'))).alias('nctIds'))
+    )
+    search_drugs = drugs.transform(lambda df: _build_drug_index(df, assoc_drugs, t_lut, d_lut, nct_by_drug))
 
     logger.info('Building search index for variants')
     search_variants = _build_variant_index(variants).repartition(100)
