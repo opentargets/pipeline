@@ -3,6 +3,7 @@
 from typing import Any
 
 from loguru import logger
+from pyspark.storagelevel import StorageLevel
 
 from pts.pyspark.associations_utils.association import Association
 from pts.pyspark.associations_utils.evidence import Evidence
@@ -100,10 +101,14 @@ def association(
         .parquet(destination['temporary'])
     )
 
-    # Save direct association by datasource:
+    # Load the indirect intermediate once and persist for the three downstream uses,
+    # so each downstream aggregation reads from cache rather than re-scanning GCS.
+    indirect_intermediate = session.load_data(destination['temporary']).persist(StorageLevel.MEMORY_AND_DISK)
+
+    # Save indirect association by datasource:
     logger.info('Processing indirect associations stratified by datasource.')
     (
-        Association(_df=session.load_data(destination['temporary']))
+        Association(_df=indirect_intermediate)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
@@ -113,10 +118,10 @@ def association(
         .parquet(destination['by_datasource_indirect'])
     )
 
-    # Save direct association by datasource:
+    # Save indirect association by datatype:
     logger.info('Processing indirect associations stratified by datatype.')
     (
-        Association(_df=session.load_data(destination['temporary']))
+        Association(_df=indirect_intermediate)
         .aggregate_by_datatype(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
@@ -127,10 +132,10 @@ def association(
         .parquet(destination['by_datatype_indirect'])
     )
 
-    # Save direct association by datasource:
+    # Save indirect overall association:
     logger.info('Processing indirect overall associations.')
     (
-        Association(_df=session.load_data(destination['temporary']))
+        Association(_df=indirect_intermediate)
         .aggregate_overall(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
@@ -140,3 +145,6 @@ def association(
         .write.mode('overwrite')
         .parquet(destination['overall_indirect'])
     )
+
+    # Free the cache.
+    indirect_intermediate.unpersist()
