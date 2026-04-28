@@ -377,14 +377,8 @@ class Association(Dataset):
         )
 
         # Step 3: collect peaks per group as array<struct<peak_year, peak_value>>
-        peaks_per_group = (
-            peaks_per_row
-            .groupBy(*groupby_columns)
-            .agg(
-                f.collect_list(
-                    f.struct(f.col('peak_year'), f.col('peak_value'))
-                ).alias('peaks')
-            )
+        peaks_per_group = peaks_per_row.groupBy(*groupby_columns).agg(
+            f.collect_list(f.struct(f.col('peak_year'), f.col('peak_value'))).alias('peaks')
         )
 
         # Step 4: bring all (group, year) rows back, left-join peaks
@@ -411,15 +405,11 @@ class Association(Dataset):
                     lambda acc, p: f.greatest(
                         acc,
                         f.when(
-                            (f.col('year') >= p.peak_year)
-                            & (f.col('year') <= p.peak_year + f.lit(novelty_window)),
+                            (f.col('year') >= p.peak_year) & (f.col('year') <= p.peak_year + f.lit(novelty_window)),
                             p.peak_value
                             / (
                                 f.lit(1.0)
-                                + f.exp(
-                                    f.lit(novelty_scale)
-                                    * ((f.col('year') - p.peak_year) - f.lit(novelty_shift))
-                                )
+                                + f.exp(f.lit(novelty_scale) * ((f.col('year') - p.peak_year) - f.lit(novelty_shift)))
                             ),
                         ).otherwise(f.lit(0.0)),
                     ),

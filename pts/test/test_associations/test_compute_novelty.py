@@ -59,10 +59,16 @@ class TestComputeNoveltyRegression:
     def test_output_columns_present(self: TestComputeNoveltyRegression) -> None:
         """Output schema includes the public-facing columns."""
         cols = set(self.association.compute_novelty().columns)
-        for required in {
-            'targetId', 'diseaseId', 'aggregationType', 'aggregationValue',
-            'associationScore', 'evidenceCount', 'timeseries', 'currentNovelty',
-        }:
+        for required in (
+            'targetId',
+            'diseaseId',
+            'aggregationType',
+            'aggregationValue',
+            'associationScore',
+            'evidenceCount',
+            'timeseries',
+            'currentNovelty',
+        ):
             assert required in cols, f'missing column: {required}'
 
     def test_currentnovelty_for_group_a_is_zero_long_after_peak(
@@ -75,7 +81,8 @@ class TestComputeNoveltyRegression:
         # Only meaningful if current_year is well past 2020 (peak + window)
         assert current_year >= 2021
         row = (
-            self.association.compute_novelty()
+            self.association
+            .compute_novelty()
             .filter((f.col('targetId') == 't1') & (f.col('diseaseId') == 'd1'))
             .first()
         )
@@ -107,8 +114,7 @@ class TestComputeNoveltyRegression:
 
             # Total entry count includes the nullified-year entry
             assert len(row.timeseries) == expected_entry_count, (
-                f'group {key}: expected {expected_entry_count} timeseries entries, '
-                f'got {len(row.timeseries)}'
+                f'group {key}: expected {expected_entry_count} timeseries entries, got {len(row.timeseries)}'
             )
 
             # The set of non-null years must exactly match the back-filled range
@@ -139,11 +145,11 @@ class TestComputeNoveltyRegression:
         rows = self.association.compute_novelty().collect()
         by_key = {(r.targetId, r.diseaseId): r for r in rows}
         # Group A: one row with yearlyEvidenceCount=1
-        assert by_key[('t1', 'd1')].evidenceCount == 1
+        assert by_key['t1', 'd1'].evidenceCount == 1
         # Group B: two rows with yearlyEvidenceCount=1+1
-        assert by_key[('t2', 'd2')].evidenceCount == 2
+        assert by_key['t2', 'd2'].evidenceCount == 2
         # Group C: one row with yearlyEvidenceCount=1
-        assert by_key[('t3', 'd3')].evidenceCount == 1
+        assert by_key['t3', 'd3'].evidenceCount == 1
 
     def test_overall_group_aggregationvalue_round_trip_to_null(
         self: TestComputeNoveltyRegression,
@@ -157,8 +163,6 @@ class TestComputeNoveltyRegression:
         """
         rows = self.association.compute_novelty().collect()
         by_key = {(r.targetId, r.diseaseId): r for r in rows}
-        group_c = by_key[('t3', 'd3')]
+        group_c = by_key['t3', 'd3']
         assert group_c.aggregationType == 'overall'
-        assert group_c.aggregationValue is None, (
-            f"expected null aggregationValue, got {group_c.aggregationValue!r}"
-        )
+        assert group_c.aggregationValue is None, f'expected null aggregationValue, got {group_c.aggregationValue!r}'

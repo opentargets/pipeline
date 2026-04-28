@@ -25,6 +25,7 @@ _DB_INTEREST = {'ChEMBL', 'DrugBank', 'PDB', 'Ensembl', 'GO', 'InterPro', 'React
 _BRACES_RE = re.compile(r'\{[^}]*\}')
 _MODIFIER_RE = re.compile(r'^\[([^\]]+)\]:\s*(.+)$')
 
+
 def _strip_braces(text: str) -> str:
     return _BRACES_RE.sub('', text).strip()
 
