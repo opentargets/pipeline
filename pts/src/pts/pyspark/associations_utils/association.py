@@ -152,7 +152,6 @@ class Association(Dataset):
                 f.max('associationScore').alias('associationScore'),
                 f.sum('yearlyEvidenceCount').alias('yearlyEvidenceCount'),
             )
-            .orderBy('targetId', 'diseaseId', 'year')
         )
 
     def compute_novelty(
