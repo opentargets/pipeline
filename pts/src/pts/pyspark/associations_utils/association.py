@@ -347,36 +347,85 @@ class Association(Dataset):
         novelty_shift: int,
         novelty_scale: int,
     ) -> DataFrame:
-        """Calculate novelty values.
+        """Calculate novelty values without the per-row 11x explosion.
+
+        For each group:
+          1. Compute the peak column via lag window.
+          2. Filter to peak > 0 (most rows have peak == 0 after back-fill).
+          3. Collect remaining (year, peak_value) into an array per group.
+          4. Left-join the array back to all (group, year) rows.
+          5. Aggregate over the peaks array per row to compute novelty.
 
         Args:
             intermediate_dataset (DataFrame): backfilled association dataset.
             groupby_columns (list[str]): list of columns to group data by.
             novelty_window (int): size of the window.
-            novelty_shift (int): Novelty shift
+            novelty_shift (int): Novelty shift.
             novelty_scale (int): how quickly the novelty decays.
 
         Returns:
-            DataFrame: novelty dataset.
+            DataFrame: novelty dataset with (groupby_columns, year, novelty).
         """
-        window_spec = Window.partitionBy(groupby_columns).orderBy('year')
-        return (
+        peak_window = Window.partitionBy(groupby_columns).orderBy('year')
+
+        # Step 1+2: compute peak, keep only positive peaks
+        peaks_per_row = (
             intermediate_dataset
-            # Marking peaks:
-            .withColumn('peak', Association._get_peak(f.col('associationScore'), window_spec))
-            .withColumnRenamed('year', 'associationYear')
-            # Drawing around the window:
-            .select('*', Association._windowing_around_peak(f.col('associationYear'), novelty_window))
-            # Grouping data again:
-            .groupBy([*groupby_columns, 'year'])
+            .withColumn('peak', Association._get_peak(f.col('associationScore'), peak_window))
+            .filter(f.col('peak') > 0)
+            .select(*groupby_columns, f.col('year').alias('peak_year'), f.col('peak').alias('peak_value'))
+        )
+
+        # Step 3: collect peaks per group as array<struct<peak_year, peak_value>>
+        peaks_per_group = (
+            peaks_per_row
+            .groupBy(*groupby_columns)
             .agg(
-                Association.calculate_logistic_decay(
-                    score_value=f.col('peak'),
-                    window_difference=f.col('year-peakYear'),
-                    sigmoid_midpoint=novelty_shift,
-                    decay_steepness=novelty_scale,
-                ).alias('novelty')
+                f.collect_list(
+                    f.struct(f.col('peak_year'), f.col('peak_value'))
+                ).alias('peaks')
             )
+        )
+
+        # Step 4: bring all (group, year) rows back, left-join peaks
+        all_year_rows = intermediate_dataset.select(*groupby_columns, 'year')
+
+        # Step 5: per row, aggregate over the peaks array.
+        # contribution(p, y) = p.peak_value / (1 + exp(scale * ((y - p.peak_year) - shift)))
+        #                       if 0 <= y - p.peak_year <= window
+        #                       else 0.0
+        # Groups with no positive peaks have NULL `peaks` after the left join.
+        # The inner coalesce normalises that to an empty typed array; aggregate(...)
+        # on an empty array returns the initial value (0.0).
+        return (
+            all_year_rows
+            .join(peaks_per_group, on=list(groupby_columns), how='left')
+            .withColumn(
+                'novelty',
+                f.aggregate(
+                    f.coalesce(
+                        f.col('peaks'),
+                        f.array().cast('array<struct<peak_year:int,peak_value:double>>'),
+                    ),
+                    f.lit(0.0),
+                    lambda acc, p: f.greatest(
+                        acc,
+                        f.when(
+                            (f.col('year') >= p.peak_year)
+                            & (f.col('year') <= p.peak_year + f.lit(novelty_window)),
+                            p.peak_value
+                            / (
+                                f.lit(1.0)
+                                + f.exp(
+                                    f.lit(novelty_scale)
+                                    * ((f.col('year') - p.peak_year) - f.lit(novelty_shift))
+                                )
+                            ),
+                        ).otherwise(f.lit(0.0)),
+                    ),
+                ),
+            )
+            .drop('peaks')
         )
 
     @staticmethod
@@ -423,39 +472,6 @@ class Association(Dataset):
             <BLANKLINE>
         """
         return f.max(score_value / (1 + f.exp(decay_steepness * (window_difference - f.lit(sigmoid_midpoint)))))
-
-    @staticmethod
-    def _windowing_around_peak(peak: Column, window: int) -> Column:
-        """Window around peak.
-
-        Tells in a given year, how many years has passed since the peak year.
-
-        Args:
-            peak (Column): peak column to window.
-            window (int): size of the window.
-
-        Returns:
-            Column: windowed peak.
-
-        Examples:
-        >>> df = spark.createDataFrame([(1990,), (1991,), (1992,)], ['peak'])
-        >>> df.select(Association._windowing_around_peak(f.col('peak'), 2)).show()
-        +-------------+----+
-        |year-peakYear|year|
-        +-------------+----+
-        |            0|1990|
-        |            1|1991|
-        |            2|1992|
-        |            0|1991|
-        |            1|1992|
-        |            2|1993|
-        |            0|1992|
-        |            1|1993|
-        |            2|1994|
-        +-------------+----+
-        <BLANKLINE>
-        """
-        return f.posexplode(f.sequence(peak, peak + f.lit(window))).alias('year-peakYear', 'year')
 
     @staticmethod
     def _retain_max_scores(array_col: Column) -> Column:
