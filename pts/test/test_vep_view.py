@@ -3,7 +3,80 @@
 import polars as pl
 import pytest
 
-from pts.transformers.vep_view import process_credible_set, process_l2g
+from pts.transformers.vep_view import process_biosample, process_credible_set, process_l2g, process_study
+
+
+class TestProcessBiosample:
+    """Tests for process_biosample."""
+
+    @pytest.fixture
+    def biosample(self) -> pl.LazyFrame:
+        """Two biosamples, one duplicated."""
+        return pl.DataFrame({
+            'biosampleId':   ['BS1', 'BS2', 'BS1'],
+            'biosampleName': ['Tissue A', 'Tissue B', 'Tissue A'],
+        }).lazy()
+
+    def test_columns_are_renamed(self, biosample: pl.LazyFrame) -> None:
+        """Output must use qtlBiosampleId and qtlBiosampleName."""
+        result = process_biosample(biosample).collect()
+        assert 'qtlBiosampleId' in result.columns
+        assert 'qtlBiosampleName' in result.columns
+        assert 'biosampleId' not in result.columns
+        assert 'biosampleName' not in result.columns
+
+    def test_duplicates_are_removed(self, biosample: pl.LazyFrame) -> None:
+        """Duplicate rows must be deduplicated."""
+        result = process_biosample(biosample).collect()
+        assert len(result) == 2
+
+    def test_values_are_preserved(self, biosample: pl.LazyFrame) -> None:
+        """Biosample IDs and names must be unchanged after rename."""
+        result = process_biosample(biosample).collect().sort('qtlBiosampleId')
+        assert result['qtlBiosampleId'].to_list() == ['BS1', 'BS2']
+        assert result['qtlBiosampleName'].to_list() == ['Tissue A', 'Tissue B']
+
+
+class TestProcessStudy:
+    """Tests for process_study."""
+
+    @pytest.fixture
+    def study(self) -> pl.LazyFrame:
+        """Three studies: GWAS with diseases, GWAS with empty disease list, and a QTL."""
+        return pl.DataFrame({
+            'studyId':   ['gwas1', 'gwas2', 'qtl1'],
+            'studyType': ['gwas', 'gwas', 'eqtl'],
+            'diseaseIds': [['EFO_001', 'EFO_002'], [], []],
+            'geneId':    [None, None, 'ENSG001'],
+            'biosampleId': [None, None, 'BS1'],
+        }).lazy()
+
+    def test_gwas_diseases_joined_with_pipe(self, study: pl.LazyFrame) -> None:
+        """Non-empty diseaseIds must be pipe-joined into gwasDiseases."""
+        result = process_study(study).collect()
+        row = result.filter(pl.col('studyId') == 'gwas1')
+        assert row['gwasDiseases'].to_list() == ['EFO_001|EFO_002']
+
+    def test_empty_disease_list_is_null(self, study: pl.LazyFrame) -> None:
+        """An empty diseaseIds list must produce a null gwasDiseases value."""
+        result = process_study(study).collect()
+        row = result.filter(pl.col('studyId') == 'gwas2')
+        assert row['gwasDiseases'].to_list() == [None]
+
+    def test_qtl_columns_are_renamed(self, study: pl.LazyFrame) -> None:
+        """geneId and biosampleId must be renamed to qtlGeneId and qtlBiosampleId."""
+        result = process_study(study).collect()
+        assert 'qtlGeneId' in result.columns
+        assert 'qtlBiosampleId' in result.columns
+        assert 'geneId' not in result.columns
+        assert 'biosampleId' not in result.columns
+
+    def test_qtl_gene_and_biosample_values(self, study: pl.LazyFrame) -> None:
+        """QTL study must carry through its geneId and biosampleId values."""
+        result = process_study(study).collect()
+        row = result.filter(pl.col('studyId') == 'qtl1')
+        assert row['qtlGeneId'].to_list() == ['ENSG001']
+        assert row['qtlBiosampleId'].to_list() == ['BS1']
 
 
 class TestProcessCredibleSet:

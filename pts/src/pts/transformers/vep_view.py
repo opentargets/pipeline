@@ -21,8 +21,8 @@ def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
         Deduplicated lazy frame with columns `qtlBiosampleId` and `qtlBiosampleName`.
     """
     return biosample.select(
-        pl.col("biosampleId").alias("qtlBiosampleId"),
-        pl.col("biosampleName").alias("qtlBiosampleName"),
+        pl.col('biosampleId').alias('qtlBiosampleId'),
+        pl.col('biosampleName').alias('qtlBiosampleName'),
     ).unique()
 
 
@@ -48,22 +48,22 @@ def process_credible_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
     """
     return (
         credible_set.select(
-            "studyLocusId", "studyId", pl.col("variantId").alias("leadVariantId"), "locus", "finemappingMethod"
+            'studyLocusId', 'studyId', pl.col('variantId').alias('leadVariantId'), 'locus', 'finemappingMethod'
         )
-        .explode("locus")
-        .unnest("locus")
+        .explode('locus')
+        .unnest('locus')
         .select(
-            "studyLocusId",
-            "studyId",
-            "pValueMantissa",
-            "pValueExponent",
-            "beta",
-            "is95CredibleSet",
-            "is99CredibleSet",
-            "posteriorProbability",
-            pl.col("variantId"),
-            "finemappingMethod",
-            (pl.col("leadVariantId") == pl.col("variantId")).alias("isLead"),
+            'studyLocusId',
+            'studyId',
+            'pValueMantissa',
+            'pValueExponent',
+            'beta',
+            'is95CredibleSet',
+            'is99CredibleSet',
+            'posteriorProbability',
+            pl.col('variantId'),
+            'finemappingMethod',
+            (pl.col('leadVariantId') == pl.col('variantId')).alias('isLead'),
         )
         .unique()
     )
@@ -87,11 +87,11 @@ def process_study(study: pl.LazyFrame) -> pl.LazyFrame:
         `qtlGeneId`, and `qtlBiosampleId`.
     """
     return study.select(
-        "studyId",
-        "studyType",
-        pl.when(pl.col("diseaseIds").list.len() > 0).then(pl.col("diseaseIds").list.join("|")).alias("gwasDiseases"),
-        pl.col("geneId").alias("qtlGeneId"),
-        pl.col("biosampleId").alias("qtlBiosampleId"),
+        'studyId',
+        'studyType',
+        pl.when(pl.col('diseaseIds').list.len() > 0).then(pl.col('diseaseIds').list.join('|')).alias('gwasDiseases'),
+        pl.col('geneId').alias('qtlGeneId'),
+        pl.col('biosampleId').alias('qtlBiosampleId'),
     )
 
 
@@ -112,13 +112,13 @@ def process_l2g(l2g: pl.LazyFrame) -> pl.LazyFrame:
         and `gwasLocusToGeneScore` (renamed from `score`).
     """
     return (
-        l2g.select("studyLocusId", "geneId", "score")
-        .with_columns(pl.col("score").rank(method="min", descending=True).over("studyLocusId").alias("rank"))
-        .filter((pl.col("rank") == 1) | (pl.col("score") >= 0.5))
+        l2g.select('studyLocusId', 'geneId', 'score')
+        .with_columns(pl.col('score').rank(method='min', descending=True).over('studyLocusId').alias('rank'))
+        .filter((pl.col('rank') == 1) | (pl.col('score') >= 0.5))
         .select(
-            "studyLocusId",
-            pl.col("geneId").alias("gwasGeneId"),
-            pl.col("score").alias("gwasLocusToGeneScore"),
+            'studyLocusId',
+            pl.col('geneId').alias('gwasGeneId'),
+            pl.col('score').alias('gwasLocusToGeneScore'),
         )
     )
 
@@ -157,59 +157,59 @@ def vep_view(
         config: Otter pipeline config object (unused directly, passed for interface
             compatibility).
     """
-    logger.info("Loading input data")
+    logger.info('Loading input data')
     credible_set = process_credible_set(pl.scan_parquet(f"{source['credible_set']}/*.parquet"))
     study = process_study(pl.scan_parquet(f"{source['study_table']}/*.parquet"))
     l2g = process_l2g(pl.scan_parquet(f"{source['l2g_table']}/*.parquet"))
     biosample = process_biosample(pl.scan_parquet(f"{source['biosample']}/*.parquet"))
 
-    logger.info("Joining and processing data")
+    logger.info('Joining and processing data')
     result = (
-        credible_set.join(l2g, on="studyLocusId", how="left")
-        .join(study, on="studyId", how="left")
-        .join(biosample, on="qtlBiosampleId", how="left")
+        credible_set.join(l2g, on='studyLocusId', how='left')
+        .join(study, on='studyId', how='left')
+        .join(biosample, on='qtlBiosampleId', how='left')
         .with_columns(
-            pl.col("variantId").str.split("_").list.get(0).alias("#chromosome"),
-            pl.col("variantId").str.split("_").list.get(1).cast(pl.Int32, strict=False).alias("position"),
-            pl.col("variantId").str.split("_").list.get(2).alias("referenceAllele"),
-            pl.col("variantId").str.split("_").list.get(3).alias("alternateAllele"),
+            pl.col('variantId').str.split('_').list.get(0).alias('#chromosome'),
+            pl.col('variantId').str.split('_').list.get(1).cast(pl.Int32, strict=False).alias('position'),
+            pl.col('variantId').str.split('_').list.get(2).alias('referenceAllele'),
+            pl.col('variantId').str.split('_').list.get(3).alias('alternateAllele'),
         )
         .select(
-            "#chromosome",
-            "position",
-            "referenceAllele",
-            "alternateAllele",
-            "variantId",
-            "studyId",
-            "studyType",
-            "studyLocusId",
-            "pValueMantissa",
-            "pValueExponent",
-            "beta",
-            "is95CredibleSet",
-            "is99CredibleSet",
-            "posteriorProbability",
-            "finemappingMethod",
-            "isLead",
-            "gwasGeneId",
-            "gwasLocusToGeneScore",
-            "gwasDiseases",
-            "qtlGeneId",
-            "qtlBiosampleName",
+            '#chromosome',
+            'position',
+            'referenceAllele',
+            'alternateAllele',
+            'variantId',
+            'studyId',
+            'studyType',
+            'studyLocusId',
+            'pValueMantissa',
+            'pValueExponent',
+            'beta',
+            'is95CredibleSet',
+            'is99CredibleSet',
+            'posteriorProbability',
+            'finemappingMethod',
+            'isLead',
+            'gwasGeneId',
+            'gwasLocusToGeneScore',
+            'gwasDiseases',
+            'qtlGeneId',
+            'qtlBiosampleName',
         )
         .filter(
-            pl.col("position").is_not_null(),
-            pl.col("chromosome").str.len_chars() < 3,
+            pl.col('position').is_not_null(),
+            pl.col('#chromosome').str.len_chars() < 3,
         )
-        .sort("chromosome", "position")
+        .sort('#chromosome', 'position')
         .collect()
     )
 
-    logger.info("Writing full dataset")
-    result.write_csv(destination["vep_data_all"], separator="\t")
+    logger.info('Writing full dataset')
+    result.write_csv(destination['vep_data_all'], separator='\t')
 
-    logger.info("Writing GWAS dataset")
-    result.filter(pl.col("studyType") == "gwas").write_csv(destination["vep_data_gwas"], separator="\t")
+    logger.info('Writing GWAS dataset')
+    result.filter(pl.col('studyType') == 'gwas').write_csv(destination['vep_data_gwas'], separator='\t')
 
-    logger.info("Writing QTL dataset")
-    result.filter(pl.col("studyType") != "gwas").write_csv(destination["vep_data_qtl"], separator="\t")
+    logger.info('Writing QTL dataset')
+    result.filter(pl.col('studyType') != 'gwas').write_csv(destination['vep_data_qtl'], separator='\t')
