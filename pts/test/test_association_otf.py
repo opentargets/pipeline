@@ -56,8 +56,13 @@ class TestComputeFacetClasses:
 
     @pytest.fixture(autouse=True)
     def _setup(self: TestComputeFacetClasses, spark: SparkSession) -> None:
-        self.df = spark.createDataFrame(self.DATASET, schema=self.TARGET_CLASS_SCHEMA)
-        self.result = _compute_facet_classes(self.df)
+        if '_cached_result' not in TestComputeFacetClasses.__dict__:
+            df = spark.createDataFrame(self.DATASET, schema=self.TARGET_CLASS_SCHEMA)
+            result = _compute_facet_classes(df)
+            result.cache()
+            result.count()  # materialize
+            TestComputeFacetClasses._cached_result = result
+        self.result = TestComputeFacetClasses._cached_result
 
     def test_target_class_column_dropped(self: TestComputeFacetClasses) -> None:
         """TargetClass column should be replaced by facetClasses."""
@@ -112,11 +117,16 @@ class TestComputeFacetTherapeuticAreas:
 
     @pytest.fixture(autouse=True)
     def _setup(self: TestComputeFacetTherapeuticAreas, spark: SparkSession) -> None:
-        self.df = spark.createDataFrame(
-            self.DATASET,
-            'diseaseId STRING, diseaseData STRING, therapeuticAreas ARRAY<STRING>, name STRING',
-        )
-        self.result = _compute_facet_therapeutic_areas(self.df, 'diseaseId', 'name', 'therapeuticAreas')
+        if '_cached_result' not in TestComputeFacetTherapeuticAreas.__dict__:
+            df = spark.createDataFrame(
+                self.DATASET,
+                'diseaseId STRING, diseaseData STRING, therapeuticAreas ARRAY<STRING>, name STRING',
+            )
+            result = _compute_facet_therapeutic_areas(df, 'diseaseId', 'name', 'therapeuticAreas')
+            result.cache()
+            result.count()  # materialize
+            TestComputeFacetTherapeuticAreas._cached_result = result
+        self.result = TestComputeFacetTherapeuticAreas._cached_result
 
     def test_output_columns(self: TestComputeFacetTherapeuticAreas) -> None:
         """Output should contain the key column and the vec column."""
@@ -177,8 +187,13 @@ class TestComputeFacetTractability:
 
     @pytest.fixture(autouse=True)
     def _setup(self: TestComputeFacetTractability, spark: SparkSession) -> None:
-        self.df = spark.createDataFrame(self.DATASET, schema=self.TRACTABILITY_SCHEMA)
-        self.result = _compute_facet_tractability(self.df)
+        if '_cached_result' not in TestComputeFacetTractability.__dict__:
+            df = spark.createDataFrame(self.DATASET, schema=self.TRACTABILITY_SCHEMA)
+            result = _compute_facet_tractability(df)
+            result.cache()
+            result.count()  # materialize
+            TestComputeFacetTractability._cached_result = result
+        self.result = TestComputeFacetTractability._cached_result
 
     def test_facet_columns_added(self: TestComputeFacetTractability) -> None:
         """All four modality facet columns should be present."""

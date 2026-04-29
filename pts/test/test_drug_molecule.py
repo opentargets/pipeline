@@ -86,7 +86,7 @@ MECHANISM_SCHEMA = StructType([
 # --- Fixtures ---
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def clinical_report_df(spark):
     """A clinical report with multiple drugs, diseases, and stages."""
     data = [
@@ -140,7 +140,7 @@ def clinical_report_df(spark):
     return spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def disease_df(spark):
     """Disease reference data."""
     data = [
@@ -151,7 +151,7 @@ def disease_df(spark):
     return spark.createDataFrame(data, schema=DISEASE_SCHEMA)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def molecule_df(spark):
     """Molecule data with various cross-references."""
     data = [
@@ -226,7 +226,7 @@ def molecule_df(spark):
     return spark.createDataFrame(data, schema=MOLECULE_SCHEMA)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def chemical_probes_df(spark):
     """Chemical probes data."""
     data = [
@@ -236,7 +236,7 @@ def chemical_probes_df(spark):
     return spark.createDataFrame(data, schema=CHEMICAL_PROBES_SCHEMA)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def mechanism_df(spark):
     """Mechanism of action data."""
     data = [
@@ -465,262 +465,93 @@ class TestJoinSemantic:
         assert _join_semantic(['a', 'b', 'c']) == 'a, b and c'
 
 
+# --- Shared fixture for process_drug_index ---
+
+
+@pytest.fixture(scope='module')
+def drug_index_result(spark, molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df):
+    """Pre-computed drug index result shared across all TestProcessDrugIndex tests."""
+    result = process_drug_index(molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df)
+    result.cache()
+    result.count()  # materialize the cache
+    return result
+
+
 # --- Tests for process_drug_index ---
 
 
 class TestProcessDrugIndex:
     @pytest.mark.slow
-    def test_non_drug_molecules_excluded(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_non_drug_molecules_excluded(self, drug_index_result):
         """CHEMBL999 has no drugbank ref, no clinical reports, no mechanism, no probe -> excluded."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        ids = [r['id'] for r in result.collect()]
+        ids = [r['id'] for r in drug_index_result.collect()]
         assert 'CHEMBL999' not in ids
 
     @pytest.mark.slow
-    def test_drug_with_drugbank_included(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_drug_with_drugbank_included(self, drug_index_result):
         """CHEMBL1 has a drugbank cross-reference -> included."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        ids = [r['id'] for r in result.collect()]
+        ids = [r['id'] for r in drug_index_result.collect()]
         assert 'CHEMBL1' in ids
 
     @pytest.mark.slow
-    def test_drug_in_clinical_reports_included(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_drug_in_clinical_reports_included(self, drug_index_result):
         """CHEMBL2 appears in clinical reports -> included."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        ids = [r['id'] for r in result.collect()]
+        ids = [r['id'] for r in drug_index_result.collect()]
         assert 'CHEMBL2' in ids
 
     @pytest.mark.slow
-    def test_chemical_probe_included(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_chemical_probe_included(self, drug_index_result):
         """CHEMBL3 is a chemical probe -> included."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        ids = [r['id'] for r in result.collect()]
+        ids = [r['id'] for r in drug_index_result.collect()]
         assert 'CHEMBL3' in ids
 
     @pytest.mark.slow
-    def test_chemical_probe_gets_probes_drugs_xref(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_chemical_probe_gets_probes_drugs_xref(self, drug_index_result):
         """CHEMBL3 is a chemical probe -> should have probes&drugs cross-reference with probe ID."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        chembl3 = result.filter(f.col('id') == 'CHEMBL3').collect()[0]
+        chembl3 = drug_index_result.filter(f.col('id') == 'CHEMBL3').collect()[0]
         xrefs = {xref['source']: xref['ids'] for xref in chembl3['crossReferences']}
         assert 'Probes&Drugs' in xrefs
 
     @pytest.mark.slow
-    def test_non_probe_has_no_probes_drugs_xref(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_non_probe_has_no_probes_drugs_xref(self, drug_index_result):
         """CHEMBL1 is not a chemical probe -> should not have probes&drugs cross-reference."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        chembl1 = result.filter(f.col('id') == 'CHEMBL1').collect()[0]
+        chembl1 = drug_index_result.filter(f.col('id') == 'CHEMBL1').collect()[0]
         xref_sources = [xref['source'] for xref in chembl1['crossReferences']]
         assert 'probes&drugs' not in xref_sources
 
-    def test_max_phase_is_string(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_max_phase_is_string(self, drug_index_result):
         """MaximumClinicalTrialPhase should be a string, not a double."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        phase_field = result.schema['maximumClinicalStage']
+        phase_field = drug_index_result.schema['maximumClinicalStage']
         assert phase_field.dataType == StringType()
 
     @pytest.mark.slow
-    def test_drugs_without_clinical_reports_get_unknown_phase(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_drugs_without_clinical_reports_get_unknown_phase(self, drug_index_result):
         """Drugs not in clinical reports should have maximumClinicalStage='UNKNOWN'."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        null_phases = result.filter(f.col('maximumClinicalStage').isNull()).count()
+        null_phases = drug_index_result.filter(f.col('maximumClinicalStage').isNull()).count()
         assert null_phases == 0
-        # CHEMBL888 has drugbank xref but no clinical reports -> unknown
-        chembl888 = result.filter(f.col('id') == 'CHEMBL888').collect()[0]
+        chembl888 = drug_index_result.filter(f.col('id') == 'CHEMBL888').collect()[0]
         assert chembl888['maximumClinicalStage'] == 'UNKNOWN'
 
-    def test_no_blackbox_or_withdrawal_columns(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_no_blackbox_or_withdrawal_columns(self, drug_index_result):
         """Output should not contain blackBoxWarning or hasBeenWithdrawn columns."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        assert 'blackBoxWarning' not in result.columns
-        assert 'hasBeenWithdrawn' not in result.columns
+        assert 'blackBoxWarning' not in drug_index_result.columns
+        assert 'hasBeenWithdrawn' not in drug_index_result.columns
 
-    def test_no_intermediate_columns(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_no_intermediate_columns(self, drug_index_result):
         """Intermediate columns should be dropped from final output."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        assert 'chemicalProbeDrugId' not in result.columns
-        assert 'hasMechanismOfAction' not in result.columns
-        assert 'indications' not in result.columns
+        assert 'chemicalProbeDrugId' not in drug_index_result.columns
+        assert 'hasMechanismOfAction' not in drug_index_result.columns
+        assert 'indications' not in drug_index_result.columns
 
     @pytest.mark.slow
-    def test_description_is_populated(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_description_is_populated(self, drug_index_result):
         """All drugs in the output should have a non-null description."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        null_descriptions = result.filter(f.col('description').isNull()).count()
+        null_descriptions = drug_index_result.filter(f.col('description').isNull()).count()
         assert null_descriptions == 0
 
     @pytest.mark.slow
-    def test_no_duplicate_ids(
-        self,
-        spark,
-        molecule_df,
-        chemical_probes_df,
-        mechanism_df,
-        clinical_report_df,
-        disease_df,
-    ):
+    def test_no_duplicate_ids(self, drug_index_result):
         """Output should have no duplicate drug IDs."""
-        result = process_drug_index(
-            molecule_df,
-            chemical_probes_df,
-            mechanism_df,
-            clinical_report_df,
-            disease_df,
-        )
-        total = result.count()
-        distinct = result.select('id').distinct().count()
+        total = drug_index_result.count()
+        distinct = drug_index_result.select('id').distinct().count()
         assert total == distinct
