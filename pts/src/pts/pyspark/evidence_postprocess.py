@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from pyspark.storagelevel import StorageLevel
 
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import (
@@ -85,6 +86,11 @@ def evidence_postprocess(
         .hash_long_variant_identifiers()
     )
 
-    # Writing outputs:
-    processed_evidence.get_invalid_evidence().write.mode('overwrite').parquet(destination['failed_evidence'])
-    processed_evidence.get_valid_evidence().write.mode('overwrite').parquet(destination['evidence'])
+    # Writing outputs: persist before the valid/invalid split so the upstream chain
+    # (LUT joins, hashing, scoring, direction-of-effect) only runs once.
+    processed_evidence.df = processed_evidence.df.persist(StorageLevel.MEMORY_AND_DISK)
+    try:
+        processed_evidence.get_invalid_evidence().write.mode('overwrite').parquet(destination['failed_evidence'])
+        processed_evidence.get_valid_evidence().write.mode('overwrite').parquet(destination['evidence'])
+    finally:
+        processed_evidence.df.unpersist()
