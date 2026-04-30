@@ -53,9 +53,12 @@ def evidence_postprocess(
 
     # Reading look up tables and make surer all looks good:
     lookup_tables = LookUpTables(session, source)
-    assert lookup_tables.disease_lut is not None, 'disease_lut not generated'
-    assert lookup_tables.target_lut is not None, 'target_lut not generated'
-    assert lookup_tables.publication_lut is not None, 'publication_lut not generated'
+    if lookup_tables.disease_lut is None:
+        raise ValueError('disease_lut not generated')
+    if lookup_tables.target_lut is None:
+        raise ValueError('target_lut not generated')
+    if lookup_tables.publication_lut is None:
+        raise ValueError('publication_lut not generated')
 
     # Processing evidence:
     processed_evidence = (
