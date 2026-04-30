@@ -1194,7 +1194,7 @@ steps:
           'DEGRADER',
           'INVERSE AGONIST',
           'ALLOSTERIC ANTAGONIST',
-          'DISRUPTING AGENT'
+          'DISRUPTING AGENT',
           'GENE EDITING NEGATIVE MODULATOR'
           ) THEN 'LoF'
           WHEN actionType IN (
