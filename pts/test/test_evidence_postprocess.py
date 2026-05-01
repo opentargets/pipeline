@@ -200,6 +200,27 @@ class TestEvidence:
         """Upon generating evidence id, check type."""
         assert 'id' in deduplicated.df.columns
 
+    def test_validate_uniqueness__deterministic(self: TestEvidence, spark: SparkSession) -> None:
+        """Repeated calls on the same input must flag the same survivor.
+
+        Previously ``validate_uniqueness`` ordered duplicate rows by ``f.rand()``, so the
+        surviving row was non-deterministic across runs. The replacement uses a stable
+        content-derived hash, so a re-run must produce identical flagging.
+        """
+        rows = [
+            ('shared_id', 'a', 1.0),
+            ('shared_id', 'b', 2.0),
+            ('shared_id', 'c', 3.0),
+        ]
+        df = spark.createDataFrame(rows, 'id STRING, payload STRING, score FLOAT').withColumn(
+            Evidence.QC_COLUMN, f.array().cast('array<string>'),
+        )
+        first = Evidence(df).validate_uniqueness().df.orderBy('payload').collect()
+        second = Evidence(df).validate_uniqueness().df.orderBy('payload').collect()
+        assert [row.qualityControls for row in first] == [row.qualityControls for row in second]
+        flagged = sum(EvidenceFlags.DUPLICATED in (row.qualityControls or []) for row in first)
+        assert flagged == len(rows) - 1, f'expected exactly one survivor, got {len(rows) - flagged}'
+
     # Testing the result of chaining process:
     def test_chain__validate_columns(self: TestEvidence, scored_evidence: Evidence) -> None:
         """Testing if chaining methods together still results good shape."""

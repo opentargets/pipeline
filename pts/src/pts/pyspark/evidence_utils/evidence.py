@@ -119,9 +119,20 @@ class Evidence:
         Returns:
             Evidence: where non-unique evidence is flagged.
         """
+        # Order duplicates by a stable content-derived hash so the surviving row is reproducible
+        # across runs and across optimizer-induced re-shuffles within a single plan.
+        # The separator below is ASCII SOH (U+0001) — a control character that cannot occur
+        # in real text fields, so distinct field values can never produce the same hash input.
+        content_hash = f.sha2(
+            f.concat_ws(
+                '',
+                *[f.coalesce(f.col(c).cast(t.StringType()), f.lit('null')) for c in self.df.columns],
+            ),
+            256,
+        )
         return Evidence(
             self.df
-            .withColumn('evidence_unique_rank', f.rank().over(Window.partitionBy('id').orderBy(f.rand())))
+            .withColumn('evidence_unique_rank', f.row_number().over(Window.partitionBy('id').orderBy(content_hash)))
             .withColumn(
                 self.QC_COLUMN,
                 update_quality_flag(
@@ -162,7 +173,7 @@ class Evidence:
         ]
 
         # Generate a hash based on the concatenated fields:
-        hash_expression = f.sha1(f.concat(*valid_columns))
+        hash_expression = f.sha1(f.concat_ws('', *valid_columns))
 
         return Evidence(self.df.withColumn('id', hash_expression))
 
