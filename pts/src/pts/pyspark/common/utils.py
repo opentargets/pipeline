@@ -3,7 +3,6 @@ import json
 from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import wraps
-from math import log10
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import pyspark.sql.functions as f
@@ -172,54 +171,6 @@ def linear_rescaling(
 
     # clamp to [out_range_min, out_range_max]
     return min(max(score, out_range_min), out_range_max)
-
-
-def pvalue_linear_rescaling(
-    pvalue: float,
-    in_range_min: float = 1.0,
-    in_range_max: float = 1e-10,
-    out_range_min: float = 0.0,
-    out_range_max: float = 1.0,
-) -> float:
-    """Convert p-value to log10 space and apply linear_rescaling.
-
-    Args:
-        pvalue (float): p-value to rescale
-        in_range_min (float): minimum of the starting p-value range
-        in_range_max (float): maximum of the starting p-value range
-        out_range_min (float): minimum of the resulting range
-        out_range_max (float): maximum of the resulting range
-
-    Returns:
-        float: re-scaled value
-
-    Examples:
-    Examples:
-        >>> # p = 1  -> log10(1) == 0 -> maps to out_range_min (0.0)
-        >>> pvalue_linear_rescaling(1.0)
-        0.0
-
-        >>> # p = 1e-10 -> log10 == -10 -> maps to out_range_max (1.0)
-        >>> pvalue_linear_rescaling(1e-10)
-        1.0
-
-        >>> # p = 1e-5 -> log10 == -5 -> halfway between 0 and -10 -> 0.5
-        >>> pvalue_linear_rescaling(1e-5)
-        0.5
-
-        >>> # p smaller than in_range_max: maps beyond out_range_max but clamped to 1.0
-        >>> pvalue_linear_rescaling(1e-12)
-        1.0
-
-        >>> # p larger than in_range_min: would map below 0.0 but is clamped to 0.0
-        >>> pvalue_linear_rescaling(2.0)
-        0.0
-    """
-    pvalue_log = log10(pvalue)
-    in_min_log = log10(in_range_min)
-    in_max_log = log10(in_range_max)
-
-    return linear_rescaling(pvalue_log, in_min_log, in_max_log, out_range_min, out_range_max)
 
 
 def parse_spark_schema(schema_json: str) -> StructType:
