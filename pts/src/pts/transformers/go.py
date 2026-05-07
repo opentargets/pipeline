@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TextIO, cast
 
+import networkx as nx
 import obonet
 import polars as pl
 from loguru import logger
@@ -9,6 +10,13 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
+
+
+def _non_obsolete_ids(graph) -> set[str]:
+    return {
+        n for n, data in graph.nodes(data=True)
+        if n.startswith('GO:') and data.get('is_obsolete', 'false') != 'true'
+    }
 
 
 def _rows_from_obo(graph) -> list[dict]:
@@ -68,6 +76,9 @@ def _rows_from_obo(graph) -> list[dict]:
             'negativelyRegulates': negatively_regulates,
             'positivelyRegulates': positively_regulates,
             'isObsolete': is_obsolete,
+            # populated after graph traversal
+            'ancestors': [],
+            'descendants': [],
         })
     logger.info(f'parsed {len(rows)} go terms, {obsolete_count} obsolete')
     return rows
@@ -86,6 +97,14 @@ def go(
 
     logger.info('transforming obo data')
     rows = _rows_from_obo(graph)
+
+    logger.info('computing ancestors and descendants')
+    live_ids = _non_obsolete_ids(graph)
+    for row in rows:
+        node = row['id']
+        # obonet edges go child→parent, so nx.descendants = ontological ancestors
+        row['ancestors'] = sorted(nx.descendants(graph, node) & live_ids)
+        row['descendants'] = sorted(nx.ancestors(graph, node) & live_ids)
 
     logger.info('creating dataframe from parsed data')
     df = pl.DataFrame(rows, schema=go_schema)

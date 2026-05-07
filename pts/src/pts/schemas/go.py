@@ -13,4 +13,6 @@ go_schema = {
     'negativelyRegulates': pl.List(pl.String),
     'positivelyRegulates': pl.List(pl.String),
     'isObsolete': pl.Boolean,
+    'ancestors': pl.List(pl.String),
+    'descendants': pl.List(pl.String),
 }
