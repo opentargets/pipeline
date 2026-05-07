@@ -188,6 +188,9 @@ def _compute_go_facets(target_df: DataFrame, go_df: DataFrame, categories: dict[
             f.col('g.id').alias('id'),
             f.col('g.aspect').alias('aspect'),
         )
+        .join(go_df.select('id', 'ancestors'), 'id', 'left')
+        .withColumn('all_ids', f.when(f.col('ancestors').isNull(), f.array(f.col('id'))).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
+        .select('ensemblGeneId', f.explode('all_ids').alias('id'), 'aspect')
         .join(go_df, 'id', 'left')
         .where(f.col('label').isNotNull())
         .withColumn('datasourceId', f.col('id'))
@@ -260,31 +263,34 @@ def _compute_target_class_facets(target_df: DataFrame, categories: dict[str, str
     )
 
 
-def _compute_pathway_facets(target_df: DataFrame, categories: dict[str, str]) -> DataFrame:
+def _compute_pathway_facets(target_df: DataFrame, reactome_df: DataFrame, categories: dict[str, str]) -> DataFrame:
     """Compute Reactome pathway facets.
 
-    Explodes the pathways array, using pathway name as label and pathwayId as
-    datasourceId.
+    Explodes the pathways array, expands each pathwayId to include all ancestors
+    from the reactome ETL, then joins for labels.
 
     Args:
-        target_df: DataFrame with columns id, pathways (array of structs with
-            pathwayId, pathway, topLevelTerm).
+        target_df: DataFrame with columns id, pathways (array of structs with pathwayId).
+        reactome_df: Reactome ETL DataFrame with columns id, label, ancestors.
         categories: category label mapping.
 
     Returns:
         DataFrame with columns label, category, entityIds, datasourceId.
     """
     logger.info('Computing pathway facets')
+    reactome_ref = reactome_df.select('id', 'label', 'ancestors')
     return (
         target_df
         .where(f.col('pathways').isNotNull())
         .select(f.col('id').alias('ensemblGeneId'), f.explode('pathways').alias('p'))
-        .select(
-            f.col('ensemblGeneId'),
-            f.col('p.pathway').alias('label'),
-            f.lit(categories['pathways']).alias('category'),
-            f.col('p.pathwayId').alias('datasourceId'),
-        )
+        .select(f.col('ensemblGeneId'), f.col('p.pathwayId').alias('id'))
+        .join(reactome_ref.select('id', 'ancestors'), 'id', 'left')
+        .withColumn('all_ids', f.when(f.col('ancestors').isNull(), f.array(f.col('id'))).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
+        .select('ensemblGeneId', f.explode('all_ids').alias('id'))
+        .join(reactome_ref.select('id', 'label'), 'id', 'left')
+        .where(f.col('label').isNotNull())
+        .withColumn('category', f.lit(categories['pathways']))
+        .withColumnRenamed('id', 'datasourceId')
         .groupBy('label', 'category', 'datasourceId')
         .agg(f.collect_set('ensemblGeneId').alias('entityIds'))
     )
@@ -356,6 +362,9 @@ def search_facet(
     logger.info('Loading GO data from %s', source['go'])
     go_df = spark.read.parquet(source['go'])
 
+    logger.info('Loading Reactome data from %s', source['reactome'])
+    reactome_df = spark.read.parquet(source['reactome'])
+
     # ---- disease facets ----
     disease_facets = _compute_disease_name_facets(disease_df, categories).unionByName(
         _compute_therapeutic_areas_facets(disease_df, categories)
@@ -369,7 +378,7 @@ def search_facet(
         .unionByName(_compute_go_facets(target_df, go_df, categories))
         .unionByName(_compute_subcellular_location_facets(target_df, categories))
         .unionByName(_compute_target_class_facets(target_df, categories))
-        .unionByName(_compute_pathway_facets(target_df, categories))
+        .unionByName(_compute_pathway_facets(target_df, reactome_df, categories))
         .unionByName(_compute_tractability_facets(target_df, categories))
     )
 

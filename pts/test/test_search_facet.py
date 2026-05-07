@@ -236,6 +236,7 @@ TARGET_GO_SCHEMA = StructType([
 GO_SCHEMA = StructType([
     StructField('id', StringType()),
     StructField('label', StringType()),
+    StructField('ancestors', ArrayType(StringType())),
 ])
 
 
@@ -252,9 +253,9 @@ def test_go_facet_produces_f_p_c_categories(spark):
         ),
     ]
     go_data = [
-        Row(id='GO:0003677', label='DNA binding'),
-        Row(id='GO:0008150', label='biological_process'),
-        Row(id='GO:0005634', label='nucleus'),
+        Row(id='GO:0003677', label='DNA binding', ancestors=[]),
+        Row(id='GO:0008150', label='biological_process', ancestors=[]),
+        Row(id='GO:0005634', label='nucleus', ancestors=[]),
     ]
     target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
     go_df = spark.createDataFrame(go_data, GO_SCHEMA)
@@ -269,7 +270,7 @@ def test_go_facet_produces_f_p_c_categories(spark):
 def test_go_facet_entry_structure(spark):
     """GO facet entries have label, category, entityIds, datasourceId."""
     target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
-    go_data = [Row(id='GO:0003677', label='DNA binding')]
+    go_data = [Row(id='GO:0003677', label='DNA binding', ancestors=[])]
     target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
     go_df = spark.createDataFrame(go_data, GO_SCHEMA)
     result = _compute_go_facets(target_df, go_df, CATEGORIES)
@@ -404,6 +405,12 @@ PATHWAY_SCHEMA = StructType([
     ),
 ])
 
+REACTOME_SCHEMA = StructType([
+    StructField('id', StringType()),
+    StructField('label', StringType()),
+    StructField('ancestors', ArrayType(StringType())),
+])
+
 
 def test_pathway_facet_category(spark):
     """Pathway facet produces 'Reactome' category."""
@@ -413,8 +420,10 @@ def test_pathway_facet_category(spark):
             pathways=[Row(pathwayId='R-HSA-1', pathway='Cell Cycle', topLevelTerm='Cell Cycle')],
         ),
     ]
+    reactome_data = [Row(id='R-HSA-1', label='Cell Cycle', ancestors=[])]
     df = spark.createDataFrame(data, PATHWAY_SCHEMA)
-    result = _compute_pathway_facets(df, CATEGORIES)
+    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
+    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
     rows = result.collect()
     categories = {r.category for r in rows}
     assert 'Reactome' in categories
@@ -428,8 +437,10 @@ def test_pathway_facet_entry_structure(spark):
             pathways=[Row(pathwayId='R-HSA-1', pathway='Cell Cycle', topLevelTerm='Cell Cycle')],
         ),
     ]
+    reactome_data = [Row(id='R-HSA-1', label='Cell Cycle', ancestors=[])]
     df = spark.createDataFrame(data, PATHWAY_SCHEMA)
-    result = _compute_pathway_facets(df, CATEGORIES)
+    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
+    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
     row = result.collect()[0]
     assert hasattr(row, 'label')
     assert hasattr(row, 'category')
@@ -437,6 +448,43 @@ def test_pathway_facet_entry_structure(spark):
     assert hasattr(row, 'datasourceId')
     assert row.label == 'Cell Cycle'
     assert row.datasourceId == 'R-HSA-1'
+
+
+def test_pathway_facet_propagates_to_ancestors(spark):
+    """Target mapped to a child pathway also appears in ancestor pathway facets."""
+    data = [
+        Row(
+            id='ENSG00000001',
+            pathways=[Row(pathwayId='R-HSA-2', pathway='DNA Repair', topLevelTerm='Cell Cycle')],
+        ),
+    ]
+    reactome_data = [
+        Row(id='R-HSA-2', label='DNA Repair', ancestors=['R-HSA-1']),
+        Row(id='R-HSA-1', label='Cell Cycle', ancestors=[]),
+    ]
+    df = spark.createDataFrame(data, PATHWAY_SCHEMA)
+    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
+    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
+    rows = {r.datasourceId: r for r in result.collect()}
+    assert 'R-HSA-2' in rows
+    assert 'R-HSA-1' in rows
+    assert 'ENSG00000001' in rows['R-HSA-1'].entityIds
+
+
+def test_go_facet_propagates_to_ancestors(spark):
+    """Target annotated with a child GO term also appears in ancestor GO term facets."""
+    target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
+    go_data = [
+        Row(id='GO:0003677', label='DNA binding', ancestors=['GO:0005488']),
+        Row(id='GO:0005488', label='binding', ancestors=[]),
+    ]
+    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
+    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
+    result = _compute_go_facets(target_df, go_df, CATEGORIES)
+    rows = {r.datasourceId: r for r in result.collect()}
+    assert 'GO:0003677' in rows
+    assert 'GO:0005488' in rows
+    assert 'ENSG00000001' in rows['GO:0005488'].entityIds
 
 
 # ---------------------------------------------------------------------------
