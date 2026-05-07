@@ -282,6 +282,22 @@ def test_go_facet_entry_structure(spark):
     assert row.datasourceId == 'GO:0003677'
 
 
+def test_go_facet_propagates_to_ancestors(spark):
+    """Target annotated with a child GO term also appears in ancestor GO term facets."""
+    target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
+    go_data = [
+        Row(id='GO:0003677', label='DNA binding', ancestors=['GO:0005488']),
+        Row(id='GO:0005488', label='binding', ancestors=[]),
+    ]
+    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
+    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
+    result = _compute_go_facets(target_df, go_df, CATEGORIES)
+    rows = {r.datasourceId: r for r in result.collect()}
+    assert 'GO:0003677' in rows
+    assert 'GO:0005488' in rows
+    assert 'ENSG00000001' in rows['GO:0005488'].entityIds
+
+
 # ---------------------------------------------------------------------------
 # 5. Subcellular location facets
 # ---------------------------------------------------------------------------
@@ -469,22 +485,6 @@ def test_pathway_facet_propagates_to_ancestors(spark):
     assert 'R-HSA-2' in rows
     assert 'R-HSA-1' in rows
     assert 'ENSG00000001' in rows['R-HSA-1'].entityIds
-
-
-def test_go_facet_propagates_to_ancestors(spark):
-    """Target annotated with a child GO term also appears in ancestor GO term facets."""
-    target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
-    go_data = [
-        Row(id='GO:0003677', label='DNA binding', ancestors=['GO:0005488']),
-        Row(id='GO:0005488', label='binding', ancestors=[]),
-    ]
-    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
-    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
-    result = _compute_go_facets(target_df, go_df, CATEGORIES)
-    rows = {r.datasourceId: r for r in result.collect()}
-    assert 'GO:0003677' in rows
-    assert 'GO:0005488' in rows
-    assert 'ENSG00000001' in rows['GO:0005488'].entityIds
 
 
 # ---------------------------------------------------------------------------
