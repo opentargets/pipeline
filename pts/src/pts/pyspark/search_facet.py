@@ -189,7 +189,9 @@ def _compute_go_facets(target_df: DataFrame, go_df: DataFrame, categories: dict[
             f.col('g.aspect').alias('aspect'),
         )
         .join(go_df.select('id', 'ancestors'), 'id', 'left')
-        .withColumn('all_ids', f.when(f.col('ancestors').isNull(), f.array(f.col('id'))).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
+        .withColumn('all_ids', f.when(
+            f.col('ancestors').isNull(), f.array(f.col('id'))
+        ).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
         .select('ensemblGeneId', f.explode('all_ids').alias('id'), 'aspect')
         .join(go_df, 'id', 'left')
         .where(f.col('label').isNotNull())
@@ -285,7 +287,9 @@ def _compute_pathway_facets(target_df: DataFrame, reactome_df: DataFrame, catego
         .select(f.col('id').alias('ensemblGeneId'), f.explode('pathways').alias('p'))
         .select(f.col('ensemblGeneId'), f.col('p.pathwayId').alias('id'))
         .join(reactome_ref.select('id', 'ancestors'), 'id', 'left')
-        .withColumn('all_ids', f.when(f.col('ancestors').isNull(), f.array(f.col('id'))).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
+        .withColumn('all_ids', f.when(
+            f.col('ancestors').isNull(), f.array(f.col('id'))
+        ).otherwise(f.array_union(f.array(f.col('id')), f.col('ancestors'))))
         .select('ensemblGeneId', f.explode('all_ids').alias('id'))
         .join(reactome_ref.select('id', 'label'), 'id', 'left')
         .where(f.col('label').isNotNull())
