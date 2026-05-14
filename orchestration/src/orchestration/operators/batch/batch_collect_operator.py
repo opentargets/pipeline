@@ -7,8 +7,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import cast
 
 from airflow.exceptions import AirflowSkipException
-from airflow.models.baseoperator import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
+from airflow.sdk import BaseOperator
 from google.cloud.storage import Blob, Bucket
 
 from orchestration.models.batch import BatchCollectSpec

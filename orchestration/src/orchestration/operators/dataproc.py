@@ -17,7 +17,7 @@ from airflow.providers.google.cloud.operators.dataproc import (
     InstanceFlexibilityPolicy,
     PreemptibilityType,
 )
-from airflow.utils.context import Context
+from airflow.sdk import Context
 from google.api_core.exceptions import NotFound as GCPNotFound
 from google.cloud.dataproc_v1 import JobReference
 from google.cloud.dataproc_v1.types import DiskConfig, NodeInitializationAction
@@ -367,6 +367,8 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
             if has_blobs
             else None
         )
+        if not self._cluster_config.secret_init_action_uri:
+            raise ValueError('secret_init_action_uri must be set if secrets or secret blobs are provided')
         init_action = SecretInitAction(
             secrets=secrets,
             secret_blobs=secret_blobs,
@@ -377,11 +379,11 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
 
     def _patch_cluster_init_actions(self, init_actions: list[NodeInitializationAction] | None) -> None:
         """Patch in place the cluster init actions."""
-        if not init_actions:
+        if not init_actions or not self.cluster_config:
             return
         self.log.info(f'Patching cluster init actions with {init_actions}')
         self.log.debug(f'Current cluster config: {self.cluster_config}')
-        self.cluster_config['initialization_actions'].extend(init_actions)
+        self.cluster_config['initialization_actions'].extend(init_actions)  # ty:ignore[not-subscriptable]
 
 
 class SubmitJobOperator(DataprocSubmitJobOperator):

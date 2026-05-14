@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from airflow.decorators.task_group import task_group
-from airflow.models.baseoperator import chain
-from airflow.models.dag import DAG
-from airflow.models.param import Param
-from airflow.models.taskmixin import DAGNode
-from airflow.operators.empty import EmptyOperator
 from airflow.providers.google.cloud.operators.compute import ComputeEngineDeleteInstanceOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.sdk import DAG, Param, chain, task_group
+from airflow.sdk.definitions.param import ParamsDict
+from airflow.task.trigger_rule import TriggerRule
 from airflow.utils.edgemodifier import Label
-from airflow.utils.trigger_rule import TriggerRule
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
@@ -43,23 +39,23 @@ with DAG(
     dag_id='unified_pipeline',
     description='Open Targets unified data pipeline',
     default_args=shared_dag_args,
-    default_view='grid',
     catchup=False,
     schedule=None,
     user_defined_filters={'strhash': strhash},
     tags=['unified_pipeline'],
-    params={
+    params=ParamsDict({
         'run_label': Param(
-            default=f'up-{datetime.now().strftime("%Y%m%d-%H%M")}',
+            default=None,
             description="""A label with key 'run' and the contents of this parameter
                            will be added to any infrastructure resources that this
-                           pipeline creates in Google Cloud.""",
+                           pipeline creates in Google Cloud.
+                           Defaults to the DAG run ID if not provided.""",
         ),
-    },
+    }),
 ) as dag:
     logger = logging.getLogger(__name__)
     config = UnifiedPipelineConfig()
-    steps: dict[str, dict[str, DAGNode]] = {}  # this is a registry of tasks, it is used to build dependencies
+    steps: dict[str, dict[str, Any]] = {}  # this is a registry of tasks, it is used to build dependencies
 
     # ==============================================================================================
     # PIS stage of the DAG —  two paths

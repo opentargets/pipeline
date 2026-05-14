@@ -1,4 +1,5 @@
-LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/adc.json
+.DEFAULT_GOAL := cloud-dev
+LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
@@ -14,8 +15,11 @@ help: ## Show the help message
 include ../common.mk
 
 clean: ## Clean the project
-	@docker compose down
-	@rm -rf logs dist .venv .pytest_cache .ruff_cache deployment/.terraform deployment/plan.out
+	@AIRFLOW__API__SECRET_KEY=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_SECRET=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_ISSUER=$${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow} \
+	docker compose down --remove-orphans && \
+	rm -rf logs dist .venv .pytest_cache .ruff_cache deployment/.terraform deployment/plan.out
 
 clean-vm: ## Destroy the Airflow development VM
 	@echo "Destroying Airflow development VM..."
@@ -42,7 +46,10 @@ lint: sync ## Lint codebase
 check: lint test ## run all checks
 
 local-airflow:  ## Start a local AirFlow instance used for development
-	@GOOGLE_APPLICATION_CREDENTIALS=$(LOCAL_DEV_CREDENTIALS) docker compose -f compose.yaml -f compose.local.yaml up -d
+	@AIRFLOW__API__SECRET_KEY=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_SECRET=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_ISSUER=$${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow} \
+	GOOGLE_APPLICATION_CREDENTIALS=$(LOCAL_DEV_CREDENTIALS) docker compose -f compose.yaml -f compose.local.yaml up -d --build --remove-orphans
 
 cloud-airflow: ## Start a remote AirFlow instance used for running the unified pipeline
 	@./deployment/start.sh
@@ -55,6 +62,8 @@ tunnel: ## Tunnel to the remote AirFlow instance
 
 build-dag-svgs: ## Generate visual representations of Airflow DAGs for documentation purposes
 	@uv sync --all-groups
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow db migrate
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags reserialize
 	@$(foreach dag, \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_clumping \

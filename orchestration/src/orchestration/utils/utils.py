@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import random
 import re
+import shlex
 import string
 from pathlib import Path
 from typing import Any
@@ -200,7 +201,10 @@ def convert_params_to_hydra_positional_arg(params: dict[str, Any] | None, datapr
 
     positional_args = []
     for k, v in params.items():
-        positional_args.append(f'{k}={v}')
+        arg = f'{k}={v}'
+        if isinstance(v, str) and v[:1] in '{[':
+            arg = shlex.quote(arg)
+        positional_args.append(arg)
 
     if not dataproc:
         return positional_args

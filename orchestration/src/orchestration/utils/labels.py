@@ -4,7 +4,7 @@ import re
 from collections import UserDict
 from typing import Any
 
-from airflow.utils.context import Context
+from airflow.sdk import Context
 
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_SERVICE_ACCOUNT
 
@@ -71,5 +71,5 @@ class Labels(UserDict[str, str]):
         dag_run = context.get('dag_run')
         if dag_run:
             default_run_label = dag_run.run_id
-        run_label = context.get('params', {}).get('run_label', default_run_label)
+        run_label = context.get('params', {}).get('run_label') or default_run_label
         self['run'] = run_label

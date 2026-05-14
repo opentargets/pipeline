@@ -60,12 +60,14 @@ To spin the local Airflow instance, run:
 make local-airflow
 ```
 
-This will start airflow service and install the required dependencies using uv.
+This will build and start the local Airflow services, install the required dependencies using uv, and generate per-run Airflow API/JWT secrets for the stack.
 
 > [!WARNING]
-> If you run `docker compose up` by itself, to get a working dev environment you
-> must add the override file `compose-local.yaml` as well as set the
-> `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+> If you run Docker Compose manually, export `GOOGLE_APPLICATION_CREDENTIALS`,
+> `AIRFLOW__API__SECRET_KEY`, and `AIRFLOW__API_AUTH__JWT_SECRET` first (for
+> example, `export AIRFLOW__API__SECRET_KEY="$(openssl rand -hex 32)"` and
+> `export AIRFLOW__API_AUTH__JWT_SECRET="$(openssl rand -hex 32)"`), then use
+> `docker compose -f compose.yaml -f compose.local.yaml up -d --build`.
 
 In order to use the local Airflow instance yoy need to have Google Cloud
 credentials set up on local machine. By default the `make dev` comamnd will link
@@ -166,8 +168,8 @@ docker compose down --volumes --remove-orphans
 More information on running Airflow with Docker Compose can be found in the
 [official docs](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html).
 
-1. **Increase Airflow concurrency**. Modify the `docker-compose.yaml` and add
-    the following to the x-airflow-common → environment section:
+1. **Increase Airflow concurrency**. Modify `compose.yaml` and add the following
+    to the x-airflow-common → environment section:
 
     ```yaml
     AIRFLOW__CORE__PARALLELISM: 32
@@ -182,7 +184,7 @@ More information on running Airflow with Docker Compose can be found in the
 
 ### Troubleshooting
 
-Note that when you a a new workflow under `dags/`, Airflow will not pick that up
+Note that when you add a new workflow under `dags/`, Airflow will not pick that up
 immediately. By default the filesystem is only scanned for new DAGs every 300s.
 However, once the DAG is added, updates are applied nearly instantaneously.
 

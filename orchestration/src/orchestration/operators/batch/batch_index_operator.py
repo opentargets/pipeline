@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from airflow.models.baseoperator import BaseOperator
-from airflow.utils.context import Context
+from airflow.sdk import BaseOperator, Context
 
 from orchestration.models.batch import BatchIndexOperatorSpec, BatchIndexRow
 from orchestration.operators.batch.manifest_generators import (

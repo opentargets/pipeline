@@ -2,11 +2,9 @@
 
 from collections.abc import Iterable, Sequence
 
-from airflow.models.taskinstance import TaskInstance
-from airflow.operators.branch import BaseBranchOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.serialization.pydantic.taskinstance import TaskInstancePydantic
-from airflow.utils.context import Context
+from airflow.sdk import BaseBranchOperator, Context
+from airflow.sdk.types import RuntimeTaskInstanceProtocol
 from google.cloud.storage import Client
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
@@ -73,7 +71,7 @@ class DiffOperator(BaseBranchOperator):
 
     def choose_branch(self, context: Context) -> str | Iterable[str]:
         """Decide whether to run a step or not."""
-        task_instance: TaskInstance | TaskInstancePydantic | None = context.get('task_instance')
+        task_instance: RuntimeTaskInstanceProtocol | None = context.get('task_instance')
         if not task_instance:
             raise ValueError('task_instance not found in context')
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-import logging
 import random
 import time
 from collections.abc import Sequence
@@ -12,15 +11,15 @@ from functools import cached_property
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
+import structlog
 from airflow.configuration import conf
 from airflow.exceptions import AirflowException
 from airflow.providers.google.cloud.hooks.compute import ComputeEngineHook
 from airflow.providers.google.cloud.operators.compute import ComputeEngineDeleteInstanceOperator
 from airflow.providers.google.common.consts import CLIENT_INFO
 from airflow.providers.google.common.hooks.base_google import GoogleBaseHook
-from airflow.sensors.base import BaseSensorOperator
+from airflow.sdk import BaseSensorOperator, Context
 from airflow.triggers.base import BaseTrigger, TriggerEvent
-from airflow.utils.context import Context
 from google.api_core.exceptions import ResourceExhausted, RetryError
 from google.api_core.extended_operation import ExtendedOperation
 from google.cloud import compute_v1, logging_v2
@@ -33,6 +32,8 @@ from orchestration.utils.labels import Labels
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from airflow.sdk.log import Logger
 
 CONTAINER_NAME = 'workload_container'
 LOGGING_REQUEST_INTERVAL = 2
@@ -49,7 +50,7 @@ def wait_for_extended_operation(
     operation: ExtendedOperation,
     verbose_name: str = 'operation',
     timeout: int | None = 300,
-    log: logging.Logger | None = None,
+    log: Logger | None = None,
 ) -> Any:
     """Waits for the extended (long-running) operation to complete.
 
@@ -78,7 +79,7 @@ def wait_for_extended_operation(
         a `concurrent.futures.TimeoutError` will be raised.
     """
     if log is None:
-        log = logging.getLogger(__name__)
+        log = structlog.get_logger(__name__)
 
     result = operation.result(timeout=timeout)
 
@@ -116,7 +117,7 @@ class RateLimitedLoggingClient(logging_v2.Client):
 
     def __init__(
         self,
-        log: logging.Logger,
+        log: Logger,
         *args,
         **kwargs,
     ) -> None:
@@ -632,7 +633,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         dag_run = context.get('dag_run')
         if dag_run:
             default_run_label = dag_run.run_id
-        run_label = context.get('params', {}).get('run_label', default_run_label)
+        run_label = context.get('params', {}).get('run_label') or default_run_label
         self.labels['run'] = run_label
         self.start()
 

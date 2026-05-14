@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from airflow.models.baseoperator import chain
 from airflow.models.dag import DAG
+from airflow.sdk import chain
 
 from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
 from orchestration.operators.batch import BatchIndexOperator, BatchJobOperator
@@ -23,7 +23,7 @@ config = read_yaml_config(SOURCE_CONFIG_FILE_PATH, sentinels)
 logger = logging.getLogger(__name__)
 
 with DAG(
-    dag_id='gwas_catalog_heritability_estimate',
+    dag_id='gentropy_heritability_estimate',
     description='Run heritability estimation for harmonised summary statistics using gentropy',
     default_args=shared_dag_args,
     **shared_dag_kwargs,
