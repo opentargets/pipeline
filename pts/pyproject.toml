@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.06.13"
+version = "26.06.14"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -35,7 +35,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
-clinical-mining = { git = "https://github.com/opentargets/clinical_mining" }
+clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.4.0" }
 
 
 [dependency-groups]
