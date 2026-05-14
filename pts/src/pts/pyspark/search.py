@@ -346,10 +346,12 @@ def _build_target_index(
             (f.col('transcriptConsequences.consequenceScore') + f.lit(1))
             * f.col('transcriptConsequences.distanceFromFootprint'),
         )
+        .withColumn('chrVariantId', f.concat(f.lit('chr'), f.col('variantId')))
         .withColumn(
             'variant_labels',
             _flatten_cat(
                 'array(variantId)',
+                'array(chrVariantId)',
                 'array(hgvsId)',
                 'dbXrefs.id',
                 'rsIds',

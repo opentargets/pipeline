@@ -221,6 +221,56 @@ def test_build_target_index_entity_is_target(spark):
     assert row.entity == 'target'
 
 
+def test_build_target_index_terms_include_chr_prefixed_variant(spark):
+    """_build_target_index includes both bare and chr-prefixed variant IDs in target terms."""
+    targets = spark.createDataFrame(
+        [
+            Row(
+                targetId='ENSG001',
+                approvedSymbol='BRCA1',
+                approvedName='Breast cancer 1',
+                biotype='protein_coding',
+                synonyms=[],
+                proteinIds=[],
+                dbXRefs=[],
+            )
+        ],
+        _TARGET_SCHEMA,
+    )
+    variants = spark.createDataFrame(
+        [
+            Row(
+                variantId='1_100_A_G',
+                chromosome='1',
+                position='100',
+                rsIds=[],
+                hgvsId=None,
+                dbXrefs=[],
+                transcriptConsequences=[
+                    Row(targetId='ENSG001', consequenceScore=1.0, distanceFromFootprint=1.0)
+                ],
+            )
+        ],
+        _VARIANT_SCHEMA,
+    )
+    assocs = spark.createDataFrame(
+        [Row(associationId='EFO_001-ENSG001', targetId='ENSG001', diseaseId='EFO_001', score=0.5)],
+        _ASSOC_SCHEMA,
+    )
+    d_lut = spark.createDataFrame(
+        [Row(diseaseId='EFO_001', disease_labels=[], disease_name='Cancer', therapeutic_labels=[])],
+        _DISEASE_LUT_SCHEMA,
+    )
+    dr_lut = spark.createDataFrame([], _DRUG_LUT_SCHEMA)
+
+    result = _build_target_index(targets, assocs, d_lut, dr_lut, variants)
+    row = result.collect()[0]
+    assert 'chr1_100_A_G' in row.terms
+    assert '1_100_A_G' in row.terms
+    assert 'chr1_100_A_G' in row.terms25
+    assert 'chr1_100_A_G' in row.terms5
+
+
 # ---------------------------------------------------------------------------
 # 4. _build_variant_index
 # ---------------------------------------------------------------------------
