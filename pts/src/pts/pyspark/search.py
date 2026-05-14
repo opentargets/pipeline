@@ -332,6 +332,12 @@ def _build_target_index(
     # Variant labels per target
     variant_labels_df = (
         variants
+        # gnomad dbXrefs ids (e.g. 1-14677-G-A) are the dash-delimited variantId,
+        # 100% redundant with variantId once OpenSearch normalises delimiters.
+        .withColumn(
+            'dbXrefs',
+            f.filter(f.col('dbXrefs'), lambda x: ~x.getField('source').eqNullSafe('gnomad')),
+        )
         .withColumn('transcriptConsequences', f.explode(f.col('transcriptConsequences')))
         .withColumn(
             'consequenceScore',
@@ -571,6 +577,12 @@ def _build_variant_index(variants: DataFrame) -> DataFrame:
     """
     variant_df = (
         variants
+        # gnomad dbXrefs ids (e.g. 1-14677-G-A) are the dash-delimited variantId,
+        # 100% redundant with variantId once OpenSearch normalises delimiters.
+        .withColumn(
+            'dbXrefs',
+            f.filter(f.col('dbXrefs'), lambda x: ~x.getField('source').eqNullSafe('gnomad')),
+        )
         .withColumn('chrVariantId', f.concat(f.lit('chr'), f.col('variantId')))
         .withColumn(
             'locationUnderscore',
