@@ -270,6 +270,75 @@ def test_build_variant_index_entity_is_variant(spark):
     assert row.entity == 'variant'
 
 
+def test_build_variant_index_keywords_include_chr_prefixed_forms(spark):
+    """_build_variant_index adds chr-prefixed variant ID and location to keywords."""
+    variants = spark.createDataFrame(
+        [
+            Row(
+                variantId='1_100_A_G',
+                chromosome='1',
+                position='100',
+                rsIds=[],
+                hgvsId=None,
+                dbXrefs=[],
+                transcriptConsequences=[],
+            )
+        ],
+        _VARIANT_SCHEMA,
+    )
+    row = _build_variant_index(variants).collect()[0]
+    assert '1_100_A_G' in row.keywords
+    assert 'chr1_100_A_G' in row.keywords
+    assert 'chr1_100_' in row.keywords
+    assert '1_100_' in row.keywords
+
+
+def test_build_variant_index_prefixes_include_chr_prefixed_forms(spark):
+    """_build_variant_index adds chr-prefixed variant ID and location to prefixes."""
+    variants = spark.createDataFrame(
+        [
+            Row(
+                variantId='1_100_A_G',
+                chromosome='1',
+                position='100',
+                rsIds=[],
+                hgvsId=None,
+                dbXrefs=[],
+                transcriptConsequences=[],
+            )
+        ],
+        _VARIANT_SCHEMA,
+    )
+    row = _build_variant_index(variants).collect()[0]
+    assert '1_100_A_G' in row.prefixes
+    assert 'chr1_100_A_G' in row.prefixes
+    assert 'chr1_100_' in row.prefixes
+    assert '1_100_' in row.prefixes
+
+
+def test_build_variant_index_drops_dash_and_colon_location_forms(spark):
+    """_build_variant_index no longer emits dash/colon variant location forms."""
+    variants = spark.createDataFrame(
+        [
+            Row(
+                variantId='1_100_A_G',
+                chromosome='1',
+                position='100',
+                rsIds=[],
+                hgvsId=None,
+                dbXrefs=[],
+                transcriptConsequences=[],
+            )
+        ],
+        _VARIANT_SCHEMA,
+    )
+    row = _build_variant_index(variants).collect()[0]
+    assert '1-100-' not in row.keywords
+    assert '1:100:' not in row.keywords
+    assert '1-100-' not in row.prefixes
+    assert '1:100:' not in row.prefixes
+
+
 # ---------------------------------------------------------------------------
 # 5. _build_drug_index
 # ---------------------------------------------------------------------------

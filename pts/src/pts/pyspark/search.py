@@ -569,9 +569,12 @@ def _build_variant_index(variants: DataFrame) -> DataFrame:
     """
     variant_df = (
         variants
-        .withColumn('locationUnderscore', f.concat(f.col('chromosome'), f.lit('_'), f.col('position'), f.lit('_')))
-        .withColumn('locationDash', f.concat(f.col('chromosome'), f.lit('-'), f.col('position'), f.lit('-')))
-        .withColumn('locationColon', f.concat(f.col('chromosome'), f.lit(':'), f.col('position'), f.lit(':')))
+        .withColumn('chrVariantId', f.concat(f.lit('chr'), f.col('variantId')))
+        .withColumn(
+            'locationUnderscore',
+            f.concat(f.col('chromosome'), f.lit('_'), f.col('position'), f.lit('_')),
+        )
+        .withColumn('chrLocationUnderscore', f.concat(f.lit('chr'), f.col('locationUnderscore')))
     )
     return _search_index(
         variant_df,
@@ -585,15 +588,17 @@ def _build_variant_index(variants: DataFrame) -> DataFrame:
             'dbXrefs.id',
             'rsIds',
             'array(locationUnderscore)',
-            'array(locationDash)',
-            'array(locationColon)',
+            'array(chrVariantId)',
+            'array(chrLocationUnderscore)',
         ),
         prefixes_col=_flatten_cat(
             'array(variantId)',
             'array(hgvsId)',
             'dbXrefs.id',
             'rsIds',
-            'array(locationColon)',
+            'array(locationUnderscore)',
+            'array(chrVariantId)',
+            'array(chrLocationUnderscore)',
         ),
         ngrams_col=_flatten_cat('array(variantId)', 'dbXrefs.id'),
         multiplier_col=f.lit(1.0),
