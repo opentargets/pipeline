@@ -736,6 +736,38 @@ def test_build_drug_index_nct_ids_appear_in_keywords(spark):
     assert 'nct00005678' in keywords
 
 
+def test_build_drug_index_child_chembl_ids_appear_in_terms_not_keywords(spark):
+    """childChemblIds belong in terms (low-priority) not keywords (top-hit ranked)."""
+    drugs = spark.createDataFrame(
+        [
+            Row(
+                drugId='CHEMBL2010601',
+                name='Ivacaftor',
+                description=None,
+                drugType='Small molecule',
+                synonyms=[],
+                tradeNames=[],
+                childChemblIds=['CHEMBL4297603'],
+                crossReferences=[],
+                rows=[],
+                indications=[],
+            )
+        ],
+        _DRUG_SCHEMA,
+    )
+
+    result = _build_drug_index(
+        drugs,
+        spark.createDataFrame([], _ASSOC_DRUG_SCHEMA),
+        spark.createDataFrame([], _TARGET_LUT_SCHEMA),
+        spark.createDataFrame([], _DISEASE_LUT2_SCHEMA),
+        spark.createDataFrame([], _NCT_BY_DRUG_SCHEMA),
+    )
+    row = result.collect()[0]
+    assert 'CHEMBL4297603' not in row.keywords
+    assert 'CHEMBL4297603' in row.terms
+
+
 def test_build_drug_index_missing_nct_ids_yields_no_crash(spark):
     """_build_drug_index works correctly when a drug has no NCT IDs."""
     drugs = spark.createDataFrame(

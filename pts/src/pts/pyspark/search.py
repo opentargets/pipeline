@@ -551,11 +551,13 @@ def _build_drug_index(
         entity_col=f.lit('drug'),
         category_col=f.array(f.col('drugType')),
         keywords_col=_flatten_cat(
-            'synonyms', 'tradeNames', 'array(name)', 'array(drugId)', 'childChemblIds', 'crossReferences', 'nctIds'
+            'synonyms', 'tradeNames', 'array(name)', 'array(drugId)', 'crossReferences', 'nctIds'
         ),
         prefixes_col=_flatten_cat('synonyms', 'tradeNames', 'array(name)', 'descriptions'),
         ngrams_col=_flatten_cat('array(name)', 'synonyms', 'tradeNames', 'descriptions'),
-        terms_col=_flatten_cat('disease_labels', 'target_labels', 'indicationLabels', 'therapeutic_labels'),
+        terms_col=_flatten_cat(
+            'disease_labels', 'target_labels', 'indicationLabels', 'therapeutic_labels', 'childChemblIds'
+        ),
         multiplier_col=f.when(
             f.col('drug_relevance').isNotNull(),
             f.log1p(f.col('drug_relevance')) + f.lit(1.0),
