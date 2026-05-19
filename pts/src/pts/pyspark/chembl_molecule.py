@@ -115,6 +115,15 @@ def _molecule_preprocess(
             f.col('molecule_chembl_id').alias('id'),
             f.col('molecule_structures.canonical_smiles').alias('canonicalSmiles'),
             f.col('molecule_structures.standard_inchi_key').alias('inchiKey'),
+            # ChEMBL ships molfile as a full SD-file record (molblock + appended
+            # SDF property tags). Truncate to the bare molblock by dropping
+            # everything after the `M  END` terminator. If `M  END` is absent the
+            # string is left unchanged.
+            f.regexp_replace(
+                f.col('molecule_structures.molfile'),
+                r'(?s)(\nM  END\n).*',
+                '$1',
+            ).alias('molblock'),
             f.coalesce(f.col('molecule_type'), f.lit('Unknown')).alias('drugType'),
             f.col('pref_name').alias('name'),
             f.col('cross_references'),

@@ -50,6 +50,7 @@ MOLECULE_SCHEMA = StructType([
     StructField('drugType', StringType()),
     StructField('canonicalSmiles', StringType()),
     StructField('inchiKey', StringType()),
+    StructField('molblock', StringType()),
     StructField('parentId', StringType()),
     StructField('tradeNames', ArrayType(StringType())),
     StructField('synonyms', ArrayType(StringType())),
@@ -161,6 +162,7 @@ def molecule_df(spark):
             drugType='Small molecule',
             canonicalSmiles='C',
             inchiKey='INCHI1',
+            molblock='MOLBLOCK_CHEMBL1',
             parentId='CHEMBL1',
             tradeNames=['TradeA'],
             synonyms=['SynA'],
@@ -174,6 +176,7 @@ def molecule_df(spark):
             drugType='Antibody',
             canonicalSmiles=None,
             inchiKey=None,
+            molblock=None,
             parentId='CHEMBL2',
             tradeNames=None,
             synonyms=None,
@@ -187,6 +190,7 @@ def molecule_df(spark):
             drugType='Small molecule',
             canonicalSmiles='CC',
             inchiKey='INCHI3',
+            molblock='MOLBLOCK_CHEMBL3',
             parentId='CHEMBL3',
             tradeNames=None,
             synonyms=None,
@@ -201,6 +205,7 @@ def molecule_df(spark):
             drugType='Small molecule',
             canonicalSmiles='CCCC',
             inchiKey='INCHI888',
+            molblock=None,
             parentId='CHEMBL888',
             tradeNames=None,
             synonyms=None,
@@ -215,6 +220,7 @@ def molecule_df(spark):
             drugType='Small molecule',
             canonicalSmiles='CCC',
             inchiKey='INCHI999',
+            molblock=None,
             parentId='CHEMBL999',
             tradeNames=None,
             synonyms=None,
@@ -555,3 +561,12 @@ class TestProcessDrugIndex:
         total = drug_index_result.count()
         distinct = drug_index_result.select('id').distinct().count()
         assert total == distinct
+
+    @pytest.mark.slow
+    def test_molblock_passed_through(self, drug_index_result):
+        """molblock from the molecule input survives into the drug index."""
+        assert 'molblock' in drug_index_result.columns
+        chembl1 = drug_index_result.filter(f.col('id') == 'CHEMBL1').collect()[0]
+        assert chembl1['molblock'] == 'MOLBLOCK_CHEMBL1'
+        chembl2 = drug_index_result.filter(f.col('id') == 'CHEMBL2').collect()[0]
+        assert chembl2['molblock'] is None
