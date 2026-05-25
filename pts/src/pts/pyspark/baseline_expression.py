@@ -133,7 +133,6 @@ def _override_biosample_id(
         .withColumn('norm', norm('value'))
         .withColumn('pretty', pretty('value'))
         .filter(f.length(f.col('norm')) > 0)
-        .cache()
     )
     min_key_by_norm = enriched.groupBy('norm').agg(f.min(f.col(key_col)).alias(key_col))
     mapping_norm = (
@@ -227,7 +226,7 @@ def _add_parental_biosample_id(
         )
     )
 
-    df_with_parent = df.join(biosample_to_parent, on=id_col, how='left').cache()
+    df_with_parent = df.join(biosample_to_parent, on=id_col, how='left')
 
     null_parent_df = df_with_parent.filter(f.col(parent_col_name).isNull())
     if null_parent_df.take(1):
@@ -332,8 +331,20 @@ def baseline_expression(
 
         try:
             valid, invalid = split_valid_invalid(validated)
-            valid.write.mode('overwrite').parquet(destination['valid'])
-            invalid.write.mode('overwrite').parquet(destination['failed'])
+            # Disable parquet dictionary encoding: expression values are
+            # high-cardinality doubles whose in-memory dictionary OOMs the writer.
+            (
+                valid.write
+                .mode('overwrite')
+                .option('parquet.enable.dictionary', 'false')
+                .parquet(destination['valid'])
+            )
+            (
+                invalid.write
+                .mode('overwrite')
+                .option('parquet.enable.dictionary', 'false')
+                .parquet(destination['failed'])
+            )
         finally:
             validated.unpersist()
     finally:

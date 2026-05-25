@@ -8,7 +8,7 @@ The biosample index may optionally include `obsoleteTerms`.
 
 from __future__ import annotations
 
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
@@ -38,13 +38,19 @@ def prepare_target_lut(df: DataFrame) -> DataFrame:
         )
         .filter(f.col('targetFromSourceId').isNotNull())
     )
-    # Deduplicate
-    window = Window.partitionBy('targetFromSourceId').orderBy('targetId')
+    # Deduplicate so each alias maps to exactly one targetId, preventing
+    # left-join fan-out when an alias is shared across multiple targets.
+    # `min(struct(...))` gives a deterministic argmin (lexicographically
+    # smallest targetId wins) via hash aggregation.
     return (
         exploded
-        .withColumn('_rn', f.row_number().over(window))
-        .filter(f.col('_rn') == 1)
-        .drop('_rn')
+        .groupBy('targetFromSourceId')
+        .agg(f.min(f.struct('targetId', 'biotype')).alias('_pick'))
+        .select(
+            f.col('_pick.targetId').alias('targetId'),
+            f.col('_pick.biotype').alias('biotype'),
+            f.col('targetFromSourceId'),
+        )
     )
 
 
@@ -62,11 +68,11 @@ def prepare_biosample_lut(df: DataFrame) -> DataFrame:
         )
         .filter(f.col('biosampleFromSourceMappedId').isNotNull())
     )
-    # Deduplicate
-    window = Window.partitionBy('biosampleFromSourceMappedId').orderBy('biosampleId')
+    # Deduplicate so each alias maps to exactly one biosampleId, preventing
+    # left-join fan-out when an obsolete term maps to multiple successors.
+    # `min(biosampleId)` gives a deterministic winner via hash aggregation.
     return (
         exploded
-        .withColumn('_rn', f.row_number().over(window))
-        .filter(f.col('_rn') == 1)
-        .drop('_rn')
+        .groupBy('biosampleFromSourceMappedId')
+        .agg(f.min('biosampleId').alias('biosampleId'))
     )
