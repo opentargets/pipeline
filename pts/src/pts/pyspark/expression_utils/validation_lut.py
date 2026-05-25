@@ -8,7 +8,7 @@ The biosample index may optionally include `obsoleteTerms`.
 
 from __future__ import annotations
 
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
@@ -29,7 +29,7 @@ def prepare_target_lut(df: DataFrame) -> DataFrame:
             )
         )
     )
-    return (
+    exploded = (
         df
         .select(
             f.col('id').alias('targetId'),
@@ -37,7 +37,14 @@ def prepare_target_lut(df: DataFrame) -> DataFrame:
             f.explode(aliases).alias('targetFromSourceId'),
         )
         .filter(f.col('targetFromSourceId').isNotNull())
-        .distinct()
+    )
+    # Deduplicate
+    window = Window.partitionBy('targetFromSourceId').orderBy('targetId')
+    return (
+        exploded
+        .withColumn('_rn', f.row_number().over(window))
+        .filter(f.col('_rn') == 1)
+        .drop('_rn')
     )
 
 
@@ -47,12 +54,19 @@ def prepare_biosample_lut(df: DataFrame) -> DataFrame:
     if 'obsoleteTerms' in df.columns:
         arrays.append(f.coalesce(f.col('obsoleteTerms'), f.array().cast(_STRING_ARRAY)))
     aliases = f.concat(*arrays)
-    return (
+    exploded = (
         df
         .select(
             f.col('biosampleId'),
             f.explode(aliases).alias('biosampleFromSourceMappedId'),
         )
         .filter(f.col('biosampleFromSourceMappedId').isNotNull())
-        .distinct()
+    )
+    # Deduplicate
+    window = Window.partitionBy('biosampleFromSourceMappedId').orderBy('biosampleId')
+    return (
+        exploded
+        .withColumn('_rn', f.row_number().over(window))
+        .filter(f.col('_rn') == 1)
+        .drop('_rn')
     )
