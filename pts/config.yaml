@@ -88,7 +88,7 @@ steps:
       requires:
         - pyspark baseline expression harmonise dice
         - pyspark baseline expression specificity dice
-    
+
   baseline_expression_cellxgene:
     - name: pyspark baseline expression harmonise cellxgene
       pyspark: baseline_expression_harmonise
@@ -103,7 +103,7 @@ steps:
         min_cells: 5 # Minimum cells a gene must be expressed in to be retained
         min_genes: 5 # Minimum genes a cell must express to be retained
         technology: 10X # Technology used to generate the data
-        normalise: true 
+        normalise: true
         aggregation_min_cells: 5 # Minimum cells required per pseudobulked sample
         aggregation_method: sum # Options: sum, mean
         tissue_agg_colname: tissue_ontology_term_id
@@ -141,7 +141,7 @@ steps:
         - pyspark baseline expression harmonise cellxgene
     - name: pyspark baseline expression aggregate celltype
       pyspark: baseline_expression_aggregate
-      source: 
+      source:
         expression_data: intermediate/baseline_expression/unaggregated/tabula_sapiens/celltype/parquet
         celltype_cellex: intermediate/baseline_expression/specificity/tabula_sapiens/celltype/cellex/esmu.csv.gz
       destination: intermediate/baseline_expression/aggregated/tabula_sapiens/celltype
@@ -150,7 +150,7 @@ steps:
         - pyspark baseline expression specificity celltype
     - name: pyspark baseline expression aggregate tissue
       pyspark: baseline_expression_aggregate
-      source: 
+      source:
         expression_data: intermediate/baseline_expression/unaggregated/tabula_sapiens/tissue/parquet
         tissue_cellex: intermediate/baseline_expression/specificity/tabula_sapiens/tissue/cellex/esmu.csv.gz
       destination: intermediate/baseline_expression/aggregated/tabula_sapiens/tissue
@@ -159,7 +159,7 @@ steps:
         - pyspark baseline expression specificity tissue
     - name: pyspark baseline expression aggregate tissue celltype
       pyspark: baseline_expression_aggregate
-      source: 
+      source:
         expression_data: intermediate/baseline_expression/unaggregated/tabula_sapiens/tissue_celltype/parquet
         tissue_celltype_cellex: intermediate/baseline_expression/specificity/tabula_sapiens/tissue_celltype/cellex/esmu.csv.gz
       destination: intermediate/baseline_expression/aggregated/tabula_sapiens/tissue_celltype
@@ -177,14 +177,14 @@ steps:
         baseline_expression: intermediate/baseline_expression/unaggregated/PRIDE/tissue
       settings:
         harmoniser: pride
-        pride_codes: 
+        pride_codes:
           - PXD020192
-          - PXD000865 
+          - PXD000865
           - PXD000561
           - PXD016999
     - name: pyspark baseline expression aggregate pride
       pyspark: baseline_expression_aggregate
-      source: 
+      source:
         expression_data: intermediate/baseline_expression/unaggregated/PRIDE/tissue/parquet
       destination: intermediate/baseline_expression/aggregated/PRIDE/tissue
       requires:
@@ -216,7 +216,7 @@ steps:
         - pyspark baseline expression harmonise gtex
     - name: pyspark baseline expression aggregate gtex
       pyspark: baseline_expression_aggregate
-      source: 
+      source:
         expression_data: intermediate/baseline_expression/unaggregated/GTEx/tissue/parquet
         tissue_cellex: intermediate/baseline_expression/specificity/GTEx/tissue/cellex/esmu.csv.gz
       destination: intermediate/baseline_expression/aggregated/GTEx/tissue
@@ -724,13 +724,14 @@ steps:
         aact_conditions: input/clinical_report/aact/conditions.parquet
         aact_study_references: input/clinical_report/aact/study_references.parquet
         aact_designs: input/clinical_report/aact/designs.parquet
-        aact_summaries: input/clinical_report/aact/summaries.parquet
+        aact_summaries: input/clinical_report/aact/brief_summaries.parquet
         chembl_indication: input/clinical_report/chembl/drug_indication.parquet
         chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
         chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
         chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
         chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
+        trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
         output: output/clinical_report/clinical_report.parquet

@@ -8,6 +8,7 @@ import pdfplumber
 import polars as pl
 import torch
 from clinical_mining.data_sources.aact import extract_clinical_report as extract_aact_clinical_report
+from clinical_mining.data_sources.aact.llm_extractor import parse_indication_batch_results
 from clinical_mining.data_sources.chembl.drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
@@ -94,6 +95,7 @@ def clinical_report(
     chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
         'warning_id', 'ref_type', 'ref_id', 'ref_url'
     )
+    llm_indications = parse_indication_batch_results(source['trial_extraction_batch_results'])
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -105,6 +107,7 @@ def clinical_report(
         conditions=aact_conditions,
         additional_metadata=[aact_study_references, aact_designs, aact_summaries],
         aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
+        llm_extraction_df=llm_indications,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
     if aact_stop_reasons.height > 0:
