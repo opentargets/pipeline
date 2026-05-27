@@ -65,7 +65,7 @@ def _regroup_matches(matches: DataFrame, max_sentence_length: int) -> DataFrame:
     return (
         matches
         .join(section_rank_table, on='section')
-        .withColumn('keys', f.collect_set(f.col('keywordId')).over(w_per_section))
+        .withColumn('keys', f.collect_set(f.col('mappedId')).over(w_per_section))
         .dropDuplicates(['pmid', 'rank'])
         .groupBy('pmid')
         .agg(f.collect_list(f.col('keys')).alias('keys'))

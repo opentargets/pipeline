@@ -242,3 +242,43 @@ def safe_array_union(*cols: Column) -> Column:
     for col in cols[1:]:
         result = f.array_union(result, f.coalesce(col, f.array()))
     return result
+
+
+def maybe_coalesce(df: DataFrame, n: int | None) -> DataFrame:
+    """Coalesce a DataFrame to a fixed partition count when configured.
+
+    Used at write boundaries to avoid emitting many small parquet files when
+    the upstream shuffle partition count is high. Coalesce is a narrow
+    transformation that merges partitions without a network shuffle, so it
+    only reduces file count -- it does not rebalance data.
+
+    Args:
+        df: DataFrame to coalesce.
+        n: Target partition count. Falsy values leave ``df`` unchanged.
+
+    Returns:
+        The coalesced DataFrame, or ``df`` unchanged when ``n`` is falsy.
+    """
+    if n:
+        return df.coalesce(n)
+    return df
+
+
+def maybe_repartition(df: DataFrame, n: int | None) -> DataFrame:
+    """Repartition a DataFrame to a fixed partition count when configured.
+
+    Used after a read of scattered small files to keep downstream Spark task
+    counts sane. Repartition is a wide transformation that hash-shuffles rows
+    across partitions, so it both rebalances data and sets the partition count
+    -- the cost is one extra shuffle stage.
+
+    Args:
+        df: DataFrame to repartition.
+        n: Target partition count. Falsy values leave ``df`` unchanged.
+
+    Returns:
+        The repartitioned DataFrame, or ``df`` unchanged when ``n`` is falsy.
+    """
+    if n:
+        return df.repartition(n)
+    return df

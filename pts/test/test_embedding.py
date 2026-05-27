@@ -10,22 +10,22 @@ class TestFilterMatches:
         from pts.pyspark.literature_embedding import _filter_matches
 
         data = [
-            Row(keywordId='ENSG001', type='GP', isMapped=True, section='title'),
-            Row(keywordId='CHEMBL1', type='CD', isMapped=True, section='abstract'),
-            Row(keywordId='EFO001', type='DS', isMapped=True, section='title'),
-            Row(keywordId='ENSG002', type='GP', isMapped=False, section='title'),
-            Row(keywordId='OTHER1', type='XX', isMapped=True, section='title'),
+            Row(mappedId='ENSG001', type='GP', isMapped=True, section='title'),
+            Row(mappedId='CHEMBL1', type='CD', isMapped=True, section='abstract'),
+            Row(mappedId='EFO001', type='DS', isMapped=True, section='title'),
+            Row(mappedId='ENSG002', type='GP', isMapped=False, section='title'),
+            Row(mappedId='OTHER1', type='XX', isMapped=True, section='title'),
         ]
         df = spark.createDataFrame(data)
         result = _filter_matches(df)
         assert result.count() == 3
-        ids = {r['keywordId'] for r in result.collect()}
+        ids = {r['mappedId'] for r in result.collect()}
         assert ids == {'ENSG001', 'CHEMBL1', 'EFO001'}
 
     def test_empty_input(self, spark):
         from pts.pyspark.literature_embedding import _filter_matches
 
-        schema = 'keywordId STRING, type STRING, isMapped BOOLEAN, section STRING'
+        schema = 'mappedId STRING, type STRING, isMapped BOOLEAN, section STRING'
         df = spark.createDataFrame([], schema=schema)
         result = _filter_matches(df)
         assert result.count() == 0
@@ -38,9 +38,9 @@ class TestRegroupMatches:
         from pts.pyspark.literature_embedding import _regroup_matches
 
         data = [
-            Row(pmid='1', keywordId='ENSG001', section='title', type='GP', isMapped=True),
-            Row(pmid='1', keywordId='CHEMBL1', section='title', type='CD', isMapped=True),
-            Row(pmid='1', keywordId='EFO001', section='abstract', type='DS', isMapped=True),
+            Row(pmid='1', mappedId='ENSG001', section='title', type='GP', isMapped=True),
+            Row(pmid='1', mappedId='CHEMBL1', section='title', type='CD', isMapped=True),
+            Row(pmid='1', mappedId='EFO001', section='abstract', type='DS', isMapped=True),
         ]
         df = spark.createDataFrame(data)
         result = _regroup_matches(df, max_sentence_length=100)

@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.06.20"
+version = "26.06.21"
 description = "Open Targets Pipeline Transformation Stage"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -18,7 +18,8 @@ dependencies = [
   "obonet>=0.3.1",
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
-  "ontoma==2.3.1",
+  "ontoma>=2.4.1",
+  "ot-literature",
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
   "pdfplumber>=0.11.9",
@@ -35,6 +36,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
+ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.0" }
 clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.4.0" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
@@ -72,6 +74,7 @@ exclude = ["test"]
 
 [tool.deptry.package_module_name_map]
 opentargets-otter = 'otter'
+ot-literature = 'literature'
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ['openpyxl', 'coverage', 'setuptools', 'gcsfs']

@@ -13,7 +13,6 @@ from typing import Any
 from loguru import logger
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as f
-from pyspark.sql.window import Window
 
 from pts.pyspark.common.session import Session
 
@@ -64,34 +63,45 @@ def _compute_relevance(matches: DataFrame) -> DataFrame:
     """Compute harmonic relevance scores for entity-publication pairs.
 
     Args:
-        matches: DataFrame with literature match data (pmid, keywordId, section, type, etc.)
+        matches: DataFrame with literature match data (pmid, mappedId, section, type, etc.)
 
     Returns:
         DataFrame with columns: pmid, pmcid, date, year, month, day, keywordId, relevance, keywordType
     """
     spark = matches.sparkSession
 
-    section_rank_table = f.broadcast(spark.createDataFrame(_SECTION_RANKS).orderBy(f.col('rank').asc()))
+    section_rank_table = f.broadcast(spark.createDataFrame(_SECTION_RANKS))
 
-    w_by_section_keyword = Window.partitionBy('pmid', 'section', 'keywordId')
-
-    # Step 1: join with section ranks and compute per-section weight vectors.
-    # Title always gets a single fixed weight; other sections collect all
-    # mention weights within that section.
+    # Step 1: join with section ranks and collapse to one row per
+    # (pmid, section, keywordId). Title always gets a single fixed weight;
+    # other sections collect all mention weights within that section.
+    # The match dataset names the entity id `mappedId`; rename it to
+    # `keywordId` (the name used throughout this step and in the output).
     with_section_weights = (
         matches
+        .withColumnRenamed('mappedId', 'keywordId')
         .withColumnRenamed('type', 'keywordType')
         .join(section_rank_table, on='section', how='left_outer')
         .na.fill(100, ['rank'])
         .na.fill(0.01, ['weight'])
+        .groupBy('pmid', 'section', 'keywordId')
+        .agg(
+            f.first('pmcid').alias('pmcid'),
+            f.first('date').alias('date'),
+            f.first('year').alias('year'),
+            f.first('month').alias('month'),
+            f.first('day').alias('day'),
+            f.first('keywordType').alias('keywordType'),
+            f.first('rank').alias('rank'),
+            f.first('weight').alias('weight'),
+            f.collect_list('weight').alias('all_weights'),
+        )
         .withColumn(
             'keywordSectionV',
-            f.when(
-                f.col('section') != 'title',
-                f.collect_list(f.col('weight')).over(w_by_section_keyword),
-            ).otherwise(f.array(f.lit(_TITLE_WEIGHT))),
+            f.when(f.col('section') == 'title', f.array(f.lit(_TITLE_WEIGHT)))
+             .otherwise(f.col('all_weights')),
         )
-        .dropDuplicates(['pmid', 'section', 'keywordId'])
+        .drop('all_weights')
     )
 
     # Step 2: aggregate across sections per (pmid, keywordId).
@@ -136,9 +146,11 @@ def literature_entity_lut(
 
     logger.info('Reading literature matches')
     matches = spark.read.parquet(source['matches'])
+    logger.info(f'[DIAG] matches partitions: {matches.rdd.getNumPartitions()}')
 
     logger.info('Computing relevance scores')
     result = _compute_relevance(matches)
+    logger.info(f'[DIAG] result partitions: {result.rdd.getNumPartitions()}')
 
     dest = destination['literature_entity_lut'] if isinstance(destination, dict) else destination
     logger.info(f'Writing literature entity LUT to {dest}')

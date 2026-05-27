@@ -1,4 +1,4 @@
-"""Tests for pts.pyspark.common.utils camelCase conversion utilities."""
+"""Tests for pts.pyspark.common.utils helpers."""
 
 import pytest
 from pyspark.sql import Row
@@ -11,7 +11,12 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pts.pyspark.common.utils import rename_columns_to_camel_case, snake_to_lower_camel
+from pts.pyspark.common.utils import (
+    maybe_coalesce,
+    maybe_repartition,
+    rename_columns_to_camel_case,
+    snake_to_lower_camel,
+)
 
 # ---------------------------------------------------------------------------
 # snake_to_lower_camel
@@ -165,3 +170,49 @@ def test_rename_mixed_schema_preserves_all_data(spark):
     assert row['sourceInfo']['databaseVersion'] == 'v2'
     assert row['detectionMethods'][0]['methodName'] == 'pull-down'
     assert row['detectionMethods'][0]['isValid'] is True
+
+
+# ---------------------------------------------------------------------------
+# maybe_coalesce
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_coalesce_when_count_given(spark):
+    df = spark.range(100).repartition(8)
+    result = maybe_coalesce(df, 2)
+    assert result.rdd.getNumPartitions() == 2
+
+
+def test_maybe_coalesce_returns_df_unchanged_when_none(spark):
+    df = spark.range(100)
+    result = maybe_coalesce(df, None)
+    assert result is df
+
+
+def test_maybe_coalesce_returns_df_unchanged_when_zero(spark):
+    df = spark.range(100)
+    result = maybe_coalesce(df, 0)
+    assert result is df
+
+
+# ---------------------------------------------------------------------------
+# maybe_repartition
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_repartition_when_count_given(spark):
+    df = spark.range(100)
+    result = maybe_repartition(df, 4)
+    assert result.rdd.getNumPartitions() == 4
+
+
+def test_maybe_repartition_returns_df_unchanged_when_none(spark):
+    df = spark.range(100)
+    result = maybe_repartition(df, None)
+    assert result is df
+
+
+def test_maybe_repartition_returns_df_unchanged_when_zero(spark):
+    df = spark.range(100)
+    result = maybe_repartition(df, 0)
+    assert result is df
