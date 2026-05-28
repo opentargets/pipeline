@@ -194,6 +194,11 @@ class DepMapEssentiality:
         logger.info(f'Number of essential genes: {self.essentials.select("targetSymbol").distinct().count()}')  # ty:ignore[unresolved-attribute]
         logger.info(f'Number of unique diseases: {self.essentials.select("diseaseFromSource").distinct().count()}')  # ty:ignore[unresolved-attribute]
 
+    @staticmethod
+    def _non_gene_columns() -> set[str]:
+        """Return set of known non-gene columns in DepMap wide-format files."""
+        return {'SequencingID', 'ModelConditionID', 'IsDefaultEntryForModel', 'IsDefaultEntryForMC'}
+
     def _melt(self, df: DataFrame, value_name: str) -> DataFrame:
         """Melt a wide dataframe into a long format.
 
@@ -209,16 +214,18 @@ class DepMapEssentiality:
             DataFrame: Melted dataframe. Columns: depmapId, targetSymbol, value_name (e.g. geneEffect, expression,
             hotspotMutation, damagingMutation)
         """
-        df = (
-            df
-            # Some files don't have label for the first column:
-            .withColumnRenamed('_c0', 'depmapId')
-            # Some files have the wrong label:
-            .withColumnRenamed('ModelID', 'depmapId')
-        )
+        # Some files have ModelID as the DepMap ID column; others have it as an unnamed first column (_c0).
+        # When both exist, _c0 is a row index and ModelID carries the actual DepMap ID.
+        if 'ModelID' in df.columns:
+            df = df.withColumnRenamed('ModelID', 'depmapId')
+            if '_c0' in df.columns:
+                df = df.drop('_c0')
+        elif '_c0' in df.columns:
+            df = df.withColumnRenamed('_c0', 'depmapId')
 
-        # Extracting cell lines:
-        genes = df.columns[1:]
+        # Filter out known non-gene metadata columns:
+        skip = self._non_gene_columns()
+        genes = [c for c in df.columns if c != 'depmapId' and c not in skip]
 
         # Generate unpivot expression:
         unpivot_expression = (
