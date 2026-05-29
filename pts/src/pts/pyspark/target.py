@@ -1154,7 +1154,13 @@ def _build_protein_classification(df: DataFrame) -> DataFrame:
     Returns:
         DataFrame with [accession, targetClass[{id, label, level}]].
     """
-    accession_pc = df.select(
+    # Restrict to single-component ChEMBL targets. Multi-component records
+    # (complexes, PPIs) carry classifications that are not positionally aligned
+    # with `target_components`, so zipping them misattributes classes across
+    # subunits.
+    single = df.filter(f.size(f.col('target_components')) == 1)
+
+    accession_pc = single.select(
         f.explode(
             f.arrays_zip(
                 f.col('_metadata.protein_classification'),
