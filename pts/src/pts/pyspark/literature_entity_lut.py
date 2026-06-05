@@ -152,6 +152,9 @@ def literature_entity_lut(
     result = _compute_relevance(matches)
     logger.info(f'[DIAG] result partitions: {result.rdd.getNumPartitions()}')
 
+    partition_count = settings.get('partition_count')
+
     dest = destination['literature_entity_lut'] if isinstance(destination, dict) else destination
     logger.info(f'Writing literature entity LUT to {dest}')
-    result.write.mode('overwrite').parquet(dest)
+    out = result.coalesce(partition_count) if partition_count is not None else result
+    out.write.mode('overwrite').parquet(dest)

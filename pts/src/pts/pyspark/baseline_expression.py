@@ -329,12 +329,15 @@ def baseline_expression(
         )
         validated = validated.persist()
 
+        partition_count = settings.get('partition_count')
+
         try:
             valid, invalid = split_valid_invalid(validated)
             # Disable parquet dictionary encoding: expression values are
             # high-cardinality doubles whose in-memory dictionary OOMs the writer.
+            valid_out = valid.coalesce(partition_count) if partition_count is not None else valid
             (
-                valid.write
+                valid_out.write
                 .mode('overwrite')
                 .option('parquet.enable.dictionary', 'false')
                 .parquet(destination['valid'])

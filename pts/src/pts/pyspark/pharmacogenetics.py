@@ -99,8 +99,11 @@ def pharmacogenetics(
         moa_df,
     )
 
+    partition_count = settings.get('partition_count')
+
     logger.info(f'save associations to {destination["associations"]}')
-    enriched_pgx_df.write.parquet(destination['associations'], mode='overwrite')
+    out = enriched_pgx_df.coalesce(partition_count) if partition_count is not None else enriched_pgx_df
+    out.write.parquet(destination['associations'], mode='overwrite')
 
 
 def parse_phenotype_with_gpt(

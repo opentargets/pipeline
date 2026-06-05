@@ -82,11 +82,16 @@ def evidence_postprocess(
         .hash_long_variant_identifiers()
     )
 
+    partition_count = settings.get('partition_count')
+
     # Writing outputs: persist before the valid/invalid split so the upstream chain
     # (LUT joins, hashing, scoring, direction-of-effect) only runs once.
     processed_evidence.df = processed_evidence.df.persist(StorageLevel.MEMORY_AND_DISK)
     try:
         processed_evidence.get_invalid_evidence().write.mode('overwrite').parquet(destination['failed_evidence'])
-        processed_evidence.get_valid_evidence().write.mode('overwrite').parquet(destination['evidence'])
+        valid_df = processed_evidence.get_valid_evidence()
+        if partition_count is not None:
+            valid_df = valid_df.coalesce(partition_count)
+        valid_df.write.mode('overwrite').parquet(destination['evidence'])
     finally:
         processed_evidence.df.unpersist()

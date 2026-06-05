@@ -29,6 +29,7 @@ def association(
     novelty_scale = settings['novelty_scale']
     novelty_window = settings['novelty_window']
     novelty_shift = settings['novelty_shift']
+    partition_count = settings.get('partition_count') or {}
     # start spark session
     session = Session(app_name='timeseries', properties=properties)
 
@@ -45,45 +46,45 @@ def association(
     # This is a re-used and persisted dataset.
     association_by_datasource = Evidence.from_raw_evidence(raw_evidence).aggregate_evidence_by_datasource(persist=True)
 
+    def _write(df, key: str) -> None:
+        n = partition_count.get(key)
+        (df.coalesce(n) if n else df).write.mode('overwrite').parquet(destination[key])
+
     # Save direct association by datasource:
     logger.info('Processing direct association stratified by datasource.')
-    (
-        association_by_datasource
-        .compute_novelty(
+    _write(
+        association_by_datasource.compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['by_datasource_direct'])
+        ),
+        'by_datasource_direct',
     )
 
     # Save direct overall association:
     logger.info('Processing direct overall association.')
-    (
+    _write(
         association_by_datasource
         .aggregate_overall(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['overall_direct'])
+        ),
+        'overall_direct',
     )
 
     # Save direct association by datatype:
     logger.info('Processing direct associations stratified by datatype.')
-    (
+    _write(
         association_by_datasource
         .aggregate_by_datatype(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['by_datatype_direct'])
+        ),
+        'by_datatype_direct',
     )
 
     # Unpersist temporary, datasource specific data:
@@ -107,43 +108,40 @@ def association(
 
     # Save indirect association by datasource:
     logger.info('Processing indirect associations stratified by datasource.')
-    (
+    _write(
         Association(_df=indirect_intermediate)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['by_datasource_indirect'])
+        ),
+        'by_datasource_indirect',
     )
 
     # Save indirect association by datatype:
     logger.info('Processing indirect associations stratified by datatype.')
-    (
+    _write(
         Association(_df=indirect_intermediate)
         .aggregate_by_datatype(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['by_datatype_indirect'])
+        ),
+        'by_datatype_indirect',
     )
 
     # Save indirect overall association:
     logger.info('Processing indirect overall associations.')
-    (
+    _write(
         Association(_df=indirect_intermediate)
         .aggregate_overall(datasource_weights)
         .compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
-        )
-        .write.mode('overwrite')
-        .parquet(destination['overall_indirect'])
+        ),
+        'overall_indirect',
     )
 
     # Free the cache.

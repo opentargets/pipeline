@@ -113,8 +113,11 @@ def drug_molecule(
         disease_df,
     )
 
+    partition_count = settings.get('partition_count')
+
     logger.info(f'Writing drug index to {destination["output"]}')
-    output_df.write.mode('overwrite').parquet(destination['output'])
+    out = output_df.coalesce(partition_count) if partition_count is not None else output_df
+    out.write.mode('overwrite').parquet(destination['output'])
 
 
 def process_drug_index(

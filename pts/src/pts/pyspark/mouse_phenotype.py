@@ -50,9 +50,12 @@ def mouse_phenotype(
     target_df = spark.load_data(source['target'], format='parquet')
     out_df, exc_df = filter_mouse_phenotypes_by_target(mouse_phenotypes_df, target_df)
 
+    partition_count = settings.get('partition_count')
+
     # write output data
     logger.info(f'writing output data to: {destination}')
-    out_df.write.mode('overwrite').parquet(destination['output'])
+    out = out_df.coalesce(partition_count) if partition_count is not None else out_df
+    out.write.mode('overwrite').parquet(destination['output'])
     exc_df.write.mode('overwrite').parquet(destination['excluded'])
 
 

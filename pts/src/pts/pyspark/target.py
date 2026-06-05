@@ -322,13 +322,19 @@ def target(
         .transform(_add_tss)
     )
 
+    partition_count = settings.get('partition_count') or {}
+
     logger.info(f'Writing target output to {destination["target"]}')
-    targets_df.write.mode('overwrite').parquet(destination['target'])
+    target_parts = partition_count.get('target') if isinstance(partition_count, dict) else None
+    out_targets = targets_df.coalesce(target_parts) if target_parts else targets_df
+    out_targets.write.mode('overwrite').parquet(destination['target'])
 
     logger.info('Building gene essentiality output')
     gene_essentiality_df = _build_gene_essentiality_output(gene_essentiality_raw, ensg_lookup)
     logger.info(f'Writing gene essentiality output to {destination["gene_essentiality"]}')
-    gene_essentiality_df.write.mode('overwrite').parquet(destination['gene_essentiality'])
+    essentiality_parts = partition_count.get('gene_essentiality') if isinstance(partition_count, dict) else None
+    out_essentiality = gene_essentiality_df.coalesce(essentiality_parts) if essentiality_parts else gene_essentiality_df
+    out_essentiality.write.mode('overwrite').parquet(destination['gene_essentiality'])
 
 
 # ===========================================================================

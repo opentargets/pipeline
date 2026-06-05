@@ -631,6 +631,7 @@ def interaction(
 
     score_threshold: int = int(settings.get('scorethreshold', 0))
     string_version: str = str(settings.get('string_version', '12'))
+    partition_count = settings.get('partition_count') or {}
 
     logger.info('Loading target data from %s', source['targets'])
     target_df = spark.read.parquet(source['targets'])
@@ -677,7 +678,9 @@ def interaction(
     logger.info('Aggregating interaction pairs')
     intact_agg = _generate_interactions_agg(_select_fields(intact_valid))
     string_agg = _generate_interactions_agg(_select_fields(string_valid))
-    aggregated = rename_columns_to_camel_case(intact_agg.unionByName(string_agg)).coalesce(200)
+    interactions_parts = partition_count.get('interactions')
+    aggregated_raw = rename_columns_to_camel_case(intact_agg.unionByName(string_agg))
+    aggregated = aggregated_raw.coalesce(interactions_parts) if interactions_parts else aggregated_raw
 
     # Evidences
     logger.info('Generating interaction evidences')
@@ -693,7 +696,9 @@ def interaction(
             intact_evidences = intact_evidences.withColumn(col_name, f.lit(None))
 
     evidences_raw = string_evidences.select(all_columns).unionByName(intact_evidences.select(all_columns))
-    evidences = rename_columns_to_camel_case(evidences_raw).repartition(200)
+    evidence_parts = partition_count.get('interactions_evidence')
+    evidences_renamed = rename_columns_to_camel_case(evidences_raw)
+    evidences = evidences_renamed.coalesce(evidence_parts) if evidence_parts else evidences_renamed
 
     # Unmatched
     logger.info('Collecting unmatched interactors')
