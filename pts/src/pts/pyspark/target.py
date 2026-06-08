@@ -14,7 +14,6 @@ Scala sources ported:
     - Hgnc.scala
     - Ncbi.scala
     - Ortholog.scala
-    - ProjectScores.scala
     - ProteinClassification.scala
     - Reactome.scala
     - Safety.scala
@@ -144,8 +143,6 @@ def target(
     tep_raw = spark.read.json(source['tep'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
-    ps_ids_raw = spark.read.parquet(source['project_scores_ids'])
-    ps_matrix_raw = spark.read.parquet(source['project_scores_essentiality_matrix'])
     chembl_raw = spark.read.json(source['chembl'])
     genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
     homology_dict_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['homology_dictionary'])
@@ -218,9 +215,6 @@ def target(
     logger.info('Building HPA subcellular locations')
     hpa_df = _build_gene_with_location(hpa_raw, hpa_sl_raw)
 
-    logger.info('Building ProjectScores')
-    project_scores_df = _build_project_scores(ps_ids_raw, ps_matrix_raw)
-
     logger.info('Building ProteinClassification')
     protein_class_df = _build_protein_classification(chembl_raw)
 
@@ -246,14 +240,13 @@ def target(
     uniprot_df = _build_uniprot(uniprot_raw, uniprot_ssl_raw)
 
     # --- Merge ---------------------------------------------------------------
-    logger.info('Merging HGNC + Ensembl + GO + ProjectScores + Hallmarks')
+    logger.info('Merging HGNC + Ensembl + GO + Hallmarks')
     hgnc_ensembl = _merge_hgnc_ensembl(hgnc_df, ensembl_df)
 
     hgnc_ensembl_go = (
         hgnc_ensembl
         .join(go_df, hgnc_ensembl['id'] == go_df['ensemblId'], 'left_outer')
         .drop('ensemblId')
-        .join(project_scores_df, 'id', 'left_outer')
         .join(hallmarks_df, 'approvedSymbol', 'left_outer')
     )
 
@@ -277,7 +270,7 @@ def target(
         .withColumn('proteinIds', _safe_array_union(f.col('proteinIds'), f.col('pid')))
         .withColumn(
             'dbXrefs',
-            _safe_array_union(f.col('hgncId'), f.col('dbXrefs'), f.col('signalP'), f.col('xRef')),
+            _safe_array_union(f.col('hgncId'), f.col('dbXrefs'), f.col('signalP')),
         )
         .withColumn('symbolSynonyms', _safe_array_union(f.col('symbolSynonyms'), f.col('hgncSymbolSynonyms')))
         .withColumn('nameSynonyms', _safe_array_union(f.col('nameSynonyms'), f.col('hgncNameSynonyms')))
@@ -297,7 +290,6 @@ def target(
             'hgncObsoleteSymbols',
             'uniprotIds',
             'signalP',
-            'xRef',
         )
         .persist()
     )
@@ -1089,60 +1081,6 @@ def _build_gene_with_location(df: DataFrame, sl_df: DataFrame) -> DataFrame:
         )
         .groupBy('id')
         .agg(f.collect_list('locations').alias('locations'))
-    )
-
-
-# ===========================================================================
-# ProjectScores.scala → _build_project_scores
-# ===========================================================================
-
-
-def _build_project_scores(ids_df: DataFrame, matrix_df: DataFrame) -> DataFrame:
-    """Build project scores (DepMap) cross-references.
-
-    Args:
-        ids_df: Gene identifiers mapping (gene_id, ensembl_gene_id, hgnc_symbol).
-        matrix_df: Binary dependency scores matrix (Gene column + per-cell-line columns).
-
-    Returns:
-        DataFrame with [id, xRef[{id, source}]].
-    """
-    id_source_schema = ArrayType(
-        StructType([
-            StructField('id', StringType()),
-            StructField('source', StringType()),
-        ])
-    )
-
-    ps_ids = ids_df.filter(f.col('ensembl_gene_id').isNotNull()).select(
-        f.col('gene_id').alias('ps_gene_id'),
-        f.col('ensembl_gene_id'),
-        f.col('hgnc_symbol'),
-    )
-
-    # Build a proper total using stack expression
-    data_cols = [c for c in matrix_df.columns if c != 'Gene']
-    if data_cols:
-        stack_expr = f'stack({len(data_cols)}, {", ".join([f"`{c}`" for c in data_cols])}) as val'
-        total_df = (
-            matrix_df
-            .select('Gene', f.expr(stack_expr).alias('val'))
-            .groupBy('Gene')
-            .agg(f.sum('val').alias('total'))
-            .filter(f.col('total') > 0)
-        )
-
-    return total_df.join(ps_ids, total_df['Gene'] == ps_ids['hgnc_symbol']).select(
-        f.col('ensembl_gene_id').alias('id'),
-        f
-        .array(
-            f.struct(
-                f.col('ps_gene_id').alias('id'),
-                f.lit('ProjectScore').alias('source'),
-            )
-        )
-        .cast(id_source_schema)
-        .alias('xRef'),
     )
 
 
