@@ -169,6 +169,7 @@ def literature_publication_match(
             'clinvar_xrefs',
             'approved_name',
             'approved_symbol',
+            'trade_name_component',
         ]
     )
     # consumed by the isValid==True and isValid==False filters
