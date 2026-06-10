@@ -510,7 +510,6 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
@@ -1989,7 +1988,7 @@ steps:
         hf_data_dir: metrics
   ##################################################################################################
 
-#: LITERATURE_ENTITY_LUT STEP :#####################################################################
+  #: LITERATURE_ENTITY_LUT STEP :#####################################################################
   literature_entity_lut:
     - name: pyspark literature_entity_lut
       pyspark: literature_entity_lut
@@ -2003,7 +2002,7 @@ steps:
         spark.sql.shuffle.partitions: '10000'
   ##################################################################################################
 
-#: LITERATURE_EMBEDDING STEP :######################################################################
+  #: LITERATURE_EMBEDDING STEP :######################################################################
   literature_embedding:
     - name: pyspark literature_embedding
       pyspark: literature_embedding
@@ -2015,7 +2014,7 @@ steps:
         spark.sql.shuffle.partitions: '15000'
   ##################################################################################################
 
-#: LITERATURE_VECTOR STEP :#########################################################################
+  #: LITERATURE_VECTOR STEP :#########################################################################
   literature_vector:
     - name: pyspark literature_vector
       pyspark: literature_vector
