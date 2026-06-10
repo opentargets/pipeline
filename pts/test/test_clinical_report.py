@@ -1,7 +1,11 @@
 import polars as pl
 from clinical_mining.dataset import ClinicalReport
 
-from pts.pyspark.clinical_report import validate_disease
+from pts.pyspark.clinical_report import (
+    ClinicalReportFlags,
+    flag_indirect_primary_purpose,
+    validate_disease,
+)
 
 
 def _build_reports(entries) -> ClinicalReport:
@@ -61,3 +65,88 @@ def test_validate_disease_preserves_populated_diseases() -> None:
     assert diseases == [
         {'diseaseFromSource': 'teratogenicity', 'diseaseId': 'EFO:0009880'},
     ]
+
+
+def _report(id_: str, primary_purpose: str | None = None) -> dict:
+    return {
+        'id': id_,
+        'phaseFromSource': 'phase 3',
+        'type': 'CURATED_RESOURCE',
+        'source': 'ClinicalTrials',
+        'trialPrimaryPurpose': primary_purpose,
+        'drugs': [{'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}],
+        'diseases': [{'diseaseFromSource': 'hypertension', 'diseaseId': 'EFO:0000537'}],
+    }
+
+
+def _flagged(reports: ClinicalReport, report_id: str) -> bool:
+    qc = reports.df.filter(pl.col('id') == report_id).select('qualityControls').to_series().to_list()[0]
+    return qc is not None and ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE.value in qc
+
+
+def test_flag_indirect_primary_purpose_device_feasibility() -> None:
+    reports = _build_reports([
+        _report('r1', primary_purpose='TREATMENT'),
+        _report('r2', primary_purpose='DEVICE_FEASIBILITY'),
+        _report('r3', primary_purpose='DIAGNOSTIC'),
+        _report('r4', primary_purpose='OTHER'),
+    ])
+    result = flag_indirect_primary_purpose(reports)
+    assert not _flagged(result, 'r1')
+    assert _flagged(result, 'r2')
+    assert _flagged(result, 'r3')
+    assert not _flagged(result, 'r4')
+
+
+def test_flag_indirect_primary_purpose_no_primary_purpose() -> None:
+    """Reports without a trialPrimaryPurpose should not be flagged."""
+    reports = _build_reports([
+        _report('r1', primary_purpose=None),
+    ])
+    result = flag_indirect_primary_purpose(reports)
+    assert not _flagged(result, 'r1')
+
+
+def test_flag_indirect_primary_purpose_with_llm_no_match_is_flagged() -> None:
+    """When llm_batch_results is provided but report has no match, drug_intent is null → flagged."""
+    reports = _build_reports([
+        _report('r1', primary_purpose='TREATMENT'),
+    ])
+    llm_batch_results = pl.DataFrame({'id': ['r_other'], 'drug_intent': ['therapeutic']})
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
+    assert _flagged(result, 'r1')
+
+
+def test_flag_indirect_primary_purpose_with_llm_therapeutic_not_flagged() -> None:
+    """drug_intent='therapeutic' should not be flagged."""
+    reports = _build_reports([
+        _report('r1', primary_purpose='TREATMENT'),
+    ])
+    llm_batch_results = pl.DataFrame({'id': ['r1'], 'drug_intent': ['therapeutic']})
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
+    assert not _flagged(result, 'r1')
+
+
+def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> None:
+    """Non-therapeutic drug_intent values (prevention, supportive_care, etc.) should be flagged."""
+    reports = _build_reports([
+        _report('r1', primary_purpose='TREATMENT'),
+        _report('r2', primary_purpose='TREATMENT'),
+    ])
+    llm_batch_results = pl.DataFrame({
+        'id': ['r1', 'r2'],
+        'drug_intent': ['therapeutic', 'prevention'],
+    })
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
+    assert not _flagged(result, 'r1')
+    assert _flagged(result, 'r2')
+
+
+def test_flag_indirect_primary_purpose_drops_drug_intent() -> None:
+    """The drug_intent column must be dropped from the output."""
+    reports = _build_reports([
+        _report('r1', primary_purpose='TREATMENT'),
+    ])
+    llm_batch_results = pl.DataFrame({'id': ['r1'], 'drug_intent': ['therapeutic']})
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
+    assert 'drug_intent' not in result.df.columns

@@ -8,7 +8,7 @@ import pdfplumber
 import polars as pl
 import torch
 from clinical_mining.data_sources.aact import extract_clinical_report as extract_aact_clinical_report
-from clinical_mining.data_sources.aact.llm_extractor import parse_indication_batch_results
+from clinical_mining.data_sources.aact.llm_extractor import parse_batch_results
 from clinical_mining.data_sources.chembl.drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
@@ -33,6 +33,8 @@ class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
     UNVALIDATED_INDICATION = 'UNVALIDATED_INDICATION'
     INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
+    NO_DISEASE = 'NO_DISEASE'
+    NO_DRUGS = 'NO_DRUGS'
 
 
 def clinical_report(
@@ -95,7 +97,12 @@ def clinical_report(
     chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
         'warning_id', 'ref_type', 'ref_id', 'ref_url'
     )
-    llm_indications = parse_indication_batch_results(source['trial_extraction_batch_results'])
+    llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
+    llm_indications = llm_batch_results.select(
+        'id',
+        pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug').unique()).alias('drugs'),
+        pl.col('primary_indications').list.eval(pl.element().struct.field('name').unique()).alias('diseases'),
+    )
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -164,8 +171,10 @@ def clinical_report(
         )
         .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
         .pipe(create_title)
+        .pipe(flag_null_diseases)
+        .pipe(flag_null_drugs)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_indirect_primary_purpose)
+        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.select('id', 'drug_intent'))
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
@@ -419,16 +428,61 @@ def flag_unvalidated_indication(
     )
 
 
-def flag_indirect_primary_purpose(reports: ClinicalReport) -> ClinicalReport:
-    """Flag reports where the primary purpose is indirect."""
+def flag_indirect_primary_purpose(
+    reports: ClinicalReport, llm_drug_intent: pl.DataFrame | None = None
+) -> ClinicalReport:
+    """Flag reports where the primary purpose is not a therapeutic direct purpose.
+
+    Args:
+        reports: ClinicalReport to flag
+        llm_drug_intent: DataFrame with drug_intent extracted from LLM
+
+    Returns:
+        ClinicalReport with indirect primary purpose flag
+    """
+    if llm_drug_intent is not None:
+        reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
+        llm_drug_intent_condition = (
+            # Null drug_intent means the report wasn't in llm results — flag it
+            pl.col('drug_intent').is_null()
+            # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
+            | (pl.col('drug_intent') != 'therapeutic')
+        )
+    else:
+        reports_df = reports.df
+        llm_drug_intent_condition = pl.lit(False)
     return ClinicalReport(
         df=update_quality_flag(
-            df=reports.df,
+            df=reports_df,
             flag_condition=(
                 # Flag consists of reports where the primary purpose is indirect
                 pl.col('trialPrimaryPurpose').is_in(['DEVICE_FEASIBILITY', 'DIAGNOSTIC'])
+                # or the extracted drug_intent is missing or non-therapeutic
+                | llm_drug_intent_condition
             ),
             flag_text=ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE.value,
+        ).select(pl.all().exclude('drug_intent'))
+    )
+
+
+def flag_null_diseases(reports: ClinicalReport) -> ClinicalReport:
+    """Flag reports where the diseases column is null."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=pl.col('diseases').is_null(),
+            flag_text=ClinicalReportFlags.NO_DISEASE.value,
+        )
+    )
+
+
+def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
+    """Flag reports where the drugs column is null."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=pl.col('drugs').is_null(),
+            flag_text=ClinicalReportFlags.NO_DRUGS.value,
         )
     )
 
