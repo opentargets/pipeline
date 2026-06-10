@@ -37,7 +37,7 @@ explicit = true
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.0" }
-clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.6.0" }
+clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.6.3" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [dependency-groups]
