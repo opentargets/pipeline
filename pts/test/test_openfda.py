@@ -24,11 +24,16 @@ from pts.pyspark.openfda import (
 # Schemas
 # ---------------------------------------------------------------------------
 
+_SYNONYM_STRUCT = StructType([
+    StructField('label', StringType()),
+    StructField('source', StringType()),
+])
+
 CHEMBL_SCHEMA = StructType([
     StructField('id', StringType()),
     StructField('name', StringType()),
-    StructField('synonyms', ArrayType(StringType())),
-    StructField('tradeNames', ArrayType(StringType())),
+    StructField('synonyms', ArrayType(_SYNONYM_STRUCT)),
+    StructField('tradeNames', ArrayType(_SYNONYM_STRUCT)),
 ])
 
 BLACKLIST_SCHEMA = StructType([
@@ -52,7 +57,12 @@ def test_prepare_drug_list_includes_pref_name(spark):
 
 def test_prepare_drug_list_includes_synonyms(spark):
     """_prepare_drug_list includes synonyms as drug_names."""
-    data = [Row(id='CHEMBL1', name='Drug', synonyms=['SynA', 'SynB'], tradeNames=[])]
+    data = [Row(
+        id='CHEMBL1',
+        name='Drug',
+        synonyms=[Row(label='SynA', source='ChEMBL'), Row(label='SynB', source='ChEMBL')],
+        tradeNames=[],
+    )]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)
     names = {r.drug_name for r in result.collect()}
@@ -62,7 +72,7 @@ def test_prepare_drug_list_includes_synonyms(spark):
 
 def test_prepare_drug_list_includes_trade_names(spark):
     """_prepare_drug_list includes trade names as drug_names."""
-    data = [Row(id='CHEMBL1', name='Drug', synonyms=[], tradeNames=['BrandX'])]
+    data = [Row(id='CHEMBL1', name='Drug', synonyms=[], tradeNames=[Row(label='BrandX', source='ChEMBL')])]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)
     names = {r.drug_name for r in result.collect()}
@@ -80,7 +90,7 @@ def test_prepare_drug_list_output_columns(spark):
 def test_prepare_drug_list_deduplicates(spark):
     """_prepare_drug_list deduplicates (chembl_id, drug_name) pairs."""
     data = [
-        Row(id='CHEMBL1', name='Drug', synonyms=['Drug'], tradeNames=[]),
+        Row(id='CHEMBL1', name='Drug', synonyms=[Row(label='Drug', source='ChEMBL')], tradeNames=[]),
     ]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)

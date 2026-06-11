@@ -551,10 +551,10 @@ def _build_drug_index(
         entity_col=f.lit('drug'),
         category_col=f.array(f.col('drugType')),
         keywords_col=_flatten_cat(
-            'synonyms', 'tradeNames', 'array(name)', 'array(drugId)', 'crossReferences', 'nctIds'
+            'synonyms.label', 'tradeNames.label', 'array(name)', 'array(drugId)', 'crossReferences', 'nctIds'
         ),
-        prefixes_col=_flatten_cat('synonyms', 'tradeNames', 'array(name)', 'descriptions'),
-        ngrams_col=_flatten_cat('array(name)', 'synonyms', 'tradeNames', 'descriptions'),
+        prefixes_col=_flatten_cat('synonyms.label', 'tradeNames.label', 'array(name)', 'descriptions'),
+        ngrams_col=_flatten_cat('array(name)', 'synonyms.label', 'tradeNames.label', 'descriptions'),
         terms_col=_flatten_cat(
             'disease_labels', 'target_labels', 'indicationLabels', 'therapeutic_labels', 'childChemblIds'
         ),
@@ -840,8 +840,8 @@ def search(
         .withColumn(
             'drug_labels',
             _flatten_cat(
-                'synonyms',
-                'tradeNames',
+                'synonyms.label',
+                'tradeNames.label',
                 'array(name)',
                 'rows.mechanismOfAction',
             ),

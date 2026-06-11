@@ -1,7 +1,8 @@
 """ChEMBL Molecule processing.
 
 Processes raw ChEMBL molecule data into the Open Targets molecule format,
-including synonyms, cross-references, and molecule hierarchy.
+including synonyms, cross-references, and molecule hierarchy. Clinical-trial
+(AACT) synonym mining lives in :mod:`pts.pyspark.drug_utils.aact_synonyms`.
 """
 
 from typing import Any
@@ -12,6 +13,8 @@ from pyspark.sql import DataFrame
 from pyspark.sql.types import ArrayType, MapType, StringType
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.drug_utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_batch
+from pts.pyspark.drug_utils.labels import CHEMBL_SOURCE, LABEL_SOURCE_SCHEMA, as_label_source
 
 
 def chembl_molecule(
@@ -26,6 +29,9 @@ def chembl_molecule(
         source: Dictionary with paths to:
             - chembl_molecule: ChEMBL molecule JSONL
             - drugbank: Drugbank to ChEMBL ID mapping CSV
+            - aact_extraction_batch_results: (optional) OpenAI batch output for
+              clinical-trial synonym mining; when present, AACT synonyms are
+              appended to the molecules.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
         properties: Spark configuration options.
@@ -41,8 +47,12 @@ def chembl_molecule(
         sep='\t',
     )
 
+    aact_batch_df = None
+    if 'aact_extraction_batch_results' in source:
+        aact_batch_df = spark.load_data(source['aact_extraction_batch_results'], format='json')
+
     logger.info('Processing molecules')
-    output_df = process_molecules(molecule_df, drugbank_df)
+    output_df = process_molecules(molecule_df, drugbank_df, aact_batch_df)
 
     logger.info(f'Writing molecules to {destination}')
     output_df.write.parquet(destination, mode='overwrite')
@@ -51,12 +61,17 @@ def chembl_molecule(
 def process_molecules(
     molecule_raw: DataFrame,
     drugbank_lookup: DataFrame,
+    aact_batch: DataFrame | None = None,
 ) -> DataFrame:
     """Process raw ChEMBL molecule data.
 
     Args:
         molecule_raw: Raw ChEMBL molecule data.
         drugbank_lookup: Drugbank to ChEMBL ID mapping.
+        aact_batch: (optional) OpenAI batch output for clinical-trial synonym
+            mining.  When provided, AACT synonyms are appended (deduped
+            case-insensitively vs existing ChEMBL labels) before the final
+            name-coalesce so that AACT labels never become the molecule name.
 
     Returns:
         Processed molecule DataFrame.
@@ -84,12 +99,40 @@ def process_molecules(
         .join(hierarchy, on='id', how='left_outer')
     )
 
+    # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
+    # AACT labels are never selected as the molecule name.
+    if aact_batch is not None:
+        entries = parse_aact_batch(aact_batch)
+        empty_ls = f.array().cast(LABEL_SOURCE_SCHEMA)
+        empty_str_arr = f.array().cast('array<string>')
+        # mine_aact_synonyms / _build_chembl_indexes expect non-null arrays; coalesce here.
+        mol_for_index = mol_combined.select(
+            'id', 'name',
+            f.coalesce(f.col('synonyms'), empty_ls).alias('synonyms'),
+            f.coalesce(f.col('tradeNames'), empty_ls).alias('tradeNames'),
+            'parentId',
+            f.coalesce(f.col('childChemblIds'), empty_str_arr).alias('childChemblIds'),
+        )
+        aact_df = mine_aact_synonyms(mol_for_index, entries)
+        mol_combined = merge_aact_synonyms(mol_combined, aact_df)
+
+    empty_label_source = f.array().cast(LABEL_SOURCE_SCHEMA)
+
     # Final processing - ensure name is populated and deduplicate
     return (
         mol_combined
+        .withColumn('synonyms', f.coalesce(f.col('synonyms'), empty_label_source))
+        .withColumn('tradeNames', f.coalesce(f.col('tradeNames'), empty_label_source))
         .withColumn(
             'name',
-            f.coalesce(f.col('name'), f.element_at(f.col('synonyms'), 1), f.col('id')),
+            f.coalesce(
+                f.col('name'),
+                f.element_at(
+                    f.filter(f.col('synonyms'), lambda s: s['source'] == CHEMBL_SOURCE),
+                    1,
+                )['label'],
+                f.col('id'),
+            ),
         )
         .drop('drugbank_id')
         .dropDuplicates(['id'])
@@ -149,7 +192,7 @@ def _process_molecule_synonyms(preprocessed_mols: DataFrame) -> DataFrame:
         preprocessed_mols: Preprocessed molecule DataFrame.
 
     Returns:
-        DataFrame with id, tradeNames, and synonyms columns.
+        DataFrame with id, tradeNames, and synonyms columns ({label, source} structs).
     """
     synonyms = (
         preprocessed_mols
@@ -162,23 +205,26 @@ def _process_molecule_synonyms(preprocessed_mols: DataFrame) -> DataFrame:
         synonyms
         .filter(f.col('syn_type') == 'TRADE_NAME')
         .groupBy('id')
-        .agg(f.collect_set('synonym').alias('tradeNames'))
+        .agg(f.collect_set('synonym').alias('_trade'))
     )
 
     other_synonyms = (
-        synonyms.filter(f.col('syn_type') != 'TRADE_NAME').groupBy('id').agg(f.collect_set('synonym').alias('synonyms'))
+        synonyms.filter(f.col('syn_type') != 'TRADE_NAME').groupBy('id').agg(f.collect_set('synonym').alias('_syn'))
     )
 
     full = trade_names.join(other_synonyms, on='id', how='full_outer')
 
-    # Ensure arrays are not null and are sorted
     return full.withColumn(
         'synonyms',
-        f.coalesce(f.array_sort(f.col('synonyms')), f.array()),
+        f.array_sort(
+            f.transform(f.coalesce(f.col('_syn'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
+        ).cast(LABEL_SOURCE_SCHEMA),
     ).withColumn(
         'tradeNames',
-        f.coalesce(f.array_sort(f.col('tradeNames')), f.array()),
-    )
+        f.array_sort(
+            f.transform(f.coalesce(f.col('_trade'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
+        ).cast(LABEL_SOURCE_SCHEMA),
+    ).drop('_syn', '_trade')
 
 
 def _process_molecule_hierarchy(preprocessed_mols: DataFrame) -> DataFrame:

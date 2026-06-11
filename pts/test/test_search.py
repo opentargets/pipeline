@@ -485,13 +485,18 @@ _NCT_BY_DRUG_SCHEMA = StructType([
     StructField('nctIds', ArrayType(StringType())),
 ])
 
+_LABEL_SOURCE_STRUCT = StructType([
+    StructField('label', StringType()),
+    StructField('source', StringType()),
+])
+
 _DRUG_SCHEMA = StructType([
     StructField('drugId', StringType()),
     StructField('name', StringType()),
     StructField('description', StringType()),
     StructField('drugType', StringType()),
-    StructField('synonyms', ArrayType(StringType())),
-    StructField('tradeNames', ArrayType(StringType())),
+    StructField('synonyms', ArrayType(_LABEL_SOURCE_STRUCT)),
+    StructField('tradeNames', ArrayType(_LABEL_SOURCE_STRUCT)),
     StructField('childChemblIds', ArrayType(StringType())),
     StructField(
         'crossReferences',
@@ -542,8 +547,8 @@ def test_build_drug_index_output_schema(spark):
                 name='Aspirin',
                 description='Pain reliever',
                 drugType='Small molecule',
-                synonyms=['ASA'],
-                tradeNames=['Bayer'],
+                synonyms=[Row(label='ASA', source='ChEMBL')],
+                tradeNames=[Row(label='Bayer', source='ChEMBL')],
                 childChemblIds=[],
                 crossReferences=[Row(ids=['CID12345'])],
                 rows=[Row(mechanismOfAction='COX inhibitor')],
@@ -681,6 +686,19 @@ _NCT_BY_DISEASE_SCHEMA = StructType([
     StructField('diseaseId', StringType()),
     StructField('nctIds', ArrayType(StringType())),
 ])
+
+
+_LS_SCHEMA = StructType([
+    StructField('synonyms', ArrayType(_LABEL_SOURCE_STRUCT)),
+])
+
+
+def test_flatten_cat_extracts_struct_labels(spark):
+    """_flatten_cat over struct arrays via '.label' yields the labels."""
+    data = [Row(synonyms=[Row(label='ASA', source='ChEMBL'), Row(label='G-CSF', source='AACT')])]
+    df = spark.createDataFrame(data, _LS_SCHEMA)
+    df = df.withColumn('result', _flatten_cat('synonyms.label'))
+    assert set(df.collect()[0].result) == {'ASA', 'G-CSF'}
 
 
 def test_build_nct_map_drops_rows_without_nct_ids(spark):

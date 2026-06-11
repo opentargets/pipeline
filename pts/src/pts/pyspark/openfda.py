@@ -200,9 +200,9 @@ def _prepare_drug_list(chembl_df: DataFrame) -> DataFrame:
         chembl_df
         .selectExpr(
             'id as chembl_id',
-            'synonyms',
+            'synonyms.label as synonyms',
             'name as pref_name',
-            'tradeNames as trade_names',
+            'tradeNames.label as trade_names',
         )
         .withColumn(
             'drug_names',

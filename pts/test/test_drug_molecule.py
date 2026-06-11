@@ -52,8 +52,14 @@ MOLECULE_SCHEMA = StructType([
     StructField('inchiKey', StringType()),
     StructField('molblock', StringType()),
     StructField('parentId', StringType()),
-    StructField('tradeNames', ArrayType(StringType())),
-    StructField('synonyms', ArrayType(StringType())),
+    StructField('tradeNames', ArrayType(StructType([
+        StructField('label', StringType()),
+        StructField('source', StringType()),
+    ]))),
+    StructField('synonyms', ArrayType(StructType([
+        StructField('label', StringType()),
+        StructField('source', StringType()),
+    ]))),
     StructField(
         'crossReferences',
         ArrayType(
@@ -164,8 +170,8 @@ def molecule_df(spark):
             inchiKey='INCHI1',
             molblock='MOLBLOCK_CHEMBL1',
             parentId='CHEMBL1',
-            tradeNames=['TradeA'],
-            synonyms=['SynA'],
+            tradeNames=[Row(label='TradeA', source='ChEMBL')],
+            synonyms=[Row(label='SynA', source='ChEMBL')],
             crossReferences=[Row(source='drugbank', ids=['DB001'])],
             childChemblIds=[],
             description=None,

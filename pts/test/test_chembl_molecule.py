@@ -193,3 +193,88 @@ class TestProcessMolecules:
         """Adding molblock does not change the row count."""
         result = process_molecules(raw_molecule_df, raw_drugbank_df)
         assert result.count() == raw_molecule_df.count()
+
+
+class TestSynonymStructs:
+    def test_synonyms_are_label_source_structs(self, spark, raw_drugbank_df):
+        """ChEMBL synonyms become {label, source:'ChEMBL'} structs, sorted."""
+        data = [
+            Row(
+                molecule_chembl_id='CHEMBL10',
+                molecule_structures=Row(canonical_smiles=None, standard_inchi_key=None, molfile=None),
+                molecule_type='Small molecule',
+                pref_name='Aspirin',
+                cross_references=[],
+                molecule_hierarchy=Row(parent_chembl_id='CHEMBL10'),
+                molecule_synonyms=[
+                    Row(molecule_synonym='ASA', syn_type='OTHER'),
+                    Row(molecule_synonym='Bayer', syn_type='TRADE_NAME'),
+                ],
+            ),
+        ]
+        df = spark.createDataFrame(data, schema=RAW_MOLECULE_SCHEMA)
+        row = {r['id']: r for r in process_molecules(df, raw_drugbank_df).collect()}['CHEMBL10']
+        assert [(s['label'], s['source']) for s in row['synonyms']] == [('ASA', 'ChEMBL')]
+        assert [(t['label'], t['source']) for t in row['tradeNames']] == [('Bayer', 'ChEMBL')]
+
+    def test_empty_synonyms_are_empty_struct_array(self, raw_molecule_df, raw_drugbank_df):
+        """Molecules with no synonyms get an empty (not null) struct array."""
+        row = {r['id']: r for r in process_molecules(raw_molecule_df, raw_drugbank_df).collect()}['CHEMBL1']
+        assert row['synonyms'] == []
+        assert row['tradeNames'] == []
+
+    def test_synonyms_schema_is_struct(self, raw_molecule_df, raw_drugbank_df):
+        """synonyms column type is array<struct<label,source>>."""
+        result = process_molecules(raw_molecule_df, raw_drugbank_df)
+        field = result.schema['synonyms'].dataType
+        assert isinstance(field, ArrayType)
+        assert {sub.name for sub in field.elementType.fields} == {'label', 'source'}
+
+
+class TestMergeAndTwoSource:
+    def test_two_source_molecule(self, spark, raw_drugbank_df):
+        import json
+
+        mol = [Row(
+            molecule_chembl_id='CHEMBL1',
+            molecule_structures=Row(canonical_smiles=None, standard_inchi_key=None, molfile=None),
+            molecule_type='Protein', pref_name='Filgrastim', cross_references=[],
+            molecule_hierarchy=Row(parent_chembl_id='CHEMBL1'),
+            molecule_synonyms=[Row(molecule_synonym='Neupogen', syn_type='TRADE_NAME')],
+        )]
+        mol_df = spark.createDataFrame(mol, schema=RAW_MOLECULE_SCHEMA)
+
+        outer_schema = StructType([
+            StructField('custom_id', StringType()),
+            StructField('response', StructType([StructField('body', StructType([
+                StructField('output', ArrayType(StructType([
+                    StructField('type', StringType()),
+                    StructField('content', ArrayType(StructType([StructField('text', StringType())]))),
+                ]))),
+            ]))])),
+        ])
+        payload = json.dumps({
+            'investigated_drugs': [{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
+            'comparator_drugs': [], 'supportive_drugs': [],
+        })
+        content = [Row(text=payload)]
+        output = [Row(type='message', content=content)]
+        batch = spark.createDataFrame(
+            [
+                Row(custom_id='NCT1', response=Row(body=Row(output=output))),
+                Row(custom_id='NCT2', response=Row(body=Row(output=output))),
+            ],
+            outer_schema,
+        )
+
+        row = {r['id']: r for r in process_molecules(mol_df, raw_drugbank_df, batch).collect()}['CHEMBL1']
+        sources = {s['source'] for s in row['synonyms']}
+        labels = {s['label'] for s in row['synonyms']}
+        assert 'AACT' in sources
+        assert 'g-csf' in labels
+        assert row['name'] == 'Filgrastim'  # AACT label never becomes name
+
+    def test_existing_two_arg_call_still_works(self, raw_molecule_df, raw_drugbank_df):
+        """process_molecules without a batch arg behaves as before (no AACT)."""
+        result = process_molecules(raw_molecule_df, raw_drugbank_df)
+        assert result.count() == raw_molecule_df.count()
