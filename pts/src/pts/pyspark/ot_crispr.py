@@ -419,7 +419,7 @@ def ot_crispr(
     spark = Session(app_name='ot_crispr', properties=properties)
 
     logger.info(f'loading data from: {source}')
-    study_table_df = spark.load_data(source['study_table'], format='csv', header=True, inferSchema=True, sep='\t')
+    study_table_df = spark.load_data(source['study_table'], format='csv', header=True, inferSchema=True, sep=',')
 
     logger.info('parse study study table')
     parsed_studies_df = StudyParser(study_table=study_table_df).process_studies()
