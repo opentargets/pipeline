@@ -1,0 +1,27 @@
+{
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.tabSize": 4,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    },
+  },
+  "ruff.nativeServer": true,
+  "ruff.lint.enable": true,
+  "ruff.organizeImports": true,
+  "python.languageServer": "None",
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "*.egg-info": true,
+    "build": true,
+  },
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
+      "config.yaml"
+    ]
+  },
+  "yaml.format.singleQuote": true,
+}
