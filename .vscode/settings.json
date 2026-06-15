@@ -20,8 +20,22 @@
   },
   "yaml.schemas": {
     "https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
-      "pis/config.yaml"
+      "pis/config.yaml",
+      "pts/config.yaml"
     ]
   },
   "yaml.format.singleQuote": true,
+  "files.associations": {
+    "*.conf": "hocon"
+  },
+  "cSpell.words": [
+    "colocalisation",
+    "cpus",
+    "GCST",
+    "harmonisation",
+    "harmonise",
+    "harmonised",
+    "sumstat",
+    "sumstats"
+  ]
 }
