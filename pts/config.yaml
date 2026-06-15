@@ -1,9 +1,9 @@
 ---
-work_path: ../pipeline_work
+work_path: ../work
 log_level: DEBUG
 pool_size: 4
 
-scratchpad: {}
+scratchpad:
 
 steps:
   #: DISEASE STEP :#################################################################################

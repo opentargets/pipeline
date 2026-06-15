@@ -1,9 +1,9 @@
 """Evidence parser for Orphanet's gene-disease associations."""
 
+import xml.etree.ElementTree as ET
 from itertools import chain
 from typing import Any
 
-import defusedxml.ElementTree as eT
 from loguru import logger
 from pyspark.sql import DataFrame, Row
 from pyspark.sql.functions import array_distinct, col, create_map, lit, split
@@ -59,12 +59,12 @@ def orphanet(
 
 def parse_orphanet_xml(xml_string: str) -> list[dict]:
     """Function to parse Orphanet xml dump and return the parsed data as a list of dictionaries."""
-    # defusedxml.ElementTree.parse() returns the root element directly, not an ElementTree object
-    root = eT.fromstring(xml_string)
-
-    # Type checking to ensure we have the correct element
-    if not hasattr(root, 'find'):
-        raise ValueError('Failed to parse XML file - invalid root element')
+    # Insecure parsing is fine, we trust Orphanet and the worst that can happen
+    # is we freeze a machine in GCP.
+    try:
+        root: ET.Element[str] = ET.fromstring(xml_string)  # noqa: S314
+    except ET.ParseError as e:
+        raise ValueError('failed to parse xml file') from e
 
     # Checking if the basic nodes are in the xml structure:
     logger.info(f'There are {root.find("DisorderList").get("count")} disease in the Orphanet xml file.')
