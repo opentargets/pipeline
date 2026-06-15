@@ -1,0 +1,24 @@
+---
+dataproc:
+  cluster_name: gnomad-preprocess
+  cluster_config:
+    project_id: open-targets-genetics-dev
+    autoscaling_policy: otg-etl
+    metadata:
+      GENTROPY_REF: v3.2.0-rc.2
+    init_actions_uris:
+      - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
+
+nodes:
+  - id: ld_index
+    kind: Task
+    prerequisites: []
+    params:
+      step: ld_index
+      step.ld_index_out: gs://gnomad_data_2/ld_index/v2.1.1
+  - id: gnomad_variants
+    kind: Task
+    prerequisites: [ld_index]
+    params:
+      step: gnomad_variants
+      step.variant_annotation_path: gs://gnomad_data_2/v4.1/variant_index

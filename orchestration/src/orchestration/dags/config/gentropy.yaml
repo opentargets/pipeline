@@ -1,0 +1,307 @@
+---
+steps:
+  biosample:
+    params:
+      step: biosample_index
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # INPUTS
+      step.cell_ontology_input_path: '{{release_uri}}/input/biosample/cl.json'
+      step.uberon_input_path: '{{release_uri}}/input/biosample/uberon.json'
+      step.efo_input_path: '{{release_uri}}/input/biosample/efo.json'
+      # OUTPUTS
+      step.biosample_index_path: '{{release_uri}}/output/biosample'
+
+  study:
+    params:
+      step: study_validation
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      step.invalid_qc_reasons:
+        - UNRESOLVED_TARGET
+        - UNRESOLVED_DISEASE
+        - UNKNOWN_STUDY_TYPE
+        - DUPLICATED_STUDY
+        - UNKNOWN_BIOSAMPLE
+        - FAILED_MEAN_BETA_CHECK
+        - FAILED_PZ_CHECK
+        - FAILED_GC_LAMBDA_CHECK
+        - NO_OT_CURATION
+        - CASE_CASE_STUDY_DESIGN
+      # INPUTS
+      step.study_index_path:
+        # GWAS
+        - '{{release_uri}}/input/gwas/study/gcca'
+        - '{{release_uri}}/input/gwas/study/gcss_pics'
+        - '{{release_uri}}/input/gwas/study/gcss_susie'
+        - '{{release_uri}}/input/gwas/study/finngen'
+        # molQTL
+        - '{{release_uri}}/input/molqtl/study/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
+      step.target_index_path: '{{release_uri}}/output/target'
+      step.disease_index_path: '{{release_uri}}/output/disease'
+      step.biosample_index_path: '{{release_uri}}/output/biosample'
+      step.heritability_input_path: '{{release_uri}}/input/heritability_estimate'
+      # OUTPUTS
+      step.valid_study_index_path: '{{release_uri}}/output/study'
+      step.invalid_study_index_path: '{{release_uri}}/excluded/study'
+
+  credible_set:
+    params:
+      step: credible_set_validation
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 200 # 200 Needed for parallelization of predictions
+      step.invalid_qc_reasons:
+        - DUPLICATED_STUDYLOCUS_ID
+        - AMBIGUOUS_STUDY
+        - MISSING_STUDY
+        - NO_GENOMIC_LOCATION_FLAG
+        - COMPOSITE_FLAG
+        - INCONSISTENCY_FLAG
+        - SUBSIGNIFICANT_FLAG
+        - LD_CLUMPED
+        - IN_MHC
+        - REDUNDANT_PICS_TOP_HIT
+        - EXPLAINED_BY_SUSIE
+        - WINDOW_CLUMPED
+        - NON_MAPPED_VARIANT_FLAG
+        - INVALID_VARIANT_IDENTIFIER
+        - INVALID_CHROMOSOME
+        - TOP_HIT_AND_SUMMARY_STATS
+      step.trans_qtl_threshold: 5_000_000
+      # INPUTS
+      step.study_locus_path:
+        # GWAS
+        - '{{release_uri}}/input/gwas/credible_set/gcca'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_pics'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_susie'
+        - '{{release_uri}}/input/gwas/credible_set/finngen'
+        # molQTL
+        - '{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
+      step.study_index_path: '{{release_uri}}/output/study'
+      step.target_index_path: '{{release_uri}}/output/target'
+      # OUTPUTS
+      step.valid_study_locus_path: '{{release_uri}}/output/credible_set'
+      step.invalid_study_locus_path: '{{release_uri}}/excluded/credible_set'
+
+  colocalisation:
+    params:
+      step: colocalisation
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 200
+      step.colocalisation_method: coloc_pip_ecaviar
+      +step.session.extended_spark_conf: >-
+        {spark.executor.memory: '22g', spark.executor.memoryOverhead: '4g', spark.executor.cores: '4', spark.memory.fraction: '0.8', spark.memory.storageFraction: '0.2'}
+      # INPUTS
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      # OUTPUTS
+      step.coloc_path: '{{release_uri}}/output/colocalisation'
+
+  variant_partition:
+    params:
+      step: variant_to_vcf
+      step.partition_size: 2_000 # approximate num of variants per partition!
+      step.session.write_mode: overwrite
+      # INPUTS
+      step.source_paths:
+        - '{{release_uri}}/input/evidence/uniprot_variants.json.gz'
+        - '{{release_uri}}/input/evidence/eva.json.gz'
+        - '{{release_uri}}/output/pharmacogenomics'
+        - '{{release_uri}}/output/credible_set'
+      step.source_formats:
+        - json
+        - json
+        - parquet
+        - parquet
+      # OUTPUTS
+      step.output_path: '{{release_uri}}/intermediate/variant_partition'
+
+  variant_annotation:
+    cluster: false
+    google_batch_index_specs:
+      pointer: "vep" # pointer to the vep manifest generator implementation.
+      max_task_count: 500 # Max number of tasks running in a single google batch job.
+      generator_specs:
+        generator_options:
+          # INPUTS
+          # Based on vcf_input_path, the job environment variables $INPUT_FILE and $OUTPUT_FILE are discovered.
+          vcf_input_path: &vep_input_uri '{{release_uri}}/intermediate/variant_partition/'
+          vep_cache_path: &vep_cache_uri 'gs://vep_cache_data/vep/cache'
+          # OUTPUTS
+          vep_output_path: &vep_output_uri '{{release_uri}}/intermediate/variant_annotation/'
+    google_batch:
+      job:
+        task_group:
+          parallelism: 500 # Max number of VEP tasks run at a time in parallel on all machines.
+          task_count_per_node: 2 # Number of tasks running at the same time on a single machine.
+          task_environments:
+            # Populated at runtime by BatchIndexOperator with dictionaries
+            # containing $INPUT_FILE and $OUTPUT_FILE
+            environments: []
+          task_config:
+            max_retry_count: 2
+            max_run_duration: '2h'
+            instance_resource_spec:
+              cpu_milli: 2000
+              memory_mib: 2000
+              boot_disk_mib: 10000
+            runnable_spec:
+              image_uri: 'europe-west1-docker.pkg.dev/open-targets-eu-dev/vep/custom_ensembl_vep:{{vep_version}}'
+              entrypoint: /bin/bash
+              script_file: annotate_variants.sh # In src.orchestration.assets
+              script_variables: # variables templated into the script before execution.
+                cache_dir: &vep_cache_mount '/mnt/disks/share/cache/'
+                input_dir: &vep_input_mount '/mnt/disks/share/input/'
+                output_dir: &vep_output_mount '/mnt/disks/share/output/'
+            shared_volumes:
+              mounting_points:
+                - remote_uri: *vep_input_uri
+                  mount_point: *vep_input_mount
+                - remote_uri: *vep_output_uri
+                  mount_point: *vep_output_mount
+                - remote_uri: *vep_cache_uri
+                  mount_point: *vep_cache_mount
+        allocation:
+          instance:
+            machine_type: n1-standard-4
+            provisioning_model: STANDARD # Other options: SPOT (but careful with max_retry_count)
+        logs: {}
+
+  variant:
+    params:
+      step: variant_index
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 25
+      # INPUTS
+      step.vep_output_json_path: '{{release_uri}}/intermediate/variant_annotation'
+      step.variant_annotations_path:
+        - gs://gnomad_data_2/v4.1/variant_index
+      step.amino_acid_change_annotations:
+        - gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation
+      # OUTPUTS
+      step.variant_index_path: '{{release_uri}}/output/variant'
+
+  l2g_feature_matrix:
+    params:
+      step: locus_to_gene_feature_matrix
+      step.session.write_mode: overwrite
+      +step.session.extended_spark_conf: "{spark.sql.autoBroadcastJoinThreshold:'-1'}"
+      # INPUTS
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.variant_index_path: '{{release_uri}}/output/variant'
+      step.colocalisation_path: '{{release_uri}}/output/colocalisation'
+      step.study_index_path: '{{release_uri}}/output/study'
+      step.target_index_path: '{{release_uri}}/output/target'
+      step.intervals_path: '{{release_uri}}/output/enhancer_to_gene'
+      # OUTPUTS
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+
+  l2g_training:
+    params:
+      step: locus_to_gene
+      step.session.write_mode: overwrite
+      step.run_mode: train
+      step.wandb_run_name: '{{l2g_training_version}}'
+      step.cross_validate: false
+      step.train_on_full_dataset: true
+      step.hf_hub_repo_id: opentargets/locus_to_gene_{{l2g_training_version}}
+      step.hf_model_commit_message: 'chore: update model base model for {{l2g_training_version}} run'
+      +step.session.extended_spark_conf: >-
+        {spark.kryoserializer.buffer.max:500m, spark.sql.autoBroadcastJoinThreshold:'-1'}
+      # INPUTS
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+      step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
+      # OUTPUTS
+      step.model_path: '{{release_uri}}/etc/model/locus_to_gene_model/classifier.skops'
+      step.hf_credentials_path: "/var/run/secrets/hfhub-key"
+      step.wandb_credentials_path: "/var/run/secrets/wandb-key"
+
+  l2g_prediction:
+    cluster: false
+    google_batch_index_specs:
+      pointer: "gentropy_step"
+      max_task_count: 1000 # Number of tasks running in a single google batch job.
+      generator_specs:
+        generator_options:
+          # Job partitioning depends on the number of credible_set parquet files found in the input glob.
+          input_glob: '{{release_uri}}/output/credible_set/**.parquet'
+          # With output_partitions = 1, each input is mapped to 1 output.
+          output_prefix: '{{release_uri}}/intermediate/l2g_prediction'
+    google_batch:
+      job:
+        task_group:
+          parallelism: 200
+          task_environments:
+            # Populated at runtime by BatchIndexOperator with dictionaries
+            # containing $INPUT_PARTITION and $OUTPUT_PARTITION
+            environments: []
+          task_config:
+            shared_environment:
+              secrets:
+                mapping:
+                  HF_TOKEN:
+                    secret_id: hfhub-key
+            max_retry_count: 2
+            max_run_duration: "1h"
+            instance_resource_spec:
+              cpu_milli: 2000
+              memory_mib: 7000
+              boot_disk_mib: 4000
+            runnable_spec:
+              image_uri: 'ghcr.io/opentargets/gentropy:{{gentropy_version}}'
+              entrypoint: /usr/bin/bash
+              script_file: l2g_predict.sh
+              script_variables:
+                l2g_training_version: '{{l2g_training_version}}'
+                feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+        allocation:
+          instance:
+            machine_type: n1-standard-2
+            provisioning_model: STANDARD
+        logs: {}
+      collect:
+        source_prefix: '{{release_uri}}/intermediate/l2g_prediction'
+        destination_prefix: '{{release_uri}}/output/l2g_prediction'
+        file_glob: '**.parquet'
+
+  l2g_evidence:
+    params:
+      step: locus_to_gene_evidence
+      step.session.write_mode: overwrite
+      step.locus_to_gene_threshold: 0.05
+      # INPUTS
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.locus_to_gene_predictions_path: '{{release_uri}}/output/l2g_prediction/*'
+      step.study_index_path: '{{release_uri}}/output/study'
+      # OUTPUTS
+      step.evidence_output_path: '{{release_uri}}/intermediate/evidence/l2g_evidence'
+
+  enhancer_to_gene:
+    params:
+      step: interval_e2g
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 30
+      step.min_valid_score: 0.6
+      step.max_valid_score: 1.0
+      step.invalid_qc_reasons:
+        - UNRESOLVED_TARGET
+        - UNKNOWN_BIOSAMPLE
+        - SCORE_OUTSIDE_BOUNDS
+        - UNKNOWN_INTERVAL_TYPE
+        - AMBIGUOUS_SCORE
+        - UNKNOWN_PROJECT_ID
+        - INVALID_CHROMOSOME
+        - INVALID_RANGE
+        - AMBIGUOUS_INTERVAL_TYPE
+
+      # INPUTS
+      step.target_index_path: '{{release_uri}}/output/target'
+      step.biosample_index_path: '{{release_uri}}/output/biosample'
+      step.biosample_mapping_path: '{{release_uri}}/input/encode/rE2G/biosample_mapping.csv'
+      step.chromosome_contig_index_path: '{{release_uri}}/input/chromosome/chromosome.parquet'
+      step.interval_source: '{{release_uri}}/input/encode/rE2G/datasets/*.bed.gz'
+      # OUTPUTS
+      step.valid_output_path: '{{release_uri}}/output/enhancer_to_gene'
+      step.invalid_output_path: '{{release_uri}}/excluded/enhancer_to_gene'

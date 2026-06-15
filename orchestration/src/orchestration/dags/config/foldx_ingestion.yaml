@@ -1,0 +1,19 @@
+---
+dataproc:
+  cluster_name: foldx-ingestion
+  cluster_config:
+    project_id: open-targets-genetics-dev
+    metadata:
+      GENTROPY_REF: v2.3.0-rc.5
+    init_actions_uris:
+      - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
+    autoscaling_policy: otg-etl
+nodes:
+  - id: foldx_variant_annotation_ingestion
+    kind: Task
+    prerequisites: []
+    params:
+      step: foldx_integration
+      step.foldx_dataset_path: gs://otar013-ppp/OTAR2081_foldx/foldx_export.parquet
+      step.plddt_threshold: 0.7
+      step.annotation_path: gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation

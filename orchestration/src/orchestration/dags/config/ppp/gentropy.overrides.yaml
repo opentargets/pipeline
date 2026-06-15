@@ -1,0 +1,69 @@
+---
+# PPP overrides
+
+# This file overrides the unified pipeline configuration for the gentropy.yaml step configuration for
+# the PPP run
+steps:
+  study:
+    params:
+      step.study_index_path:
+        # GWAS
+        - '{{release_uri}}/input/gwas/study/gcca'
+        - '{{release_uri}}/input/gwas/study/gcss_pics'
+        - '{{release_uri}}/input/gwas/study/gcss_susie'
+        - '{{release_uri}}/input/gwas/study/finngen'
+        # molQTL
+        - '{{release_uri}}/input/molqtl/study/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
+        # GWAS_PPP
+        - '{{release_uri}}/input/gwas/study/finngen_ukb_mvp'
+        # molQTL PPP
+        - '{{release_uri}}/input/molqtl/study/otar2077/microglia'
+        - '{{release_uri}}/input/molqtl/study/otar2077/MAGE_OTAR'
+        - '{{release_uri}}/input/molqtl/study/otar2077/IBDverse'
+        - '{{release_uri}}/input/molqtl/study/eQTLGen/single_cell_eqtl'
+        - '{{release_uri}}/input/molqtl/study/eQTLGen/coeqtl'
+        - '{{release_uri}}/input/molqtl/study/GTEx_v10'
+      step.invalid_qc_reasons:
+        - UNRESOLVED_TARGET
+        - UNRESOLVED_DISEASE
+        - UNKNOWN_STUDY_TYPE
+        - DUPLICATED_STUDY
+        - UNKNOWN_BIOSAMPLE
+        - FAILED_MEAN_BETA_CHECK
+        - FAILED_PZ_CHECK
+        - FAILED_GC_LAMBDA_CHECK
+        - NO_OT_CURATION
+        - CASE_CASE_STUDY_DESIGN
+        # PPP
+        - DEPRECATED_PROJECT
+      step.deprecated_project_ids:
+        - GTEx # GTEx v8 studies from eqtl Catalogue are swapped with newly ingested GTEX-v10
+
+  credible_set:
+    params:
+      step.study_locus_path:
+        # GWAS
+        - '{{release_uri}}/input/gwas/credible_set/gcca'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_pics'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_susie'
+        - '{{release_uri}}/input/gwas/credible_set/finngen'
+        # molQTL
+        - '{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
+        # GWAS_PPP
+        - '{{release_uri}}/input/gwas/credible_set/finngen_ukb_mvp'
+        # molQTL PPP
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/microglia'
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/MAGE_OTAR'
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/IBDverse'
+        - '{{release_uri}}/input/molqtl/credible_set/eQTLGen/single_cell_eqtl'
+        - '{{release_uri}}/input/molqtl/credible_set/eQTLGen/coeqtl'
+        - '{{release_uri}}/input/molqtl/credible_set/GTEx_v10'
+
+  variant:
+    params:
+      step.variant_annotations_path:
+        - gs://gnomad_data_2/v4.1/variant_index
+        # PPP
+        - gs://otar013-ppp/OTAR2075_lof_curation/lof_curation_variant_annotations
