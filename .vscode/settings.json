@@ -18,6 +18,14 @@
     "*.egg-info": true,
     "build": true,
   },
+  "json.schemas": [
+    {
+      "fileMatch": [
+        "*.jsonld",
+      ],
+      "url": "https://json.schemastore.org/jsonld.json"
+    }
+  ],
   "yaml.schemas": {
     "https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
       "pis/config.yaml",

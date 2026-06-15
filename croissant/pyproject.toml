@@ -1,15 +1,22 @@
 [project]
-name = "ot-croissant"
-version = "26.03.0"
-description = "Open Targets Croissant exporter"
+name = "croissant"
+version = "26.6.0"
+description = "Open Targets Pipeline Croissant exporter"
+authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
+
 dependencies = [
-    "loguru>=0.7.3",
-    "mlcroissant>=1.0.17",
-    "pydantic>=2.0",
-    "pyspark==3.5.7",
+  "loguru>=0.7.3",
+  "mlcroissant>=1.0.17",
+  "pydantic>=2.0",
+  "pyspark>=3.5.7",
 ]
+
+[dependency-groups]
+dev = ["deptry>=0.25.1", "ruff>=0.15.17", "ty>=0.0.49"]
+test = ["coverage>=7.14.1", "pytest>=9.0.3"]
+
 
 [build-system]
 requires = ["hatchling"]
@@ -21,16 +28,6 @@ packages = ["src/ot_croissant"]
 [project.scripts]
 ot_croissant = "app:main"
 
-[dependency-groups]
-dev = [
-    "ipykernel>=6.29.5",
-    "ipython>=8.32.0",
-    "mypy>=1.15.0",
-    "pylance>=0.26.0",
-    "pylint>=4.0.3",
-    "pytest>=9.0.3",
-    "ruff>=0.9.3",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
