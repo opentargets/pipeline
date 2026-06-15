@@ -1,0 +1,29 @@
+# various python files
+__pycache__/
+dist/
+build/
+coverage.xml
+htmlcov
+*.egg-info/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.venv/
+.cache
+.coverage
+
+# pycharm files
+.idea
+.DS_Store
+
+# terraform
+.terraform
+terraform.tfstate*
+plan.out
+
+# output working directory
+work
+
+# airflow logs
+logs
