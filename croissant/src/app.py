@@ -1,0 +1,150 @@
+"""CLI for the OT-Croissant metadata exporter."""
+
+import argparse
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from loguru import logger
+
+from ot_croissant.crumbs.metadata import PlatformOutputMetadata
+
+# Remove default handler
+logger.remove()
+
+# Add a new handler with INFO as minimum level
+logger.add(sys.stderr, level='INFO')
+
+
+def list_folders_in_directory(user_path: str) -> list[str]:
+    """Generate a list of folders within the given directory with absolute paths.
+
+    Args:
+        user_path (str): The absolute or relative path provided by the user.
+
+    Returns:
+        list[str]: A list of absolute paths to the folders in the directory.
+    """
+    # Resolve the user-provided path to an absolute path
+    directory = Path(user_path).expanduser().resolve()
+
+    # Check if the path exists and is a directory
+    if not directory.is_dir():
+        raise ValueError(f"The provided path '{user_path}' is not a valid directory.")
+
+    # List all folders in the directory and return their absolute paths
+    return [str(folder.resolve()) for folder in directory.iterdir() if folder.is_dir()]
+
+
+parser = argparse.ArgumentParser()
+# Output file path
+parser.add_argument(
+    '--output',
+    type=str,
+    help='Output file path',
+    required=True,
+)
+# FTP location
+parser.add_argument(
+    '--ftp_location',
+    type=str,
+    help='FTP location',
+    required=False,
+)
+parser.add_argument(
+    '--gcp_location',
+    type=str,
+    help='GCP location',
+    required=True,
+)
+parser.add_argument(
+    '--aws_location',
+    type=str,
+    help='AWS location',
+    required=False,
+)
+# List of datasets to include
+parser.add_argument(
+    '-d',
+    '--dataset',
+    action='append',
+    type=str,
+    help='Dataset to include',
+    required=False,
+)
+# Folder with the datasets:
+parser.add_argument(
+    '--dataset_folder',
+    type=str,
+    help='Folder with the datasets',
+    required=False,
+)
+# Data release version
+parser.add_argument(
+    '--version',
+    type=str,
+    help='Data release version',
+    required=True,
+)
+
+parser.add_argument(
+    '--date_published',
+    type=str,
+    help='Data release date in ISO 8601 format (https://en.wikipedia.org/wiki/ISO_8601)',
+    required=True,
+)
+
+parser.add_argument(
+    '--data_integrity_hash',
+    type=str,
+    help='Data integrity hash using sha256',
+    required=True,
+)
+
+parser.add_argument(
+    '--instance',
+    type=str,
+    help='Defining the platform instance',
+    required=False,
+)
+
+
+def datetime_serializer(obj):
+    """Serialize datetime objects to ISO 8601 strings for JSON output."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f'Type {type(obj)} not serializable')
+
+
+def main():
+    """CLI for mlcroissant."""
+    args = parser.parse_args()
+
+    if args.dataset is None and args.dataset_folder is None:
+        raise ValueError('At least one dataset of a folder with datasts must be provided.')
+
+    if args.dataset_folder is None:
+        datasets = args.dataset
+    else:
+        datasets = list_folders_in_directory(args.dataset_folder)
+
+    metadata = PlatformOutputMetadata(
+        ftp_location=args.ftp_location,
+        datasets=datasets,
+        version=args.version,
+        date_published=datetime.fromisoformat(args.date_published),
+        gcp_location=args.gcp_location,
+        aws_location=args.aws_location,
+        data_integrity_hash=args.data_integrity_hash,
+        instance=args.instance,
+    )
+    with open(args.output, 'w', encoding='utf-8') as f:
+        content = metadata.to_json()
+        content = json.dumps(content, indent=2, default=datetime_serializer)
+        f.write(content)
+        f.write('\n')
+
+
+if __name__ == '__main__':
+    main()
