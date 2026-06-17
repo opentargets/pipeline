@@ -12,6 +12,7 @@ from orchestration.operators.batch.manifest_generators import (
     HarmonisationManifestGenerator,
     VepManifestGenerator,
 )
+from orchestration.operators.batch.manifest_generators.heritability_estimate import HeritabilityManifestGenerator
 from orchestration.operators.batch.manifest_generators.proto import ProtoManifestGenerator
 
 MANIFEST_GENERATOR_MAP = {
@@ -19,6 +20,7 @@ MANIFEST_GENERATOR_MAP = {
     'gentropy_step': GentropyStepManifestGenerator,
     'finemapping': FinemappingManifestGenerator,
     'harmonisation': HarmonisationManifestGenerator,
+    'heritability_estimate': HeritabilityManifestGenerator,
 }
 
 
