@@ -218,8 +218,8 @@ class HarmonisationManifestGenerator(ProtoManifestGenerator):
         logger.info('Shape of merged sumstat %s', merged_df2.shape)
 
         # Backfill
-        merged_df2['isHarmonised'] = merged_df2['isHarmonised'].fillna(False)
-        merged_df2['qcPerformed'] = merged_df['isHarmonised'].fillna(False)
+        merged_df2['isHarmonised'] = merged_df2['isHarmonised'].fillna(False).astype(bool)
+        merged_df2['qcPerformed'] = merged_df['isHarmonised'].fillna(False).astype(bool)
 
         expr = lambda x: self._output_path(x, self.qc_output_pattern)
         merged_df2['qcPath'] = merged_df2['study'].apply(expr)

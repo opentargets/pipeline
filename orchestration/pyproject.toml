@@ -9,7 +9,7 @@ license = { text = "Apache-2.0" }
 
 dependencies = [
   "apache-airflow-providers-google>=14.1.0",
-  "apache-airflow[apache-beam,async,celery,google]>=2.10.5",
+  "apache-airflow[apache-beam,async,celery,google]>=2.10.5,<3",
   "google>=3.0.0",
   "pandas>=2.1.4",
   "pyhocon>=0.3.61",

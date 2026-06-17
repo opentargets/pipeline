@@ -275,7 +275,7 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
 
         if logs and logs.entries:
             entry = logs.entries[0]
-            return int(entry.json_payload['message'].split('exit status', 1)[1].strip())  # type: ignore[index]
+            return int(entry.json_payload['message'].split('exit status', 1)[1].strip())  # ty:ignore[unresolved-attribute]
 
         self.log.info('No log entries with an exit status found yet.')
         return None
