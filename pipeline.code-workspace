@@ -19,12 +19,46 @@
 		},
 	],
 	"settings": {
+		"editor.formatOnSave": true,
+		"files.associations": {
+			"*.conf": "hocon"
+		},
 		"files.exclude": {
+			"**/__pycache__": true,
+			"**/.pytest_cache": true,
+			"**/.ruff_cache": true,
+			"*.egg-info": true,
 			"pis": true,
 			"pts": true,
 			"orchestration": true,
 			"croissant": true
 		},
-		"python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
-	},
+		"json.schemas": [
+			{
+				"fileMatch": [
+					"*.jsonld",
+				],
+				"url": "https://json.schemastore.org/jsonld.json"
+			}
+		],
+		"python.languageServer": "None",
+		"[python]": {
+			"editor.defaultFormatter": "charliermarsh.ruff",
+			"editor.tabSize": 4,
+		},
+		"ruff.interpreter": [
+			"python3"
+		],
+		"ruff.lint.enable": true,
+		"ruff.nativeServer": true,
+		"ruff.organizeImports": true,
+		"ty.diagnosticMode": "openFilesOnly",
+		"yaml.schemas": {
+			"https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
+				"pis/config.yaml",
+				"pts/config.yaml",
+			]
+		},
+		"yaml.format.singleQuote": true,
+	}
 }
