@@ -1,0 +1,145 @@
+line-length = 120
+# extend-exclude = ["src/orchestration/assets/**"]
+
+[format]
+preview = true
+quote-style = 'single'
+
+[lint]
+select = [
+  'D',     # pydocstyle
+  'E',     # pycodestyle
+  'I',     # isort
+  'F',     # pyflakes
+  'N',     # pep8-naming
+  'Q',     # flake8-quotes
+  'RUF',   # ruff
+  'PERF',  # perflint
+  'UP',    # pyupgrade
+  'W',     # pycodestyle
+  'PGH',   # pygrep-hooks
+  'PL',    # pylint
+  'TRY',   # tryceratops
+  'FURB',  # refurb
+  'ASYNC', # flake8-async
+  # 'ANN',    # flake8-annotations
+  'S',      # flake8-bandit
+  'B',      # flake8-bugbear
+  'A001',   # flake8-builtins
+  'COM',    # flake8-commas
+  'C4',     # flake8-comprehensions
+  'T10',    # flake8-debugger
+  'D212',   # flake8-docstrings
+  'EXE',    # flake8-executable
+  'INT',    # flake8-gettext
+  'ISC',    # flake8-implicit-str-concat
+  'ICN001', # flake8-import-conventions
+  'LOG',    # flake8-logging
+  'G',      # flake8-logging-format
+  'PIE',    # flake8-pie
+  'PT',     # flake8-pytest-style
+  'RSE',    # flake8-raise
+  'RET504', # flake8-return
+  'SIM',    # flake8-simplify
+  'TID',    # flake8-tidy-imports
+  'T20',    # flake8-todo
+]
+
+ignore = [
+  'B011',    # we don't run python with `-O` (also see S101)
+  'B904',    # possibly useful but too noisy
+  'COM812',  # trailing commas conflict with formatter
+  'D1',      # allow lax documentation
+  'D101',    # missing docstring in public class
+  'D105',    # we don't want to document every single magic method
+  'D107',    # we don't want to document every single init method
+  'D213',    # we prefer D212
+  'E226',    # allow omitting whitespace around arithmetic operators
+  'E731',    # allow assigning lambdas
+  'FURB113', # less readable
+  'FURB140', # less readable and actually slower in 3.12+
+  'G004',    # f-strings in logging are fine
+  'PERF203', # noisy, false positives, and not applicable for 3.11+
+  'PLC0208', # Use a sequence type instead of a `set` when iterating over values
+  'PLC0415', # local imports are there for a reason
+  'PLC2701', # some private imports are needed
+  'PLR09',   # too-many-<whatever> is noisy
+  'PLR1702', # complexity might be warranted
+  'PLR6201', # sets are faster (by a factor of 10!) but it's noisy and we're in nanoseconds territory
+  'PLR6301', # no-self-use is too noisy
+  'PLW0108', # a lambda often makes it more clear what you actually want
+  'PLW1510', # we often do not care about the status code of commands
+  'PLW1514', # we expect UTF8 environments everywhere
+  'PLR2004', # too noisy
+  'PLW2901', # Outer {outer_kind} variable {name} overwritten by inner {inner_kind} target
+  'PT011',   # very noisy
+  'PT015',   # nice for tests but not so nice elsewhere
+  'PT018',   # ^ likewise
+  'RUF012',  # mutable class vars are common
+  'RUF015',  # not always more readable
+  'S101',    # we use asserts outside tests, and do not run python with `-O` (also see B011)
+  'S301',    # we trust our pickled data
+  'S311',    # false positives, it does not care about the context
+  'S324',    # all our md5/sha1 usages are for non-security purposes
+  'S404',    # useless, triggers on *all* subprocess imports
+  'S603',    # triggers on all subprocess calls
+  'S603',    # useless, triggers on *all* subprocess calls: https://github.com/astral-sh/ruff/issues/4045
+  'S607',    # we trust the PATH to be sane
+  'SIM102',  # sometimes nested ifs are more readable
+  'SIM103',  # sometimes this is more readable (especially when checking multiple conditions)
+  'SIM105',  # try-except-pass is faster and people are used to it
+  'SIM108',  # ternary not always more readable
+  'SIM114',  # sometimes separate ifs are more readable (especially if they just return a bool)
+  'SIM117',  # nested context managers may be more readable
+  'TRY002',  # super noisy, and those exceptions are pretty exceptional anyway
+  'TRY003',  # long exception messages are fine
+  'TRY300',  # return-in-try is situational
+  'TRY301',  # sometimes doing that is actually useful
+  'TRY400',  # not all exceptions need logging
+  'UP006',   # keep type annotation style as is
+  'UP007',   # keep type annotation style as is
+  'UP047',   # we need to support Python 3.11 for now
+]
+
+extend-safe-fixes = [
+  'C4',      # they seem pretty safe
+  'D200',    # ^ likewise
+  'D400',    # ^ likewise
+  'PERF102', # ^ likewise
+  'PT014',   # duplicate test case parametrizations are never intentional
+  'RET504',  # looks pretty safe
+  'RSE102',  # we do not use `raise func()` (with `func` returning the exception instance)
+  'RUF005',  # we typically don't deal with objects overriding `__add__` or `__radd__`
+  'SIM110',  # looks pretty safe
+  'UP008',   # ^ likewise
+]
+
+
+[lint.extend-per-file-ignores]
+'**/tasks/*.py' = ['D102']                   # Neither for run() in Otter tasks
+'tests/**/*.py' = ['D', 'S108', 'S602']      # We don't do docs in tests
+'**/tests/test_secret.py' = ['S105', 'S106'] # Those are not real secrets
+# '**/transformers/*.py' = ['D100', 'D103']
+# '**/pyspark/*.py' = ['RUF069', 'D100', 'D101', 'D102', 'D103']
+
+[lint.flake8-quotes]
+inline-quotes = 'single'
+multiline-quotes = 'double'
+docstring-quotes = 'double'
+avoid-escape = true
+
+[lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false
+parametrize-names-type = 'tuple'
+parametrize-values-type = 'list'
+parametrize-values-row-type = 'tuple'
+
+[lint.pydocstyle]
+convention = "google"
+ignore-decorators = [
+  "airflow.decorators.task",                  # Don't require docstrings for Airflow tasks
+  "airflow.decorators.task_group.task_group", # ^ for airflow task groups
+  # "otter.tasks.report",
+  # "otter.manifest.task_reporter.report",
+]
