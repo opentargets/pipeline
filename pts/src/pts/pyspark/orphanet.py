@@ -57,6 +57,24 @@ def orphanet(
     evidence_df.write.mode('overwrite').parquet(destination)
 
 
+def _text(el: ET.Element | None, path: str) -> str | None:
+    if el is None:
+        return None
+    found = el.find(path)
+    if found is None:
+        return None
+    return found.text
+
+
+def _req(el: ET.Element | None, path: str) -> ET.Element:
+    if el is None:
+        raise ValueError(f'missing required node: {path}')
+    found = el.find(path)
+    if found is None:
+        raise ValueError(f'missing required node: {path}')
+    return found
+
+
 def parse_orphanet_xml(xml_string: str) -> list[dict]:
     """Function to parse Orphanet xml dump and return the parsed data as a list of dictionaries."""
     # Insecure parsing is fine, we trust Orphanet and the worst that can happen
@@ -67,48 +85,55 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
         raise ValueError('failed to parse xml file') from e
 
     # Checking if the basic nodes are in the xml structure:
-    logger.info(f'There are {root.find("DisorderList").get("count")} disease in the Orphanet xml file.')
+    disorder_list = _req(root, 'DisorderList')
+    logger.info(f'There are {disorder_list.get("count")} disease in the Orphanet xml file.')
     orphanet_disorders = []
-    for disorder in root.find('DisorderList').findall('Disorder'):
+    for disorder in disorder_list.findall('Disorder'):
         # Extracting disease information:
-        parsed_disorder = {
-            'diseaseFromSource': disorder.find('Name').text,
-            'diseaseFromSourceId': 'Orphanet_' + disorder.find('OrphaCode').text,
-            'type': disorder.find('DisorderType/Name').text,
+        orphanet_disorder_id = _text(disorder, 'OrphaCode')
+        if orphanet_disorder_id is None:
+            logger.warning(f'skipping orphanet disorder without id: {ET.tostring(disorder)}')
+            continue
+        orphanet_disorder_id = f'Orphanet_{orphanet_disorder_id}'
+        parsed_disorder: dict[str, object] = {
+            'diseaseFromSource': _text(disorder, 'Name'),
+            'diseaseFromSourceId': 'Orphanet_' + orphanet_disorder_id,
+            'type': _text(disorder, 'DisorderType/Name'),
         }
 
         # One disease might be mapped to multiple genes:
-        for association in disorder.find('DisorderGeneAssociationList'):
+        for association in _req(disorder, 'DisorderGeneAssociationList'):
             # For each mapped gene, an evidence is created:
             evidence = parsed_disorder.copy()
 
-            # Not all gene/disease association is backed up by publication:
-            try:
-                evidence['literature'] = [
-                    pmid.replace('[PMID]', '').rstrip()
-                    for pmid in association.find('SourceOfValidation').text.split('_')
-                    if '[PMID]' in pmid
-                ]
-            except AttributeError:
+            # Not all gene/disease associations are backed by publications:
+            source_of_validation = _text(association, 'SourceOfValidation')
+            if source_of_validation is None:
                 evidence['literature'] = None
+            else:
+                evidence['literature'] = [
+                    pmid.replace('[PMID]', '').rstrip() for pmid in source_of_validation.split('_') if '[PMID]' in pmid
+                ]
 
-            evidence['associationType'] = association.find('DisorderGeneAssociationType/Name').text
-            evidence['confidence'] = association.find('DisorderGeneAssociationStatus/Name').text
+            disorder_gene_association_type = _text(association, 'DisorderGeneAssociationType/Name')
+            disorder_gene_association_status = _text(association, 'DisorderGeneAssociationStatus/Name')
+
+            evidence['associationType'] = disorder_gene_association_type
+            evidence['confidence'] = disorder_gene_association_status
 
             # Parse gene name and id - going for Ensembl gene id only:
             gene = association.find('Gene')
-            evidence['targetFromSource'] = gene.find('Name').text
+            gene_name = _text(gene, 'Name')
+            evidence['targetFromSource'] = gene_name
 
             # Extracting ensembl gene id from cross references:
-            try:
-                ensembl_gene_id = [
-                    xref.find('Reference').text
-                    for xref in gene.find('ExternalReferenceList')
-                    if 'ENSG' in xref.find('Reference').text
-                ]
-                evidence['targetFromSourceId'] = ensembl_gene_id[0] if len(ensembl_gene_id) > 0 else None
-            except TypeError:
-                evidence['targetFromSourceId'] = None
+            ensembl = []
+            xrefs = gene.find('ExternalReferenceList') if gene is not None else None
+            for xref in xrefs or []:
+                r = xref.find('Reference')
+                if r is not None and r.text and 'ENSG' in r.text:
+                    ensembl.append(r.text)
+            evidence['targetFromSourceId'] = ensembl[0] if ensembl else None
 
             # Collect evidence:
             orphanet_disorders.append(evidence)
@@ -123,10 +148,10 @@ def process_orphanet(orphanet_df: DataFrame) -> DataFrame:
     return (
         orphanet_df
         .filter(~col('associationType').isin(EXCLUDED_ASSOCIATIONTYPES))
-        .filter(~col('targetFromSourceId').isNull())  # ty:ignore[missing-argument]
+        .filter(~col('targetFromSourceId').isNull())
         .withColumn(
             'variantFunctionalConsequenceId',
-            so_mapping_expr.getItem(col('associationType')),
+            so_mapping_expr[col('associationType')],
         )
         .select(
             lit('orphanet').alias('datasourceId'),

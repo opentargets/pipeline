@@ -63,7 +63,7 @@ class TaskConfiguration(BaseModel):
     """Maximum number of retries for the task in case of failures.
         By default, it is set to 0, meaning no retries will be attempted in case of task failure."""
 
-    max_run_duration: str = "3600s"
+    max_run_duration: str = '3600s'
     """Maximum run duration for the task in ISO 8601 format (e.g., '3600s' for 1 hour)."""
 
     exit_codes: Sequence[int] | None = None
@@ -96,8 +96,9 @@ class TaskConfiguration(BaseModel):
         Note:
             By default the lifecycle policy is set to `google.cloud.batch_v1.LifecyclePolicy.Action.RETRY_TASK`
             for the default exit codes (50001, 50002, 50003, 50004, and 50005).
-            This means that **if the task exits with any of these exit codes**, it will be retried up to `max_retry_count` times.
-            If `exit_codes` are provided, the lifecycle policy will be set to retry the task for those exit codes instead.
+            This means that **if the task exits with any of these exit codes**, it will be retried up to
+            `max_retry_count` times. If `exit_codes` are provided, the lifecycle policy will be set to retry the task
+            for those exit codes instead.
         """
         return [
             batch_v1.LifecyclePolicy(
@@ -115,15 +116,15 @@ class TaskConfiguration(BaseModel):
             batch_v1.TaskSpec: A `google.cloud.batch_v1.TaskSpec` object built from the provided specifications.
         """
         spec = {
-            "runnables": [self.runnable_spec.build()],
-            "compute_resource": self.instance_resource_spec.build(),
-            "max_run_duration": datetime.timedelta(seconds=self.max_run_duration_seconds),
-            "max_retry_count": self.max_retry_count,
-            "lifecycle_policies": self.lifecycle_policies,
+            'runnables': [self.runnable_spec.build()],
+            'compute_resource': self.instance_resource_spec.build(),
+            'max_run_duration': datetime.timedelta(seconds=self.max_run_duration_seconds),
+            'max_retry_count': self.max_retry_count,
+            'lifecycle_policies': self.lifecycle_policies,
         }
         if self.shared_environment:
-            spec["environment"] = self.shared_environment.build()
+            spec['environment'] = self.shared_environment.build()
         if self.shared_volumes:
-            spec["volumes"] = self.shared_volumes.build()
+            spec['volumes'] = self.shared_volumes.build()
 
         return batch_v1.TaskSpec(**spec)

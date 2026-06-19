@@ -5,9 +5,10 @@ from google.cloud.storage import Client
 
 from orchestration.dags.config.app_config import AppConfig
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
+from orchestration.operators.differs.differ import Differ
 
 
-class ConfigDiffer:
+class ConfigDiffer(Differ):
     """Check whether the configuration for a step has changed or not.
 
     This class fetches the config from GCS and checks if it is less or equal to
@@ -17,10 +18,16 @@ class ConfigDiffer:
         project_id (str): The GCP project ID. Defaults to the platform project.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
-    def is_diff(self, *, step_name: str, config: UnifiedPipelineConfig, client: Client) -> bool:
+    def is_diff(
+        self,
+        *,
+        step_name: str,
+        config: UnifiedPipelineConfig,
+        client: Client,
+    ) -> bool:
         """Compare the local configuration with the remote configuration.
 
         Args:
@@ -31,12 +38,12 @@ class ConfigDiffer:
         Returns:
             bool: Whether the configs are different.
         """
-        stage, _ = step_name.split("_", 1)
+        stage, _ = step_name.split('_', 1)
 
         try:
             local_config = getattr(config, stage)
         except AttributeError:
-            self.logger.warning(f"local config not found for step {step_name}")
+            self.logger.warning(f'local config not found for step {step_name}')
             return True
 
         try:
@@ -47,10 +54,10 @@ class ConfigDiffer:
                 client=client,
             )
         except GCSNotFound:
-            self.logger.info(f"remote config not found: {remote_config_path}")
+            self.logger.info(f'remote config not found: {remote_config_path}')
             return True
 
-        self.logger.info(f"comparing local config for step {step_name} with {remote_config_path}")
+        self.logger.info(f'comparing local config for step {step_name} with {remote_config_path}')
 
         # if the local config does not contain the remote config, the differ triggers
         return not local_config <= remote_config

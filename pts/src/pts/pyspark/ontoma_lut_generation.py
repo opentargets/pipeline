@@ -23,8 +23,8 @@ def ontoma_lut_generation(
     clinvar_xrefs = spark.load_data(path=source['clinvar_xrefs'], format='csv', header=True, sep='\t')
 
     disease_index_label_lut = OpenTargetsDisease.as_label_lut(disease_index)
-    ot_disease_curation_label_lut = (
-        DiseaseCuration.as_label_lut(ot_disease_curation, 'ot_curation', disease_index, True)
+    ot_disease_curation_label_lut = DiseaseCuration.as_label_lut(
+        ot_disease_curation, 'ot_curation', disease_index, True
     )
     eva_clinvar_label_lut = DiseaseCuration.as_label_lut(eva_clinvar, 'eva_clinvar', disease_index, True)
     clinvar_xrefs_label_lut = DiseaseCuration.as_label_lut(clinvar_xrefs, 'clinvar_xrefs', disease_index, True)

@@ -42,8 +42,7 @@ def spark_type_to_polars(type_spec: str | dict[str, Any]) -> Any:
 
     if type_name == 'struct':
         return pl.Struct([
-            pl.Field(field['name'], spark_type_to_polars(field['type']))
-            for field in type_spec['fields']
+            pl.Field(field['name'], spark_type_to_polars(field['type'])) for field in type_spec['fields']
         ])
 
     msg = f'Unsupported Spark complex type: {type_name}'
@@ -57,7 +56,4 @@ def load_spark_schema_as_polars(schema_json: str) -> dict[str, Any]:
     with schema_path.open(encoding='utf-8') as f:
         spark_schema = json.load(f)
 
-    return {
-        field['name']: spark_type_to_polars(field['type'])
-        for field in spark_schema['fields']
-    }
+    return {field['name']: spark_type_to_polars(field['type']) for field in spark_schema['fields']}

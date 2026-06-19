@@ -24,7 +24,7 @@ from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from pts.transformers.utils import update_quality_flag
 
@@ -517,8 +517,8 @@ def _load_model_assets(model_name: str) -> tuple[AutoTokenizer, AutoModelForSequ
 
 def _predict_batch(
     texts: list[str],
-    tokenizer: AutoTokenizer,
-    model: AutoModelForSequenceClassification,
+    tokenizer: PreTrainedTokenizerBase,
+    model: PreTrainedModel,
     id2label: dict[int, str],
     threshold: float,
 ) -> list[list[str]]:

@@ -10,7 +10,11 @@ from typing import Generic, TypeVar
 from loguru import logger
 from pydantic import BaseModel
 
-from ot_croissant.models import DistributionAnnotation, InstanceAnnotation, RecordsetFieldAnnotation
+from ot_croissant.models import (
+    DistributionAnnotation,
+    InstanceAnnotation,
+    RecordsetFieldAnnotation,
+)
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -43,7 +47,7 @@ class BaseCuration(ABC, Generic[T]):
         if entry is None:
             logger.log(
                 log_level,
-                f"[{type(self).__name__}]: No curation entry found for '{id}'.",
+                f"[{type(self).__name__}]: no curation entry found for '{id}'",
             )
         return entry
 
@@ -97,7 +101,11 @@ class RecordsetCuration:
             self._cache[dataset] = {e['id']: RecordsetFieldAnnotation.model_validate(e) for e in entries}
         return self._cache[dataset]
 
-    def get_field(self, distribution_id: str, log_level: str = 'WARNING') -> RecordsetFieldAnnotation | None:
+    def get_field(
+        self,
+        distribution_id: str,
+        log_level: str = 'WARNING',
+    ) -> RecordsetFieldAnnotation | None:
         """Return the annotation for a field, or ``None`` if not found.
 
         Args:
@@ -108,7 +116,7 @@ class RecordsetCuration:
         if '/' not in distribution_id:
             logger.log(
                 log_level,
-                f"[RecordsetCuration]: Unexpected id format '{distribution_id}' — expected 'dataset/field'.",
+                f"[RecordsetCuration]: unexpected id format '{distribution_id}',expected 'dataset/field'",
             )
             return None
 
@@ -117,6 +125,6 @@ class RecordsetCuration:
         if entry is None:
             logger.log(
                 log_level,
-                f"[RecordsetCuration]: No curation entry found for '{distribution_id}'.",
+                f"[RecordsetCuration]: no curation entry found for '{distribution_id}'",
             )
         return entry

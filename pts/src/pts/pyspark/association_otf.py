@@ -157,7 +157,7 @@ def association_otf(
             f.col('therapeuticAreas'),
             f.col('name'),
         )
-        .orderBy(f.col('diseaseId').asc())  # ty:ignore[missing-argument]
+        .orderBy(f.col('diseaseId').asc())
         .persist()
     )
 
@@ -184,7 +184,7 @@ def association_otf(
             f.col('pathways').alias('reactome'),
             f.col('tractability'),
         )
-        .orderBy(f.col('targetId').asc())  # ty:ignore[missing-argument]
+        .orderBy(f.col('targetId').asc())
         .persist()
     )
 

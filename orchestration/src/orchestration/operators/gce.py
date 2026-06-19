@@ -34,7 +34,7 @@ from orchestration.utils.labels import Labels
 if TYPE_CHECKING:
     from typing import Any
 
-CONTAINER_NAME = "workload_container"
+CONTAINER_NAME = 'workload_container'
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 
@@ -47,7 +47,7 @@ LOGGING_REQUEST_MAX_INTERVAL = 180
 
 def wait_for_extended_operation(
     operation: ExtendedOperation,
-    verbose_name: str = "operation",
+    verbose_name: str = 'operation',
     timeout: int | None = 300,
     log: logging.Logger | None = None,
 ) -> Any:
@@ -84,14 +84,14 @@ def wait_for_extended_operation(
 
     if operation.error_code:
         log.error(
-            f"Error during {verbose_name}: [Code: {operation.error_code}]: {operation.error_message}",
+            f'Error during {verbose_name}: [Code: {operation.error_code}]: {operation.error_message}',
         )
         raise operation.exception() or RuntimeError(operation.error_message)
 
     if operation.warnings:
-        log.warning(f"Warnings during {verbose_name}")
+        log.warning(f'Warnings during {verbose_name}')
         for warning in operation.warnings:
-            log.warning(f"{warning.code}: {warning.message}")
+            log.warning(f'{warning.code}: {warning.message}')
 
     return result
 
@@ -114,7 +114,12 @@ class RateLimitedLoggingClient(logging_v2.Client):
     a large number of log entries, but it will prevent the rate limit errors.
     """
 
-    def __init__(self, log: logging.Logger, *args, **kwargs):
+    def __init__(
+        self,
+        log: logging.Logger,
+        *args,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.log = log
         self.request_interval = LOGGING_REQUEST_INTERVAL
@@ -130,7 +135,7 @@ class RateLimitedLoggingClient(logging_v2.Client):
                 break
             except ResourceExhausted:
                 self.log.warning(
-                    "Rate limit for logging api exceeded, waiting for %d seconds",
+                    'Rate limit for logging api exceeded, waiting for %d seconds',
                     self.request_interval,
                 )
                 time.sleep(self.request_interval)
@@ -150,8 +155,8 @@ class CloudLoggingHook(GoogleBaseHook):
 
     def __init__(
         self,
-        api_version: str = "v2",
-        gcp_conn_id: str = "google_cloud_default",
+        api_version: str = 'v2',
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
     ) -> None:
         self._client: RateLimitedLoggingClient | None = None
@@ -183,8 +188,8 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
 
     def __init__(
         self,
-        api_version: str = "v2",
-        gcp_conn_id: str = "google_cloud_default",
+        api_version: str = 'v2',
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
     ) -> None:
         self._client: LoggingServiceV2AsyncClient | None = None
@@ -234,13 +239,13 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
         """  # noqa: D301
         client = self.get_conn()
         timestamp = start_time.isoformat()
-        query = f'resource.type="gce_instance" labels.instance_name="{instance_name}" timestamp>"{timestamp}" jsonPayload.message=~"startup-script[\w\\\":\s]*exit status [0-9]+"'  # type: ignore # fmt: skip  # noqa: Q004, W605
+        query = rf'resource.type="gce_instance" labels.instance_name="{instance_name}" timestamp>"{timestamp}" jsonPayload.message=~"startup-script[\w\\\":\s]*exit status [0-9]+"'  # noqa: E501
         log_pages = None
 
         while True:
             try:
                 log_pages = await client.list_log_entries(
-                    resource_names=[f"projects/{project_name}"],
+                    resource_names=[f'projects/{project_name}'],
                     filter=query,
                     timeout=300,
                 )
@@ -248,14 +253,14 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
                 break
             except ResourceExhausted:
                 self.log.warning(
-                    "Rate limit for logging api exceeded, waiting for %d seconds",
+                    'Rate limit for logging api exceeded, waiting for %d seconds',
                     self.request_interval,
                 )
                 await asyncio.sleep(self.request_interval)
                 self.request_interval = _backoff(self.request_interval)
             except RetryError as e:
                 self.log.warning(
-                    "Error occurred while fetching log entries: %s, retrying after %d seconds",
+                    'Error occurred while fetching log entries: %s, retrying after %d seconds',
                     e,
                     self.request_interval,
                 )
@@ -266,13 +271,13 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
         try:
             logs = await anext(log_pages.pages, None)
         except Exception as e:
-            self.log.error("Error occurred while fetching log entries: %s", e)
+            self.log.error('Error occurred while fetching log entries: %s', e)
 
         if logs and logs.entries:
             entry = logs.entries[0]
-            return int(entry.json_payload["message"].split("exit status", 1)[1].strip())  # type: ignore[index]
+            return int(entry.json_payload['message'].split('exit status', 1)[1].strip())  # type: ignore[index]
 
-        self.log.info("No log entries with an exit status found yet.")
+        self.log.info('No log entries with an exit status found yet.')
         return None
 
 
@@ -319,14 +324,14 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
     """
 
     template_fields: Sequence[str] = (
-        "instance_name",
-        "labels",
-        "container_image",
-        "container_command",
-        "container_args",
-        "container_env",
-        "container_files",
-        "container_secret_files",
+        'instance_name',
+        'labels',
+        'container_image',
+        'container_command',
+        'container_args',
+        'container_env',
+        'container_files',
+        'container_secret_files',
     )
 
     def __init__(
@@ -337,17 +342,17 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         instance_name: str,
         labels: Labels | None = None,
         container_image: str,
-        container_command: str = "",
+        container_command: str = '',
         container_args: list[str] | None = None,
         container_env: dict[str, str] | None = None,
         container_scopes: list[str] | None = None,
         container_files: dict[str, str] | None = None,
         container_secret_files: dict[str, str] | None = None,
-        machine_type: str = "n1-standard-16",
+        machine_type: str = 'n1-standard-16',
         work_disk_size_gb: int = 0,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
-        deferrable: bool = conf.getboolean("operators", "default_deferrable", fallback=False),
+        deferrable: bool = conf.getboolean('operators', 'default_deferrable', fallback=False),
         poll_interval: int = 10,
         **kwargs,
     ) -> None:
@@ -373,19 +378,19 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
     def build_env_params(self):
         """Build the environment parameters for the docker run command."""
         if not self.container_env:
-            return "\\"
-        return ("\n").join([f"    -e {k}={v} \\" for k, v in self.container_env.items()])
+            return '\\'
+        return ('\n').join([f'    -e {k}={v} \\' for k, v in self.container_env.items()])
 
     def build_volume_params(self):
         """Build the volume parameters for the docker run command."""
         mount_paths = [*self.container_files.values(), *self.container_secret_files.values()]
         if not mount_paths and not self.work_disk_size_gb:
-            return "\\"
+            return '\\'
 
-        vs = [f"    -v /home/app/{p.lstrip('/')}:{p} \\" for p in mount_paths]
+        vs = [f'    -v /home/app/{p.lstrip("/")}:{p} \\' for p in mount_paths]
         if self.work_disk_size_gb:
-            vs.append("    -v /mnt/disks/work:/mnt/disks/work \\")
-        return ("\n").join(vs)
+            vs.append('    -v /mnt/disks/work:/mnt/disks/work \\')
+        return ('\n').join(vs)
 
     def startup_script(self):
         """Build the startup script for the instance.
@@ -397,12 +402,12 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         3. Configure docker to use the GCR credentials.
         4. Run the containerized workload with the specified image, command, and arguments.
         """
-        arg = (" ").join(self.container_args or [])
+        arg = (' ').join(self.container_args or [])
 
-        gcs_files = (" ").join([f'"{w}"' for w in self.container_files])
-        dest_paths = (" ").join([f'"{w}"' for w in self.container_files.values()])
-        secret_names = (" ").join([f'"{w}"' for w in self.container_secret_files])
-        secret_dest_paths = (" ").join([f'"{w}"' for w in self.container_secret_files.values()])
+        gcs_files = (' ').join([f'"{w}"' for w in self.container_files])
+        dest_paths = (' ').join([f'"{w}"' for w in self.container_files.values()])
+        secret_names = (' ').join([f'"{w}"' for w in self.container_secret_files])
+        secret_dest_paths = (' ').join([f'"{w}"' for w in self.container_secret_files.values()])
 
         init_work_disk = (
             dedent("""
@@ -412,7 +417,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 chmod a+w /mnt/disks/work
             """)
             if self.work_disk_size_gb
-            else ""
+            else ''
         )
 
         return dedent(f"""
@@ -493,19 +498,19 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             auto_delete=True,
             boot=True,
             initialize_params=compute_v1.AttachedDiskInitializeParams(
-                disk_type=f"zones/{self.zone}/diskTypes/pd-ssd",
+                disk_type=f'zones/{self.zone}/diskTypes/pd-ssd',
                 labels=self.labels,
-                source_image="projects/cos-cloud/global/images/cos-113-18244-151-50",
+                source_image='projects/cos-cloud/global/images/cos-113-18244-151-50',
             ),
         )
 
         work_disk = compute_v1.AttachedDisk(
             auto_delete=True,
-            device_name="work-disk",
+            device_name='work-disk',
             initialize_params=compute_v1.AttachedDiskInitializeParams(
                 disk_size_gb=self.work_disk_size_gb,
                 labels=self.labels,
-                disk_type=f"zones/{self.zone}/diskTypes/pd-ssd",
+                disk_type=f'zones/{self.zone}/diskTypes/pd-ssd',
             ),
         )
 
@@ -514,38 +519,38 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         # Decide which service account to use. To honor the impersonation chain,
         # we need to get the last service account in the chain. If there is nothing,
         # we use the default service account.
-        service_account_email = "default"
+        service_account_email = 'default'
         try:
             service_account_email = self.hook._get_credentials_email
         except Exception:
-            self.log.warning("Failed to get the service account email from the credentials.")
-        self.log.info(f"using service account {service_account_email} for the instance creation")
+            self.log.warning('Failed to get the service account email from the credentials.')
+        self.log.info(f'using service account {service_account_email} for the instance creation')
         if self.impersonation_chain:
             if isinstance(self.impersonation_chain, str):
-                service_account_email = self.impersonation_chain.split(",")[-1]
+                service_account_email = self.impersonation_chain.split(',')[-1]
             elif isinstance(self.impersonation_chain, Sequence):
                 service_account_email = self.impersonation_chain[-1]
-            self.log.info(f"using service account {service_account_email} from the impersonation chain")
+            self.log.info(f'using service account {service_account_email} from the impersonation chain')
 
         return compute_v1.Instance(
             name=self.instance_name,
-            description="unified pipeline runner instance",
-            machine_type=f"zones/{self.zone}/machineTypes/{self.machine_type}",
+            description='unified pipeline runner instance',
+            machine_type=f'zones/{self.zone}/machineTypes/{self.machine_type}',
             disks=disks,
             labels=self.labels,
             metadata=types.Metadata(
                 items=[
                     {
-                        "key": "google-logging-enabled",
-                        "value": "true",
+                        'key': 'google-logging-enabled',
+                        'value': 'true',
                     },
                     {
-                        "key": "google-monitoring-enabled",
-                        "value": "true",
+                        'key': 'google-monitoring-enabled',
+                        'value': 'true',
                     },
                     {
-                        "key": "startup-script",
-                        "value": self.startup_script(),
+                        'key': 'startup-script',
+                        'value': self.startup_script(),
                     },
                 ]
             ),
@@ -553,8 +558,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 types.NetworkInterface(
                     access_configs=[
                         types.AccessConfig(
-                            name="External NAT",
-                            network_tier="PREMIUM",
+                            name='External NAT',
+                            network_tier='PREMIUM',
                         ),
                     ]
                 )
@@ -563,13 +568,13 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 types.ServiceAccount(
                     email=service_account_email,
                     scopes=([
-                        "https://www.googleapis.com/auth/cloud-platform",
-                        "https://www.googleapis.com/auth/devstorage.full_control",
-                        "https://www.googleapis.com/auth/logging.write",
-                        "https://www.googleapis.com/auth/monitoring.write",
-                        "https://www.googleapis.com/auth/servicecontrol",
-                        "https://www.googleapis.com/auth/service.management.readonly",
-                        "https://www.googleapis.com/auth/trace.append",
+                        'https://www.googleapis.com/auth/cloud-platform',
+                        'https://www.googleapis.com/auth/devstorage.full_control',
+                        'https://www.googleapis.com/auth/logging.write',
+                        'https://www.googleapis.com/auth/monitoring.write',
+                        'https://www.googleapis.com/auth/servicecontrol',
+                        'https://www.googleapis.com/auth/service.management.readonly',
+                        'https://www.googleapis.com/auth/trace.append',
                         *self.container_scopes,
                     ]),
                 ),
@@ -589,26 +594,26 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             )
             wait_for_extended_operation(
                 operation,
-                verbose_name="instance insertion",
+                verbose_name='instance insertion',
                 timeout=int(self.execution_timeout.total_seconds()) if self.execution_timeout else None,
                 log=self.log,
             )
         except Exception as e:
-            raise AirflowException(f"Failed to create instance {self.instance_name}") from e
+            raise AirflowException(f'Failed to create instance {self.instance_name}') from e
 
-        self.log.info(f"created vm {self.instance_name}")
+        self.log.info(f'created vm {self.instance_name}')
 
     def copy_machine_logs(self) -> None:
         """Copy logs from the machine to the Airflow logs."""
         client = self.logging_hook.get_conn()
-        query = f'resource.type="gce_instance" jsonPayload.instance.name="{self.instance_name}" jsonPayload.container.name="/{CONTAINER_NAME}"'
+        query = f'resource.type="gce_instance" jsonPayload.instance.name="{self.instance_name}" jsonPayload.container.name="/{CONTAINER_NAME}"'  # noqa: E501
         entries = client.list_entries(
             filter_=query,
             order_by=google_logging.ASCENDING,
             page_size=1000,
         )
         for entry in entries:
-            self.log.info(entry.payload.get("message", "Empty log message"))
+            self.log.info(entry.payload.get('message', 'Empty log message'))
 
     def poke(self, context: Context) -> bool:
         """Check if the instance is still running in a synchronous way."""
@@ -619,22 +624,22 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         """Set up and execute the sensor, then start the trigger."""
         # Try to extract the impersonation chain and project from the connection
         conn = self.hook.get_connection(self.gcp_conn_id)
-        impersonation_chain = conn.extra_dejson.get("impersonation_chain")
+        impersonation_chain = conn.extra_dejson.get('impersonation_chain')
         if impersonation_chain:
-            self.log.info(f"setting impersonation_chain from connection: {impersonation_chain}")
+            self.log.info(f'setting impersonation_chain from connection: {impersonation_chain}')
             self.impersonation_chain = impersonation_chain
 
-        dag_run = context.get("dag_run")
+        dag_run = context.get('dag_run')
         if dag_run:
             default_run_label = dag_run.run_id
-        run_label = context.get("params", {}).get("run_label", default_run_label)
-        self.labels["run"] = run_label
+        run_label = context.get('params', {}).get('run_label', default_run_label)
+        self.labels['run'] = run_label
         self.start()
 
         if not self.deferrable:
             super().execute(context)
         elif not self.poke(context):
-            self.log.info("Deferring the sensor execution.")
+            self.log.info('Deferring the sensor execution.')
             self.defer(
                 timeout=self.execution_timeout,
                 trigger=ComputeEngineExitCodeTrigger(
@@ -645,7 +650,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                     impersonation_chain=self.impersonation_chain,
                     poll_sleep=self.poll_interval,
                 ),
-                method_name="execute_complete",
+                method_name='execute_complete',
             )
 
     def execute_complete(self, context: Context, event: dict[str, str | list]) -> bool:
@@ -655,10 +660,10 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         an exception.
         """
         self.copy_machine_logs()
-        if event["status"] == "success":
-            self.log.info(event["message"])
+        if event['status'] == 'success':
+            self.log.info(event['message'])
             return True
-        raise AirflowException(f"Sensor failed: {event['message']}")
+        raise AirflowException(f'Sensor failed: {event["message"]}')
 
     @cached_property
     def hook(self) -> ComputeEngineHook:
@@ -711,14 +716,14 @@ class ComputeEngineExitCodeTrigger(BaseTrigger):
     def serialize(self) -> tuple[str, dict[str, Any]]:
         """Serialize class arguments and classpath."""
         return (
-            "orchestration.operators.gce.ComputeEngineExitCodeTrigger",
+            'orchestration.operators.gce.ComputeEngineExitCodeTrigger',
             {
-                "instance_name": self.instance_name,
-                "project": self.project,
-                "zone": self.zone,
-                "gcp_conn_id": self.gcp_conn_id,
-                "impersonation_chain": self.impersonation_chain,
-                "poll_sleep": self.poll_sleep,
+                'instance_name': self.instance_name,
+                'project': self.project,
+                'zone': self.zone,
+                'gcp_conn_id': self.gcp_conn_id,
+                'impersonation_chain': self.impersonation_chain,
+                'poll_sleep': self.poll_sleep,
             },
         )
 
@@ -742,25 +747,25 @@ class ComputeEngineExitCodeTrigger(BaseTrigger):
                     self.start_time,
                 )
 
-                self.log.info(f"VM {self.instance_name} exit code is {exit_code}")
+                self.log.info(f'VM {self.instance_name} exit code is {exit_code}')
 
                 if exit_code == 0:
                     yield TriggerEvent({
-                        "status": "success",
-                        "message": f"VM {self.instance_name} exit code is {exit_code}",
+                        'status': 'success',
+                        'message': f'VM {self.instance_name} exit code is {exit_code}',
                     })
                     return
                 elif exit_code is not None:
                     yield TriggerEvent({
-                        "status": "error",
-                        "message": f"VM {self.instance_name} exit code is {exit_code}",
+                        'status': 'error',
+                        'message': f'VM {self.instance_name} exit code is {exit_code}',
                     })
                     return
-                self.log.info("VM startup script is still running.")
+                self.log.info('VM startup script is still running.')
                 await asyncio.sleep(self.poll_sleep)
         except Exception as e:
-            self.log.error("Error occurred while checking startup script exit code.")
-            yield TriggerEvent({"status": "error", "message": f"{type(e)}: {e!r}"})
+            self.log.error('Error occurred while checking startup script exit code.')
+            yield TriggerEvent({'status': 'error', 'message': f'{type(e)}: {e!r}'})
 
     @cached_property
     def hook(self) -> CloudLoggingAsyncHook:

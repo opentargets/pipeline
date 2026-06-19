@@ -8,8 +8,8 @@ from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 from orchestration.models.step import UnifiedPipelineStep
 from orchestration.operators.dataproc import PTSJobBuilder
 
-ASSET_PATH = Path(__file__).parent.parent / "assets"
-PTS_CLUSTER_NAME = "pts"
+ASSET_PATH = Path(__file__).parent.parent / 'assets'
+PTS_CLUSTER_NAME = 'pts'
 
 
 def pts_step_from_config(
@@ -25,14 +25,14 @@ def pts_step_from_config(
     Returns:
         PTSStep: The created PTSStep instance.
     """
-    short_name = name.split("_", 1)[1]
-    step_tasks = config.pts.config.get("steps", {}).get(short_name, {})
+    short_name = name.split('_', 1)[1]
+    step_tasks = config.pts.config.get('steps', {}).get(short_name, {})
     if len(step_tasks) == 0:
-        raise ValueError(f"no tasks found for pts step {name}")
+        raise ValueError(f'no tasks found for pts step {name}')
 
     # if any task inside a step is a pyspark task, then this is a dataproc step
     for task in step_tasks:
-        if task.get("name", "").startswith("pyspark"):
+        if task.get('name', '').startswith('pyspark'):
             return PTSDataprocStep(name, config)
 
     return PTSStep(name, config)
@@ -75,7 +75,7 @@ class PTSStep(UnifiedPipelineStep):
     @property
     def config_uri(self) -> str:
         """Returns the URI for the step config."""
-        return f"{self.config_destination_prefix}/{self.name}.yaml"
+        return f'{self.config_destination_prefix}/{self.name}.yaml'
 
 
 class PTSDataprocStep(PTSStep):
@@ -99,32 +99,30 @@ class PTSDataprocStep(PTSStep):
         self.runs_on_cluster = True
         self.cluster_definition = self.get_cluster_definition(name)
         if not self.is_dataproc:
-            raise ValueError(f"step {name} is not intended to run in dataproc")
+            raise ValueError(f'step {name} is not intended to run in dataproc')
 
     @property
     def dataproc_script_run_source(self) -> Path:
         """Returns the path to the Dataproc run script, if applicable."""
-        return ASSET_PATH / "dataproc_pts_run.py"
+        return ASSET_PATH / 'dataproc_pts_run.py'
 
     @property
     def dataproc_script_run_uri(self) -> str:
         """Returns the URI for the Dataproc run script, if applicable."""
-        return f"{self.bin_destination_prefix}/{self.name}_dataproc_pts_run.py"
+        return f'{self.bin_destination_prefix}/{self.name}_dataproc_pts_run.py'
 
     @property
     def dataproc_args(self) -> list[str]:
-        return ["-s", self.short_name, "-c", f"{self.name}.yaml"]
+        return ['-s', self.short_name, '-c', f'{self.name}.yaml']
 
     def build_job(self) -> PySparkJob:
         """Builds the job for the step."""
-        self.logger.info(
-            f"Debug - dataproc_script_run_uri: {self.dataproc_script_run_uri}, type: {type(self.dataproc_script_run_uri)}"
-        )
-        self.logger.info(f"Debug - dataproc_args: {self.dataproc_args}, type: {type(self.dataproc_args)}")
-        self.logger.info(f"Debug - config_uri: {self.config_uri}, type: {type(self.config_uri)}")
+        self.logger.info(f'dataproc_script_run_uri: {self.dataproc_script_run_uri}')
+        self.logger.info(f'dataproc_args: {self.dataproc_args}')
+        self.logger.info(f'config_uri: {self.config_uri}')
 
         if not self.is_dataproc:
-            raise NotImplementedError("called build_job on non-dataproc step")
+            raise NotImplementedError('called build_job on non-dataproc step')
 
         return PTSJobBuilder(
             main_python_file_uri=self.dataproc_script_run_uri,

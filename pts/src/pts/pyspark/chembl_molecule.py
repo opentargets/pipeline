@@ -107,7 +107,8 @@ def process_molecules(
         empty_str_arr = f.array().cast('array<string>')
         # mine_aact_synonyms / _build_chembl_indexes expect non-null arrays; coalesce here.
         mol_for_index = mol_combined.select(
-            'id', 'name',
+            'id',
+            'name',
             f.coalesce(f.col('synonyms'), empty_ls).alias('synonyms'),
             f.coalesce(f.col('tradeNames'), empty_ls).alias('tradeNames'),
             'parentId',
@@ -202,10 +203,7 @@ def _process_molecule_synonyms(preprocessed_mols: DataFrame) -> DataFrame:
     )
 
     trade_names = (
-        synonyms
-        .filter(f.col('syn_type') == 'TRADE_NAME')
-        .groupBy('id')
-        .agg(f.collect_set('synonym').alias('_trade'))
+        synonyms.filter(f.col('syn_type') == 'TRADE_NAME').groupBy('id').agg(f.collect_set('synonym').alias('_trade'))
     )
 
     other_synonyms = (
@@ -214,17 +212,22 @@ def _process_molecule_synonyms(preprocessed_mols: DataFrame) -> DataFrame:
 
     full = trade_names.join(other_synonyms, on='id', how='full_outer')
 
-    return full.withColumn(
-        'synonyms',
-        f.array_sort(
-            f.transform(f.coalesce(f.col('_syn'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
-        ).cast(LABEL_SOURCE_SCHEMA),
-    ).withColumn(
-        'tradeNames',
-        f.array_sort(
-            f.transform(f.coalesce(f.col('_trade'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
-        ).cast(LABEL_SOURCE_SCHEMA),
-    ).drop('_syn', '_trade')
+    return (
+        full
+        .withColumn(
+            'synonyms',
+            f.array_sort(
+                f.transform(f.coalesce(f.col('_syn'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
+            ).cast(LABEL_SOURCE_SCHEMA),
+        )
+        .withColumn(
+            'tradeNames',
+            f.array_sort(
+                f.transform(f.coalesce(f.col('_trade'), f.array()), lambda c: as_label_source(c, CHEMBL_SOURCE))
+            ).cast(LABEL_SOURCE_SCHEMA),
+        )
+        .drop('_syn', '_trade')
+    )
 
 
 def _process_molecule_hierarchy(preprocessed_mols: DataFrame) -> DataFrame:
@@ -240,7 +243,7 @@ def _process_molecule_hierarchy(preprocessed_mols: DataFrame) -> DataFrame:
         preprocessed_mols
         .select('id', 'parentId')
         .filter(f.col('id') != f.col('parentId'))
-        .filter(f.col('parentId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('parentId').isNotNull())
         .groupBy('parentId')
         .agg(f.collect_set('id').alias('childChemblIds'))
         .withColumnRenamed('parentId', 'id')
@@ -261,7 +264,7 @@ def _process_molecule_cross_references(preprocessed_mols: DataFrame) -> DataFram
 
     # Merge cross reference maps
     merged = _merge_cross_reference_maps(chembl_xrefs, drugbank_xrefs)
-    merged = merged.filter(f.col('xref').isNotNull()).withColumnRenamed('xref', 'crossReferences')  # ty:ignore[missing-argument]
+    merged = merged.filter(f.col('xref').isNotNull()).withColumnRenamed('xref', 'crossReferences')
 
     # Transform to array of structs format
     return (
@@ -325,7 +328,7 @@ def _process_singleton_cross_references(
     """
     return (
         preprocessed_mols
-        .filter(f.col(reference_id_column).isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col(reference_id_column).isNotNull())
         .select(f.col('id'), f.col(reference_id_column).cast('string'))
         .groupBy('id')
         .agg(f.collect_set(reference_id_column).alias(reference_id_column))

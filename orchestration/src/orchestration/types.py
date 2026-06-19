@@ -14,8 +14,8 @@ class DataprocSpecs(TypedDict):
 
 
 class Environment(Enum):
-    TEST = "Test"
-    PROD = "Prod"
+    TEST = 'Test'
+    PROD = 'Prod'
 
 
 class EnvironmentSpec(TypedDict):
@@ -25,7 +25,7 @@ class EnvironmentSpec(TypedDict):
 
 class ConfigNode(TypedDict):
     id: str
-    kind: Literal["Task", "TaskGroup"]
+    kind: Literal['Task', 'TaskGroup']
     prerequisites: list[str]
     params: dict[str, Any]
     google_batch: Any

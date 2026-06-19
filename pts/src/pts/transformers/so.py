@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 from loguru import logger
@@ -18,7 +18,7 @@ def so(
     logger.debug('loading so')
     h = StorageHandle(source)
     f = h.open()
-    initial = pl.read_json(f)
+    initial = pl.read_json(cast(bytes, f))
 
     # prepare node data
     node_list = pl.DataFrame(

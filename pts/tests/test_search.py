@@ -153,7 +153,12 @@ _VARIANT_SCHEMA = StructType([
     StructField('hgvsId', StringType()),
     StructField(
         'dbXrefs',
-        ArrayType(StructType([StructField('id', StringType()), StructField('source', StringType())])),
+        ArrayType(
+            StructType([
+                StructField('id', StringType()),
+                StructField('source', StringType()),
+            ])
+        ),
     ),
     StructField(
         'transcriptConsequences',
@@ -250,18 +255,36 @@ def test_build_target_index_terms_include_chr_prefixed_variant(spark):
                 hgvsId=None,
                 dbXrefs=[],
                 transcriptConsequences=[
-                    Row(targetId='ENSG001', consequenceScore=1.0, distanceFromFootprint=1.0)
+                    Row(
+                        targetId='ENSG001',
+                        consequenceScore=1.0,
+                        distanceFromFootprint=1.0,
+                    )
                 ],
             )
         ],
         _VARIANT_SCHEMA,
     )
     assocs = spark.createDataFrame(
-        [Row(associationId='EFO_001-ENSG001', targetId='ENSG001', diseaseId='EFO_001', score=0.5)],
+        [
+            Row(
+                associationId='EFO_001-ENSG001',
+                targetId='ENSG001',
+                diseaseId='EFO_001',
+                score=0.5,
+            )
+        ],
         _ASSOC_SCHEMA,
     )
     d_lut = spark.createDataFrame(
-        [Row(diseaseId='EFO_001', disease_labels=[], disease_name='Cancer', therapeutic_labels=[])],
+        [
+            Row(
+                diseaseId='EFO_001',
+                disease_labels=[],
+                disease_name='Cancer',
+                therapeutic_labels=[],
+            )
+        ],
         _DISEASE_LUT_SCHEMA,
     )
     dr_lut = spark.createDataFrame([], _DRUG_LUT_SCHEMA)
@@ -303,18 +326,36 @@ def test_build_target_index_drops_gnomad_dbxrefs_from_variant_labels(spark):
                     Row(id='RCV000123', source='clinvar'),
                 ],
                 transcriptConsequences=[
-                    Row(targetId='ENSG001', consequenceScore=1.0, distanceFromFootprint=1.0)
+                    Row(
+                        targetId='ENSG001',
+                        consequenceScore=1.0,
+                        distanceFromFootprint=1.0,
+                    )
                 ],
             )
         ],
         _VARIANT_SCHEMA,
     )
     assocs = spark.createDataFrame(
-        [Row(associationId='EFO_001-ENSG001', targetId='ENSG001', diseaseId='EFO_001', score=0.5)],
+        [
+            Row(
+                associationId='EFO_001-ENSG001',
+                targetId='ENSG001',
+                diseaseId='EFO_001',
+                score=0.5,
+            )
+        ],
         _ASSOC_SCHEMA,
     )
     d_lut = spark.createDataFrame(
-        [Row(diseaseId='EFO_001', disease_labels=[], disease_name='Cancer', therapeutic_labels=[])],
+        [
+            Row(
+                diseaseId='EFO_001',
+                disease_labels=[],
+                disease_name='Cancer',
+                therapeutic_labels=[],
+            )
+        ],
         _DISEASE_LUT_SCHEMA,
     )
     dr_lut = spark.createDataFrame([], _DRUG_LUT_SCHEMA)
@@ -695,7 +736,14 @@ _LS_SCHEMA = StructType([
 
 def test_flatten_cat_extracts_struct_labels(spark):
     """_flatten_cat over struct arrays via '.label' yields the labels."""
-    data = [Row(synonyms=[Row(label='ASA', source='ChEMBL'), Row(label='G-CSF', source='AACT')])]
+    data = [
+        Row(
+            synonyms=[
+                Row(label='ASA', source='ChEMBL'),
+                Row(label='G-CSF', source='AACT'),
+            ]
+        )
+    ]
     df = spark.createDataFrame(data, _LS_SCHEMA)
     df = df.withColumn('result', _flatten_cat('synonyms.label'))
     assert set(df.collect()[0].result) == {'ASA', 'G-CSF'}
@@ -755,7 +803,7 @@ def test_build_drug_index_nct_ids_appear_in_keywords(spark):
 
 
 def test_build_drug_index_child_chembl_ids_appear_in_terms_not_keywords(spark):
-    """childChemblIds belong in terms (low-priority) not keywords (top-hit ranked)."""
+    """childChemblIds belong in terms (low-priority) not keywords (top-hit ranked)."""  # noqa: D403
     drugs = spark.createDataFrame(
         [
             Row(
@@ -878,7 +926,12 @@ def test_build_disease_index_nct_ids_appear_in_keywords(spark):
                 description='A disease',
                 therapeutic_labels=[],
                 therapeuticAreas=[],
-                synonyms=Row(hasBroadSynonym=[], hasExactSynonym=[], hasNarrowSynonym=[], hasRelatedSynonym=[]),
+                synonyms=Row(
+                    hasBroadSynonym=[],
+                    hasExactSynonym=[],
+                    hasNarrowSynonym=[],
+                    hasRelatedSynonym=[],
+                ),
             )
         ],
         _DISEASE_INDEX_SCHEMA,
@@ -889,7 +942,16 @@ def test_build_disease_index_nct_ids_appear_in_keywords(spark):
     )
     phenotypes, assocs, assoc_drugs, t_lut, dr_lut, studies = _empty_disease_index_inputs(spark)
 
-    result = _build_disease_index(diseases, phenotypes, assocs, assoc_drugs, t_lut, dr_lut, studies, nct_by_disease)
+    result = _build_disease_index(
+        diseases,
+        phenotypes,
+        assocs,
+        assoc_drugs,
+        t_lut,
+        dr_lut,
+        studies,
+        nct_by_disease,
+    )
     keywords = result.collect()[0].keywords
     assert 'nct00001234' in keywords
 
@@ -904,7 +966,12 @@ def test_build_disease_index_missing_nct_ids_yields_no_crash(spark):
                 description='A disease',
                 therapeutic_labels=[],
                 therapeuticAreas=[],
-                synonyms=Row(hasBroadSynonym=[], hasExactSynonym=[], hasNarrowSynonym=[], hasRelatedSynonym=[]),
+                synonyms=Row(
+                    hasBroadSynonym=[],
+                    hasExactSynonym=[],
+                    hasNarrowSynonym=[],
+                    hasRelatedSynonym=[],
+                ),
             )
         ],
         _DISEASE_INDEX_SCHEMA,

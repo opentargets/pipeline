@@ -25,8 +25,8 @@ def literature_ontoma_lut_generation(
     drug_index = spark.load_data(path=source['drug_index'])
 
     disease_index_label_lut = OpenTargetsDisease.as_label_lut(disease_index)
-    ot_disease_curation_label_lut = (
-        DiseaseCuration.as_label_lut(ot_disease_curation, 'ot_curation', disease_index, True)
+    ot_disease_curation_label_lut = DiseaseCuration.as_label_lut(
+        ot_disease_curation, 'ot_curation', disease_index, True
     )
     eva_clinvar_label_lut = DiseaseCuration.as_label_lut(eva_clinvar, 'eva_clinvar', disease_index, True)
     clinvar_xrefs_label_lut = DiseaseCuration.as_label_lut(clinvar_xrefs, 'clinvar_xrefs', disease_index, True)
@@ -41,7 +41,7 @@ def literature_ontoma_lut_generation(
             eva_clinvar_label_lut,
             clinvar_xrefs_label_lut,
             target_index_label_lut,
-            drug_index_label_lut
+            drug_index_label_lut,
         ],
         cache_dir=destination['disease_target_drug_label_lut'],
     )

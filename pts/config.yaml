@@ -3,7 +3,7 @@ work_path: ../work
 log_level: DEBUG
 pool_size: 4
 
-scratchpad:
+scratchpad: {}
 
 steps:
   #: DISEASE STEP :#################################################################################
@@ -534,6 +534,8 @@ steps:
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/orphanet.parquet
+      properties:
+        'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
   ##################################################################################################
 
   #: EVIDENCE_CLINGEN STEP :#######################################################################
@@ -642,6 +644,12 @@ steps:
       destination:
         disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
+      properties:
+        'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
+  ##################################################################################################
+
+  #: ONTOMA LITERATURE STEP :#######################################################################
+  ontoma_literature:
     - name: pyspark ontoma generate lookup tables for literature
       pyspark: literature_ontoma_lut_generation
       source:

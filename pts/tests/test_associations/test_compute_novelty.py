@@ -74,9 +74,8 @@ class TestComputeNoveltyRegression:
     def test_currentnovelty_for_group_a_is_zero_long_after_peak(
         self: TestComputeNoveltyRegression,
     ) -> None:
-        """Group A has its peak in 2010; with novelty_window=10 the peak's
-        contribution to currentNovelty (current_year) decays to ~0 long after.
-        """
+        # Group A has its peak in 2010; with novelty_window=10 the peak's
+        # contribution to currentNovelty (current_year) decays to ~0 long after.
         current_year = datetime.now().year
         # Only meaningful if current_year is well past 2020 (peak + window)
         assert current_year >= 2021
@@ -91,7 +90,9 @@ class TestComputeNoveltyRegression:
         # window=10 → peak only contributes for years 2010..2020. After that, 0.
         assert row.currentNovelty == pytest.approx(0.0, abs=1e-9)
 
-    def test_timeseries_array_contains_expected_years(self: TestComputeNoveltyRegression) -> None:
+    def test_timeseries_array_contains_expected_years(
+        self: TestComputeNoveltyRegression,
+    ) -> None:
         """Pin the exact set of years in the timeseries for both groups.
 
         _back_fill_missing_years generates years [first_evidence_year - 5, current_year + 1].
@@ -141,7 +142,7 @@ class TestComputeNoveltyRegression:
         filled rows carry NULL — so the sum equals the input total. If a future
         refactor populates yearlyEvidenceCount on filled rows, this expectation
         would change and that change should be intentional.
-        """
+        """  # noqa: D403
         rows = self.association.compute_novelty().collect()
         by_key = {(r.targetId, r.diseaseId): r for r in rows}
         # Group A: one row with yearlyEvidenceCount=1

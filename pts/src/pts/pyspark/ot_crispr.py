@@ -83,7 +83,10 @@ class StudyParser:
         - Collect replicates for each study.
     """
 
-    def __init__(self, study_table: DataFrame) -> None:
+    def __init__(
+        self,
+        study_table: DataFrame,
+    ) -> None:
         """Initialise the study parser.
 
         Args:
@@ -138,7 +141,7 @@ class StudyParser:
         return (
             reduce(self.apply_check, STUDY_CHECKS, self.study_table)
             # Dropping studies with no OTAR project and the field description row:
-            .filter(f.col('projectId').startswith('OTAR'))  # ty:ignore[missing-argument, invalid-argument-type]
+            .filter(f.col('projectId').startswith('OTAR'))
             # Selecting relevant columns:
             .select(
                 'studyId',
@@ -165,7 +168,7 @@ class StudyParser:
                 'ControlDataset',
                 # Adding replicate identifier when missing:
                 f
-                .when(f.col('replicateNumber').isNull(), f.lit(1))  # ty:ignore[missing-argument]
+                .when(f.col('replicateNumber').isNull(), f.lit(1))
                 .otherwise(f.col('replicateNumber'))
                 .alias('replicateId'),
             )
@@ -203,7 +206,12 @@ class EvidenceParser:
         - Combine the results into a single DataFrame.
     """
 
-    def __init__(self, spark: Session, study_table: DataFrame, data_path: str) -> None:
+    def __init__(
+        self,
+        spark: Session,
+        study_table: DataFrame,
+        data_path: str,
+    ) -> None:
         """Initialise the evidence generator.
 
         Args:
@@ -244,11 +252,18 @@ class EvidenceParser:
             .withColumn(
                 'filter_value_map',
                 f.create_map(
-                    *reduce(operator.iadd, ([f.lit(col), f.col(col).cast('double')] for col in filter_columns), [])
+                    *reduce(
+                        operator.iadd,
+                        ([f.lit(col), f.col(col).cast('double')] for col in filter_columns),
+                        [],
+                    )
                 ),
             )
             # Get the minimal value:
-            .withColumn('resourceScore', f.array_min(f.array([f.col(col).cast('double') for col in filter_columns])))
+            .withColumn(
+                'resourceScore',
+                f.array_min(f.array([f.col(col).cast('double') for col in filter_columns])),
+            )
             # Dropping non-significant hits:
             .filter(f.col('resourceScore') < threshold)
             # Finish parsing:
@@ -261,15 +276,15 @@ class EvidenceParser:
                 f.split(f.col('id'), '_')[0].alias('targetFromSourceId'),
                 # Extract log2Fold change value based on where the hit is coming from:
                 f
-                .when(f.col('sourceLabel').contains('pos'), f.col('pos|lfc'))  # ty:ignore[missing-argument, invalid-argument-type]
-                .when(f.col('sourceLabel').contains('neg'), f.col('neg|lfc'))  # ty:ignore[missing-argument, invalid-argument-type]
+                .when(f.col('sourceLabel').contains('pos'), f.col('pos|lfc'))
+                .when(f.col('sourceLabel').contains('neg'), f.col('neg|lfc'))
                 .otherwise(None)
                 .cast(t.FloatType())
                 .alias('log2FoldChangeValue'),
                 # Extract which tail of distribution the hit is coming from:
                 f
-                .when(f.col('sourceLabel').contains('pos'), f.lit('upper tail'))  # ty:ignore[missing-argument, invalid-argument-type]
-                .when(f.col('sourceLabel').contains('neg'), f.lit('lower tail'))  # ty:ignore[missing-argument, invalid-argument-type]
+                .when(f.col('sourceLabel').contains('pos'), f.lit('upper tail'))
+                .when(f.col('sourceLabel').contains('neg'), f.lit('lower tail'))
                 .alias('statisticalTestTail'),
                 'resourceScore',
             )

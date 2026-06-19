@@ -41,17 +41,37 @@ def _empty_metrics_frame() -> pl.DataFrame:
     )
 
 
-def _document_total_count(df: pl.DataFrame, variable: str) -> pl.DataFrame:
+def _document_total_count(
+    df: pl.DataFrame,
+    variable: str,
+) -> pl.DataFrame:
     """Build a single total-count metric row from a dataframe."""
-    return pl.DataFrame({'datasourceId': ['all'], 'variable': [variable], 'field': [None], 'value': [df.height]})
+    return pl.DataFrame({
+        'datasourceId': ['all'],
+        'variable': [variable],
+        'field': [None],
+        'value': [df.height],
+    })
 
 
-def _document_total_value(value: int, variable: str) -> pl.DataFrame:
+def _document_total_value(
+    value: int,
+    variable: str,
+) -> pl.DataFrame:
     """Build a single total-count metric row from a scalar value."""
-    return pl.DataFrame({'datasourceId': ['all'], 'variable': [variable], 'field': [None], 'value': [value]})
+    return pl.DataFrame({
+        'datasourceId': ['all'],
+        'variable': [variable],
+        'field': [None],
+        'value': [value],
+    })
 
 
-def _document_count_by(df: pl.DataFrame, column: str, variable: str) -> pl.DataFrame:
+def _document_count_by(
+    df: pl.DataFrame,
+    column: str,
+    variable: str,
+) -> pl.DataFrame:
     """Build count-by-column metrics with datasource-compatible output columns."""
     return (
         df
@@ -63,7 +83,11 @@ def _document_count_by(df: pl.DataFrame, column: str, variable: str) -> pl.DataF
     )
 
 
-def _not_null_fields_count_top_level(df: pl.DataFrame, variable: str, group_by_datasource: bool) -> pl.DataFrame:
+def _not_null_fields_count_top_level(
+    df: pl.DataFrame,
+    variable: str,
+    group_by_datasource: bool,
+) -> pl.DataFrame:
     """Compute non-null counts using only top-level dataframe columns."""
     columns_to_count = list(df.columns)
     if group_by_datasource:
@@ -92,7 +116,10 @@ def _not_null_fields_count_top_level(df: pl.DataFrame, variable: str, group_by_d
     return melted.select('datasourceId', 'variable', 'field', 'value')
 
 
-def _distinct_fields_count_top_level(df: pl.DataFrame, variable: str) -> pl.DataFrame:
+def _distinct_fields_count_top_level(
+    df: pl.DataFrame,
+    variable: str,
+) -> pl.DataFrame:
     """Compute distinct counts using only top-level dataframe columns."""
     value_columns = [column for column in df.columns if column != 'datasourceId']
     unique_exprs = [pl.col(column).n_unique().alias(column) for column in value_columns]
@@ -105,10 +132,14 @@ def _distinct_fields_count_top_level(df: pl.DataFrame, variable: str) -> pl.Data
         value_name='value',
     )
 
-    return melted.with_columns(variable=pl.lit(variable)).select('datasourceId', 'variable', 'field', 'value')
+    return melted.with_columns(
+        variable=pl.lit(variable),
+    ).select('datasourceId', 'variable', 'field', 'value')
 
 
-def _get_evidence_columns_to_report(dataset_columns: list[str]) -> list[str]:
+def _get_evidence_columns_to_report(
+    dataset_columns: list[str],
+) -> list[str]:
     """Return the evidence fields used for backward-compatible distinct metrics."""
     return [
         'datasourceId',
@@ -119,7 +150,9 @@ def _get_evidence_columns_to_report(dataset_columns: list[str]) -> list[str]:
     ]
 
 
-def _metric_prefix(dataset_rel_path: str) -> str:
+def _metric_prefix(
+    dataset_rel_path: str,
+) -> str:
     """Map dataset path names to metric variable name prefixes."""
     dataset_name = Path(dataset_rel_path).name
     aliases = {
@@ -137,7 +170,10 @@ def _metric_prefix(dataset_rel_path: str) -> str:
     return parts[0] + ''.join(part.capitalize() for part in parts[1:])
 
 
-def _global_rich_metrics(df: pl.DataFrame, metric_prefix: str) -> list[pl.DataFrame]:
+def _global_rich_metrics(
+    df: pl.DataFrame,
+    metric_prefix: str,
+) -> list[pl.DataFrame]:
     """Build rich top-level metrics (total, not-null, distinct) for a dataset."""
     global_df = df.with_columns(datasourceId=pl.lit('all'))
     return [
@@ -147,7 +183,9 @@ def _global_rich_metrics(df: pl.DataFrame, metric_prefix: str) -> list[pl.DataFr
     ]
 
 
-def _metric_label_token(label: str) -> str:
+def _metric_label_token(
+    label: str,
+) -> str:
     """Normalize arbitrary QC labels into deterministic metric-name tokens."""
     parts = [part for part in re.split(r'[^A-Za-z0-9]+', label) if part]
     token = ''.join(part.lower().capitalize() for part in parts)
@@ -156,7 +194,10 @@ def _metric_label_token(label: str) -> str:
     return token or 'Unknown'
 
 
-def _quality_control_flag_total_metrics(df: pl.DataFrame, metric_prefix: str) -> list[pl.DataFrame]:
+def _quality_control_flag_total_metrics(
+    df: pl.DataFrame,
+    metric_prefix: str,
+) -> list[pl.DataFrame]:
     """Build per-flag total-count metrics when a qualityControls column is present."""
     if 'qualityControls' not in df.columns:
         return []
@@ -257,7 +298,10 @@ def _to_parquet_glob(path: str | Path) -> str:
     return f'{path_str.rstrip("/")}/*.parquet'
 
 
-def _to_release_relative_path(path: str, release_uri: str) -> str:
+def _to_release_relative_path(
+    path: str,
+    release_uri: str,
+) -> str:
     """Convert an absolute dataset path into a release-relative path key."""
     release_root = release_uri.rstrip('/')
     if path.startswith(release_root):
@@ -271,7 +315,10 @@ def _to_release_relative_path(path: str, release_uri: str) -> str:
     return relative
 
 
-def _build_absolute_scope_pattern(release_uri: str, scope: str) -> str:
+def _build_absolute_scope_pattern(
+    release_uri: str,
+    scope: str,
+) -> str:
     """Build an absolute storage glob pattern from release URI and scope."""
     scope_path = scope if scope.startswith('/') else f'/{scope}'
     return f'{release_uri.rstrip("/")}{scope_path}'
@@ -295,7 +342,10 @@ def _has_glob_wildcards(path_pattern: str) -> bool:
     return any(char in path_pattern for char in '*?[')
 
 
-def _expand_storage_glob(path_pattern: str, config: Config) -> list[str]:
+def _expand_storage_glob(
+    path_pattern: str,
+    config: Config,
+) -> list[str]:
     """Expand a storage glob pattern into concrete dataset paths.
 
     Example:
@@ -310,7 +360,13 @@ def _expand_storage_glob(path_pattern: str, config: Config) -> list[str]:
     If no wildcards are present, returns [path_pattern] unchanged.
     """
     wildcard_positions = [
-        idx for idx in (path_pattern.find('*'), path_pattern.find('?'), path_pattern.find('[')) if idx != -1
+        idx
+        for idx in (
+            path_pattern.find('*'),
+            path_pattern.find('?'),
+            path_pattern.find('['),
+        )
+        if idx != -1
     ]
     if not wildcard_positions:
         return [path_pattern]
@@ -326,7 +382,11 @@ def _expand_storage_glob(path_pattern: str, config: Config) -> list[str]:
     return sorted(StorageHandle(root, config=config).glob(pattern))
 
 
-def _discover_dataset_paths(release_uri: str, scope_globs: list[str], config: Config) -> dict[str, str]:
+def _discover_dataset_paths(
+    release_uri: str,
+    scope_globs: list[str],
+    config: Config,
+) -> dict[str, str]:
     """Discover datasets from configured scopes and key them by release-relative path."""
     discovered: dict[str, str] = {}
     for scope in scope_globs:
@@ -363,7 +423,10 @@ def _resolve_metric_lists(
     return rich, minimal
 
 
-def _read_evidence_with_canonical_schema(path: str, schema: dict[str, Any]) -> pl.DataFrame:
+def _read_evidence_with_canonical_schema(
+    path: str,
+    schema: dict[str, Any],
+) -> pl.DataFrame:
     """Read evidence parquet files using a canonical schema for cross-source unioning."""
     return pl.scan_parquet(
         path,
@@ -374,7 +437,10 @@ def _read_evidence_with_canonical_schema(path: str, schema: dict[str, Any]) -> p
     ).collect()
 
 
-def _read_evidence_with_canonical_schema_from_paths(paths: list[str], schema: dict[str, Any]) -> pl.DataFrame:
+def _read_evidence_with_canonical_schema_from_paths(
+    paths: list[str],
+    schema: dict[str, Any],
+) -> pl.DataFrame:
     """Read multiple evidence parquet path globs using the canonical evidence schema."""
     if not paths:
         return pl.DataFrame(schema=schema)
@@ -409,7 +475,10 @@ def _count_parquet_rows(path: str) -> int:
     return int(pl.scan_parquet(_to_parquet_glob(path), glob=True).select(pl.len()).collect().item())
 
 
-def _single_discovered_path(discovered: dict[str, str], rel_path: str) -> str | None:
+def _single_discovered_path(
+    discovered: dict[str, str],
+    rel_path: str,
+) -> str | None:
     """Return one discovered dataset path and warn if it is missing."""
     path = discovered.get(rel_path)
     if not path:
@@ -530,7 +599,10 @@ def _emit_evidence_failed_metrics(evidence_failed: pl.DataFrame) -> list[pl.Data
     ]
 
 
-def _emit_association_metrics(df: pl.DataFrame, kind: str) -> list[pl.DataFrame]:
+def _emit_association_metrics(
+    df: pl.DataFrame,
+    kind: str,
+) -> list[pl.DataFrame]:
     """Emit backward-compatible metrics for association by-datasource datasets."""
     datasource_view = _association_datasource_view(df)
     return [

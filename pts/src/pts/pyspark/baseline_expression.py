@@ -118,7 +118,7 @@ def _override_biosample_id(
         value = f.coalesce(f.col(column_name).cast('string'), f.lit(''))
         values = f.split(value, delim)
         values = f.transform(values, lambda item: f.trim(item))
-        return f.filter(values, lambda item: item.isNotNull() & (item != ''))  # noqa: PLC1901
+        return f.filter(values, lambda item: item.isNotNull() & (item != ''))
 
     long_parts = [
         mapping_df.select(f.col(key_col), f.explode_outer(clean_tokens(column_name)).alias('value'))
@@ -168,10 +168,7 @@ def _add_parental_biosample_id(
         parent_col_name = 'celltypeBiosampleParentId'
         source_col = 'celltypeBiosampleFromSource'
     else:
-        raise ValueError(
-            f'Unexpected id_col "{id_col}". '
-            'Accepted values: "tissueBiosampleId", "celltypeBiosampleId".'
-        )
+        raise ValueError(f'Unexpected id_col "{id_col}". Accepted values: "tissueBiosampleId", "celltypeBiosampleId".')
 
     if id_col not in df.columns:
         logger.warning(f'Missing {id_col} column in merged baseline expression. Skipping {parent_col_name} resolution.')

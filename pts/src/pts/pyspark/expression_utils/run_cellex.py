@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from loguru import logger
+from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, concat_ws
 
 
@@ -18,7 +19,7 @@ def _import_cellex():
 class CellexAnalysis:
     def __init__(
         self,
-        spark=None,
+        spark: SparkSession,
         mode='parquet',
         expression_matrix_path=None,
         metadata_path=None,

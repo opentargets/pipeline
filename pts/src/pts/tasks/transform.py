@@ -5,6 +5,7 @@ from importlib import import_module
 from typing import Any, Self
 
 from loguru import logger
+from otter.config.model import Config
 from otter.manifest.model import Artifact
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
@@ -14,7 +15,10 @@ from otter.util.fs import check_destination
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
 path_or_paths = str | dict[str, str]
-transformer_type = Callable[[str | dict[str, str], str | dict[str, str], dict[str, Any] | None], None]
+transformer_type = Callable[
+    [str | dict[str, str], str | dict[str, str], dict[str, Any] | None, Config | None],
+    None,
+]
 
 
 class TransformSpec(Spec):
@@ -45,7 +49,11 @@ class TransformSpec(Spec):
 class Transform(Task):
     """Task that applies a transformation function to input files."""
 
-    def __init__(self, spec: TransformSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: TransformSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: TransformSpec
         self.transformer = self.load_transformer(spec.transformer)

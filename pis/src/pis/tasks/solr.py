@@ -51,7 +51,11 @@ class SolrSpec(Spec):
 class Solr(Task):
     """Fetch Solr data and save as CSV files."""
 
-    def __init__(self, spec: SolrSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: SolrSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: SolrSpec
         self.session: requests.Session
@@ -124,7 +128,7 @@ class Solr(Task):
         dst = h.open('wb')
 
         for batch in self._fetch_docs():
-            self._save_docs(batch, dst, trim_header=dst.tell() > 0)  # ty:ignore[invalid-argument-type]
+            self._save_docs(batch, dst, trim_header=dst.tell() > 0)
         logger.info(f'fetched data type {self.spec.data_type} to {h.absolute}')
 
         return self

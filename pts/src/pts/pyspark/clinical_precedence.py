@@ -62,7 +62,7 @@ def clinical_precedence(
         .withColumn('_drug', f.explode_outer('drugs'))
         .withColumn('drugFromSource', f.col('_drug.drugFromSource'))
         .withColumn('drugId', f.col('_drug.drugId'))
-        .filter(f.col('diseaseFromSourceMappedId').isNotNull() & f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('diseaseFromSourceMappedId').isNotNull() & f.col('drugId').isNotNull())
     )
 
     # Prepare drug_mechanism_of_action: explode chemblIds to get drugId, keep targets
@@ -73,7 +73,7 @@ def clinical_precedence(
         exploded_cr
         .join(drug_moa_exploded, on='drugId', how='inner')
         .withColumn('targetFromSourceId', f.explode_outer('targets'))
-        .filter(f.col('targetFromSourceId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('targetFromSourceId').isNotNull())
         .select(
             'clinicalReportId',
             'clinicalStage',

@@ -187,7 +187,17 @@ class TestLiteratureEntityLutTransform:
         ]
         df = spark.createDataFrame(data, schema=_MATCH_SCHEMA)
         result = _compute_relevance(df)
-        expected = {'pmid', 'pmcid', 'date', 'year', 'month', 'day', 'keywordId', 'relevance', 'keywordType'}
+        expected = {
+            'pmid',
+            'pmcid',
+            'date',
+            'year',
+            'month',
+            'day',
+            'keywordId',
+            'relevance',
+            'keywordType',
+        }
         assert set(result.columns) == expected
 
     def test_unmapped_section_gets_default_weight(self, spark):

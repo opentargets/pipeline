@@ -1,8 +1,7 @@
 """Download fields from all documents in ElasticSearch indexes."""
 
 import json
-from io import IOBase
-from typing import Any, Self
+from typing import IO, Any, Self
 
 import elasticsearch.helpers
 from elasticsearch import Elasticsearch as Es
@@ -51,7 +50,11 @@ class Elasticsearch(Task):
     destination field.
     """
 
-    def __init__(self, spec: ElasticsearchSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: ElasticsearchSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: ElasticsearchSpec
         self.es: Es
@@ -63,7 +66,7 @@ class Elasticsearch(Task):
             self.es.close()
             del self.es
 
-    def _write_docs(self, docs: list[dict[str, Any]], f: IOBase) -> None:
+    def _write_docs(self, docs: list[dict[str, Any]], f: IO[str]) -> None:
         try:
             for d in docs:
                 json.dump(d, f)

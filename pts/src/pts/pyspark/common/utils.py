@@ -3,7 +3,7 @@ import json
 from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 import pyspark.sql.functions as f
 from pyspark.sql import Column, DataFrame
@@ -12,10 +12,6 @@ from pyspark.sql.types import StructField, StructType
 from pts import schemas
 
 F = TypeVar('F', bound=Callable[..., Any])
-
-
-if TYPE_CHECKING:
-    from enum import Enum
 
 
 def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> Column:
@@ -59,7 +55,7 @@ def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> 
         +-----+---------------+---------+
         <BLANKLINE>
     """
-    qc = f.when(qc.isNull(), f.array()).otherwise(qc)  # ty:ignore[missing-argument]
+    qc = f.when(qc.isNull(), f.array()).otherwise(qc)
     return f.when(
         flag_condition,
         f.array_sort(f.array_distinct(f.array_union(qc, f.array(f.lit(flag_text.value))))),
@@ -79,16 +75,17 @@ def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
             A list or iterable of required column names that must exist
             in `self.df.columns`.
 
-    Raises:
-        ValueError: If any required column is missing from `self.df.columns`.
-
     Returns:
         Callable[[F], F]:
             The decorated function with column presence validation.
 
+    Raises:
+        ValueError: If any required column is missing from `self.df.columns`.
+
+
     Example:
         >>> class EvidenceETL:
-        ...     def __init__(self, df: DataFrame):
+        ...     def __init__(self, df: DataFrame) -> None:
         ...         self.df = df
         ...     @required_columns(["gene_id", "pvalue"])
         ...     def score(self) -> DataFrame:
@@ -105,14 +102,15 @@ def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
         @wraps(func)
         def wrapper(self, *args: Any, **kwargs: Any) -> Any:
             if not hasattr(self, 'df') or not isinstance(self.df, DataFrame):
-                raise AttributeError(f'Function "{func.__name__}" expects "self.df" to be a Spark DataFrame.')
+                func_name = getattr(func, '__name__', repr(func))
+                raise AttributeError(f'Function "{func_name}" expects "self.df" to be a Spark DataFrame.')
 
             data_cols = self.df.columns
             missing = [col for col in cols if col not in data_cols]
             if missing:
+                func_name = getattr(func, '__name__', repr(func))
                 raise ValueError(
-                    f'Columns {missing} required by "{func.__name__}" are missing. '
-                    f'Available columns: {sorted(data_cols)}'
+                    f'Columns {missing} required by "{func_name}" are missing. Available columns: {sorted(data_cols)}'
                 )
 
             return func(self, *args, **kwargs)
@@ -123,7 +121,11 @@ def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
 
 
 def linear_rescaling(
-    value: float, in_range_min: float, in_range_max: float, out_range_min: float, out_range_max: float
+    value: float,
+    in_range_min: float,
+    in_range_max: float,
+    out_range_min: float,
+    out_range_max: float,
 ) -> float:
     """Linearly rescaling a value across ranges.
 

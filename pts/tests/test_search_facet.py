@@ -4,7 +4,14 @@ Ported from platform-etl-backend searchFacet step.
 """
 
 from pyspark.sql import Row
-from pyspark.sql.types import ArrayType, BooleanType, LongType, StringType, StructField, StructType
+from pyspark.sql.types import (
+    ArrayType,
+    BooleanType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 from pts.pyspark.search_facet import (
     _compute_disease_name_facets,

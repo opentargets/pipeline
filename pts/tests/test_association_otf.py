@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
@@ -17,6 +17,8 @@ from pts.pyspark.association_otf import (
 @pytest.mark.slow
 class TestComputeFacetClasses:
     """Tests for _compute_facet_classes."""
+
+    _cached_result: DataFrame
 
     TARGET_CLASS_SCHEMA = (
         t
@@ -81,7 +83,9 @@ class TestComputeFacetClasses:
     def test_l3_entries_filtered_out(self: TestComputeFacetClasses) -> None:
         """Only l1 and l2 levels should appear in facetClasses."""
         t1_row = self.result.filter(f.col('targetId') == 'T1').first()
-        facet_classes = t1_row['facetClasses']  # ty:ignore[not-subscriptable]
+        if t1_row is None:
+            raise AssertionError('T1 row not found in result')
+        facet_classes = t1_row['facetClasses']
 
         # T1 has 2 valid id groups (id=1, id=2); id=3 is l3-only and filtered
         assert len(facet_classes) == 2
@@ -89,26 +93,36 @@ class TestComputeFacetClasses:
     def test_struct_has_l1_l2_fields(self: TestComputeFacetClasses) -> None:
         """Each facet class struct should have l1 and l2 fields."""
         t1_row = self.result.filter(f.col('targetId') == 'T1').first()
-        for fc in t1_row['facetClasses']:  # ty:ignore[not-subscriptable]
+        if t1_row is None:
+            raise AssertionError('T1 row not found in result')
+        for fc in t1_row['facetClasses']:
             assert 'l1' in fc.asDict()
             assert 'l2' in fc.asDict()
 
     def test_correct_l1_l2_pairing(self: TestComputeFacetClasses) -> None:
         """l1 and l2 labels should be correctly paired by id."""
         t2_row = self.result.filter(f.col('targetId') == 'T2').first()
-        fc = t2_row['facetClasses'][0]  # ty:ignore[not-subscriptable]
+        if t2_row is None:
+            raise AssertionError('T2 row not found in result')
+        fc = t2_row['facetClasses'][0]
         assert fc['l1'] == 'Transporter'
         assert fc['l2'] == 'ABC transporter'
 
-    def test_null_target_class_produces_null_facet(self: TestComputeFacetClasses) -> None:
+    def test_null_target_class_produces_null_facet(
+        self: TestComputeFacetClasses,
+    ) -> None:
         """Targets with null targetClass should have null facetClasses."""
         t3_row = self.result.filter(f.col('targetId') == 'T3').first()
-        assert t3_row['facetClasses'] is None  # ty:ignore[not-subscriptable]
+        if t3_row is None:
+            raise AssertionError('T3 row not found in result')
+        assert t3_row['facetClasses'] is None
 
 
 @pytest.mark.slow
 class TestComputeFacetTherapeuticAreas:
     """Tests for _compute_facet_therapeutic_areas."""
+
+    _cached_result: DataFrame
 
     DATASET = [
         ('D1', 'D1 Cancer', ['D1', 'D2'], 'Cancer'),
@@ -117,7 +131,10 @@ class TestComputeFacetTherapeuticAreas:
     ]
 
     @pytest.fixture(autouse=True)
-    def _setup(self: TestComputeFacetTherapeuticAreas, spark: SparkSession) -> None:
+    def _setup(
+        self: TestComputeFacetTherapeuticAreas,
+        spark: SparkSession,
+    ) -> None:
         if '_cached_result' not in TestComputeFacetTherapeuticAreas.__dict__:
             df = spark.createDataFrame(
                 self.DATASET,
@@ -136,14 +153,22 @@ class TestComputeFacetTherapeuticAreas:
     def test_d1_resolves_both_ta_labels(self: TestComputeFacetTherapeuticAreas) -> None:
         """D1 has therapeuticAreas [D1, D2] which should resolve to {Cancer, Neoplasm}."""
         d1_row = self.result.filter(f.col('diseaseId') == 'D1').first()
-        assert set(d1_row['therapeuticAreas']) == {'Cancer', 'Neoplasm'}  # ty:ignore[not-subscriptable]
+        if d1_row is None:
+            raise AssertionError('D1 row not found in result')
+        assert set(d1_row['therapeuticAreas']) == {'Cancer', 'Neoplasm'}
 
-    def test_d2_resolves_single_ta_label(self: TestComputeFacetTherapeuticAreas) -> None:
+    def test_d2_resolves_single_ta_label(
+        self: TestComputeFacetTherapeuticAreas,
+    ) -> None:
         """D2 has therapeuticAreas [D1] which should resolve to {Cancer}."""
         d2_row = self.result.filter(f.col('diseaseId') == 'D2').first()
-        assert set(d2_row['therapeuticAreas']) == {'Cancer'}  # ty:ignore[not-subscriptable]
+        if d2_row is None:
+            raise AssertionError('D2 row not found in result')
+        assert set(d2_row['therapeuticAreas']) == {'Cancer'}
 
-    def test_null_therapeutic_areas_handled(self: TestComputeFacetTherapeuticAreas) -> None:
+    def test_null_therapeutic_areas_handled(
+        self: TestComputeFacetTherapeuticAreas,
+    ) -> None:
         """D3 has null therapeuticAreas and should still appear in results."""
         d3_row = self.result.filter(f.col('diseaseId') == 'D3').first()
         assert d3_row is not None
@@ -152,6 +177,8 @@ class TestComputeFacetTherapeuticAreas:
 @pytest.mark.slow
 class TestComputeFacetTractability:
     """Tests for _compute_facet_tractability."""
+
+    _cached_result: DataFrame
 
     TRACTABILITY_SCHEMA = (
         t
@@ -217,17 +244,23 @@ class TestComputeFacetTractability:
     def test_only_true_values_kept(self: TestComputeFacetTractability) -> None:
         """Only tractability entries with value=True should appear."""
         t1_row = self.result.filter(f.col('targetId') == 'T1').first()
+        if t1_row is None:
+            raise AssertionError('T1 row not found in result')
         # SM: sm_1 is True, sm_2 is False → only sm_1
-        assert t1_row['facetTractabilitySmallmolecule'] == ['sm_1']  # ty:ignore[not-subscriptable]
-        assert t1_row['facetTractabilityAntibody'] == ['ab_1']  # ty:ignore[not-subscriptable]
-        assert t1_row['facetTractabilityProtac'] == ['pr_1']  # ty:ignore[not-subscriptable]
-        assert t1_row['facetTractabilityOthermodalities'] == ['oc_1']  # ty:ignore[not-subscriptable]
+        assert t1_row['facetTractabilitySmallmolecule'] == ['sm_1']
+        assert t1_row['facetTractabilityAntibody'] == ['ab_1']
+        assert t1_row['facetTractabilityProtac'] == ['pr_1']
+        assert t1_row['facetTractabilityOthermodalities'] == ['oc_1']
 
-    def test_all_false_produces_empty_arrays(self: TestComputeFacetTractability) -> None:
+    def test_all_false_produces_empty_arrays(
+        self: TestComputeFacetTractability,
+    ) -> None:
         """When all entries have value=False, facet arrays should be empty."""
         t2_row = self.result.filter(f.col('targetId') == 'T2').first()
-        assert t2_row['facetTractabilitySmallmolecule'] == []  # ty:ignore[not-subscriptable]
-        assert t2_row['facetTractabilityAntibody'] == []  # ty:ignore[not-subscriptable]
+        if t2_row is None:
+            raise AssertionError('T2 row not found in result')
+        assert t2_row['facetTractabilitySmallmolecule'] == []
+        assert t2_row['facetTractabilityAntibody'] == []
 
     def test_null_tractability_handled(self: TestComputeFacetTractability) -> None:
         """Targets with null tractability should still be present."""

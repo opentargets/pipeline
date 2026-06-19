@@ -28,7 +28,11 @@ class UnzipSpec(Spec):
 class Unzip(Task):
     """Unzip a file and store locally."""
 
-    def __init__(self, spec: UnzipSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: UnzipSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: UnzipSpec
         self.inner_file = spec.inner_file or str(Path(self.spec.source).stem)
@@ -37,7 +41,10 @@ class Unzip(Task):
     def run(self) -> Self:
         check_destination(self.spec.destination, delete=True)
 
-        s = StorageHandle(self.spec.source, config=self.context.config)
+        s = StorageHandle(
+            self.spec.source,
+            config=self.context.config,
+        )
         f = s.open('rb')
         logger.debug(f'unzipping {self.inner_file} from {self.spec.source} to {self.spec.destination}')
 

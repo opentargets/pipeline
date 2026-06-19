@@ -277,7 +277,11 @@ def test_go_grouping_by_aspect(spark):
         ),
     ])
     ensembl_go_data = [
-        Row(id='ENSG00000141510', approvedSymbol='TP53', proteinIds=[Row(id='P04637', source='uniprot_swissprot')])
+        Row(
+            id='ENSG00000141510',
+            approvedSymbol='TP53',
+            proteinIds=[Row(id='P04637', source='uniprot_swissprot')],
+        )
     ]
     ensembl_df = spark.createDataFrame(ensembl_go_data, ensembl_go_schema)
 
@@ -305,9 +309,21 @@ def test_homologue_whitelist_filtering(spark):
         StructField('taxonomy_id', StringType()),
     ])
     homology_dict_data = [
-        Row(**{'#name': 'mus_musculus', 'species': 'mus_musculus', 'taxonomy_id': '10090'}),
-        Row(**{'#name': 'rattus_norvegicus', 'species': 'rattus_norvegicus', 'taxonomy_id': '10116'}),
-        Row(**{'#name': 'danio_rerio', 'species': 'danio_rerio', 'taxonomy_id': '7955'}),
+        Row(**{
+            '#name': 'mus_musculus',
+            'species': 'mus_musculus',
+            'taxonomy_id': '10090',
+        }),
+        Row(**{
+            '#name': 'rattus_norvegicus',
+            'species': 'rattus_norvegicus',
+            'taxonomy_id': '10116',
+        }),
+        Row(**{
+            '#name': 'danio_rerio',
+            'species': 'danio_rerio',
+            'taxonomy_id': '7955',
+        }),
     ]
     homology_dict_df = spark.createDataFrame(homology_dict_data, homology_dict_schema)
 
@@ -480,7 +496,13 @@ def test_safety_evidence_aggregation(spark):
         StructField('symbols', ArrayType(StringType())),
     ])
     lookup_data = [
-        Row(ensgId='ENSG00000141510', name=['P04637', 'TP53'], uniprot=['P04637'], HGNC=['TP53'], symbols=['TP53']),
+        Row(
+            ensgId='ENSG00000141510',
+            name=['P04637', 'TP53'],
+            uniprot=['P04637'],
+            HGNC=['TP53'],
+            symbols=['TP53'],
+        ),
     ]
     lookup_df = spark.createDataFrame(lookup_data, lookup_schema)
 
@@ -847,10 +869,12 @@ def test_subcellular_location_struct_schema_alignment(spark):
         StructField('uniprotId', StringType()),
         StructField(
             'locations',
-            ArrayType(StructType([
-                StructField('location', StringType()),
-                StructField('targetModifier', StringType()),
-            ])),
+            ArrayType(
+                StructType([
+                    StructField('location', StringType()),
+                    StructField('targetModifier', StringType()),
+                ])
+            ),
         ),
     ])
     uniprot_df = spark.createDataFrame(
@@ -864,16 +888,26 @@ def test_subcellular_location_struct_schema_alignment(spark):
         StructField('Category', StringType()),
     ])
     ssl_df = spark.createDataFrame(
-        [('SL-0086', 'Cytoplasm', 'Intracellular'), ('SL-0191', 'Nucleus', 'Intracellular')],
+        [
+            ('SL-0086', 'Cytoplasm', 'Intracellular'),
+            ('SL-0191', 'Nucleus', 'Intracellular'),
+        ],
         ssl_schema,
     )
 
     hpa_result = _build_gene_with_location(hpa_df, hpa_sl_df)
     uniprot_result = _map_uniprot_locations_to_ssl(uniprot_df, ssl_df)
 
-    hpa_struct = hpa_result.schema['locations'].dataType.elementType
-    uniprot_struct = uniprot_result.schema['subcellularLocations'].dataType.elementType
+    hpa_locations = hpa_result.schema['locations'].dataType
+    assert isinstance(hpa_locations, ArrayType)
+    hpa_struct = hpa_locations.elementType
 
+    uniprot_locations = uniprot_result.schema['subcellularLocations'].dataType
+    assert isinstance(uniprot_locations, ArrayType)
+    uniprot_struct = uniprot_locations.elementType
+
+    assert isinstance(hpa_struct, StructType)
+    assert isinstance(uniprot_struct, StructType)
     hpa_fields = {field.name: field.dataType for field in hpa_struct.fields}
     uniprot_fields = {field.name: field.dataType for field in uniprot_struct.fields}
 

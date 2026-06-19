@@ -16,9 +16,12 @@ class AggregateExpression:
      gene (rows) per annotation (columns).
     """
 
-    def __init__(self, spark: SparkSession):
+    def __init__(
+        self,
+        spark: SparkSession,
+    ) -> None:
         self.spark = spark
-        self.df: DataFrame | None = None
+        self.df: DataFrame
 
     def load_data(self, directory: str, local: bool = False):
         """This function loads the data from the directory and returns a list of DataFrames."""

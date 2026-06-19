@@ -52,14 +52,24 @@ MOLECULE_SCHEMA = StructType([
     StructField('inchiKey', StringType()),
     StructField('molblock', StringType()),
     StructField('parentId', StringType()),
-    StructField('tradeNames', ArrayType(StructType([
-        StructField('label', StringType()),
-        StructField('source', StringType()),
-    ]))),
-    StructField('synonyms', ArrayType(StructType([
-        StructField('label', StringType()),
-        StructField('source', StringType()),
-    ]))),
+    StructField(
+        'tradeNames',
+        ArrayType(
+            StructType([
+                StructField('label', StringType()),
+                StructField('source', StringType()),
+            ])
+        ),
+    ),
+    StructField(
+        'synonyms',
+        ArrayType(
+            StructType([
+                StructField('label', StringType()),
+                StructField('source', StringType()),
+            ])
+        ),
+    ),
     StructField(
         'crossReferences',
         ArrayType(
@@ -204,7 +214,8 @@ def molecule_df(spark):
             childChemblIds=[],
             description=None,
         ),
-        # A molecule with drugbank xref but no clinical reports (should get UNKNOWN phase)
+        # A molecule with drugbank xref but no clinical reports (should get
+        # UNKNOWN phase)
         Row(
             id='CHEMBL888',
             name='Drug D',
@@ -219,7 +230,8 @@ def molecule_df(spark):
             childChemblIds=[],
             description=None,
         ),
-        # A molecule that is NOT a drug (no drugbank, no clinical reports, no mechanism, no probe)
+        # A molecule that is NOT a drug (no drugbank, no clinical reports, no
+        # mechanism, no probe)
         Row(
             id='CHEMBL999',
             name='Not A Drug',
@@ -322,7 +334,8 @@ class TestProcessClinicalReportIndications:
         result = _process_clinical_report_indications(clinical_report_df, disease_df)
         rows = {r['id']: r['indications'] for r in result.collect()}
 
-        # CHEMBL1 should have indications for EFO_0001 (approved) and EFO_0002 (phase III)
+        # CHEMBL1 should have indications for EFO_0001 (approved) and EFO_0002
+        # (phase III)
         chembl1_indications = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL1']}
         assert ('EFO_0001', 'APPROVAL') in chembl1_indications
         assert ('EFO_0002', 'PHASE_3') in chembl1_indications
@@ -570,7 +583,7 @@ class TestProcessDrugIndex:
 
     @pytest.mark.slow
     def test_molblock_passed_through(self, drug_index_result):
-        """molblock from the molecule input survives into the drug index."""
+        """molblock from the molecule input survives into the drug index."""  # noqa: D403
         assert 'molblock' in drug_index_result.columns
         chembl1 = drug_index_result.filter(f.col('id') == 'CHEMBL1').collect()[0]
         assert chembl1['molblock'] == 'MOLBLOCK_CHEMBL1'

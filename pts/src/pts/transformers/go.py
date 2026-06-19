@@ -14,8 +14,7 @@ from pts.schemas.go import go_schema
 
 def _non_obsolete_ids(graph) -> set[str]:
     return {
-        n for n, data in graph.nodes(data=True)
-        if n.startswith('GO:') and data.get('is_obsolete', 'false') != 'true'
+        n for n, data in graph.nodes(data=True) if n.startswith('GO:') and data.get('is_obsolete', 'false') != 'true'
     }
 
 

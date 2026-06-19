@@ -83,7 +83,8 @@ def _read_publications(
 
     def _read_kind(kind: str) -> DataFrame:
         df = (
-            spark.read.schema(schema)
+            spark.read
+            .schema(schema)
             .json(_epmc_read_path(epmc_path, kind, date_prefix))
             .withColumn('kind', f.lit(kind))
             .withColumn('traceSource', f.input_file_name())
@@ -147,15 +148,11 @@ def literature_publication_match(
     )
 
     logger.info('extract matches and map labels')
-    match_mapped = (
-        publication
-        .extract_matches()
-        .map_labels(
-            session=spark,
-            label_lut_path=source['ontoma_disease_target_drug_label_lut'],
-            label_col_name='label',
-            type_col_name='type',
-        )
+    match_mapped = publication.extract_matches().map_labels(
+        session=spark,
+        label_lut_path=source['ontoma_disease_target_drug_label_lut'],
+        label_col_name='label',
+        type_col_name='type',
     )
     # consumed by match_disambiguated and the isMapped==False filter
     match_mapped.df.persist()
@@ -179,32 +176,16 @@ def literature_publication_match(
 
     # rows that fail mapping are emitted via the isMapped==False branch, so
     # guard the disambiguation branch with isMapped==True to keep the union disjoint
-    match_failed = (
-        match_mapped.df
-        .filter(~f.col('isMapped'))
-        .unionByName(
-            match_disambiguated.df
-            .filter(f.col('isMapped'))
-            .filter(~f.col('isValid')),
-            allowMissingColumns=True,
-        )
+    match_failed = match_mapped.df.filter(~f.col('isMapped')).unionByName(
+        match_disambiguated.df.filter(f.col('isMapped')).filter(~f.col('isValid')),
+        allowMissingColumns=True,
     )
 
-    logger.info(
-        f'write valid matches to {destination["match_valid"]} '
-        f'(coalesce={match_valid_coalesce})'
-    )
-    maybe_coalesce(match_valid, match_valid_coalesce).write.mode('overwrite').parquet(
-        destination['match_valid']
-    )
+    logger.info(f'write valid matches to {destination["match_valid"]} (coalesce={match_valid_coalesce})')
+    maybe_coalesce(match_valid, match_valid_coalesce).write.mode('overwrite').parquet(destination['match_valid'])
 
-    logger.info(
-        f'write failed matches to {destination["match_failed"]} '
-        f'(coalesce={match_failed_coalesce})'
-    )
-    maybe_coalesce(match_failed, match_failed_coalesce).write.mode('overwrite').parquet(
-        destination['match_failed']
-    )
+    logger.info(f'write failed matches to {destination["match_failed"]} (coalesce={match_failed_coalesce})')
+    maybe_coalesce(match_failed, match_failed_coalesce).write.mode('overwrite').parquet(destination['match_failed'])
 
     match_mapped.df.unpersist()
     match_disambiguated.df.unpersist()

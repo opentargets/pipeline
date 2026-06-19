@@ -27,14 +27,14 @@ class BatchJobOperator(CloudBatchSubmitJobOperator):
         region: str = GCP_REGION,
         labels: Labels | None = None,
         **kwargs,
-    ):
+    ) -> None:
         job = batch_job_spec.job.build(
             task_environments=batch_index_row.environments, labels=dict(labels) if labels else None
         )
         super().__init__(
             project_id=project_id,
             region=region,
-            job_name=f"{job_name}-job-{batch_index_row.idx}-{time.strftime('%Y%m%d-%H%M%S')}",
+            job_name=f'{job_name}-job-{batch_index_row.idx}-{time.strftime("%Y%m%d-%H%M%S")}',
             job=job,
             deferrable=False,
             **kwargs,

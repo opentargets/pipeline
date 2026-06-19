@@ -29,40 +29,45 @@ class VepVolumeRegistryOptions(BaseModel):
         vcf_input_path (str): GCS path that contains all input VCF files.
         vep_output_path (str): GCS path where the output of the VEP annotation should be stored.
         vep_cache_path (str): GCS path to the VEP cache
-        mount_dir_root (str): Mount directory root for Vep google batch tasks. This should be an absolute path. The default value is /mnt/vep
+        mount_dir_root (str): Mount directory root for Vep google batch tasks. This should be an absolute path.
+            The default value is /mnt/vep
 
 
-    The configuration contains a single method `to_path_registry` that converts the **path configuration into a path registry**.
+    The configuration contains a single method `to_path_registry` that converts the **path configuration into a path
+    registry**.
 
-    The path registry contains 3 keys `input`, `output` and `cache` that correspond to the input, output and cache paths respectively.
-    The value of each key is a dictionary that contains the `remote_path` (GCS path) and the `mount_point` (local path on the google batch VM).
+    The path registry contains 3 keys `input`, `output` and `cache` that correspond to the input, output and cache paths
+    respectively. The value of each key is a dictionary that contains the `remote_path` (GCS path) and the `mount_point`
+    (local path on the google batch VM).
 
     The mount points are derived from the `mount_dir_root` attribute and the path keys.
     """
 
-    vcf_input_path: Annotated[str, Field(pattern=r"^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$")]
+    vcf_input_path: Annotated[str, Field(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$')]
     """GCS path that contains all input VCF files."""
-    vep_output_path: Annotated[str, Field(pattern=r"^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$")]
+    vep_output_path: Annotated[str, Field(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$')]
     """GCS path where the output of the VEP annotation should be stored."""
-    vep_cache_path: Annotated[str, Field(pattern=r"^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$")]
+    vep_cache_path: Annotated[str, Field(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$')]
     """GCS path to the VEP cache."""
-    mount_dir_root: Annotated[str, Field(pattern=r"^/mnt(/[a-zA-Z0-9_-]+)*/$")] = "/mnt/disks/share/"
-    """Mount directory root for Vep google batch tasks. This should be an absolute path. The default value is /mnt/disks/share/."""
+    mount_dir_root: Annotated[str, Field(pattern=r'^/mnt(/[a-zA-Z0-9_-]+)*/$')] = '/mnt/disks/share/'
+    """Mount directory root for Vep google batch tasks. This should be an absolute path. The default value is
+        /mnt/disks/share/.
+    """
 
     @property
     def vcf_input(self) -> VolumeSpec:
         """Get vcf input path."""
-        return VolumeSpec(remote_uri=self.vcf_input_path.rstrip("/"), mount_point=f"{self.mount_dir_root}input/")
+        return VolumeSpec(remote_uri=self.vcf_input_path.rstrip('/'), mount_point=f'{self.mount_dir_root}input/')
 
     @property
     def vep_output(self) -> VolumeSpec:
         """Get vep output path."""
-        return VolumeSpec(remote_uri=self.vep_output_path.rstrip("/"), mount_point=f"{self.mount_dir_root}output/")
+        return VolumeSpec(remote_uri=self.vep_output_path.rstrip('/'), mount_point=f'{self.mount_dir_root}output/')
 
     @property
     def vep_cache(self) -> VolumeSpec:
         """Get vep cache path."""
-        return VolumeSpec(remote_uri=self.vep_cache_path.rstrip("/"), mount_point=f"{self.mount_dir_root}cache/")
+        return VolumeSpec(remote_uri=self.vep_cache_path.rstrip('/'), mount_point=f'{self.mount_dir_root}cache/')
 
     @property
     def to_volume_registry(self) -> VolumeRegistrySpec:
@@ -90,7 +95,7 @@ class VepManifestGenerator(ProtoManifestGenerator):
         self,
         *,
         options: VepVolumeRegistryOptions,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         project_id: str = GCP_PROJECT_PLATFORM,
     ) -> None:
         """Initialize the manifest generator.
@@ -127,28 +132,33 @@ class VepManifestGenerator(ProtoManifestGenerator):
         Returns:
             set[str]: set of base names to pass to the task environments.
         """
-        blobs = self.gcs_hook.list(input_path.bucket, prefix=input_path.path, match_glob="**.csv")
-        vcf_paths = {GCSPath(f"gs://{input_path.bucket}/{blob}").segments["filename"] for blob in blobs}
-        logger.info("Found %s vcf files", len(vcf_paths))
+        blobs = self.gcs_hook.list(input_path.bucket, prefix=input_path.path, match_glob='**.csv')
+        vcf_paths = {GCSPath(f'gs://{input_path.bucket}/{blob}').segments['filename'] for blob in blobs}
+        logger.info('Found %s vcf files', len(vcf_paths))
         return vcf_paths
 
     def _build_environment_registry(self) -> EnvironmentRegistrySpec:
         """Build the list of variables to be used in the manifest.
 
-        The list is built by listing the number of VCF files in the `vcf_input_path` and creating a dictionary for each file with the corresponding mount configuration.
+        The list is built by listing the number of VCF files in the `vcf_input_path` and creating a dictionary for each
+        file with the corresponding mount configuration.
 
         Returns:
             EnvironmentRegistrySpec: List of variables to be used in the manifest.
         """
         vcf_files = self._get_vcf_partition_basenames(self.options.vcf_input.gcs_path)
         # The content looks like:
-        # [{"INPUT_FILE": "file1.vcf", "OUTPUT_FILE": "file1.json"}, {"INPUT_FILE": "file2.vcf", "OUTPUT_FILE": "file2.json"}, ...]
+        # [
+        #   {"INPUT_FILE": "file1.vcf", "OUTPUT_FILE": "file1.json"},
+        #   {"INPUT_FILE": "file2.vcf", "OUTPUT_FILE": "file2.json"},
+        #   ...
+        # ]
         return EnvironmentRegistrySpec(
             environments=[
                 EnvironmentSpec(
                     variables={
-                        "INPUT_FILE": file,
-                        "OUTPUT_FILE": file.replace(".csv", ".json"),
+                        'INPUT_FILE': file,
+                        'OUTPUT_FILE': file.replace('.csv', '.json'),
                     }
                 )
                 for file in vcf_files

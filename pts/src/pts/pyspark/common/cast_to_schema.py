@@ -65,7 +65,11 @@ def cast_column_to_target_type(
             # Array of structs
             return f.transform(
                 col,
-                lambda x: cast_struct(x, source_type.elementType, target_type.elementType),  # ty:ignore[invalid-argument-type]
+                lambda x: cast_struct(
+                    x,
+                    source_type.elementType,
+                    target_type.elementType,
+                ),
             )
         else:
             # Simple array

@@ -325,15 +325,15 @@ def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
         'pValueMantissa',
         'pValueExponent',
         'oddsRatio',
-        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(  # ty:ignore[missing-argument]
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalLower')).alias(
             'oddsRatioConfidenceIntervalLower'
         ),
-        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(  # ty:ignore[missing-argument]
+        f.when(f.col('oddsRatio').isNotNull(), f.col('ConfidenceIntervalUpper')).alias(
             'oddsRatioConfidenceIntervalUpper'
         ),
         'beta',
-        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),  # ty:ignore[missing-argument]
-        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),  # ty:ignore[missing-argument]
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalLower')).alias('betaConfidenceIntervalLower'),
+        f.when(f.col('beta').isNotNull(), f.col('ConfidenceIntervalUpper')).alias('betaConfidenceIntervalUpper'),
         f.split(f.col('sex'), ', ').alias('sex'),
         'ancestry',
         'ancestryId',
@@ -341,7 +341,7 @@ def process_gene_burden_curation(burden_curation_df: DataFrame) -> DataFrame:
         'studySampleSize',
         'studyCases',
         'studyCasesWithQualifyingVariants',
-        f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(  # ty:ignore[missing-argument]
+        f.when(f.col('allelicRequirements').isNotNull(), f.array(f.col('allelicRequirements'))).alias(
             'allelicRequirements'
         ),
         'statisticalMethod',

@@ -39,7 +39,7 @@ class BatchCollectOperator(BaseOperator):
     def __init__(
         self,
         collect_spec: BatchCollectSpec | None,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         max_workers: int = 20,
         **kwargs,
     ) -> None:
@@ -51,14 +51,14 @@ class BatchCollectOperator(BaseOperator):
     def execute(self, context) -> None:
         """Execute the collect operation."""
         if self.collect_spec is None:
-            raise AirflowSkipException("No collect spec configured — skipping.")
+            raise AirflowSkipException('No collect spec configured — skipping.')
         hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         spec = self.collect_spec
         files = self._list_files(self.collect_spec, hook)
         if not files:
-            raise AirflowSkipException(f"No files under {spec.source_prefix!r} matching {spec.file_glob!r} — skipping.")
+            raise AirflowSkipException(f'No files under {spec.source_prefix!r} matching {spec.file_glob!r} — skipping.')
 
-        self.log.info("Collecting %d file(s) from %s into %s", len(files), spec.source_prefix, spec.destination_prefix)
+        self.log.info('Collecting %d file(s) from %s into %s', len(files), spec.source_prefix, spec.destination_prefix)
         client = hook.get_conn()
         src_bucket = client.bucket(spec.source_path.bucket)
         dst_bucket = client.bucket(spec.destination_path.bucket)
@@ -69,7 +69,7 @@ class BatchCollectOperator(BaseOperator):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             pending = self._submit_copies(executor, blob_pairs)
             for future in as_completed(pending):
-                self.log.info("collected %s -> %s", pending[future], future.result())
+                self.log.info('collected %s -> %s', pending[future], future.result())
 
     @staticmethod
     def _list_files(spec: BatchCollectSpec, hook: GCSHook) -> list[str]:
@@ -91,7 +91,7 @@ class BatchCollectOperator(BaseOperator):
             (
                 src_bucket.blob(src_name),
                 dst_bucket.blob(
-                    f"{dest_path}/part-{part_idx:05d}-{uuid.uuid5(uuid.NAMESPACE_URL, src_name)}-c000.snappy.{extension}"
+                    f'{dest_path}/part-{part_idx:05d}-{uuid.uuid5(uuid.NAMESPACE_URL, src_name)}-c000.snappy.{extension}'  # noqa: E501
                 ),
             )
             for part_idx, src_name in enumerate(sorted(files))

@@ -46,7 +46,7 @@ def build_gene_mapping(
             '`3. marker symbol` as targetInModel',
             '`11. Ensembl gene id` as targetInModelEnsemblId',
         )
-        .filter(f.col('targetInModelEnsemblId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('targetInModelEnsemblId').isNotNull())
         .join(
             mouse_to_human_gene.selectExpr('gene_id as targetInModelMgiId', 'hgnc_gene_id'),
             on='targetInModelMgiId',
@@ -59,13 +59,20 @@ def build_gene_mapping(
             on='hgnc_gene_id',
             how='inner',
         )
-        .filter(f.col('targetFromSourceId').isNotNull())  # ty:ignore[missing-argument]
-        .select('targetInModelMgiId', 'targetInModel', 'targetInModelEnsemblId', 'targetFromSourceId')
+        .filter(f.col('targetFromSourceId').isNotNull())
+        .select(
+            'targetInModelMgiId',
+            'targetInModel',
+            'targetInModelEnsemblId',
+            'targetFromSourceId',
+        )
     )
 
 
 def process_literature_references(
-    mgi_pubmed: DataFrame, disease_model_summary: DataFrame, model_mouse_phenotypes: DataFrame
+    mgi_pubmed: DataFrame,
+    disease_model_summary: DataFrame,
+    model_mouse_phenotypes: DataFrame,
 ) -> DataFrame:
     """Process literature references for model-gene combinations."""
     mgi_pubmed_exploded = (

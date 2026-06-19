@@ -19,9 +19,7 @@ class Dataset:
     # The theoretical maximum of harmonic sum for score normalisation:
     MAX_HARMONIC_SUM: float = reduce(lambda acc, iv: acc + iv[1] / iv[0] ** 2, enumerate([1] * 1000, start=1), 0.0)
 
-    def __post_init__(
-        self: Dataset,
-    ) -> None:
+    def __post_init__(self: Dataset) -> None:
         """Initialise an instance of Dataset class."""
         # Validating type:
         match self._df:
@@ -32,7 +30,7 @@ class Dataset:
 
         # Validating required columns:
         if hasattr(self, 'MANDATORY_COLUMNS'):
-            self.validate_columns(self._df, self.MANDATORY_COLUMNS)  # ty:ignore[invalid-argument-type]
+            self.validate_columns(self._df, self.MANDATORY_COLUMNS)
 
     @staticmethod
     def validate_columns(df: DataFrame, required_columns: list[str]) -> None:
@@ -45,9 +43,6 @@ class Dataset:
         Raises:
             ValueError, Required column: {column} is missing from dataset
         """
-        if required_columns is None:
-            pass
-
         dataframe_columns = df.columns
 
         for column in required_columns:
@@ -147,7 +142,7 @@ class Dataset:
             lambda pair: pair.sorted_filtered_scores / f.pow(pair.indices, f.lit(2)),
         )
 
-        return f.aggregate(weighted_scores, f.lit(0.0), lambda acc, x: acc + x)  # noqa: FURB118  # PySpark requires a lambda here
+        return f.aggregate(weighted_scores, f.lit(0.0), lambda acc, x: acc + x)  # PySpark requires a lambda here
 
     @staticmethod
     def _get_top_high_scores(collected_scores: Column, max_array_size: int = 50) -> Column:

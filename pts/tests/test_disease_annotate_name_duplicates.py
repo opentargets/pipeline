@@ -55,20 +55,21 @@ def base_df() -> pl.DataFrame:
 
     Collision groups
     ----------------
-    - "acidosis"  : http://.../EFO_001 (efo, rank 1) vs http://.../HP_001 (hp, rank 100)
-                    → EFO_001 canonical, HP_001 superseded
-    - "fever"     : http://.../MONDO_001 (mondo, rank 2) vs http://.../HP_002 (hp, rank 100)
-                    → MONDO_001 canonical, HP_002 superseded
+    - "acidosis"  : http://.../EFO_001 (efo, rank 1) vs http://.../HP_001
+                    (hp, rank 100) → EFO_001 canonical, HP_001 superseded
+    - "fever"     : http://.../MONDO_001 (mondo, rank 2) vs http://.../HP_002
+                    (hp, rank 100) → MONDO_001 canonical, HP_002 superseded
     - "unique"    : http://.../EFO_002  — no collision, must be unchanged
 
-    Also included: an already-deprecated node (http://.../HP_OLD) that must not be touched.
+    Also included: an already-deprecated node (http://.../HP_OLD) that must not
+    be touched.
     """
     return _make_df(
         _make_node('http://www.ebi.ac.uk/efo/EFO_001', 'acidosis'),
-        _make_node('http://purl.obolibrary.org/obo/HP_001', 'Acidosis'),   # same name, lower priority
+        _make_node('http://purl.obolibrary.org/obo/HP_001', 'Acidosis'),  # same name, lower priority
         _make_node('http://purl.obolibrary.org/obo/MONDO_001', 'fever'),
-        _make_node('http://purl.obolibrary.org/obo/HP_002', 'Fever'),       # same name, lower priority
-        _make_node('http://www.ebi.ac.uk/efo/EFO_002', 'unique disease'),   # no collision
+        _make_node('http://purl.obolibrary.org/obo/HP_002', 'Fever'),  # same name, lower priority
+        _make_node('http://www.ebi.ac.uk/efo/EFO_002', 'unique disease'),  # no collision
         _make_node('http://purl.obolibrary.org/obo/HP_OLD', 'old term', deprecated=True),
     )
 
@@ -99,25 +100,34 @@ class TestAnnotateNameDuplicates:
 
     # -- superseded nodes marked deprecated ----------------------------------
 
-    @pytest.mark.parametrize('superseded_url', [
-        'http://purl.obolibrary.org/obo/HP_001',
-        'http://purl.obolibrary.org/obo/HP_002',
-    ])
+    @pytest.mark.parametrize(
+        'superseded_url',
+        [
+            'http://purl.obolibrary.org/obo/HP_001',
+            'http://purl.obolibrary.org/obo/HP_002',
+        ],
+    )
     def test_superseded_node_is_deprecated(self, superseded_url: str) -> None:
-        deprecated = (
-            self.result
-            .filter(pl.col('id') == superseded_url)
-            .select(pl.col('meta').struct['deprecated'])
-            ['deprecated'][0]
-        )
+        deprecated = self.result.filter(pl.col('id') == superseded_url).select(pl.col('meta').struct['deprecated'])[
+            'deprecated'
+        ][0]
         assert deprecated is True
 
     # -- superseded nodes receive IAO entry pointing to canonical URL --------
 
-    @pytest.mark.parametrize(('superseded_url', 'canonical_url'), [
-        ('http://purl.obolibrary.org/obo/HP_001', 'http://www.ebi.ac.uk/efo/EFO_001'),
-        ('http://purl.obolibrary.org/obo/HP_002', 'http://purl.obolibrary.org/obo/MONDO_001'),
-    ])
+    @pytest.mark.parametrize(
+        ('superseded_url', 'canonical_url'),
+        [
+            (
+                'http://purl.obolibrary.org/obo/HP_001',
+                'http://www.ebi.ac.uk/efo/EFO_001',
+            ),
+            (
+                'http://purl.obolibrary.org/obo/HP_002',
+                'http://purl.obolibrary.org/obo/MONDO_001',
+            ),
+        ],
+    )
     def test_superseded_node_has_iao_entry(self, superseded_url: str, canonical_url: str) -> None:
         iao_vals = (
             self.result
@@ -125,24 +135,24 @@ class TestAnnotateNameDuplicates:
             .unnest('meta')
             .explode('basicPropertyValues')
             .unnest('basicPropertyValues')
-            .filter(pl.col('pred') == _IAO_REPLACED_BY)
-            ['val'].to_list()
+            .filter(pl.col('pred') == _IAO_REPLACED_BY)['val']
+            .to_list()
         )
         assert canonical_url in iao_vals
 
     # -- canonical nodes are not touched -------------------------------------
 
-    @pytest.mark.parametrize('canonical_url', [
-        'http://www.ebi.ac.uk/efo/EFO_001',
-        'http://purl.obolibrary.org/obo/MONDO_001',
-    ])
+    @pytest.mark.parametrize(
+        'canonical_url',
+        [
+            'http://www.ebi.ac.uk/efo/EFO_001',
+            'http://purl.obolibrary.org/obo/MONDO_001',
+        ],
+    )
     def test_canonical_node_not_deprecated(self, canonical_url: str) -> None:
-        deprecated = (
-            self.result
-            .filter(pl.col('id') == canonical_url)
-            .select(pl.col('meta').struct['deprecated'])
-            ['deprecated'][0]
-        )
+        deprecated = self.result.filter(pl.col('id') == canonical_url).select(pl.col('meta').struct['deprecated'])[
+            'deprecated'
+        ][0]
         # must remain None (was never deprecated) — not True
         assert deprecated is not True
 
@@ -202,7 +212,9 @@ class TestAnnotateNameDuplicatesEdgeCases:
         )
         result = annotate_name_duplicates(df)
         # HP_A is not CLASS, so EFO_A should not be marked canonical over it
-        hp_deprecated = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_A').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
+        hp_deprecated = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_A').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
         assert hp_deprecated is not True
 
     def test_priority_efo_over_mondo(self) -> None:
@@ -211,10 +223,14 @@ class TestAnnotateNameDuplicatesEdgeCases:
             _make_node('http://purl.obolibrary.org/obo/MONDO_X', 'Shared Name'),
         )
         result = annotate_name_duplicates(df)
-        efo_dep = result.filter(pl.col('id') == 'http://www.ebi.ac.uk/efo/EFO_X').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
-        mondo_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/MONDO_X').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
-        assert efo_dep is not True   # EFO wins
-        assert mondo_dep is True     # MONDO is superseded
+        efo_dep = result.filter(pl.col('id') == 'http://www.ebi.ac.uk/efo/EFO_X').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
+        mondo_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/MONDO_X').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
+        assert efo_dep is not True  # EFO wins
+        assert mondo_dep is True  # MONDO is superseded
 
     def test_priority_mondo_over_hp(self) -> None:
         df = _make_df(
@@ -222,10 +238,14 @@ class TestAnnotateNameDuplicatesEdgeCases:
             _make_node('http://purl.obolibrary.org/obo/HP_Y', 'Shared Name'),
         )
         result = annotate_name_duplicates(df)
-        mondo_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/MONDO_Y').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
-        hp_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_Y').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
+        mondo_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/MONDO_Y').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
+        hp_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_Y').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
         assert mondo_dep is not True  # MONDO wins
-        assert hp_dep is True         # HP is superseded
+        assert hp_dep is True  # HP is superseded
 
     def test_unknown_prefix_superseded_by_hp(self) -> None:
         """Unknown prefix gets rank 99 — it beats HP (100) but loses to everything listed."""
@@ -234,7 +254,11 @@ class TestAnnotateNameDuplicatesEdgeCases:
             _make_node('http://example.org/UNKNOWN_Z', 'Shared Name'),
         )
         result = annotate_name_duplicates(df)
-        hp_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_Z').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
-        unk_dep = result.filter(pl.col('id') == 'http://example.org/UNKNOWN_Z').select(pl.col('meta').struct['deprecated'])['deprecated'][0]
+        hp_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/HP_Z').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
+        unk_dep = result.filter(pl.col('id') == 'http://example.org/UNKNOWN_Z').select(
+            pl.col('meta').struct['deprecated']
+        )['deprecated'][0]
         assert unk_dep is not True  # unknown (rank 99) wins over HP (rank 100)
         assert hp_dep is True

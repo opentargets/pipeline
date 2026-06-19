@@ -16,11 +16,16 @@ class TestCleanPathways:
     ])
 
     def test_keeps_only_homo_sapiens(self, spark: SparkSession) -> None:
-        data = [('R-HSA-1', 'Pathway A', 'Homo sapiens'), ('R-MMU-1', 'Pathway B', 'Mus musculus')]
+        data = [
+            ('R-HSA-1', 'Pathway A', 'Homo sapiens'),
+            ('R-MMU-1', 'Pathway B', 'Mus musculus'),
+        ]
         df = spark.createDataFrame(data, schema=self.SCHEMA)
         result = _clean_pathways(df)
         assert result.count() == 1
-        assert result.first()['id'] == 'R-HSA-1'
+        row = result.first()
+        assert row is not None
+        assert row['id'] == 'R-HSA-1'
 
     def test_drops_species_column(self, spark: SparkSession) -> None:
         data = [('R-HSA-1', 'Pathway A', 'Homo sapiens')]
@@ -41,6 +46,7 @@ class TestBuildGraphDocuments:
         )
         result = _build_graph_documents(spark, vertices, edges)
         row = result.filter(result.id == 'R-1').first()
+        assert row is not None
         assert row['ancestors'] == []
         assert row['children'] == []
 
@@ -50,6 +56,8 @@ class TestBuildGraphDocuments:
         result = _build_graph_documents(spark, vertices, edges)
         child = result.filter(result.id == 'R-2').first()
         root = result.filter(result.id == 'R-1').first()
+        assert child is not None
+        assert root is not None
         assert 'R-1' in child['ancestors']
         assert 'R-1' in child['parents']
         assert 'R-2' in root['descendants']

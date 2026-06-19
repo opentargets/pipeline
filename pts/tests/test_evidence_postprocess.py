@@ -33,7 +33,13 @@ class TestEvidence:
 
     INVALID_BIOTYPES = ['bt2', 'bt3']
 
-    UNIQUE_FIELDS = ['diseaseId', 'targetId', 'targetFromSourceId', 'diseaseFromSourceMappedId', 'resourceScore']
+    UNIQUE_FIELDS = [
+        'diseaseId',
+        'targetId',
+        'targetFromSourceId',
+        'diseaseFromSourceMappedId',
+        'resourceScore',
+    ]
 
     @pytest.fixture(autouse=True)
     def _setup(self: TestEvidence, spark: SparkSession) -> None:
@@ -48,7 +54,8 @@ class TestEvidence:
 
         # Generate target look up table:
         self.target_lut = spark.createDataFrame(
-            self.TARGET_LUT_DATA, 'targetId STRING, targetFromSourceId STRING, biotype STRING'
+            self.TARGET_LUT_DATA,
+            'targetId STRING, targetFromSourceId STRING, biotype STRING',
         )
 
         # Generate disease look-up-table:
@@ -120,7 +127,7 @@ class TestEvidence:
         df = scored_evidence.df
 
         flagged_count = df.filter(f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.NO_VALID_SCORE)).count()
-        bad_scores_count = df.filter(f.col('score').isNull() | (f.col('score') <= 0) | (f.col('score') > 1)).count()  # ty:ignore[missing-argument]
+        bad_scores_count = df.filter(f.col('score').isNull() | (f.col('score') <= 0) | (f.col('score') > 1)).count()
 
         assert flagged_count == bad_scores_count
 
@@ -146,8 +153,8 @@ class TestEvidence:
         """Testing if the validation flags evidence where no target is present."""
         problematic_rows = target_validated.df.withColumn(
             'problematic',
-            (f.col('targetId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET))  # ty:ignore[missing-argument]
-            | (f.col('targetId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET)),  # ty:ignore[missing-argument]
+            (f.col('targetId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET))
+            | (f.col('targetId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_TARGET)),
         ).filter(f.col('problematic'))
 
         assert problematic_rows.count() == 0
@@ -184,8 +191,8 @@ class TestEvidence:
         """Testing if disease validation flags correct evidence."""
         problematic_rows = disease_validated.df.withColumn(
             'problematic',
-            (f.col('diseaseId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE))  # ty:ignore[missing-argument]
-            | (f.col('diseaseId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE)),  # ty:ignore[missing-argument]
+            (f.col('diseaseId').isNull() & ~f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE))
+            | (f.col('diseaseId').isNotNull() & f.array_contains(Evidence.QC_COLUMN, EvidenceFlags.INVALID_DISEASE)),
         ).filter(f.col('problematic'))
 
         assert problematic_rows.count() == 0
@@ -203,9 +210,9 @@ class TestEvidence:
     def test_validate_uniqueness__deterministic(self: TestEvidence, spark: SparkSession) -> None:
         """Repeated calls on the same input must flag the same survivor.
 
-        Previously ``validate_uniqueness`` ordered duplicate rows by ``f.rand()``, so the
-        surviving row was non-deterministic across runs. The replacement uses a stable
-        content-derived hash, so a re-run must produce identical flagging.
+        Previously ``validate_uniqueness`` ordered duplicate rows by ``f.rand()``, so
+        the surviving row was non-deterministic across runs. The replacement uses a
+        stable content-derived hash, so a re-run must produce identical flagging.
         """
         rows = [
             ('shared_id', 'a', 1.0),
@@ -213,7 +220,8 @@ class TestEvidence:
             ('shared_id', 'c', 3.0),
         ]
         df = spark.createDataFrame(rows, 'id STRING, payload STRING, score FLOAT').withColumn(
-            Evidence.QC_COLUMN, f.array().cast('array<string>'),
+            Evidence.QC_COLUMN,
+            f.array().cast('array<string>'),
         )
         first = Evidence(df).validate_uniqueness().df.orderBy('payload').collect()
         second = Evidence(df).validate_uniqueness().df.orderBy('payload').collect()
@@ -263,24 +271,23 @@ class TestResolveEvidenceDate:
                 'publicationDate STRING, curationDate STRING, studyStartDate STRING',
             )
         )
-        self.evidence_without_dates = Evidence(
-            spark.createDataFrame([('t1',), ('t2',)], 'targetId STRING')
-        )
+        self.evidence_without_dates = Evidence(spark.createDataFrame([('t1',), ('t2',)], 'targetId STRING'))
 
     def test_return_type(self: TestResolveEvidenceDate) -> None:
         """resolve_evidence_date returns an Evidence object."""
         assert isinstance(self.evidence_with_dates.resolve_evidence_date(), Evidence)
 
     def test_column_added(self: TestResolveEvidenceDate) -> None:
-        """evidenceDate column is added to the DataFrame."""
+        """evidenceDate column is added to the DataFrame."""  # noqa: D403
         assert 'evidenceDate' in self.evidence_with_dates.resolve_evidence_date().df.columns
 
     def test_all_dates_present_picks_minimum(self: TestResolveEvidenceDate) -> None:
         """When all date columns are non-null, the earliest date is selected."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        assert result.filter(
-            (f.col('publicationDate') == '2020-01-01') & (f.col('evidenceDate') != '2020-01-01')
-        ).count() == 0
+        assert (
+            result.filter((f.col('publicationDate') == '2020-01-01') & (f.col('evidenceDate') != '2020-01-01')).count()
+            == 0
+        )
 
     def test_null_date_column_ignored(self: TestResolveEvidenceDate) -> None:
         """Null date columns do not propagate null to evidenceDate when other dates are available."""
@@ -295,22 +302,29 @@ class TestResolveEvidenceDate:
     def test_null_date_column_correct_minimum(self: TestResolveEvidenceDate) -> None:
         """When a date column is null, the minimum of the remaining non-null columns is returned."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        # Row with publicationDate=null: min of '2019-06-01' and '2021-01-01' is '2019-06-01'
-        assert result.filter(
-            f.col('publicationDate').isNull()
-            & f.col('curationDate').isNotNull()
-            & (f.col('evidenceDate') != '2019-06-01')
-        ).count() == 0
+        # Row with publicationDate=null: min of '2019-06-01' and '2021-01-01' is
+        # '2019-06-01'
+        assert (
+            result.filter(
+                f.col('publicationDate').isNull()
+                & f.col('curationDate').isNotNull()
+                & (f.col('evidenceDate') != '2019-06-01')
+            ).count()
+            == 0
+        )
 
     def test_all_null_returns_null(self: TestResolveEvidenceDate) -> None:
         """When all date columns are null, evidenceDate is null."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        assert result.filter(
-            f.col('publicationDate').isNull()
-            & f.col('curationDate').isNull()
-            & f.col('studyStartDate').isNull()
-            & f.col('evidenceDate').isNotNull()
-        ).count() == 0
+        assert (
+            result.filter(
+                f.col('publicationDate').isNull()
+                & f.col('curationDate').isNull()
+                & f.col('studyStartDate').isNull()
+                & f.col('evidenceDate').isNotNull()
+            ).count()
+            == 0
+        )
 
     def test_no_date_columns_returns_null(self: TestResolveEvidenceDate) -> None:
         """When the DataFrame has no date columns, evidenceDate is null for all rows."""

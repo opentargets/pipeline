@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 from loguru import logger
@@ -15,7 +15,7 @@ def expression_tissue(
     # load the ontology
     logger.debug('loading expression tissue')
     h = StorageHandle(source)
-    f = h.open()
+    f = cast(bytes, h.open())
     initial = pl.read_json(f)
 
     # unnest the tissues column and add a column for the tissue id

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import mlcroissant as mlc
 from loguru import logger
 from pyspark.errors.exceptions.captured import AnalysisException
@@ -11,7 +13,7 @@ from pyspark.sql import types as t
 from ot_croissant.constants import TYPE_DICT
 from ot_croissant.curation import DistributionCuration, RecordsetCuration
 
-SNAKE_CASE_WARNING = "Column name '{field_name}' appears to be snake_case. camelCase is expected."
+SNAKE_CASE_WARNING = "column '{field_name}' is snake_case, camelCase is expected"
 
 
 def _warn_if_snake_case(field_name: str) -> None:
@@ -65,11 +67,11 @@ class PlatformOutputRecordSets:
     ) -> mlc.RecordSet:
         """Returns the recordset for a fileset."""
         # Get the schema from the recordset:
-        logger.info(f"Processing '{self.DISTRIBUTION_ID}'")
+        logger.info(f"processing '{self.DISTRIBUTION_ID}'")
         try:
             schema = self.spark.read.parquet(path, recursiveFileLookup=True).schema
         except AnalysisException:
-            logger.error(f'Could not read parquet: {path}')
+            logger.error(f'could not read parquet: {path}')
             raise ValueError(f'Could not read dataset: {path}')
 
         fields = [self.parse_spark_field(field) for field in schema]
@@ -92,13 +94,22 @@ class PlatformOutputRecordSets:
             record_set.key = primary_key
 
         # Extract description of dataset:
-        record_set.description = self.generate_distribution_description(self.DISTRIBUTION_ID)
+        record_set.description = self.generate_distribution_description(
+            self.DISTRIBUTION_ID,
+        )
 
         # Return record set
         return record_set
 
-    def parse_spark_field(self: PlatformOutputRecordSets, field: t.StructField, parent: str | None = None) -> mlc.Field:
-        """Parse a Spark StructField into a Croissant Field, recursing into arrays, structs, and maps."""
+    def parse_spark_field(
+        self: PlatformOutputRecordSets,
+        field: t.StructField,
+        parent: str | None = None,
+    ) -> mlc.Field:
+        """Parse a Spark StructField into a Croissant Field.
+
+        The parsing is recursive with arrays, structs, and maps.
+        """
 
         def get_field_description(field: t.StructField, field_id: str) -> str:
             """Get the field description."""
@@ -174,53 +185,64 @@ class PlatformOutputRecordSets:
                 extract=mlc.Extract(column=get_field_id(parent, field, False)),
             ),
         )
+        croissant_field.data_types = []
 
         if foreign_key := get_foreign_key(field, get_field_id(parent, field)):
             croissant_field.references = mlc.Source(field=foreign_key)
 
         if field_type in TYPE_DICT:
-            croissant_field.data_types.append(TYPE_DICT.get(field_type))
+            croissant_field.data_types.append(TYPE_DICT[field_type])
 
         # Test if the field is a list:
         if field_type == 'array':
-            element_type = field.dataType.elementType
+            data_type = cast(t.ArrayType, field.dataType)
+            element_type = data_type.elementType
             croissant_field.repeated = True
 
             # A list of struct:
             if element_type.typeName() == 'struct':
+                data_type = cast(t.StructType, element_type)
                 croissant_field.sub_fields = [
-                    self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in element_type
+                    self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in data_type
                 ]
 
             # If element type is a primitive type:
             elif element_type.typeName() in TYPE_DICT:
                 # Append data type of the primitive type
-                croissant_field.data_types.append(TYPE_DICT.get(element_type.typeName()))
+                if (type_name := TYPE_DICT.get(element_type.typeName())) is not None:
+                    croissant_field.data_types.append(type_name)
 
-            # If the element type is an other array, we flatten it
-            if element_type.typeName() == 'array':
+            # If the element type is another array, we flatten it
+            if isinstance(element_type, t.ArrayType):
                 logger.warning(
-                    f'Field {field.name} is of type array of array. This is not yet supported by croissant. Flattening.'
+                    f'field {field.name} is of type array of array, this is not yet supported by croissant, flattening'
                 )
-                sub_element_type = element_type.elementType
-                croissant_field.data_types.append(TYPE_DICT.get(sub_element_type.typeName()))
+                sub_type_name = element_type.elementType.typeName()
+                if sub_type_name in TYPE_DICT:
+                    croissant_field.data_types.append(TYPE_DICT[field_type])
 
         # Test if the field is a struct:
         elif field_type == 'struct':
+            data_type = cast(t.StructType, field.dataType)
             croissant_field.sub_fields = [
-                self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in field.dataType
+                self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in data_type
             ]
         elif field_type == 'map':
             logger.warning(
-                f'Field {self.DISTRIBUTION_ID}/{field.name} is of type map. This is not yet supported by croissant.'
+                f'field {self.DISTRIBUTION_ID}/{field.name} is of type map,this is not yet supported by croissant'
             )
 
+            data_type = cast(t.MapType, field.dataType)
+
             # Extracting keys/values:
-            key_type = field.dataType.keyType
-            value_type = field.dataType.valueType
+            key_type = data_type.keyType
+            value_type = data_type.valueType
 
             # Constructing an artifical struct:
-            struct = t.StructType([t.StructField('key', key_type), t.StructField('value', value_type)])
+            struct = t.StructType([
+                t.StructField('key', key_type),
+                t.StructField('value', value_type),
+            ])
 
             # Modelling maps as arrays:
             croissant_field.repeated = True

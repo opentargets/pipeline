@@ -1,16 +1,22 @@
-from typing import Any, Protocol, runtime_checkable
+import logging
+from abc import ABC, abstractmethod
+
+from google.cloud.storage import Client
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 
-@runtime_checkable
-class Differ(Protocol):
+class Differ(ABC):
+    def __init__(self) -> None:
+        self.logger = logging.getLogger(__name__)
+
+    @abstractmethod
     def is_diff(
         self,
-        *args: Any,
+        *,
         step_name: str,
         config: UnifiedPipelineConfig,
-        **kwargs: Any,
+        client: Client,
     ) -> bool:
         """Determine whether something has changed.
 
@@ -19,10 +25,9 @@ class Differ(Protocol):
         step must run.
 
         Args:
-            *args: Positional arguments.
             step_name (str): The name of the step to compare.
             config (UnifiedPipelineConfig): The unified pipeline configuration.
-            **kwargs: Keyword arguments.
+            client (Client): The Google Cloud Storage client used in the differ.
 
         Returns:
             bool: Whether there are differences in the comparison.

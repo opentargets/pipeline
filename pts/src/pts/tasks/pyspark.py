@@ -46,7 +46,11 @@ class PysparkSpec(Spec):
 class Pyspark(Task):
     """Task to run a pyspark job."""
 
-    def __init__(self, spec: PysparkSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: PysparkSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: PysparkSpec
         self.pyspark = self.load_pyspark(spec.pyspark)

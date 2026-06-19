@@ -28,7 +28,8 @@ def clingen(
     # Row 5: separator (+++)
     # Row 6+: actual data
     clingen_df = (
-        raw_df.withColumn('idx', f.monotonically_increasing_id())
+        raw_df
+        .withColumn('idx', f.monotonically_increasing_id())
         .filter(f.col('idx') > 5)  # Skip metadata, headers, and separators - start from actual data
         .drop('idx')
         # Rename columns to match the header row we saw in the file

@@ -17,7 +17,7 @@ class RunnableSpec(BaseModel):
     image_uri: Annotated[str, StringConstraints(min_length=1)]
     """Container image to be used for the batch task."""
 
-    entrypoint: str = "/bin/bash"
+    entrypoint: str = '/bin/bash'
     """Entrypoint for the batch task. Default is /bin/bash."""
 
     inline_commands: list[str] | None = None
@@ -34,16 +34,16 @@ class RunnableSpec(BaseModel):
     """Optional mapping of variable names to values to substitute into the script file.
         Sentinels in the script must follow the bash variable syntax: ``${variable_name}``."""
 
-    @model_validator(mode="after")
+    @model_validator(mode='after')
     def _validate_oneof_script_or_commands(self) -> RunnableSpec:
         if not ((self.inline_commands is not None) ^ (self.script_file is not None)):
             raise ValueError("Exactly one of 'inline_commands' or 'script_file' must be provided, not both or neither.")
         return self
 
-    @model_validator(mode="after")
+    @model_validator(mode='after')
     def _validate_script_file_exists(self) -> RunnableSpec:
         if self.script_file:
-            script_path = files("orchestration.assets").joinpath(self.script_file)
+            script_path = files('orchestration.assets').joinpath(self.script_file)
             if not script_path.is_file():
                 raise FileNotFoundError(
                     f"Script file '{self.script_file}' not found in 'orchestration.assets' package."
@@ -60,7 +60,7 @@ class RunnableSpec(BaseModel):
             if self.script_variables:
                 script_content = self._apply_template(script_content, self.script_variables)
             script_commands = self._parse_script_file(script_content)
-            return ["-c", script_commands]
+            return ['-c', script_commands]
         else:
             raise ValueError("Either 'inline_commands' or 'script_file' must be provided to create a Runnable.")
 
@@ -73,7 +73,8 @@ class RunnableSpec(BaseModel):
 
         If `commands` are provided, they will be used directly in the `Runnable`.
         If a `script_file` is provided instead, the method will read the script file from
-        the `src.orchestration.assets` package, parse it to extract the commands, and use those commands in the `Runnable`.
+        the `src.orchestration.assets` package, parse it to extract the commands, and use those commands in the
+        `Runnable`.
 
 
         Returns:
@@ -108,13 +109,13 @@ class RunnableSpec(BaseModel):
         'echo hello'
         """
         for key, value in variables.items():
-            script_content = script_content.replace(f"${{{key}}}", value)
+            script_content = script_content.replace(f'${{{key}}}', value)
         return script_content
 
     @classmethod
     def _find_script_file(cls, script_name: str) -> str:
         """Find the script file in the `src.orchestration.assets` package and return its content."""
-        script_path = files("orchestration.assets").joinpath(script_name)
+        script_path = files('orchestration.assets').joinpath(script_name)
         if not script_path.is_file():
             raise FileNotFoundError(f"Script file '{script_name}' not found in 'orchestration.assets' package.")
         return script_path.read_text()
@@ -143,7 +144,7 @@ class RunnableSpec(BaseModel):
         lines = cls._remove_comments(script_content)
         joined_lines = cls._join_continuation_lines(lines)
         commands = cls._split_commands(joined_lines)
-        return " && ".join(commands)
+        return ' && '.join(commands)
 
     @staticmethod
     def _remove_comments(script: str) -> list[str]:
@@ -157,7 +158,7 @@ class RunnableSpec(BaseModel):
         lines = []
         for line in script.splitlines():
             stripped = line.strip()
-            if stripped.startswith("#") or not stripped:
+            if stripped.startswith('#') or not stripped:
                 continue
             lines.append(line)
         return lines
@@ -175,14 +176,14 @@ class RunnableSpec(BaseModel):
         buffer = []
         for line in lines:
             # Start new buffer if line ends with \, otherwise add to current buffer and join
-            if line.rstrip().endswith("\\"):
+            if line.rstrip().endswith('\\'):
                 buffer.append(line.rstrip()[:-1].strip())
             else:
                 buffer.append(line.strip())
-                joined_lines.append(" ".join(buffer).strip())
+                joined_lines.append(' '.join(buffer).strip())
                 buffer = []
         if buffer:
-            joined_lines.append(" ".join(buffer).strip())
+            joined_lines.append(' '.join(buffer).strip())
         return joined_lines
 
     @staticmethod
@@ -196,7 +197,7 @@ class RunnableSpec(BaseModel):
         """
         commands = []
         for line in joined_lines:
-            parts = re.split(r"\s*;\s*", line)
+            parts = re.split(r'\s*;\s*', line)
             for part in parts:
                 part = part.strip()
                 if part:

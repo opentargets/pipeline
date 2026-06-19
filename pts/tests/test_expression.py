@@ -5,7 +5,11 @@ from __future__ import annotations
 from pyspark.sql import SparkSession
 from pyspark.sql import types as t
 
-from pts.pyspark.expression import _efo_tissue_mapping, _transform_normal_tissue, _transpose_baseline
+from pts.pyspark.expression import (
+    _efo_tissue_mapping,
+    _transform_normal_tissue,
+    _transpose_baseline,
+)
 
 
 class TestTransformNormalTissue:
@@ -24,26 +28,35 @@ class TestTransformNormalTissue:
         ]
         df = spark.createDataFrame(data, schema=self.SCHEMA)
         result = _transform_normal_tissue(df)
+        assert result is not None
         assert result.count() == 1
-        assert result.first()['Gene'] == 'G1'
+        row = result.first()
+        assert row is not None
+        assert row['Gene'] == 'G1'
 
     def test_maps_reliability_supportive_to_true(self, spark: SparkSession) -> None:
         data = [('G1', 'Liver', None, 'High', 'Supportive')]
         df = spark.createDataFrame(data, schema=self.SCHEMA)
         result = _transform_normal_tissue(df)
-        assert result.first()['ReliabilityMap'] is True
+        row = result.first()
+        assert row is not None
+        assert row['ReliabilityMap'] is True
 
     def test_maps_level_high_to_3(self, spark: SparkSession) -> None:
         data = [('G1', 'Liver', None, 'High', 'Supportive')]
         df = spark.createDataFrame(data, schema=self.SCHEMA)
         result = _transform_normal_tissue(df)
-        assert result.first()['LevelMap'] == 3
+        row = result.first()
+        assert row is not None
+        assert row['LevelMap'] == 3
 
     def test_maps_reliability_uncertain_to_false(self, spark: SparkSession) -> None:
         data = [('G1', 'Liver', None, 'Low', 'Uncertain')]
         df = spark.createDataFrame(data, schema=self.SCHEMA)
         result = _transform_normal_tissue(df)
-        assert result.first()['ReliabilityMap'] is False
+        row = result.first()
+        assert row is not None
+        assert row['ReliabilityMap'] is False
 
     def test_normalises_column_names_with_spaces(self, spark: SparkSession) -> None:
         schema = t.StructType([
@@ -94,6 +107,7 @@ class TestEfoTissueMapping:
         )
         result = _efo_tissue_mapping(efomap, hierarchy)
         row = result.first()
+        assert row is not None
         assert row['efoId'] == 'EFO:001'
         assert row['labelNew'] == 'Liver'
 
@@ -108,4 +122,7 @@ class TestEfoTissueMapping:
         )
         result = _efo_tissue_mapping(efomap, hierarchy)
         row = result.first()
-        assert row['efoId'] == result.filter(result.efoId.isNotNull()).first()['efoId']
+        assert row is not None
+        filtered = result.filter(result.efoId.isNotNull()).first()
+        assert filtered is not None
+        assert row['efoId'] == filtered['efoId']

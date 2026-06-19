@@ -17,12 +17,12 @@ def extract_study_id_from_path(path: str) -> str:
     Raises:
         ValueError: when identifier is not found.
     """
-    pattern = r"\/(GCST\d+)\/"
+    pattern = r'\/(GCST\d+)\/'
     pattern = re.compile(pattern)
     result = pattern.search(path)
     if not result:
-        raise ValueError("Gwas Catalog identifier was not found in %s", path)
+        raise ValueError('Gwas Catalog identifier was not found in %s', path)
     return result.group(1)
 
 
-__all__ = ["extract_study_id_from_path"]
+__all__ = ['extract_study_id_from_path']

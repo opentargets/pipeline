@@ -6,7 +6,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
 
 # install package dependencies for ide
-cd /opt/orchestration && uv sync --all-extras --dev
+cd /opt/orchestration && uv sync --all-groups --all-extras --dev
 sudo chgrp -R google-sudoers .venv
 
 # enable git for users

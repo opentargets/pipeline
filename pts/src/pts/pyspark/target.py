@@ -272,8 +272,14 @@ def target(
             'dbXrefs',
             _safe_array_union(f.col('hgncId'), f.col('dbXrefs'), f.col('signalP')),
         )
-        .withColumn('symbolSynonyms', _safe_array_union(f.col('symbolSynonyms'), f.col('hgncSymbolSynonyms')))
-        .withColumn('nameSynonyms', _safe_array_union(f.col('nameSynonyms'), f.col('hgncNameSynonyms')))
+        .withColumn(
+            'symbolSynonyms',
+            _safe_array_union(f.col('symbolSynonyms'), f.col('hgncSymbolSynonyms')),
+        )
+        .withColumn(
+            'nameSynonyms',
+            _safe_array_union(f.col('nameSynonyms'), f.col('hgncNameSynonyms')),
+        )
         .withColumn(
             'synonyms',
             _safe_array_union(f.col('synonyms'), f.col('symbolSynonyms'), f.col('nameSynonyms')),
@@ -467,7 +473,10 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
     ensembl = (
         ensembl
         .withColumn('_desc_parts', f.split(f.col('description'), r'\['))
-        .withColumn('approvedName', f.regexp_replace(f.element_at(f.col('_desc_parts'), 1), r'(?i)tec', ''))
+        .withColumn(
+            'approvedName',
+            f.regexp_replace(f.element_at(f.col('_desc_parts'), 1), r'(?i)tec', ''),
+        )
         .drop('_desc_parts', 'description')
     )
 
@@ -488,7 +497,10 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
         'signalP',
         f.when(
             f.col('signalP').isNotNull() & (f.size(f.col('signalP')) >= 0),
-            f.transform(f.col('signalP'), lambda c: f.struct(c.alias('id'), f.lit('signalP').alias('source'))),
+            f.transform(
+                f.col('signalP'),
+                lambda c: f.struct(c.alias('id'), f.lit('signalP').alias('source')),
+            ),
         ).cast(id_source_schema),
     )
 
@@ -622,8 +634,14 @@ def _parse_ensembl_transcripts(df: DataFrame) -> DataFrame:
                 tr.getField('id').alias('transcriptId'),
                 tr.getField('biotype').alias('biotype'),
                 f
-                .when(tr.getField('uniprot_swissprot').isNotNull(), f.element_at(tr.getField('uniprot_swissprot'), 1))
-                .when(tr.getField('uniprot_trembl').isNotNull(), f.element_at(tr.getField('uniprot_trembl'), 1))
+                .when(
+                    tr.getField('uniprot_swissprot').isNotNull(),
+                    f.element_at(tr.getField('uniprot_swissprot'), 1),
+                )
+                .when(
+                    tr.getField('uniprot_trembl').isNotNull(),
+                    f.element_at(tr.getField('uniprot_trembl'), 1),
+                )
                 .alias('uniprotId'),
                 f
                 .when(tr.getField('uniprot_swissprot').isNotNull(), f.lit(True))
@@ -687,7 +705,10 @@ def _build_hgnc(df: DataFrame) -> DataFrame:
     def _array_to_label_source(col_expr, source_val):
         return f.when(
             col_expr.isNotNull(),
-            f.transform(col_expr, lambda c: f.struct(c.alias('label'), f.lit(source_val).alias('source'))),
+            f.transform(
+                col_expr,
+                lambda c: f.struct(c.alias('label'), f.lit(source_val).alias('source')),
+            ),
         ).cast(label_source_schema)
 
     hgnc = (
@@ -938,7 +959,14 @@ def _build_gene_ontology(
     )
 
     # RNA lookup: rnaCentralId → ensemblId
-    rna_lu_cols = ['rnaCentralId', 'database', 'externalId', 'ncbiTaxonId', 'rnaType', 'ensemblId']
+    rna_lu_cols = [
+        'rnaCentralId',
+        'database',
+        'externalId',
+        'ncbiTaxonId',
+        'rnaType',
+        'ensemblId',
+    ]
     n_rna = len(rna_lookup.columns)
     rna_lu = (
         rna_lookup
@@ -959,7 +987,10 @@ def _build_gene_ontology(
             f.col('proteinIds'),
         )
         # Explode proteinIds to get one row per protein accession
-        .withColumn('pid', f.explode(_safe_array_union(f.col('proteinIds.id'), f.array(f.col('approvedSymbol')))))
+        .withColumn(
+            'pid',
+            f.explode(_safe_array_union(f.col('proteinIds.id'), f.array(f.col('approvedSymbol')))),
+        )
         .drop('proteinIds', 'approvedSymbol')
         .withColumnRenamed('pid', 'uniprotId')
     )
@@ -976,6 +1007,8 @@ def _build_gene_ontology(
         from pyspark.sql import SparkSession
 
         spark = SparkSession.getActiveSession()
+        if spark is None:
+            raise RuntimeError('no active spark session found')
         eco_lu = spark.createDataFrame(
             [],
             StructType([
@@ -1069,10 +1102,18 @@ def _build_gene_with_location(df: DataFrame, sl_df: DataFrame) -> DataFrame:
         .withColumn(
             'all_locations',
             f.explode(
-                _safe_array_union(f.col('HPA_main'), f.col('HPA_additional'), f.col('HPA_extracellular_location')),
+                _safe_array_union(
+                    f.col('HPA_main'),
+                    f.col('HPA_additional'),
+                    f.col('HPA_extracellular_location'),
+                ),
             ),
         )
-        .select('id', f.col('all_locations.location').alias('location'), f.col('all_locations.source').alias('source'))
+        .select(
+            'id',
+            f.col('all_locations.location').alias('location'),
+            f.col('all_locations.source').alias('source'),
+        )
         .join(sl_df, f.col('location') == sl_df['HPA_location'], 'left_outer')
         .withColumn('targetModifier', f.lit(None).cast(StringType()))
         .select(
@@ -1242,6 +1283,8 @@ def _build_homologues(
     from pyspark.sql import SparkSession
 
     spark = SparkSession.getActiveSession()
+    if spark is None:
+        raise RuntimeError('no active spark session found')
     priority_df = spark.createDataFrame(priority_df_data, ['speciesId', 'priority']).withColumn(
         'priority', f.col('priority').cast('int')
     )
@@ -1256,7 +1299,7 @@ def _build_homologues(
     gene_dict_mapped = gene_dict.select(
         f.col('id').alias('homology_gene_stable_id'),
         f
-        .when(f.col('name').isNotNull() & (f.col('name') != ''), f.col('name'))  # noqa: PLC1901
+        .when(f.col('name').isNotNull() & (f.col('name') != ''), f.col('name'))
         .otherwise(f.col('id'))
         .alias('targetGeneSymbol'),
     )
@@ -1494,7 +1537,10 @@ def _build_uniprot(df: DataFrame, ssl_df: DataFrame) -> DataFrame:
             dst_col,
             f.when(
                 f.col(src_col).isNotNull(),
-                f.transform(f.col(src_col), lambda c: f.struct(c.alias('label'), f.lit('uniprot').alias('source'))),
+                f.transform(
+                    f.col(src_col),
+                    lambda c: f.struct(c.alias('label'), f.lit('uniprot').alias('source')),
+                ),
             ).cast(label_source_schema),
         ).drop(src_col)
 
@@ -1532,17 +1578,17 @@ def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame
         .withColumn('loc3', f.trim(f.regexp_extract('location', last_after_comma_regex, 1)))
         .withColumn(
             'ssl_match',
-            f
-            .when(f.col('loc1') != '', f.col('loc1'))  # noqa: PLC1901
-            .when(f.col('loc3') != '', f.col('loc3'))  # noqa: PLC1901
-            .otherwise(f.lit(None)),
+            f.when(f.col('loc1') != '', f.col('loc1')).when(f.col('loc3') != '', f.col('loc3')).otherwise(f.lit(None)),
         )
         .drop('loc1', 'loc3')
         .filter(f.col('location').isNotNull())
         .join(f.broadcast(ssl_onto), 'ssl_match', 'left_outer')
         .drop('ssl_match')
         .withColumn('source', f.lit('uniprot'))
-        .select('uniprotId', f.struct('location', 'source', 'termSL', 'labelSL', 'targetModifier').alias('loc'))
+        .select(
+            'uniprotId',
+            f.struct('location', 'source', 'termSL', 'labelSL', 'targetModifier').alias('loc'),
+        )
         .groupBy('uniprotId')
         .agg(f.collect_list('loc').alias('subcellularLocations'))
     )
@@ -1573,7 +1619,11 @@ def _build_safety(
     # Add missing ENSG IDs for entries that only have symbol (e.g. ToxCast)
     enriched = (
         safety_df
-        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'left_outer')
+        .join(
+            ensg_lookup,
+            f.array_contains(f.col('name'), f.col('targetFromSourceId')),
+            'left_outer',
+        )
         .drop(*[c for c in ensg_lookup.columns if c != 'ensgId'])
         .withColumn('temp_id', f.coalesce(f.col('id'), f.col('ensgId')))
         .drop('id', 'ensgId')
@@ -1582,12 +1632,17 @@ def _build_safety(
 
     # Replace obsolete EFOs
     disease_mapping = diseases_df.select(
-        f.col('id').alias('diseaseId'), f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm')
+        f.col('id').alias('diseaseId'),
+        f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm'),
     )
 
     enriched = (
         enriched
-        .join(disease_mapping, enriched['eventId'] == disease_mapping['obsoleteTerm'], 'left_outer')
+        .join(
+            disease_mapping,
+            enriched['eventId'] == disease_mapping['obsoleteTerm'],
+            'left_outer',
+        )
         .withColumn('eventId', f.coalesce(f.col('diseaseId'), f.col('eventId')))
         .drop('obsoleteTerm', 'diseaseId')
     )
@@ -1655,7 +1710,10 @@ def _merge_hgnc_ensembl(hgnc_df: DataFrame, ensembl_df: DataFrame) -> DataFrame:
         e
         .join(hgnc_df, e['id'] == hgnc_df['ensemblId'], 'left_outer')
         .withColumn('approvedName', f.coalesce(f.col('approvedName'), f.col('_an'), f.lit('')))
-        .withColumn('approvedSymbol', f.coalesce(f.col('approvedSymbol'), f.col('_as'), f.col('id')))
+        .withColumn(
+            'approvedSymbol',
+            f.coalesce(f.col('approvedSymbol'), f.col('_as'), f.col('id')),
+        )
         .drop('_an', '_as', 'ensemblId')
     )
 
@@ -1725,7 +1783,11 @@ def _add_protein_classification_to_uniprot(
             f.explode(_safe_array_union(f.array(f.col('uniprotId')), f.col('proteinIds.id'))).alias('pid'),
         )
         .withColumn('pid', f.trim('pid'))
-        .join(protein_class_df, f.col('pid') == protein_class_df['accession'], 'left_outer')
+        .join(
+            protein_class_df,
+            f.col('pid') == protein_class_df['accession'],
+            'left_outer',
+        )
         .drop('accession')
         .groupBy('uniprotId')
         .agg(f.flatten(f.collect_set('targetClass')).alias('targetClass'))
@@ -1875,7 +1937,10 @@ def _filter_and_sort_protein_ids(df: DataFrame) -> DataFrame:
         df
         .select(f.col('id').alias(ensembl_id), f.explode(f.col(protein_id)).alias('p'))
         .select(ensembl_id, f.col('p.*'))
-        .withColumn('arr', f.array_join(f.array(f.trim(f.col('id')), f.col('source')), delimiter))
+        .withColumn(
+            'arr',
+            f.array_join(f.array(f.trim(f.col('id')), f.col('source')), delimiter),
+        )
         .groupBy(ensembl_id)
         .agg(f.collect_list('arr').alias('accessions'))
         .select(f.col(ensembl_id), sort_udf(f.col('accessions')).alias('accessions'))
@@ -1940,7 +2005,11 @@ def _add_orthologues(df: DataFrame, orthologs: DataFrame) -> DataFrame:
         )
         .withColumn(
             'targetGeneSymbol',
-            f.coalesce(f.col('paralogGeneSymbol'), f.col('targetGeneSymbol'), f.col('approvedSymbol')),
+            f.coalesce(
+                f.col('paralogGeneSymbol'),
+                f.col('targetGeneSymbol'),
+                f.col('approvedSymbol'),
+            ),
         )
         .drop('approvedSymbol', 'paralogGeneSymbol', 'paralogId')
     )
@@ -1952,7 +2021,10 @@ def _add_orthologues(df: DataFrame, orthologs: DataFrame) -> DataFrame:
         .groupBy('id')
         .agg(f.collect_list('homologues').alias('homologues'))
         # Sort by priority (ascending = closest species first)
-        .withColumn('homologues', f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)'))
+        .withColumn(
+            'homologues',
+            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)'),
+        )
     )
 
     return df.join(grouped, 'id', 'left_outer').drop('humanGeneId')
@@ -1977,7 +2049,10 @@ def _add_ncbi_synonyms(df: DataFrame, ncbi: DataFrame) -> DataFrame:
         .join(ncbi_renamed, 'id', 'left_outer')
         .withColumn('symbolSynonyms', _safe_array_union(f.col('symbolSynonyms'), f.col('_ss')))
         .withColumn('nameSynonyms', _safe_array_union(f.col('nameSynonyms'), f.col('_ns')))
-        .withColumn('synonyms', _safe_array_union(f.col('synonyms'), f.col('_s'), f.col('_ns'), f.col('_ss')))
+        .withColumn(
+            'synonyms',
+            _safe_array_union(f.col('synonyms'), f.col('_s'), f.col('_ns'), f.col('_ss')),
+        )
         .drop('_s', '_ss', '_ns')
     )
 
@@ -2000,7 +2075,13 @@ def _add_reactome(df: DataFrame, reactome: DataFrame) -> DataFrame:
 
 def _remove_duplicated_synonyms(df: DataFrame) -> DataFrame:
     """Deduplicate synonym arrays."""
-    for col_name in ['synonyms', 'symbolSynonyms', 'nameSynonyms', 'obsoleteNames', 'obsoleteSymbols']:
+    for col_name in [
+        'synonyms',
+        'symbolSynonyms',
+        'nameSynonyms',
+        'obsoleteNames',
+        'obsoleteSymbols',
+    ]:
         if col_name in df.columns:
             df = df.withColumn(col_name, f.array_distinct(f.col(col_name)))
     return df
@@ -2010,7 +2091,8 @@ def _add_tss(df: DataFrame) -> DataFrame:
     """Add transcription start site column."""
     return df.withColumn(
         'tss',
-        f.when(f.col('canonicalTranscript.strand') == '+', f.col('canonicalTranscript.start')).when(
-            f.col('canonicalTranscript.strand') == '-', f.col('canonicalTranscript.end')
-        ),
+        f.when(
+            f.col('canonicalTranscript.strand') == '+',
+            f.col('canonicalTranscript.start'),
+        ).when(f.col('canonicalTranscript.strand') == '-', f.col('canonicalTranscript.end')),
     )

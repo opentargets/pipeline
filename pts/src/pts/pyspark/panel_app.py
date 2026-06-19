@@ -93,7 +93,11 @@ class PanelAppEvidenceGenerator:
         ),
     ]
 
-    def __init__(self, spark: Session, panelapp_df: DataFrame):
+    def __init__(
+        self,
+        spark: Session,
+        panelapp_df: DataFrame,
+    ) -> None:
         self.spark = spark
         self.panelapp_df = panelapp_df
 
@@ -166,7 +170,7 @@ class PanelAppEvidenceGenerator:
             .withColumn(
                 'ontology',
                 f.when(
-                    (f.col('ontology_namespace') != '') & (f.col('ontology_id') != ''),  # noqa: PLC1901
+                    (f.col('ontology_namespace') != '') & (f.col('ontology_id') != ''),
                     f.concat(f.col('ontology_namespace'), f.lit(':'), f.col('ontology_id')),
                 ),
             )
@@ -178,7 +182,10 @@ class PanelAppEvidenceGenerator:
             .withColumn('omim_id', f.regexp_extract(f.col('diseaseFromSource'), self.OMIM_RE, 2))
             .withColumn(
                 'omim',
-                f.when(f.col('omim_id') != '', f.concat(f.lit('OMIM:'), f.col('omim_id'))),  # noqa: PLC1901
+                f.when(
+                    f.col('omim_id') != '',
+                    f.concat(f.lit('OMIM:'), f.col('omim_id')),
+                ),
             )
             .withColumn(
                 'diseaseFromSource',
@@ -187,7 +194,7 @@ class PanelAppEvidenceGenerator:
             # Choose one of the ontology identifiers, keeping OMIM as a priority.
             .withColumn(
                 'diseaseFromSourceId',
-                f.when(f.col('omim').isNotNull(), f.col('omim')).otherwise(f.col('ontology')),  # ty:ignore[missing-argument]
+                f.when(f.col('omim').isNotNull(), f.col('omim')).otherwise(f.col('ontology')),
             )
             .drop('ontology_namespace', 'ontology_id', 'ontology', 'omim_id', 'omim')
             # Clean up the final split phenotypes.
@@ -198,10 +205,10 @@ class PanelAppEvidenceGenerator:
             .withColumn('diseaseFromSource', f.trim(f.col('diseaseFromSource')))
             .withColumn(
                 'diseaseFromSource',
-                f.when(f.col('diseaseFromSource') != '', f.col('diseaseFromSource')),  # noqa: PLC1901
+                f.when(f.col('diseaseFromSource') != '', f.col('diseaseFromSource')),
             )
             # Remove low quality records, where the name of the phenotype string starts with a question mark.
-            .filter(~((f.col('diseaseFromSource').isNotNull()) & (f.col('diseaseFromSource').startswith('?'))))  # ty:ignore[missing-argument, invalid-argument-type]
+            .filter(~((f.col('diseaseFromSource').isNotNull()) & (f.col('diseaseFromSource').startswith('?'))))
             # Remove duplication caused by cases where multiple phenotypes within the same record fail to generate any
             # phenotype string or ontology identifier.
             .distinct()
@@ -210,7 +217,7 @@ class PanelAppEvidenceGenerator:
             .withColumn(
                 'diseaseFromSource',
                 f.when(
-                    (f.col('diseaseFromSource').isNull()) & (f.col('diseaseFromSourceId').isNull()),  # ty:ignore[missing-argument]
+                    (f.col('diseaseFromSource').isNull()) & (f.col('diseaseFromSourceId').isNull()),
                     f.col('Panel Name'),
                 ).otherwise(f.col('diseaseFromSource')),
             )
@@ -231,7 +238,7 @@ class PanelAppEvidenceGenerator:
             .withColumn(
                 'allelicRequirements',
                 f.when(
-                    f.col('Mode of inheritance').isNotNull(),  # ty:ignore[missing-argument]
+                    f.col('Mode of inheritance').isNotNull(),
                     f.array(f.col('Mode of inheritance')),
                 ),
             )
@@ -257,10 +264,10 @@ class PanelAppEvidenceGenerator:
             panels
             # only keep panels that returned a valid response
             .filter(
-                f.col('id').isNotNull()  # ty:ignore[missing-argument]
-                & f.col('genes.gene_data').isNotNull()  # ty:ignore[missing-argument]
-                & f.col('genes.gene_data.gene_symbol').isNotNull()  # ty:ignore[missing-argument]
-                & f.col('genes.publications').isNotNull()  # ty:ignore[missing-argument]
+                f.col('id').isNotNull()
+                & f.col('genes.gene_data').isNotNull()
+                & f.col('genes.gene_data.gene_symbol').isNotNull()
+                & f.col('genes.publications').isNotNull()
                 & (f.size('genes.publications') > 0)
             )
             .select('id', f.explode_outer('genes').alias('gene'))
@@ -269,7 +276,10 @@ class PanelAppEvidenceGenerator:
                 f.col('gene.gene_data.gene_symbol').alias('Symbol'),
                 f.explode('gene.publications').alias('publication_string'),
             )
-            .withColumn('literature', f.explode(self.extract_pubmed_ids(f.col('publication_string'))))
+            .withColumn(
+                'literature',
+                f.explode(self.extract_pubmed_ids(f.col('publication_string'))),
+            )
             .groupby(['Panel Id', 'Symbol'])
             .agg(f.collect_set('literature').alias('literature'))
         )
@@ -290,7 +300,10 @@ class PanelAppEvidenceGenerator:
 
         # extract digit sequences from the extracted occurrences
         extracted_pmids = f.flatten(
-            f.transform(extracted_occurrences, lambda x: f.regexp_extract_all(x, f.lit(r'(\d+)'), 1))
+            f.transform(
+                extracted_occurrences,
+                lambda x: f.regexp_extract_all(x, f.lit(r'(\d+)'), 1),
+            )
         ).alias('extracted_pmids')
 
         # deduplicate and exclude pmids if they are 0 (placeholder for a missing ID) or they are too long

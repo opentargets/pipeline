@@ -31,7 +31,11 @@ class Gzip(Task):
     with PIS.
     """
 
-    def __init__(self, spec: GzipSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: GzipSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: GzipSpec
 
@@ -40,10 +44,17 @@ class Gzip(Task):
 
         check_source(self.context.config.work_path / self.spec.source)
 
-        s = StorageHandle(self.spec.source, config=self.context.config, force_local=True)
+        s = StorageHandle(
+            self.spec.source,
+            config=self.context.config,
+            force_local=True,
+        )
         sf = s.open('rb')
 
-        d = StorageHandle(self.spec.destination, config=self.context.config)
+        d = StorageHandle(
+            self.spec.destination,
+            config=self.context.config,
+        )
         df = d.open('wb')
         with gzip.open(df, mode='wb') as gzip_file:
             gzip_file.write(sf.read())

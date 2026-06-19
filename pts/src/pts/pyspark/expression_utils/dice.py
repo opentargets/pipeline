@@ -12,7 +12,16 @@ import os
 
 from loguru import logger
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import array, col, explode, lit, regexp_replace, split, struct, trim
+from pyspark.sql.functions import (
+    array,
+    col,
+    explode,
+    lit,
+    regexp_replace,
+    split,
+    struct,
+    trim,
+)
 from pyspark.sql.functions import sum as spark_sum
 
 
@@ -104,7 +113,9 @@ class DiceBaselineExpression:
         ]).alias('samp_tpm')
 
         return wide_df.select('Feature_name', explode(samp_structs).alias('x')).select(
-            col('Feature_name'), col('x.donorId').alias('donorId'), col('x.expression').alias('expression')
+            col('Feature_name'),
+            col('x.donorId').alias('donorId'),
+            col('x.expression').alias('expression'),
         )
 
     def _join_celltype_mapping(self, df_long: DataFrame, mapping_path: str) -> DataFrame:

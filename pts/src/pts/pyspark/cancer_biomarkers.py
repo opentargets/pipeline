@@ -113,7 +113,7 @@ class CancerBiomarkersEvidenceGenerator:
             .withColumn('alteration_type', f.element_at(f.col('tmp'), 2))
             .withColumn(
                 'alteration',
-                f.when(~f.col('IndividualMutation').isNull(), f.col('IndividualMutation')).otherwise(  # ty:ignore[missing-argument]
+                f.when(~f.col('IndividualMutation').isNull(), f.col('IndividualMutation')).otherwise(
                     f.element_at(f.col('tmp'), 1)
                 ),
             )
@@ -128,13 +128,13 @@ class CancerBiomarkersEvidenceGenerator:
                 )
                 .when(
                     # Cleans strings like 'ARAF:.'
-                    f.col('alteration').contains(':.'),  # ty:ignore[missing-argument, invalid-argument-type]
+                    f.col('alteration').contains(':.'),
                     f.translate(f.col('alteration'), ':.', ''),
                 )
                 .when(
                     # Fusion genes are described with '__'
                     # biomarker is a cleaner representation when there's one alteration
-                    (f.col('alteration').contains('__')) & (~f.col('Biomarker').contains('+')),  # ty:ignore[missing-argument, invalid-argument-type]
+                    (f.col('alteration').contains('__')) & (~f.col('Biomarker').contains('+')),
                     f.col('Biomarker'),
                 )
                 .otherwise(f.col('alteration')),
@@ -147,24 +147,24 @@ class CancerBiomarkersEvidenceGenerator:
             .join(source_df.select(f.col('label').alias('niceName'), 'source', 'url'), on='source', how='left')
             .withColumn(
                 'literature',
-                f.when(f.col('source').startswith('PMID'), f.regexp_extract(f.col('source'), r'(PMID:)(\d+)', 2)),  # ty:ignore[missing-argument, invalid-argument-type]
+                f.when(f.col('source').startswith('PMID'), f.regexp_extract(f.col('source'), r'(PMID:)(\d+)', 2)),
             )
             .withColumn(
                 'urls',
                 f.when(
-                    f.col('source').startswith('NCT'),  # ty:ignore[missing-argument, invalid-argument-type]
+                    f.col('source').startswith('NCT'),
                     f.struct(
                         f.lit('Clinical Trials').alias('niceName'),
                         f.concat(f.lit('https://clinicaltrials.gov/ct2/show/'), f.col('source')).alias('url'),
                     ),
                 ).when(
-                    (~f.col('source').startswith('PMID')) | (~f.col('source').startswith('NCIT')),  # ty:ignore[missing-argument, invalid-argument-type]
+                    (~f.col('source').startswith('PMID')) | (~f.col('source').startswith('NCIT')),
                     f.struct(f.col('niceName'), f.col('url')),
                 ),
             )
             # The previous conditional clause creates a struct regardless of
             # whether any condition is met. The empty struct is replaced with null
-            .withColumn('urls', f.when(~f.col('urls.niceName').isNull(), f.col('urls')))  # ty:ignore[missing-argument]
+            .withColumn('urls', f.when(~f.col('urls.niceName').isNull(), f.col('urls')))
             # Enrich data
             .withColumn('functionalConsequenceId', f.col('alteration_type'))
             .replace(to_replace=ALTERATIONTYPE2FUNCTIONCSQ, subset=['functionalConsequenceId'])
@@ -181,21 +181,21 @@ class CancerBiomarkersEvidenceGenerator:
             .withColumn(
                 # drug class is coalesced when the precise name of the medicine is not provided
                 'drug',
-                f.when(f.col('drug').isNull() | (f.length(f.col('drug')) == 0), f.col('DrugFullName')).otherwise(  # ty:ignore[missing-argument]
+                f.when(f.col('drug').isNull() | (f.length(f.col('drug')) == 0), f.col('DrugFullName')).otherwise(
                     f.col('drug')
                 ),
             )
             .join(drugs_df, on='drug', how='left')
             .withColumn('drug', f.initcap(f.col('drug')))
             # Translate variantId
-            .withColumn('variantId', f.when(~f.col('gDNA').isNull(), self.get_variant_id_udf(f.col('gDNA'))))  # ty:ignore[missing-argument]
+            .withColumn('variantId', f.when(~f.col('gDNA').isNull(), self.get_variant_id_udf(f.col('gDNA'))))
             # Assign a GO ID when a gene expression data is reported
             .withColumn(
                 'geneExpressionId',
                 f
-                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('over')), 'GO_0010628')  # ty:ignore[missing-argument, invalid-argument-type]
-                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('under')), 'GO_0010629')  # ty:ignore[missing-argument, invalid-argument-type]
-                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('norm')), 'GO_0010467'),  # ty:ignore[missing-argument, invalid-argument-type]
+                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('over')), 'GO_0010628')
+                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('under')), 'GO_0010629')
+                .when((f.col('alteration_type') == 'EXPR') & (f.col('alteration').contains('norm')), 'GO_0010467'),
             )
             # Create geneticVariation struct
             .withColumn(

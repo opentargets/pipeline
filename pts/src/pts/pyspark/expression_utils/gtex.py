@@ -8,8 +8,10 @@ Expected input formats:
 - Subject metadata: TSV file with columns SUBJID, AGE, SEX.
 """
 
+from typing import Any
+
 from loguru import logger
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col, concat_ws, expr, lit, regexp_replace, split, when
 
 
@@ -37,9 +39,9 @@ class GtexBaselineExpression:
         self.local = local
         self.matrix = matrix
         self.no_efo = no_efo
-        self.df = None
-        self.df_matrix = None
-        self.sample_ids = None
+        self.df: DataFrame
+        self.df_matrix: DataFrame
+        self.sample_ids: list[Any] = []
 
     def _read_and_prepare_base_df(self):
         """Read the .gct.gz file and perform initial cleaning."""
@@ -205,9 +207,15 @@ class GtexBaselineExpression:
 
             # Rename the file
             spark = SparkSession.getActiveSession()
+            if spark is None:
+                raise RuntimeError('no active Spark session found')
             sc = spark.sparkContext
-            fs = sc._jvm.org.apache.hadoop.fs.FileSystem.get(sc._jsc.hadoopConfiguration())
-            path = sc._jvm.org.apache.hadoop.fs.Path
+            jvm = sc._jvm
+            jsc = sc._jsc
+            if jvm is None or jsc is None:
+                raise RuntimeError('no jvm found in spark context')
+            fs = jvm.org.apache.hadoop.fs.FileSystem.get(jsc.hadoopConfiguration())
+            path = jvm.org.apache.hadoop.fs.Path
 
             # Find the part-00000 file in the temp directory
             temp_path_obj = path(temp_path)

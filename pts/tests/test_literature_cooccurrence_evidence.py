@@ -13,7 +13,12 @@ class TestAdaptCooccurrenceForEvidence:
         )
 
         df = spark.createDataFrame([
-            Row(mappedId1='ENSG001', mappedId2='EFO_0000311', evidenceScore=0.8, section='abstract'),
+            Row(
+                mappedId1='ENSG001',
+                mappedId2='EFO_0000311',
+                evidenceScore=0.8,
+                section='abstract',
+            ),
         ])
         result = _adapt_cooccurrence_for_evidence(df)
         assert 'keywordId1' in result.columns
@@ -26,7 +31,12 @@ class TestAdaptCooccurrenceForEvidence:
         )
 
         df = spark.createDataFrame([
-            Row(mappedId1='ENSG001', mappedId2='EFO_0000311', evidenceScore=0.8, section='abstract'),
+            Row(
+                mappedId1='ENSG001',
+                mappedId2='EFO_0000311',
+                evidenceScore=0.8,
+                section='abstract',
+            ),
         ])
         result = _adapt_cooccurrence_for_evidence(df)
         assert 'mappedId1' not in result.columns
@@ -39,7 +49,12 @@ class TestAdaptCooccurrenceForEvidence:
         )
 
         df = spark.createDataFrame([
-            Row(mappedId1='ENSG001', mappedId2='EFO_0000311', evidenceScore=0.8, section='abstract'),
+            Row(
+                mappedId1='ENSG001',
+                mappedId2='EFO_0000311',
+                evidenceScore=0.8,
+                section='abstract',
+            ),
         ])
         result = _adapt_cooccurrence_for_evidence(df)
         assert 'section' in result.columns

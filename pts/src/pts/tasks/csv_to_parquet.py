@@ -29,7 +29,11 @@ class CsvToParquetSpec(Spec):
 class CsvToParquet(Task):
     """Task to convert a CSV file to Parquet format."""
 
-    def __init__(self, spec: CsvToParquetSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: CsvToParquetSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: CsvToParquetSpec
 
@@ -37,11 +41,25 @@ class CsvToParquet(Task):
     def run(self) -> Self:
         check_destination(self.spec.destination, delete=True)
 
-        s = StorageHandle(self.spec.source, config=self.context.config, force_local=self.spec.local_source)
-        d = StorageHandle(self.spec.destination, config=self.context.config)
+        s = StorageHandle(
+            self.spec.source,
+            config=self.context.config,
+            force_local=self.spec.local_source,
+        )
+        d = StorageHandle(
+            self.spec.destination,
+            config=self.context.config,
+        )
 
-        df = pl.read_csv(s.absolute, has_header=True, separator=self.spec.separator)
-        df.write_parquet(d.absolute, compression='gzip')
+        df = pl.read_csv(
+            s.absolute,
+            has_header=True,
+            separator=self.spec.separator,
+        )
+        df.write_parquet(
+            d.absolute,
+            compression='gzip',
+        )
         logger.info('transformation complete')
 
         self.artifacts = [Artifact(source=s.absolute, destination=d.absolute)]

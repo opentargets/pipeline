@@ -38,7 +38,7 @@ def disease_phenotype(
     logger.debug('loading mondo dataset')
     h = StorageHandle(source['mondo_path'])
     f = h.open()
-    df_mondo = pl.read_json(f, schema=ontology_schema)
+    df_mondo = pl.read_json(f, schema=ontology_schema)  # ty:ignore[invalid-argument-type]
 
     ############################################################################
     # mondo dataset

@@ -30,13 +30,19 @@ class Association(Dataset):
     ]
 
     # This is the default set of columns we group evidence by, used for association calculation:
-    GROUPBY_COLUMNS: ClassVar[list[str]] = ['diseaseId', 'targetId', 'aggregationType', 'aggregationValue']
+    GROUPBY_COLUMNS: ClassVar[list[str]] = [
+        'diseaseId',
+        'targetId',
+        'aggregationType',
+        'aggregationValue',
+    ]
 
     def aggregate_overall(self: Association, datasource_weights: DataFrame) -> Association:
         """Apply overall aggregation on the datasource data.
 
         Args:
-            datasource_weights (DataFrame): for each datasource we need to provide weights and corresponding datatype
+            datasource_weights (DataFrame): for each datasource we need to provide
+            weights and corresponding datatype
 
         Returns:
             Association: where the datasources are further aggregated fully.
@@ -63,7 +69,8 @@ class Association(Dataset):
         """Apply further aggregation based on data types.
 
         Args:
-            datasource_weights (DataFrame): for each datasource we need to provide weights and corresponding datatype
+            datasource_weights (DataFrame): for each datasource we need to provide
+            weights and corresponding datatype
 
         Returns:
             Association: where the datasources are further aggregated by datatypes.
@@ -115,7 +122,7 @@ class Association(Dataset):
         collect_window = (
             Window
             .partitionBy(['targetId', 'diseaseId', 'aggregationValue'])
-            .orderBy(f.col('year').asc(), f.col('datasourceId').asc())  # ty:ignore[missing-argument]
+            .orderBy(f.col('year').asc(), f.col('datasourceId').asc())
             .rowsBetween(Window.unboundedPreceding, 0)
         )
 
@@ -175,7 +182,11 @@ class Association(Dataset):
 
         # Calculate novelty based on subsequent years:
         novelty = self._get_novelty(
-            intermediate_dataset, self.GROUPBY_COLUMNS, novelty_window, novelty_shift, novelty_scale
+            intermediate_dataset,
+            self.GROUPBY_COLUMNS,
+            novelty_window,
+            novelty_shift,
+            novelty_scale,
         )
 
         # Next year:
@@ -261,7 +272,7 @@ class Association(Dataset):
         """
         peak_value = scores - f.lag(scores, offset=1).over(window)
 
-        return f.when(peak_value.isNull(), f.lit(0)).otherwise(peak_value)  # ty:ignore[missing-argument]
+        return f.when(peak_value.isNull(), f.lit(0)).otherwise(peak_value)
 
     @staticmethod
     def _create_yearly_view(df) -> DataFrame:
@@ -373,7 +384,11 @@ class Association(Dataset):
             intermediate_dataset
             .withColumn('peak', Association._get_peak(f.col('associationScore'), peak_window))
             .filter(f.col('peak') > 0)
-            .select(*groupby_columns, f.col('year').alias('peak_year'), f.col('peak').alias('peak_value'))
+            .select(
+                *groupby_columns,
+                f.col('year').alias('peak_year'),
+                f.col('peak').alias('peak_value'),
+            )
         )
 
         # Step 3: collect peaks per group as array<struct<peak_year, peak_value>>
@@ -420,7 +435,10 @@ class Association(Dataset):
 
     @staticmethod
     def calculate_logistic_decay(
-        score_value: Column, window_difference: Column, sigmoid_midpoint: float, decay_steepness: float
+        score_value: Column,
+        window_difference: Column,
+        sigmoid_midpoint: float,
+        decay_steepness: float,
     ) -> Column:
         """Calculate change of novelty over the years.
 

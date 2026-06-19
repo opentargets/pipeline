@@ -47,9 +47,8 @@ def process_credible_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
         `isLead` (True when the tag variant is the lead variant of the locus).
     """
     return (
-        credible_set.select(
-            'studyLocusId', 'studyId', pl.col('variantId').alias('leadVariantId'), 'locus', 'finemappingMethod'
-        )
+        credible_set
+        .select('studyLocusId', 'studyId', pl.col('variantId').alias('leadVariantId'), 'locus', 'finemappingMethod')
         .explode('locus')
         .unnest('locus')
         .select(
@@ -112,7 +111,8 @@ def process_l2g(l2g: pl.LazyFrame) -> pl.LazyFrame:
         and `gwasLocusToGeneScore` (renamed from `score`).
     """
     return (
-        l2g.select('studyLocusId', 'geneId', 'score')
+        l2g
+        .select('studyLocusId', 'geneId', 'score')
         .with_columns(pl.col('score').rank(method='min', descending=True).over('studyLocusId').alias('rank'))
         .filter((pl.col('rank') == 1) | (pl.col('score') >= 0.5))
         .select(
@@ -158,14 +158,15 @@ def vep_view(
             compatibility).
     """
     logger.info('Loading input data')
-    credible_set = process_credible_set(pl.scan_parquet(f"{source['credible_set']}/*.parquet"))
-    study = process_study(pl.scan_parquet(f"{source['study_table']}/*.parquet"))
-    l2g = process_l2g(pl.scan_parquet(f"{source['l2g_table']}/*.parquet"))
-    biosample = process_biosample(pl.scan_parquet(f"{source['biosample']}/*.parquet"))
+    credible_set = process_credible_set(pl.scan_parquet(f'{source["credible_set"]}/*.parquet'))
+    study = process_study(pl.scan_parquet(f'{source["study_table"]}/*.parquet'))
+    l2g = process_l2g(pl.scan_parquet(f'{source["l2g_table"]}/*.parquet'))
+    biosample = process_biosample(pl.scan_parquet(f'{source["biosample"]}/*.parquet'))
 
     logger.info('Joining and processing data')
     result = (
-        credible_set.join(l2g, on='studyLocusId', how='left')
+        credible_set
+        .join(l2g, on='studyLocusId', how='left')
         .join(study, on='studyId', how='left')
         .join(biosample, on='qtlBiosampleId', how='left')
         .with_columns(
@@ -206,10 +207,19 @@ def vep_view(
     )
 
     logger.info('Writing full dataset')
-    result.write_csv(destination['vep_data_all'], separator='\t')
+    result.write_csv(
+        destination['vep_data_all'],
+        separator='\t',
+    )
 
     logger.info('Writing GWAS dataset')
-    result.filter(pl.col('studyType') == 'gwas').write_csv(destination['vep_data_gwas'], separator='\t')
+    result.filter(pl.col('studyType') == 'gwas').write_csv(
+        destination['vep_data_gwas'],
+        separator='\t',
+    )
 
     logger.info('Writing QTL dataset')
-    result.filter(pl.col('studyType') != 'gwas').write_csv(destination['vep_data_qtl'], separator='\t')
+    result.filter(pl.col('studyType') != 'gwas').write_csv(
+        destination['vep_data_qtl'],
+        separator='\t',
+    )

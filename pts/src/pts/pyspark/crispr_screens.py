@@ -104,7 +104,7 @@ def crispr_screens(
         .withColumn('contrast', f.coalesce('contrast', 'Phenotype'))
         .drop('Phenotype')
         # QC and filter for studies that have disease mapping
-        .filter(f.col('diseaseFromSourceMappedId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('diseaseFromSourceMappedId').isNotNull())
         .distinct()
     )
 
@@ -114,7 +114,7 @@ def crispr_screens(
         .withColumn('input_file', f.input_file_name())
         .withColumn('studyId', f.regexp_replace(f.regexp_extract('input_file', r'([^/]+)\.csv\.gz$', 1), r'%20', ' '))
         .filter(
-            f.col('Hit Class').isNotNull()  # ty:ignore[missing-argument]
+            f.col('Hit Class').isNotNull()
             & ((f.col('Hit Class') == 'Positive Hit') | (f.col('Hit Class') == 'Negative Hit'))
         )
         .select(

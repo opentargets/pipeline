@@ -139,11 +139,9 @@ def test_release_metrics_core_counts() -> None:
 def test_release_metrics_top_level_only_fields() -> None:
     metrics = _core_metrics_frame(_input_tables())
 
-    evidence_fields = (
-        metrics
-        .filter(pl.col('variable') == 'evidenceFieldNotNullCountByDatasource')['field']
-        .drop_nulls()
-    )
+    evidence_fields = metrics.filter(pl.col('variable') == 'evidenceFieldNotNullCountByDatasource')[
+        'field'
+    ].drop_nulls()
     assert all('.' not in field for field in evidence_fields)
 
 
@@ -198,7 +196,10 @@ def test_generic_rich_metrics_with_heterogeneous_list_struct() -> None:
 
     assert _metric_value(metrics, 'studyTotalCount') == 2
     assert (
-        metrics.filter(pl.col('variable') == 'studyNotNullCount', pl.col('field') == 'ldPopulationStructure').height
+        metrics.filter(
+            pl.col('variable') == 'studyNotNullCount',
+            pl.col('field') == 'ldPopulationStructure',
+        ).height
         == 1
     )
 
@@ -238,7 +239,10 @@ def test_discover_dataset_paths_recovers_missing_directory_markers(monkeypatch) 
             ]
         return []
 
-    monkeypatch.setattr('pts.transformers.release_metrics._expand_storage_glob', fake_expand_storage_glob)
+    monkeypatch.setattr(
+        'pts.transformers.release_metrics._expand_storage_glob',
+        fake_expand_storage_glob,
+    )
 
     discovered = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)
 
@@ -259,7 +263,10 @@ def test_discover_dataset_paths_scope_trailing_slash_equivalent(monkeypatch) -> 
             ]
         return []
 
-    monkeypatch.setattr('pts.transformers.release_metrics._expand_storage_glob', fake_expand_storage_glob)
+    monkeypatch.setattr(
+        'pts.transformers.release_metrics._expand_storage_glob',
+        fake_expand_storage_glob,
+    )
 
     discovered_without_slash = _discover_dataset_paths(release_uri, ['/output/*'], config=config)
     discovered_with_slash = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)

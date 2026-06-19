@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 from loguru import logger
@@ -19,7 +19,7 @@ def disease_hpo(
     logger.debug('loading hpo ontology')
     h = StorageHandle(source)
     f = h.open()
-    initial = pl.read_json(f, schema=schema)
+    initial = pl.read_json(cast(bytes, f), schema=schema)
 
     # prepare dataframes
     n = pl.DataFrame(

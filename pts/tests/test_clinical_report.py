@@ -112,7 +112,10 @@ def test_flag_indirect_primary_purpose_with_llm_no_match_is_flagged() -> None:
     reports = _build_reports([
         _report('r1', primary_purpose='TREATMENT'),
     ])
-    llm_batch_results = pl.DataFrame({'id': ['r_other'], 'drug_intent': ['therapeutic']})
+    llm_batch_results = pl.DataFrame({
+        'id': ['r_other'],
+        'drug_intent': ['therapeutic'],
+    })
     result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
     assert _flagged(result, 'r1')
 

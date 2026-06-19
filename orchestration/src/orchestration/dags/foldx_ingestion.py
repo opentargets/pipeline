@@ -8,22 +8,22 @@ from orchestration.utils import chain_dependencies, read_yaml_config
 from orchestration.utils.common import shared_dag_args, shared_dag_kwargs
 from orchestration.utils.dataproc import generate_dataproc_task_chain, submit_gentropy_step
 
-config = read_yaml_config(Path(__file__).parent / "config" / "foldx_ingestion.yaml")
+config = read_yaml_config(Path(__file__).parent / 'config' / 'foldx_ingestion.yaml')
 
 with DAG(
     dag_id=Path(__file__).stem,
-    description="Open Targets Genetics — FoldX Ingestion",
+    description='Open Targets Genetics — FoldX Ingestion',
     default_args=shared_dag_args,
     **shared_dag_kwargs,
 ):
     tasks = {}
-    for step in config["nodes"]:
+    for step in config['nodes']:
         task = submit_gentropy_step(
-            cluster_name=config["dataproc"]["cluster_name"],
-            step_name=step["id"],
-            params=step["params"],
+            cluster_name=config['dataproc']['cluster_name'],
+            step_name=step['id'],
+            params=step['params'],
         )
-        tasks[step["id"]] = task
-    chain_dependencies(nodes=config["nodes"], tasks_or_task_groups=tasks)
+        tasks[step['id']] = task
+    chain_dependencies(nodes=config['nodes'], tasks_or_task_groups=tasks)
 
-    dag = generate_dataproc_task_chain(tasks=list(tasks.values()), **config["dataproc"])
+    dag = generate_dataproc_task_chain(tasks=list(tasks.values()), **config['dataproc'])

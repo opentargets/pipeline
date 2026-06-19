@@ -151,7 +151,7 @@ def process_drug_index(
     # Get probe compound IDs grouped per drug (for cross-references)
     probe_xrefs = (
         chemical_probes
-        .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('drugId').isNotNull())
         .groupBy(f.col('drugId').alias('_probeXrefDrugId'))
         .agg(f.collect_set('drugFromSourceId').alias('_probeIds'))
     )
@@ -178,7 +178,7 @@ def process_drug_index(
     drug_df = drug_df.withColumn(
         'crossReferences',
         f.when(
-            f.col('_probeIds').isNotNull(),  # ty:ignore[missing-argument]
+            f.col('_probeIds').isNotNull(),
             f.concat(
                 f.coalesce(f.col('crossReferences'), f.array()),
                 f.array(f.struct(f.lit('Probes&Drugs').alias('source'), f.col('_probeIds').alias('ids'))),
@@ -194,9 +194,9 @@ def process_drug_index(
 
     is_drug = (
         f.expr("array_contains(transform(crossReferences, x -> x.source), 'drugbank')")
-        | f.col('maximumClinicalStage').isNotNull()  # ty:ignore[missing-argument]
-        | f.col('hasMechanismOfAction').isNotNull()  # ty:ignore[missing-argument]
-        | f.col('chemicalProbeDrugId').isNotNull()  # ty:ignore[missing-argument]
+        | f.col('maximumClinicalStage').isNotNull()
+        | f.col('hasMechanismOfAction').isNotNull()
+        | f.col('chemicalProbeDrugId').isNotNull()
     )
 
     # Add description
@@ -240,7 +240,7 @@ def _compute_max_phase_per_drug(clinical_report: DataFrame) -> DataFrame:
             f.col('drug.drugId').alias('id'),
             f.col('clinicalStage'),
         )
-        .filter(f.col('id').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('id').isNotNull())
         .withColumn('stageRank', _stage_rank(f.col('clinicalStage')))
         # Group by drug, take minimum rank (= best stage)
         .groupBy('id')
@@ -280,7 +280,7 @@ def _process_clinical_report_indications(
             f.col('disease.diseaseId').alias('diseaseId'),
             f.col('clinicalStage'),
         )
-        .filter(f.col('drugId').isNotNull() & f.col('diseaseId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('drugId').isNotNull() & f.col('diseaseId').isNotNull())
         .withColumn('stageRank', _stage_rank(f.col('clinicalStage')))
     )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from airflow.models.baseoperator import BaseOperator
+from airflow.utils.context import Context
 
 from orchestration.models.batch import BatchIndexOperatorSpec, BatchIndexRow
 from orchestration.operators.batch.manifest_generators import (
@@ -14,10 +15,10 @@ from orchestration.operators.batch.manifest_generators import (
 from orchestration.operators.batch.manifest_generators.proto import ProtoManifestGenerator
 
 MANIFEST_GENERATOR_MAP = {
-    "vep": VepManifestGenerator,
-    "gentropy_step": GentropyStepManifestGenerator,
-    "finemapping": FinemappingManifestGenerator,
-    "harmonisation": HarmonisationManifestGenerator,
+    'vep': VepManifestGenerator,
+    'gentropy_step': GentropyStepManifestGenerator,
+    'finemapping': FinemappingManifestGenerator,
+    'harmonisation': HarmonisationManifestGenerator,
 }
 
 
@@ -44,9 +45,9 @@ class BatchIndexOperator(BaseOperator):
         try:
             return MANIFEST_GENERATOR_MAP[label]
         except KeyError:
-            raise KeyError(f"Manifest generator with label {label} not found in the manifest generator registry.")
+            raise KeyError(f'Manifest generator with label {label} not found in the manifest generator registry.')
 
-    def execute(self, **kwargs) -> list[BatchIndexRow]:
+    def execute(self, context: Context) -> list[BatchIndexRow]:
         """Execute the operator."""
         generator = self.manifest_generator.from_generator_config(self.generator_specs)
         index = generator.generate_batch_index()

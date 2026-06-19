@@ -11,11 +11,11 @@ from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_SERVICE_ACCOUNT
 
 def default_labels(project: str, is_ppp: bool = False) -> dict[str, str]:
     return {
-        "team": "open-targets",
-        "subteam": "data" if project == GCP_PROJECT_PLATFORM else "genetics",
-        "product": "ppp" if is_ppp else "platform",
-        "environment": "development" if "dev" in GCP_SERVICE_ACCOUNT else "production",
-        "created_by": "unified-pipeline" if project == GCP_PROJECT_PLATFORM else "gentropy-pipelines",
+        'team': 'open-targets',
+        'subteam': 'data' if project == GCP_PROJECT_PLATFORM else 'genetics',
+        'product': 'ppp' if is_ppp else 'platform',
+        'environment': 'development' if 'dev' in GCP_SERVICE_ACCOUNT else 'production',
+        'created_by': 'unified-pipeline' if project == GCP_PROJECT_PLATFORM else 'gentropy-pipelines',
     }
 
 
@@ -56,9 +56,9 @@ class Labels(UserDict[str, str]):
         characters, underscores and dashes. The value can be at most 63 characters
         long.
         """
-        return re.sub(r"[^a-z0-9-_]", "-", label.lower())[0:63]
+        return re.sub(r'[^a-z0-9-_]', '-', label.lower())[0:63]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: Any) -> None:  # ty:ignore[invalid-method-override]
         super().__setitem__(key, self.clean_label(str(value)))
 
     def add_dag_run_id(self, context: Context) -> None:
@@ -67,8 +67,9 @@ class Labels(UserDict[str, str]):
         Args:
             context: Airflow's task rendering context.
         """
-        dag_run = context.get("dag_run")
+        default_run_label = 'unknown'
+        dag_run = context.get('dag_run')
         if dag_run:
             default_run_label = dag_run.run_id
-        run_label = context.get("params", {}).get("run_label", default_run_label)
-        self["run"] = run_label
+        run_label = context.get('params', {}).get('run_label', default_run_label)
+        self['run'] = run_label

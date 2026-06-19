@@ -9,9 +9,9 @@ from orchestration.models.batch.operator import (
 )
 
 __all__ = [
-    "BatchCollectSpec",
-    "BatchIndexOperatorSpec",
-    "BatchIndexRow",
-    "BatchJobOperatorSpec",
-    "ManifestGeneratorSpec",
+    'BatchCollectSpec',
+    'BatchIndexOperatorSpec',
+    'BatchIndexRow',
+    'BatchJobOperatorSpec',
+    'ManifestGeneratorSpec',
 ]

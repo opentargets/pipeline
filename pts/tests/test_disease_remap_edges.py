@@ -6,7 +6,11 @@ import polars as pl
 import pytest
 
 from pts.schemas.ontology import node
-from pts.transformers.disease import _IAO_REPLACED_BY, annotate_name_duplicates, remap_edges
+from pts.transformers.disease import (
+    _IAO_REPLACED_BY,
+    annotate_name_duplicates,
+    remap_edges,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,9 +58,9 @@ def _make_edges(rows: list[tuple[str, str, str]]) -> pl.DataFrame:
 # Shared URL constants
 EFO_001 = 'http://www.ebi.ac.uk/efo/EFO_001'
 EFO_002 = 'http://www.ebi.ac.uk/efo/EFO_002'
-HP_001 = 'http://purl.obolibrary.org/obo/HP_001'   # superseded by EFO_001
-HP_002 = 'http://purl.obolibrary.org/obo/HP_002'   # superseded by EFO_002
-HP_003 = 'http://purl.obolibrary.org/obo/HP_003'   # canonical (unique name)
+HP_001 = 'http://purl.obolibrary.org/obo/HP_001'  # superseded by EFO_001
+HP_002 = 'http://purl.obolibrary.org/obo/HP_002'  # superseded by EFO_002
+HP_003 = 'http://purl.obolibrary.org/obo/HP_003'  # canonical (unique name)
 
 
 # ---------------------------------------------------------------------------
@@ -67,24 +71,26 @@ HP_003 = 'http://purl.obolibrary.org/obo/HP_003'   # canonical (unique name)
 @pytest.fixture
 def annotated_nodes() -> pl.DataFrame:
     """Node table with two name-collision pairs already annotated."""
-    return annotate_name_duplicates(_make_nodes(
-        _make_node(EFO_001, 'acidosis'),
-        _make_node(HP_001, 'Acidosis'),   # superseded by EFO_001
-        _make_node(EFO_002, 'fever'),
-        _make_node(HP_002, 'Fever'),       # superseded by EFO_002
-        _make_node(HP_003, 'unique term'),  # no collision
-    ))
+    return annotate_name_duplicates(
+        _make_nodes(
+            _make_node(EFO_001, 'acidosis'),
+            _make_node(HP_001, 'Acidosis'),  # superseded by EFO_001
+            _make_node(EFO_002, 'fever'),
+            _make_node(HP_002, 'Fever'),  # superseded by EFO_002
+            _make_node(HP_003, 'unique term'),  # no collision
+        )
+    )
 
 
 @pytest.fixture
 def edges() -> pl.DataFrame:
     return _make_edges([
-        (HP_001, 'is_a', EFO_002),   # sub is superseded
-        (EFO_001, 'is_a', HP_002),    # obj is superseded
-        (HP_001, 'is_a', HP_002),    # both superseded → becomes EFO_001 -> EFO_002
-        (HP_001, 'is_a', EFO_001),   # remaps to EFO_001 -> EFO_001 (self-loop → drop)
-        (EFO_001, 'is_a', HP_003),    # no remapping needed
-        (HP_003, 'is_a', EFO_002),   # no remapping needed
+        (HP_001, 'is_a', EFO_002),  # sub is superseded
+        (EFO_001, 'is_a', HP_002),  # obj is superseded
+        (HP_001, 'is_a', HP_002),  # both superseded → becomes EFO_001 -> EFO_002
+        (HP_001, 'is_a', EFO_001),  # remaps to EFO_001 -> EFO_001 (self-loop → drop)
+        (EFO_001, 'is_a', HP_003),  # no remapping needed
+        (HP_003, 'is_a', EFO_002),  # no remapping needed
     ])
 
 
@@ -120,8 +126,8 @@ class TestRemapEdges:
             .unnest('meta')
             .explode('basicPropertyValues')
             .unnest('basicPropertyValues')
-            .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
-            ['id'].to_list()
+            .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
+            .to_list()
         )
         remaining = self.result.filter(pl.col('sub').is_in(superseded))
         assert remaining.is_empty(), f"Superseded URLs still in 'sub': {remaining}"
@@ -132,8 +138,8 @@ class TestRemapEdges:
             .unnest('meta')
             .explode('basicPropertyValues')
             .unnest('basicPropertyValues')
-            .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
-            ['id'].to_list()
+            .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
+            .to_list()
         )
         remaining = self.result.filter(pl.col('obj').is_in(superseded))
         assert remaining.is_empty(), f"Superseded URLs still in 'obj': {remaining}"
@@ -170,16 +176,12 @@ class TestRemapEdges:
 
     def test_canonical_only_edge_unchanged(self) -> None:
         """EFO_001 -> HP_003 has no deprecated endpoint and must pass through."""
-        canonical_edge = self.result.filter(
-            (pl.col('sub') == EFO_001) & (pl.col('obj') == HP_003)
-        )
+        canonical_edge = self.result.filter((pl.col('sub') == EFO_001) & (pl.col('obj') == HP_003))
         assert canonical_edge.height == 1
 
     def test_canonical_obj_edge_unchanged(self) -> None:
         """HP_003 -> EFO_002 has no deprecated endpoint and must pass through."""
-        canonical_edge = self.result.filter(
-            (pl.col('sub') == HP_003) & (pl.col('obj') == EFO_002)
-        )
+        canonical_edge = self.result.filter((pl.col('sub') == HP_003) & (pl.col('obj') == EFO_002))
         assert canonical_edge.height == 1
 
 
@@ -197,10 +199,12 @@ class TestRemapEdgesEdgeCases:
         assert result.equals(e)
 
     def test_empty_edges_returns_empty(self) -> None:
-        n = annotate_name_duplicates(_make_nodes(
-            _make_node(EFO_001, 'acidosis'),
-            _make_node(HP_001, 'Acidosis'),
-        ))
+        n = annotate_name_duplicates(
+            _make_nodes(
+                _make_node(EFO_001, 'acidosis'),
+                _make_node(HP_001, 'Acidosis'),
+            )
+        )
         e = _make_edges([])
         result = remap_edges(e, n)
         assert result.is_empty()

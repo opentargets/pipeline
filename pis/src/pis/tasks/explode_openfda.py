@@ -3,7 +3,7 @@
 import json
 from typing import Any, Self
 
-import jq
+import jq  # ty:ignore[unresolved-import] jq is a C extension
 from loguru import logger
 from otter.scratchpad.model import Scratchpad
 from otter.storage.synchronous.handle import StorageHandle
@@ -71,7 +71,11 @@ class ExplodeOpenfda(Task):
     or sub-objects.
     """
 
-    def __init__(self, spec: ExplodeOpenfdaSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: ExplodeOpenfdaSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: ExplodeOpenfdaSpec
         self.scratchpad = Scratchpad({

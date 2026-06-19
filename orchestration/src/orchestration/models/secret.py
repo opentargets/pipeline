@@ -67,55 +67,59 @@ from orchestration.utils.path import GCSPath
 
 class Secret(BaseModel):
     secret_id: str
-    """Secret ID in GCP Secret Manager. This is the name of the secret without the "projects/{project_id}/secrets/" prefix."""
+    """Secret ID in GCP Secret Manager. This is the name of the secret without the "projects/{project_id}/secrets/"
+        prefix.
+    """
     project_id: str = GCP_PROJECT_PLATFORM
     """Project ID where the secret is stored. Defaults to GCP_PROJECT_PLATFORM."""
-    version_id: str = "latest"
-    """Version ID of the secret. Defaults to "latest". Can be a specific version number or "latest" to always fetch the most recent version."""
+    version_id: str = 'latest'
+    """Version ID of the secret. Defaults to "latest". Can be a specific version number or "latest" to always fetch the
+        most recent version.
+    """
 
-    @field_validator("secret_id")
+    @field_validator('secret_id')
     @classmethod
     def _validate_secret_id(cls, v: str) -> str:
         """Sanitize the secret_id to ensure it conforms to GCP Secret Manager requirements.
 
         See: [GCP Secret API](https://docs.cloud.google.com/secret-manager/docs/reference/rest/v1/projects.secrets/create#query-parameters)
         """
-        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,255}", v):
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,255}', v):
             raise ValueError(
-                f"Invalid secret_id {v!r}. Must be 1-255 characters containing only "
-                "letters, digits, hyphens, and underscores."
+                f'Invalid secret_id {v!r}. Must be 1-255 characters containing only '
+                'letters, digits, hyphens, and underscores.'
             )
         return v
 
-    @field_validator("project_id")
+    @field_validator('project_id')
     @classmethod
     def _validate_project_id(cls, v: str) -> str:
         """Sanitize the project_id to ensure it conforms to GCP Secret Manager requirements.
 
         See: [GCP Project ID requirements](https://docs.cloud.google.com/resource-manager/docs/creating-managing-projects#before_you_begin)
         """
-        if not re.fullmatch(r"[a-z0-9-]{6,30}", v):
+        if not re.fullmatch(r'[a-z0-9-]{6,30}', v):
             raise ValueError(
-                f"Invalid project_id {v!r}. Must be 6-30 characters containing only "
-                "lowercase letters, digits, and hyphens."
+                f'Invalid project_id {v!r}. Must be 6-30 characters containing only '
+                'lowercase letters, digits, and hyphens.'
             )
         return v
 
-    @field_validator("version_id")
+    @field_validator('version_id')
     @classmethod
     def _validate_version_id(cls, v: str) -> str:
         """Sanitize the version_id to ensure it is either 'latest' or a numeric version string."""
-        if not re.fullmatch(r"latest|[0-9]+", v):
+        if not re.fullmatch(r'latest|[0-9]+', v):
             raise ValueError(f"Invalid version_id {v!r}. Must be 'latest' or a numeric version string.")
         return v
 
     @classmethod
     def from_secret_name(cls, secret_name: str) -> Secret:
-        """Create a Secret instance from the full secret name in the format "projects/{project_id}/secrets/{secret_id}/versions/{version_id}"."""
-        parts = secret_name.split("/")
-        if len(parts) != 6 or parts[0] != "projects" or parts[2] != "secrets" or parts[4] != "versions":
+        """Create a Secret instance from the full secret name in the format "projects/{project_id}/secrets/{secret_id}/versions/{version_id}"."""  # noqa: E501
+        parts = secret_name.split('/')
+        if len(parts) != 6 or parts[0] != 'projects' or parts[2] != 'secrets' or parts[4] != 'versions':
             raise ValueError(
-                f"Invalid secret name format: {secret_name}. Expected format: 'projects/{{project_id}}/secrets/{{secret_id}}/versions/{{version_id}}'"
+                f"Invalid secret name format: {secret_name}. Expected format: 'projects/{{project_id}}/secrets/{{secret_id}}/versions/{{version_id}}'"  # noqa: E501
             )
         return cls(
             project_id=parts[1],
@@ -126,7 +130,7 @@ class Secret(BaseModel):
     @property
     def name(self) -> str:
         """Construct the full secret name in the format required by GCP Secret Manager API."""
-        return f"projects/{self.project_id}/secrets/{self.secret_id}/versions/{self.version_id}"
+        return f'projects/{self.project_id}/secrets/{self.secret_id}/versions/{self.version_id}'
 
 
 class Secrets(BaseModel):
@@ -135,7 +139,8 @@ class Secrets(BaseModel):
     This class represents a collection of secrets that can be injected as environment variables to the batch tasks.
     The mapping between environment variable names and secrets is defined in the `mapping` attribute.
 
-    The `to_env` method can be used to fetch the secret values and convert them to a format suitable for environment variables.
+    The `to_env` method can be used to fetch the secret values and convert them to a format suitable for environment
+    variables.
 
     Examples:
     ---
@@ -156,20 +161,20 @@ class Secrets(BaseModel):
     mapping: dict[str, Secret]
     """Mapping between environment variable names and secret ids."""
 
-    @field_validator("mapping")
+    @field_validator('mapping')
     @classmethod
     def _validate_env_var_names(cls, v: dict[str, Secret]) -> dict[str, Secret]:
-        """Sanitize the environment variable names to ensure they conform to typical environment variable naming conventions."""
+        """Sanitize the environment variable names to ensure they conform to typical environment variable naming conventions."""  # noqa: E501
         for key in v:
-            if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+            if not re.fullmatch(r'[A-Z_][A-Z0-9_]*', key):
                 raise ValueError(
-                    f"Invalid environment variable name {key!r}. Must start with an "
-                    "uppercase letter or underscore, followed by uppercase letters, digits, or underscores."
+                    f'Invalid environment variable name {key!r}. Must start with an '
+                    'uppercase letter or underscore, followed by uppercase letters, digits, or underscores.'
                 )
         return v
 
     def build(self) -> dict[str, str]:
-        """Build a dictionary of environment variable names to secret references in the format expected by Dataproc init actions."""
+        """Build a dictionary of environment variable names to secret references in the format expected by Dataproc init actions."""  # noqa: E501
         return {env_var: secret.name for env_var, secret in self.mapping.items()}
 
 
@@ -191,8 +196,9 @@ class SecretInitAction(BaseModel):
         Returns:
             str: Format string with placeholders for env_var, version_id, secret_id, project_id and secret_file_path.
         """
-        # NOTE: DO NOT TOUCH! THIS STRING IS CRAFTED AS A PART OF THE INIT ACTION SCRIPT THAT FETCHES THE SECRETS FROM GCP.
-        return 'echo "{{\\"{env_var}\\": \\"$(gcloud secrets versions access {version_id} --secret={secret_id} --project={project_id})\\"}}"  > /var/run/secrets/{secret_id}'
+        # NOTE: DO NOT TOUCH! THIS STRING IS CRAFTED AS A PART OF THE INIT ACTION
+        # SCRIPT THAT FETCHES THE SECRETS FROM GCP.
+        return 'echo "{{\\"{env_var}\\": \\"$(gcloud secrets versions access {version_id} --secret={secret_id} --project={project_id})\\"}}"  > /var/run/secrets/{secret_id}'  # noqa: E501
 
     def _to_script_str(self) -> str:
         """Transform the secrets into a init action script.
@@ -209,17 +215,17 @@ class SecretInitAction(BaseModel):
             for env_var, secret in self.secrets.mapping.items()
         ]
         lines = [
-            "#!/bin/bash",
-            "set -euo pipefail",
-            "set +x",
-            "mkdir -p /var/run/secrets",
-            "# Use gcloud secret-manager to fetch secrets and export them to files under /var/run/secrets/",
+            '#!/bin/bash',
+            'set -euo pipefail',
+            'set +x',
+            'mkdir -p /var/run/secrets',
+            '# Use gcloud secret-manager to fetch secrets and export them to files under /var/run/secrets/',
             *fetch_secret_cmds,
             "# 112 is the 'hadoop' group",
-            "chown root:112 /var/run/secrets/*",
-            "chmod 440 /var/run/secrets/*",
+            'chown root:112 /var/run/secrets/*',
+            'chmod 440 /var/run/secrets/*',
         ]
-        return "\n".join(lines)
+        return '\n'.join(lines)
 
     def push_to_gcs(self, gcs_hook: GCSHook) -> NodeInitializationAction:
         """Push the init action script to GCS.

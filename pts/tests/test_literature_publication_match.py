@@ -16,22 +16,17 @@ class TestEpmcReadPath:
         from pts.pyspark.literature_publication_match import _epmc_read_path
 
         assert (
-            _epmc_read_path('gs://otar025-epmc/ml02', 'abstract', None)
-            == 'gs://otar025-epmc/ml02/abstract/*/*.jsonl'
+            _epmc_read_path('gs://otar025-epmc/ml02', 'abstract', None) == 'gs://otar025-epmc/ml02/abstract/*/*.jsonl'
         )
 
     def test_strips_trailing_slash(self):
         from pts.pyspark.literature_publication_match import _epmc_read_path
 
         assert (
-            _epmc_read_path('gs://otar025-epmc/ml02/', 'fulltext', None)
-            == 'gs://otar025-epmc/ml02/fulltext/*/*.jsonl'
+            _epmc_read_path('gs://otar025-epmc/ml02/', 'fulltext', None) == 'gs://otar025-epmc/ml02/fulltext/*/*.jsonl'
         )
 
     def test_empty_date_prefix_treated_as_none(self):
         from pts.pyspark.literature_publication_match import _epmc_read_path
 
-        assert (
-            _epmc_read_path('gs://otar025-epmc/ml02', 'abstract', '')
-            == 'gs://otar025-epmc/ml02/abstract/*/*.jsonl'
-        )
+        assert _epmc_read_path('gs://otar025-epmc/ml02', 'abstract', '') == 'gs://otar025-epmc/ml02/abstract/*/*.jsonl'

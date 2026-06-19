@@ -143,7 +143,7 @@ def _finalise_evidence_strings(mapped_evidence: DataFrame) -> DataFrame:
         'diseaseFromSourceMappedId',  # EFO mapped disease ID.
         'targetFromSourceId',  # Ensembl mapped human gene ID.
     ]
-    w = Window.partitionBy([f.col(c) for c in unique_fields]).orderBy(f.col('resourceScore').desc())  # ty:ignore[missing-argument]
+    w = Window.partitionBy([f.col(c) for c in unique_fields]).orderBy(f.col('resourceScore').desc())
     return (
         mapped_evidence
         .withColumn('row', f.row_number().over(w))

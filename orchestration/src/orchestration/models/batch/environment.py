@@ -38,9 +38,9 @@ class EnvironmentSpec(BaseModel):
         """
         c = {}
         if self.variables:
-            c["variables"] = self.variables
+            c['variables'] = self.variables
         if self.secrets:
-            c["secret_variables"] = self.secrets.build()
+            c['secret_variables'] = self.secrets.build()
         return batch_v1.Environment(c)
 
 
@@ -98,7 +98,8 @@ class EnvironmentRegistrySpec(BaseModel):
             max_task_count (int): The maximum number of tasks (environments) in each partition.
 
         Returns:
-            list[EnvironmentRegistrySpec]: A list of EnvironmentRegistrySpec objects, each containing a partition of the environments.
+            list[EnvironmentRegistrySpec]: A list of EnvironmentRegistrySpec objects, each containing a partition of the
+                environments.
 
         Example:
         ---
@@ -135,4 +136,4 @@ class EnvironmentRegistrySpec(BaseModel):
 
     def __repr__(self) -> str:
         """Get environment registry string representation."""
-        return f"EnvironmentRegistrySpec(n={len(self.environments)} environments)"
+        return f'EnvironmentRegistrySpec(n={len(self.environments)} environments)'

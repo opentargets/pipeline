@@ -8,7 +8,7 @@ import re
 from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, cast
 
 import yaml
 from google.cloud import storage
@@ -16,8 +16,8 @@ from requests.adapters import HTTPAdapter
 
 CHUNK_SIZE = 1024 * 256
 MAX_N_THREADS = 32
-URI_PATTERN = r"^^((?P<protocol>.*)://)?(?P<root>[(\w)-]+)/(?P<path>([(\w)-/])+)"
-PARTITION_REGEX = r"\w*=(\w*)"
+URI_PATTERN = r'^^((?P<protocol>.*)://)?(?P<root>[(\w)-]+)/(?P<path>([(\w)-/])+)'
+PARTITION_REGEX = r'\w*=(\w*)'
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,10 @@ class NativePath(ProtoPath):
         path (str): Local file path.
     """
 
-    def __init__(self, path: str):
+    def __init__(
+        self,
+        path: str,
+    ) -> None:
         self.native_path = Path(path)
 
     def dump(self, data: Any) -> None:
@@ -114,11 +117,11 @@ class NativePath(ProtoPath):
         """
         dirname = self.native_path.parent
         dirname.mkdir(parents=True, exist_ok=True)
-        with open(self.native_path, "w") as fp:
+        with open(self.native_path, 'w') as fp:
             match self.native_path.suffix:
-                case ".json":
+                case '.json':
                     json.dump(data, fp)
-                case ".yaml" | ".yml":
+                case '.yaml' | '.yml':
                     yaml.safe_dump(data, fp)
                 case _:
                     fp.write(data)
@@ -131,9 +134,9 @@ class NativePath(ProtoPath):
         """
         with open(self.native_path) as fp:
             match self.native_path.suffix:
-                case ".json":
+                case '.json':
                     return json.load(fp)
-                case ".yaml" | ".yml":
+                case '.yaml' | '.yml':
                     return yaml.safe_load(fp)
                 case _:
                     return fp.read()
@@ -167,10 +170,10 @@ class NativePath(ProtoPath):
             PathSegments: Object with path segments.
         """
         return {
-            "protocol": "file",
-            "root": self.native_path.root,
-            "prefix": str(self.native_path.parent),
-            "filename": self.native_path.name,
+            'protocol': 'file',
+            'root': self.native_path.root,
+            'prefix': str(self.native_path.parent),
+            'filename': self.native_path.name,
         }
 
 
@@ -206,8 +209,8 @@ class GCSPath(ProtoPath):
         """
         client = self._client or storage.Client()
         adapter = HTTPAdapter(pool_connections=128, pool_maxsize=1024, max_retries=3)
-        client._http.mount("https://", adapter)
-        client._http._auth_request.session.mount("https://", adapter)
+        client._http.mount('https://', adapter)
+        client._http._auth_request.session.mount('https://', adapter)
         return client
 
     @cached_property
@@ -222,7 +225,7 @@ class GCSPath(ProtoPath):
         """
         matches = self.path_pattern.match(self.gcs_path)
         if matches is None:
-            raise ValueError("Invalid GCS path %s", self.gcs_path)
+            raise ValueError('Invalid GCS path %s', self.gcs_path)
         return matches
 
     @property
@@ -232,7 +235,7 @@ class GCSPath(ProtoPath):
         Returns:
             str: Bucket name.
         """
-        return self._match.group("root")
+        return self._match.group('root')
 
     @property
     def path(self) -> str:
@@ -241,7 +244,7 @@ class GCSPath(ProtoPath):
         Returns:
             str: Path segment after Bucket Name.
         """
-        return self._match.group("path")
+        return self._match.group('path')
 
     def exists(self) -> bool:
         """Check if file exists in Google Cloud Storage.
@@ -273,11 +276,11 @@ class GCSPath(ProtoPath):
         """
         bucket = storage.Bucket(client=self.client, name=self.bucket)
         blob = storage.Blob(name=self.path, bucket=bucket)
-        with blob.open("w") as fp:
+        with blob.open('w') as fp:
             match Path(self.path).suffix:
-                case ".json":
-                    json.dump(data, fp)  # type: ignore
-                case ".yaml" | ".yml":
+                case '.json':
+                    json.dump(data, fp)
+                case '.yaml' | '.yml':
                     yaml.safe_dump(data, fp, indent=2)
                 case _:
                     fp.write(data)
@@ -291,11 +294,11 @@ class GCSPath(ProtoPath):
         bucket = storage.Bucket(client=self.client, name=self.bucket)
         blob = storage.Blob(name=self.path, bucket=bucket)
 
-        with blob.open("r") as fp:
+        with blob.open('r') as fp:
             match Path(self.path).suffix:
-                case ".json":
+                case '.json':
                     return json.load(fp)
-                case ".yaml" | ".yml":
+                case '.yaml' | '.yml':
                     return yaml.safe_load(fp)
                 case _:
                     return fp.read()
@@ -317,12 +320,12 @@ class GCSPath(ProtoPath):
         Returns:
             PathSegments: Object with path segments.
         """
-        split = self._match.group("path").split("/")
+        split = self._match.group('path').split('/')
         return {
-            "protocol": self._match.group("protocol"),
-            "root": self._match.group("root"),
-            "prefix": "/".join(split[0:-1]),
-            "filename": split[-1],
+            'protocol': self._match.group('protocol'),
+            'root': self._match.group('root'),
+            'prefix': '/'.join(split[0:-1]),
+            'filename': split[-1],
         }
 
 
@@ -355,18 +358,18 @@ class IOManager:
         Raises:
             NotImplementedError: When not supported file protocol is provided as input path.
         """
-        match path.split("://"):
-            case ["gs", _]:
+        match path.split('://'):
+            case ['gs', _]:
                 return GCSPath(path)
-            case [_] | ["file", _]:
+            case [_] | ['file', _]:
                 return NativePath(path)
             case [protocol, _]:
                 raise NotImplementedError(
-                    "IOManager.resolve does not implement %s protocol resolution",
+                    'IOManager.resolve does not implement %s protocol resolution',
                     protocol,
                 )
             case _:
-                raise NotImplementedError("IOManager.resolve is not implemented for path=%s", path)
+                raise NotImplementedError('IOManager.resolve is not implemented for path=%s', path)
 
     def resolve_paths(self, paths: list[str]) -> list[ProtoPath]:
         """Resolve multiple paths by the protocols.
@@ -393,13 +396,13 @@ class IOManager:
             list[Any]: Objects that were read.
         """
         if not paths:
-            logger.warning("Nothing to load.")
+            logger.warning('Nothing to load.')
             return []
 
         resolved_paths = self.resolve_paths(paths)
         if not n_threads:
             n_threads = self._find_optimal_thread_num(len(paths))
-        logger.info("LOADING %s OBJECTS by %s THREADS.", len(paths), n_threads)
+        logger.info('LOADING %s OBJECTS by %s THREADS.', len(paths), n_threads)
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures: list[concurrent.futures.Future] = []
             for path in resolved_paths:
@@ -413,7 +416,7 @@ class IOManager:
             if exe:
                 logger.error(exe)
             else:
-                logger.info(f"Successfully loaded {idx + 1}/{len(futures)} objects.")
+                logger.info(f'Successfully loaded {idx + 1}/{len(futures)} objects.')
                 results.append(future.result())
         return results
 
@@ -436,9 +439,9 @@ class IOManager:
 
         """
         if len(paths) != len(objects):
-            raise ValueError("Empty paths or unequal number of objects")
+            raise ValueError('Empty paths or unequal number of objects')
         if not paths:
-            logger.warning("Nothing to dump.")
+            logger.warning('Nothing to dump.')
             return None
 
         resolved_paths = self.resolve_paths(paths)
@@ -446,12 +449,12 @@ class IOManager:
         if len(paths) != len(unique_paths):
             duplicated_paths = [p for p in paths if p not in unique_paths]
             raise ThreadSafetyError(
-                "You are trying to write to the same file multiple times %s",
+                'You are trying to write to the same file multiple times %s',
                 duplicated_paths,
             )
         if not n_threads:
             n_threads = self._find_optimal_thread_num(len(paths))
-        logger.info("DUMPING %s OBJECTS by %s THREADS.", len(paths), n_threads)
+        logger.info('DUMPING %s OBJECTS by %s THREADS.', len(paths), n_threads)
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures: list[concurrent.futures.Future] = []
             for path, ob in zip(resolved_paths, objects, strict=True):
@@ -464,7 +467,7 @@ class IOManager:
             if exe:
                 logger.error(exe)
             else:
-                logger.info(f"Successfully dumped {idx + 1}/{len(futures)} objects.")
+                logger.info(f'Successfully dumped {idx + 1}/{len(futures)} objects.')
 
     @staticmethod
     def _find_optimal_thread_num(n_processes: int, max_n_threads: int = MAX_N_THREADS) -> int:
@@ -501,11 +504,11 @@ def extract_partition_from_blob(blob: storage.Blob | str, with_prefix: bool = Tr
     if isinstance(blob, str):
         name = blob
     if isinstance(blob, storage.Blob):
-        name: str = blob.name  # type: ignore
-    name = name.removesuffix("/")
+        name: str = cast(str, blob.name)
+    name = name.removesuffix('/')
     matches = re.search(PARTITION_REGEX, name)
     if not matches:
-        raise ValueError("No partition found in %s", name)
+        raise ValueError('No partition found in %s', name)
     if with_prefix:
         return matches.group(0)
     return matches.group(1)

@@ -98,8 +98,7 @@ def _compute_relevance(matches: DataFrame) -> DataFrame:
         )
         .withColumn(
             'keywordSectionV',
-            f.when(f.col('section') == 'title', f.array(f.lit(_TITLE_WEIGHT)))
-             .otherwise(f.col('all_weights')),
+            f.when(f.col('section') == 'title', f.array(f.lit(_TITLE_WEIGHT))).otherwise(f.col('all_weights')),
         )
         .drop('all_weights')
     )

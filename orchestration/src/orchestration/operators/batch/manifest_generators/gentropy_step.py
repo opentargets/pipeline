@@ -18,9 +18,11 @@ from orchestration.utils.path import GCSPath
 class GentropyStepManifestGeneratorOptions(BaseModel):
     """Specification for GentropyStepGoogleBatchManifestGenerator."""
 
-    input_glob: Annotated[str, StringConstraints(pattern=r"^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/\*\*(\.[a-zA-Z0-9]+)+$")]
+    input_glob: Annotated[
+        str, StringConstraints(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/\*\*(\.[a-zA-Z0-9]+)+$')
+    ]
     """GCS glob pattern for input files. Example: gs://bucket_name/some/prefix/**.parquet"""
-    output_prefix: Annotated[str, StringConstraints(pattern=r"^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$")] = ""
+    output_prefix: Annotated[str, StringConstraints(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$')] = ''
     """GCS prefix for output files. Example: gs://bucket_name/some/output/prefix"""
 
 
@@ -29,8 +31,8 @@ class GentropyStepManifestGenerator(ProtoManifestGenerator):
         self,
         *,
         options: GentropyStepManifestGeneratorOptions,
-        gcp_conn_id: str = "google_cloud_default",
-    ):
+        gcp_conn_id: str = 'google_cloud_default',
+    ) -> None:
         """Manifest generator for gentropy step running on google batch.
 
         This class should be utilized in case the gentropy step execution should be
@@ -42,7 +44,8 @@ class GentropyStepManifestGenerator(ProtoManifestGenerator):
 
         The `manifest_kwargs` represent the way to partition the input dataset. The default value provided should be
         {"input_glob": "gs://bucket_name/some/prefix/**.ext", "output_prefix": "gs://bucket_name/some/output/prefix"}.
-        Depending on the number of files that match the `input_glob` the computed google batch job definition will have corresponding number of tasks.
+        Depending on the number of files that match the `input_glob` the computed google batch job definition will have
+        corresponding number of tasks.
         """
         self.options = options
         self.gcs_hook = GCSHook(gcp_conn_id=gcp_conn_id)
@@ -62,24 +65,24 @@ class GentropyStepManifestGenerator(ProtoManifestGenerator):
 
     def _build_environment_registry(self) -> EnvironmentRegistrySpec:
         """Build variable lists that will be later used to build google batch environments."""
-        protocol = self.input_glob.segments.get("protocol")
-        bucket_name = self.input_glob.segments.get("root")
-        prefix = self.input_glob.segments.get("prefix")
-        match_glob = self.input_glob.segments.get("filename")
+        protocol = self.input_glob.segments.get('protocol')
+        bucket_name = self.input_glob.segments.get('root')
+        prefix = self.input_glob.segments.get('prefix')
+        match_glob = self.input_glob.segments.get('filename')
         files = self.gcs_hook.list(
             bucket_name=bucket_name,
-            prefix=prefix + "/",
+            prefix=prefix + '/',
             match_glob=match_glob,
         )
 
         if len(files) == 0:
-            raise AirflowSkipException(f"No files found under {self.input_glob} glob")
+            raise AirflowSkipException(f'No files found under {self.input_glob} glob')
         return EnvironmentRegistrySpec(
             environments=[
                 EnvironmentSpec(
                     variables={
-                        "INPUT_PARTITION": f"{protocol}://{bucket_name}/{file}",
-                        "OUTPUT_PARTITION": f"{self.output_prefix.gcs_path}/{file.split('/')[-1]}",
+                        'INPUT_PARTITION': f'{protocol}://{bucket_name}/{file}',
+                        'OUTPUT_PARTITION': f'{self.output_prefix.gcs_path}/{file.split("/")[-1]}',
                     }
                 )
                 for file in files

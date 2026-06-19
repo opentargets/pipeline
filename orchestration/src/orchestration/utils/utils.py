@@ -34,7 +34,7 @@ def check_gcp_folder_exists(bucket_name: str, folder_path: str) -> bool:
 
 def clean_name(name: str) -> str:
     """Create a clean name meeting google cloud naming conventions."""
-    return re.sub(r"[^a-z0-9-]", "-", name.lower())
+    return re.sub(r'[^a-z0-9-]', '-', name.lower())
 
 
 def resource_name(name: str) -> str:
@@ -46,7 +46,7 @@ def resource_name(name: str) -> str:
 
     `up-etl-expression-3beef`
     """
-    return f"up-{clean_name(name)}-{{{{ run_id | strhash }}}}"
+    return f'up-{clean_name(name)}-{{{{ run_id | strhash }}}}'
 
 
 def read_yaml_config(
@@ -67,12 +67,12 @@ def read_yaml_config(
         Any: Parsed YAML config file.
     """
     config_path = config_path if isinstance(config_path, Path) else Path(config_path)
-    assert config_path.exists(), f"YAML config path {config_path} does not exists"
+    assert config_path.exists(), f'YAML config path {config_path} does not exists'
 
     raw_config = config_path.read_text()
     if sentinels:
         for sentinel, replacement in sentinels.items():
-            raw_config = raw_config.replace(f"{{{sentinel}}}", replacement)
+            raw_config = raw_config.replace(f'{{{sentinel}}}', replacement)
 
     return yaml.safe_load(raw_config)
 
@@ -103,12 +103,12 @@ def read_hocon_config(
         Any: Parsed HOCON config file.
     """
     config_path = config_path if isinstance(config_path, Path) else Path(config_path)
-    assert config_path.exists(), f"HOCON config path {config_path} does not exists"
+    assert config_path.exists(), f'HOCON config path {config_path} does not exists'
 
     raw_config = config_path.read_text()
     if sentinels:
         for sentinel, replacement in sentinels.items():
-            raw_config = raw_config.replace(f"{{{{{sentinel}}}}}", replacement)
+            raw_config = raw_config.replace(f'{{{{{sentinel}}}}}', replacement)
 
     return pyhocon.ConfigFactory.parse_string(raw_config)
 
@@ -128,7 +128,7 @@ def strhash(s: str) -> str:
 
 def random_id(length: int = 5) -> str:
     """Create a random string of a given length."""
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
 def time_to_seconds(time_str: str) -> int:
@@ -143,19 +143,19 @@ def time_to_seconds(time_str: str) -> int:
     Raises:
         ParsingError: when pattern is not matched.
     """
-    time_pattern = r"^\d+[dhms]{1}$"
+    time_pattern = r'^\d+[dhms]{1}$'
     result = re.match(time_pattern, time_str)
     if not result:
-        raise ValueError("Cound not parse %s time string", time_str)
+        raise ValueError('Cound not parse %s time string', time_str)
     match list(time_str):
-        case [*days, "d"]:
-            return int("".join(days)) * 24 * 60 * 60
-        case [*hours, "h"]:
-            return int("".join(hours)) * 60 * 60
-        case [*minutes, "m"]:
-            return int("".join(minutes)) * 60
-        case [*seconds, "s"]:
-            return int("".join(seconds))
+        case [*days, 'd']:
+            return int(''.join(days)) * 24 * 60 * 60
+        case [*hours, 'h']:
+            return int(''.join(hours)) * 60 * 60
+        case [*minutes, 'm']:
+            return int(''.join(minutes)) * 60
+        case [*seconds, 's']:
+            return int(''.join(seconds))
         case _:
             return 0
 
@@ -167,7 +167,7 @@ def chain_dependencies(nodes: list[ConfigNode], tasks_or_task_groups: dict[str, 
 
     """
     if nodes:
-        node_dependencies = {node["id"]: node.get("prerequisites", []) for node in nodes}
+        node_dependencies = {node['id']: node.get('prerequisites', []) for node in nodes}
         for label, node in tasks_or_task_groups.items():
             for dependency in node_dependencies[label]:
                 if dependency in tasks_or_task_groups:
@@ -193,13 +193,13 @@ def convert_params_to_hydra_positional_arg(params: dict[str, Any] | None, datapr
     """
     if not params:
         raise ValueError("Expected at least one parameter with the step: 'step_name'")
-    incorrect_param_keys = [key for key in params if "step" not in key]
+    incorrect_param_keys = [key for key in params if 'step' not in key]
     if incorrect_param_keys:
-        raise ValueError(f"Passed incorrect param keys {incorrect_param_keys}")
-    positional_args = [f"{k}={v}" for k, v in params.items()]
+        raise ValueError(f'Passed incorrect param keys {incorrect_param_keys}')
+    positional_args = [f'{k}={v}' for k, v in params.items()]
     if not dataproc:
         return positional_args
-    yarn_session_config = "step.session.spark_uri=yarn"
+    yarn_session_config = 'step.session.spark_uri=yarn'
     if yarn_session_config not in positional_args:
         positional_args.append(yarn_session_config)
     return positional_args
@@ -208,7 +208,7 @@ def convert_params_to_hydra_positional_arg(params: dict[str, Any] | None, datapr
 def find_node_in_config(config: list[ConfigNode], node_id: str) -> ConfigNode | None:
     """Find node config list."""
     for node_config in config:
-        if node_config["id"] == node_id:
+        if node_config['id'] == node_id:
             return node_config
     return None
 
@@ -216,14 +216,14 @@ def find_node_in_config(config: list[ConfigNode], node_id: str) -> ConfigNode | 
 def find_environment_vars(env_spec: list[EnvironmentSpec], env: Environment) -> dict[str, str]:
     """Get the environment variables for a given environment."""
     for spec in env_spec:
-        if spec["name"] == env:
-            return spec["vars"]
-    raise ValueError(f"Environment {env} not found in the environment specs")
+        if spec['name'] == env:
+            return spec['vars']
+    raise ValueError(f'Environment {env} not found in the environment specs')
 
 
 def safe_join_paths(right: str, left: str) -> str:
     """Safely join paths."""
-    right = right.removesuffix("/")
-    left = left.removeprefix("/")
+    right = right.removesuffix('/')
+    left = left.removeprefix('/')
 
-    return right + "/" + left
+    return right + '/' + left

@@ -40,7 +40,13 @@ class TestRegroupMatches:
         data = [
             Row(pmid='1', mappedId='ENSG001', section='title', type='GP', isMapped=True),
             Row(pmid='1', mappedId='CHEMBL1', section='title', type='CD', isMapped=True),
-            Row(pmid='1', mappedId='EFO001', section='abstract', type='DS', isMapped=True),
+            Row(
+                pmid='1',
+                mappedId='EFO001',
+                section='abstract',
+                type='DS',
+                isMapped=True,
+            ),
         ]
         df = spark.createDataFrame(data)
         result = _regroup_matches(df, max_sentence_length=100)

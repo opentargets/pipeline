@@ -69,10 +69,10 @@ class JobSpec(BaseModel):
         {'team': 'test'}
         """
         j = {
-            "task_groups": [self.task_group.build(task_environments=task_environments)],
-            "allocation_policy": self.allocation.build(),
-            "logs_policy": self.logs.build(),
-            "labels": labels or self.labels or dict(Labels()),
+            'task_groups': [self.task_group.build(task_environments=task_environments)],
+            'allocation_policy': self.allocation.build(),
+            'logs_policy': self.logs.build(),
+            'labels': labels or self.labels or dict(Labels()),
         }
 
         return batch_v1.Job(**j)

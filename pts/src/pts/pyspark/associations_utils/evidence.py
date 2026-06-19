@@ -21,7 +21,14 @@ class Evidence(Dataset):
     """Methods applied on evidence data."""
 
     # This is the default set of columns we group evidence by, used for association calculation:
-    GROUPBY_COLUMNS: list[str] = field(default_factory=lambda: ['targetId', 'diseaseId', 'datasourceId', 'datatypeId'])
+    GROUPBY_COLUMNS: list[str] = field(
+        default_factory=lambda: [
+            'targetId',
+            'diseaseId',
+            'datasourceId',
+            'datatypeId',
+        ]
+    )
 
     # These are the columns we are working on:
     MANDATORY_COLUMNS: ClassVar[list[str]] = [
@@ -53,7 +60,8 @@ class Evidence(Dataset):
         # Covert and return evidence:
         return Evidence(
             raw_evidence_input.filter(f.col('score') > 0).select(
-                *raw_input_columns, cls._evidence_date_to_year(f.col('evidenceDate'), next_year).alias('year')
+                *raw_input_columns,
+                cls._evidence_date_to_year(f.col('evidenceDate'), next_year).alias('year'),
             )
         )
 
@@ -163,6 +171,9 @@ class Evidence(Dataset):
             +------------+----+
             <BLANKLINE>
         """
-        maybe_year = f.when(evidence_date.isNotNull(), f.trim(f.regexp_extract(evidence_date, r'^(\d{4})(?:\D|$)', 1)))  # ty:ignore[missing-argument]
+        maybe_year = f.when(
+            evidence_date.isNotNull(),
+            f.trim(f.regexp_extract(evidence_date, r'^(\d{4})(?:\D|$)', 1)),
+        )
 
-        return f.when(maybe_year != '', maybe_year.cast(t.IntegerType())).otherwise(next_year)  # noqa: PLC1901
+        return f.when(maybe_year != '', maybe_year.cast(t.IntegerType())).otherwise(next_year)

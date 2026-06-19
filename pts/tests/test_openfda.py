@@ -57,12 +57,17 @@ def test_prepare_drug_list_includes_pref_name(spark):
 
 def test_prepare_drug_list_includes_synonyms(spark):
     """_prepare_drug_list includes synonyms as drug_names."""
-    data = [Row(
-        id='CHEMBL1',
-        name='Drug',
-        synonyms=[Row(label='SynA', source='ChEMBL'), Row(label='SynB', source='ChEMBL')],
-        tradeNames=[],
-    )]
+    data = [
+        Row(
+            id='CHEMBL1',
+            name='Drug',
+            synonyms=[
+                Row(label='SynA', source='ChEMBL'),
+                Row(label='SynB', source='ChEMBL'),
+            ],
+            tradeNames=[],
+        )
+    ]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)
     names = {r.drug_name for r in result.collect()}
@@ -72,7 +77,14 @@ def test_prepare_drug_list_includes_synonyms(spark):
 
 def test_prepare_drug_list_includes_trade_names(spark):
     """_prepare_drug_list includes trade names as drug_names."""
-    data = [Row(id='CHEMBL1', name='Drug', synonyms=[], tradeNames=[Row(label='BrandX', source='ChEMBL')])]
+    data = [
+        Row(
+            id='CHEMBL1',
+            name='Drug',
+            synonyms=[],
+            tradeNames=[Row(label='BrandX', source='ChEMBL')],
+        )
+    ]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)
     names = {r.drug_name for r in result.collect()}
@@ -90,7 +102,12 @@ def test_prepare_drug_list_output_columns(spark):
 def test_prepare_drug_list_deduplicates(spark):
     """_prepare_drug_list deduplicates (chembl_id, drug_name) pairs."""
     data = [
-        Row(id='CHEMBL1', name='Drug', synonyms=[Row(label='Drug', source='ChEMBL')], tradeNames=[]),
+        Row(
+            id='CHEMBL1',
+            name='Drug',
+            synonyms=[Row(label='Drug', source='ChEMBL')],
+            tradeNames=[],
+        ),
     ]
     df = spark.createDataFrame(data, CHEMBL_SCHEMA)
     result = _prepare_drug_list(df)
@@ -176,7 +193,10 @@ def test_adverse_event_qualification_filter(spark):
     df = spark.createDataFrame(data, _PATIENT_SCHEMA)
     drug_df = spark.createDataFrame(
         [Row(chembl_id='CHEMBL1', drug_name='aspirin')],
-        StructType([StructField('chembl_id', StringType()), StructField('drug_name', StringType())]),
+        StructType([
+            StructField('chembl_id', StringType()),
+            StructField('drug_name', StringType()),
+        ]),
     )
     result = _prepare_adverse_event_data(df, drug_df, spark.createDataFrame([], BLACKLIST_SCHEMA))
     ids = {r.safetyreportid for r in result.collect()}
@@ -194,7 +214,10 @@ def test_adverse_event_excludes_serious_death(spark):
     df = spark.createDataFrame(data, _PATIENT_SCHEMA)
     drug_df = spark.createDataFrame(
         [Row(chembl_id='CHEMBL1', drug_name='aspirin')],
-        StructType([StructField('chembl_id', StringType()), StructField('drug_name', StringType())]),
+        StructType([
+            StructField('chembl_id', StringType()),
+            StructField('drug_name', StringType()),
+        ]),
     )
     result = _prepare_adverse_event_data(df, drug_df, spark.createDataFrame([], BLACKLIST_SCHEMA))
     ids = {r.safetyreportid for r in result.collect()}
@@ -211,7 +234,10 @@ def test_adverse_event_filters_blacklisted(spark):
     df = spark.createDataFrame(data, _PATIENT_SCHEMA)
     drug_df = spark.createDataFrame(
         [Row(chembl_id='CHEMBL1', drug_name='aspirin')],
-        StructType([StructField('chembl_id', StringType()), StructField('drug_name', StringType())]),
+        StructType([
+            StructField('chembl_id', StringType()),
+            StructField('drug_name', StringType()),
+        ]),
     )
     blacklist = spark.createDataFrame([Row(reactions='death')], BLACKLIST_SCHEMA)
     result = _prepare_adverse_event_data(df, drug_df, blacklist)
@@ -226,7 +252,10 @@ def test_adverse_event_joins_chembl(spark):
     df = spark.createDataFrame(data, _PATIENT_SCHEMA)
     drug_df = spark.createDataFrame(
         [Row(chembl_id='CHEMBL1', drug_name='aspirin')],
-        StructType([StructField('chembl_id', StringType()), StructField('drug_name', StringType())]),
+        StructType([
+            StructField('chembl_id', StringType()),
+            StructField('drug_name', StringType()),
+        ]),
     )
     result = _prepare_adverse_event_data(df, drug_df, spark.createDataFrame([], BLACKLIST_SCHEMA))
     rows = result.collect()
@@ -248,8 +277,16 @@ _COOKED_SCHEMA = StructType([
 def test_summary_statistics_output_columns(spark):
     """_prepare_summary_statistics produces expected output columns."""
     data = [
-        Row(safetyreportid='R1', reaction_reactionmeddrapt='headache', chembl_id='CHEMBL1'),
-        Row(safetyreportid='R2', reaction_reactionmeddrapt='headache', chembl_id='CHEMBL1'),
+        Row(
+            safetyreportid='R1',
+            reaction_reactionmeddrapt='headache',
+            chembl_id='CHEMBL1',
+        ),
+        Row(
+            safetyreportid='R2',
+            reaction_reactionmeddrapt='headache',
+            chembl_id='CHEMBL1',
+        ),
         Row(safetyreportid='R3', reaction_reactionmeddrapt='nausea', chembl_id='CHEMBL2'),
     ]
     df = spark.createDataFrame(data, _COOKED_SCHEMA)
@@ -267,8 +304,16 @@ def test_summary_statistics_output_columns(spark):
 def test_summary_statistics_counts_reports_by_reaction(spark):
     """_prepare_summary_statistics counts distinct reports per reaction."""
     data = [
-        Row(safetyreportid='R1', reaction_reactionmeddrapt='headache', chembl_id='CHEMBL1'),
-        Row(safetyreportid='R2', reaction_reactionmeddrapt='headache', chembl_id='CHEMBL2'),
+        Row(
+            safetyreportid='R1',
+            reaction_reactionmeddrapt='headache',
+            chembl_id='CHEMBL1',
+        ),
+        Row(
+            safetyreportid='R2',
+            reaction_reactionmeddrapt='headache',
+            chembl_id='CHEMBL2',
+        ),
         Row(safetyreportid='R3', reaction_reactionmeddrapt='nausea', chembl_id='CHEMBL1'),
     ]
     df = spark.createDataFrame(data, _COOKED_SCHEMA)

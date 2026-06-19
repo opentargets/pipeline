@@ -15,18 +15,24 @@ from orchestration.utils.labels import Labels
 class InstanceSpec(BaseModel):
     """Machine instance specification for Google Batch tasks.
 
-    This class maps to the :py:class:`google.cloud.batch_v1.AllocationPolicy.InstancePolicy` class used in Google Batch job definitions.
+    This class maps to the :py:class:`google.cloud.batch_v1.AllocationPolicy.InstancePolicy` class used in Google Batch
+    job definitions.
 
     Attributes:
-        machine_type: Type of machine to be used for the batch task. Must be n*-[standard|highmem|highcpu]-* (e.g., n1-standard-4, n2-highmem-8, etc.).
-        provisioning_model: Provisioning model for the batch task. Must be one of `STANDARD`, `SPOT`, or `PREEMPTIBLE`. The default value is `SPOT`.
+        machine_type: Type of machine to be used for the batch task. Must be n*-[standard|highmem|highcpu]-* (e.g.,
+            n1-standard-4, n2-highmem-8, etc.).
+        provisioning_model: Provisioning model for the batch task. Must be one of `STANDARD`, `SPOT`, or `PREEMPTIBLE`.
+            The default value is `SPOT`.
     """
 
-    machine_type: Annotated[str, StringConstraints(pattern=r"^n\d-(standard|highmem|highcpu)-\d+$")] = "n1-standard-4"
-    """Type of machine to be used for the batch task. Must be n*-[standard|highmem|highcpu]-* (e.g., n1-standard-4, n2-highmem-8, etc.)."""
+    machine_type: Annotated[str, StringConstraints(pattern=r'^n\d-(standard|highmem|highcpu)-\d+$')] = 'n1-standard-4'
+    """Type of machine to be used for the batch task. Must be n*-[standard|highmem|highcpu]-* (e.g., n1-standard-4,
+    n2-highmem-8, etc.)."""
 
-    provisioning_model: Literal["STANDARD", "SPOT", "PREEMPTIBLE"] = "SPOT"
-    """Provisioning model for the batch task. Must be one of `STANDARD`, `SPOT`, or `PREEMPTIBLE`. The default value is `SPOT`."""
+    provisioning_model: Literal['STANDARD', 'SPOT', 'PREEMPTIBLE'] = 'SPOT'
+    """Provisioning model for the batch task. Must be one of `STANDARD`, `SPOT`, or `PREEMPTIBLE`. The default value is
+        `SPOT`.
+    """
 
     def build(self) -> batch_v1.AllocationPolicy.InstancePolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy.InstancePolicy` object from the instance specification.
@@ -108,7 +114,7 @@ class InstanceResourceSpec(BaseModel):
 class AllocationSpec(BaseModel):
     """Allocation specification for Google Batch tasks."""
 
-    DEFAULT_REGION: ClassVar[str] = f"regions/{GCP_REGION}"
+    DEFAULT_REGION: ClassVar[str] = f'regions/{GCP_REGION}'
 
     instance: InstanceSpec
     """Instance specification for the batch task."""
@@ -119,16 +125,16 @@ class AllocationSpec(BaseModel):
     service_account_scopes: list[str] | None = None
     """Service account scopes to be used for the batch task."""
 
-    region: Annotated[str | None, StringConstraints(pattern=r"^regions/[a-z0-9-]+$")] = None
+    region: Annotated[str | None, StringConstraints(pattern=r'^regions/[a-z0-9-]+$')] = None
     """Region specification for the batch task. In format regions/<region>."""
 
-    zones: list[Annotated[str, StringConstraints(pattern=r"^zones/[a-z0-9-]+$")]] | None = None
+    zones: list[Annotated[str, StringConstraints(pattern=r'^zones/[a-z0-9-]+$')]] | None = None
     """Zone specification for the batch task. In format [zones/<zone>]. Can be multiple zones."""
 
     labels: dict[str, str] | None = None
     """Labels to be applied to each instance in the task group."""
 
-    @model_validator(mode="after")
+    @model_validator(mode='after')
     def validate_region_or_zone(self) -> AllocationSpec:
         """Validate that either region or zones are specified, but not both.
 
@@ -151,9 +157,9 @@ class AllocationSpec(BaseModel):
         Traceback (most recent call last):
             ...
         pydantic_core._pydantic_core.ValidationError: ...
-        """
+        """  # noqa: E501
         if self.region and self.zones:
-            raise ValueError("Either `region` or `zones` can be specified, but not both.")
+            raise ValueError('Either `region` or `zones` can be specified, but not both.')
         if self.zones:
             return self
         # By default set the region to the default region if neither region nor zones are specified
@@ -179,9 +185,7 @@ class AllocationSpec(BaseModel):
         Returns:
             batch_v1.AllocationPolicy.LocationPolicy: The location policy for the batch task.
         """
-        return batch_v1.AllocationPolicy.LocationPolicy(
-            allowed_locations=[self.region] if self.region else self.zones
-        )
+        return batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=[self.region] if self.region else self.zones)
 
     def build(self) -> batch_v1.AllocationPolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy` object from the allocation specification.
@@ -202,14 +206,14 @@ class AllocationSpec(BaseModel):
         >>> alloc_zones = AllocationSpec(instance=InstanceSpec(), zones=["zones/europe-west1-b"], labels={"team": "test"})
         >>> list(alloc_zones.build().location.allowed_locations)
         ['zones/europe-west1-b']
-        """
+        """  # noqa: E501
         ap = {
-            "instances": [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
-            "labels": self.labels or dict(Labels()),
+            'instances': [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
+            'labels': self.labels or dict(Labels()),
         }
         if self.location:
-            ap["location"] = self.location
+            ap['location'] = self.location
         if self.service_account_email:
-            ap["service_account"] = self.service_account
+            ap['service_account'] = self.service_account
 
         return batch_v1.AllocationPolicy(**ap)

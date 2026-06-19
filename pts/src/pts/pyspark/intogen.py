@@ -27,12 +27,12 @@ DOI_TO_PMID_MAPPING = {
 
 
 def parse_source(source_column: Column) -> Column:
-    processed = f.when(source_column.startswith('WEB'), f.lit(None)).otherwise(f.trim(f.split(source_column, ':')[1]))  # ty:ignore[missing-argument, invalid-argument-type]
+    processed = f.when(source_column.startswith('WEB'), f.lit(None)).otherwise(f.trim(f.split(source_column, ':')[1]))
 
     map_udf = f.udf(lambda v: DOI_TO_PMID_MAPPING.get(v, v), t.StringType())
     mapped = map_udf(processed)
 
-    return f.when(mapped.isNotNull(), f.array(mapped))  # ty:ignore[missing-argument]
+    return f.when(mapped.isNotNull(), f.array(mapped))
 
 
 def generate_evidence(genes: DataFrame, cohorts: DataFrame, disease_mapping: DataFrame) -> DataFrame:

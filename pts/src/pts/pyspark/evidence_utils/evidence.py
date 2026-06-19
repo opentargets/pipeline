@@ -76,7 +76,7 @@ class Evidence:
             # Flag evidence without mapped targets:
             .withColumn(
                 self.QC_COLUMN,
-                update_quality_flag(f.col(self.QC_COLUMN), f.col('targetId').isNull(), EvidenceFlags.INVALID_TARGET),  # ty:ignore[missing-argument]
+                update_quality_flag(f.col(self.QC_COLUMN), f.col('targetId').isNull(), EvidenceFlags.INVALID_TARGET),
             )
             # Flag evidence without target of invalid biotype:
             .withColumn(
@@ -105,7 +105,7 @@ class Evidence:
             # Flag evidence without mapped targets:
             .withColumn(
                 self.QC_COLUMN,
-                update_quality_flag(f.col(self.QC_COLUMN), f.col('diseaseId').isNull(), EvidenceFlags.INVALID_DISEASE),  # ty:ignore[missing-argument]
+                update_quality_flag(f.col(self.QC_COLUMN), f.col('diseaseId').isNull(), EvidenceFlags.INVALID_DISEASE),
             )
         )
 
@@ -244,7 +244,7 @@ class Evidence:
                 update_quality_flag(
                     f.col(self.QC_COLUMN),
                     f.when(
-                        f.col('score').isNull() | (f.col('score') < 0) | (f.col('score') > 1),  # ty:ignore[missing-argument]
+                        f.col('score').isNull() | (f.col('score') < 0) | (f.col('score') > 1),
                         f.lit(True),
                     ).otherwise(f.lit(False)),
                     EvidenceFlags.NO_VALID_SCORE,
@@ -282,14 +282,14 @@ class Evidence:
             evidence_with_pub_ids
             .join(publication_date_lut, on='publicationId', how='inner')
             # For each evidence identifier find the earliest publication date:
-            .withColumn('rank', f.row_number().over(Window.partitionBy('id').orderBy(f.col('publicationDate').asc())))  # ty:ignore[missing-argument]
+            .withColumn('rank', f.row_number().over(Window.partitionBy('id').orderBy(f.col('publicationDate').asc())))
             .filter(f.col('rank') == 1)
             .select('id', 'publicationDate')
             .distinct()
         )
 
         # Broadcast for efficiency and join back to main evidence
-        dated_evidence_lut = f.broadcast(dated_evidence.orderBy(f.col('id').asc()))  # ty:ignore[missing-argument]
+        dated_evidence_lut = f.broadcast(dated_evidence.orderBy(f.col('id').asc()))
 
         return Evidence(self.df.join(dated_evidence_lut, on='id', how='left_outer'))
 
@@ -334,7 +334,7 @@ class Evidence:
         # Apply transformation logic
         return (
             f
-            .when(chr_col.isNull() | pos_col.isNull(), f.concat(f.lit('OTVAR_'), f.md5(variant_id).cast('string')))  # ty:ignore[missing-argument]
+            .when(chr_col.isNull() | pos_col.isNull(), f.concat(f.lit('OTVAR_'), f.md5(variant_id).cast('string')))
             .when(
                 f.length(variant_id) > threshold,
                 f.concat_ws('_', f.lit('OTVAR'), chr_col, pos_col, f.md5(variant_id).cast('string')),

@@ -308,7 +308,10 @@ def _build_target_index(
             f.filter(f.col('dbXRefs'), lambda c: c.getField('source') == 'HGNC').alias('h'),
         )
         .select('targetId', f.explode_outer(f.col('h.id')).alias('hgncId'))
-        .withColumn('hgncId', f.when(f.col('hgncId').isNotNull(), f.concat(f.lit('HGNC:'), f.col('hgncId'))))
+        .withColumn(
+            'hgncId',
+            f.when(f.col('hgncId').isNotNull(), f.concat(f.lit('HGNC:'), f.col('hgncId'))),
+        )
         .orderBy('targetId')
     )
 
@@ -551,12 +554,21 @@ def _build_drug_index(
         entity_col=f.lit('drug'),
         category_col=f.array(f.col('drugType')),
         keywords_col=_flatten_cat(
-            'synonyms.label', 'tradeNames.label', 'array(name)', 'array(drugId)', 'crossReferences', 'nctIds'
+            'synonyms.label',
+            'tradeNames.label',
+            'array(name)',
+            'array(drugId)',
+            'crossReferences',
+            'nctIds',
         ),
         prefixes_col=_flatten_cat('synonyms.label', 'tradeNames.label', 'array(name)', 'descriptions'),
         ngrams_col=_flatten_cat('array(name)', 'synonyms.label', 'tradeNames.label', 'descriptions'),
         terms_col=_flatten_cat(
-            'disease_labels', 'target_labels', 'indicationLabels', 'therapeutic_labels', 'childChemblIds'
+            'disease_labels',
+            'target_labels',
+            'indicationLabels',
+            'therapeutic_labels',
+            'childChemblIds',
         ),
         multiplier_col=f.when(
             f.col('drug_relevance').isNotNull(),
@@ -648,7 +660,8 @@ def _build_study_index(
         'rank', f.rank().over(window)
     )
 
-    max_rank = studies_with_cred.agg(f.max('rank')).first()[0] or 1
+    first_study = studies_with_cred.agg(f.max('rank')).first()
+    max_rank = first_study[0] if first_study else 1
     multiplier = f.expr(f'1 + (({max_rank} - rank) / ({max_rank} - 1))') if max_rank > 1 else f.lit(1.0)
 
     return _search_index(
@@ -693,7 +706,9 @@ def _build_study_index(
 def _build_nct_map(indication: DataFrame) -> DataFrame:
     """Process clinical indication dataset to generate a lookup of NCT IDs and relevant disease and drug IDs."""
     return indication.select(
-        f.filter(f.col('clinicalReportIds'), lambda x: x.startswith('nct')).alias('nctIds'), 'drugId', 'diseaseId'
+        f.filter(f.col('clinicalReportIds'), lambda x: x.startswith('nct')).alias('nctIds'),
+        'drugId',
+        'diseaseId',
     ).filter(f.size('nctIds') > 0)
 
 
@@ -888,7 +903,11 @@ def search(
 
     assoc_drugs_with_scores = (
         assoc_with_drugs_from_evidence
-        .join(association_scores.select('associationId', 'score'), 'associationId', 'inner')
+        .join(
+            association_scores.select('associationId', 'score'),
+            'associationId',
+            'inner',
+        )
         .withColumn('drugId', f.explode('drugIds'))
         .select('associationId', 'drugId', 'drugIds', 'targetId', 'diseaseId', 'score')
     )
@@ -907,7 +926,14 @@ def search(
         .agg(f.array_distinct(f.flatten(f.collect_list('nctIds'))).alias('nctIds'))
     )
     search_diseases = _build_disease_index(
-        diseases, phenotype_names, association_scores, assoc_drugs_with_scores, t_lut, dr_lut, studies, nct_by_disease
+        diseases,
+        phenotype_names,
+        association_scores,
+        assoc_drugs_with_scores,
+        t_lut,
+        dr_lut,
+        studies,
+        nct_by_disease,
     )
 
     logger.info('Building search index for targets')

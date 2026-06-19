@@ -29,15 +29,11 @@ def prepare_target_lut(df: DataFrame) -> DataFrame:
             )
         )
     )
-    exploded = (
-        df
-        .select(
-            f.col('id').alias('targetId'),
-            f.col('biotype'),
-            f.explode(aliases).alias('targetFromSourceId'),
-        )
-        .filter(f.col('targetFromSourceId').isNotNull())
-    )
+    exploded = df.select(
+        f.col('id').alias('targetId'),
+        f.col('biotype'),
+        f.explode(aliases).alias('targetFromSourceId'),
+    ).filter(f.col('targetFromSourceId').isNotNull())
     # Deduplicate so each alias maps to exactly one targetId, preventing
     # left-join fan-out when an alias is shared across multiple targets.
     # `min(struct(...))` gives a deterministic argmin (lexicographically
@@ -60,19 +56,11 @@ def prepare_biosample_lut(df: DataFrame) -> DataFrame:
     if 'obsoleteTerms' in df.columns:
         arrays.append(f.coalesce(f.col('obsoleteTerms'), f.array().cast(_STRING_ARRAY)))
     aliases = f.concat(*arrays)
-    exploded = (
-        df
-        .select(
-            f.col('biosampleId'),
-            f.explode(aliases).alias('biosampleFromSourceMappedId'),
-        )
-        .filter(f.col('biosampleFromSourceMappedId').isNotNull())
-    )
+    exploded = df.select(
+        f.col('biosampleId'),
+        f.explode(aliases).alias('biosampleFromSourceMappedId'),
+    ).filter(f.col('biosampleFromSourceMappedId').isNotNull())
     # Deduplicate so each alias maps to exactly one biosampleId, preventing
     # left-join fan-out when an obsolete term maps to multiple successors.
     # `min(biosampleId)` gives a deterministic winner via hash aggregation.
-    return (
-        exploded
-        .groupBy('biosampleFromSourceMappedId')
-        .agg(f.min('biosampleId').alias('biosampleId'))
-    )
+    return exploded.groupBy('biosampleFromSourceMappedId').agg(f.min('biosampleId').alias('biosampleId'))

@@ -6,8 +6,8 @@ from orchestration.operators.batch.manifest_generators.harmonisation import Harm
 from orchestration.operators.batch.manifest_generators.vep import VepManifestGenerator
 
 __all__ = [
-    "FinemappingManifestGenerator",
-    "GentropyStepManifestGenerator",
-    "HarmonisationManifestGenerator",
-    "VepManifestGenerator",
+    'FinemappingManifestGenerator',
+    'GentropyStepManifestGenerator',
+    'HarmonisationManifestGenerator',
+    'VepManifestGenerator',
 ]

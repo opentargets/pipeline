@@ -18,7 +18,6 @@ scratchpad:
   gtex_version: '10'
 
 steps:
-  ##################################################################################################
   #: BASELINE EXPRESSION STEP :#####################################################################
   baseline_expression_raw:
     - name: copy GTEx TPM matrix

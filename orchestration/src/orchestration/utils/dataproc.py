@@ -23,11 +23,11 @@ from orchestration.utils.labels import Labels
 
 log: logging.Logger = logging.getLogger(__name__)
 # TODO: Delete all these once they are no longer used here.
-GCP_DATAPROC_IMAGE = "2.2"
-GCP_AUTOSCALING_POLICY = "otg-etl"
-GCP_EFM_AUTOSCALING_POLICY = "otg-efm"
-GENTROPY_CLI_SCRIPT = "gs://genetics_etl_python_playground/initialisation/cli.py"
-GENTROPY_CLUSTER_INIT_SCRIPT = "gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh"
+GCP_DATAPROC_IMAGE = '2.2'
+GCP_AUTOSCALING_POLICY = 'otg-etl'
+GCP_EFM_AUTOSCALING_POLICY = 'otg-efm'
+GENTROPY_CLI_SCRIPT = 'gs://genetics_etl_python_playground/initialisation/cli.py'
+GENTROPY_CLUSTER_INIT_SCRIPT = 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
 
 
 def create_cluster(cluster_name: str, cluster_config: CustomClusterConfig) -> CreateClusterOperator:
@@ -35,7 +35,7 @@ def create_cluster(cluster_name: str, cluster_config: CustomClusterConfig) -> Cr
     return CreateClusterOperator(
         project_id=GCP_PROJECT_GENETICS,
         region=GCP_REGION,
-        task_id=f"create_cluster_{cluster_name}",
+        task_id=f'create_cluster_{cluster_name}',
         cluster_name=cluster_name,
         cluster_config=cluster_config,
         labels=Labels(project=GCP_PROJECT_GENETICS),
@@ -52,7 +52,7 @@ def delete_cluster(cluster_name: str) -> DeleteClusterOperator:
         DeleteClusterOperator: Airflow task to delete a Dataproc cluster.
     """
     return DeleteClusterOperator(
-        task_id=f"delete_cluster_{cluster_name}",
+        task_id=f'delete_cluster_{cluster_name}',
         project_id=GCP_PROJECT_GENETICS,
         cluster_name=cluster_name,
         region=GCP_REGION,
@@ -87,18 +87,18 @@ def submit_gentropy_step(
     * step.session.write_mode: "overwrite"
     * +step.session.extended_spark_conf: "{spark.jars:https://storage.googleapis.com/hadoop-lib/gcs/gcs-connector-hadoop3-latest.jar}"
     """
-    labels = Labels(project=GCP_PROJECT_GENETICS, extra={"step": step_name})
-    log.info(f"Sending {step_name} to {cluster_name} with {params}")
+    labels = Labels(project=GCP_PROJECT_GENETICS, extra={'step': step_name})
+    log.info(f'Sending {step_name} to {cluster_name} with {params}')
 
     job = GentropyJobBuilder(
         main_python_file_uri=GENTROPY_CLI_SCRIPT,
         params=params,
         properties={
-            "spark.jars": "/opt/conda/miniconda3/lib/python3.11/site-packages/hail/backend/hail-all-spark.jar",
-            "spark.driver.extraClassPath": "/opt/conda/miniconda3/lib/python3.11/site-packages/hail/backend/hail-all-spark.jar",
-            "spark.executor.extraClassPath": "./hail-all-spark.jar",
-            "spark.serializer": "org.apache.spark.serializer.KryoSerializer",
-            "spark.kryo.registrator": "is.hail.kryo.HailKryoRegistrator",
+            'spark.jars': '/opt/conda/miniconda3/lib/python3.11/site-packages/hail/backend/hail-all-spark.jar',
+            'spark.driver.extraClassPath': '/opt/conda/miniconda3/lib/python3.11/site-packages/hail/backend/hail-all-spark.jar',  # noqa: E501
+            'spark.executor.extraClassPath': './hail-all-spark.jar',
+            'spark.serializer': 'org.apache.spark.serializer.KryoSerializer',
+            'spark.kryo.registrator': 'is.hail.kryo.HailKryoRegistrator',
         },
     ).build()
 
@@ -135,14 +135,14 @@ def generate_dataproc_task_chain(
     """
     if create:
         create_cluster_task = create_cluster(
-            cluster_name=kwargs["cluster_name"],
-            cluster_config=CustomClusterConfig(**kwargs["cluster_config"]),
+            cluster_name=kwargs['cluster_name'],
+            cluster_config=CustomClusterConfig(**kwargs['cluster_config']),
         )
         for task in tasks:
             if not task.get_direct_relatives(upstream=True):
                 task.set_upstream(create_cluster_task)
     if delete:
-        delete_cluster_task = delete_cluster(cluster_name=kwargs["cluster_name"])
+        delete_cluster_task = delete_cluster(cluster_name=kwargs['cluster_name'])
         for task in tasks:
             if not task.get_direct_relatives(upstream=False):
                 task.set_downstream(delete_cluster_task)

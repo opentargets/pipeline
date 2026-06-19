@@ -17,12 +17,20 @@ def _generate_datasets(
 ) -> dict[str, DataFrame]:
     """Join associations and evidence with target and disease metadata."""
     assoc_ds = (
-        associations.join(targets, 'targetId', 'inner')
+        associations
+        .join(targets, 'targetId', 'inner')
         .join(diseases, 'diseaseId', 'inner')
-        .select('targetId', 'diseaseId', 'approvedSymbol', 'name', f.col('associationScore').alias('score'))
+        .select(
+            'targetId',
+            'diseaseId',
+            'approvedSymbol',
+            'name',
+            f.col('associationScore').alias('score'),
+        )
     )
     evidence_ds = (
-        evidence.join(targets, 'targetId', 'inner')
+        evidence
+        .join(targets, 'targetId', 'inner')
         .join(diseases, 'diseaseId', 'inner')
         .select('targetId', 'diseaseId', 'approvedSymbol', 'name', 'score')
     )

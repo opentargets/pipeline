@@ -134,7 +134,7 @@ def _chembl_target(target_df: DataFrame, gene_df: DataFrame) -> DataFrame:
     target = (
         target_df
         .withColumn('target_components', f.explode('target_components'))
-        .filter(f.col('target_components.accession').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('target_components.accession').isNotNull())
         .select(
             f.col('pref_name').alias('targetName'),
             f.col('target_components.accession').alias('uniprot_id'),

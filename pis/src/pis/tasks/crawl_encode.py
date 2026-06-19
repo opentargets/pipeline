@@ -21,7 +21,11 @@ class CrawlEncodeSpec(Spec):
 class CrawlEncode(Task):
     """Extract IDs from ENCODE TSV manifest."""
 
-    def __init__(self, spec: CrawlEncodeSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: CrawlEncodeSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: CrawlEncodeSpec
 

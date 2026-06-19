@@ -60,7 +60,7 @@ def ensembl(
             }],
         }
     """.replace('\n', ' ').replace(' ', '')
-    logger.info(f'transforming ensembl data from {source} and writing as parquet to {destination}')
+    logger.info(f'transforming ensembl data from {source} to {destination}')
     # we get a local handle to the ensembl file
     s = StorageHandle(source, config=config, force_local=True)
     t = StorageHandle(f'{s.absolute}.transformed.ndjson', force_local=True)

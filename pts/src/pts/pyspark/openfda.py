@@ -119,7 +119,7 @@ def _calculate_critical_values(
     return float(max_llrs_sorted[idx])
 
 
-@f.pandas_udf(DoubleType())
+@f.pandas_udf(DoubleType())  # ty:ignore[no-matching-overload]
 def _critical_values_pandas_udf(
     permutations_s: pd.Series,
     n_j_s: pd.Series,
@@ -206,11 +206,15 @@ def _prepare_drug_list(chembl_df: DataFrame) -> DataFrame:
         )
         .withColumn(
             'drug_names',
-            f.array_distinct(f.flatten(f.array(
-                f.col('trade_names'),
-                f.array(f.col('pref_name')),
-                f.col('synonyms'),
-            ))),
+            f.array_distinct(
+                f.flatten(
+                    f.array(
+                        f.col('trade_names'),
+                        f.array(f.col('pref_name')),
+                        f.col('synonyms'),
+                    )
+                )
+            ),
         )
         .withColumn('_drug_name', f.explode(f.col('drug_names')))
         .withColumn('drug_name', f.lower(f.col('_drug_name')))
@@ -303,23 +307,25 @@ def _prepare_adverse_event_data(
         )
     else:
         # Already flat: rename seriousnessdeath if present
-        flat = fda_pre_prepped.withColumnRenamed('seriousnessdeath', 'seriousness_death') \
-            if 'seriousnessdeath' in fda_pre_prepped.columns else fda_pre_prepped
+        flat = (
+            fda_pre_prepped.withColumnRenamed('seriousnessdeath', 'seriousness_death')
+            if 'seriousnessdeath' in fda_pre_prepped.columns
+            else fda_pre_prepped
+        )
 
     filtered = (
         flat
-        .where(
-            f.col('qualification').isin('1', '2', '3')
-            & (f.col('drugcharacterization') == '1')
-        )
+        .where(f.col('qualification').isin('1', '2', '3') & (f.col('drugcharacterization') == '1'))
         .withColumn(
             'drug_names',
-            f.array_distinct(f.concat(
-                f.col('drug_brand_name_list'),
-                f.array(f.col('drug_medicinalproduct')),
-                f.col('drug_generic_name_list'),
-                f.col('drug_substance_name_list'),
-            )),
+            f.array_distinct(
+                f.concat(
+                    f.col('drug_brand_name_list'),
+                    f.array(f.col('drug_medicinalproduct')),
+                    f.col('drug_generic_name_list'),
+                    f.col('drug_substance_name_list'),
+                )
+            ),
         )
         .withColumn('_drug_name', f.explode(f.col('drug_names')))
         .withColumn('drug_name', f.lower(f.col('_drug_name')))
@@ -407,10 +413,7 @@ def _prepare_for_montecarlo(fda_stats: DataFrame, target_stats_col_id: str) -> D
         .withColumn('B', f.col('uniq_report_ids_by_reaction') - f.col('A'))
         .withColumn(
             'D',
-            f.lit(total_reports)
-            - f.col(target_stats_col_id)
-            - f.col('uniq_report_ids_by_reaction')
-            + f.col('A'),
+            f.lit(total_reports) - f.col(target_stats_col_id) - f.col('uniq_report_ids_by_reaction') + f.col('A'),
         )
         .withColumn('aterm', f.col('A') * (f.log(f.col('A')) - f.log(f.col('A') + f.col('B'))))
         .withColumn('cterm', f.col('C') * (f.log(f.col('C')) - f.log(f.col('C') + f.col('D'))))
@@ -444,6 +447,7 @@ def _attach_meddra(
     Returns:
         DataFrame with an added meddraCode column.
     """
+
     def _parse_meddra(df: DataFrame, cols: list[str]) -> DataFrame:
         parsed = (
             df
@@ -526,10 +530,7 @@ def _run_montecarlo(
     return (
         fda_data
         .join(crit_val, target_col_id, 'inner')
-        .where(
-            (f.col('llr') > f.col('criticalValue'))
-            & (f.col('criticalValue') > 0)
-        )
+        .where((f.col('llr') > f.col('criticalValue')) & (f.col('criticalValue') > 0))
         .selectExpr(
             f'{target_col_id}',
             'reaction_reactionmeddrapt as event',
@@ -624,9 +625,7 @@ def openfda(
     fda_with_meddra.write.mode('overwrite').parquet(destination['fda_unfiltered'])
 
     logger.info('Running Monte Carlo sampling')
-    mc_results = _run_montecarlo(
-        fda_with_meddra, target_col_id, target_stats_col_id, percentile, permutations
-    )
+    mc_results = _run_montecarlo(fda_with_meddra, target_col_id, target_stats_col_id, percentile, permutations)
 
     logger.info('Writing significant results')
     mc_results.coalesce(1).write.mode('overwrite').parquet(destination['fda_results'])

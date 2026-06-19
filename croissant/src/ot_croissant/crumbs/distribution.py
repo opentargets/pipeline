@@ -1,4 +1,4 @@
-"""Class to create the croissant distribution metadata for the Open Targets Platform."""
+"""Croissant distribution metadata for an Open Targets Platform data release."""
 
 from mlcroissant import FileObject, FileSet
 from pyspark.sql import SparkSession
@@ -7,12 +7,12 @@ from ot_croissant.curation import DistributionCuration
 
 
 class PlatformOutputDistribution:
-    """Class to store the list of FileSets or FileObjects in the Open Targets Platform data."""
+    """List of FileSets or FileObjects in the Open Targets Platform data."""
 
     distribution: list[FileSet | FileObject]
     contained_in: list[str]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.distribution = []
         self.contained_in = []
         self.curation = DistributionCuration()
@@ -26,7 +26,7 @@ class PlatformOutputDistribution:
         """Return the distribution metadata."""
         return self.distribution
 
-    def add_ftp_location(self, ftp_location: str, data_integrity_hash: str):
+    def add_ftp_location(self, ftp_location: str | None, data_integrity_hash: str):
         """Add the FTP location of the distribution IF ftp location is not None.
 
         Args:
@@ -42,7 +42,7 @@ class PlatformOutputDistribution:
                     id='ftp-location',
                     name='FTP location',
                     description='FTP location of the Open Targets Platform data.',
-                    encoding_formats='application/x-ftp-directory',
+                    encoding_formats=['application/x-ftp-directory'],
                     content_url=ftp_location,
                     sha256=data_integrity_hash,
                 )
@@ -57,8 +57,8 @@ class PlatformOutputDistribution:
             FileObject(
                 id='gcp-location',
                 name='GCP location',
-                description='Location of the Open Targets Platform data in Google Cloud Storage.',
-                encoding_formats='application/x-gcp-directory',
+                description=('Location of the Open Targets Platform data in Google Cloud Storage.'),
+                encoding_formats=['application/x-gcp-directory'],
                 content_url=gcp_location,
                 sha256=data_integrity_hash,
             )
@@ -81,8 +81,8 @@ class PlatformOutputDistribution:
                 FileObject(
                     id='aws-location',
                     name='AWS location',
-                    description='Location of the Open Targets Platform data in Amazon Web Services.',
-                    encoding_formats='application/x-aws-directory',
+                    description=('Location of the Open Targets Platform data in Amazon Web Services.'),
+                    encoding_formats=['application/x-aws-directory'],
                     content_url=aws_location,
                     sha256=data_integrity_hash,
                 )
@@ -101,7 +101,7 @@ class PlatformOutputDistribution:
             partitioned_by = self._partitioned_by(path)
 
             # The includes depends on if the dataset has hyve partition:
-            includes = f'{dataset_id}/**/*.parquet' if len(partitioned_by) > 0 else f'{dataset_id}/*.parquet'
+            includes = [f'{dataset_id}/**/*.parquet'] if len(partitioned_by) > 0 else [f'{dataset_id}/*.parquet']
 
             # Description:
             description = f'Files containing all partitions of the {dataset_id} dataset'
@@ -116,7 +116,7 @@ class PlatformOutputDistribution:
                 id=dataset_id + '-fileset',
                 name=ann.nice_name if ann else f"Automatic nice_name of the file set/object '{dataset_id}'.",
                 description=description,
-                encoding_formats='application/vnd.apache.parquet',
+                encoding_formats=['application/vnd.apache.parquet'],
                 includes=includes,
             )
 
@@ -127,7 +127,7 @@ class PlatformOutputDistribution:
         return self
 
     def _partitioned_by(self, path: str) -> list[str]:
-        """Checking if the dataset has hyve partition via interacting with spark context.
+        """Check if the dataset has hive partition via interacting with spark context.
 
         Args:
             path (str): path to the dataset
@@ -136,8 +136,12 @@ class PlatformOutputDistribution:
             list[str]: List of columns the dataset is partitioned by
         """
         # List all files and folders in the path
-        fs = self.spark_context._jvm.org.apache.hadoop.fs.FileSystem.get(self.spark_context._jsc.hadoopConfiguration())
-        p = self.spark_context._jvm.org.apache.hadoop.fs.Path(path)
+        spark_context_jvm = self.spark_context._jvm
+        spark_context_jsc = self.spark_context._jsc
+        if spark_context_jvm is None or spark_context_jsc is None:
+            raise RuntimeError('spark context is not available')
+        fs = spark_context_jvm.org.apache.hadoop.fs.FileSystem.get(spark_context_jsc.hadoopConfiguration())
+        p = spark_context_jvm.apache.hadoop.fs.Path(path)
         statuses = fs.listStatus(p)
 
         # Find folders with '=' in their name (Hive partition folders)

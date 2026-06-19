@@ -27,7 +27,7 @@ class UploadFileOperator(BaseOperator):
         dst_uri: The destination URI in GCS.
     """
 
-    template_fields: Sequence[str] = ("src_path", "dst_uri")
+    template_fields: Sequence[str] = ('src_path', 'dst_uri')
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class UploadFileOperator(BaseOperator):
 
         blob = b.blob(self.path)
         blob.upload_from_filename(self.src_path)
-        self.log.info("uploaded file from %s to: %s", self.src_path, self.dst_uri)
+        self.log.info('uploaded file from %s to: %s', self.src_path, self.dst_uri)
 
 
 class UploadRemoteFileOperator(BaseOperator):
@@ -69,7 +69,7 @@ class UploadRemoteFileOperator(BaseOperator):
         dst_uri: The destination URI in GCS.
     """
 
-    template_fields: Sequence[str] = ("src_url", "dst_uri")
+    template_fields: Sequence[str] = ('src_url', 'dst_uri')
 
     def __init__(
         self,
@@ -95,7 +95,7 @@ class UploadRemoteFileOperator(BaseOperator):
 
         with requests.get(self.src_url, stream=True, timeout=10) as r:
             r.raise_for_status()
-            with open(temp_file, "wb") as f:
+            with open(temp_file, 'wb') as f:
                 f.writelines(r.iter_content(chunk_size=8192))
 
         if not b.exists():
@@ -104,7 +104,7 @@ class UploadRemoteFileOperator(BaseOperator):
         blob = b.blob(self.path)
         blob.upload_from_filename(temp_file)
         temp_file.unlink()
-        self.log.info("uploaded file from %s to: %s", self.src_url, self.dst_uri)
+        self.log.info('uploaded file from %s to: %s', self.src_url, self.dst_uri)
 
 
 class UploadStringOperator(BaseOperator):
@@ -122,7 +122,7 @@ class UploadStringOperator(BaseOperator):
         dst_uri: The destination URI in GCS.
     """
 
-    template_fields: Sequence[str] = ("dst_uri",)
+    template_fields: Sequence[str] = ('dst_uri',)
 
     def __init__(
         self,
@@ -131,7 +131,7 @@ class UploadStringOperator(BaseOperator):
         contents: str,
         dst_uri: str,
         overwrite: bool = False,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
         **kwargs,
     ) -> None:
@@ -158,14 +158,14 @@ class UploadStringOperator(BaseOperator):
             hook.create_bucket(bucket_name=self.bucket_name)
 
         if not self.overwrite and hook.exists(self.bucket_name, self.path):
-            raise FileExistsError(f"Destination object {self.dst_uri} already exists.")
+            raise FileExistsError(f'Destination object {self.dst_uri} already exists.')
 
         hook.upload(
             bucket_name=self.bucket_name,
             object_name=self.path,
             data=self.contents,
         )
-        self.log.info("uploaded string to: %s", self.dst_uri)
+        self.log.info('uploaded string to: %s', self.dst_uri)
 
 
 class CopyBlobOperator(BaseOperator):
@@ -183,7 +183,7 @@ class CopyBlobOperator(BaseOperator):
         impersonation_chain: The service account to impersonate.
     """
 
-    template_fields: Sequence[str] = ("src_uri", "dst_uri", "impersonation_chain")
+    template_fields: Sequence[str] = ('src_uri', 'dst_uri', 'impersonation_chain')
 
     def __init__(
         self,
@@ -191,7 +191,7 @@ class CopyBlobOperator(BaseOperator):
         src_uri: str,
         dst_uri: str,
         overwrite: bool = False,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
         **kwargs,
     ) -> None:
@@ -210,13 +210,13 @@ class CopyBlobOperator(BaseOperator):
             impersonation_chain=self.impersonation_chain,
         )
 
-        source_bucket, source_object = self.src_uri.removeprefix("gs://").split("/", 1)
-        destination_bucket, destination_object = self.dst_uri.removeprefix("gs://").split("/", 1)
+        source_bucket, source_object = self.src_uri.removeprefix('gs://').split('/', 1)
+        destination_bucket, destination_object = self.dst_uri.removeprefix('gs://').split('/', 1)
 
         if not hook.exists(source_bucket, source_object):
-            raise FileNotFoundError(f"Source object {self.src_uri} does not exist.")
+            raise FileNotFoundError(f'Source object {self.src_uri} does not exist.')
         if not self.overwrite and hook.exists(destination_bucket, destination_object):
-            raise FileExistsError(f"Destination object {self.dst_uri} already exists.")
+            raise FileExistsError(f'Destination object {self.dst_uri} already exists.')
 
-        self.log.info("copying %s to %s", self.src_uri, self.dst_uri)
+        self.log.info('copying %s to %s', self.src_uri, self.dst_uri)
         hook.rewrite(source_bucket, source_object, destination_bucket, destination_object)

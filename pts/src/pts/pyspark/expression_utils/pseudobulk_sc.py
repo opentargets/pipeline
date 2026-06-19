@@ -42,7 +42,15 @@ class PseudobulkExpression:
             StructField('ethnicity', StringType(), True),
         ])
 
-    def __init__(self, spark, h5ad_path, datasource_id, datatype_id, output_directory_path, json):
+    def __init__(
+        self,
+        spark,
+        h5ad_path,
+        datasource_id,
+        datatype_id,
+        output_directory_path,
+        json,
+    ) -> None:
         self.spark = spark
         self.h5ad_path = h5ad_path
         self.datasource_id = datasource_id
@@ -183,8 +191,10 @@ class PseudobulkExpression:
             # Set unit based on aggregation method
             unit_dict = {'mean': 'pseudobulk mean(logCP10K[counts])', 'sum': 'CPM(pseudobulk sum[counts])'}
             merged_df['unit'] = unit_dict[agg_method]
-            merged_df['tissueBiosampleId'] = tissue_id.replace(':', '_') if tissue_agg_colname else None
-            merged_df['celltypeBiosampleId'] = celltype_id.replace(':', '_') if celltype_agg_colname else None
+            merged_df['tissueBiosampleId'] = tissue_id.replace(':', '_') if tissue_id and tissue_agg_colname else None
+            merged_df['celltypeBiosampleId'] = (
+                celltype_id.replace(':', '_') if celltype_id and celltype_agg_colname else None
+            )
             merged_df['tissueBiosampleFromSource'] = tissue_label
             merged_df['celltypeBiosampleFromSource'] = celltype_label
 

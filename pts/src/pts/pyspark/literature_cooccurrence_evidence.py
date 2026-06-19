@@ -71,25 +71,15 @@ def literature_cooccurrence_evidence(
     match = spark.load_data(path=source['match'])
     logger.info(f'[DIAG] match partitions: {match.rdd.getNumPartitions()}')
 
-    logger.info(
-        f'write cooccurrences to {destination["cooccurrence"]} '
-        f'(coalesce={cooccurrence_coalesce})'
-    )
+    logger.info(f'write cooccurrences to {destination["cooccurrence"]} (coalesce={cooccurrence_coalesce})')
     cooccurrence = MatchMapped(match).generate_target_disease_cooccurrences().df
     logger.info(f'[DIAG] cooccurrence partitions: {cooccurrence.rdd.getNumPartitions()}')
-    maybe_coalesce(cooccurrence, cooccurrence_coalesce).write.mode('overwrite').parquet(
-        destination['cooccurrence']
-    )
+    maybe_coalesce(cooccurrence, cooccurrence_coalesce).write.mode('overwrite').parquet(destination['cooccurrence'])
 
     logger.info('re-read cooccurrences and compute EPMC evidence')
     cooccurrence_reread = spark.spark.read.parquet(destination['cooccurrence'])
     evidence = evidence_epmc._compute_evidence(_adapt_cooccurrence_for_evidence(cooccurrence_reread))
     logger.info(f'[DIAG] evidence partitions: {evidence.rdd.getNumPartitions()}')
 
-    logger.info(
-        f'write EPMC evidence to {destination["evidence"]} '
-        f'(coalesce={evidence_coalesce})'
-    )
-    maybe_coalesce(evidence, evidence_coalesce).write.mode('overwrite').parquet(
-        destination['evidence']
-    )
+    logger.info(f'write EPMC evidence to {destination["evidence"]} (coalesce={evidence_coalesce})')
+    maybe_coalesce(evidence, evidence_coalesce).write.mode('overwrite').parquet(destination['evidence'])

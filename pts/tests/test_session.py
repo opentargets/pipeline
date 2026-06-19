@@ -17,7 +17,10 @@ def test_load_csv_and_replace(tmp_path, pts_session):
     assert names == {'TP53', 'MLL'}
 
     # Example transform: replace 'MLL' -> 'KMT2A' inline (runtime check)
-    df2 = df.withColumn('gene', f.when(f.col('gene') == 'MLL', f.lit('KMT2A')).otherwise(f.col('gene')))
+    df2 = df.withColumn(
+        'gene',
+        f.when(f.col('gene') == 'MLL', f.lit('KMT2A')).otherwise(f.col('gene')),
+    )
     assert {'KMT2A', 'TP53'} == {r['gene'] for r in df2.select('gene').collect()}
 
 

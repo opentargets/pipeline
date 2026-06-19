@@ -202,7 +202,7 @@ def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFram
         spark
         .createDataFrame(pd.read_excel(probes_excel, sheet_name='COMPOUNDSETS', header=0, index_col=0))
         .selectExpr('COMPOUNDSET as datasourceId', 'SOURCE_URL as url')
-        .filter(f.col('url').startswith('http'))  # ty:ignore[missing-argument, invalid-argument-type]
+        .filter(f.col('url').startswith('http'))
     )
 
 
@@ -233,7 +233,7 @@ def process_drugs_xrefs(spark: SparkSession, drugs_csv: str, chembl_molecule: Da
         spark.read
         .csv(drugs_csv, header=True)
         .selectExpr('pdid', 'ChEMBL as drugId')
-        .filter(f.col('drugId').isNotNull())  # ty:ignore[missing-argument]
+        .filter(f.col('drugId').isNotNull())
         .join(valid_ids, on='drugId', how='inner')
     )
 

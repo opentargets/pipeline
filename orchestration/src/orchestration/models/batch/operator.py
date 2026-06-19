@@ -27,14 +27,16 @@ class BatchCollectSpec(BaseModel):
         '**.parquet'
     """
 
-    source_prefix: Annotated[str, StringConstraints(pattern="^gs://.+/.+$")]
+    source_prefix: Annotated[str, StringConstraints(pattern='^gs://.+/.+$')]
     """Source GCS prefix where the google batch task writes nested partition subdirectories."""
-    destination_prefix: Annotated[str, StringConstraints(pattern="^gs://.+/.+$")]
+    destination_prefix: Annotated[str, StringConstraints(pattern='^gs://.+/.+$')]
     """GCS prefix where flat, renamed parquet files will land."""
-    file_glob: Annotated[str, StringConstraints(pattern=r"^\*\*\.(parquet|tsv|tsv\.gz|csv|csv\.gz|json|jsonl)$")] = (
-        "**.parquet"
+    file_glob: Annotated[str, StringConstraints(pattern=r'^\*\*\.(parquet|tsv|tsv\.gz|csv|csv\.gz|json|jsonl)$')] = (
+        '**.parquet'
     )
-    """Glob pattern for files to collect. Defaults to ``**.parquet``. Should follow the format ``**.<extension>`` where extension is one of parquet, tsv, tsv.gz, csv, csv.gz, json, or jsonl."""
+    """Glob pattern for files to collect. Defaults to ``**.parquet``. Should follow the format ``**.<extension>`` where
+        extension is one of parquet, tsv, tsv.gz, csv, csv.gz, json, or jsonl.
+    """
 
     @cached_property
     def file_extension(self) -> str:
@@ -56,7 +58,7 @@ class BatchCollectSpec(BaseModel):
             ... ).file_extension
             'tsv.gz'
         """
-        return self.file_glob.removeprefix("**.")
+        return self.file_glob.removeprefix('**.')
 
     @cached_property
     def destination_path(self) -> GCSPath:
@@ -75,7 +77,7 @@ class BatchCollectSpec(BaseModel):
             >>> spec.destination_path.path
             'output/flat'
         """
-        return GCSPath(self.destination_prefix.removesuffix("/"))
+        return GCSPath(self.destination_prefix.removesuffix('/'))
 
     @cached_property
     def source_path(self) -> GCSPath:
@@ -94,7 +96,7 @@ class BatchCollectSpec(BaseModel):
             >>> spec.source_path.path
             'input/partitioned'
         """
-        return GCSPath(self.source_prefix.removesuffix("/"))
+        return GCSPath(self.source_prefix.removesuffix('/'))
 
 
 class BatchIndexRow(BaseModel):

@@ -219,7 +219,7 @@ def _biotype_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
         f.col('biotype'),
         f
         .when(f.col('biotype') == 'protein_coding', 1)
-        .when(f.col('biotype') == '', None)  # noqa: PLC1901
+        .when(f.col('biotype') == '', None)
         .otherwise(0)
         .alias('Nr_biotype'),
     )
@@ -260,7 +260,14 @@ def _target_membrane_query(
         f.when(f.col('col.location').isNull(), f.lit('noInfo')).otherwise('hasInfo').alias('result'),
     ).dropDuplicates()
 
-    source_list = ['HPA_1', 'HPA_secreted', 'HPA_add_1', 'uniprot_1', 'uniprot_secreted', 'HPA_dif']
+    source_list = [
+        'HPA_1',
+        'HPA_secreted',
+        'HPA_add_1',
+        'uniprot_1',
+        'uniprot_secreted',
+        'HPA_dif',
+    ]
 
     membrane_grouped = (
         subcellular_locations
@@ -607,7 +614,7 @@ def _tep_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
         f.col('tep.*'),
         f
         .when(
-            f.col('tep.description').isNotNull() | (f.col('tep.description') != ''),  # noqa: PLC1901
+            f.col('tep.description').isNotNull() | (f.col('tep.description') != ''),
             f.lit(1),
         )
         .otherwise(f.lit(None))
@@ -668,7 +675,10 @@ def _mouse_model_query(
         .agg(f.collect_list(f.col('score')).alias('score'))
         .withColumn('harmonicSum', harmonic_sum(f.col('score')).cast('double'))
         .withColumn('maxHarmonicSum', max_harmonic_sum(f.col('score')).cast('double'))
-        .withColumn('maximum', f.max(f.col('maxHarmonicSum')).over(Window.orderBy()).cast('double'))
+        .withColumn(
+            'maximum',
+            f.max(f.col('maxHarmonicSum')).over(Window.orderBy()).cast('double'),
+        )
         .withColumn(
             'scaledHarmonicSum',
             f.when(f.col('maximum') > 0, f.col('harmonicSum') / f.col('maximum')).otherwise(f.lit(0)),

@@ -60,7 +60,7 @@ def pharmacogenetics(
     annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
     unparsed_texts = (
         annotated_pgx_df
-        .filter(f.col('phenotypeText').isNull())  # ty:ignore[missing-argument]
+        .filter(f.col('phenotypeText').isNull())
         .select('genotypeAnnotationText')
         .distinct()
         .toPandas()['genotypeAnnotationText']
@@ -153,7 +153,10 @@ def parse_phenotype_with_gpt(
         model=gpt_model,
         response_format={'type': 'json_object'},
         messages=[
-            {'role': 'system', 'content': 'you are an expert in clinical pharmacology designed to output JSON.'},
+            {
+                'role': 'system',
+                'content': 'you are an expert in clinical pharmacology designed to output JSON.',
+            },
             {'role': 'user', 'content': prompt},
         ],
         seed=42,
@@ -219,9 +222,11 @@ def add_variantid_column(input_df: DataFrame) -> DataFrame:
         # split genotypeId column into chr pos ref alt columns
         .select(
             'genotypeId',
-            f.from_csv(f.col('genotypeId'), 'chr string, pos string, ref string, alt string', {'sep': '_'}).alias(
-                'genotype_split'
-            ),
+            f.from_csv(
+                f.col('genotypeId'),
+                'chr string, pos string, ref string, alt string',
+                {'sep': '_'},
+            ).alias('genotype_split'),
         )
         .select('genotypeId', 'genotype_split.*')
         .toDF('genotypeId', 'chr', 'pos', 'ref', 'alt')
@@ -229,7 +234,8 @@ def add_variantid_column(input_df: DataFrame) -> DataFrame:
         .withColumn('alt', f.explode(f.split(f.col('alt'), ',')))
         .filter(~(f.col('ref') == f.col('alt')))
         .select(
-            'genotypeId', f.concat_ws('_', f.col('chr'), f.col('pos'), f.col('ref'), f.col('alt')).alias('variantId')
+            'genotypeId',
+            f.concat_ws('_', f.col('chr'), f.col('pos'), f.col('ref'), f.col('alt')).alias('variantId'),
         )
         .join(input_df, on='genotypeId', how='right')
     )
@@ -264,7 +270,8 @@ def enrich_with_drug_and_target_info(
 
     # Add operational row ID for grouping back later
     pgx_expanded = (
-        pgx_df.withColumn('_operationalRowId', f.monotonically_increasing_id())
+        pgx_df
+        .withColumn('_operationalRowId', f.monotonically_increasing_id())
         .withColumn('drug', f.explode('drugs'))
         .withColumn('drugFromSource', f.col('drug.drugFromSource'))
         .drop('drugs')
@@ -275,7 +282,8 @@ def enrich_with_drug_and_target_info(
 
     # Join with drug-target lookup and flag direct targets
     pgx_enriched = (
-        pgx_with_drug_id.join(drug_target_lut, on='drugId', how='left')
+        pgx_with_drug_id
+        .join(drug_target_lut, on='drugId', how='left')
         .withColumn(
             'isDirectTarget',
             f.when(
@@ -317,7 +325,8 @@ def enrich_with_drug_and_target_info(
     existing_cols = [c for c in grouping_cols if c in pgx_enriched.columns]
 
     return (
-        pgx_enriched.groupBy(*existing_cols)
+        pgx_enriched
+        .groupBy(*existing_cols)
         .agg(f.collect_list(f.struct(f.col('drugFromSource'), f.col('drugId'))).alias('drugs'))
         .drop('_operationalRowId')
     )
@@ -336,7 +345,8 @@ def _get_drug_name_lut(molecule_df: DataFrame) -> DataFrame:
         DataFrame with drugFromSource and drugId columns.
     """
     return (
-        molecule_df.select(f.col('id'), f.lower(f.col('name')).alias('drugFromSource'))
+        molecule_df
+        .select(f.col('id'), f.lower(f.col('name')).alias('drugFromSource'))
         .filter(f.col('drugFromSource').isNotNull())
         .groupBy('drugFromSource')
         .agg(f.collect_set('id').alias('ids'))
@@ -357,9 +367,8 @@ def _map_drug_id(pgx_df: DataFrame, drug_name_lut: DataFrame) -> DataFrame:
     Returns:
         DataFrame with drugId column added.
     """
-    return (
-        pgx_df.withColumn('drugFromSource', f.lower(f.col('drugFromSource')))
-        .join(drug_name_lut, on='drugFromSource', how='left')
+    return pgx_df.withColumn('drugFromSource', f.lower(f.col('drugFromSource'))).join(
+        drug_name_lut, on='drugFromSource', how='left'
     )
 
 
@@ -376,7 +385,8 @@ def _get_drug_target_lut(moa_df: DataFrame) -> DataFrame:
         DataFrame with drugId and drugTargetIds columns.
     """
     return (
-        moa_df.filter(f.col('targets').isNotNull() & (f.size(f.col('targets')) >= 1))
+        moa_df
+        .filter(f.col('targets').isNotNull() & (f.size(f.col('targets')) >= 1))
         .select(
             f.explode(f.col('chemblIds')).alias('drugId'),
             f.col('targets'),

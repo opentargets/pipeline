@@ -12,7 +12,11 @@ seen in ``MIN_TRIALS`` distinct trials → merge into the molecule synonyms.
 import pyspark.sql.functions as f
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
-from pts.pyspark.drug_utils.labels import AACT_SOURCE, LABEL_SOURCE_SCHEMA, as_label_source
+from pts.pyspark.drug_utils.labels import (
+    AACT_SOURCE,
+    LABEL_SOURCE_SCHEMA,
+    as_label_source,
+)
 
 # --- Tunables ---------------------------------------------------------------
 
@@ -31,10 +35,12 @@ def _normalize_name(col):
 
 # --- Batch parsing ----------------------------------------------------------
 
-_DRUG_LIST_SCHEMA = ArrayType(StructType([
-    StructField('drug', StringType()),
-    StructField('synonyms', ArrayType(StringType())),
-]))
+_DRUG_LIST_SCHEMA = ArrayType(
+    StructType([
+        StructField('drug', StringType()),
+        StructField('synonyms', ArrayType(StringType())),
+    ])
+)
 
 BATCH_INNER_SCHEMA = StructType([
     StructField('investigated_drugs', _DRUG_LIST_SCHEMA),
@@ -58,7 +64,10 @@ def parse_aact_batch(batch_raw):
         .select('nct_id', f.explode('out.content').alias('content'))
         # content.text is itself a JSON string (OpenAI structured output is double-encoded);
         # decode it into BATCH_INNER_SCHEMA.
-        .select('nct_id', f.from_json(f.col('content.text'), BATCH_INNER_SCHEMA).alias('parsed'))
+        .select(
+            'nct_id',
+            f.from_json(f.col('content.text'), BATCH_INNER_SCHEMA).alias('parsed'),
+        )
     )
 
     roles = f.array_union(
@@ -111,8 +120,14 @@ def _build_chembl_indexes(mol_df):
             f.array_union(
                 f.array(f.col('name')),
                 f.array_union(
-                    f.transform(f.coalesce(f.col('synonyms'), empty_ls), lambda s: s['label']),  # noqa: FURB118
-                    f.transform(f.coalesce(f.col('tradeNames'), empty_ls), lambda t: t['label']),  # noqa: FURB118
+                    f.transform(
+                        f.coalesce(f.col('synonyms'), empty_ls),
+                        lambda s: s['label'],
+                    ),
+                    f.transform(
+                        f.coalesce(f.col('tradeNames'), empty_ls),
+                        lambda t: t['label'],
+                    ),
                 ),
             ).alias('labels'),
         )
@@ -140,13 +155,10 @@ def _build_chembl_indexes(mol_df):
         'id',
         f.coalesce(f.col('childChemblIds'), empty_str_arr).alias('related'),
     )
-    parents = (
-        mol_df
-        .filter(f.col('parentId').isNotNull())
-        .select('id', f.array(f.col('parentId')).alias('related'))
-    )
+    parents = mol_df.filter(f.col('parentId').isNotNull()).select('id', f.array(f.col('parentId')).alias('related'))
     parent_child = (
-        children.union(parents)
+        children
+        .union(parents)
         .groupBy('id')
         .agg(f.array_distinct(f.flatten(f.collect_list('related'))).alias('related'))
     )
@@ -237,7 +249,8 @@ def _anchor_candidates(entries, name_index, parent_child):
     empty_str_arr = f.array().cast('array<string>')
     cand = cand.withColumn(
         'status',
-        f.when(f.size('ids') == 0, f.lit('NOVEL'))
+        f
+        .when(f.size('ids') == 0, f.lit('NOVEL'))
         .when(
             f.arrays_overlap(f.col('ids'), f.coalesce(f.col('pc_related'), empty_str_arr)),
             f.lit('PARENT_CHILD'),
@@ -260,14 +273,38 @@ CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
 
 # v1 port of the experiment's cleanup blacklists — expected to grow with corpus coverage.
 CONTROL_TERMS = {
-    'placebo', 'vehicle', 'saline', 'sham', 'soc', 'standard of care', 'study drug',
-    'sodium chloride', 'water', 'air', 'normal saline',
+    'placebo',
+    'vehicle',
+    'saline',
+    'sham',
+    'soc',
+    'standard of care',
+    'study drug',
+    'sodium chloride',
+    'water',
+    'air',
+    'normal saline',
 }
 # v1 port of the experiment's cleanup blacklists — expected to grow with corpus coverage.
 CLASS_KEYWORDS = [
-    'inhibitor', 'agonist', 'antagonist', 'antibody', 'analogue', 'analog', 'therapy',
-    'statin', 'steroid', 'nsaid', 'cell', 'cells', 'lymphocyte', 'lymphocytes',
-    'mesenchymal', 'stromal', 'progenitor', 'fibroblast',
+    'inhibitor',
+    'agonist',
+    'antagonist',
+    'antibody',
+    'analogue',
+    'analog',
+    'therapy',
+    'statin',
+    'steroid',
+    'nsaid',
+    'cell',
+    'cells',
+    'lymphocyte',
+    'lymphocytes',
+    'mesenchymal',
+    'stromal',
+    'progenitor',
+    'fibroblast',
 ]
 _CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
 
@@ -327,15 +364,21 @@ def _rewrite_and_reclassify_codes(cand, name_index, parent_child):
     pc = parent_child.withColumnRenamed('related', 'pc_related')
     resolved = resolved.join(pc, on='id', how='left')
     empty_str_arr = f.array().cast('array<string>')
-    return resolved.withColumn(
-        'status',
-        f.when(f.size('ids') == 0, f.lit('NOVEL'))
-        .when(
-            f.arrays_overlap(f.col('ids'), f.coalesce(f.col('pc_related'), empty_str_arr)),
-            f.lit('PARENT_CHILD'),
+    return (
+        resolved
+        .withColumn(
+            'status',
+            f
+            .when(f.size('ids') == 0, f.lit('NOVEL'))
+            .when(
+                f.arrays_overlap(f.col('ids'), f.coalesce(f.col('pc_related'), empty_str_arr)),
+                f.lit('PARENT_CHILD'),
+            )
+            .otherwise(f.lit('CONFLICT')),
         )
-        .otherwise(f.lit('CONFLICT')),
-    ).select('id', 'candidate', 'nct_id', 'status').distinct()
+        .select('id', 'candidate', 'nct_id', 'status')
+        .distinct()
+    )
 
 
 def _apply_cleanup_rules(cand, regimen_index, existing_per_id):
@@ -377,16 +420,28 @@ def _apply_cleanup_rules(cand, regimen_index, existing_per_id):
     # #11: plural suppression (singular already on M)
     cand = cand.withColumn(
         'singular',
-        f.when(f.col('candidate').endswith('ies'),
-               f.concat(f.expr('left(candidate, length(candidate) - 3)'), f.lit('y')))
-        .when(f.col('candidate').endswith('es'), f.expr('left(candidate, length(candidate) - 2)'))
-        .when(f.col('candidate').endswith('s'), f.expr('left(candidate, length(candidate) - 1)'))
+        f
+        .when(
+            f.col('candidate').endswith('ies'),
+            f.concat(f.expr('left(candidate, length(candidate) - 3)'), f.lit('y')),
+        )
+        .when(
+            f.col('candidate').endswith('es'),
+            f.expr('left(candidate, length(candidate) - 2)'),
+        )
+        .when(
+            f.col('candidate').endswith('s'),
+            f.expr('left(candidate, length(candidate) - 1)'),
+        )
         .otherwise(f.col('candidate')),
     )
     cand = cand.join(existing_per_id, on='id', how='left')
     cand = cand.filter(
         (f.col('singular') == f.col('candidate'))
-        | ~f.array_contains(f.coalesce(f.col('existing'), f.array().cast('array<string>')), f.col('singular'))
+        | ~f.array_contains(
+            f.coalesce(f.col('existing'), f.array().cast('array<string>')),
+            f.col('singular'),
+        )
     ).drop('singular', 'existing')
 
     return cand.select('id', 'candidate', 'nct_id').distinct()
@@ -412,8 +467,14 @@ def mine_aact_synonyms(mol_df, entries):
         f.array_union(
             f.array(_normalize_name(f.col('name'))),
             f.array_union(
-                f.transform(f.coalesce(f.col('synonyms'), empty_ls), lambda s: _normalize_name(s['label'])),
-                f.transform(f.coalesce(f.col('tradeNames'), empty_ls), lambda t: _normalize_name(t['label'])),
+                f.transform(
+                    f.coalesce(f.col('synonyms'), empty_ls),
+                    lambda s: _normalize_name(s['label']),
+                ),
+                f.transform(
+                    f.coalesce(f.col('tradeNames'), empty_ls),
+                    lambda t: _normalize_name(t['label']),
+                ),
             ),
         ).alias('existing'),
     )
@@ -451,6 +512,9 @@ def merge_aact_synonyms(mol_combined, aact_df):
         'synonyms',
         # array_sort for deterministic output; array_union already dedups identical structs.
         f.array_sort(
-            f.array_union(f.coalesce(f.col('synonyms'), f.array().cast(LABEL_SOURCE_SCHEMA)), new_structs)
+            f.array_union(
+                f.coalesce(f.col('synonyms'), f.array().cast(LABEL_SOURCE_SCHEMA)),
+                new_structs,
+            )
         ).cast(LABEL_SOURCE_SCHEMA),
     ).drop('aact_labels')

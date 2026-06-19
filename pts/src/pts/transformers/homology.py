@@ -20,7 +20,13 @@ class FilteredJSONDecoder(json.JSONDecoder):
     https://github.com/pola-rs/polars/issues/17677
     """
 
-    def __init__(self, root_key='genes', allowed_keys=None, *args, **kwargs):
+    def __init__(
+        self,
+        root_key='genes',
+        allowed_keys=None,
+        *args,
+        **kwargs,
+    ) -> None:
         self.root_key = root_key
         self.allowed_keys = allowed_keys or {'id', 'name'}
         super().__init__(*args, **kwargs, object_hook=self.filter_keys)

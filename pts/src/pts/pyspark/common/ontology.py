@@ -46,7 +46,8 @@ def add_efo_mapping(
         )
 
         result_df = label_id_mapped_df.withColumn(
-            'diseaseFromSourceMappedId', _combine_result_columns(col('labelMappedResult'), col('idMappedResult'))
+            'diseaseFromSourceMappedId',
+            _combine_result_columns(col('labelMappedResult'), col('idMappedResult')),
         ).drop('labelMappedResult', 'idMappedResult')
     else:
         result_df = label_mapped_df.withColumn('diseaseFromSourceMappedId', explode_outer('labelMappedResult')).drop(

@@ -64,9 +64,7 @@ def association(
     # Save direct overall association:
     logger.info('Processing direct overall association.')
     _write(
-        association_by_datasource
-        .aggregate_overall(datasource_weights)
-        .compute_novelty(
+        association_by_datasource.aggregate_overall(datasource_weights).compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
@@ -77,9 +75,7 @@ def association(
     # Save direct association by datatype:
     logger.info('Processing direct associations stratified by datatype.')
     _write(
-        association_by_datasource
-        .aggregate_by_datatype(datasource_weights)
-        .compute_novelty(
+        association_by_datasource.aggregate_by_datatype(datasource_weights).compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,
@@ -109,8 +105,7 @@ def association(
     # Save indirect association by datasource:
     logger.info('Processing indirect associations stratified by datasource.')
     _write(
-        Association(_df=indirect_intermediate)
-        .compute_novelty(
+        Association(_df=indirect_intermediate).compute_novelty(
             novelty_scale=novelty_scale,
             novelty_shift=novelty_shift,
             novelty_window=novelty_window,

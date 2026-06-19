@@ -57,7 +57,7 @@ class LookUpTables:
                     )
                 ).alias('diseaseFromSourceMappedId'),
             )
-            .orderBy(f.col('diseaseFromSourceMappedId').asc())  # ty:ignore[missing-argument]
+            .orderBy(f.col('diseaseFromSourceMappedId').asc())
             .repartition(f.col('diseaseFromSourceMappedId'))
         )
 
@@ -97,7 +97,7 @@ class LookUpTables:
                 f.explode('targetFromSourceIds').alias('targetFromSourceId'),
             )
             .distinct()
-            .orderBy(f.col('targetFromSourceId').asc())  # ty:ignore[missing-argument]
+            .orderBy(f.col('targetFromSourceId').asc())
             .repartition(f.col('targetFromSourceId'))
         )
 
@@ -144,7 +144,10 @@ class LookUpTables:
                 hallmark_descriptions,
                 lambda desc: (
                     f
-                    .when(desc.contains('oncogene') & desc.contains('tsg'), f.lit('bivalent'))
+                    .when(
+                        desc.contains('oncogene') & desc.contains('tsg'),
+                        f.lit('bivalent'),
+                    )
                     .when(desc.contains('oncogene'), f.lit('oncogene'))
                     .when(desc.contains('tsg'), f.lit('tsg'))
                 ),

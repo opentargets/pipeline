@@ -23,9 +23,11 @@ def update_quality_flag(
         df = df.with_columns(pl.lit(None, dtype=pl.List(pl.String)).alias('qualityControls'))
 
     return df.with_columns(
-        pl.when(flag_condition)
+        pl
+        .when(flag_condition)
         .then(
-            pl.concat_list([
+            pl
+            .concat_list([
                 pl.col('qualityControls').fill_null([]),
                 pl.lit(flag_text).implode(),
             ])

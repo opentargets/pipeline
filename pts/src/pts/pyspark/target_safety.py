@@ -178,11 +178,11 @@ def process_adverse_events(adverse_events_df: DataFrame) -> DataFrame:
             f.struct(
                 f
                 .when(
-                    f.col('effects')[0].contains('activation'),  # ty:ignore[missing-argument, invalid-argument-type]
+                    f.col('effects')[0].contains('activation'),
                     f.lit('Activation/Increase/Upregulation'),
                 )
                 .when(
-                    f.col('effects')[0].contains('inhibition'),  # ty:ignore[missing-argument, invalid-argument-type]
+                    f.col('effects')[0].contains('inhibition'),
                     f.lit('Inhibition/Decrease/Downregulation'),
                 )
                 .alias('direction'),
@@ -277,7 +277,7 @@ def process_safety_risk(safety_risk_df: DataFrame) -> DataFrame:
         safety_risk_df
         .withColumn(
             'studyType',
-            f.when(f.col('ref').contains('Force'), 'preclinical').when(f.col('ref').contains('Lamore'), 'cell-based'),  # ty:ignore[missing-argument, invalid-argument-type]
+            f.when(f.col('ref').contains('Force'), 'preclinical').when(f.col('ref').contains('Lamore'), 'cell-based'),
         )
         .select(
             f.col('ensemblId').alias('id'),
@@ -300,15 +300,15 @@ def process_safety_risk(safety_risk_df: DataFrame) -> DataFrame:
         )
         .withColumn(
             'event',
-            f.when(f.col('datasource').contains('Force'), 'heart disease').when(  # ty:ignore[missing-argument, invalid-argument-type]
-                f.col('datasource').contains('Lamore'),  # ty:ignore[missing-argument, invalid-argument-type]
+            f.when(f.col('datasource').contains('Force'), 'heart disease').when(
+                f.col('datasource').contains('Lamore'),
                 'cardiac arrhythmia',
             ),
         )
         .withColumn(
             'eventId',
-            f.when(f.col('datasource').contains('Force'), 'EFO_0003777').when(  # ty:ignore[missing-argument, invalid-argument-type]
-                f.col('datasource').contains('Lamore'),  # ty:ignore[missing-argument, invalid-argument-type]
+            f.when(f.col('datasource').contains('Force'), 'EFO_0003777').when(
+                f.col('datasource').contains('Lamore'),
                 'EFO_0004269',
             ),
         )
@@ -367,12 +367,12 @@ def process_pharmacogenetics(pgx_df: DataFrame) -> DataFrame:
         pgx_df
         # Only interested in the evidence that is related to toxicity
         .filter(f.col('pgxCategory') == 'toxicity')
-        .filter((f.col('targetFromSourceId').isNotNull()) & (f.col('phenotypeText').isNotNull()))  # ty:ignore[missing-argument]
+        .filter((f.col('targetFromSourceId').isNotNull()) & (f.col('phenotypeText').isNotNull()))
         # Safety liabilities extraction
         .filter(
             ~(
-                f.col('phenotypeText').contains('no significant association')  # ty:ignore[missing-argument, invalid-argument-type]
-                | f.col('phenotypeText').contains('not associated with')  # ty:ignore[missing-argument, invalid-argument-type]
+                f.col('phenotypeText').contains('no significant association')
+                | f.col('phenotypeText').contains('not associated with')
             )
         )
         .withColumn('event', clean_phenotype_to_describe_safety_event(f.col('phenotypeText')))

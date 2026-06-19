@@ -33,7 +33,7 @@ from orchestration.operators.batch.batch_index_operator import BatchIndexOperato
 from orchestration.operators.batch.batch_job_operator import BatchJobOperator
 
 __all__ = [
-    "BatchCollectOperator",
-    "BatchIndexOperator",
-    "BatchJobOperator",
+    'BatchCollectOperator',
+    'BatchIndexOperator',
+    'BatchJobOperator',
 ]

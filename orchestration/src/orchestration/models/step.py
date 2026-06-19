@@ -12,10 +12,10 @@ from orchestration.dags.config.unified_pipeline import ClusterDefinition, Unifie
 class UnifiedPipelineStage(StrEnum):
     """Enum representing different stages in the unified pipeline."""
 
-    PIS = "pis"
-    PTS = "pts"
-    ETL = "etl"
-    GENTROPY = "gentropy"
+    PIS = 'pis'
+    PTS = 'pts'
+    ETL = 'etl'
+    GENTROPY = 'gentropy'
 
     @classmethod
     def from_step_name(
@@ -23,7 +23,7 @@ class UnifiedPipelineStage(StrEnum):
         step_name: str,
     ) -> UnifiedPipelineStage:
         """Returns the UnifiedPipelineStage corresponding to the given step name."""
-        step_prefix = step_name.split("_")[0].lower()
+        step_prefix = step_name.split('_', maxsplit=1)[0].lower()
         return UnifiedPipelineStage(step_prefix)
 
 
@@ -52,7 +52,7 @@ class UnifiedPipelineStep:
         """
         self.name = name
         """The full name of the step, including stage prefix."""
-        self.short_name = name.split("_", 1)[1]
+        self.short_name = name.split('_', 1)[1]
         """The short name of the step, without stage prefix."""
         self.config = config
         """The UnifiedPipelineConfig."""
@@ -64,17 +64,17 @@ class UnifiedPipelineStep:
         """The cluster definition for the step."""
         self.logger = logging.getLogger(__name__)
 
-        self.logger.info(f"initializing {self.stage} step: {self.name}")
+        self.logger.info(f'initializing {self.stage} step: {self.name}')
 
     @property
     def config_destination_prefix(self) -> str:
         """Returns the URI prefix where the step config should be uploaded."""
-        return f"{self.config.dev_uri or self.config.release_uri}/etc/config"
+        return f'{self.config.dev_uri or self.config.release_uri}/etc/config'
 
     @property
     def bin_destination_prefix(self) -> str:
         """Returns the URI prefix where the step binaries should be uploaded."""
-        return f"{self.config.dev_uri or self.config.release_uri}/etc/bin"
+        return f'{self.config.dev_uri or self.config.release_uri}/etc/bin'
 
     @property
     @abstractmethod
@@ -88,11 +88,11 @@ class UnifiedPipelineStep:
             ValueError: If the step does not run on a cluster.
         """
         if self.runs_on_cluster is False:
-            raise ValueError(f"step {step_name} does not run on a cluster.")
+            raise ValueError(f'step {step_name} does not run on a cluster.')
 
-        clusters = self.config.clusters.config.get("clusters", {})
-        sorted_cluster_names = sorted(clusters.keys(), key=len, reverse=True)
+        clusters = self.config.clusters.config.get('clusters', {})
+        sorted_cluster_names = sorted(clusters.keys(), key=lambda name: len(name), reverse=True)
         for cluster_name in sorted_cluster_names:
             if step_name.startswith(cluster_name):
                 return ClusterDefinition(cluster_name, clusters[cluster_name])
-        raise ValueError(f"no cluster definition found for step {step_name}.")
+        raise ValueError(f'no cluster definition found for step {step_name}.')

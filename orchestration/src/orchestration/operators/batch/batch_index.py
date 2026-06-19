@@ -55,12 +55,12 @@ class BatchIndex:
             AirflowSkipException: If the environment registry is empty.
         """
         if self.environment_registry.empty:
-            msg = "BatchIndex can not partition variable list, as list is empty."
+            msg = 'BatchIndex can not partition variable list, as list is empty.'
             logger.warning(msg)
             raise AirflowSkipException(msg)
 
         self.env_batches = self.environment_registry.partition(max_task_count=max_task_count)
-        logger.info("Created %s task list batches.", len(self.env_batches))
+        logger.info('Created %s task list batches.', len(self.env_batches))
 
         return self
 
@@ -78,15 +78,15 @@ class BatchIndex:
             AirflowSkipException: If no rows are available (e.g. ``partition()`` was never called).
         """
         rows: list[BatchIndexRow] = []
-        logger.info("Preparing BatchIndexRows. Each row represents a batch job.")
+        logger.info('Preparing BatchIndexRows. Each row represents a batch job.')
         for idx, batch in enumerate(self.env_batches):
             rows.append(BatchIndexRow(idx=idx, environments=batch))
 
-        logger.info("Prepared %s BatchIndexRows", len(rows))
+        logger.info('Prepared %s BatchIndexRows', len(rows))
         if not rows:
-            raise AirflowSkipException("Empty BatchIndexRows will not allow to create batch task. Skipping downstream")
+            raise AirflowSkipException('Empty BatchIndexRows will not allow to create batch task. Skipping downstream')
         return rows
 
     def __repr__(self) -> str:
         """Get batch index string representation."""
-        return f"BatchIndex(env_registry={self.environment_registry})"
+        return f'BatchIndex(env_registry={self.environment_registry})'

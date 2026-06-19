@@ -9,7 +9,7 @@ Expected input formats:
 """
 
 from loguru import logger
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import (
     array,
     coalesce,
@@ -45,7 +45,7 @@ class PrideBaselineExpression:
         self.tissue_ontology_mapping_path = tissue_ontology_mapping_path
         self.json = json
         self.local = local
-        self.df = None
+        self.df: DataFrame | None = None
 
     def read_pride_data(self, pride_code: str):
         pride_source_data_path = f'{self.pride_source_data_dir}/{pride_code}/{pride_code}_OpenTargets_ppb.txt'
@@ -152,6 +152,9 @@ class PrideBaselineExpression:
 
     def pack_data_for_output(self):
         """Use spark to write the DataFrame to parquet format."""
+        if self.df is None:
+            raise ValueError
+
         if self.local:
             output_path = f'file://{self.output_directory_path}'
         else:

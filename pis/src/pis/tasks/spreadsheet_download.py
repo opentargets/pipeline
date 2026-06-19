@@ -42,8 +42,13 @@ class SpreadsheetDownload(Task):
     destination field.
     """
 
-    def __init__(self, spec: SpreadsheetDownloadSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: SpreadsheetDownloadSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
+        self.spec: SpreadsheetDownloadSpec
 
     @report
     async def run(self) -> Self:

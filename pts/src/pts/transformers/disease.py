@@ -118,7 +118,15 @@ def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
                 xrefs=pl.col('xrefs'),
             )
         )
-        .drop('basicPropertyValues', 'comments', 'definition', 'deprecated', 'subsets', 'synonyms', 'xrefs')
+        .drop(
+            'basicPropertyValues',
+            'comments',
+            'definition',
+            'deprecated',
+            'subsets',
+            'synonyms',
+            'xrefs',
+        )
         .select(n.columns)
     )
 
@@ -155,8 +163,16 @@ def remap_edges(e: pl.DataFrame, n: pl.DataFrame) -> pl.DataFrame:
 
     return (
         e
-        .join(id_remap.rename({'old_url': 'sub', 'new_url': 'sub_new'}), on='sub', how='left')
-        .join(id_remap.rename({'old_url': 'obj', 'new_url': 'obj_new'}), on='obj', how='left')
+        .join(
+            id_remap.rename({'old_url': 'sub', 'new_url': 'sub_new'}),
+            on='sub',
+            how='left',
+        )
+        .join(
+            id_remap.rename({'old_url': 'obj', 'new_url': 'obj_new'}),
+            on='obj',
+            how='left',
+        )
         .with_columns(
             sub=pl.coalesce('sub_new', 'sub'),
             obj=pl.coalesce('obj_new', 'obj'),
@@ -178,7 +194,7 @@ def disease(
     logger.debug('loading efo')
     h = StorageHandle(source)
     f = h.open()
-    initial = pl.read_json(f)
+    initial = pl.read_json(f)  # ty:ignore[invalid-argument-type]
 
     logger.debug('starting transformation')
 

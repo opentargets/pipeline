@@ -51,7 +51,7 @@ class CustomClusterConfig(BaseModel):
     """Google cloud project ID of the custom image."""
     custom_image_family: str | None = None
     """Image family for the custom dataproc image."""
-    image_version: str | None = "2.2"
+    image_version: str | None = '2.2'
     """The version of software inside the cluster."""
 
     autoscaling_policy: str | None = None
@@ -60,9 +60,9 @@ class CustomClusterConfig(BaseModel):
 
     num_masters: int = 1
     """The number of master nodes to spin up. Default is 1."""
-    master_machine_type: str = "n1-highmem-16"
+    master_machine_type: str = 'n1-highmem-16'
     """GCE machine type to use for master nodes. Default is n1-highmem-16."""
-    master_disk_type: str = "pd-ssd"
+    master_disk_type: str = 'pd-ssd'
     """The disk type to use for master nodes. Default is pd-ssd."""
     master_disk_size: int = 512
     """The disk size in GB to use for master nodes. Default is 500."""
@@ -86,9 +86,9 @@ class CustomClusterConfig(BaseModel):
     """The number of instances in the instance group as secondary workers.
         Default is 0.
     """
-    worker_machine_type: str = "n1-standard-4"
+    worker_machine_type: str = 'n1-standard-4'
     """GCE machine type to use for worker nodes. Default is n1-standard-4."""
-    worker_disk_type: str = "pd-ssd"
+    worker_disk_type: str = 'pd-ssd'
     """The disk type to use for worker nodes. Default is pd-ssd."""
     worker_disk_size: int = 2048
     """The disk size to use for worker nodes. Default is 2048."""
@@ -159,7 +159,7 @@ class CustomClusterConfig(BaseModel):
 
     init_actions_uris: list[str] | None = None
     """List of GCS URIs of initialization scripts."""
-    init_action_timeout: str = "10m"
+    init_action_timeout: str = '10m'
     """Timeout for initialization actions. Default is 10 minutes."""
 
     service_account: str | None = GCP_SERVICE_ACCOUNT
@@ -174,23 +174,23 @@ class CustomClusterConfig(BaseModel):
     secret_init_action_uri: str | None = None
     """The URI of the init action script that will handle the secret injection. Default to None."""
 
-    @model_validator(mode="after")
+    @model_validator(mode='after')
     def validate_secret_config(self) -> Self:
         """If secret_map is set and not empty, secret_init_action_uri must be set."""
         if self.secret_map and not self.secret_init_action_uri:
-            raise ValueError("secret_init_action_uri must be set if secret_map is set")
+            raise ValueError('secret_init_action_uri must be set if secret_map is set')
         return self
 
     def model_post_init(self, _: Any) -> None:
-        if isinstance(self.autoscaling_policy, str) and "/" not in self.autoscaling_policy:
+        if isinstance(self.autoscaling_policy, str) and '/' not in self.autoscaling_policy:
             zone = self.zone or GCP_ZONE
-            region = zone.rsplit("-", 1)[0]
-            ap = f"projects/{self.project_id}/regions/{region}/autoscalingPolicies/{self.autoscaling_policy}"
+            region = zone.rsplit('-', 1)[0]
+            ap = f'projects/{self.project_id}/regions/{region}/autoscalingPolicies/{self.autoscaling_policy}'
             self.autoscaling_policy = ap
 
     def _update_c4_machine_disk_config(self, disk_config: DiskConfig) -> DiskConfig:
         """Update the disk config with the right values for c4 machine types."""
-        disk_config.boot_disk_type = "hyperdisk-balanced"
+        disk_config.boot_disk_type = 'hyperdisk-balanced'
         disk_config.boot_disk_provisioned_iops = 6_000
         disk_config.boot_disk_provisioned_throughput = 500
         return disk_config
@@ -209,31 +209,32 @@ class CustomClusterConfig(BaseModel):
             ClusterConfig: The Dataproc cluster.
         """
         exclude_fields = {
-            "secondary_worker_disk_type",
-            "secondary_worker_disk_size",
-            "secondary_worker_machine_type",
-            "secret_map",
-            "secret_init_action_uri",
+            'secondary_worker_disk_type',
+            'secondary_worker_disk_size',
+            'secondary_worker_machine_type',
+            'secret_map',
+            'secret_init_action_uri',
         }
         config = ClusterGenerator(**self.model_dump(exclude=exclude_fields)).make()
 
         # Ensure that the c4- machine types have the right disk config
         # TODO: Refactor once we are sure we need the c4- machine types
 
-        if self.worker_machine_type.startswith("c4-"):
-            dc = DiskConfig(**config["worker_config"]["disk_config"])
+        if self.worker_machine_type.startswith('c4-'):
+            dc = DiskConfig(**config['worker_config']['disk_config'])
             dc = self._update_c4_machine_disk_config(dc)
-            config["worker_config"]["disk_config"] = dc
-        if self.master_machine_type.startswith("c4-"):
-            dc = DiskConfig(**config["master_config"]["disk_config"])
+            config['worker_config']['disk_config'] = dc
+        if self.master_machine_type.startswith('c4-'):
+            dc = DiskConfig(**config['master_config']['disk_config'])
             dc = self._update_c4_machine_disk_config(dc)
-            config["master_config"]["disk_config"] = dc
-        # By default the secondary workers have the same disk config as the primary workers, but we want to be able to set it independently
+            config['master_config']['disk_config'] = dc
+        # By default the secondary workers have the same disk config as the primary workers, but we
+        # want to be able to set it independently
         if self.secondary_worker_machine_type:
-            config["secondary_worker_config"]["machine_type_uri"] = self.secondary_worker_machine_type
+            config['secondary_worker_config']['machine_type_uri'] = self.secondary_worker_machine_type
         if self.secondary_worker_disk_size or self.secondary_worker_disk_type:
             dc = self._create_secondary_worker_disk_config()
-            config["secondary_worker_config"]["disk_config"] = dc
+            config['secondary_worker_config']['disk_config'] = dc
 
         return config
 
@@ -285,10 +286,10 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
     """
 
     template_fields: Sequence[str] = (
-        "project_id",
-        "region",
-        "cluster_name",
-        "labels",
+        'project_id',
+        'region',
+        'cluster_name',
+        'labels',
     )
 
     def __init__(
@@ -299,7 +300,7 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
         cluster_name: str,
         cluster_config: CustomClusterConfig,
         labels: Labels | None = None,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
         **kwargs,
     ) -> None:
@@ -319,7 +320,7 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
             # Apparently the actual `self.cluster_config` is
             # `dataproc_v1.types.cluster.ClusterConfig` and not `dataproc_v1.types.cluster.Cluster`,
             # but passing both types seem to work fine anyway???
-            cluster_config=self.cluster_config,  # type: ignore
+            cluster_config=self.cluster_config,
             labels=dict(self.labels),
             use_if_exists=True,
             gcp_conn_id=self.gcp_conn_id,
@@ -330,7 +331,7 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
     def execute(self, context: Context) -> dict:
         """Execute the operator."""
         # the base operator can only handle dicts, we need to convert back and forth
-        labels = Labels({**self.labels})
+        labels = Labels({**(self.labels or {})})
         labels.add_dag_run_id(context)
         self.labels = dict(labels)
         secret_action = self._prepare_secret_init_action()
@@ -342,7 +343,7 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
         if not self._cluster_config.secret_map:
             return None
         if not self._cluster_config.secret_init_action_uri:
-            raise AirflowException("secret_init_action_uri must be set if secret_map is set")
+            raise AirflowException('secret_init_action_uri must be set if secret_map is set')
         secrets = Secrets(
             mapping={
                 env_var: Secret(secret_id=secret_name, project_id=self.project_id)
@@ -360,9 +361,9 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
         """Patch in place the cluster init actions."""
         if not init_actions:
             return
-        self.log.info(f"Patching cluster init actions with {init_actions}")
-        self.log.debug(f"Current cluster config: {self.cluster_config}")
-        self.cluster_config["initialization_actions"].extend(init_actions)  # type: ignore
+        self.log.info(f'Patching cluster init actions with {init_actions}')
+        self.log.debug(f'Current cluster config: {self.cluster_config}')
+        self.cluster_config['initialization_actions'].extend(init_actions)  # ty:ignore[not-subscriptable]
 
 
 class SubmitJobOperator(DataprocSubmitJobOperator):
@@ -384,11 +385,11 @@ class SubmitJobOperator(DataprocSubmitJobOperator):
     """
 
     template_fields: Sequence[str] = (
-        "project_id",
-        "region",
-        "cluster_name",
-        "step_name",
-        "labels",
+        'project_id',
+        'region',
+        'cluster_name',
+        'step_name',
+        'labels',
     )
 
     def __init__(
@@ -401,7 +402,7 @@ class SubmitJobOperator(DataprocSubmitJobOperator):
         spark_job: SparkJob | None = None,
         py_spark_job: PySparkJob | None = None,
         labels: Labels | None = None,
-        gcp_conn_id: str = "google_cloud_default",
+        gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
         **kwargs,
     ) -> None:
@@ -417,7 +418,7 @@ class SubmitJobOperator(DataprocSubmitJobOperator):
 
         # check that either spark_job or py_spark_job but not both are set
         if not bool(spark_job) ^ bool(py_spark_job):
-            raise ValueError("provide either spark_job or py_spark_job, but not both")
+            raise ValueError('provide either spark_job or py_spark_job, but not both')
 
         # note the job set in here is a `google.cloud.dataproc_v1.types.Job`,
         # which inside contains the spark/pyspark job itself. That one is set
@@ -434,7 +435,7 @@ class SubmitJobOperator(DataprocSubmitJobOperator):
     def execute(self, context: Context) -> str:
         """Execute the operator."""
         self.labels.add_dag_run_id(context)
-        job_id = f"{self.cluster_name}-{self.step_name}-{random_id()}"
+        job_id = f'{self.cluster_name}-{self.step_name}-{random_id()}'
         self.job = Job(
             reference=JobReference(project_id=self.project_id, job_id=job_id),
             placement=JobPlacement(cluster_name=self.cluster_name),
@@ -459,7 +460,7 @@ class DeleteClusterOperator(DataprocDeleteClusterOperator):
         try:
             super().execute(context)
         except GCPNotFound:
-            self.log.warning(f"cluster {self.cluster_name} not found")
+            self.log.warning(f'cluster {self.cluster_name} not found')
 
 
 class JobBuilder(ABC):
@@ -503,7 +504,7 @@ class JobBuilder(ABC):
         for property_name, property_value in properties.items():
             for sentinel, value in template_context.items():
                 result[property_name] = result.get(property_name, property_value).replace(
-                    f"{{{{{sentinel}}}}}",
+                    f'{{{{{sentinel}}}}}',
                     value,
                 )
         return result
@@ -534,11 +535,11 @@ class ETLJobBuilder(JobBuilder):
             template_context=self.template_context,
         )
 
-        self.logger.info("spawning etl job")
-        self.logger.info(f"jar_uri: {self.jar_uri}")
-        self.logger.info(f"config_uri: {self.config_uri}")
-        self.logger.info(f"args: {self.args}")
-        self.logger.info(f"properties (already rendered): {rendered_properties}")
+        self.logger.info('spawning etl job')
+        self.logger.info(f'jar_uri: {self.jar_uri}')
+        self.logger.info(f'config_uri: {self.config_uri}')
+        self.logger.info(f'args: {self.args}')
+        self.logger.info(f'properties (already rendered): {rendered_properties}')
 
         return SparkJob(
             main_jar_file_uri=self.jar_uri,
@@ -566,7 +567,7 @@ class GentropyJobBuilder(JobBuilder):
 
     def build(self) -> PySparkJob:
         """Build a SparkJob that runs a Gentropy step."""
-        self.logger.info(f"params: {self.params}")
+        self.logger.info(f'params: {self.params}')
 
         args = convert_params_to_hydra_positional_arg(
             params=self.params,
@@ -577,10 +578,10 @@ class GentropyJobBuilder(JobBuilder):
             template_context=self.template_context,
         )
 
-        self.logger.info("spawning gentropy job")
-        self.logger.info(f"main_python_file_uri: {self.main_python_file_uri}")
-        self.logger.info(f"args: {args}")
-        self.logger.info(f"properties (already rendered): {rendered_properties}")
+        self.logger.info('spawning gentropy job')
+        self.logger.info(f'main_python_file_uri: {self.main_python_file_uri}')
+        self.logger.info(f'args: {args}')
+        self.logger.info(f'properties (already rendered): {rendered_properties}')
 
         return PySparkJob(
             main_python_file_uri=self.main_python_file_uri,
@@ -605,10 +606,10 @@ class PTSJobBuilder(JobBuilder):
 
     def build(self) -> PySparkJob:
         """Build a SparkJob that runs a Gentropy step."""
-        self.logger.info(f"params: {self.args}")
-        self.logger.info("spawning pts job")
-        self.logger.info(f"main_python_file_uri: {self.main_python_file_uri}")
-        self.logger.info(f"args: {self.args}")
+        self.logger.info(f'params: {self.args}')
+        self.logger.info('spawning pts job')
+        self.logger.info(f'main_python_file_uri: {self.main_python_file_uri}')
+        self.logger.info(f'args: {self.args}')
 
         return PySparkJob(
             main_python_file_uri=self.main_python_file_uri,

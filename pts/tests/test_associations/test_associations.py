@@ -82,7 +82,7 @@ class TestAssociation:
                 & (f.col('targetId') == target_id)
                 & (f.col('aggregationValue') == datasource_id)
             )
-            .orderBy(f.col('year').asc())  # ty:ignore[missing-argument]
+            .orderBy(f.col('year').asc())
         )
 
         # Assert df is not empty:
@@ -105,8 +105,8 @@ class TestAssociation:
         """Test if the data propagation after explosion is good."""
         propagated_data = Association._back_fill_missing_years(self.association.df)
 
-        assert propagated_data.filter(f.col('associationScore').isNull()).count() == 0  # ty:ignore[missing-argument]
-        assert propagated_data.filter(f.col('yearlyEvidenceScores').isNull()).count() > 0  # ty:ignore[missing-argument]
+        assert propagated_data.filter(f.col('associationScore').isNull()).count() == 0
+        assert propagated_data.filter(f.col('yearlyEvidenceScores').isNull()).count() > 0
 
     def test_data_propagation_to_missing_years__association_score_always_grow(self: TestAssociation) -> None:
         """Test if yearlyAssociation score never decreases in subsequent years.  Within the same association window."""

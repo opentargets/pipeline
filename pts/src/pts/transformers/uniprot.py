@@ -65,7 +65,10 @@ def _parse_record(lines: list[str]) -> dict:
                     break
                 m = _MODIFIER_RE.match(p)
                 if m:
-                    locations.append({'location': m.group(2).strip(), 'targetModifier': m.group(1).strip()})
+                    locations.append({
+                        'location': m.group(2).strip(),
+                        'targetModifier': m.group(1).strip(),
+                    })
                 else:
                     locations.append({'location': p, 'targetModifier': None})
 

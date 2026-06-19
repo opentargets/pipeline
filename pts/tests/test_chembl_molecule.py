@@ -66,11 +66,7 @@ SAMPLE_MOLBLOCK = (
 
 # ChEMBL ships `molfile` as a full SD-file record: the molblock plus appended
 # SDF property tags. PTS truncates this back to the bare molblock.
-SAMPLE_MOLFILE = SAMPLE_MOLBLOCK + (
-    '> <chembl_id>\nCHEMBL1\n\n'
-    '> <chembl_pref_name>\nDRUG A\n\n'
-    '$$$$\n'
-)
+SAMPLE_MOLFILE = SAMPLE_MOLBLOCK + ('> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n')
 
 # A molfile-shaped string with no `M  END` terminator. PTS has nothing to
 # truncate here, so it must pass through unchanged.
@@ -146,13 +142,21 @@ def raw_drugbank_df(spark):
 
 
 class TestMoleculePreprocess:
-    def test_molblock_truncated_at_m_end(self, raw_molecule_df, drugbank_df):
-        """molblock is the source molfile truncated at `M  END`."""
+    def test_molblock_truncated_at_m_end(
+        self,
+        raw_molecule_df,
+        drugbank_df,
+    ):
+        """molblock is the source molfile truncated at `M  END`."""  # noqa: D403
         result = _molecule_preprocess(raw_molecule_df, drugbank_df)
         rows = {r['id']: r['molblock'] for r in result.collect()}
         assert rows['CHEMBL1'] == SAMPLE_MOLBLOCK
 
-    def test_molblock_sdf_tags_stripped(self, raw_molecule_df, drugbank_df):
+    def test_molblock_sdf_tags_stripped(
+        self,
+        raw_molecule_df,
+        drugbank_df,
+    ):
         """The SDF property tags appended after `M  END` are removed."""
         result = _molecule_preprocess(raw_molecule_df, drugbank_df)
         molblock = {r['id']: r['molblock'] for r in result.collect()}['CHEMBL1']
@@ -160,20 +164,32 @@ class TestMoleculePreprocess:
         assert '> <chembl_id>' not in molblock
         assert '$$$$' not in molblock
 
-    def test_molblock_null_when_molfile_absent(self, raw_molecule_df, drugbank_df):
-        """molblock is null when the source molecule has no molfile."""
+    def test_molblock_null_when_molfile_absent(
+        self,
+        raw_molecule_df,
+        drugbank_df,
+    ):
+        """molblock is null when the source molecule has no molfile."""  # noqa: D403
         result = _molecule_preprocess(raw_molecule_df, drugbank_df)
         rows = {r['id']: r['molblock'] for r in result.collect()}
         assert rows['CHEMBL2'] is None
 
-    def test_molfile_without_terminator_passed_through(self, raw_molecule_df, drugbank_df):
+    def test_molfile_without_terminator_passed_through(
+        self,
+        raw_molecule_df,
+        drugbank_df,
+    ):
         """A source molfile with no `M  END` terminator is left unchanged."""
         result = _molecule_preprocess(raw_molecule_df, drugbank_df)
         rows = {r['id']: r['molblock'] for r in result.collect()}
         assert rows['CHEMBL3'] == MOLFILE_NO_TERMINATOR
 
-    def test_molblock_is_string_column(self, raw_molecule_df, drugbank_df):
-        """molblock is exposed as a string column."""
+    def test_molblock_is_string_column(
+        self,
+        raw_molecule_df,
+        drugbank_df,
+    ):
+        """molblock is exposed as a string column."""  # noqa: D403
         result = _molecule_preprocess(raw_molecule_df, drugbank_df)
         assert result.schema['molblock'].dataType == StringType()
 
@@ -224,38 +240,61 @@ class TestSynonymStructs:
         assert row['tradeNames'] == []
 
     def test_synonyms_schema_is_struct(self, raw_molecule_df, raw_drugbank_df):
-        """synonyms column type is array<struct<label,source>>."""
+        """Synonyms column type is array<struct<label,source>>."""
         result = process_molecules(raw_molecule_df, raw_drugbank_df)
         field = result.schema['synonyms'].dataType
         assert isinstance(field, ArrayType)
-        assert {sub.name for sub in field.elementType.fields} == {'label', 'source'}
+        element_type = field.elementType
+        assert isinstance(element_type, StructType)
+        assert {sub.name for sub in element_type.fields} == {'label', 'source'}
 
 
 class TestMergeAndTwoSource:
     def test_two_source_molecule(self, spark, raw_drugbank_df):
         import json
 
-        mol = [Row(
-            molecule_chembl_id='CHEMBL1',
-            molecule_structures=Row(canonical_smiles=None, standard_inchi_key=None, molfile=None),
-            molecule_type='Protein', pref_name='Filgrastim', cross_references=[],
-            molecule_hierarchy=Row(parent_chembl_id='CHEMBL1'),
-            molecule_synonyms=[Row(molecule_synonym='Neupogen', syn_type='TRADE_NAME')],
-        )]
+        mol = [
+            Row(
+                molecule_chembl_id='CHEMBL1',
+                molecule_structures=Row(canonical_smiles=None, standard_inchi_key=None, molfile=None),
+                molecule_type='Protein',
+                pref_name='Filgrastim',
+                cross_references=[],
+                molecule_hierarchy=Row(parent_chembl_id='CHEMBL1'),
+                molecule_synonyms=[Row(molecule_synonym='Neupogen', syn_type='TRADE_NAME')],
+            )
+        ]
         mol_df = spark.createDataFrame(mol, schema=RAW_MOLECULE_SCHEMA)
 
         outer_schema = StructType([
             StructField('custom_id', StringType()),
-            StructField('response', StructType([StructField('body', StructType([
-                StructField('output', ArrayType(StructType([
-                    StructField('type', StringType()),
-                    StructField('content', ArrayType(StructType([StructField('text', StringType())]))),
-                ]))),
-            ]))])),
+            StructField(
+                'response',
+                StructType([
+                    StructField(
+                        'body',
+                        StructType([
+                            StructField(
+                                'output',
+                                ArrayType(
+                                    StructType([
+                                        StructField('type', StringType()),
+                                        StructField(
+                                            'content',
+                                            ArrayType(StructType([StructField('text', StringType())])),
+                                        ),
+                                    ])
+                                ),
+                            ),
+                        ]),
+                    )
+                ]),
+            ),
         ])
         payload = json.dumps({
             'investigated_drugs': [{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
-            'comparator_drugs': [], 'supportive_drugs': [],
+            'comparator_drugs': [],
+            'supportive_drugs': [],
         })
         content = [Row(text=payload)]
         output = [Row(type='message', content=content)]

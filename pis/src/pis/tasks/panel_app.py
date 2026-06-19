@@ -31,7 +31,11 @@ class PanelAppSpec(Spec):
 class PanelApp(Task):
     """Fetch data from the PanelApp API and save as a JSONL file."""
 
-    def __init__(self, spec: PanelAppSpec, context: TaskContext) -> None:
+    def __init__(
+        self,
+        spec: PanelAppSpec,
+        context: TaskContext,
+    ) -> None:
         super().__init__(spec, context)
         self.spec: PanelAppSpec
 
