@@ -19,7 +19,7 @@ from clinical_mining.data_sources.pmda import parse_pmda_approvals
 from clinical_mining.data_sources.ttd import extract_clinical_report as extract_ttd_clinical_report
 from clinical_mining.data_sources.ttd import extract_indication as extract_ttd_indication
 from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalStageCategory
+from clinical_mining.schemas import ClinicalSource, ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
@@ -443,10 +443,11 @@ def flag_indirect_primary_purpose(
     if llm_drug_intent is not None:
         reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
         llm_drug_intent_condition = (
-            # Null drug_intent means the report wasn't in llm results — flag it
-            pl.col('drug_intent').is_null()
+            # Flagging should only act on AACT reports
+            (pl.col('source') == ClinicalSource.AACT.value) &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
-            | (pl.col('drug_intent') != 'therapeutic')
+            # or when LLM was not able to infer the intent (null)
+            ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())
         )
     else:
         reports_df = reports.df

@@ -6,10 +6,11 @@ so they live in a neutral module to avoid an import cycle between the two.
 """
 
 import pyspark.sql.functions as f
+from clinical_mining.schemas import ClinicalSource
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 CHEMBL_SOURCE = 'ChEMBL'
-AACT_SOURCE = 'AACT'
+AACT_SOURCE = ClinicalSource.AACT.value
 
 LABEL_SOURCE_SCHEMA = ArrayType(
     StructType([
