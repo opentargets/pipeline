@@ -1381,32 +1381,33 @@ steps:
           - drugId
           - clinicalReportId
         direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'protect' END
-        direction_on_target_expression: "CASE
-          WHEN actionType IN (
-          'RNAI INHIBITOR',
-          'NEGATIVE MODULATOR',
-          'NEGATIVE ALLOSTERIC MODULATOR',
-          'ANTAGONIST',
-          'ANTISENSE INHIBITOR',
-          'BLOCKER',
-          'INHIBITOR',
-          'DEGRADER',
-          'INVERSE AGONIST',
-          'ALLOSTERIC ANTAGONIST',
-          'DISRUPTING AGENT',
-          'GENE EDITING NEGATIVE MODULATOR'
-          ) THEN 'LoF'
-          WHEN actionType IN (
-          'PARTIAL AGONIST',
-          'ACTIVATOR',
-          'POSITIVE ALLOSTERIC MODULATOR',
-          'POSITIVE MODULATOR',
-          'AGONIST',
-          'SEQUESTERING AGENT',
-          'STABILISER'
-          ) THEN 'GoF'
-          ELSE NULL
-          END"
+        direction_on_target_expression: |
+          CASE
+            WHEN actionType IN (
+              'RNAI INHIBITOR',
+              'NEGATIVE MODULATOR',
+              'NEGATIVE ALLOSTERIC MODULATOR',
+              'ANTAGONIST',
+              'ANTISENSE INHIBITOR',
+              'BLOCKER',
+              'INHIBITOR',
+              'DEGRADER',
+              'INVERSE AGONIST',
+              'ALLOSTERIC ANTAGONIST',
+              'DISRUPTING AGENT',
+              'GENE EDITING NEGATIVE MODULATOR'
+            ) THEN 'LoF'
+            WHEN actionType IN (
+              'PARTIAL AGONIST',
+              'ACTIVATOR',
+              'POSITIVE ALLOSTERIC MODULATOR',
+              'POSITIVE MODULATOR',
+              'AGONIST',
+              'SEQUESTERING AGENT',
+              'STABILISER'
+            ) THEN 'GoF'
+            ELSE NULL
+          END
 
   evidence_postprocess_reactome:
     - name: pyspark evidence_postprocess
@@ -1448,7 +1449,7 @@ steps:
         partition_count: 25
         evidence_format: parquet
         datasource_id: impc
-        score_expression: 'resourceScore / 100'
+        score_expression: resourceScore / 100
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1476,7 +1477,7 @@ steps:
         partition_count: 1
         evidence_format: parquet
         datasource_id: orphanet
-        score_expression: "element_at(map('Assessed', 1.0, 'Not yet assessed', 0.5), confidence)"
+        score_expression: element_at(map('Assessed', 1.0, 'Not yet assessed', 0.5), confidence)
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1621,7 +1622,8 @@ steps:
           WHEN beta > 0.0 THEN 'risk'
           WHEN beta < 0.0 THEN 'protect'
           END
-        direction_on_target_expression: "'LoF'"
+        direction_on_target_expression: |
+          'LoF'
 
   evidence_postprocess_crispr_screens:
     - name: pyspark evidence_postprocess

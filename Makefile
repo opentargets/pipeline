@@ -37,9 +37,9 @@ test: $(addprefix test-,$(COMPONENTS))  ## Run tests for all components
 
 #: DEVELOPMENT TARGETS #############################################################################
 .git/hooks/pre-commit:
-	@ln -sf $(shell pwd)/pre-commit.githook .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@echo pre-commit hook installed
+	@uv tool install prek
+	@uvx prek install
+	@echo prek hook installed
 
 dev-%: %/pyproject.toml .git/hooks/pre-commit
 	@cd $* && uv sync --all-groups --all-extras
