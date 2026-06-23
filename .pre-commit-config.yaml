@@ -33,10 +33,11 @@ repos:
     rev: v0.21.0
     hooks:
       - id: yamlfmt
-        args: [-conf, '.yamlfmt']
+        args: [-conf, '.yamlfmt', '-lint']
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: pretty-format-json
+        args: [--no-sort-keys]
         files: ^croissant/src/

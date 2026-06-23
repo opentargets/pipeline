@@ -103,9 +103,9 @@ steps:
         - name: copy_many processed ${dataset} aggregated expression
           sources: gs://baseline_expression/processed/aggregated/${dataset}/parquet/*
           destination: intermediate/baseline_expression/aggregated/${dataset}/parquet
-        # - name: copy processed ${dataset} unaggregated expression
-        #   source: gs://baseline_expression/processed/unaggregated/${dataset}/parquet
-        #   destination: intermediate/baseline_expression/unaggregated/${dataset}/parquet
+          # - name: copy processed ${dataset} unaggregated expression
+          #   source: gs://baseline_expression/processed/unaggregated/${dataset}/parquet
+          #   destination: intermediate/baseline_expression/unaggregated/${dataset}/parquet
 
     - name: explode parent mapping
       foreach:

@@ -1,0 +1,92 @@
+---
+name: Publish
+
+on:
+  workflow_call:
+    inputs:
+      final:
+        description: 'Whether this is a final release.'
+        required: true
+        type: boolean
+      package:
+        description: 'Package to publish.'
+        required: true
+        type: string
+      version:
+        description: 'Version to publish.'
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Build & push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - id: branch-tag
+        if: ${{ !inputs.final }}
+        run: |
+          echo "tag=$(echo "${{ inputs.version }}" | sed -E 's/\.dev[0-9]+//; s/\.[^.]+$//')" >> "$GITHUB_OUTPUT"
+
+      - id: auth-ghcr
+        if: ${{ inputs.final }}
+        name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: auth-google
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          token_format: access_token
+          project_id: 'open-targets-eu-dev'
+          workload_identity_provider: projects/426265110888/locations/global/workloadIdentityPools/github-actions/providers/opentargets
+          service_account: github-actions@open-targets-eu-dev.iam.gserviceaccount.com
+          access_token_lifetime: 300s
+
+      - id: auth-gar
+        name: Log in to Google Artifact Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: europe-west1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth-google.outputs.access_token }}
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - id: push-dev
+        if: ${{ !inputs.final }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./${{ inputs.package }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ inputs.version }}
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ steps.branch-tag.outputs.tag }}
+
+      - id: push-final
+        if: ${{ inputs.final }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./${{ inputs.package }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ inputs.package }}:${{ inputs.version }}
+            ghcr.io/${{ github.repository }}/${{ inputs.package }}:latest
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ inputs.version }}
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:latest
+
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: ${{ inputs.final }}
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/${{ inputs.package }}
+          subject-digest: ${{ steps.push-final.outputs.digest }}
+          push-to-registry: true

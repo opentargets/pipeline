@@ -1,0 +1,75 @@
+---
+name: Check and publish images
+
+on:
+  push:
+    tags:
+      - 'orchestration@v[0-9]+.[0-9]+.[0-9]+*'
+      - 'pis@v[0-9]+.[0-9]+.[0-9]+*'
+      - 'pts@v[0-9]+.[0-9]+.[0-9]+*'
+      - 'croissant@v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  decide:
+    name: Decide package
+    runs-on: ubuntu-latest
+    outputs:
+      final: ${{ steps.decide.outputs.final }}
+      package: ${{ steps.decide.outputs.package }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - id: decide
+        name: decide package, version and whether final or dev
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          package="${tag%@v*}"                                   # shortest match on @v from end
+          version="${tag#*@v}"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then  # final when version is like 1.2.3
+            final=true
+          else
+            final=false
+          fi
+          {
+            echo "final=$final"
+            echo "package=${package}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "publishing $package:$version (final=$final)"
+
+  check:
+    needs: decide
+    uses: ./.github/workflows/check.yaml
+    with:
+      packages: '["${{ needs.decide.outputs.package }}"]'
+
+  publish:
+    needs: [decide, check]
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      attestations: write
+    uses: ./.github/workflows/publish.yaml
+    with:
+      final: ${{ needs.decide.outputs.final == 'true' }}
+      package: ${{ needs.decide.outputs.package }}
+      version: ${{ needs.decide.outputs.version }}
+
+  release:
+    needs: [decide, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: ${{ needs.decide.outputs.final == 'true' }}
+    steps:
+      - id: release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          name: ${{ needs.decide.outputs.package }} ${{ needs.decide.outputs.version }}
+          body: |
+            This is the ${{ needs.decide.outputs.package }} version used for Open Targets `<RELEASE>` release.
+
+            `REMEMBER TO GENERATE RELEASE NOTES USING THE PREVIOUS FINAL RELEASE AS PREVIOUS TAG`

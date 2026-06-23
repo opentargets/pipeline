@@ -1539,7 +1539,8 @@ steps:
           WHEN beta > 0.0 THEN 'risk'
           WHEN beta < 0.0 THEN 'protect'
           END
-        direction_on_target_expression: "'LoF'"
+        direction_on_target_expression: |
+          'LoF'
 
   evidence_postprocess_crispr_screens:
     - name: pyspark evidence_postprocess

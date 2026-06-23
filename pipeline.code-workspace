@@ -2,21 +2,25 @@
 {
 	"folders": [
 		{
+			"name": "orchestration",
 			"path": "orchestration"
 		},
 		{
+			"name": "pis",
 			"path": "pis"
 		},
 		{
+			"name": "pts",
 			"path": "pts"
 		},
 		{
+			"name": "croissant",
 			"path": "croissant"
 		},
 		{
-			"path": ".",
-			"name": "pipeline (root)"
-		},
+			"name": "pipeline (root)",
+			"path": "."
+		}
 	],
 	"settings": {
 		"editor.formatOnSave": true,

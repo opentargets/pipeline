@@ -1,0 +1,50 @@
+---
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      packages:
+        description: 'A JSON string with the packages to check.'
+        required: false
+        type: string
+
+jobs:
+  test:
+    name: Test ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(inputs.packages || '["orchestration","pis","pts","croissant"]') }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Sync dependencies
+        working-directory: ${{ matrix.package }}
+        run: uv sync --frozen --all-groups --all-extras
+
+      - name: Run tests
+        working-directory: ${{ matrix.package }}
+        run: uv run --frozen pytest -rxs
+
+      - name: run ty # better to do it here because we have deps installed
+        working-directory: ${{ matrix.package }}
+        run: uv run --frozen ty check --output-format=github
+
+  lint:
+    name: Lint all packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
+        with:
+          extra-args: --all-files --skip ty # we run ty during test

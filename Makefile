@@ -20,14 +20,14 @@ clean: $(addprefix clean-,$(COMPONENTS))  ## Remove build/test artifacts from al
 
 #: TEST TARGETS ####################################################################################
 lint-%: %/pyproject.toml
-	@cd $* && uv run ruff check . && uv run ty check
+	@cd $* && uv run --frozen ruff check . && uv run --frozen ty check
 	@echo "lint completed for $*"
 
 lint: $(addprefix lint-,$(COMPONENTS))  ## Run linter for all components
 	@echo "lint completed for all components"
 
 test-%: dev-%
-	@cd $* && uv run pytest -rxs
+	@cd $* && uv run --frozen pytest -rxs
 	@echo "tests completed for $*"
 
 test: $(addprefix test-,$(COMPONENTS))  ## Run tests for all components
@@ -42,7 +42,7 @@ test: $(addprefix test-,$(COMPONENTS))  ## Run tests for all components
 	@echo prek hook installed
 
 dev-%: %/pyproject.toml .git/hooks/pre-commit
-	@cd $* && uv sync --all-groups --all-extras
+	@cd $* && uv sync --frozen --all-groups --all-extras
 	@echo "dev dependencies installed for $*"
 
 dev: $(addprefix dev-,$(COMPONENTS))  ## Install dev dependencies for all components
