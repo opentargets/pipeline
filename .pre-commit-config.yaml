@@ -12,18 +12,22 @@ repos:
         name: ty orchestration
         args: [--directory, orchestration]
         files: ^orchestration/
+        always_run: false
       - id: ty
         name: ty pis
         args: [--directory, pis]
         files: ^pis/
+        always_run: false
       - id: ty
         name: ty pts
         args: [--directory, pts]
         files: ^pts/
+        always_run: false
       - id: ty
         name: ty croissant
         args: [--directory, croissant]
         files: ^croissant/
+        always_run: false
 
   - repo: https://github.com/google/yamlfmt
     rev: v0.21.0
