@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.15.17", "ty>=0.0.51"]
+dev = ["ruff>=0.15.17", "ty>=0.0.55"]
 test = ["pytest>=9.0.3"]
 
 [tool.uv]
