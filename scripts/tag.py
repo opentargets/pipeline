@@ -103,8 +103,8 @@ def get_latest_version(package: str) -> Version | None:
         _, version = parts
         try:
             versions.append(Version(version))
-        except Exception as e:
-            print(f'warning: ignoring invalid tag {tag}: {e}', file=sys.stderr)
+        except Exception:
+            print(f'ignoring non-final or bad tag: {tag}', file=sys.stderr)
     versions.sort(reverse=True)
     return versions[0] if versions else None
 
@@ -149,8 +149,8 @@ if build_type in {'rc', 'final'}:
     if build_type == 'final' and package_version.is_prerelease:
         bail(f'cannot build final version from {package_version}')
 
-    # do not let users build an rc tag from a dev version
-    if build_type == 'rc' and (package_version.is_devrelease or package_version.is_prerelease):
+    # do not let users build an rc tag from a dev version or a final version
+    if build_type == 'rc' and (package_version.is_devrelease or not package_version.is_prerelease):
         bail(f'cannot build rc version from {package_version}')
 
     # for rc/final builds, we ensure the version is greater than the last
