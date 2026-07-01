@@ -1,15 +1,16 @@
-VERSION := $$(grep '^version' pyproject.toml | sed 's%version = "\(.*\)"%\1%')
-.DEFAULT_GOAL := cloud-dev
+.DEFAULT_GOAL := cloud-airflow
 LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/adc.json
 
 ### HOUSEKEEPING TARGETS ###
-.PHONY: help sync version clean clean-vm test check cloud-dev tunnel upload-ukb-ppp-bucket-readme upload-eqtl-catalogue-bucket-readme upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme update-bucket-docs build-gentropy-gcs-image setup-harmonisation-test
+.PHONY: help clean clean-vm \
+        test lint check local-airflow cloud-airflow tunnel \
+				upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
+				upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
+				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
+				upload-finngen-meta-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-
-version: ## Show the package version
-	@echo $(VERSION)
 
 clean: ## Clean the project
 	@docker compose down
@@ -28,28 +29,26 @@ clean-vm: ## Destroy the Airflow development VM
 	fi
 
 ### DEVELOPMENT TARGETS ###
-test: sync ## Run unit tests
-	@uv run pytest
-
-format: ## Format codebase
-	@uv run ruff check src/ tests/
-
-check: format test ## run all checks
-
 sync:
-	@uv sync --all-groups --dev
+	@uv sync --all-groups --all-extras
 
-.git/hooks/commit-msg:
-	@uv run pre-commit install --hook-type commit-msg
+test: sync ## Run unit tests
+	@uv run --frozen pytest -rxs
 
-dev: sync .git/hooks/commit-msg  ## Prepare the local development environment
+lint: sync ## Lint codebase
+	@uv run --frozen ruff check . && uv run --frozen ty check
+
+check: lint test ## run all checks
+
+local-airflow:  ## Start a local AirFlow instance used for development
 	@GOOGLE_APPLICATION_CREDENTIALS=$(LOCAL_DEV_CREDENTIALS) docker compose -f compose.yaml -f compose.local.yaml up -d
 
-cloud-dev: ## Start the remote development environment and connect to it (default goal)
+cloud-airflow: ## Start a remote AirFlow instance used for running the unified pipeline
 	@./deployment/start.sh
 
-tunnel: ## Tunnel to the remote development environment
+tunnel: ## Tunnel to the remote AirFlow instance
 	@./deployment/tunnel.sh
+
 
 ### OTHER TARGETS ###
 
@@ -72,30 +71,33 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 
-upload-eqtl-catalogue-bucket-readme: ## upload eqtl_catalogue_data readme to the bucket
+upload-eqtl-catalogue-bucket-readme: ## Upload eqtl_catalogue_data readme to the bucket
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data gs://eqtl_catalogue_data/docs
 
-upload-ukb-ppp-bucket-readme: ## upload ukb_ppp_eur_data readme to the bucket
+upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
 	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data gs://ukb_ppp_eur_data/docs
 	@gcloud storage rsync docs/credible_set_qc gs://ukb_ppp_eur_data/docs/credible_set_qc
 
-upload-finngen-bucket-readme: ## upload finngen_data readme to the bucket
+upload-finngen-bucket-readme: ## Upload finngen_data readme to the bucket
 	@gcloud storage rsync docs/datasources/finngen_data gs://finngen_data/docs
 
-upload-gwas-catalog-buckets-readme: ## upload gwas_catalog readme to the bucket(s)
+upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_pics/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_susie/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_top_hits/docs
 	@gcloud storage rsync docs/credible_set_qc gs://gwas_catalog_sumstats_susie/docs/credible_set_qc
 
-upload-gnomad-bucket-readme: ## upload gnomad_data readme to the bucket
+upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 	@gcloud storage rsync docs/datasources/gnomad_data gs://gnomad_data_2/docs
 
-upload-intervals-bucket-readme: ## upload intervals readme to the bucket
+upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 	@gcloud storage rsync docs/datasources/interval_data gs://interval_data/docs
 
-upload-finngen-meta-readme: ## upload finngen-meta readme to the bucket
+upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
 	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
 
-update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme upload-gnomad-bucket-readme upload-intervals-bucket-readme upload-finngen-meta-readme ## upload readmes to the datasource buckets
+update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
+									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
+										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
+										upload-finngen-meta-readme

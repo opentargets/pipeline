@@ -3,7 +3,8 @@ work_path: ../work
 log_level: DEBUG
 pool_size: 4
 
-scratchpad: {}
+scratchpad:
+  string_version: '12.0'
 
 steps:
   #: DISEASE STEP :#################################################################################
@@ -48,7 +49,7 @@ steps:
       destination: output/otar
   ##################################################################################################
 
-  #: REACTOME STEP :#################################################################################
+  #: REACTOME STEP :################################################################################
   reactome:
     - name: pyspark reactome
       pyspark: reactome
@@ -56,7 +57,6 @@ steps:
         pathways: input/reactome/ReactomePathways.txt
         relations: input/reactome/ReactomePathwaysRelation.txt
       destination: output/reactome
-
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
@@ -225,33 +225,27 @@ steps:
         - pyspark baseline expression specificity gtex
 
   baseline_expression:
-    - name: explode baseline expression merge and validate by aggregation
-      each_placeholder: aggregation
-      foreach:
-        # - unaggregated
-        - aggregated
-      do:
-        - name: pyspark baseline expression ${aggregation}
-          pyspark: baseline_expression
-          source:
-            baseline_expression: intermediate/baseline_expression
-            target_index: output/target
-            biosample_index: output/biosample
-            tissue_parents: input/baseline_expression/tissue-parent_mapping.tsv
-            celltype_parents: input/baseline_expression/celltype-parent_mapping.tsv
-          destination:
-            valid: output/baseline_expression_${aggregation}
-            failed: excluded/baseline_expression_${aggregation}
-          settings:
-            partition_count: 39
-            aggregation: ${aggregation}
-            datasets:
-              - GTEx/tissue
-              - PRIDE/tissue
-              - tabula_sapiens/celltype
-              - tabula_sapiens/tissue
-              - tabula_sapiens/tissue_celltype
-              - DICE/celltype
+    - name: pyspark baseline expression aggregated
+      pyspark: baseline_expression
+      source:
+        baseline_expression: intermediate/baseline_expression
+        target_index: output/target
+        biosample_index: output/biosample
+        tissue_parents: input/baseline_expression/tissue-parent_mapping.tsv
+        celltype_parents: input/baseline_expression/celltype-parent_mapping.tsv
+      destination:
+        valid: output/baseline_expression
+        failed: excluded/baseline_expression
+      settings:
+        partition_count: 39
+        aggregation: aggregated
+        datasets:
+          - GTEx/tissue
+          - PRIDE/tissue
+          - tabula_sapiens/celltype
+          - tabula_sapiens/tissue
+          - tabula_sapiens/tissue_celltype
+          - DICE/celltype
   ##################################################################################################
 
   #: MOUSE_PHENOTYPES STEP :########################################################################
@@ -305,7 +299,7 @@ steps:
   ##################################################################################################
 
   #: OPENFDA STEP :#################################################################################
-  openfda:
+  openfda_input_preparation:
     - name: explode_glob transform openfda drug events
       glob: input/openfda/**/*.zip
       do:
@@ -313,6 +307,8 @@ steps:
           source: ${uri}
           destination: intermediate/openfda/${uuid}.parquet
           transformer: openfda
+
+  openfda:
     - name: pyspark openfda
       pyspark: openfda
       source:
@@ -435,7 +431,7 @@ steps:
         models: input/target/gene-essentiality/depmap/Model.csv
         essential_genes: input/target/gene-essentiality/depmap/CRISPRInferredCommonEssentials.csv
         gene_effects: input/target/gene-essentiality/depmap/CRISPRGeneEffect.csv
-        gene_expression: input/target/gene-essentiality/depmap/OmicsExpressionProteinCodingGenesTPMLogp1.csv
+        gene_expression: input/target/gene-essentiality/depmap/OmicsExpressionTPMLogp1HumanProteinCodingGenes.csv
         mutation_hotspots: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixHotspot.csv
         mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
@@ -534,8 +530,6 @@ steps:
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
       destination: intermediate/evidence/orphanet.parquet
-      properties:
-        'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
   ##################################################################################################
 
   #: EVIDENCE_CLINGEN STEP :#######################################################################
@@ -632,7 +626,7 @@ steps:
       destination: intermediate/evidence/ot_crispr.parquet
   ##################################################################################################
 
-  #: ONTOMA STEP :##################################################################################
+  #: ONTOMA STEPS :##################################################################################
   ontoma:
     - name: pyspark ontoma generate lookup tables
       pyspark: ontoma_lut_generation
@@ -644,13 +638,12 @@ steps:
       destination:
         disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      properties:
-        'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
-  ##################################################################################################
 
-  #: ONTOMA LITERATURE STEP :#######################################################################
-  ontoma_literature:
-    - name: pyspark ontoma generate lookup tables for literature
+  # This is split so that we don't run into circularity issues
+  # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
+  # on pts_ontoma through pts_target_safety → pts_pharmacogenetics.
+  literature_ontoma:
+    - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
       source:
         disease_index: output/disease/disease.parquet
@@ -751,11 +744,10 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
-  #: CLINICAL_TARGET STEP :#######################################################################
+  #: CLINICAL_TARGET STEP :#########################################################################
   clinical_target:
     - name: transform clinical_target
       source:
@@ -768,7 +760,6 @@ steps:
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
-          - UNVALIDATED_INDICATION
           - INDIRECT_PRIMARY_PURPOSE
   ##################################################################################################
 
@@ -781,7 +772,7 @@ steps:
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action
-        baseline_expression: output/baseline_expression/aggregated
+        baseline_expression: output/baseline_expression
         uniprot_slterms: input/target_prioritisation/uniprot_locations.tsv.gz
         mouse_pheno_scores: input/target_prioritisation/mouse_pheno_scores.csv
       destination: output/target_prioritisation
@@ -789,7 +780,7 @@ steps:
         spark.driver.memory: 16g
   ##################################################################################################
 
-  #: ASSOCIATION STEP :##############################################################################
+  #: ASSOCIATION STEP :#############################################################################
   association:
     - name: pyspark association
       pyspark: association
@@ -1340,10 +1331,10 @@ steps:
             clinicalStage
           )
           *
-          case
-          when trialStopReasonCategories is null then
+          CASE
+          WHEN trialStopReasonCategories IS NULL THEN
             double(1.0)
-          else
+          ELSE
             array_min(
               transform(
                 trialStopReasonCategories,
@@ -1372,7 +1363,7 @@ steps:
                 )
               )
             )
-          end
+          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1668,7 +1659,7 @@ steps:
         evidence: output/evidence_europepmc
       settings:
         partition_count: 125
-        evidence_format: json
+        evidence_format: parquet
         datasource_id: europepmc
         score_expression: array_min(array(resourceScore / 100.0, 1.0))
         unique_fields:
@@ -1848,7 +1839,7 @@ steps:
           - primaryProjectId
   ##################################################################################################
 
-  #: Association on the fly STEP :#######################################################################
+  #: ASSOCIATION_OTF STEP :#########################################################################
   association_otf:
     - name: pyspark association_otf
       pyspark: association_otf
@@ -1863,39 +1854,25 @@ steps:
       destination: view/association_otf
   ##################################################################################################
 
-  #: VEP View generation STEP :#####################################################################
+  #: VEP_VIEW STEP :################################################################################
   vep_view:
-    - name: transform vep_view
-      transformer: vep_view
+    - name: pyspark generate vep view
+      pyspark: vep_view
       source:
         credible_set: output/credible_set
         study_table: output/study
         l2g_table: output/l2g_prediction
         biosample: output/biosample
       destination:
-        vep_data_all: intermediate/vep_view/full.tsv
-        vep_data_gwas: intermediate/vep_view/gwas.tsv
-        vep_data_qtl: intermediate/vep_view/qtl.tsv
-
-  ##################################################################################################
-
-  #: SEARCH EBI STEP :##############################################################################
-  search_ebi:
-    - name: pyspark search_ebi
-      pyspark: search_ebi
-      source:
-        disease: output/disease
-        target: output/target
-        association: output/association_overall_direct
-        evidence: output/evidence_gwas_credible_sets
-      destination:
-        associations: view/search_ebi_associations
-        evidence: view/search_ebi_evidence
+        vep_data_header: intermediate/vep_view_header.tsv
+        vep_data_all: intermediate/vep_view
+        vep_data_gwas: intermediate/vep_view_gwas
+        vep_data_qtl: intermediate/vep_view_qtl
       properties:
-        spark.driver.memory: 8g
+        spark.driver.memory: 16g
   ##################################################################################################
 
-  #: ASSOCIATION TIMESERIES VIEW STEP :#############################################################
+  #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
   association_timeseries_view:
     - name: pyspark timeseries view
       pyspark: association_timeseries_view
@@ -1909,7 +1886,7 @@ steps:
         spark.driver.memory: 12g
   ##################################################################################################
 
-  #: SEARCH FACET STEP :###########################################################################
+  #: SEARCH_FACET STEP :############################################################################
   search_facet:
     - name: pyspark search_facet
       pyspark: search_facet
@@ -1923,7 +1900,7 @@ steps:
         diseases: view/search_facet_disease
   ##################################################################################################
 
-  #: INTERACTION STEP :############################################################################
+  #: INTERACTION STEP :#############################################################################
   interaction:
     - name: pyspark interaction
       pyspark: interaction
@@ -1943,10 +1920,38 @@ steps:
           interactions: 2
           interactions_evidence: 6
         scorethreshold: 0
-        string_version: '12.0'
+        string_version: ${string_version}
   ##################################################################################################
 
-  #: SEARCH VIEW STEP :##########################################################################
+  #: RELEASE_METRICS STEP :#########################################################################
+  release_metrics:
+    - name: transform release_metrics
+      transformer: release_metrics
+      source: {}
+      destination:
+        parquet: metrics.parquet
+      settings:
+        ot_release: '{{release_name}}'
+        metric_scopes:
+          - /output/*/
+          - /excluded/evidence/*/
+        rich_dataset_whitelist:
+          - /output/evidence_*
+          - /excluded/evidence/*
+          - /output/association_by_datasource_direct
+          - /output/association_by_datasource_indirect
+          - /output/disease
+          - /output/target
+          - /output/drug_molecule
+          - /output/study
+          - /output/clinical_report
+        upload_to_hf_hub: false
+        hf_token_filename: /var/run/secrets/hf_token
+        hf_repo_id: opentargets/ot-release-metrics
+        hf_data_dir: metrics
+  ##################################################################################################
+
+  #: SEARCH STEP :##################################################################################
   search:
     - name: pyspark search
       pyspark: search
@@ -1971,71 +1976,23 @@ steps:
         studies: view/search_study
   ##################################################################################################
 
-  #: RELEASE METRICS STEP :#########################################################################
-  release_metrics:
-    - name: transform release_metrics
-      transformer: release_metrics
-      source: {}
-      destination:
-        parquet: metrics.parquet
-      settings:
-        ot_release: '26.03-test4'
-        metric_scopes:
-          - /output/*
-          - /excluded/evidence/*
-        rich_dataset_whitelist:
-          - /output/evidence_*
-          - /excluded/evidence/*
-          - /output/association_by_datasource_direct
-          - /output/association_by_datasource_indirect
-          - /output/disease
-          - /output/target
-          - /output/drug_molecule
-          - /output/study
-          - /output/clinical_report
-        upload_to_hf_hub: false
-        hf_token_filename: /var/run/secrets/hf_token
-        hf_repo_id: opentargets/ot-release-metrics
-        hf_data_dir: metrics
-  ##################################################################################################
-
-  #: LITERATURE_ENTITY_LUT STEP :#####################################################################
-  literature_entity_lut:
-    - name: pyspark literature_entity_lut
-      pyspark: literature_entity_lut
+  #: SEARCH_EBI STEP :##############################################################################
+  search_ebi:
+    - name: pyspark search_ebi
+      pyspark: search_ebi
       source:
-        matches: intermediate/literature/match
+        disease: output/disease
+        target: output/target
+        association: output/association_overall_direct
+        evidence: output/evidence_gwas_credible_sets
       destination:
-        literature_entity_lut: output/literature_entity_lut
-      settings:
-        partition_count: 35
+        associations: view/search_ebi_associations
+        evidence: view/search_ebi_evidence
       properties:
-        spark.sql.shuffle.partitions: '10000'
+        spark.driver.memory: 8g
   ##################################################################################################
 
-  #: LITERATURE_EMBEDDING STEP :######################################################################
-  literature_embedding:
-    - name: pyspark literature_embedding
-      pyspark: literature_embedding
-      source:
-        matches: intermediate/literature/match
-      destination:
-        model: etc/model/w2v_model
-      properties:
-        spark.sql.shuffle.partitions: '15000'
-  ##################################################################################################
-
-  #: LITERATURE_VECTOR STEP :#########################################################################
-  literature_vector:
-    - name: pyspark literature_vector
-      pyspark: literature_vector
-      source:
-        model: etc/model/w2v_model
-      destination:
-        vectors: output/literature_vector
-  ##################################################################################################
-
-  #: LITERATURE_PUBLICATION_MATCH STEP (collapsed publication + match) :############################
+  #: LITERATURE STEPS (run on pts_literature cluster) :#############################################
   literature_publication_match:
     - name: pyspark literature publication match
       pyspark: literature_publication_match
@@ -2052,18 +2009,50 @@ steps:
         match_valid_coalesce: 600
         match_failed_coalesce: 530
       properties:
-        spark.sql.shuffle.partitions: '15000'
-        spark.sql.adaptive.skewJoin.skewedPartitionFactor: '2'
-        spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes: '64MB'
-        spark.sql.adaptive.advisoryPartitionSizeInBytes: '268435456'
-        spark.sql.adaptive.coalescePartitions.parallelismFirst: 'false'
-        spark.sql.files.maxPartitionBytes: '33554432'
-        spark.dynamicAllocation.executorIdleTimeout: '7200s'
-        spark.dynamicAllocation.shuffleTracking.enabled: 'true'
-        spark.dynamicAllocation.shuffleTracking.timeout: '7200s'
-  ##################################################################################################
+        # Per-step overrides for the heavy publication_match step. Held-executor
+        # pin (dynamicAllocation.*) survives the autoscaler downscale issue
+        # observed in PTS run-015. AQE coalesce + skew handling and the EPMC
+        # file partition cap (32MB) were validated on runs 013-016.
+        'spark.sql.shuffle.partitions': '15000'
+        'spark.sql.adaptive.skewJoin.skewedPartitionFactor': '2'
+        'spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes': '64MB'
+        'spark.sql.adaptive.advisoryPartitionSizeInBytes': '268435456'
+        'spark.sql.adaptive.coalescePartitions.parallelismFirst': 'false'
+        'spark.sql.files.maxPartitionBytes': '33554432'
+        'spark.dynamicAllocation.executorIdleTimeout': '7200s'
+        'spark.dynamicAllocation.shuffleTracking.enabled': 'true'
+        'spark.dynamicAllocation.shuffleTracking.timeout': '7200s'
 
-  #: LITERATURE_COOCCURRENCE_EVIDENCE STEP (collapsed cooccurrence + evidence) :####################
+  literature_entity_lut:
+    - name: pyspark literature entity lut
+      pyspark: literature_entity_lut
+      source:
+        matches: intermediate/literature/match
+      destination:
+        literature_entity_lut: output/literature_entity_lut
+      settings:
+        partition_count: 35
+      properties:
+        'spark.sql.shuffle.partitions': '10000'
+
+  literature_embedding:
+    - name: pyspark literature embedding
+      pyspark: literature_embedding
+      source:
+        matches: intermediate/literature/match
+      destination:
+        model: etc/model/w2v_model
+      properties:
+        'spark.sql.shuffle.partitions': '15000'
+
+  literature_vector:
+    - name: pyspark literature vector
+      pyspark: literature_vector
+      source:
+        model: etc/model/w2v_model
+      destination:
+        vectors: output/literature_vector
+
   literature_cooccurrence_evidence:
     - name: pyspark literature cooccurrence evidence
       pyspark: literature_cooccurrence_evidence
@@ -2076,7 +2065,7 @@ steps:
         cooccurrence_coalesce: 40
         evidence_coalesce: 32
       properties:
-        spark.sql.shuffle.partitions: '15000'
-        spark.sql.adaptive.skewJoin.skewedPartitionFactor: '2'
-        spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes: '64MB'
+        'spark.sql.shuffle.partitions': '15000'
+        'spark.sql.adaptive.skewJoin.skewedPartitionFactor': '2'
+        'spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes': '64MB'
   ##################################################################################################

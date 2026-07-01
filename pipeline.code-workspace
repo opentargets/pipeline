@@ -64,5 +64,6 @@
 			]
 		},
 		"yaml.format.singleQuote": true,
+		"yaml.format.printWidth": 120,
 	}
 }

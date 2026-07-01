@@ -51,38 +51,32 @@ class UnifiedPipelineConfig:
         self.num_partitions = 20
         """The default number of partitions for steps using spark that do not specify it."""
 
-        self.pis = AppConfig.from_file(
-            file_path=config_path / 'pis.yaml',
-            template_context={
-                'release_uri': self.dev_uri or self.release_uri,
-                'chembl_version': up.get('chembl_version'),
-                'efo_version': up.get('efo_version'),
-                'ensembl_version': up.get('ensembl_version'),
-                'gencode_version': up.get('gencode_version'),
-                'depmap_version': up.get('depmap_version'),
-                'hpo_version': up.get('hpo_version'),
-                'mondo_version': up.get('mondo_version'),
-                'ot_curation': up.get('ot_curation'),
-                'probes_drugs_version': up.get('probes_drugs_version'),
-                'gnomad_version': up.get('gnomad_version'),
-                'gtex_version': up.get('gtex_version'),
-            },
-        )
+        self.pis = AppConfig.from_file(file_path=config_path.parents[4] / 'pis' / 'config.yaml')
         """The internal configuration for PIS steps."""
+
+        # Replace config values, this should be refactored into the step class
+        # eventually. Doing it here for now so config files work for local runs.
+        self.pis.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pis.config['work_path'] = '/mnt/disks/work'
+        self.pis.config['log_level'] = 'INFO'
+        self.pis.config['pool_size'] = 16
 
         if self.is_ppp:
             self.pis = self.pis.overwrite(config_path / 'ppp' / 'pis.override.yaml')
         """The internal configuration for PIS steps, with PPP-specific overrides."""
 
         self.pts = AppConfig.from_file(
-            file_path=config_path / 'pts.yaml',
-            template_context={
-                'release_uri': self.dev_uri or self.release_uri,
-                'release_name': up.get('release_name'),
-                'string_version': up.get('string_version'),
-            },
+            file_path=config_path.parents[4] / 'pts' / 'config.yaml',
+            template_context={'release_name': up.get('release_name')},
         )
         """The internal configuration for PTS steps."""
+
+        # Replace config values, this should be refactored into the step class
+        # eventually. Doing it here for now so config files work for local runs.
+        self.pts.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pts.config['work_path'] = '/mnt/disks/work'
+        self.pts.config['log_level'] = 'INFO'
+        self.pts.config['pool_size'] = 32
 
         if self.is_ppp:
             self.pts = self.pts.overwrite(config_path / 'ppp' / 'pts.override.yaml')

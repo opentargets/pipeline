@@ -1,24 +1,23 @@
 ---
 work_path: ../work
-
 log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  chembl_version: '36'
-  efo_version: '3.83.0'
+  chembl_version: '37'
+  efo_version: '3.88.0'
   ensembl_version: '115'
   gencode_version: '49'
-  depmap_version: '2025Q2'
-  hpo_version: '2025-01-16'
-  mondo_version: '2025-02-04'
-  ot_curation: '25.12.2'
+  depmap_version: '2026Q1'
+  hpo_version: '2026-02-16'
+  mondo_version: '2026-05-05'
+  ot_curation: '26.05'
   probes_drugs_version: '02_2025'
   gnomad_version: '4.1'
-  gtex_version: '10'
+  gtex_version: '11'
 
 steps:
-  #: BASELINE EXPRESSION STEP :#####################################################################
+  #: BASELINE_EXPRESSION_RAW STEP :#################################################################
   baseline_expression_raw:
     - name: copy GTEx TPM matrix
       source: https://storage.googleapis.com/adult-gtex/bulk-gex/v${gtex_version}/rna-seq/GTEx_Analysis_v${gtex_version}_RNASeQCv2.4.2_gene_tpm.gct.gz
@@ -88,7 +87,9 @@ steps:
         - name: copy PRIDE ${each} tissues.txt
           source: gs://ot-team/tobi/baseline_expression/data/PRIDE/${each}/${each}_tissues.txt
           destination: input/baseline_expression/MSproteomics/PRIDE/${each}/${each}_tissues.txt
+  ##################################################################################################
 
+  #: BASELINE_EXPRESSION STEP :#####################################################################
   baseline_expression:
     - name: explode processed baseline expression datasets
       each_placeholder: dataset
@@ -115,7 +116,6 @@ steps:
         - name: copy parent mapping for ${each}
           source: gs://baseline_expression/parent_mappings/${each}-parent_mapping.tsv
           destination: input/baseline_expression/${each}-parent_mapping.tsv
-
   ##################################################################################################
 
   #: BIOSAMPLE STEP :###############################################################################
@@ -131,10 +131,9 @@ steps:
     - name: copy efo
       source: https://github.com/EBISPOT/efo/releases/download/v${efo_version}/efo.json
       destination: input/biosample/efo.json
+  ##################################################################################################
 
-  #################################################################################################
-
-  #: CLINICAL_REPORT STEP :########################################################################
+  #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
     - name: explode_glob clinical_report
       glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
@@ -488,7 +487,7 @@ steps:
   #: EVIDENCE_PANEL_APP STEP :######################################################################
   evidence_panel_app:
     - name: copy panel_app
-      source: gs://otar000-evidence_input/GenomicsEngland/data_files/All_genes_20250525_public_v1plus_genes_all_ratings.tsv
+      source: gs://otar000-evidence_input/GenomicsEngland/data_files/All_genes_20260511_public_v1plus_panels-1.tsv
       destination: input/evidence/panelapp/panel_app.tsv
     - name: panel_app fetch
       requires:
@@ -541,7 +540,7 @@ steps:
       destination: input/evidence/uniprot_variants.json.gz
   ##################################################################################################
 
-  #: EVIDENCE_INTOGEN STEP :#######################################################################
+  #: EVIDENCE_INTOGEN STEP :########################################################################
   evidence_intogen:
     - name: explode intogen files
       foreach:
@@ -583,7 +582,7 @@ steps:
     - name: spreadsheet_download otar crispr study spreadsheet
       sheet_id: 1eow_rTizGY_Vda0Q-8sFNWCOyFkKRSUen1Em1ysPSiA
       gid: '0'
-      destination: input/evidence/ot_crispr/config.tsv
+      destination: input/evidence/ot_crispr/config.csv
 
     - name: explode_glob ot_crispr files
       glob: 'gs://otar013-ppp/ot_crispr/input_data_filtered/**/*'
@@ -591,7 +590,6 @@ steps:
         - name: copy ot_crispr ${match_stem} ${uuid}
           source: ${uri}
           destination: input/evidence/ot_crispr/data/${match_path}/${match_stem}.${match_ext}
-
   ##################################################################################################
 
   #: GO STEP :######################################################################################
@@ -680,7 +678,7 @@ steps:
       destination: input/gwas/study/gcss_susie
 
     - name: copy_many GCSS susie credible sets
-      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260130/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260519/*.parquet
       destination: input/gwas/credible_set/gcss_susie
 
     - name: copy_many finngen study
@@ -692,7 +690,7 @@ steps:
       destination: input/gwas/credible_set/finngen
   ##################################################################################################
 
-  #: GWAS PPP STEP :################################################################################
+  #: GWAS_PPP STEP :################################################################################
   gwas_ppp:
     - name: copy_many finngen-UKBB-MVP study
       sources: gs://finngen_ukb_mvp_meta_data/study_index/*.parquet
@@ -701,6 +699,13 @@ steps:
     - name: copy_many finngen-UKBB-MVP credible sets
       sources: gs://finngen_ukb_mvp_meta_data/credible_sets/*.parquet
       destination: input/gwas/credible_set/finngen_ukb_mvp
+  ##################################################################################################
+
+  #: HERITABILITY STEP :############################################################################
+  heritability:
+    - name: copy_many gwas ldsc h2 estimates
+      sources: gs://gwas_catalog_sumstats_susie/heritability_estimates/**/*.parquet
+      destination: input/heritability_estimate
   ##################################################################################################
 
   #: L2G STEP :#####################################################################################
@@ -717,7 +722,7 @@ steps:
       destination: input/literature/PMID_PMCID_DOI.csv.gz
 
     - name: explode_glob literature dating lut
-      glob: gs://otar000-evidence_input/literature_export/2026.03/*.json.gz
+      glob: gs://otar000-evidence_input/literature_export/2026.05/*.json.gz
       do:
         - name: copy literature dating lut ${match_stem}
           source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
@@ -725,7 +730,7 @@ steps:
 
   ##################################################################################################
 
-  #: molQTL STEP: ##############################################################################
+  #: MOLQTL STEP: ##################################################################################
   molqtl:
     - name: copy_many eQTL Catalogue study
       sources: gs://eqtl_catalogue_data/study_index/*.parquet
@@ -744,7 +749,7 @@ steps:
       destination: input/molqtl/credible_set/ukb_ppp_eur
   ##################################################################################################
 
-  #: molQTL PPP STEP: ##############################################################################
+  #: MOLQTL_PPP STEP: ##############################################################################
   molqtl_ppp:
     - name: explode otar2077 molqtl
       foreach:
@@ -826,6 +831,7 @@ steps:
       sheet_id: 1CV_shXJy1ACM09HZBB_-3Nl6l_dfkrA26elMAF0ttHs
       gid: '1179867447'
       destination: input/otar/otar_meta.csv
+
     - name: spreadsheet_download otar project to efo spreadsheet
       sheet_id: 1CV_shXJy1ACM09HZBB_-3Nl6l_dfkrA26elMAF0ttHs
       gid: '72910172'
@@ -1051,10 +1057,6 @@ steps:
 
   #: TARGET_PRIORITISATION STEP :###################################################################
   target_prioritisation:
-    - name: copy protein atlas
-      source: https://www.proteinatlas.org/download/proteinatlas.json.gz
-      destination: input/target_prioritisation/proteinatlas.json.gz
-
     - name: copy uniprot locations
       source: https://rest.uniprot.org/locations/stream?compressed=true&fields=id%2Cname%2Ccategory%2Cgene_ontologies%2Cpart_of%2Cis_a&format=tsv&query=%28%2A%29
       destination: input/target_prioritisation/uniprot_locations.tsv.gz
