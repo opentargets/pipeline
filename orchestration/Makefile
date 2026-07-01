@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := cloud-airflow
 LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/adc.json
 
+include ../common.mk
+
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \

@@ -10,11 +10,13 @@
 # TAG CREATION SCRIPT
 #####################
 #
-# Builds the tag for a given package and build type.
+# Builds the tag for a given package.
 #
-# For the pipeline repo, we need special tags given it contains more than one python package inside.
-# The tags contain more information than the version. We have two shapes, one for dev builds and one
-# for rc/final builds.
+# This script builds the tag for a given package and returns it.
+#
+# For the pipeline repo, we need special tags given it contains more than one
+# python package inside. The tags contain more information than the version. We
+# have two shapes, one for dev builds and one for rc/final builds.
 #
 # Dev builds: (Must be created from a branch other than main)
 # ----------
@@ -38,21 +40,27 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import tomllib
 from packaging.version import Version
 
 PACKAGES = ['orchestration', 'pis', 'pts', 'croissant']
-BUILD_TYPES = ['dev', 'rc', 'final']
 
 
 def list_to_str(lst, sep: str = '|') -> str:
     return sep.join(lst)
 
 
-def bail(msg: str):
+def bail(msg: str) -> NoReturn:
     print(f'error: {msg}', file=sys.stderr)
     sys.exit(1)
+
+
+def parse_args() -> str:
+    if len(sys.argv) == 2 and sys.argv[1] in PACKAGES:
+        return sys.argv[1]
+    bail(f'usage: pr.py <{list_to_str(PACKAGES)}>')
 
 
 def subprocess_run(cmd: list[str]) -> str:
@@ -62,28 +70,62 @@ def subprocess_run(cmd: list[str]) -> str:
     return result.stdout.strip()
 
 
-def parse_args() -> tuple[str, str]:
-    args = sys.argv[1:]
-    if len(args) != 2:
-        bail(f'usage: version.py <{list_to_str(PACKAGES)}> <{list_to_str(BUILD_TYPES)}>')
-    package, build_type = args
-    if package not in PACKAGES:
-        bail(f'invalid package {package}, must be one of {list_to_str(PACKAGES)}')
-    if build_type not in BUILD_TYPES:
-        bail(f'invalid build type {build_type}, must be one of {list_to_str(BUILD_TYPES)}')
-    return package, build_type
+def refresh_repo():
+    subprocess_run(['git', 'fetch', 'origin'])
+
+
+def get_branch() -> str:
+    branch = subprocess_run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+    if branch == '':
+        bail('detached head state, first checkout a branch')
+    return branch
+
+
+def normalize_branch(branch: str) -> str:
+    branch = branch.lower()  # convert to lowercase
+    branch = re.sub(r'[^a-z0-9]+', '-', branch)  # replace anything not a-z0-9 with hyphens
+    branch = re.sub(r'--+', '-', branch)  # collapse multiple hyphens into one
+    return re.sub(r'^-+|-+$', '', branch)  # remove leading and trailing hyphens
+
+
+def is_branch_ancestor(a: str, b: str) -> bool:
+    return subprocess.run(['git', 'merge-base', '--is-ancestor', a, b]).returncode == 0
+
+
+def ensure_branch_pushed(branch: str):
+    if subprocess.run(['git', 'rev-parse', '--verify', f'origin/{branch}'], capture_output=True).returncode != 0:
+        bail(f'{branch} is not on origin, push it first')
+    if not is_branch_ancestor('HEAD', f'origin/{branch}'):
+        bail(f'HEAD is not pushed to origin/{branch}, push before building')
+
+
+def get_sha() -> str:
+    sha = subprocess_run(['git', 'rev-parse', '--short=7', 'HEAD'])
+    if sha == '':
+        bail('could not get current commit sha')
+    return sha
+
+
+def infer_type(v: Version) -> str:
+    if v.is_devrelease:
+        return 'dev'
+    if v.pre and v.pre[0] == 'rc':
+        return 'rc'
+    if not v.is_prerelease:
+        return 'final'
+    bail(f'unsupported prerelease {v}; only rc/dev/final')
 
 
 def get_package_version(package: str) -> Version:
+    root = subprocess_run(['git', 'rev-parse', '--show-toplevel'])
     try:
-        data = tomllib.loads((Path(package) / 'pyproject.toml').read_text())
+        data = tomllib.loads((Path(root) / package / 'pyproject.toml').read_text())
     except Exception as e:
         bail(f'reading package version for {package}: {e}')
     return Version(data['project']['version'])
 
 
 def get_latest_version(package: str) -> Version | None:
-    # only consider tags that are merged into main, and sort them by version (descending)
     tags = subprocess_run([
         'git',
         'for-each-ref',
@@ -97,7 +139,7 @@ def get_latest_version(package: str) -> Version | None:
     versions = []
     for tag in tags:
         parts = tag.split('@')
-        if parts[0] != package or len(parts) != 2:
+        if len(parts) != 2 or parts[0] != package:
             print(f'warning: ignoring invalid tag {tag}', file=sys.stderr)
             continue
         _, version = parts
@@ -109,54 +151,36 @@ def get_latest_version(package: str) -> Version | None:
     return versions[0] if versions else None
 
 
-def get_branch() -> str:
-    branch = subprocess_run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
-    if branch == '':
-        bail('detached head state, first checkout a branch')
-    branch = branch.lower()  # convert to lowercase
-    branch = re.sub(r'[^a-z0-9]+', '-', branch)  # replace anything not a-z0-9 with hyphens
-    branch = re.sub(r'--+', '-', branch)  # collapse multiple hyphens into one
-    return re.sub(r'^-+|-+$', '', branch)  # remove leading and trailing hyphens
+def main():
+    package = parse_args()
+
+    refresh_repo()
+
+    current_branch = get_branch()
+    ensure_branch_pushed(current_branch)
+
+    current_sha = get_sha()
+    package_version = get_package_version(package)
+    build_type = infer_type(package_version)
+
+    if build_type == 'dev':
+        if current_branch == 'main':
+            bail('cannot build dev version from main branch')
+
+        print(f'{package}@v{package_version}.{normalize_branch(current_branch)}.{current_sha}')
+
+    if build_type in {'rc', 'final'}:
+        if current_branch != 'main':
+            bail('can only build rc/final version from main branch')
+
+        # for rc/final builds, we ensure the version is greater than the last
+        latest_version = get_latest_version(package)
+        if latest_version:
+            if package_version <= latest_version:
+                bail(f'package version {package_version} must be greater than latest tag {latest_version}')
+
+        print(f'{package}@v{package_version}')
 
 
-def get_sha() -> str:
-    sha = subprocess_run(['git', 'rev-parse', '--short=7', 'HEAD'])
-    if sha == '':
-        bail('could not get current commit sha')
-    return sha
-
-
-package, build_type = parse_args()
-current_branch = get_branch()
-current_sha = get_sha()
-package_version = get_package_version(package)
-
-if build_type == 'dev':
-    if current_branch == 'main':
-        bail('cannot build dev version from main branch')
-
-    # for dev builds, we ensure the package has a dev version
-    if package_version.dev is None:
-        bail(f'package version in pyproject.toml is {package_version}, but you attempting to build a dev version')
-
-    print(f'{package}@v{package_version}.{current_branch}.{current_sha}')
-
-if build_type in {'rc', 'final'}:
-    if current_branch != 'main':
-        bail('can only build rc/final version from main branch')
-
-    # do not let users build a final tag from an rc/dev version
-    if build_type == 'final' and package_version.is_prerelease:
-        bail(f'cannot build final version from {package_version}')
-
-    # do not let users build an rc tag from a dev version or a final version
-    if build_type == 'rc' and (package_version.is_devrelease or not package_version.is_prerelease):
-        bail(f'cannot build rc version from {package_version}')
-
-    # for rc/final builds, we ensure the version is greater than the last
-    latest_version = get_latest_version(package)
-    if latest_version:
-        if package_version <= latest_version:
-            bail(f'package version {package_version} must be greater than latest tag {latest_version}')
-
-    print(f'{package}@v{package_version}')
+if __name__ == '__main__':
+    main()
