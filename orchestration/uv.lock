@@ -3447,12 +3447,10 @@ dependencies = [
     { name = "asyncpg" },
     { name = "deepdiff" },
     { name = "deepmerge" },
-    { name = "flask-limiter" },
     { name = "google" },
     { name = "pandas" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
-    { name = "pyyaml" },
     { name = "requests" },
 ]
 
@@ -3477,12 +3475,10 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "deepdiff", specifier = ">=9.1.0" },
     { name = "deepmerge", specifier = ">=2.1.0" },
-    { name = "flask-limiter", specifier = ">=3,<4" },
     { name = "google", specifier = ">=3.0.0" },
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
 

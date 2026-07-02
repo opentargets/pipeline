@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 from airflow.configuration import conf
-from airflow.exceptions import AirflowException
 from airflow.providers.google.cloud.hooks.compute import ComputeEngineHook
 from airflow.providers.google.cloud.operators.compute import ComputeEngineDeleteInstanceOperator
 from airflow.providers.google.common.consts import CLIENT_INFO
 from airflow.providers.google.common.hooks.base_google import GoogleBaseHook
 from airflow.sdk import BaseSensorOperator, Context
+from airflow.sdk.exceptions import AirflowException
 from airflow.triggers.base import BaseTrigger, TriggerEvent
 from google.api_core.exceptions import ResourceExhausted, RetryError
 from google.api_core.extended_operation import ExtendedOperation
