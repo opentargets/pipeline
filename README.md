@@ -1,6 +1,6 @@
 # Open Targets Data Pipeline
 
-Turns external source data into an Open Targets Data Release.
+Generates an Open Targets Data Release.
 
 ## Packages
 
