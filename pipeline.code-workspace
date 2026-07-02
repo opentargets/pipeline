@@ -24,9 +24,6 @@
 	],
 	"settings": {
 		"editor.formatOnSave": true,
-		"files.associations": {
-			"*.conf": "hocon"
-		},
 		"files.exclude": {
 			"**/__pycache__": true,
 			"**/.pytest_cache": true,

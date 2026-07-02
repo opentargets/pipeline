@@ -44,11 +44,7 @@ class SparkJobDiffer(Differ):
         if not self.outputs:
             self.outputs = config.step_specific_config(step_name).get('output', [])
         for output in self.outputs.values():
-            # output can be a dict with a path key (ETL) or a strng (Gentropy)
-            if isinstance(output, dict):
-                output_uri = str(output.get('path'))
-            else:
-                output_uri = str(output)
+            output_uri = str(output)
             self.logger.info(f'checking step {step_name} output {output_uri}')
             bucket, prefix = output_uri.removeprefix('gs://').split('/', 1)
             blob_name = f'{prefix}/_SUCCESS'

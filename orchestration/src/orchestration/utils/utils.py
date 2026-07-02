@@ -10,7 +10,6 @@ import string
 from pathlib import Path
 from typing import Any
 
-import pyhocon
 import yaml
 from google.cloud.storage import Client
 
@@ -81,45 +80,6 @@ def read_yaml_config(
 def to_yaml(config: dict) -> str:
     """Convert a dictionary to a YAML string."""
     return yaml.dump(config)
-
-
-def read_hocon_config(
-    config_path: Path | str,
-    sentinels: dict[str, str] | None = None,
-) -> Any:
-    """Parse a HOCON config file replacing sentinels.
-
-    Sentinels in hocon files are in the form:
-
-    `{{variable_name}}`
-
-    they are doubly enclosed in curly braces because hocon files use a single
-    curly brace to denote a variable.
-
-    Args:
-        config_path (Path | str): Path to the HOCON config file.
-        sentinels (dict[str, str] | None): Sentinels to replace in the config file.
-
-    Returns:
-        Any: Parsed HOCON config file.
-    """
-    config_path = config_path if isinstance(config_path, Path) else Path(config_path)
-    assert config_path.exists(), f'HOCON config path {config_path} does not exists'
-
-    raw_config = config_path.read_text()
-    if sentinels:
-        for sentinel, replacement in sentinels.items():
-            raw_config = raw_config.replace(f'{{{{{sentinel}}}}}', replacement)
-
-    return pyhocon.ConfigFactory.parse_string(raw_config)
-
-
-def to_hocon(config: dict[str, Any]) -> str:
-    """Convert a ConfigTree to a HOCON string."""
-    if isinstance(config, pyhocon.ConfigTree):
-        return pyhocon.HOCONConverter.to_hocon(config)
-    elif isinstance(config, dict):
-        return pyhocon.HOCONConverter.to_hocon(pyhocon.ConfigFactory.from_dict(config))
 
 
 def strhash(s: str) -> str:

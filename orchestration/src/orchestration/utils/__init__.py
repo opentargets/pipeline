@@ -10,12 +10,10 @@ from orchestration.utils.utils import (
     find_environment_vars,
     find_node_in_config,
     random_id,
-    read_hocon_config,
     read_yaml_config,
     resource_name,
     strhash,
     time_to_seconds,
-    to_hocon,
     to_yaml,
 )
 
@@ -32,11 +30,9 @@ __all__ = [
     'find_environment_vars',
     'find_node_in_config',
     'random_id',
-    'read_hocon_config',
     'read_yaml_config',
     'resource_name',
     'strhash',
     'time_to_seconds',
-    'to_hocon',
     'to_yaml',
 ]

@@ -3452,7 +3452,6 @@ dependencies = [
     { name = "pandas" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
-    { name = "pyhocon" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -3483,7 +3482,6 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pyhocon", specifier = ">=0.3.61" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
@@ -3952,15 +3950,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/b9/13/55deec25bf0938321
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/cd/bd196b2cf014afb1009de8b0f05ecd54011d881944e62763f3c1b1e8ef37/pygtrie-2.5.0-py3-none-any.whl", hash = "sha256:8795cda8105493d5ae159a5bef313ff13156c5d4d72feddefacaad59f8c8ce16", size = 25099, upload-time = "2022-09-23T20:30:05.12Z" },
 ]
-
-[[package]]
-name = "pyhocon"
-version = "0.3.63"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyparsing" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/25/d9/810f7d07989dbe565712869094d2d595bed2af7474e02bb210563cee17c1/pyhocon-0.3.63.tar.gz", hash = "sha256:7c98db21453c0390c6cedc376576fee4e0a153da5f2201bc681cf886820f4a7c", size = 307265, upload-time = "2026-03-20T03:23:45.957Z" }
 
 [[package]]
 name = "pyjwt"

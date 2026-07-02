@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pyhocon
 import yaml
 from deepdiff.diff import DeepDiff
 
@@ -17,7 +16,6 @@ if TYPE_CHECKING:
 
 _parsers: dict[str, Callable] = {
     'yaml': yaml.safe_load,
-    'conf': pyhocon.ConfigFactory.parse_string,
 }
 
 
