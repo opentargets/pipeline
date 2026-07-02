@@ -4,13 +4,11 @@ The Unified Pipeline is main OpenTargets pipeline that streamlines the data rele
 
 ## Dag structure
 
-Dag is divided into 4 stages:
+Dag is divided into 3 stages:
 
 1. **Platform Input Stage (PIS)** - This stage is responsible for collecting and preparing the **input data for the pipeline**. It includes steps like fetching data from various sources, the full transfer configuration is defined in the [pis.yaml](../../src/orchestration/dags/config/pis.yaml) file. This step ensures the process reproducible. This step uses [PIS](https://github.com/opentargets/pis) as a tool to process the data.
 
 2. **Platform Transformation Stage (PTS)** - This stage is responsible for **transforming the input data**. The transformations are defined in the [pts.yaml](../../src/orchestration/dags/config/pts.yaml) file. This step uses [PTS](https://github.com/opentargets/pts) as a tool to process the data.
-
-3. **Platform ETL Stage (ETL)** - This stage is is also responsible for **transforming the input data into platform evidence**. The transformations are defined in the [etl.conf](../../src/orchestration/dags/config/etl.conf) file. The tasks implemented in this stage are running on Spark clusters, which are defined in the [clusters.yaml](../../src/orchestration/dags/config/clusters.yaml) file. This step uses [platform ETL backend](https://github.com/opentargets/platform-etl-backend) as a tool to process the data.
 
 4. **Platform Genetics Stage (Gentropy)** - This stage is responsible for **transforming genetics data into platform evidence (L2G)**. The transformations are defined in the [gentropy.yaml](../../src/orchestration/dags/config/gentropy.yaml) file. The tasks implemented in this stage are running on Spark clusters, which are defined in the [clusters.yaml](../../src/orchestration/dags/config/clusters.yaml) file. This step uses [gentropy](https://github.com/opentargets/gentropy) as a tool to process the genetics data.
 

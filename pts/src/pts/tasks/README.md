@@ -4,7 +4,7 @@ The `pyspark` task can be used to launch pyspark jobs. They are local jobs for n
 dataproc cluster support.
 
 The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a pyspark job port of
-[the scala ETL's `mouse_phenotype` step](https://github.com/opentargets/platform-etl-backend/blob/main/src/main/scala/io/opentargets/etl/backend/MousePhenotype.scala).
+[the scala ETL's `mouse_phenotype` step](https://github.com/opentargets-archive/platform-etl-backend/blob/0e95e7cefb605ce2a0b15ee53f396134cc3bc471/src/main/scala/io/opentargets/etl/backend/MousePhenotype.scala).
 
 
 ## Launching
