@@ -1,7 +1,4 @@
-.DEFAULT_GOAL := cloud-airflow
 LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/adc.json
-
-include ../common.mk
 
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
@@ -13,6 +10,8 @@ include ../common.mk
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+include ../common.mk
 
 clean: ## Clean the project
 	@docker compose down

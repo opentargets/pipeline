@@ -1,6 +1,7 @@
 # PIS — Open Targets Pipeline Input Stage
 
-Fetch, validate and arrange the data required by the Open Targets data pipeline.
+This is the part of the Open Targets Data Pipeline that fetches, validates, and
+arranges the input data required for a run of the pipeline.
 
 
 ## Summary
@@ -13,13 +14,13 @@ Check out the [config.yaml](config.yaml) file to see the steps and the tasks tha
 make them up.
 
 
-## Installation and running
+## Running
 
 PIS uses [UV](https://docs.astral.sh/uv/) as its package manager. It is compatible
 with PIP, so you can also fall back to it if you feel more comfortable.
 
 
-```bash
+```sh
 uv run pis -h
 ```
 
@@ -31,7 +32,7 @@ uv run pis -h
 ### Running with Docker
 
 You can also launch PIS with Docker:
-```bash
+```sh
 docker run ghcr.io/opentargets/pis:latest -h
 ```
 
@@ -39,7 +40,7 @@ PIS can upload the files it fetches into different cloud storage services. Open
 Targets uses Google Cloud. To enable it in a docker container, you must have a
 credentials file. Assuming you do, you can run the following command:
 
-```bash
+```sh
 docker run \
   -v /path/to/credentials.json:/app/credentials.json \
   -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
@@ -49,7 +50,7 @@ docker run \
 To build your own Docker image, run the following command from the root of the
 repository:
 
-```bash
+```sh
 docker build -t pis .
 ```
 
@@ -57,8 +58,8 @@ docker build -t pis .
 ## Development
 
 > [!IMPORTANT]
-> Remember to run `make dev` before starting development. This will set up a very
-> simple git hook that does a few checks before committing.
+> Remember to run `make dev` in the root of the repository before starting development.
+> This will set up a pre-commit checks and install dependencies.
 
 Development of PIS can be done straight away in the local environment. You can run
 the application just like before (`uv run pis`) to check the changes you make.
@@ -69,14 +70,14 @@ the application just like before (`uv run pis`) to check the changes you make.
 
 You can test the changes by running a small step, like `so`:
 
-```bash
+```sh
 uv run pis --step so
 ```
 
 
 ## Copyright
 
-Copyright 2014-2024 EMBL - European Bioinformatics Institute, Genentech, GSK,
+Copyright 2014-2026 EMBL - European Bioinformatics Institute, Genentech, GSK,
 MSD, Pfizer, Sanofi and Wellcome Sanger Institute
 
 This software was developed as part of the Open Targets project. For more

@@ -1,6 +1,7 @@
 # PTS — Open Targets Pipeline Transformation Stage
 
-Convert files into formats and structures used by the Open Targets data pipeline.
+This is the main part of the Open Targets Data Pipeline. It transforms input data
+into the final output files that make up an Open Targets data release.
 
 
 ## Summary
@@ -13,13 +14,13 @@ Check out the [config.yaml](config.yaml) file to see the steps and the tasks tha
 make them up.
 
 
-## Installation and running
+## Running
 
 PTS uses [UV](https://docs.astral.sh/uv/) as its package manager. It is compatible
 with PIP, so you can also fall back to it if you feel more comfortable.
 
 
-```bash
+```sh
 uv run pts -h
 ```
 
@@ -31,7 +32,7 @@ uv run pts -h
 ### Running with Docker
 
 You can also launch PTS with Docker:
-```bash
+```sh
 docker run ghcr.io/opentargets/pts:latest -h
 ```
 
@@ -39,7 +40,7 @@ PTS can upload the files it fetches into different cloud storage services. Open
 Targets uses Google Cloud. To enable it in a docker container, you must have a
 credentials file. Assuming you do, you can run the following command:
 
-```bash
+```sh
 docker run \
   -v /path/to/credentials.json:/app/credentials.json \
   -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
@@ -49,7 +50,7 @@ docker run \
 To build your own Docker image, run the following command from the root of the
 repository:
 
-```bash
+```sh
 docker build -t pts .
 ```
 
@@ -57,8 +58,8 @@ docker build -t pts .
 ## Development
 
 > [!IMPORTANT]
-> Remember to run `make dev` before starting development. This will set up a very
-> simple git hook that does a few checks before committing.
+> Remember to run `make dev` in the root of the repository before starting development.
+> This will set up a pre-commit checks and install dependencies.
 
 Development of PTS can be done straight away in the local environment. You can run
 the application just like before (`uv run pts`) to check the changes you make.
@@ -69,14 +70,14 @@ the application just like before (`uv run pts`) to check the changes you make.
 
 You can test the changes by running a small step, like `so`:
 
-```bash
+```sh
 uv run pts --step so
 ```
 
 
 ## Copyright
 
-Copyright 2014-2024 EMBL - European Bioinformatics Institute, Genentech, GSK,
+Copyright 2014-2026 EMBL - European Bioinformatics Institute, Genentech, GSK,
 MSD, Pfizer, Sanofi and Wellcome Sanger Institute
 
 This software was developed as part of the Open Targets project. For more

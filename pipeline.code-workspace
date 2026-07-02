@@ -65,5 +65,9 @@
 		},
 		"yaml.format.singleQuote": true,
 		"yaml.format.printWidth": 120,
+		"[markdown]": {
+			"editor.detectIndentation": false,
+			"editor.indentSize": 4
+		}
 	}
 }

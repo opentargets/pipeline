@@ -11,7 +11,7 @@ The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a 
 
 Just like any other Otter app:
 
-```bash
+```sh
 $ uv run pts -s mouse_phenotype
 ```
 
