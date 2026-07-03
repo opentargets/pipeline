@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from functools import cached_property
 from importlib.resources import files
 from typing import Annotated
@@ -55,12 +54,13 @@ class RunnableSpec(BaseModel):
         if self.inline_commands:
             return self.inline_commands
         elif self.script_file:
-            # Assuming that the script file is located in the `src.orchestration.assets` package
+            # The script (located in the `orchestration.assets` package) is templated and then passed
+            # verbatim to the container's `bash -c`, preserving functions, conditionals, traps, pipes
+            # and failure semantics that a flattened command chain cannot represent.
             script_content = self._find_script_file(self.script_file)
             if self.script_variables:
                 script_content = self._apply_template(script_content, self.script_variables)
-            script_commands = self._parse_script_file(script_content)
-            return ['-c', script_commands]
+            return ['-c', script_content]
         else:
             raise ValueError("Either 'inline_commands' or 'script_file' must be provided to create a Runnable.")
 
@@ -72,9 +72,9 @@ class RunnableSpec(BaseModel):
 
 
         If `commands` are provided, they will be used directly in the `Runnable`.
-        If a `script_file` is provided instead, the method will read the script file from
-        the `src.orchestration.assets` package, parse it to extract the commands, and use those commands in the
-        `Runnable`.
+        If a `script_file` is provided instead, the method reads the script file from
+        the `orchestration.assets` package and passes its (templated) content verbatim to the
+        container's `bash -c` via `commands`.
 
 
         Returns:
@@ -119,87 +119,3 @@ class RunnableSpec(BaseModel):
         if not script_path.is_file():
             raise FileNotFoundError(f"Script file '{script_name}' not found in 'orchestration.assets' package.")
         return script_path.read_text()
-
-    @classmethod
-    def _parse_script_file(cls, script_content: str) -> str:
-        r"""Parse the entry script file to extract all of the commands.
-
-        This method
-        1. removes comments and empty lines,
-        2. joins lines that are continued with a backslash (\\),
-        3. splits each joined line on ``;`` to separate co-located commands,
-        4. joins all resulting commands with ``&&``.
-
-        ``||`` and ``&&`` operators within a line are never split, so guard
-        clauses of the form ``[[ check ]] || { echo error; exit 1; }`` are
-        preserved as a single logical unit and their conditional semantics
-        remain intact.
-
-        Example:
-        ---
-        >>> script = "# comment\necho hello\\\n    world\nfoo; bar"
-        >>> RunnableSpec._parse_script_file(script)
-        'echo hello world && foo && bar'
-        """
-        lines = cls._remove_comments(script_content)
-        joined_lines = cls._join_continuation_lines(lines)
-        commands = cls._split_commands(joined_lines)
-        return ' && '.join(commands)
-
-    @staticmethod
-    def _remove_comments(script: str) -> list[str]:
-        r"""Remove comment lines (starting with ``#``) and empty lines from a shell script.
-
-        Example:
-        ---
-        >>> RunnableSpec._remove_comments("# comment\necho hello\n\necho world")
-        ['echo hello', 'echo world']
-        """
-        lines = []
-        for line in script.splitlines():
-            stripped = line.strip()
-            if stripped.startswith('#') or not stripped:
-                continue
-            lines.append(line)
-        return lines
-
-    @staticmethod
-    def _join_continuation_lines(lines: list[str]) -> list[str]:
-        r"""Join lines that end with a backslash continuation into a single line.
-
-        Example:
-        ---
-        >>> RunnableSpec._join_continuation_lines(["echo hello \\", "    world", "foo"])
-        ['echo hello world', 'foo']
-        """
-        joined_lines = []
-        buffer = []
-        for line in lines:
-            # Start new buffer if line ends with \, otherwise add to current buffer and join
-            if line.rstrip().endswith('\\'):
-                buffer.append(line.rstrip()[:-1].strip())
-            else:
-                buffer.append(line.strip())
-                joined_lines.append(' '.join(buffer).strip())
-                buffer = []
-        if buffer:
-            joined_lines.append(' '.join(buffer).strip())
-        return joined_lines
-
-    @staticmethod
-    def _split_commands(joined_lines: list[str]) -> list[str]:
-        """Split on ; only — preserving || and && to keep conditional logic and pipelines intact.
-
-        Example:
-        ---
-        >>> RunnableSpec._split_commands(["foo; bar && baz", "cmd1 || cmd2", "a | b"])
-        ['foo', 'bar && baz', 'cmd1 || cmd2', 'a | b']
-        """
-        commands = []
-        for line in joined_lines:
-            parts = re.split(r'\s*;\s*', line)
-            for part in parts:
-                part = part.strip()
-                if part:
-                    commands.append(part)
-        return commands
