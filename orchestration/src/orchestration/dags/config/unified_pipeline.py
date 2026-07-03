@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from orchestration.dags.config.app_config import AppConfig
+from orchestration.models.run_config import PipelineRunConfig
 from orchestration.operators.dataproc import ClusterDefinition
 from orchestration.utils.common import GCP_PROJECT_PLATFORM
 
@@ -29,25 +29,17 @@ class UnifiedPipelineConfig:
     """
 
     def __init__(self) -> None:
+        """Construct unified pipeline configuration from a run_name."""
         self.logger = logging.getLogger(__name__)
         config_path = Path(__file__).parent
 
         up = AppConfig.from_file(file_path=config_path / 'unified_pipeline.yaml')
         self._steps = up.get('steps')
 
-        self.run_name = up.get('run_name') or datetime.now().strftime('%Y%m%d-%H%M')
-        """Used for labelling resources."""
-        self.release_uri: str = f'gs://open-targets-pre-data-releases/{up.get("release_name")}'
-        """The place where the production release files are read from and/or written to."""
-        self.is_dev = up.get('is_dev', True)
-        """Whether this is a development or production run."""
-        self.dev_uri = f'gs://open-targets-pipeline-runs/{self.run_name}' if self.is_dev else None
-        """The place where the development run files are read from and written to."""
+        self.run = PipelineRunConfig(run_name=up.get('run_name'))
         self.service_account_extra_scopes = ['https://www.googleapis.com/auth/drive']
         """Extra scopes to be added to the service account in executor machines"""
         """- the drive scope is needed to download Google Drive spreadsheets for the pis_otar step"""
-        self.is_ppp = up.get('is_ppp')
-        """Whether this is a ppp run or public platform run."""
         self.num_partitions = 20
         """The default number of partitions for steps using spark that do not specify it."""
 
@@ -56,7 +48,7 @@ class UnifiedPipelineConfig:
 
         # Replace config values, this should be refactored into the step class
         # eventually. Doing it here for now so config files work for local runs.
-        self.pis.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pis.config['release_uri'] = self.release_uri
         self.pis.config['work_path'] = '/mnt/disks/work'
         self.pis.config['log_level'] = 'INFO'
         self.pis.config['pool_size'] = 16
@@ -67,13 +59,13 @@ class UnifiedPipelineConfig:
 
         self.pts = AppConfig.from_file(
             file_path=config_path.parents[4] / 'pts' / 'config.yaml',
-            template_context={'release_name': up.get('release_name')},
+            template_context={'release_name': self.run.release_name},
         )
         """The internal configuration for PTS steps."""
 
         # Replace config values, this should be refactored into the step class
         # eventually. Doing it here for now so config files work for local runs.
-        self.pts.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pts.config['release_uri'] = self.release_uri
         self.pts.config['work_path'] = '/mnt/disks/work'
         self.pts.config['log_level'] = 'INFO'
         self.pts.config['pool_size'] = 32
@@ -85,9 +77,9 @@ class UnifiedPipelineConfig:
         self.gentropy = AppConfig.from_file(
             file_path=config_path / 'gentropy.yaml',
             template_context={
-                'release_uri': self.dev_uri or self.release_uri,
+                'release_uri': self.release_uri,
                 'gentropy_version': up.get('gentropy_version'),
-                'l2g_training_version': up.get('release_name'),
+                'l2g_training_version': self.run.release_name,
                 'vep_version': up.get('vep_version'),
             },
         )
@@ -134,6 +126,16 @@ class UnifiedPipelineConfig:
         self.gentropy_cluster_init_script_uri = (
             'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
         )
+
+    @property
+    def release_uri(self) -> str:
+        """GCS URI for this run's output in the pipeline-runs bucket."""
+        return self.run.release_uri
+
+    @property
+    def is_ppp(self) -> bool:
+        """Whether this is a PPP run. Derived from the flavor portion of run_name."""
+        return self.run.is_ppp
 
     def pis_env_vars(self, step_name: str) -> dict[str, str]:
         """Return the environment variables for a PIS step."""
@@ -291,7 +293,7 @@ class UnifiedPipelineConfig:
         Returns:
             str: The URI of the configuration file for the step.
         """
-        return f'{self.dev_uri or self.release_uri}/etc/config/{step_name}.yaml'
+        return f'{self.release_uri}/etc/config/{step_name}.yaml'
 
     def manifest_uri(self) -> str:
         """Return the URI of the manifest file for the run.
@@ -299,4 +301,4 @@ class UnifiedPipelineConfig:
         Returns:
             str: The URI of the manifest.
         """
-        return f'{self.dev_uri or self.release_uri}/manifest.json'
+        return f'{self.release_uri}/manifest.json'
