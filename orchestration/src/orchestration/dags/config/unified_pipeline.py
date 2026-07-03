@@ -103,6 +103,9 @@ class UnifiedPipelineConfig:
                 'pts_version': up.get('pts_version'),
                 'gentropy_version': up.get('gentropy_version'),
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
+                # Lets the pts / pts_literature clusters point spark.jars at the
+                # version-pinned Spark-NLP fat jar in the pipelines bucket.
+                'spark_nlp_version': up.get('spark_nlp_version'),
             },
         )
         """The cluster definitions."""
@@ -128,6 +131,30 @@ class UnifiedPipelineConfig:
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
+
+        # Spark-NLP fat jar. Clusters that use OnToma (pts, pts_literature) load
+        # it via spark.jars instead of resolving the package from Maven Central
+        # on every spark-submit (see opentargets/issues#4453). Orchestration
+        # stages the version-pinned jar from John Snow Labs into the pipelines
+        # bucket before cluster creation (idempotent), and the clusters read it
+        # from there.
+        self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
+        """GCS prefix under which orchestration stages Spark jars for the clusters.
+
+            Any jar a cluster references under this prefix (via spark.jars) must
+            have a registered upstream source in `staged_jars`, or the DAG fails.
+        """
+        spark_nlp_jar = f'spark-nlp-assembly-{up.get("spark_nlp_version")}.jar'
+        self.staged_jars: dict[str, str] = {
+            f'{self.staged_jar_prefix}{spark_nlp_jar}': (
+                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_jar}'
+            ),
+        }
+        """Registry of jars orchestration stages: staged destination URI -> source URL.
+
+            Add an entry here to have a new jar staged automatically for any
+            cluster that references it under `staged_jar_prefix` in spark.jars.
+        """
 
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'

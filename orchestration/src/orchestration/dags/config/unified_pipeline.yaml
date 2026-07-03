@@ -16,6 +16,7 @@ pis_version: '26.6.0'
 pts_version: '26.6.0'
 gentropy_version: '3.3.0-rc.1'
 vep_version: 'release_115.2'
+spark_nlp_version: '6.1.5'
 
 # Dependency graph
 # ----------------
