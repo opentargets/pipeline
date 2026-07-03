@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -3437,7 +3437,7 @@ wheels = [
 
 [[package]]
 name = "orchestration"
-version = "26.9.0rc1"
+version = "26.9.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "apache-airflow", extra = ["async", "celery", "google"] },
