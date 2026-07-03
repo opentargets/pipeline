@@ -6,8 +6,10 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from airflow.exceptions import AirflowException
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.google.cloud.operators.dataproc import (
     ClusterGenerator,
@@ -28,6 +30,10 @@ from orchestration.models.secret import Secret, SecretBlobs, SecretInitAction, S
 from orchestration.utils import convert_params_to_hydra_positional_arg, random_id, resource_name
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_REGION, GCP_SERVICE_ACCOUNT, GCP_ZONE
 from orchestration.utils.labels import Labels
+from orchestration.utils.path import GCSPath
+
+ASSET_PATH = Path(__file__).parent.parent / 'assets'
+DEFAULT_ASSET_SYNC_BASE = 'gs://opentargets-pipelines/up/'
 
 if TYPE_CHECKING:
     from typing import Any, Self
@@ -158,6 +164,14 @@ class CustomClusterConfig(BaseModel):
 
     init_actions_uris: list[str] | None = None
     """List of GCS URIs of initialization scripts."""
+    init_actions_assets: list[str] | None = None
+    """List of local asset filenames from ASSET_PATH to sync and use as init actions."""
+    init_actions_asset_location: str | None = None
+    """Optional GCS base path for syncing all init-action assets on this cluster.
+
+    Defaults to ``gs://opentargets-pipelines/up/{cluster_type}/`` where the final
+    destination is ``<base>/<asset_filename>``.
+    """
     init_action_timeout: str = '10m'
     """Timeout for initialization actions. Default is 10 minutes."""
 
@@ -214,6 +228,8 @@ class CustomClusterConfig(BaseModel):
             'secondary_worker_disk_type',
             'secondary_worker_disk_size',
             'secondary_worker_machine_type',
+            'init_actions_assets',
+            'init_actions_asset_location',
             'secret_map',
             'secret_blob_list',
             'secret_init_action_uri',
@@ -309,6 +325,7 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
     ) -> None:
         self.project_id = project_id
         self.region = region
+        self.cluster_type = cluster_name
         self._cluster_config = cluster_config
         self.labels = labels or Labels()
         self.gcp_conn_id = gcp_conn_id
@@ -338,7 +355,9 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
         labels.add_dag_run_id(context)
         self.labels = dict(labels)
         secret_action = self._prepare_secret_init_action()
-        self._patch_cluster_init_actions([secret_action] if secret_action else [])
+        asset_actions = self._prepare_asset_init_actions()
+        actions = ([secret_action] if secret_action else []) + (asset_actions or [])
+        self._patch_cluster_init_actions(actions)
         return super().execute(context)
 
     def _prepare_secret_init_action(self) -> NodeInitializationAction | None:
@@ -377,13 +396,46 @@ class CreateClusterOperator(DataprocCreateClusterOperator):
         hook = GCSHook(gcp_conn_id=self.gcp_conn_id, impersonation_chain=self.impersonation_chain)
         return init_action.push_to_gcs(gcs_hook=hook)
 
+    def _prepare_asset_init_actions(self) -> list[NodeInitializationAction] | None:
+        """Sync asset init actions to GCS and return their NodeInitializationActions."""
+        assets = self._cluster_config.init_actions_assets
+        if not assets:
+            return None
+
+        base = self._resolve_asset_location()
+        hook = GCSHook(gcp_conn_id=self.gcp_conn_id, impersonation_chain=self.impersonation_chain)
+
+        init_actions = []
+        for asset_name in assets:
+            local_path = ASSET_PATH / asset_name
+            if not local_path.exists():
+                raise AirflowException(f'Asset file not found at {local_path}')
+            remote_uri = f'{base}/{asset_name}'
+            self.log.info('Syncing asset %s to %s', asset_name, remote_uri)
+            init_actions.append(self._sync_asset_to_gcs(local_path, remote_uri, hook))
+
+        return init_actions or None
+
+    def _resolve_asset_location(self) -> str:
+        """Return the GCS base path for this cluster's asset syncs."""
+        if self._cluster_config.init_actions_asset_location:
+            return self._cluster_config.init_actions_asset_location
+        cluster_base = self.cluster_type.split('-')[0].lower()
+        return f'{DEFAULT_ASSET_SYNC_BASE}{cluster_base}/'
+
+    def _sync_asset_to_gcs(self, local_path: Path, remote_uri: str, hook: GCSHook) -> NodeInitializationAction:
+        """Upload a single asset file to GCS and return its init action."""
+        ob = GCSPath(remote_uri)
+        hook.upload(bucket_name=ob.bucket, object_name=ob.path, data=local_path.read_text())
+        return NodeInitializationAction(executable_file=remote_uri)
+
     def _patch_cluster_init_actions(self, init_actions: list[NodeInitializationAction] | None) -> None:
         """Patch in place the cluster init actions."""
         if not init_actions or not self.cluster_config:
             return
         self.log.info(f'Patching cluster init actions with {init_actions}')
         self.log.debug(f'Current cluster config: {self.cluster_config}')
-        self.cluster_config['initialization_actions'].extend(init_actions)  # ty:ignore[not-subscriptable]
+        self.cluster_config['initialization_actions'].extend(init_actions)
 
 
 class SubmitJobOperator(DataprocSubmitJobOperator):
