@@ -2,6 +2,54 @@
 
 This document describes the **Unified Pipeline configuration**
 
+## Run Version
+
+Every pipeline run is identified by a `run_name` set in `src/orchestration/dags/config/unified_pipeline.yaml`. This value controls where all pipeline outputs are written in Google Cloud Storage.
+
+### `run_name` Format
+
+```text
+<prefix>/<flavor>-YYMM-N
+```
+
+| Part | Description | Example |
+|------|-------------|---------|
+| `prefix` | Personal or team identifier, starting with a lowercase letter and followed by lowercase letters or digits | `sz`, `pt01` |
+| `flavor` | `platform` for the standard run path, `ppp` for Partner Preview; also determines downstream labeling | `platform` |
+| `YYMM` | Two-digit year plus two-digit month. This is format-only validation. | `2605` |
+| `N` | Revision number, starting from 1. Increment when re-running the same run definition. | `1` |
+
+Valid examples: `sz/platform-2605-1`, `abc/ppp-2606-2`.
+
+### Output Location
+
+Every unified pipeline run writes to `gs://open-targets-pipeline-runs/<run_name>`.
+
+The DAG does not perform a separate production-mode execution. If outputs need to be published to a release location, promotion happens after the run and outside this configuration.
+
+### PPP Mode
+
+PPP configuration overrides are enabled whenever the `flavor` portion of `run_name` is `ppp`:
+
+- `run_name: 'sz/ppp-2605-1'` enables PPP mode.
+- Steps tagged with `ppp_only: true` are included in the DAG.
+- Override configs from `src/orchestration/dags/config/ppp/` are loaded.
+
+Use `platform` for the standard unified pipeline path:
+
+- `run_name: 'sz/platform-2605-1'` excludes PPP-only steps.
+
+### `release_name`
+
+`release_name` is derived from `run_name` as `<flavor>-<YYMM>`.
+
+Examples:
+
+- `sz/platform-2605-1` becomes `platform-2605`
+- `sz/ppp-2605-1` becomes `ppp-2605`
+
+PTS and Gentropy consume `release_name`, while the full `run_name` identifies the concrete pipeline run and output path.
+
 ## Unified Pipeline configuration
 
 The Unified Pipeline configuration is defined in multiple YAML files throughout

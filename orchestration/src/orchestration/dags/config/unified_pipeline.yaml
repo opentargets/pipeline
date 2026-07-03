@@ -1,15 +1,22 @@
 ---
-release_name: '26.06.0-ppp-dev1'
-
-# If `is_dev` is true:
-#   * the bucket used for the run will be `open-targets-pipeline-runs`
-#   * the prefix inside the bucket will be `run_name`
-#         which defaults to a timestamp if not provided.
-is_dev: true
-run_name: 'ds/26.06.0-ppp-dev1'
-
-# Whether this will be a partner preview platform release (PPP)
-is_ppp: true
+# run_name identifies this pipeline run and controls where outputs are written in GCS.
+#
+# Format: <prefix>/<flavor>-<YYMM>-<N>
+#   prefix - your personal/team identifier (lowercase letter start, then letters or digits)
+#   flavor - 'platform' for the standard unified-pipeline path or 'ppp' for the Partner Preview path
+#          - determines PPP configuration overrides and the downstream release label
+#          - when set to 'ppp', the pipeline loads PPP overrides and includes ppp_only steps
+#   YYMM   - two-digit year + two-digit month (e.g. '2605' for May 2026)
+#   N      - revision number, starting from 1; increment when re-running the same run definition
+#
+# Examples: run_name: 'sz/platform-2605-1'  (is_ppp derived as False)
+#           run_name: 'sz/ppp-2605-1'       (is_ppp derived as True)
+#
+# Every unified pipeline execution writes to:
+#   gs://open-targets-pipeline-runs/<run_name>
+#
+# Promotion to a final release location happens after the run and outside this DAG.
+run_name: 'sz/platform-2605-1'
 
 # Pipeline package versions
 pis_version: '26.6.0'
