@@ -27,6 +27,11 @@ Refer to each project's README.md for instructions on how to run it.
 
 ## Development
 
+> [!IMPORTANT]
+> If using Visual Studio Code, remember to install recommended extensions, and to
+> open the workspace file `opentargets-data-pipeline.code-workspace` instead of the
+> root folder!
+
 | Make Target  | Description                                     |
 | ------------ | ----------------------------------------------- |
 | `make dev`   | Install dev dependencies and pre-commit hook.   |
@@ -78,6 +83,12 @@ commit, and push. Then you can open a PR against `main`.
 
 ### Tag format
 
+#### Some notes on the commit messages:
+* We do not use semantic commits anymore (see the naming conventions for reasons).
+* When a commit relates to a specific package, the commit message must start with
+    the package name (e.g. `pis: add new input data source`). This is not enforced.
+
+#### Tagging
 As this repository contains multiple Python packages, the tags are a bit different than
 the usual `v<version>` format:
 
