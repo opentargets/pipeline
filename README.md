@@ -29,8 +29,7 @@ Refer to each project's README.md for instructions on how to run it.
 
 > [!IMPORTANT]
 > If using Visual Studio Code, remember to install recommended extensions, and to
-> open the workspace file `opentargets-data-pipeline.code-workspace` instead of the
-> root folder!
+> open the workspace file `pipeline.code-workspace` instead of the root folder!
 
 | Make Target  | Description                                     |
 | ------------ | ----------------------------------------------- |
