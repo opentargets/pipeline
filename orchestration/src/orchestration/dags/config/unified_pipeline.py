@@ -108,7 +108,7 @@ class UnifiedPipelineConfig:
         """The cluster definitions."""
 
         # PIS-specific settings.
-        pis_image = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pis/pis'
+        pis_image = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pis'
         pis_version = up.get('pis_version')
         self.pis_image = f'{pis_image}:{pis_version}'
         """The image and tag used to run PIS steps."""
@@ -120,7 +120,7 @@ class UnifiedPipelineConfig:
         """
 
         # PTS-specific settings.
-        pts_image = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pts/pts'
+        pts_image = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pts'
         pts_version = up.get('pts_version')
         self.pts_image = f'{pts_image}:{pts_version}'
         """The image and tag used to run PTS steps."""
