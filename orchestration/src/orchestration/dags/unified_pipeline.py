@@ -27,8 +27,8 @@ from orchestration.operators.differs.config_differ import ConfigDiffer
 from orchestration.operators.differs.manifest_artifact_differ import ManifestArtifactDiffer
 from orchestration.operators.differs.spark_job_differ import SparkJobDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
-from orchestration.operators.gcs import UploadFileOperator, UploadStringOperator
-from orchestration.utils import resource_name, strhash, to_yaml
+from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
+from orchestration.utils import clean_name, resolve_jar_staging, resource_name, strhash, to_yaml
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
 from orchestration.utils.labels import Labels
 
@@ -225,7 +225,32 @@ with DAG(
 
                     steps_in_cluster = pts_clusters.get(cluster_name, [])
                     pts_clusters[cluster_name] = [*steps_in_cluster, step_name]
-                    chain(u, Label('dataproc pts step'), u2, c, r)
+
+                    # Jars a cluster references under the managed staging prefix
+                    # (via spark.jars) are staged into the pipelines bucket before
+                    # the cluster is created (skipped when already there), then read
+                    # via spark.jars. Resolved from the rendered spark.jars value
+                    # against the `staged_jars` registry, so every such jar on every
+                    # cluster (currently the Spark-NLP fat jar on `pts` and
+                    # `pts_literature`) is covered automatically; a jar under the
+                    # prefix with no registered source fails the DAG at parse time.
+                    cluster_props = s.cluster_definition.config.get('properties', {})
+                    spark_jars = str(cluster_props.get('spark:spark.jars', ''))
+                    stage_ops = [
+                        UploadRemoteFileOperator(
+                            task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}_{step_name}',
+                            src_url=src_url,
+                            dst_uri=dst_uri,
+                            skip_if_exists=True,
+                        )
+                        for src_url, dst_uri in resolve_jar_staging(
+                            spark_jars, config.staged_jars, config.staged_jar_prefix
+                        )
+                    ]
+                    if stage_ops:
+                        chain(u, Label('dataproc pts step'), u2, stage_ops, c, r)
+                    else:
+                        chain(u, Label('dataproc pts step'), u2, c, r)
 
                 e = EmptyOperator(
                     task_id=f'end_{step_name}',
