@@ -2,22 +2,374 @@
 environment_specs:
   - name: Prod
     vars:
-      input_bucket: "gs://decode_inputs"
-      data_bucket: "gs://decode_data"
+      data_bucket: gs://decode_data
+      input_bucket: gs://decode_inputs
+      gnomad_bucket: gs://gnomad_data_2
+      gentropy_ref: '3.3.0-dev.67'
+      molecular_complex_version: '2026-01-09'
+  - name: Test
+    vars:
+      data_bucket: gs://ot_orchestration/test/decode_data
+      input_bucket: gs://ot_orchestration/test/decode_inputs
+      gnomad_bucket: gs://gnomad_data_2
+      gentropy_ref: '3.3.0-dev.67'
+      molecular_complex_version: '2026-01-09'
 
 env: Prod
 
 dataproc:
   cluster_name: otg-decode
-  autoscaling_policy: otg-etl
-  allow_efm: false
-  num_workers: 2
-  cluster_metadata:
-    GENTROPY_REF: v3.3.0-dev.1
+  cluster_config:
+    project_id: open-targets-genetics-dev
+    # Enhanced Flexibility Mode: shuffle files pinned to a fixed primary pool
+    # via the `dataproc:efm.spark.shuffle=primary-worker` property (set below).
+    # Secondary workers stay pure-compute and can autoscale/decommission freely
+    # without shuffle loss. Uses the existing otg-decode-efm policy (min=max=15
+    # primary, 0-50 secondary). Primary disk sized against the 2026-07-02
+    # stalled-run peak (~10.5 TB stage 23, ~15 TB concurrent across stage
+    # transitions): 15 x 2048 GB = 30 TB gross, ~27 TB usable at 90% health
+    # threshold, target peak utilisation ~50%.
+    autoscaling_policy: otg-decode-efm
+    worker_machine_type: n2-standard-16
+    master_machine_type: n2-standard-16
+    num_workers: 15
+    num_masters: 1
+    worker_disk_size: 2048
+    worker_disk_type: 'pd-ssd'
+    secondary_worker_machine_type: n2-standard-16
+    # Secondaries hold no shuffle under EFM; a small disk is sufficient for OS
+    # and container working directories.
+    secondary_worker_disk_size: 512
+    init_actions_uris:
+      - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
+    secret_init_action_uri: 'gs://opentargets-pipelines/up/gentropy/fetch_secrets.sh'
+    secret_blob_list:
+      - 'decode'
+    metadata:
+      GENTROPY_REF: 'v{gentropy_ref}'
+    properties:
+      # Enhanced Flexibility Mode: shuffle files stored on primary workers only.
+      # Secondaries can autoscale to 0 without taking shuffle data with them,
+      # fixing the "executor removed mid-stage" failure mode without giving
+      # up autoscaling.
+      # https://cloud.google.com/dataproc/docs/concepts/configuring-clusters/flex
+      'dataproc:efm.spark.shuffle': 'primary-worker'
+      # Docs recommend bumping from the default 1 on larger machine types to
+      # improve shuffle-fetch parallelism under EFM.
+      'spark:spark.shuffle.io.numConnectionsPerPeer': '5'
+      # Kryo is meaningfully faster and produces smaller shuffle payloads than
+      # the Java serializer for shuffle-heavy workloads.
+      'spark:spark.serializer': 'org.apache.spark.serializer.KryoSerializer'
+      # Initial shuffle-partition count. AQE (coalescePartitions.enabled=true
+      # + advisoryPartitionSizeInBytes=256MB) treats this as a ceiling and
+      # adapts down per stage — safe for both shuffle-heavy harmonisation/qc
+      # stages and the small-data ldc/pics stages.
+      'spark:spark.sql.shuffle.partitions': '16000'
+      # EFM docs recommendation: 1 GB input partition size for Spark SQL,
+      # reduces task launch overhead when reading large parquet inputs.
+      'spark:spark.sql.files.maxPartitionBytes': '1g'
+      'spark:spark.task.maxFailures': '20'
+      'spark:spark.stage.maxConsecutiveAttempts': '10'
+      'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+      # Coalesce the many post-shuffle partitions at runtime. Critical for the
+      # downstream steps (ldc/pics) whose data is only KiB-MiB: without this a
+      # high shuffle.partitions count produces thousands of empty tasks.
+      'spark:spark.sql.adaptive.coalescePartitions.enabled': 'true'
+      'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
 
 nodes:
-  - id: harmonisation
+
+  ########################## Molecular complex ingestion ######################
+  # As some of the aptamers link to protein complexes, instead of individual proteins,
+  # we need to bring the full set of proteins and explode them to get all mapped genes
+
+  - id: molecular_complex
+    kind: Task
+    prerequisites: []
+    params:
+      step: molecular_complex_ingestion
+      # Input
+
+      step.predicted_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606_predicted.tsv'
+      step.experimental_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606.tsv'
+      # Output
+      step.output_path: '{data_bucket}/molecular_complex/'
+      # Session
+      step.session.write_mode: overwrite
+  ##############################################################################
+
+  ########################### SMP ##############################################
+  # The steps below result in processing of normalised summary statistics (SMP)
+  ##############################################################################
+  - id: smp_manifest_generation
+    kind: Task
+    prerequisites: []
+    # - molecular_complex
     params:
       step: decode_manifest_generation
-      # input
-      step.s3_config_path:
+      # Input
+      step.bucket_name: 'largescaleplasma-2023'
+      step.prefix: "final_somascan_smp/"
+      # Output
+      step.output_path: '{data_bucket}/smp/manifest/'
+      # Session
+      step.session.write_mode: overwrite
+      step.session.s3_configuration_path: '/var/run/secrets/decode'
+      step.session.add_s3_connector: true
+
+  # - id: smp_ingestion
+  #   prerequisites:
+  #     - smp_manifest_generation
+  #   params:
+  #     step: decode_summary_statistics_ingestion
+  #     # Input
+  #     step.manifest_path: '{data_bucket}/smp/manifest/'
+  #     # Output
+  #     step.raw_summary_statistics_path: '{input_bucket}/raw_summary_statistics/smp/'
+  #     # Session
+  #     step.session.s3_configuration_path: '/var/run/secrets/decode'
+  #     step.session.add_s3_connector: true
+
+  - id: smp_harmonisation
+    prerequisites:
+      - molecular_complex
+      - smp_manifest_generation
+      # - smp_ingestion
+    params:
+      step: decode_summary_statistics_harmonisation
+      # Input
+      step.raw_summary_statistics_path: '{input_bucket}/raw_summary_statistics/smp/'
+      step.manifest_path: '{data_bucket}/smp/manifest/'
+      step.aptamer_metadata_path: '{data_bucket}/decode_2023_aptamer_mapping.tsv'
+      step.variant_direction_path: '{gnomad_bucket}/v4.1/variant_direction/'
+      step.molecular_complex_path: '{data_bucket}/molecular_complex/'
+      # Output
+      step.harmonised_summary_statistics_path: '{data_bucket}/smp/harmonised_summary_statistics/'
+      step.protein_qtl_study_index_path: '{data_bucket}/smp/pqtl_study/'
+      # Config
+      step.perform_min_allele_count_filter: true
+      step.min_mac_threshold: 50
+      step.perform_sample_size_filter: true
+      step.min_sample_size_threshold: 30000
+      step.flipping_window_size: 10000000
+      step.remove_equal_alleles: true
+      step.remove_ambiguous_alleles: false
+      step.verify_atgc: true
+      # Session
+      step.session.write_mode: overwrite
+
+
+  - id: smp_qc
+    prerequisites:
+      - smp_harmonisation
+    params:
+      step: decode_summary_statistics_qc
+      # Input
+      step.harmonised_summary_statistics_path: '{data_bucket}/smp/harmonised_summary_statistics/'
+      step.protein_qtl_study_index_path: '{data_bucket}/smp/pqtl_study/'
+      # Output
+      step.qc_summary_statistics_path: '{data_bucket}/smp/harmonised_summary_statistics_qc/'
+      step.protein_qtl_study_index_qc_annotated_path: '{data_bucket}/smp/pqtl_study_qc_annotated/'
+      # Config
+      step.pval_threshold: 5e-8
+      # Session
+      step.session.write_mode: overwrite
+
+
+  - id: smp_wbc
+    prerequisites:
+      - smp_harmonisation
+      - smp_qc
+    params:
+      step: window_based_clumping
+      # Input
+      step.summary_statistics_input_path: '{data_bucket}/smp/harmonised_summary_statistics/'
+      # Output
+      step.study_locus_output_path: '{data_bucket}/smp/study_locus_window_based_clumped/'
+      # Config
+      step.recursive_file_lookup: false
+      step.gwas_significance: 1.8e-9 # See 2023 publication
+      step.distance: 1000000
+      step.collect_locus: false # Not collecting locus, just keeping leads
+      step.collect_locus_distance: 500000
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: smp_ldc
+    prerequisites:
+      - smp_wbc
+    params:
+      step: ld_based_clumping
+      # Input
+      step.ld_index_path: '{gnomad_bucket}/v2.1.1/ld_index/'
+      step.study_locus_input_path: '{data_bucket}/smp/study_locus_window_based_clumped/'
+      step.study_index_path: '{data_bucket}/smp/pqtl_study_qc_annotated/'
+      # Output
+      step.clumped_study_locus_output_path: '{data_bucket}/smp/study_locus_ld_clumped/'
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: smp_pics
+    prerequisites:
+      - smp_ldc
+    params:
+      step: pics
+      # Input
+      step.study_locus_ld_annotated_in: '{data_bucket}/smp/study_locus_ld_clumped/'
+      # Output
+      step.picsed_study_locus_out: '{data_bucket}/smp/credible_set/'
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: smp_pqtl_to_study
+    prerequisites:
+      - smp_pics
+    params:
+      step: pQTL_study_index_transformation
+      # Input
+      step.protein_study_index_path: '{data_bucket}/smp/pqtl_study_qc_annotated/'
+      step.target_index_path: '{data_bucket}/target/'
+      # Output
+      step.study_index_path: '{data_bucket}/smp/study/'
+      # Session
+      step.session.write_mode: overwrite
+  # #############################################################################
+
+
+  # ############################## RAW ##########################################
+  # # The steps below result in processing of non-normalized summary statistics (RAW)
+  # #############################################################################
+  - id: raw_manifest_generation
+    kind: Task
+    prerequisites:
+      - molecular_complex
+    params:
+      step: decode_manifest_generation
+      # Input
+      step.bucket_name: 'largescaleplasma-2023'
+      step.prefix: "final_somascan_raw/"
+      # Output
+      step.output_path: '{data_bucket}/raw/manifest/'
+      # Session
+      step.session.write_mode: overwrite
+      step.session.s3_configuration_path: '/var/run/secrets/decode'
+      step.session.add_s3_connector: true
+
+
+  # - id: raw_ingestion
+  #   prerequisites:
+  #     - raw_manifest_generation
+  #   params:
+  #     step: decode_summary_statistics_ingestion
+  #     # Input
+  #     step.manifest_path: '{data_bucket}/raw/manifest/'
+  #     # Output
+  #     step.raw_summary_statistics_path: '{data_bucket}/raw_summary_statistics/raw/'
+  #     # Session
+  #     step.session.write_mode: overwrite
+  #     step.session.s3_configuration_path: '/var/run/secrets/decode'
+  #     step.session.add_s3_connector: true
+
+  - id: raw_harmonisation
+    prerequisites:
+      - molecular_complex
+      - raw_manifest_generation
+      - smp_harmonisation
+      # - raw_ingestion
+    params:
+      step: decode_summary_statistics_harmonisation
+      # Input
+      step.raw_summary_statistics_path: '{input_bucket}/raw_summary_statistics/raw/'
+      step.manifest_path: '{data_bucket}/raw/manifest/'
+      step.aptamer_metadata_path: '{data_bucket}/decode_2023_aptamer_mapping.tsv'
+      step.variant_direction_path: '{gnomad_bucket}/v4.1/variant_direction/'
+      step.molecular_complex_path: '{data_bucket}/molecular_complex/'
+      # Output
+      step.harmonised_summary_statistics_path: '{data_bucket}/raw/harmonised_summary_statistics/'
+      step.protein_qtl_study_index_path: '{data_bucket}/raw/pqtl_study/'
+      # Config
+      step.perform_min_allele_count_filter: true
+      step.min_mac_threshold: 50
+      step.perform_sample_size_filter: true
+      step.min_sample_size_threshold: 30000
+      step.flipping_window_size: 10000000
+      step.remove_equal_alleles: true
+      step.remove_ambiguous_alleles: false
+      step.verify_atgc: true
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: raw_qc
+    prerequisites:
+      - raw_harmonisation
+    params:
+      step: decode_summary_statistics_qc
+      # Input
+      step.harmonised_summary_statistics_path: '{data_bucket}/raw/harmonised_summary_statistics/'
+      step.protein_qtl_study_index_path: '{data_bucket}/raw/pqtl_study/'
+      # Output
+      step.qc_summary_statistics_path: '{data_bucket}/raw/harmonised_summary_statistics_qc/'
+      step.protein_qtl_study_index_qc_annotated_path: '{data_bucket}/raw/pqtl_study_qc_annotated/'
+      # Config
+      step.pval_threshold: 5e-8
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: raw_wbc
+    prerequisites:
+      - raw_harmonisation
+      - raw_qc
+    params:
+      step: window_based_clumping
+      # Input
+      step.summary_statistics_input_path: '{data_bucket}/raw/harmonised_summary_statistics/'
+      # Output
+      step.study_locus_output_path: '{data_bucket}/raw/study_locus_window_based_clumped/'
+      # Config
+      step.recursive_file_lookup: false
+      step.gwas_significance: 1.8e-9 # See 2023 publication
+      step.distance: 1000000
+      step.collect_locus: false
+      step.collect_locus_distance: 500000
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: raw_ldc
+    prerequisites:
+      - raw_wbc
+    params:
+      step: ld_based_clumping
+      # Input
+      step.ld_index_path: '{gnomad_bucket}/v2.1.1/ld_index/'
+      step.study_locus_input_path: '{data_bucket}/raw/study_locus_window_based_clumped/'
+      step.study_index_path: '{data_bucket}/raw/pqtl_study_qc_annotated/'
+      # Output
+      step.clumped_study_locus_output_path: '{data_bucket}/raw/study_locus_ld_clumped/'
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: raw_pics
+    prerequisites:
+      - raw_ldc
+    params:
+      step: pics
+      # Input
+      step.study_locus_ld_annotated_in: '{data_bucket}/raw/study_locus_ld_clumped/'
+      # Output
+      step.picsed_study_locus_out: '{data_bucket}/raw/credible_set/'
+      # Session
+      step.session.write_mode: overwrite
+
+  - id: raw_pqtl_to_study
+    prerequisites:
+      - raw_pics
+    params:
+      step: pQTL_study_index_transformation
+      # Input
+      step.protein_study_index_path: '{data_bucket}/raw/pqtl_study_qc_annotated/'
+      step.target_index_path: '{data_bucket}/target/'
+      # Output
+      step.study_index_path: '{data_bucket}/raw/study/'
+      # Session
+      step.session.write_mode: overwrite
