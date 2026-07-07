@@ -22,7 +22,6 @@ from pts.pyspark.target import (
     _build_hgnc,
     _build_homologues,
     _build_reactome,
-    _build_safety,
     _filter_ensembl,
     _map_uniprot_locations_to_ssl,
     _merge_hgnc_ensembl,
@@ -402,128 +401,7 @@ def test_homologue_whitelist_filtering(spark):
 
 
 # ---------------------------------------------------------------------------
-# 5. Safety evidence aggregation
-# ---------------------------------------------------------------------------
-
-
-def test_safety_evidence_aggregation(spark):
-    """Safety evidence is grouped by ENSG id into safetyLiabilities."""
-    safety_schema = StructType([
-        StructField('id', StringType()),
-        StructField('targetFromSourceId', StringType()),
-        StructField('event', StringType()),
-        StructField('eventId', StringType()),
-        StructField(
-            'effects',
-            ArrayType(
-                StructType([
-                    StructField('direction', StringType()),
-                    StructField('dosing', StringType()),
-                ])
-            ),
-        ),
-        StructField(
-            'biosamples',
-            ArrayType(
-                StructType([
-                    StructField('tissueLabel', StringType()),
-                    StructField('tissueId', StringType()),
-                    StructField('cellLabel', StringType()),
-                    StructField('cellFormat', StringType()),
-                ])
-            ),
-        ),
-        StructField('datasource', StringType()),
-        StructField('literature', StringType()),
-        StructField('url', StringType()),
-        StructField(
-            'studies',
-            ArrayType(
-                StructType([
-                    StructField('name', StringType()),
-                    StructField('description', StringType()),
-                    StructField('type', StringType()),
-                ])
-            ),
-        ),
-    ])
-    safety_data = [
-        Row(
-            id='ENSG00000141510',
-            targetFromSourceId='TP53',
-            event='heart failure',
-            eventId='EFO_0003777',
-            effects=[Row(direction='Activation/Increase/Upregulation', dosing='general')],
-            biosamples=None,
-            datasource='TestSource',
-            literature='12345678',
-            url=None,
-            studies=None,
-        ),
-        Row(
-            id='ENSG00000141510',
-            targetFromSourceId='TP53',
-            event='liver toxicity',
-            eventId='EFO_0001234',
-            effects=None,
-            biosamples=None,
-            datasource='TestSource2',
-            literature=None,
-            url=None,
-            studies=None,
-        ),
-        Row(
-            id='ENSG00000012048',
-            targetFromSourceId='BRCA1',
-            event='breast cancer',
-            eventId='MONDO_0007254',
-            effects=None,
-            biosamples=None,
-            datasource='TestSource',
-            literature=None,
-            url=None,
-            studies=None,
-        ),
-    ]
-    safety_df = spark.createDataFrame(safety_data, safety_schema)
-
-    # lookup df: ensgId -> name (array)
-    lookup_schema = StructType([
-        StructField('ensgId', StringType()),
-        StructField('name', ArrayType(StringType())),
-        StructField('uniprot', ArrayType(StringType())),
-        StructField('HGNC', ArrayType(StringType())),
-        StructField('symbols', ArrayType(StringType())),
-    ])
-    lookup_data = [
-        Row(
-            ensgId='ENSG00000141510',
-            name=['P04637', 'TP53'],
-            uniprot=['P04637'],
-            HGNC=['TP53'],
-            symbols=['TP53'],
-        ),
-    ]
-    lookup_df = spark.createDataFrame(lookup_data, lookup_schema)
-
-    # disease df for EFO replacement (empty — no obsolete terms to replace)
-    disease_schema = StructType([
-        StructField('id', StringType()),
-        StructField('obsoleteTerms', ArrayType(StringType())),
-    ])
-    disease_df = spark.createDataFrame([], disease_schema)
-
-    result = _build_safety(safety_df, lookup_df, disease_df)
-    rows = {r.id: r for r in result.collect()}
-
-    # Both ENSG ids should appear
-    assert 'ENSG00000141510' in rows
-    # TP53 has 2 safety liabilities
-    assert len(rows['ENSG00000141510'].safetyLiabilities) == 2
-
-
-# ---------------------------------------------------------------------------
-# 6. Genetic constraints
+# 5. Genetic constraints
 # ---------------------------------------------------------------------------
 
 
@@ -592,7 +470,7 @@ def test_genetic_constraints_structure(spark):
 
 
 # ---------------------------------------------------------------------------
-# 7. Hallmarks
+# 6. Hallmarks
 # ---------------------------------------------------------------------------
 
 
@@ -636,7 +514,7 @@ def test_hallmarks_split_cancer_vs_non_cancer(spark):
 
 
 # ---------------------------------------------------------------------------
-# 8. Reactome pathways
+# 7. Reactome pathways
 # ---------------------------------------------------------------------------
 
 
@@ -683,7 +561,7 @@ def test_reactome_pathways(spark):
 
 
 # ---------------------------------------------------------------------------
-# 9. HGNC + Ensembl merge
+# 8. HGNC + Ensembl merge
 # ---------------------------------------------------------------------------
 
 
@@ -801,7 +679,7 @@ def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
 
 
 # ---------------------------------------------------------------------------
-# 10. Output schema validation
+# 9. Output schema validation
 # ---------------------------------------------------------------------------
 
 REQUIRED_OUTPUT_COLUMNS = {
@@ -809,18 +687,14 @@ REQUIRED_OUTPUT_COLUMNS = {
     'approvedSymbol',
     'approvedName',
     'biotype',
-    'transcripts',
     'genomicLocation',
     'pathways',
     'go',
     'constraint',
-    'safety',
-    'tractability',
     'homologues',
     'subcellularLocations',
     'targetClass',
     'hallmarks',
-    'chemicalProbes',
     'tep',
 }
 
@@ -833,7 +707,7 @@ def test_output_schema_has_required_columns(spark):
 
 
 # ---------------------------------------------------------------------------
-# 11. Subcellular location struct schema alignment
+# 10. Subcellular location struct schema alignment
 # ---------------------------------------------------------------------------
 
 
