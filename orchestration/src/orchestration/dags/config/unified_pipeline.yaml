@@ -111,6 +111,7 @@ steps:
     depends_on:
       - pis_target
       - pts_chembl_molecule
+      - pts_target
   pts_coding_variant:
     depends_on:
       - gentropy_variant
@@ -129,6 +130,17 @@ steps:
   pts_pre_target:
     depends_on:
       - pis_target
+  pts_transcript:
+    depends_on:
+      - pts_pre_target
+  pts_safety_liability:
+    depends_on:
+      - pts_target_safety
+      - pts_target
+      - pts_disease
+  pts_target_tractability:
+    depends_on:
+      - pts_target
   pts_target_safety:
     depends_on:
       - pts_pharmacogenetics
@@ -434,9 +446,7 @@ steps:
     depends_on:
       - pts_pre_target
       - pts_reactome
-      - pts_target_safety
       - pts_target_gene_essentiality
-      - pts_disease
 
   pts_search_facet:
     depends_on:
