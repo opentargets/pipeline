@@ -125,30 +125,33 @@ def get_package_version(package: str) -> Version:
     return Version(data['project']['version'])
 
 
-def get_latest_version(package: str) -> Version | None:
-    tags = subprocess_run([
+def get_release_tags(package: str, merged: str = 'main') -> list[Version]:
+    out = subprocess_run([
         'git',
         'for-each-ref',
-        '--merged=main',
+        f'--merged={merged}',
         '--format=%(refname:short)',
         f'refs/tags/{package}@*',
     ])
-    if not tags:
-        return None
-    tags = tags.splitlines()
     versions = []
-    for tag in tags:
+    for tag in out.splitlines():
         parts = tag.split('@')
         if len(parts) != 2 or parts[0] != package:
             print(f'warning: ignoring invalid tag {tag}', file=sys.stderr)
             continue
-        _, version = parts
         try:
-            versions.append(Version(version))
+            v = Version(parts[1].removeprefix('v'))
         except Exception:
-            print(f'ignoring non-final or bad tag: {tag}', file=sys.stderr)
-    versions.sort(reverse=True)
-    return versions[0] if versions else None
+            print(f'warning: ignoring bad tag {tag}', file=sys.stderr)
+            continue
+        if not v.is_devrelease:
+            versions.append(v)
+    return sorted(versions)
+
+
+def get_latest_version(package: str) -> Version | None:
+    finals = [v for v in get_release_tags(package) if not v.is_prerelease]
+    return finals[-1] if finals else None
 
 
 def main():
