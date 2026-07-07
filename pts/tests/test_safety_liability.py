@@ -84,6 +84,7 @@ def test_build_ensg_lookup_includes_approved_symbol(spark):
     rows = [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[Row(id='P12345', source='uniprot')])]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
     row = lut.filter('ensgId = "ENSG00000001"').first()
+    assert row is not None
     assert 'GENE1' in row.name
 
 
@@ -92,6 +93,7 @@ def test_build_ensg_lookup_includes_protein_id(spark):
     rows = [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[Row(id='P12345', source='uniprot')])]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
     row = lut.filter('ensgId = "ENSG00000001"').first()
+    assert row is not None
     assert 'P12345' in row.name
 
 
@@ -100,6 +102,7 @@ def test_build_ensg_lookup_handles_empty_protein_ids(spark):
     rows = [Row(id='ENSG00000002', approvedSymbol='GENE2', proteinIds=[])]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
     row = lut.filter('ensgId = "ENSG00000002"').first()
+    assert row is not None
     assert 'GENE2' in row.name
 
 
@@ -166,7 +169,9 @@ def test_build_safety_liabilities_resolves_symbol_to_ensg(spark):
     ensg_lut = _build_ensg_lookup(target)
     result = _build_safety_liabilities(safety, ensg_lut, diseases)
     assert result.count() == 1
-    assert result.first().targetId == 'ENSG00000001'
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG00000001'
 
 
 def test_build_safety_liabilities_resolves_protein_id_to_ensg(spark):
@@ -183,7 +188,9 @@ def test_build_safety_liabilities_resolves_protein_id_to_ensg(spark):
     ensg_lut = _build_ensg_lookup(target)
     result = _build_safety_liabilities(safety, ensg_lut, diseases)
     assert result.count() == 1
-    assert result.first().targetId == 'ENSG00000002'
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG00000002'
 
 
 def test_build_safety_liabilities_drops_unresolvable_rows(spark):
@@ -215,7 +222,9 @@ def test_build_safety_liabilities_remaps_obsolete_efo(spark):
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
     result = _build_safety_liabilities(safety, ensg_lut, diseases)
-    assert result.first().eventId == 'EFO_CURRENT'
+    row = result.first()
+    assert row is not None
+    assert row.eventId == 'EFO_CURRENT'
 
 
 def test_build_safety_liabilities_keeps_current_efo_unchanged(spark):
@@ -231,7 +240,9 @@ def test_build_safety_liabilities_keeps_current_efo_unchanged(spark):
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
     result = _build_safety_liabilities(safety, ensg_lut, diseases)
-    assert result.first().eventId == 'EFO_CURRENT'
+    row = result.first()
+    assert row is not None
+    assert row.eventId == 'EFO_CURRENT'
 
 
 def test_build_safety_liabilities_multiple_targets(spark):

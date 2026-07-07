@@ -74,13 +74,16 @@ def test_parse_gff3_excludes_non_transcript_features(spark):
     ]
     result = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA))
     assert result.count() == 1
-    assert result.first().transcriptId == 'ENST00000641515'
+    row = result.first()
+    assert row is not None
+    assert row.transcriptId == 'ENST00000641515'
 
 
 def test_parse_gff3_strips_version_suffix(spark):
     """Version suffixes (.N) are removed from gene, transcript and protein IDs."""
     rows = [_gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS)]
     row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.targetId == 'ENSG00000186092'
     assert row.transcriptId == 'ENST00000641515'
     assert row.proteinId == 'ENSP00000493376'
@@ -90,6 +93,7 @@ def test_parse_gff3_normalises_chrm_to_mt(spark):
     """ChrM is normalised to MT."""
     rows = [_gff('chrM', 'transcript', 1000, 2000, '+', _NC_ATTRS.replace('ENSG00000290825', 'ENSG00000000001'))]
     row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.chromosome == 'MT'
 
 
@@ -101,13 +105,16 @@ def test_parse_gff3_filters_noncanonical_chromosomes(spark):
     ]
     result = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA))
     assert result.count() == 1
-    assert result.first().chromosome == '1'
+    row = result.first()
+    assert row is not None
+    assert row.chromosome == '1'
 
 
 def test_parse_gff3_tss_positive_strand(spark):
     """TranscriptionStartSite equals start for + strand transcripts."""
     rows = [_gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS)]
     row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.transcriptionStartSite == 65419
 
 
@@ -115,6 +122,7 @@ def test_parse_gff3_tss_negative_strand(spark):
     """TranscriptionStartSite equals end for - strand transcripts."""
     rows = [_gff('chr1', 'transcript', 450740, 451678, '-', _TX_ATTRS)]
     row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.transcriptionStartSite == 451678
 
 
@@ -122,19 +130,24 @@ def test_parse_gff3_null_protein_id_for_noncoding(spark):
     """ProteinId is null when protein_id is absent from the attributes."""
     rows = [_gff('chr1', 'transcript', 11121, 14413, '+', _NC_ATTRS)]
     row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.proteinId is None
 
 
 def test_parse_gff3_is_ensembl_canonical_true_when_tagged(spark):
     """IsEnsemblCanonical is True when Ensembl_canonical is in the tag list."""
     rows = [_gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS)]
-    assert _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first().isEnsemblCanonical is True
+    row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.isEnsemblCanonical is True
 
 
 def test_parse_gff3_is_ensembl_canonical_false_when_not_tagged(spark):
     """IsEnsemblCanonical is False when Ensembl_canonical is absent."""
     rows = [_gff('chr1', 'transcript', 11121, 14413, '+', _NC_ATTRS)]
-    assert _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first().isEnsemblCanonical is False
+    row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.isEnsemblCanonical is False
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +161,9 @@ def _flags_for(spark, tags: list[str]) -> list:
         StructType([StructField('tags', ArrayType(StringType()))]),
     )
     import pyspark.sql.functions as f
-    return tags_col_df.select(_build_flags(f.col('tags')).alias('flags')).first().flags
+    row = tags_col_df.select(_build_flags(f.col('tags')).alias('flags')).first()
+    assert row is not None
+    return row.flags
 
 
 def test_build_flags_mane_select(spark):
@@ -207,6 +222,7 @@ def test_parse_exons_groups_by_transcript(spark):
     result = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA))
     assert result.count() == 1
     row = result.first()
+    assert row is not None
     assert row.transcriptId == 'ENST00000641515'
     assert len(row.exons) == 2
 
@@ -215,6 +231,7 @@ def test_parse_exons_strips_version_suffix(spark):
     """Version suffixes are stripped from exon_id and transcript_id."""
     rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
     row = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
     assert row.transcriptId == 'ENST00000641515'
     assert row.exons[0].exonId == 'ENSE00003899065'
 
@@ -222,7 +239,9 @@ def test_parse_exons_strips_version_suffix(spark):
 def test_parse_exons_exon_struct_fields(spark):
     """Each exon struct has exonId, chromosome, start, end, strand."""
     rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
-    exon = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first().exons[0]
+    row = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    exon = row.exons[0]
     assert exon.chromosome == '1'
     assert exon.start == 65419
     assert exon.end == 65433
@@ -241,6 +260,7 @@ def test_build_uniprot_lut_merges_swissprot_and_trembl(spark):
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000001"').first()
+    assert row is not None
     assert set(row.uniprotIds) == {'P12345', 'A0A001'}
 
 
@@ -251,6 +271,7 @@ def test_build_uniprot_lut_handles_null_trembl(spark):
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000002"').first()
+    assert row is not None
     assert row.uniprotIds == ['P99999']
 
 
@@ -261,6 +282,7 @@ def test_build_uniprot_lut_deduplicates(spark):
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000003"').first()
+    assert row is not None
     assert row.uniprotIds.count('P11111') == 1
 
 
@@ -305,5 +327,6 @@ def test_join_and_finalise_propagates_uniprot_ids(spark):
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
     row = _join_and_finalise(gff, exons, uniprot).first()
+    assert row is not None
     assert row.uniprotIds == ['A0A2U3U0J3']
     assert len(row.exons) == 1
