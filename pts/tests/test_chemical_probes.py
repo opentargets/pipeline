@@ -59,14 +59,18 @@ def test_build_ensg_lookup_includes_symbol(spark):
     """ApprovedSymbol appears in the name array."""
     rows = [_target_row('ENSG00000001', 'GENE1')]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    assert 'GENE1' in lut.first().name
+    row = lut.first()
+    assert row is not None
+    assert 'GENE1' in row.name
 
 
 def test_build_ensg_lookup_includes_protein_id(spark):
     """Protein accession IDs appear in the name array."""
     rows = [_target_row('ENSG00000001', 'GENE1', protein_ids=['P12345'])]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    assert 'P12345' in lut.first().name
+    row = lut.first()
+    assert row is not None
+    assert 'P12345' in row.name
 
 
 def test_build_ensg_lookup_handles_empty_protein_ids(spark):
@@ -74,6 +78,7 @@ def test_build_ensg_lookup_handles_empty_protein_ids(spark):
     rows = [_target_row('ENSG00000002', 'GENE2', protein_ids=[])]
     lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
     row = lut.first()
+    assert row is not None
     assert 'GENE2' in row.name
 
 
@@ -98,7 +103,9 @@ def test_resolve_targets_resolves_symbol_to_ensg(spark):
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
     assert result.count() == 1
-    assert result.first().targetId == 'ENSG00000001'
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG00000001'
 
 
 def test_resolve_targets_resolves_protein_id_to_ensg(spark):
@@ -108,7 +115,9 @@ def test_resolve_targets_resolves_protein_id_to_ensg(spark):
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
     assert result.count() == 1
-    assert result.first().targetId == 'ENSG00000002'
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG00000002'
 
 
 def test_resolve_targets_keeps_unresolvable_rows_with_null_target_id(spark):
@@ -123,7 +132,9 @@ def test_resolve_targets_keeps_unresolvable_rows_with_null_target_id(spark):
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
     assert result.count() == 1
-    assert result.first().targetId is None
+    row = result.first()
+    assert row is not None
+    assert row.targetId is None
 
 
 def test_resolve_targets_retains_target_from_source_id(spark):
@@ -133,7 +144,9 @@ def test_resolve_targets_retains_target_from_source_id(spark):
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
     assert 'targetFromSourceId' in result.columns
-    assert result.first().targetFromSourceId == 'GENE1'
+    row = result.first()
+    assert row is not None
+    assert row.targetFromSourceId == 'GENE1'
 
 
 def test_resolve_targets_multiple_probes_same_target(spark):
