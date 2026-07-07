@@ -841,7 +841,7 @@ steps:
   #: PHARMACOGENETICS STEP :########################################################################
   pharmacogenetics:
     - name: find_latest clinpgx annotation
-      source: gs://otar012-eva/pharmacogenomics/
+      source: gs://otar012-eva/pharmacogenomics
       scratchpad_key: latest_clinpgx_annotation
     - name: copy clinpgx annotation
       requires:
