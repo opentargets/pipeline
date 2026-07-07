@@ -1,4 +1,11 @@
-"""Parser to process chemical probes data and generate evidence."""
+"""Chemical probes dataset generation.
+
+Processes the Open Targets chemical probes Excel/CSV sources, resolves gene
+symbols to ENSG IDs via output/target, and produces a flat per-probe index
+validated against the target universe.
+"""
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -8,6 +15,7 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common import Session
+from pts.pyspark.common.utils import maybe_coalesce
 
 # Chemical probe data sources
 PROBES_SETS = [
@@ -38,32 +46,86 @@ def chemical_probes(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Process chemical probes data and generate evidence."""
-    # Starting spark session
+    """Process chemical probes data, resolve target IDs, and write the output dataset.
+
+    Parses the chemical probes Excel/CSV sources, resolves gene symbols/UniProt
+    accessions to ENSG IDs via output/target, drops probes that cannot be mapped,
+    and writes a flat per-probe parquet to the destination.
+
+    Args:
+        source: Mapping with keys ``probes_excel``, ``drugs_csv``,
+            ``chembl_molecule``, and ``target`` (output/target parquet for
+            ENSG ID resolution and validation).
+        destination: Output path for the chemical probes parquet dataset.
+        settings: Step settings; supports ``partition_count`` (int, default 2).
+        properties: Spark properties passed to :class:`Session`.
+    """
     session = Session(app_name='chemical_probes', properties=properties)
 
-    # Extract input dataset locations from config
-    probes_excel = source['probes_excel']
-    drugs_csv = source['drugs_csv']
-    chembl_molecule_path = source['chembl_molecule']
+    chembl_molecule_df = session.load_data(source['chembl_molecule'])
+    target_df = session.spark.read.parquet(source['target'])
 
-    # Load ChEMBL molecule data for drug ID validation
-    chembl_molecule_df = session.load_data(chembl_molecule_path)
+    probes_data = process_probes_data(session.spark, source['probes_excel'])
+    probes_targets_data = process_probes_targets_data(session.spark, source['probes_excel'])
+    probes_sets_data = process_probes_sets_data(session.spark, source['probes_excel'])
+    targets_xref_data = process_targets_xrefs(session.spark, source['probes_excel'])
+    drugs_xref_data = process_drugs_xrefs(session.spark, source['drugs_csv'], chembl_molecule_df)
 
-    # Process chemical probes data from Excel and CSV files
-    probes_data = process_probes_data(session.spark, probes_excel)
-    probes_targets_data = process_probes_targets_data(session.spark, probes_excel)
-    probes_sets_data = process_probes_sets_data(session.spark, probes_excel)
-    targets_xref_data = process_targets_xrefs(session.spark, probes_excel)
-    drugs_xref_data = process_drugs_xrefs(session.spark, drugs_csv, chembl_molecule_df)
-
-    # Generate evidence from chemical probes
     evidence = generate_chemical_probes_evidence(
         session.spark, probes_data, probes_targets_data, probes_sets_data, targets_xref_data, drugs_xref_data
     )
 
-    # Write the final evidence dataset
-    evidence.write.mode('overwrite').parquet(destination)
+    ensg_lookup = _build_ensg_lookup(target_df)
+    result = _resolve_targets(evidence, ensg_lookup)
+
+    partition_count = (settings or {}).get('partition_count', 2)
+    maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
+
+
+def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
+    """Build a symbol/proteinId → ENSG ID lookup from the target dataset.
+
+    Args:
+        target_df: Target parquet from ``output/target``.
+
+    Returns:
+        DataFrame with columns ``ensgId`` and ``name``
+        (``array<str>`` of protein accessions and approved symbol).
+    """
+    return target_df.select(
+        f.col('id').alias('ensgId'),
+        f.flatten(f.array(
+            f.col('proteinIds.id'),
+            f.array(f.col('approvedSymbol')),
+        )).alias('name'),
+    )
+
+
+def _resolve_targets(evidence: DataFrame, ensg_lookup: DataFrame) -> DataFrame:
+    """Resolve targetFromSourceId to ENSG IDs.
+
+    Rows with no matching ENSG are kept with a null ``targetId``: the
+    drug/probe fields on this dataset (``drugId``, ``drugFromSourceId``) are
+    consumed independently of target resolution by ``drug_molecule``, so
+    dropping unresolvable rows here would silently shrink that dataset too.
+    Consumers that join on ``targetId`` (e.g. ``target.py``) naturally
+    exclude null-targetId rows since they match no real target id.
+
+    Args:
+        evidence: Chemical probes evidence DataFrame from
+            :func:`generate_chemical_probes_evidence`.
+        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
+
+    Returns:
+        DataFrame with ``targetId`` column added (nullable) and
+        ``targetFromSourceId`` retained.
+    """
+    return (
+        evidence
+        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'left_outer')
+        .drop('name')
+        .withColumnRenamed('ensgId', 'targetId')
+    )
 
 
 def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destination_col: str) -> DataFrame:

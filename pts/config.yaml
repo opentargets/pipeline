@@ -274,11 +274,14 @@ steps:
   chemical_probes:
     - name: pyspark chemical probes
       pyspark: chemical_probes
+      settings:
+        partition_count: 2
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
         chembl_molecule: intermediate/chembl_molecule
-      destination: intermediate/chemical_probes_evidence.parquet
+        target: output/target
+      destination: output/chemical_probes
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
@@ -379,7 +382,6 @@ steps:
           target: 3
           gene_essentiality: 4
       source:
-        diseases: output/disease
         ensembl: intermediate/target/ensembl/homo_sapiens.parquet
         gene_code: input/target/gencode/gencode.gff3.gz
         genetic_constraints: input/target/gnomad/gnomad_constraint_metrics.tsv
@@ -397,17 +399,51 @@ steps:
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        safety_evidence: intermediate/target/safety.parquet
         tep: input/target/tep/tep.json.gz
-        tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
         chembl: input/target/chembl/chembl_target.jsonl
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
         gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
       destination:
         target: output/target
         gene_essentiality: output/target_essentiality
+  ##################################################################################################
+
+  #: TRANSCRIPT STEP :#################################################################################
+  transcript:
+    - name: pyspark transcript
+      pyspark: transcript
+      settings:
+        partition_count: 2
+      source:
+        gene_code: input/target/gencode/gencode.gff3.gz
+        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
+      destination: output/transcript
+  ##################################################################################################
+
+  #: SAFETY_LIABILITY STEP :#############################################################################
+  safety_liability:
+    - name: pyspark safety_liability
+      pyspark: safety_liability
+      settings:
+        partition_count: 2
+      source:
+        safety_evidence: intermediate/target/safety.parquet
+        target: output/target
+        diseases: output/disease
+      destination: output/safety_liability
+  ##################################################################################################
+
+  #: TARGET_TRACTABILITY STEP :#########################################################################
+  target_tractability:
+    - name: pyspark target_tractability
+      pyspark: target_tractability
+      settings:
+        partition_count: 2
+      source:
+        tractability: input/target/tractability/tractability.tsv
+        target: output/target
+      destination: output/target_tractability
   ##################################################################################################
 
   #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
@@ -694,7 +730,7 @@ steps:
         partition_count: 1
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
+        chemical_probes: output/chemical_probes
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
