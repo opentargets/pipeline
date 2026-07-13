@@ -13,13 +13,34 @@ on:
         type: string
 
 jobs:
+  matrix:
+    name: Compute test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.compute.outputs.include }}
+    steps:
+      - id: compute
+        # pts has far more tests than the other packages, so it's sharded
+        # across 4 runners with pytest-split to cut CI wall time.
+        run: |
+          packages='${{ inputs.packages || '["orchestration","pis","pts","croissant"]' }}'
+          include=$(jq -c '[
+            .[] | if . == "pts" then
+              range(1; 5) as $g | {package: ., group: $g, splits: 4}
+            else
+              {package: ., group: 1, splits: 1}
+            end
+          ]' <<< "$packages")
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
   test:
-    name: Test ${{ matrix.package }}
+    needs: matrix
+    name: Test ${{ matrix.package }}${{ matrix.splits > 1 && format(' (shard {0}/{1})', matrix.group, matrix.splits) || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(inputs.packages || '["orchestration","pis","pts","croissant"]') }}
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -30,9 +51,12 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ matrix.package }}
-        run: uv run --frozen pytest -rxs
+        run: >
+          uv run --frozen pytest -rxs
+          ${{ matrix.splits > 1 && format('--splits {0} --group {1}', matrix.splits, matrix.group) || '' }}
 
       - name: run ty # better to do it here because we have deps installed
+        if: matrix.group == 1
         working-directory: ${{ matrix.package }}
         run: uv run --frozen ty check --output-format=github
 
