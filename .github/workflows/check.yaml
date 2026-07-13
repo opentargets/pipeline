@@ -51,9 +51,7 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ matrix.package }}
-        run: >
-          uv run --frozen pytest -rxs
-          ${{ matrix.splits > 1 && format('--splits {0} --group {1}', matrix.splits, matrix.group) || '' }}
+        run: uv run --frozen pytest -rxs ${{ matrix.splits > 1 && format('--splits {0} --group {1}', matrix.splits, matrix.group) || '' }}
 
       - name: run ty # better to do it here because we have deps installed
         if: matrix.group == 1
