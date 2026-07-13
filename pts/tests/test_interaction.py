@@ -6,12 +6,14 @@ Ported from platform-etl-backend Interaction step.
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
+    LongType,
     StringType,
     StructField,
     StructType,
 )
 
 from pts.pyspark.interaction import (
+    _interaction_id_expr,
     _transform_human_mapping,
     _transform_rnacentral,
     _transform_string_proteins,
@@ -252,3 +254,49 @@ def test_string_proteins_source_database_is_string(spark):
     result = _transform_string_proteins(df, score_threshold=0)
     row = result.collect()[0]
     assert row.source_info.source_database == 'string'
+
+
+# ---------------------------------------------------------------------------
+# 5. _interaction_id_expr
+# ---------------------------------------------------------------------------
+
+
+def _interaction_key_df(spark, species_a='9606', species_b='9606'):
+    """Minimal DataFrame carrying every _INTERACTION_KEY_COLS column."""
+    return spark.createDataFrame(
+        [
+            Row(
+                sourceDatabase='intact',
+                targetA='ENSG00000001',
+                intA='P11111',
+                intABiologicalRole='role-a',
+                targetB='ENSG00000002',
+                intB='P22222',
+                intBBiologicalRole='role-b',
+                speciesA=Row(taxonId=species_a),
+                speciesB=Row(taxonId=species_b),
+            )
+        ]
+    )
+
+
+def test_interaction_id_is_long(spark):
+    df = _interaction_key_df(spark).withColumn('interactionId', _interaction_id_expr())
+    assert isinstance(df.schema['interactionId'].dataType, LongType)
+    assert isinstance(df.select('interactionId').head().interactionId, int)
+
+
+def test_interaction_id_distinguishes_species(spark):
+    id_human = (
+        _interaction_key_df(spark, species_a='9606')
+        .withColumn('i', _interaction_id_expr())
+        .head()
+        .i
+    )
+    id_mouse = (
+        _interaction_key_df(spark, species_a='10090')
+        .withColumn('i', _interaction_id_expr())
+        .head()
+        .i
+    )
+    assert id_human != id_mouse
