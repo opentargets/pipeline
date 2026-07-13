@@ -3,9 +3,11 @@ environment_specs:
   - name: Test
     vars:
       root_path: gs://ot_orchestration/test/gwas_catalog_harmonisation/gwas_catalog_inputs
+      GENTROPY_REF: 3.2.0
   - name: Prod
     vars:
       root_path: gs://gwas_catalog_inputs
+      GENTROPY_REF: 3.2.0
 
 env: Prod
 
@@ -41,11 +43,9 @@ nodes:
               memory_mib: 8000
               boot_disk_mib: 8000
             runnable_spec:
-              image_uri: ghcr.io/opentargets/orchestration-harmonisation:26.1-staging.1
+              image_uri: 'ghcr.io/opentargets/gentropy:{GENTROPY_REF}'
               entrypoint: /usr/bin/bash
-              inline_commands:
-                - '-c'
-                - './harmonise-sumstats.sh $RAW $HARMONISED $QC 1.0e-8'
+              script_file: harmonise.sh
         allocation:
           instance:
             machine_type: n1-standard-4

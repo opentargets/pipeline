@@ -36,6 +36,8 @@ with DAG(
             task_id=index_config['id'],
             batch_index_specs=BatchIndexOperatorSpec(**index_config['google_batch_index_specs']),
         )
+    else:
+        raise ValueError('No index config found for GWAS Catalog harmonisation DAG.')
 
     if harmonisation_config:
         harmonisation_batch_job = BatchJobOperator.partial(
