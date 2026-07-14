@@ -62,8 +62,10 @@ AIRFLOW__API__SECRET_KEY=$(openssl rand -hex 32)
 AIRFLOW__API_AUTH__JWT_SECRET=$(openssl rand -hex 32)
 AIRFLOW__API_AUTH__JWT_ISSUER=airflow
 EOF
+# the airflow signing secrets live in here, so keep it off the world bits: root writes it,
+# google-sudoers (which the orchestration user is in) only needs to read it.
 chgrp google-sudoers /opt/orchestration/.env
-chmod g+rw /opt/orchestration/.env
+chmod 640 /opt/orchestration/.env
 
 fail_service_startup() {
   SERVICE_NAME="$1"
