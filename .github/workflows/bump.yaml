@@ -1,0 +1,37 @@
+---
+name: Bump RC
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: bump-rc
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump RC
+    runs-on: ubuntu-latest
+    # skip the commits that do not bump versions
+    if: "!startsWith(github.event.head_commit.message, 'Bump ')"
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Bump, tag and push
+        run: |
+          git config user.name "opentargets-gitbot[bot]"
+          git config user.email "opentargets-gitbot[bot]@users.noreply.github.com"
+          uv run ./scripts/pr.py

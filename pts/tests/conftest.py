@@ -21,6 +21,7 @@ def spark():
         .config('spark.sql.adaptive.coalescePartitions.enabled', 'false')
         .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
         .config('spark.sql.execution.arrow.pyspark.enabled', 'true')
+        .config('spark.sql.shuffle.partitions', '1')
         .getOrCreate()
     )
     spark_session.sparkContext.setLogLevel('ERROR')
