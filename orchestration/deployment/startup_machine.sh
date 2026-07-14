@@ -51,10 +51,11 @@ sudo useradd -m -G google-sudoers,docker orchestration
 
 REMOTE_AIRFLOW_SERVICES="postgres airflow-init airflow-scheduler airflow-dag-processor airflow-triggerer airflow-apiserver"
 
-# generate the airflow secrets once and persist them in a .env file so every
-# `docker compose` invocation (up, ps, logs) can interpolate compose.yaml's
-# required vars, not just the initial `up`
-cat > /opt/orchestration/.env <<EOF
+# generate the airflow secrets once and append them to the repo's .env file
+# (which already carries GOOGLE_CLOUD_PROJECT/AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT)
+# so every `docker compose` invocation (up, ps, logs) can interpolate
+# compose.yaml's required vars, not just the initial `up`
+cat >> /opt/orchestration/.env <<EOF
 AIRFLOW__API__SECRET_KEY=$(openssl rand -hex 32)
 AIRFLOW__API_AUTH__JWT_SECRET=$(openssl rand -hex 32)
 AIRFLOW__API_AUTH__JWT_ISSUER=airflow
@@ -64,7 +65,7 @@ chmod g+rw /opt/orchestration/.env
 
 fail_service_startup() {
   SERVICE_NAME="$1"
-  cd /opt/orchestration
+  cd /opt/pipeline/orchestration
   docker compose ps --all "$SERVICE_NAME"
   docker compose logs --no-color --tail=50 "$SERVICE_NAME"
   exit 1
@@ -72,7 +73,7 @@ fail_service_startup() {
 
 wait_for_airflow_init() {
   while true; do
-    CONTAINER_ID=$(cd /opt/orchestration && docker compose ps --all -q airflow-init)
+    CONTAINER_ID=$(cd /opt/pipeline/orchestration && docker compose ps --all -q airflow-init)
     if [ -n "$CONTAINER_ID" ]; then
       STATUS=$(docker inspect --format '{{.State.Status}}' "$CONTAINER_ID")
       EXIT_CODE=$(docker inspect --format '{{.State.ExitCode}}' "$CONTAINER_ID")
@@ -89,7 +90,7 @@ wait_for_airflow_init() {
 wait_for_healthy_service() {
   SERVICE_NAME="$1"
   while true; do
-    CONTAINER_ID=$(cd /opt/orchestration && docker compose ps --all -q "$SERVICE_NAME")
+    CONTAINER_ID=$(cd /opt/pipeline/orchestration && docker compose ps --all -q "$SERVICE_NAME")
     if [ -n "$CONTAINER_ID" ]; then
       STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER_ID")
       if [ "$STATUS" = "healthy" ]; then
@@ -110,7 +111,7 @@ wait_for_apiserver() {
 
 # run the Airflow stack used for remote development
 su orchestration -c "
-  cd /opt/orchestration &&
+  cd /opt/pipeline/orchestration &&
   docker compose up -d --build ${REMOTE_AIRFLOW_SERVICES}
 "
 wait_for_airflow_init
