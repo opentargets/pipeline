@@ -13,20 +13,39 @@ on:
         type: string
 
 jobs:
+  matrix:
+    name: Compute test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.compute.outputs.include }}
+      has_pts: ${{ steps.compute.outputs.has_pts }}
+    steps:
+      - id: compute
+        # pts has far more tests than the other packages, so it's sharded
+        # separately across 4 runners with pytest-split to cut CI wall time.
+        run: |
+          packages='${{ inputs.packages || '["orchestration","pis","pts","croissant"]' }}'
+          include=$(jq -c '[.[] | select(. != "pts") | {package: .}]' <<< "$packages")
+          has_pts=$(jq -c 'any(. == "pts")' <<< "$packages")
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+          echo "has_pts=$has_pts" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: matrix
+    if: needs.matrix.outputs.include != '[]'
     name: Test ${{ matrix.package }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(inputs.packages || '["orchestration","pis","pts","croissant"]') }}
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Sync dependencies
         working-directory: ${{ matrix.package }}
-        run: uv sync --frozen --all-groups --all-extras
+        run: uv sync --locked --all-groups --all-extras
 
       - name: Run tests
         working-directory: ${{ matrix.package }}
@@ -35,6 +54,48 @@ jobs:
       - name: run ty # better to do it here because we have deps installed
         working-directory: ${{ matrix.package }}
         run: uv run --frozen ty check --output-format=github
+
+  test-pts:
+    needs: matrix
+    if: needs.matrix.outputs.has_pts == 'true'
+    name: Test pts (shard ${{ matrix.group }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Sync dependencies
+        working-directory: pts
+        run: uv sync --locked --all-groups --all-extras
+
+      - name: Run tests
+        working-directory: pts
+        run: uv run --frozen pytest -rxs --splits 4 --group ${{ matrix.group }}
+
+      - name: run ty # better to do it here because we have deps installed
+        if: matrix.group == 1
+        working-directory: pts
+        run: uv run --frozen ty check --output-format=github
+
+  test-gate:
+    name: Test pts
+    # branch protection requires the context "Test pts". Since pts's own
+    # result now lives in test-pts (separate from the other packages), this
+    # gate reports it under a name that's stable regardless of shard count -
+    # and stays green when pts isn't part of this run at all (e.g. a
+    # single-package release tag for another package).
+    needs: [matrix, test-pts]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ needs.matrix.outputs.has_pts }}" == "true" ]]; then
+            [[ "${{ needs.test-pts.result }}" == "success" ]] || exit 1
+          fi
 
   lint:
     name: Lint all packages

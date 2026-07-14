@@ -31,7 +31,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff>=0.15.17", "ty>=0.0.55"]
-test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1"]
+test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1", "pytest-split>=0.11.0"]
 
 [project.optional-dependencies]
 baseline_expression = ["pandas<3", "scanpy>=1.10.0", "cellex"]
