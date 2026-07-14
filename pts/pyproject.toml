@@ -9,7 +9,7 @@ license = { text = "Apache-2.0" }
 
 dependencies = [
   "loguru>=0.7.3",
-  "opentargets-otter>=26.6.1",
+  "opentargets-otter>=26.6.2",
   "pandas>=2.3.3",
   "polars>=1.41.2",
   "pyspark>=3.5.7",
