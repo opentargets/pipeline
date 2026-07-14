@@ -51,6 +51,13 @@ local-airflow:  ## Start a local AirFlow instance used for development
 	AIRFLOW__API_AUTH__JWT_ISSUER=$${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow} \
 	GOOGLE_APPLICATION_CREDENTIALS=$(LOCAL_DEV_CREDENTIALS) docker compose -f compose.yaml -f compose.local.yaml up -d --build --remove-orphans
 
+teardown-local-airflow:
+	@AIRFLOW__API__SECRET_KEY=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_SECRET=$$(openssl rand -hex 32) \
+	AIRFLOW__API_AUTH__JWT_ISSUER=$${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow} \
+	GOOGLE_APPLICATION_CREDENTIALS="" \
+	docker-compose down
+
 cloud-airflow: ## Start a remote AirFlow instance used for running the unified pipeline
 	@./deployment/start.sh
 
