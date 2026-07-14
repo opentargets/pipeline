@@ -10,4 +10,4 @@ cd /opt/orchestration && uv sync --all-groups --all-extras --dev
 sudo chgrp -R google-sudoers .venv
 
 # enable git for users
-git config --global --add safe.directory /opt/orchestration
+git config --global --add safe.directory /opt/pipeline

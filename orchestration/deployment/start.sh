@@ -30,12 +30,6 @@ then
     exit 1
 fi
 
-# ensure the script is run from the root of the repository
-if [ ! -d ".git" ]; then
-    echo "This script must be run from the root of the repository."
-    exit 1
-fi
-
 # check and deploy the airflow dev machine
 cecho "Ensuring the airflow dev machine and Airflow stack are ready..."
 terraform -chdir=./deployment init

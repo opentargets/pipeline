@@ -33,17 +33,18 @@ apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # clone repository
-mkdir -p /opt/orchestration
-git clone https://github.com/opentargets/orchestration /opt/orchestration
-cd /opt/orchestration
+mkdir -p /opt/pipeline
+git clone https://github.com/opentargets/pipeline /opt/pipeline
+cd /opt/pipeline
 BRANCH=$(curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/orchestration_git_branch)
 git checkout "$BRANCH"
+ln -s /opt/pipeline/orchestration /opt/orchestration
 
 # set proper ownership and permissions
 # all google cloud iam users are members of google-sudoers, so we use that group to avoid having to
 # add groups to users which seems to be a mess in google cloud vms
-chgrp -R google-sudoers /opt/orchestration
-chmod -R g+rw /opt/orchestration
+chgrp -R google-sudoers /opt/pipeline
+chmod -R g+rw /opt/pipeline
 
 # create orchestration user
 sudo useradd -m -G google-sudoers,docker orchestration
