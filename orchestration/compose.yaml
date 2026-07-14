@@ -15,6 +15,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT: ${AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT:-}
     AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: 'orchestration.models.*'
+    # `orchestration` is not installed as a package: it is importable only because src/ is
+    # mounted as the dags folder. Airflow only puts that folder on sys.path in the processes
+    # that parse dags, but the triggerer imports deferred trigger classpaths and the
+    # scheduler and api-server deserialize orchestration.models.*, so they all need it.
+    # It has to resolve from the dags folder rather than site-packages, because
+    # UnifiedPipelineConfig locates the pis and pts config.yaml relative to its own file.
+    PYTHONPATH: /opt/airflow/dags
     GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
   volumes:
     - ../pis/config.yaml:/opt/pis/config.yaml
