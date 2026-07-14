@@ -120,6 +120,7 @@ upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
 	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
 
+update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
 									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
