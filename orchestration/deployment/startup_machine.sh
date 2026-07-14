@@ -51,6 +51,17 @@ sudo useradd -m -G google-sudoers,docker orchestration
 
 REMOTE_AIRFLOW_SERVICES="postgres airflow-init airflow-scheduler airflow-dag-processor airflow-triggerer airflow-apiserver"
 
+# generate the airflow secrets once and persist them in a .env file so every
+# `docker compose` invocation (up, ps, logs) can interpolate compose.yaml's
+# required vars, not just the initial `up`
+cat > /opt/orchestration/.env <<EOF
+AIRFLOW__API__SECRET_KEY=$(openssl rand -hex 32)
+AIRFLOW__API_AUTH__JWT_SECRET=$(openssl rand -hex 32)
+AIRFLOW__API_AUTH__JWT_ISSUER=airflow
+EOF
+chgrp google-sudoers /opt/orchestration/.env
+chmod g+rw /opt/orchestration/.env
+
 fail_service_startup() {
   SERVICE_NAME="$1"
   cd /opt/orchestration
@@ -100,9 +111,6 @@ wait_for_apiserver() {
 # run the Airflow stack used for remote development
 su orchestration -c "
   cd /opt/orchestration &&
-  AIRFLOW__API__SECRET_KEY=\$(openssl rand -hex 32) \
-  AIRFLOW__API_AUTH__JWT_SECRET=\$(openssl rand -hex 32) \
-  AIRFLOW__API_AUTH__JWT_ISSUER=airflow \
   docker compose up -d --build ${REMOTE_AIRFLOW_SERVICES}
 "
 wait_for_airflow_init
