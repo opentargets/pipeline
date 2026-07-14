@@ -45,7 +45,12 @@ lint: sync ## Lint codebase
 
 check: lint test ## run all checks
 
-local-airflow:  ## Start a local AirFlow instance used for development
+# compose autoloads .env; it is git-ignored so that the airflow secrets the cloud VM
+# generates into it can never be committed. seed it from the tracked example.
+.env:
+	@cp .env.example .env
+
+local-airflow: .env  ## Start a local AirFlow instance used for development
 	@AIRFLOW__API__SECRET_KEY=$$(openssl rand -hex 32) \
 	AIRFLOW__API_AUTH__JWT_SECRET=$$(openssl rand -hex 32) \
 	AIRFLOW__API_AUTH__JWT_ISSUER=$${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow} \

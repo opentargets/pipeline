@@ -51,10 +51,12 @@ sudo useradd -m -G google-sudoers,docker orchestration
 
 REMOTE_AIRFLOW_SERVICES="postgres airflow-init airflow-scheduler airflow-dag-processor airflow-triggerer airflow-apiserver"
 
-# generate the airflow secrets once and append them to the repo's .env file
-# (which already carries GOOGLE_CLOUD_PROJECT/AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT)
-# so every `docker compose` invocation (up, ps, logs) can interpolate
-# compose.yaml's required vars, not just the initial `up`
+# seed .env from the tracked example, then generate the airflow secrets into it.
+# compose.yaml declares the secrets as required interpolation vars, so they have to be
+# readable by every `docker compose` invocation (up, ps, logs) and not just the initial
+# `up` -- the wait_for_* helpers below shell out to `docker compose ps` as root.
+# .env is git-ignored, so the generated secrets never land in a tracked file.
+cp /opt/orchestration/.env.example /opt/orchestration/.env
 cat >> /opt/orchestration/.env <<EOF
 AIRFLOW__API__SECRET_KEY=$(openssl rand -hex 32)
 AIRFLOW__API_AUTH__JWT_SECRET=$(openssl rand -hex 32)
