@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# every path below is relative to the orchestration package, so run from there no matter
+# where the caller invoked us from
+cd "$(dirname "$0")/.."
+
 cecho() {
   echo -e "\n\033[92m✨ ${1}\033[0m\n"
 }
