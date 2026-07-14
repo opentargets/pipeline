@@ -753,7 +753,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-otter"
-version = "26.6.1"
+version = "26.6.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -767,9 +767,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/6f/e1717c924b640c7f2b270632be61fc4cf31d596cc0b9b8f1b8ba37966d80/opentargets_otter-26.6.1.tar.gz", hash = "sha256:1d8720a400c84e1488c259bc3f899a642bac1862cfd471e6138ff721e7314f73", size = 227212, upload-time = "2026-06-15T09:00:36.961Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/f4/d00bdb34d2d06433e9ed82a5032212d7944760d89b1c3385a8833ca2d711/opentargets_otter-26.6.2.tar.gz", hash = "sha256:154321f40c5030f7c1be04ad302be3476d821bb5be159adc533f3e3e3b39f48c", size = 231727, upload-time = "2026-07-10T13:03:44.319Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/60/fb/70152aa954d01b1b56c6090b69bf99f3b6272db35bc283410a4ce78db0ff/opentargets_otter-26.6.1-py3-none-any.whl", hash = "sha256:ec6836acdf429794884e39cb66880f894a5b46c97ee246f9d8ba909f770e1115", size = 67038, upload-time = "2026-06-15T09:00:35.694Z" },
+    { url = "https://files.pythonhosted.org/packages/38/71/db53fa009c3b2dfdadce66b42d29ba4de1b95a6dbf204aca88346250b020/opentargets_otter-26.6.2-py3-none-any.whl", hash = "sha256:95281721c1516eba9b6c73cc17ff89db36fba935d1aac8e5b7bc189ec57a1182", size = 72199, upload-time = "2026-07-10T13:03:43.17Z" },
 ]
 
 [[package]]
@@ -808,7 +808,7 @@ requires-dist = [
     { name = "elasticsearch", specifier = ">=7.17.12" },
     { name = "jq", specifier = ">=1.11.0" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "opentargets-otter", specifier = ">=26.6.1" },
+    { name = "opentargets-otter", specifier = ">=26.6.2" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "urllib3", specifier = ">=2.7.0" },
 ]
