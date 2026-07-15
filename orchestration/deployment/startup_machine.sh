@@ -2,6 +2,11 @@
 set -x
 set -e
 
+# google runs this on every boot, not just the first one, so every step below has to be
+# safe to repeat. clear the readiness flag first: start.sh polls for it over ssh, and a
+# flag left over from an earlier boot would report a run that never happened as a success.
+rm -f /ready
+
 # remove man
 apt-get remove -y --purge man-db
 
@@ -19,7 +24,7 @@ apt-get install -y \
   build-essential
 
 # add docker gpg key
-curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --batch --yes --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
 # add docker repository
 echo \
@@ -33,26 +38,54 @@ apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # clone repository
-mkdir -p /opt/orchestration
-git clone https://github.com/opentargets/orchestration /opt/orchestration
-cd /opt/orchestration
+if [ ! -d /opt/pipeline/.git ]; then
+  git clone https://github.com/opentargets/pipeline /opt/pipeline
+fi
+cd /opt/pipeline
 BRANCH=$(curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/orchestration_git_branch)
+# fetch so the checkout resolves on a reboot too, when the clone above is skipped
+git fetch --all --tags --prune
 git checkout "$BRANCH"
+ln -sfn /opt/pipeline/orchestration /opt/orchestration
 
 # set proper ownership and permissions
 # all google cloud iam users are members of google-sudoers, so we use that group to avoid having to
 # add groups to users which seems to be a mess in google cloud vms
-chgrp -R google-sudoers /opt/orchestration
-chmod -R g+rw /opt/orchestration
+chgrp -R google-sudoers /opt/pipeline
+chmod -R g+rw /opt/pipeline
 
 # create orchestration user
-sudo useradd -m -G google-sudoers,docker orchestration
+if ! id -u orchestration > /dev/null 2>&1; then
+  useradd -m -G google-sudoers,docker orchestration
+fi
 
 REMOTE_AIRFLOW_SERVICES="postgres airflow-init airflow-scheduler airflow-dag-processor airflow-triggerer airflow-apiserver"
 
+# seed .env from the tracked example, then generate the airflow secrets into it.
+# compose.yaml declares the secrets as required interpolation vars, so they have to be
+# readable by every `docker compose` invocation (up, ps, logs) and not just the initial
+# `up` -- the wait_for_* helpers below shell out to `docker compose ps` as root.
+# .env is git-ignored, so the generated secrets never land in a tracked file.
+# only seed once: regenerating on a reboot would rotate the signing secrets out from under
+# the sessions and jwts the running stack already issued.
+if [ ! -f /opt/pipeline/orchestration/.env ]; then
+  cp /opt/pipeline/orchestration/.env.example /opt/pipeline/orchestration/.env
+  cat >> /opt/pipeline/orchestration/.env <<EOF
+AIRFLOW__API__SECRET_KEY=$(openssl rand -hex 32)
+AIRFLOW__API_AUTH__JWT_SECRET=$(openssl rand -hex 32)
+AIRFLOW__API_AUTH__JWT_ISSUER=airflow
+EOF
+fi
+
+# the airflow signing secrets live in here, so keep it off the world bits: root writes it,
+# google-sudoers (which the orchestration user is in) only needs to read it. enforced on
+# every boot, since the recursive chmod above hands group write back to everything.
+chgrp google-sudoers /opt/pipeline/orchestration/.env
+chmod 640 /opt/pipeline/orchestration/.env
+
 fail_service_startup() {
   SERVICE_NAME="$1"
-  cd /opt/orchestration
+  cd /opt/pipeline/orchestration
   docker compose ps --all "$SERVICE_NAME"
   docker compose logs --no-color --tail=50 "$SERVICE_NAME"
   exit 1
@@ -60,7 +93,7 @@ fail_service_startup() {
 
 wait_for_airflow_init() {
   while true; do
-    CONTAINER_ID=$(cd /opt/orchestration && docker compose ps --all -q airflow-init)
+    CONTAINER_ID=$(cd /opt/pipeline/orchestration && docker compose ps --all -q airflow-init)
     if [ -n "$CONTAINER_ID" ]; then
       STATUS=$(docker inspect --format '{{.State.Status}}' "$CONTAINER_ID")
       EXIT_CODE=$(docker inspect --format '{{.State.ExitCode}}' "$CONTAINER_ID")
@@ -77,7 +110,7 @@ wait_for_airflow_init() {
 wait_for_healthy_service() {
   SERVICE_NAME="$1"
   while true; do
-    CONTAINER_ID=$(cd /opt/orchestration && docker compose ps --all -q "$SERVICE_NAME")
+    CONTAINER_ID=$(cd /opt/pipeline/orchestration && docker compose ps --all -q "$SERVICE_NAME")
     if [ -n "$CONTAINER_ID" ]; then
       STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER_ID")
       if [ "$STATUS" = "healthy" ]; then
@@ -98,10 +131,7 @@ wait_for_apiserver() {
 
 # run the Airflow stack used for remote development
 su orchestration -c "
-  cd /opt/orchestration &&
-  AIRFLOW__API__SECRET_KEY=\$(openssl rand -hex 32) \
-  AIRFLOW__API_AUTH__JWT_SECRET=\$(openssl rand -hex 32) \
-  AIRFLOW__API_AUTH__JWT_ISSUER=airflow \
+  cd /opt/pipeline/orchestration &&
   docker compose up -d --build ${REMOTE_AIRFLOW_SERVICES}
 "
 wait_for_airflow_init

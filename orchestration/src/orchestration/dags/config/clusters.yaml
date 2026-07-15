@@ -11,7 +11,7 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       'spark:spark.sql.adaptive.enabled': 'true'
       # Spark NLP package (required by pharmacogenetics step)
@@ -96,7 +96,7 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     init_actions_uris:
       - 'gs://opentargets-pipelines/up/pts/install_dependencies_on_cluster.sh'
 
@@ -111,7 +111,7 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       'spark:spark.sql.shuffle.partitions': '2000'
       'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '64MB'
@@ -135,7 +135,7 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       # Cluster-wide knobs (apply to all 6 pts_literature_* steps).
       # Sized for the autoscaled 4xn1-highmem-16 + up to 50 non-preemptible
