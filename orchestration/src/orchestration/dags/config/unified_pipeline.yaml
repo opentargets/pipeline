@@ -19,11 +19,51 @@ vep_version: 'release_115.2'
 
 # Dependency graph
 # ----------------
-# Trimmed copy of unified_pipeline.yaml containing only pts_target and the
-# four steps extracted from it (pts_transcript, pts_safety_liability,
-# pts_target_tractability, pts_chemical_probes), plus their full transitive
-# dependency closure. Used for local testing without needing to run the
-# entire pipeline DAG.
+# Trimmed copy of unified_pipeline.yaml containing pts_target, the four
+# steps extracted from it (pts_transcript, pts_safety_liability,
+# pts_target_tractability, pts_chemical_probes), and the downstream
+# consumers this PR touched (pts_target_prioritisation, pts_association_otf,
+# pts_search_facet, pts_search, pts_interaction), plus their transitive
+# dependency closure *within this trimmed set only*. Used for local testing
+# without needing to run the entire pipeline DAG.
+#
+# The five downstream-consumer steps also read datasets this trimmed DAG
+# does not produce (pts_association, gentropy_variant/credible_set/study,
+# pts_drug_molecule, pts_go, pts_mouse_phenotype, pts_clinical_indication,
+# pts_disease_hpo, pts_disease_phenotype, and the pis_target_prioritisation/
+# pis_interaction raw inputs). Rather than pulling in those subtrees, the
+# corresponding `depends_on` edges are omitted here and the files must be
+# staged manually at the paths below (relative to this run's root) before
+# running these steps:
+#
+#   pts_target_prioritisation:
+#     - output/mouse_phenotype
+#     - output/drug_molecule
+#     - output/baseline_expression
+#     - input/target_prioritisation/uniprot_locations.tsv.gz
+#     - input/target_prioritisation/mouse_pheno_scores.csv
+#   pts_association_otf:
+#     - output/evidence_* (all 23 evidence_postprocess_* datasets, see pts/config.yaml)
+#     - output/association_overall_direct
+#     - output/association_overall_indirect
+#   pts_search_facet:
+#     - output/go
+#   pts_search:
+#     - output/association_overall_indirect
+#     - output/drug_molecule
+#     - output/evidence_* (all 23 evidence_postprocess_* datasets)
+#     - output/clinical_indication
+#     - output/credible_set
+#     - output/disease_phenotype
+#     - output/disease_hpo
+#     - output/study
+#     - output/variant
+#   pts_interaction:
+#     - input/interaction/rna_central_ensembl.tsv
+#     - input/interaction/HUMAN_9606_idmapping.dat.gz
+#     - input/interaction/Homo_sapiens.GRCh38.chr.gtf.gz
+#     - input/interaction/intact-interactors.json
+#     - input/interaction/string-interactions.txt.gz
 #
 # IMPORTANT: any dependency change has to be reflected here _manually_.
 #
@@ -93,4 +133,33 @@ steps:
   pts_target_gene_essentiality:
     depends_on:
       - pis_target
+      - pts_target
+
+  # Downstream consumers touched by this PR
+  # (see the file-staging list in the header comment above)
+  pts_target_prioritisation:
+    depends_on:
+      - pts_target
+      - pts_target_tractability
+      - pts_safety_liability
+      - pts_chemical_probes
+      - pts_drug_mechanism_of_action
+  pts_association_otf:
+    depends_on:
+      - pts_target
+      - pts_disease
+      - pts_target_tractability
+  pts_search_facet:
+    depends_on:
+      - pts_disease
+      - pts_target
+      - pts_reactome
+      - pts_target_tractability
+  pts_search:
+    depends_on:
+      - pts_target
+      - pts_disease
+      - pts_drug_mechanism_of_action
+  pts_interaction:
+    depends_on:
       - pts_target
