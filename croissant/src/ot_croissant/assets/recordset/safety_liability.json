@@ -1,0 +1,79 @@
+[
+  {
+    "id": "biosamples",
+    "description": "Biosamples used in safety assessments"
+  },
+  {
+    "id": "biosamples/cellFormat",
+    "description": "Format of the biosample cells"
+  },
+  {
+    "id": "biosamples/cellId",
+    "description": "Cell identifier"
+  },
+  {
+    "id": "biosamples/cellLabel",
+    "description": "Label of the biosample cell"
+  },
+  {
+    "id": "biosamples/tissueId",
+    "description": "Tissue ID for the biosample"
+  },
+  {
+    "id": "biosamples/tissueLabel",
+    "description": "Label of the biosample tissue"
+  },
+  {
+    "id": "datasource",
+    "description": "Data source reporting the safety liability"
+  },
+  {
+    "id": "effects",
+    "description": "Effects reported for the safety event"
+  },
+  {
+    "id": "effects/direction",
+    "description": "Direction of the reported effect (e.g. increase or decrease)"
+  },
+  {
+    "id": "effects/dosing",
+    "description": "Dosing conditions related to the reported effect"
+  },
+  {
+    "id": "event",
+    "description": "Safety event associated with the target"
+  },
+  {
+    "id": "eventId",
+    "description": "Unique identifier for the safety event"
+  },
+  {
+    "id": "literature",
+    "description": "Literature references for the safety liability"
+  },
+  {
+    "id": "studies",
+    "description": "Studies related to safety assessments"
+  },
+  {
+    "id": "studies/description",
+    "description": "Description of the safety study"
+  },
+  {
+    "id": "studies/name",
+    "description": "Name of the safety study"
+  },
+  {
+    "id": "studies/type",
+    "description": "Type of safety study"
+  },
+  {
+    "id": "targetId",
+    "description": "Ensembl gene identifier of the target the safety liability was reported on [bioregistry:ensembl]",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "url",
+    "description": "URL linking to more details on the safety liability"
+  }
+]

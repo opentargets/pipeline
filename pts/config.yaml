@@ -378,9 +378,7 @@ steps:
     - name: pyspark target
       pyspark: target
       settings:
-        partition_count:
-          target: 3
-          gene_essentiality: 4
+        partition_count: 3
       source:
         ensembl: intermediate/target/ensembl/homo_sapiens.parquet
         gene_code: input/target/gencode/gencode.gff3.gz
@@ -399,14 +397,10 @@ steps:
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        tep: input/target/tep/tep.json.gz
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
         chembl: input/target/chembl/chembl_target.jsonl
-        gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
-      destination:
-        target: output/target
-        gene_essentiality: output/target_essentiality
+      destination: output/target
   ##################################################################################################
 
   #: TRANSCRIPT STEP :#################################################################################
@@ -459,7 +453,7 @@ steps:
         pharmacogenetics: output/pharmacogenomics
       destination: intermediate/target/safety.parquet
 
-  #: TARGET_GENE_ESSENTIALITY STEP :#### - part of target, pyspark tasks must run standalone for now
+  #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
     - name: pyspark gene_essentiality
       pyspark: gene_essentiality
@@ -471,9 +465,11 @@ steps:
         mutation_hotspots: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixHotspot.csv
         mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
-      destination: intermediate/target/gene-essentiality/essentiality.parquet
+        target: output/target
+      destination: output/target_essentiality
       settings:
         keep_only_essentials: false
+        partition_count: 4
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################

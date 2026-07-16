@@ -1028,15 +1028,6 @@ steps:
       source: ${latest_aopwiki}
       destination: input/target/safety/aopwiki.json
 
-    - name: find_latest tep
-      source: gs://otar001-core/TEPs
-      scratchpad_key: latest_tep
-    - name: copy tep
-      requires:
-        - find_latest tep
-      source: ${latest_tep}
-      destination: input/target/tep/tep.json.gz
-
     - name: find_latest tractability
       source: gs://otar001-core/Tractability
       scratchpad_key: latest_tractability

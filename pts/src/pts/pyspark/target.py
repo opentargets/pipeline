@@ -1,7 +1,13 @@
 """Target dataset generation.
 
-Ported from platform-etl-backend target step. Integrates ~15 data sources to
-produce the canonical target index used by the Open Targets Platform.
+Ported from platform-etl-backend target step. Produces the canonical target
+index used by the Open Targets Platform.
+
+TEP, gene essentiality, safety liabilities, tractability, chemical probes,
+and per-transcript data have all been extracted into their own standalone
+PTS modules (see gene_essentiality.py, safety_liability.py,
+target_tractability.py, chemical_probes.py, transcript.py) — this module
+only assembles the core target index.
 
 Scala sources ported:
     - Target.scala (main assembly)
@@ -16,7 +22,6 @@ Scala sources ported:
     - Ortholog.scala
     - ProteinClassification.scala
     - Reactome.scala
-    - Tep.scala
     - Uniprot.scala
 """
 
@@ -40,6 +45,7 @@ from pyspark.sql.types import (
 from pyspark.sql.window import Window
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import maybe_coalesce
 from pts.pyspark.common.utils import safe_array_union as _safe_array_union
 
 # ---------------------------------------------------------------------------
@@ -58,7 +64,6 @@ REQUIRED_OUTPUT_COLUMNS = {
     'subcellularLocations',
     'targetClass',
     'hallmarks',
-    'tep',
     'synonyms',
     'symbolSynonyms',
     'nameSynonyms',
@@ -103,7 +108,7 @@ _PROTEIN_SOURCE_PRIORITY = {
 
 def target(
     source: dict[str, str],
-    destination: dict[str, str],
+    destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
@@ -111,7 +116,7 @@ def target(
 
     Args:
         source: Mapping of logical input names to paths.
-        destination: Dict with keys 'target' and 'gene_essentiality' output paths.
+        destination: Output path for the target parquet dataset.
         settings: Step settings (hgncOrthologSpecies list, etc.).
         properties: Spark properties.
     """
@@ -129,7 +134,6 @@ def target(
     go_rna_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_rna'])
     go_rna_lookup_raw = spark.read.option('sep', '\t').csv(source['gene_ontology_rna_lookup'])
     go_eco_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_eco_lookup'])
-    tep_raw = spark.read.json(source['tep'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
     chembl_raw = spark.read.json(source['chembl'])
@@ -147,7 +151,6 @@ def target(
     )
     reactome_pathways_raw = spark.read.option('sep', '\t').csv(source['reactome_pathways'])
     reactome_etl_raw = spark.read.parquet(source['reactome_etl'])
-    gene_essentiality_raw = spark.read.parquet(source['gene_essentiality'])
 
     # Uniprot is a gzipped XML flat-file — we read a pre-processed parquet
     # produced by the pts_target pre-processing step (uniprot XML→parquet).
@@ -193,9 +196,6 @@ def target(
 
     logger.info('Building Gene Ontology')
     go_df = _build_gene_ontology(go_human_raw, go_rna_raw, go_rna_lookup_raw, go_eco_raw, ensembl_df)
-
-    logger.info('Building TEP')
-    tep_df = _build_tep(tep_raw)
 
     logger.info('Building HPA subcellular locations')
     hpa_df = _build_gene_with_location(hpa_raw, hpa_sl_raw)
@@ -282,14 +282,10 @@ def target(
         .persist()
     )
 
-    logger.info('Building ENSG→symbol lookup')
-    ensg_lookup = _generate_ensg_lookup(target_interim).persist()
-
     logger.info('Assembling final target DataFrame')
     targets_df = (
         target_interim
         .join(genetic_constraints_df, 'id', 'left_outer')
-        .transform(lambda df: _add_tep(df, tep_df, ensg_lookup))
         .transform(_filter_and_sort_protein_ids)
         .transform(_remove_redundant_xrefs)
         .transform(lambda df: _add_orthologues(df, homology_df))
@@ -299,19 +295,8 @@ def target(
         .transform(_add_tss)
     )
 
-    partition_count = settings.get('partition_count') or {}
-
-    logger.info(f'Writing target output to {destination["target"]}')
-    target_parts = partition_count.get('target') if isinstance(partition_count, dict) else None
-    out_targets = targets_df.coalesce(target_parts) if target_parts else targets_df
-    out_targets.write.mode('overwrite').parquet(destination['target'])
-
-    logger.info('Building gene essentiality output')
-    gene_essentiality_df = _build_gene_essentiality_output(gene_essentiality_raw, ensg_lookup)
-    logger.info(f'Writing gene essentiality output to {destination["gene_essentiality"]}')
-    essentiality_parts = partition_count.get('gene_essentiality') if isinstance(partition_count, dict) else None
-    out_essentiality = gene_essentiality_df.coalesce(essentiality_parts) if essentiality_parts else gene_essentiality_df
-    out_essentiality.write.mode('overwrite').parquet(destination['gene_essentiality'])
+    logger.info(f'Writing target output to {destination}')
+    maybe_coalesce(targets_df, settings.get('partition_count')).write.mode('overwrite').parquet(destination)
 
 
 # ===========================================================================
@@ -1427,28 +1412,6 @@ def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame
 
 
 # ===========================================================================
-# Tep.scala → _build_tep
-# ===========================================================================
-
-
-def _build_tep(df: DataFrame) -> DataFrame:
-    """Build TEP (Target Enabling Package) DataFrame.
-
-    Args:
-        df: Raw TEP JSON.
-
-    Returns:
-        DataFrame with [targetFromSourceId, description, therapeuticArea, url].
-    """
-    return df.select(
-        f.trim(f.col('targetFromSourceId')).alias('targetFromSourceId'),
-        f.trim(f.col('description')).alias('description'),
-        f.trim(f.col('therapeuticArea')).alias('therapeuticArea'),
-        f.trim(f.col('url')).alias('url'),
-    )
-
-
-# ===========================================================================
 # Assembly helpers (mirrors Target.scala private methods)
 # ===========================================================================
 
@@ -1553,102 +1516,6 @@ def _add_protein_classification_to_uniprot(
     )
 
     return uniprot_df.join(pc_with_uniprot, 'uniprotId', 'left_outer')
-
-
-def _generate_ensg_lookup(df: DataFrame) -> DataFrame:
-    """Generate ENSG → symbol / uniprot / HGNC lookup table."""
-    safe_union = _safe_array_union
-
-    return (
-        df
-        .select(
-            'id',
-            f.col('proteinIds.id').alias('pid'),
-            f.array(f.col('approvedSymbol')).alias('as_arr'),
-            f.filter(f.col('synonyms'), lambda c: c.getField('source') == 'uniprot').alias('uniprot'),
-            f.filter(f.col('synonyms'), lambda c: c.getField('source') == 'HGNC').alias('HGNC_syns'),
-            f.array_distinct(
-                safe_union(
-                    f.col('proteinIds.id'),
-                    f.col('symbolSynonyms.label'),
-                    f.col('obsoleteSymbols.label') if 'obsoleteSymbols' in df.columns else f.array(),
-                    f.array(f.col('approvedSymbol')),
-                )
-            ).alias('symbols'),
-        )
-        .select(
-            'id',
-            f.flatten(f.array(f.col('pid'), f.col('as_arr'))).alias('name'),
-            f.col('uniprot.label').alias('uniprot'),
-            f.col('HGNC_syns.label').alias('HGNC'),
-            'symbols',
-        )
-        .select(
-            f.col('id').alias('ensgId'),
-            f.col('name'),
-            'uniprot',
-            'HGNC',
-            'symbols',
-        )
-    )
-
-
-def _build_gene_essentiality_output(
-    essentiality_df: DataFrame,
-    ensg_lookup: DataFrame,
-) -> DataFrame:
-    """Build gene essentiality output mapped to ENSG IDs.
-
-    Ports addGeneEssentiality from Target.scala.
-
-    Args:
-        essentiality_df: Gene essentiality intermediate with targetSymbol column.
-        ensg_lookup: ENSG→symbol lookup from _generate_ensg_lookup.
-
-    Returns:
-        DataFrame with [id, geneEssentiality] where geneEssentiality is a list
-        of essentiality structs per ENSG ID.
-    """
-    lookup = (
-        ensg_lookup
-        .select('ensgId', 'name')
-        .withColumn('approvedTarget', f.explode('name'))
-        .drop('name')
-        .orderBy('approvedTarget')
-    )
-    essentiality_cols = [c for c in essentiality_df.columns if c != 'targetSymbol']
-    essentiality_with_ensg = (
-        essentiality_df
-        .join(lookup, lookup['approvedTarget'] == essentiality_df['targetSymbol'], 'inner')
-        .drop(*[c for c in lookup.columns if c != 'ensgId'])
-        .drop('targetSymbol')
-    )
-    return (
-        essentiality_with_ensg
-        .select(
-            f.col('ensgId').alias('id'),
-            f.struct(*[f.col(c) for c in essentiality_cols]).alias('ts'),
-        )
-        .groupBy('id')
-        .agg(f.collect_list('ts').alias('geneEssentiality'))
-    )
-
-
-def _add_tep(df: DataFrame, tep_df: DataFrame, lookup: DataFrame) -> DataFrame:
-    """Join TEP data using symbol→ENSG lookup."""
-    lut = (
-        lookup.select(f.col('ensgId').alias('id'), 'symbols').withColumn('symbol', f.explode('symbols')).drop('symbols')
-    )
-
-    tep_fields = ['targetFromSourceId', 'description', 'therapeuticArea', 'url']
-    tep_with_id = (
-        tep_df
-        .join(lut, lut['symbol'] == tep_df['targetFromSourceId'])
-        .withColumn('tep', f.struct(*tep_fields))
-        .select('id', 'tep')
-    )
-
-    return df.join(tep_with_id, 'id', 'left_outer')
 
 
 def _filter_and_sort_protein_ids(df: DataFrame) -> DataFrame:
