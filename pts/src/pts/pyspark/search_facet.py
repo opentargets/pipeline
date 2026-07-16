@@ -108,15 +108,15 @@ def _compute_therapeutic_areas_facets(disease_df: DataFrame, categories: dict[st
 # ---------------------------------------------------------------------------
 
 
-def _compute_tractability_facets(target_df: DataFrame, categories: dict[str, str]) -> DataFrame:
+def _compute_tractability_facets(tractability_df: DataFrame, categories: dict[str, str]) -> DataFrame:
     """Compute tractability facets.
 
-    Explodes the tractability array, filters to value=True, maps modality codes
-    to human-readable category labels (SM→'Tractability Small Molecule', etc.).
+    Filters the flat target_tractability dataset to value=True, maps modality
+    codes to human-readable category labels (SM→'Tractability Small Molecule', etc.).
 
     Args:
-        target_df: DataFrame with columns id, tractability (array of structs with
-            modality, id, value).
+        tractability_df: target_tractability dataset with columns targetId,
+            modality, id, value.
         categories: category label mapping.
 
     Returns:
@@ -134,16 +134,13 @@ def _compute_tractability_facets(target_df: DataFrame, categories: dict[str, str
         f.lit(categories['oc']),
     )
     return (
-        target_df
-        .where(f.col('tractability').isNotNull())
-        .select(f.col('id'), f.explode('tractability').alias('t'))
-        .select(
-            f.col('id').alias('ensemblGeneId'),
-            f.col('t.modality').alias('category'),
-            f.col('t.id').alias('label'),
-            f.col('t.value').alias('value'),
-        )
+        tractability_df
         .where(f.col('value'))
+        .select(
+            f.col('targetId').alias('ensemblGeneId'),
+            f.col('modality').alias('category'),
+            f.col('id').alias('label'),
+        )
         .groupBy('category', 'label')
         .agg(f.collect_set('ensemblGeneId').alias('entityIds'))
         .withColumn(
@@ -354,7 +351,8 @@ def search_facet(
     results to the configured destination paths.
 
     Args:
-        source: Input paths keyed by 'diseases', 'targets', 'go'.
+        source: Input paths keyed by 'diseases', 'targets', 'go', 'reactome',
+            'tractability' (output/target_tractability).
         destination: Output paths keyed by 'targets', 'diseases'.
         settings: Step settings; may contain a 'categories' sub-dict to override
             the default category labels.
@@ -376,6 +374,9 @@ def search_facet(
     logger.info('Loading Reactome data from %s', source['reactome'])
     reactome_df = spark.read.parquet(source['reactome'])
 
+    logger.info('Loading tractability data from %s', source['tractability'])
+    tractability_df = spark.read.parquet(source['tractability'])
+
     # ---- disease facets ----
     disease_facets = _compute_disease_name_facets(disease_df, categories).unionByName(
         _compute_therapeutic_areas_facets(disease_df, categories)
@@ -390,7 +391,7 @@ def search_facet(
         .unionByName(_compute_subcellular_location_facets(target_df, categories))
         .unionByName(_compute_target_class_facets(target_df, categories))
         .unionByName(_compute_pathway_facets(target_df, reactome_df, categories))
-        .unionByName(_compute_tractability_facets(target_df, categories))
+        .unionByName(_compute_tractability_facets(tractability_df, categories))
     )
 
     logger.info('Writing target facets to %s', destination['targets'])

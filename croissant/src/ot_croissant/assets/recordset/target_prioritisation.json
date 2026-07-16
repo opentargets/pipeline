@@ -32,10 +32,6 @@
     "description": "Indicates if the target has at least one small molecule binder"
   },
   {
-    "id": "hasTEP",
-    "description": "Indicates if a Target Enabling Package (TEP) is available for the target"
-  },
-  {
     "id": "isCancerDriverGene",
     "description": "Indicates if the target is identified as a cancer driver gene"
   },

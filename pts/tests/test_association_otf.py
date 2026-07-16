@@ -180,44 +180,37 @@ class TestComputeFacetTractability:
 
     _cached_result: DataFrame
 
+    TARGETS_SCHEMA = t.StructType().add('targetId', t.StringType())
+
+    TARGETS_DATASET = [('T1',), ('T2',), ('T3',)]
+
     TRACTABILITY_SCHEMA = (
         t
         .StructType()
         .add('targetId', t.StringType())
-        .add(
-            'tractability',
-            t.ArrayType(
-                t.StructType().add('id', t.StringType()).add('modality', t.StringType()).add('value', t.BooleanType())
-            ),
-        )
+        .add('modality', t.StringType())
+        .add('id', t.StringType())
+        .add('value', t.BooleanType())
     )
 
-    DATASET = [
-        (
-            'T1',
-            [
-                {'id': 'sm_1', 'modality': 'SM', 'value': True},
-                {'id': 'sm_2', 'modality': 'SM', 'value': False},
-                {'id': 'ab_1', 'modality': 'AB', 'value': True},
-                {'id': 'pr_1', 'modality': 'PR', 'value': True},
-                {'id': 'oc_1', 'modality': 'OC', 'value': True},
-            ],
-        ),
-        (
-            'T2',
-            [
-                {'id': 'sm_x', 'modality': 'SM', 'value': False},
-                {'id': 'ab_x', 'modality': 'AB', 'value': False},
-            ],
-        ),
-        ('T3', None),
+    # T3 has no tractability rows at all — mirrors output/target_tractability,
+    # which only carries rows for targets that were actually assessed.
+    TRACTABILITY_DATASET = [
+        ('T1', 'SM', 'sm_1', True),
+        ('T1', 'SM', 'sm_2', False),
+        ('T1', 'AB', 'ab_1', True),
+        ('T1', 'PR', 'pr_1', True),
+        ('T1', 'OC', 'oc_1', True),
+        ('T2', 'SM', 'sm_x', False),
+        ('T2', 'AB', 'ab_x', False),
     ]
 
     @pytest.fixture(autouse=True)
     def _setup(self: TestComputeFacetTractability, spark: SparkSession) -> None:
         if '_cached_result' not in TestComputeFacetTractability.__dict__:
-            df = spark.createDataFrame(self.DATASET, schema=self.TRACTABILITY_SCHEMA)
-            result = _compute_facet_tractability(df)
+            targets_df = spark.createDataFrame(self.TARGETS_DATASET, schema=self.TARGETS_SCHEMA)
+            tractability_df = spark.createDataFrame(self.TRACTABILITY_DATASET, schema=self.TRACTABILITY_SCHEMA)
+            result = _compute_facet_tractability(targets_df, tractability_df)
             result.cache()
             result.count()  # materialize
             TestComputeFacetTractability._cached_result = result
@@ -233,13 +226,9 @@ class TestComputeFacetTractability:
         }
         assert expected.issubset(set(self.result.columns))
 
-    def test_miid_column_removed(self: TestComputeFacetTractability) -> None:
-        """The temporary monotonically_increasing_id column should be dropped."""
-        assert 'miid' not in self.result.columns
-
     def test_row_count_preserved(self: TestComputeFacetTractability) -> None:
-        """All original rows should be preserved."""
-        assert self.result.count() == len(self.DATASET)
+        """All original target rows should be preserved (left join)."""
+        assert self.result.count() == len(self.TARGETS_DATASET)
 
     def test_only_true_values_kept(self: TestComputeFacetTractability) -> None:
         """Only tractability entries with value=True should appear."""
@@ -262,7 +251,10 @@ class TestComputeFacetTractability:
         assert t2_row['facetTractabilitySmallmolecule'] == []
         assert t2_row['facetTractabilityAntibody'] == []
 
-    def test_null_tractability_handled(self: TestComputeFacetTractability) -> None:
-        """Targets with null tractability should still be present."""
+    def test_target_with_no_tractability_rows_still_present(
+        self: TestComputeFacetTractability,
+    ) -> None:
+        """Targets absent from target_tractability should still be present via the left join."""
         t3_row = self.result.filter(f.col('targetId') == 'T3').first()
         assert t3_row is not None
+        assert t3_row['facetTractabilitySmallmolecule'] is None
