@@ -12,8 +12,8 @@ run_name: 'ds/target_refactor'
 is_ppp: true
 
 # Pipeline package versions
-pis_version: 'v26.9.0.dev0.refactor-target.b0505da'
-pts_version: 'v26.9.0.dev0.refactor-target.b0505da'
+pis_version: '26.9.0.dev0.refactor-target.0389bb9'
+pts_version: '26.9.0.dev0.refactor-target.0389bb9'
 gentropy_version: '3.3.0-rc.1'
 vep_version: 'release_115.2'
 
@@ -66,16 +66,12 @@ steps:
   pts_pre_target:
     depends_on:
       - pis_target
-  pts_target_gene_essentiality:
-    depends_on:
-      - pis_target
 
   pts_target:
     num_partitions: 10
     depends_on:
       - pts_pre_target
       - pts_reactome
-      - pts_target_gene_essentiality
 
   # Steps extracted from pts_target
   pts_transcript:
@@ -93,4 +89,8 @@ steps:
     depends_on:
       - pis_target
       - pts_chembl_molecule
+      - pts_target
+  pts_target_gene_essentiality:
+    depends_on:
+      - pis_target
       - pts_target

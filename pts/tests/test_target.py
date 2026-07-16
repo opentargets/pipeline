@@ -695,7 +695,6 @@ REQUIRED_OUTPUT_COLUMNS = {
     'subcellularLocations',
     'targetClass',
     'hallmarks',
-    'tep',
 }
 
 

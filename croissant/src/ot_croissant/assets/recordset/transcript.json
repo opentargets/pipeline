@@ -1,0 +1,84 @@
+[
+  {
+    "id": "biotype",
+    "description": "Biotype classification of the transcript"
+  },
+  {
+    "id": "chromosome",
+    "description": "Chromosome on which the transcript is located"
+  },
+  {
+    "id": "end",
+    "description": "Genomic end position of the transcript"
+  },
+  {
+    "id": "exons",
+    "description": "List of exons that make up the transcript"
+  },
+  {
+    "id": "exons/chromosome",
+    "description": "Chromosome on which the exon is located"
+  },
+  {
+    "id": "exons/end",
+    "description": "Genomic end position of the exon"
+  },
+  {
+    "id": "exons/exonId",
+    "description": "Ensembl identifier of the exon (ENSE###) [bioregistry:ensembl]"
+  },
+  {
+    "id": "exons/start",
+    "description": "Genomic start position of the exon"
+  },
+  {
+    "id": "exons/strand",
+    "description": "Strand orientation of the exon"
+  },
+  {
+    "id": "flags",
+    "description": "List of curation flags describing the transcript (e.g. MANE, APPRIS, GENCODE Primary, Ensembl canonical)"
+  },
+  {
+    "id": "flags/label",
+    "description": "Category of the transcript flag (e.g. mane, appris, gencode_primary, ensembl_canonical)"
+  },
+  {
+    "id": "flags/value",
+    "description": "Value of the transcript flag within its category"
+  },
+  {
+    "id": "isEnsemblCanonical",
+    "description": "Flag indicating if the transcript is the Ensembl canonical transcript for the gene"
+  },
+  {
+    "id": "proteinId",
+    "description": "Ensembl protein identifier for the transcript (ENSP###); null for non-coding transcripts [bioregistry:ensembl]"
+  },
+  {
+    "id": "start",
+    "description": "Genomic start position of the transcript"
+  },
+  {
+    "id": "strand",
+    "description": "Strand orientation of the transcript"
+  },
+  {
+    "id": "targetId",
+    "description": "Ensembl gene identifier of the target the transcript belongs to [bioregistry:ensembl]",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "transcriptId",
+    "description": "Ensembl identifier of the transcript (ENST###) [bioregistry:ensembl]",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "transcriptionStartSite",
+    "description": "Transcription Start Site (TSS) genomic position, derived from the transcript's strand and coordinates"
+  },
+  {
+    "id": "uniprotIds",
+    "description": "UniProt identifiers of the protein translated from the transcript"
+  }
+]

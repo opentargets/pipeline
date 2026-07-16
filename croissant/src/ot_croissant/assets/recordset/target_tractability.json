@@ -1,0 +1,19 @@
+[
+  {
+    "id": "id",
+    "description": "Identifier of the tractability bucket assessed (e.g. clinical phase, structural evidence source)"
+  },
+  {
+    "id": "modality",
+    "description": "Drug modality the tractability assessment applies to (e.g. Small molecule, Antibody)"
+  },
+  {
+    "id": "targetId",
+    "description": "Ensembl gene identifier of the assessed target [bioregistry:ensembl]",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "value",
+    "description": "Boolean outcome of the tractability bucket assessment"
+  }
+]
