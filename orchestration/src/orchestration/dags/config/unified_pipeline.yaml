@@ -12,8 +12,8 @@ run_name: 'ds/target_refactor'
 is_ppp: true
 
 # Pipeline package versions
-pis_version: '26.9.0.dev0.refactor-target.0389bb9'
-pts_version: '26.9.0.dev0.refactor-target.0389bb9'
+pis_version: '26.9.0.dev0.refactor-target.671c87e'
+pts_version: '26.9.0.dev0.refactor-target.671c87e'
 gentropy_version: '3.3.0-rc.1'
 vep_version: 'release_115.2'
 
