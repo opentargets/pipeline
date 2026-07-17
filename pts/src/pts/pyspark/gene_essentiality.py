@@ -100,19 +100,19 @@ def _resolve_target_ids(essentiality_df: DataFrame, ensg_lookup: DataFrame) -> D
         ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
 
     Returns:
-        DataFrame with [id, geneEssentiality] where geneEssentiality is a list
-        of essentiality structs per ENSG ID.
+        DataFrame with [targetId, isEssential, depMapEssentiality], one row per
+        ENSG ID. Rows are merged when more than one ``targetSymbol`` resolves
+        to the same ENSG ID (e.g. via a shared protein accession).
     """
-    essentiality_cols = [c for c in essentiality_df.columns if c != 'targetSymbol']
     return (
         essentiality_df
         .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetSymbol')), 'inner')
-        .select(
-            f.col('ensgId').alias('id'),
-            f.struct(*[f.col(c) for c in essentiality_cols]).alias('ts'),
+        .select(f.col('ensgId').alias('targetId'), 'isEssential', 'depMapEssentiality')
+        .groupBy('targetId')
+        .agg(
+            f.max('isEssential').alias('isEssential'),
+            f.array_distinct(f.flatten(f.collect_list('depMapEssentiality'))).alias('depMapEssentiality'),
         )
-        .groupBy('id')
-        .agg(f.collect_list('ts').alias('geneEssentiality'))
     )
 
 
