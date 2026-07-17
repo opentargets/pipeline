@@ -61,7 +61,7 @@ def test_build_ensg_lookup_output_columns(spark):
 
 
 def test_resolve_target_ids_output_columns(spark):
-    """Output has exactly id and geneEssentiality columns."""
+    """Output has exactly targetId, isEssential and depMapEssentiality columns."""
     essentiality = spark.createDataFrame(
         [Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
     )
@@ -70,7 +70,7 @@ def test_resolve_target_ids_output_columns(spark):
     )
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
-    assert set(result.columns) == {'id', 'geneEssentiality'}
+    assert set(result.columns) == {'targetId', 'isEssential', 'depMapEssentiality'}
 
 
 def test_resolve_target_ids_resolves_symbol_to_ensg(spark):
@@ -85,7 +85,7 @@ def test_resolve_target_ids_resolves_symbol_to_ensg(spark):
     result = _resolve_target_ids(essentiality, lut)
     row = result.first()
     assert row is not None
-    assert row.id == 'ENSG00000001'
+    assert row.targetId == 'ENSG00000001'
 
 
 def test_resolve_target_ids_drops_unresolvable_rows(spark):
@@ -101,8 +101,8 @@ def test_resolve_target_ids_drops_unresolvable_rows(spark):
     assert result.count() == 0
 
 
-def test_resolve_target_ids_groups_multiple_entries_per_target(spark):
-    """Multiple essentiality rows for the same target are collected into one array."""
+def test_resolve_target_ids_merges_multiple_entries_per_target(spark):
+    """Multiple essentiality rows resolving to the same target are merged into one row."""
     essentiality = spark.createDataFrame([
         Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=['a']),
         Row(targetSymbol='GENE1', isEssential=False, depMapEssentiality=['b']),
@@ -115,23 +115,5 @@ def test_resolve_target_ids_groups_multiple_entries_per_target(spark):
     assert result.count() == 1
     row = result.first()
     assert row is not None
-    assert len(row.geneEssentiality) == 2
-
-
-def test_resolve_target_ids_struct_excludes_target_symbol(spark):
-    """The geneEssentiality struct does not carry the now-redundant targetSymbol field."""
-    essentiality = spark.createDataFrame(
-        [Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
-    )
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA
-    )
-    lut = _build_ensg_lookup(target)
-    result = _resolve_target_ids(essentiality, lut)
-    array_type = result.schema['geneEssentiality'].dataType
-    assert isinstance(array_type, ArrayType)
-    element_type = array_type.elementType
-    assert isinstance(element_type, StructType)
-    struct_fields = {f.name for f in element_type.fields}
-    assert 'targetSymbol' not in struct_fields
-    assert struct_fields == {'isEssential', 'depMapEssentiality'}
+    assert row.isEssential is True
+    assert set(row.depMapEssentiality) == {'a', 'b'}
