@@ -76,7 +76,7 @@ def chemical_probes(
     )
 
     ensg_lookup = _build_ensg_lookup(target_df)
-    result = _resolve_targets(evidence, ensg_lookup)
+    result = _resolve_targets(evidence, ensg_lookup).filter(f.col('targetId').isNotNull())
 
     partition_count = (settings or {}).get('partition_count', 2)
     maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
