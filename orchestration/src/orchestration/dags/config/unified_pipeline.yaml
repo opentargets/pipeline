@@ -13,16 +13,16 @@ is_ppp: true
 
 # Pipeline package versions
 pis_version: '26.9.0.dev0.refactor-target.671c87e'
-pts_version: '26.9.0.dev0.refactor-target.671c87e'
+pts_version: '26.9.0.dev0.refactor-target.c36addae'
 gentropy_version: '3.3.0-rc.1'
 vep_version: 'release_115.2'
 
 # Dependency graph
 # ----------------
-# Trimmed copy of unified_pipeline.yaml containing pts_target, the four
+# Trimmed copy of unified_pipeline.yaml containing pts_target, the five
 # steps extracted from it (pts_transcript, pts_safety_liability,
-# pts_target_tractability, pts_chemical_probes), and the downstream
-# consumers this PR touched (pts_target_prioritisation, pts_association_otf,
+# pts_target_tractability, pts_chemical_probes, pts_homologues), and the
+# downstream consumers this PR touched (pts_target_prioritisation, pts_association_otf,
 # pts_search_facet, pts_search, pts_interaction), plus their transitive
 # dependency closure *within this trimmed set only*. Used for local testing
 # without needing to run the entire pipeline DAG.
@@ -125,6 +125,9 @@ steps:
   pts_target_tractability:
     depends_on:
       - pts_target
+  pts_homologues:
+    depends_on:
+      - pts_target
   pts_chemical_probes:
     depends_on:
       - pis_target
@@ -143,6 +146,7 @@ steps:
       - pts_target_tractability
       - pts_safety_liability
       - pts_chemical_probes
+      - pts_homologues
       - pts_drug_mechanism_of_action
   pts_association_otf:
     depends_on:
