@@ -161,46 +161,6 @@
     "description": "PubMed ID of the supporting literature for the cancer hallmark [bioregistry:pubmed]"
   },
   {
-    "id": "homologues",
-    "description": "Homologues of the target gene in other species"
-  },
-  {
-    "id": "homologues/homologyType",
-    "description": "Type of homology relationship"
-  },
-  {
-    "id": "homologues/isHighConfidence",
-    "description": "Indicates if the homology is high confidence"
-  },
-  {
-    "id": "homologues/priority",
-    "description": "Priority score for the homologue"
-  },
-  {
-    "id": "homologues/queryPercentageIdentity",
-    "description": "Percentage identity of the query gene in the homologue"
-  },
-  {
-    "id": "homologues/speciesId",
-    "description": "Species ID for the homologue"
-  },
-  {
-    "id": "homologues/speciesName",
-    "description": "Species name for the homologue"
-  },
-  {
-    "id": "homologues/targetGeneId",
-    "description": "Target gene ID of the homologue"
-  },
-  {
-    "id": "homologues/targetGeneSymbol",
-    "description": "Gene symbol of the homologous target"
-  },
-  {
-    "id": "homologues/targetPercentageIdentity",
-    "description": "Percentage identity of the homologue in the query gene"
-  },
-  {
     "id": "id",
     "description": "Unique identifier for the target [bioregistry:ensembl]",
     "isPrimaryKey": true

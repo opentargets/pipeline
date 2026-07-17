@@ -1,16 +1,18 @@
 """Tests for the target_prioritisation pyspark module.
 
 Covers the query functions that were migrated off output/target's removed
-tractability, safetyLiabilities, and chemicalProbes fields onto the
-standalone target_tractability, safety_liability, and chemical_probes
-datasets, so that _ligand_pocket_query/_safety_query/_chemical_probes_query
-work against the current output/target schema instead of crashing on a
-missing column.
+tractability, safetyLiabilities, chemicalProbes, and homologues fields onto
+the standalone target_tractability, safety_liability, chemical_probes, and
+homologues datasets, so that _ligand_pocket_query/_safety_query/
+_chemical_probes_query/_paralogs_query/_orthologs_mouse_query work against
+the current output/target schema instead of crashing on a missing column.
 """
 
 from pyspark.sql import Row
 from pyspark.sql.types import (
     BooleanType,
+    DoubleType,
+    IntegerType,
     StringType,
     StructField,
     StructType,
@@ -19,6 +21,8 @@ from pyspark.sql.types import (
 from pts.pyspark.target_prioritisation import (
     _chemical_probes_query,
     _ligand_pocket_query,
+    _orthologs_mouse_query,
+    _paralogs_query,
     _safety_query,
 )
 
@@ -37,6 +41,19 @@ SAFETY_LIABILITY_SCHEMA = StructType([
 CHEMICAL_PROBES_SCHEMA = StructType([
     StructField('targetId', StringType()),
     StructField('isHighQuality', BooleanType()),
+])
+
+HOMOLOGUES_SCHEMA = StructType([
+    StructField('targetId', StringType()),
+    StructField('speciesId', StringType()),
+    StructField('speciesName', StringType()),
+    StructField('homologyType', StringType()),
+    StructField('targetGeneId', StringType()),
+    StructField('isHighConfidence', StringType()),
+    StructField('targetGeneSymbol', StringType()),
+    StructField('queryPercentageIdentity', DoubleType()),
+    StructField('targetPercentageIdentity', DoubleType()),
+    StructField('priority', IntegerType()),
 ])
 
 
@@ -177,3 +194,131 @@ def test_chemical_probes_query_drops_unresolved_target_id(spark):
     row = result.filter('targetid = "T1"').first()
     assert row is not None
     assert row.Nr_chprob is None
+
+
+# ---------------------------------------------------------------------------
+# _paralogs_query
+# ---------------------------------------------------------------------------
+
+
+def _homologue_row(**kwargs):
+    defaults = {
+        'targetId': 'T1',
+        'speciesId': '9606',
+        'speciesName': 'Human',
+        'homologyType': 'other_paralog',
+        'targetGeneId': 'T2',
+        'isHighConfidence': '1',
+        'targetGeneSymbol': 'GENE2',
+        'queryPercentageIdentity': 70.0,
+        'targetPercentageIdentity': 65.0,
+        'priority': 0,
+    }
+    defaults.update(kwargs)
+    return Row(**defaults)
+
+
+def test_paralogs_query_scores_high_identity_paralog(spark):
+    """A paralog with queryPercentageIdentity above 60 produces a negative Nr_paralogs score."""
+    homologues = spark.createDataFrame(
+        [_homologue_row(homologyType='other_paralog', queryPercentageIdentity=80.0)], HOMOLOGUES_SCHEMA
+    )
+    result = _paralogs_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_paralogs == -0.5
+
+
+def test_paralogs_query_low_identity_paralog_scores_zero(spark):
+    """A paralog with queryPercentageIdentity below 60 produces Nr_paralogs=0."""
+    homologues = spark.createDataFrame(
+        [_homologue_row(homologyType='within_species_paralog', queryPercentageIdentity=40.0)], HOMOLOGUES_SCHEMA
+    )
+    result = _paralogs_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_paralogs == 0
+
+
+def test_paralogs_query_ignores_orthologs(spark):
+    """A non-paralog homologyType (ortholog) is excluded from the paralog score."""
+    homologues = spark.createDataFrame(
+        [_homologue_row(homologyType='ortholog_one2one', queryPercentageIdentity=95.0)], HOMOLOGUES_SCHEMA
+    )
+    result = _paralogs_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_paralogs is None
+
+
+def test_paralogs_query_target_with_no_rows_is_kept(spark):
+    """A target absent from the homologues dataset is still present via the left join."""
+    homologues = spark.createDataFrame([], HOMOLOGUES_SCHEMA)
+    result = _paralogs_query(_queryset(spark, ['T1']), homologues)
+    assert result.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# _orthologs_mouse_query
+# ---------------------------------------------------------------------------
+
+
+def test_orthologs_mouse_query_scores_high_identity_mouse_ortholog(spark):
+    """A mouse ortholog with queryPercentageIdentity above 80 produces a positive Nr_ortholog score."""
+    homologues = spark.createDataFrame(
+        [
+            _homologue_row(
+                homologyType='ortholog_one2one',
+                speciesName='Mouse',
+                queryPercentageIdentity=90.0,
+            )
+        ],
+        HOMOLOGUES_SCHEMA,
+    )
+    result = _orthologs_mouse_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_ortholog == 0.5
+
+
+def test_orthologs_mouse_query_ignores_non_mouse_species(spark):
+    """An ortholog in a species other than mouse is excluded."""
+    homologues = spark.createDataFrame(
+        [
+            _homologue_row(
+                homologyType='ortholog_one2one',
+                speciesName='Zebrafish',
+                queryPercentageIdentity=95.0,
+            )
+        ],
+        HOMOLOGUES_SCHEMA,
+    )
+    result = _orthologs_mouse_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_ortholog is None
+
+
+def test_orthologs_mouse_query_ignores_mouse_paralogs(spark):
+    """A mouse row that is a paralog rather than an ortholog is excluded."""
+    homologues = spark.createDataFrame(
+        [
+            _homologue_row(
+                homologyType='other_paralog',
+                speciesName='Mouse',
+                queryPercentageIdentity=95.0,
+            )
+        ],
+        HOMOLOGUES_SCHEMA,
+    )
+    result = _orthologs_mouse_query(_queryset(spark, ['T1']), homologues)
+    row = result.filter('targetid = "T1"').first()
+    assert row is not None
+    assert row.Nr_ortholog is None
+
+
+def test_orthologs_mouse_query_target_with_no_rows_is_kept(spark):
+    """A target absent from the homologues dataset is still present via the left join."""
+    homologues = spark.createDataFrame([], HOMOLOGUES_SCHEMA)
+    result = _orthologs_mouse_query(_queryset(spark, ['T1']), homologues)
+    assert result.count() == 1

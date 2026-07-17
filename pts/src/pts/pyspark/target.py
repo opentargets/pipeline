@@ -1,28 +1,12 @@
 """Target dataset generation.
 
-Ported from platform-etl-backend target step. Produces the canonical target
-index used by the Open Targets Platform.
-
-TEP, gene essentiality, safety liabilities, tractability, chemical probes,
-and per-transcript data have all been extracted into their own standalone
-PTS modules (see gene_essentiality.py, safety_liability.py,
-target_tractability.py, chemical_probes.py, transcript.py) — this module
-only assembles the core target index.
-
-Scala sources ported:
-    - Target.scala (main assembly)
-    - Ensembl.scala
-    - GeneCode.scala
-    - GeneOntology.scala
-    - GeneticConstraints.scala
-    - GeneWithLocation.scala
-    - Hallmarks.scala
-    - Hgnc.scala
-    - Ncbi.scala
-    - Ortholog.scala
-    - ProteinClassification.scala
-    - Reactome.scala
-    - Uniprot.scala
+Produces the canonical target index used by the Open Targets Platform,
+assembling Ensembl, HGNC, Gene Ontology, UniProt, Reactome, genetic
+constraint, and NCBI data into one dataset. TEP, gene essentiality, safety
+liabilities, tractability, chemical probes, per-transcript data, and
+homologues each live in their own standalone PTS modules (see
+gene_essentiality.py, safety_liability.py, target_tractability.py,
+chemical_probes.py, transcript.py, homologues.py).
 """
 
 from __future__ import annotations
@@ -34,7 +18,6 @@ from loguru import logger
 from pyspark.sql import DataFrame
 from pyspark.sql.types import (
     ArrayType,
-    DoubleType,
     FloatType,
     IntegerType,
     LongType,
@@ -60,7 +43,6 @@ REQUIRED_OUTPUT_COLUMNS = {
     'pathways',
     'go',
     'constraint',
-    'homologues',
     'subcellularLocations',
     'targetClass',
     'hallmarks',
@@ -138,17 +120,6 @@ def target(
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
     chembl_raw = spark.read.json(source['chembl'])
     genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
-    homology_dict_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['homology_dictionary'])
-    homology_coding_proteins_raw = (
-        spark.read
-        .option('recursiveFileLookup', 'true')
-        .option('sep', '\t')
-        .option('header', 'true')
-        .csv(source['homology_coding_proteins'])
-    )
-    homology_gene_dict_raw = spark.read.option('recursiveFileLookup', 'true').parquet(
-        source['homology_gene_dictionary']
-    )
     reactome_pathways_raw = spark.read.option('sep', '\t').csv(source['reactome_pathways'])
     reactome_etl_raw = spark.read.parquet(source['reactome_etl'])
 
@@ -157,26 +128,6 @@ def target(
     # The pre-processing step writes a parquet with UniprotEntry fields.
     uniprot_raw = spark.read.parquet(source['uniprot'])
     uniprot_ssl_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['uniprot_ssl'])
-
-    # --- species whitelist from settings ------------------------------------
-    hgnc_ortholog_species: list[str] = settings.get(
-        'hgncOrthologSpecies',
-        [
-            '9606-human',
-            '9598-chimpanzee',
-            '9544-macaque',
-            '10090-mouse',
-            '10116-rat',
-            '9986-rabbit',
-            '10141-guineapig',
-            '9615-dog',
-            '9823-pig',
-            '8364-frog',
-            '7955-zebrafish',
-            '7227-fly',
-            '6239-worm',
-        ],
-    )
 
     # --- intermediate DataFrames --------------------------------------------
     logger.info('Building GeneCode canonical transcripts')
@@ -205,14 +156,6 @@ def target(
 
     logger.info('Building GeneticConstraints')
     genetic_constraints_df = _build_genetic_constraints(genetic_constraints_raw)
-
-    logger.info('Building Homologues')
-    homology_df = _build_homologues(
-        homology_dict_raw,
-        homology_coding_proteins_raw,
-        homology_gene_dict_raw,
-        hgnc_ortholog_species,
-    )
 
     logger.info('Building Reactome')
     reactome_df = _build_reactome(reactome_pathways_raw, reactome_etl_raw)
@@ -288,7 +231,6 @@ def target(
         .join(genetic_constraints_df, 'id', 'left_outer')
         .transform(_filter_and_sort_protein_ids)
         .transform(_remove_redundant_xrefs)
-        .transform(lambda df: _add_orthologues(df, homology_df))
         .transform(lambda df: _add_ncbi_synonyms(df, ncbi_df))
         .transform(lambda df: _add_reactome(df, reactome_df))
         .transform(_remove_duplicated_synonyms)
@@ -1107,111 +1049,6 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
 
 
 # ===========================================================================
-# Ortholog.scala → _build_homologues
-# ===========================================================================
-
-
-def _build_homologues(
-    homology_dict: DataFrame,
-    coding_proteins: DataFrame,
-    gene_dict: DataFrame,
-    target_species: list[str],
-) -> DataFrame:
-    """Build homologue/ortholog DataFrame.
-
-    Args:
-        homology_dict: Ensembl vertebrates species dictionary.
-        coding_proteins: Ensembl compara homologies TSV (protein + ncrna).
-        gene_dict: Gene ID → gene name mapping (pre-processed parquet).
-        target_species: Whitelisted species in format "TAXID-species_name".
-
-    Returns:
-        DataFrame with homolog fields including speciesId, speciesName, homologyType, etc.
-    """
-    # Extract tax IDs from whitelist
-    tax_ids = [s.split('-')[0] for s in target_species]
-    priority_df_data = [(s.split('-')[0], i) for i, s in enumerate(target_species)]
-
-    from pyspark.sql import SparkSession
-
-    spark = SparkSession.getActiveSession()
-    if spark is None:
-        raise RuntimeError('no active spark session found')
-    priority_df = spark.createDataFrame(priority_df_data, ['speciesId', 'priority']).withColumn(
-        'priority', f.col('priority').cast('int')
-    )
-
-    homo_dict = homology_dict.select(
-        f.col('#name').alias('name'),
-        f.col('species').alias('speciesName'),
-        f.col('taxonomy_id'),
-        f.array(*[f.lit(t) for t in tax_ids]).alias('whitelist'),
-    ).filter(f.array_contains(f.col('whitelist'), f.col('taxonomy_id')))
-
-    gene_dict_mapped = gene_dict.select(
-        f.col('id').alias('homology_gene_stable_id'),
-        f
-        .when(f.col('name').isNotNull() & (f.col('name') != ''), f.col('name'))
-        .otherwise(f.col('id'))
-        .alias('targetGeneSymbol'),
-    )
-
-    reference = 'homo_sapiens'
-
-    # homo_sapiens homologies
-    homo_sapiens_h = coding_proteins.filter(f.col('species') == reference)
-
-    # paralogs and cross-species
-    other_h = (
-        coding_proteins.filter(
-            (
-                (f.col('species') == reference)
-                & ((f.col('homology_type') == 'other_paralog') | (f.col('homology_type') == 'within_species_paralog'))
-            )
-            | ((f.col('species') != reference) & (f.col('homology_species') == reference))
-        )
-        # swap homo_sapiens ↔ homology columns
-        .select(
-            f.col('homology_gene_stable_id').alias('gene_stable_id'),
-            f.col('homology_protein_stable_id').alias('protein_stable_id'),
-            f.col('homology_species').alias('species'),
-            f.col('homology_identity').alias('identity'),
-            f.col('homology_type'),
-            f.col('gene_stable_id').alias('homology_gene_stable_id'),
-            f.col('protein_stable_id').alias('homology_protein_stable_id'),
-            f.col('species').alias('homology_species'),
-            f.col('identity').alias('homology_identity'),
-            f.col('dn'),
-            f.col('ds'),
-            f.col('goc_score'),
-            f.col('wga_coverage'),
-            f.col('is_high_confidence'),
-            f.col('homology_id'),
-        )
-    )
-
-    all_homologies = homo_sapiens_h.unionByName(other_h)
-
-    return (
-        all_homologies
-        .join(homo_dict, all_homologies['homology_species'] == homo_dict['speciesName'])
-        .join(gene_dict_mapped, 'homology_gene_stable_id', 'left_outer')
-        .select(
-            f.col('gene_stable_id').alias('id'),
-            f.col('taxonomy_id').alias('speciesId'),
-            f.col('name').alias('speciesName'),
-            f.col('homology_type').alias('homologyType'),
-            f.col('homology_gene_stable_id').alias('targetGeneId'),
-            f.col('is_high_confidence').alias('isHighConfidence'),
-            f.col('targetGeneSymbol'),
-            f.col('identity').cast(DoubleType()).alias('queryPercentageIdentity'),
-            f.col('homology_identity').cast(DoubleType()).alias('targetPercentageIdentity'),
-        )
-        .join(f.broadcast(priority_df), 'speciesId', 'left_outer')
-    )
-
-
-# ===========================================================================
 # Reactome.scala → _build_reactome
 # ===========================================================================
 
@@ -1591,49 +1428,6 @@ def _remove_redundant_xrefs(df: DataFrame) -> DataFrame:
     cols = [c for c in df.columns if c != 'dbXrefs']
     cols.append("filter(dbXrefs, s -> s.source != 'GO' and s.source != 'Ensembl') as dbXrefs")
     return df.selectExpr(*cols)
-
-
-def _add_orthologues(df: DataFrame, orthologs: DataFrame) -> DataFrame:
-    """Add homologues to target DataFrame."""
-    gene_symbols = df.select('id', 'approvedSymbol').cache()
-
-    paralog_symbols = gene_symbols.withColumnRenamed('approvedSymbol', 'paralogGeneSymbol').withColumnRenamed(
-        'id', 'paralogId'
-    )
-
-    homo_df = (
-        orthologs
-        .join(f.broadcast(gene_symbols), 'id')
-        .join(
-            f.broadcast(paralog_symbols),
-            f.col('paralogId') == f.col('targetGeneId'),
-            'left_outer',
-        )
-        .withColumn(
-            'targetGeneSymbol',
-            f.coalesce(
-                f.col('paralogGeneSymbol'),
-                f.col('targetGeneSymbol'),
-                f.col('approvedSymbol'),
-            ),
-        )
-        .drop('approvedSymbol', 'paralogGeneSymbol', 'paralogId')
-    )
-
-    homo_cols = [c for c in homo_df.columns if c != 'id']
-    grouped = (
-        homo_df
-        .select('id', f.struct(*homo_cols).alias('homologues'))
-        .groupBy('id')
-        .agg(f.collect_list('homologues').alias('homologues'))
-        # Sort by priority (ascending = closest species first)
-        .withColumn(
-            'homologues',
-            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)'),
-        )
-    )
-
-    return df.join(grouped, 'id', 'left_outer').drop('humanGeneId')
 
 
 def _add_ncbi_synonyms(df: DataFrame, ncbi: DataFrame) -> DataFrame:
