@@ -62,7 +62,10 @@ def gene_essentiality(
 
     logger.info('resolving ENSG IDs against output/target')
     ensg_lookup = _build_ensg_lookup(target_df)
-    result = _resolve_target_ids(aggregated_df, ensg_lookup)
+    result = (
+        _resolve_target_ids(aggregated_df, ensg_lookup)
+        .filter(f.col('targetId').isNotNull())
+    )
 
     partition_count = settings.get('partition_count')
     logger.info(f'writing output data to {destination}.')
