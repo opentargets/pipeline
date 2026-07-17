@@ -389,9 +389,6 @@ steps:
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
         hgnc: input/target/genenames/hgnc_complete_set.json
-        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
-        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
-        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
         hpa: intermediate/target/hpa/subcellular_location.tsv.gz
         hpa_sl: intermediate/target/hpa/subcellular_locations_ssl.parquet
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
@@ -438,6 +435,20 @@ steps:
         tractability: input/target/tractability/tractability.tsv
         target: output/target
       destination: output/target_tractability
+  ##################################################################################################
+
+  #: HOMOLOGUES STEP :###################################################################################
+  homologues:
+    - name: pyspark homologues
+      pyspark: homologues
+      settings:
+        partition_count: 2
+      source:
+        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
+        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
+        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
+        target: output/target
+      destination: output/homologues
   ##################################################################################################
 
   #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
@@ -804,6 +815,7 @@ steps:
         tractability: output/target_tractability
         safety_liability: output/safety_liability
         chemical_probes: output/chemical_probes
+        homologues: output/homologues
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action
