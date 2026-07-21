@@ -28,7 +28,7 @@ def target_prioritisation(
             - tractability: target_tractability parquet (output/target_tractability)
             - target_safety_event: target_safety_event parquet (output/target_safety_event)
             - chemical_probes: chemical_probes parquet (output/chemical_probes)
-            - homologues: homologues parquet (output/homologues)
+            - homology: homology parquet (output/homology)
             - mouse_phenotypes: Mouse phenotype parquet
             - molecule: Drug molecule parquet
             - mechanism_of_action: Mechanism of action parquet
@@ -47,7 +47,7 @@ def target_prioritisation(
     tractability_df = spark.load_data(source['tractability'])
     target_safety_event_df = spark.load_data(source['target_safety_event'])
     chemical_probes_df = spark.load_data(source['chemical_probes'])
-    homologues_df = spark.load_data(source['homologues'])
+    homology_df = spark.load_data(source['homology'])
     mouse_df = spark.load_data(source['mouse_phenotypes'])
     molecule_df = spark.load_data(source['molecule'])
     moa_df = spark.load_data(source['mechanism_of_action'])
@@ -61,7 +61,7 @@ def target_prioritisation(
         tractability_df,
         target_safety_event_df,
         chemical_probes_df,
-        homologues_df,
+        homology_df,
         mouse_df,
         molecule_df,
         moa_df,
@@ -80,7 +80,7 @@ def compute_target_prioritisation(
     tractability: DataFrame,
     target_safety_event: DataFrame,
     chemical_probes: DataFrame,
-    homologues: DataFrame,
+    homology: DataFrame,
     mouse_phenotypes: DataFrame,
     molecule: DataFrame,
     mechanism_of_action: DataFrame,
@@ -95,7 +95,7 @@ def compute_target_prioritisation(
         tractability: target_tractability data (targetId, modality, id, value).
         target_safety_event: target_safety_event data (one row per event record).
         chemical_probes: chemical_probes data (one row per probe/target).
-        homologues: homologues data (one row per target/homologue pair).
+        homology: homology data (one row per target/homologue pair).
         mouse_phenotypes: Mouse phenotype data.
         molecule: Drug molecule data.
         mechanism_of_action: Mechanism of action data.
@@ -121,8 +121,8 @@ def compute_target_prioritisation(
         .transform(lambda df: _ligand_pocket_query(df, tractability))
         .transform(lambda df: _safety_query(df, target_safety_event))
         .transform(lambda df: _constraint_query(df, targets))
-        .transform(lambda df: _paralogs_query(df, homologues))
-        .transform(lambda df: _orthologs_mouse_query(df, homologues))
+        .transform(lambda df: _paralogs_query(df, homology))
+        .transform(lambda df: _orthologs_mouse_query(df, homology))
         .transform(lambda df: _driver_gene_query(df, targets))
         .transform(lambda df: _mouse_model_query(df, mouse_phenotypes, mouse_pheno_scores))
         .transform(lambda df: _chemical_probes_query(df, chemical_probes))
@@ -509,10 +509,10 @@ def _constraint_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     return queryset.join(constraints, on='targetid', how='left')
 
 
-def _paralogs_query(queryset: DataFrame, homologues: DataFrame) -> DataFrame:
+def _paralogs_query(queryset: DataFrame, homology: DataFrame) -> DataFrame:
     """Compute paralog maximum identity percentage."""
     paralog = (
-        homologues
+        homology
         .select(
             f.col('targetId').alias('targetid'),
             f.regexp_replace(
@@ -540,10 +540,10 @@ def _paralogs_query(queryset: DataFrame, homologues: DataFrame) -> DataFrame:
     return queryset.join(paralog, on='targetid', how='left')
 
 
-def _orthologs_mouse_query(queryset: DataFrame, homologues: DataFrame) -> DataFrame:
+def _orthologs_mouse_query(queryset: DataFrame, homology: DataFrame) -> DataFrame:
     """Compute mouse ortholog maximum identity percentage."""
     orthologs = (
-        homologues
+        homology
         .select(f.col('targetId').alias('targetid'), 'homologyType', 'speciesName', 'queryPercentageIdentity')
         .withColumn('homoType', f.split(f.col('homologyType'), '_').getItem(0))
         .filter(f.col('homoType').contains('ortholog') & (f.col('speciesName') == 'Mouse'))

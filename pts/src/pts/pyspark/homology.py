@@ -1,4 +1,4 @@
-"""Homologues dataset generation.
+"""Homology dataset generation.
 
 Resolves Ensembl compara homology data into a flat, one-row-per-pair
 targetId/homologue dataset, validated against output/target (implicit
@@ -34,13 +34,13 @@ DEFAULT_HGNC_ORTHOLOG_SPECIES = [
 ]
 
 
-def homologues(
+def homology(
     source: dict[str, str],
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Build the homologues dataset and write it out.
+    """Build the homology dataset and write it out.
 
     Args:
         source: Mapping of logical input names to paths. Expected keys:
@@ -49,12 +49,12 @@ def homologues(
             ``homology_gene_dictionary`` (gene ID → gene name parquet), and
             ``target`` (output/target parquet, used for gene-symbol lookup
             and identifier validation).
-        destination: Output path for the homologues parquet dataset.
+        destination: Output path for the homology parquet dataset.
         settings: Step settings; supports ``hgncOrthologSpecies`` (list[str])
             and ``partition_count`` (int).
         properties: Spark properties passed to :class:`Session`.
     """
-    spark = Session(app_name='homologues', properties=properties).spark
+    spark = Session(app_name='homology', properties=properties).spark
 
     logger.debug(f'loading data from: {source}')
     homology_dict_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['homology_dictionary'])
@@ -73,7 +73,7 @@ def homologues(
     hgnc_ortholog_species: list[str] = settings.get('hgncOrthologSpecies', DEFAULT_HGNC_ORTHOLOG_SPECIES)
 
     logger.info('building homologue/ortholog pairs')
-    homology_df = _build_homologues(
+    homology_df = _build_homology(
         homology_dict_raw,
         homology_coding_proteins_raw,
         homology_gene_dict_raw,
@@ -81,7 +81,7 @@ def homologues(
     )
 
     logger.info('resolving target-gene symbols and validating against output/target')
-    result = _resolve_homologues(homology_df, target_df)
+    result = _resolve_homology(homology_df, target_df)
 
     partition_count = settings.get('partition_count')
     logger.info(f'writing output data to {destination}.')
@@ -89,11 +89,11 @@ def homologues(
 
 
 # ===========================================================================
-# Ortholog.scala → _build_homologues
+# Ortholog.scala → _build_homology
 # ===========================================================================
 
 
-def _build_homologues(
+def _build_homology(
     homology_dict: DataFrame,
     coding_proteins: DataFrame,
     gene_dict: DataFrame,
@@ -193,7 +193,7 @@ def _build_homologues(
     )
 
 
-def _resolve_homologues(orthologs: DataFrame, target_df: DataFrame) -> DataFrame:
+def _resolve_homology(orthologs: DataFrame, target_df: DataFrame) -> DataFrame:
     """Resolve homologue target-gene symbols and validate against output/target.
 
     Returns a flat DataFrame (one row per target/homologue pair). Rows whose
@@ -201,7 +201,7 @@ def _resolve_homologues(orthologs: DataFrame, target_df: DataFrame) -> DataFrame
     via inner join).
 
     Args:
-        orthologs: Homology pairs from :func:`_build_homologues`.
+        orthologs: Homology pairs from :func:`_build_homology`.
         target_df: Target parquet (``id``, ``approvedSymbol`` columns) from
             output/target.
 
