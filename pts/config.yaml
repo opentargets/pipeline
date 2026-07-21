@@ -442,10 +442,10 @@ steps:
       destination: output/target_tractability
   ##################################################################################################
 
-  #: HOMOLOGUES STEP :###################################################################################
-  homologues:
-    - name: pyspark homologues
-      pyspark: homologues
+  #: HOMOLOGY STEP :#####################################################################################
+  homology:
+    - name: pyspark homology
+      pyspark: homology
       settings:
         partition_count: 2
       source:
@@ -453,7 +453,7 @@ steps:
         homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
         homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
         target: output/target
-      destination: output/homologues
+      destination: output/homology
   ##################################################################################################
 
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
@@ -807,7 +807,7 @@ steps:
         tractability: output/target_tractability
         target_safety_event: output/target_safety_event
         chemical_probes: output/chemical_probes
-        homologues: output/homologues
+        homology: output/homology
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action

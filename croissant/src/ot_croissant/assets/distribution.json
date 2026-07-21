@@ -498,7 +498,7 @@
     "description": "Per-target tractability bucket assessments across small molecule, antibody, and other drug modalities"
   },
   {
-    "id": "homologues",
+    "id": "homology",
     "nice_name": "Target - homologues",
     "tags": [
       "Target"

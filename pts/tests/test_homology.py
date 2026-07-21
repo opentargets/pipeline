@@ -1,4 +1,4 @@
-"""Tests for the homologues PySpark module."""
+"""Tests for the homology PySpark module."""
 
 from pyspark.sql import Row
 from pyspark.sql.types import (
@@ -9,7 +9,7 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pts.pyspark.homologues import _build_homologues, _resolve_homologues
+from pts.pyspark.homology import _build_homology, _resolve_homology
 
 # ---------------------------------------------------------------------------
 # Shared schemas
@@ -52,11 +52,11 @@ def _ortholog_row(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# _build_homologues
+# _build_homology
 # ---------------------------------------------------------------------------
 
 
-def test_homologue_whitelist_filtering(spark):
+def test_homology_whitelist_filtering(spark):
     """Only species in whitelist are included in homologues."""
     homology_dict_schema = StructType([
         StructField('#name', StringType()),
@@ -149,7 +149,7 @@ def test_homologue_whitelist_filtering(spark):
 
     # Only mouse in whitelist (10090), not rat (10116)
     whitelist = ['10090-mus_musculus']
-    result = _build_homologues(homology_dict_df, coding_proteins_df, gene_dict_df, whitelist)
+    result = _build_homology(homology_dict_df, coding_proteins_df, gene_dict_df, whitelist)
     rows = result.collect()
     species_ids = {r.speciesId for r in rows}
     assert '10090' in species_ids
@@ -157,15 +157,15 @@ def test_homologue_whitelist_filtering(spark):
 
 
 # ---------------------------------------------------------------------------
-# _resolve_homologues
+# _resolve_homology
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_homologues_output_columns(spark):
+def test_resolve_homology_output_columns(spark):
     """Output is flat: targetId plus the existing homologue fields, no wrapper array."""
     orthologs = spark.createDataFrame([_ortholog_row()], ORTHOLOG_SCHEMA)
     target_df = spark.createDataFrame([Row(id='ENSG1', approvedSymbol='GENE1')], TARGET_SCHEMA)
-    result = _resolve_homologues(orthologs, target_df)
+    result = _resolve_homology(orthologs, target_df)
     assert set(result.columns) == {
         'targetId',
         'speciesId',
@@ -180,35 +180,35 @@ def test_resolve_homologues_output_columns(spark):
     }
 
 
-def test_resolve_homologues_renames_id_to_target_id(spark):
+def test_resolve_homology_renames_id_to_target_id(spark):
     """The query gene id becomes targetId."""
     orthologs = spark.createDataFrame([_ortholog_row(id='ENSG1')], ORTHOLOG_SCHEMA)
     target_df = spark.createDataFrame([Row(id='ENSG1', approvedSymbol='GENE1')], TARGET_SCHEMA)
-    row = _resolve_homologues(orthologs, target_df).first()
+    row = _resolve_homology(orthologs, target_df).first()
     assert row is not None
     assert row.targetId == 'ENSG1'
 
 
-def test_resolve_homologues_drops_unresolvable_rows(spark):
+def test_resolve_homology_drops_unresolvable_rows(spark):
     """A query id absent from output/target is dropped (validation)."""
     orthologs = spark.createDataFrame([_ortholog_row(id='UNKNOWN')], ORTHOLOG_SCHEMA)
     target_df = spark.createDataFrame([Row(id='ENSG1', approvedSymbol='GENE1')], TARGET_SCHEMA)
-    result = _resolve_homologues(orthologs, target_df)
+    result = _resolve_homology(orthologs, target_df)
     assert result.count() == 0
 
 
-def test_resolve_homologues_falls_back_to_ortholog_symbol(spark):
+def test_resolve_homology_falls_back_to_ortholog_symbol(spark):
     """Without a within-target paralog match, the ortholog's own symbol is kept."""
     orthologs = spark.createDataFrame(
         [_ortholog_row(id='ENSG1', targetGeneId='ENSMUSG1', targetGeneSymbol='Trp53')], ORTHOLOG_SCHEMA
     )
     target_df = spark.createDataFrame([Row(id='ENSG1', approvedSymbol='GENE1')], TARGET_SCHEMA)
-    row = _resolve_homologues(orthologs, target_df).first()
+    row = _resolve_homology(orthologs, target_df).first()
     assert row is not None
     assert row.targetGeneSymbol == 'Trp53'
 
 
-def test_resolve_homologues_prefers_paralog_symbol(spark):
+def test_resolve_homology_prefers_paralog_symbol(spark):
     """When targetGeneId matches another target in the universe, its approvedSymbol wins."""
     orthologs = spark.createDataFrame(
         [_ortholog_row(id='ENSG1', targetGeneId='ENSG2', targetGeneSymbol='stale-symbol')], ORTHOLOG_SCHEMA
@@ -220,6 +220,6 @@ def test_resolve_homologues_prefers_paralog_symbol(spark):
         ],
         TARGET_SCHEMA,
     )
-    row = _resolve_homologues(orthologs, target_df).first()
+    row = _resolve_homology(orthologs, target_df).first()
     assert row is not None
     assert row.targetGeneSymbol == 'GENE2'
