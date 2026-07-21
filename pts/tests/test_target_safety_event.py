@@ -1,4 +1,4 @@
-"""Tests for the safety_liability PySpark module."""
+"""Tests for the target_safety_event PySpark module."""
 
 import pyspark.sql.functions as f
 from pyspark.sql import Row
@@ -9,9 +9,9 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pts.pyspark.safety_liability import (
+from pts.pyspark.target_safety_event import (
     _build_ensg_lookup,
-    _build_safety_liabilities,
+    _build_target_safety_events,
     _harmonize_safety_evidence,
     clean_phenotype_to_describe_safety_event,
     process_adverse_events,
@@ -220,11 +220,11 @@ def test_build_ensg_lookup_output_columns(spark):
 
 
 # ---------------------------------------------------------------------------
-# _build_safety_liabilities
+# _build_target_safety_events
 # ---------------------------------------------------------------------------
 
 
-def test_build_safety_liabilities_output_columns(spark):
+def test_build_target_safety_events_output_columns(spark):
     """Output has one row per liability record with flat columns."""
     safety = spark.createDataFrame(
         [_safety_row(ensg='ENSG00000001')], SAFETY_SCHEMA
@@ -236,14 +236,14 @@ def test_build_safety_liabilities_output_columns(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert set(result.columns) == {
         'targetId', 'event', 'eventId', 'effects', 'biosamples',
         'datasource', 'literature', 'url', 'studies',
     }
 
 
-def test_build_safety_liabilities_one_row_per_liability(spark):
+def test_build_target_safety_events_one_row_per_liability(spark):
     """Multiple liabilities for the same target produce separate rows."""
     safety = spark.createDataFrame([
         _safety_row(ensg='ENSG00000001', event='hepatotoxicity', event_id='EFO_0001'),
@@ -256,12 +256,12 @@ def test_build_safety_liabilities_one_row_per_liability(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 2
     assert result.filter('targetId = "ENSG00000001"').count() == 2
 
 
-def test_build_safety_liabilities_resolves_symbol_to_ensg(spark):
+def test_build_target_safety_events_resolves_symbol_to_ensg(spark):
     """ToxCast rows with null id but known symbol get their ENSG resolved."""
     safety = spark.createDataFrame([
         _safety_row(ensg=None, source_id='GENE1', datasource='ToxCast'),
@@ -273,14 +273,14 @@ def test_build_safety_liabilities_resolves_symbol_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
     assert row.targetId == 'ENSG00000001'
 
 
-def test_build_safety_liabilities_resolves_protein_id_to_ensg(spark):
+def test_build_target_safety_events_resolves_protein_id_to_ensg(spark):
     """Entries keyed by protein accession are resolved via proteinIds lookup."""
     safety = spark.createDataFrame([
         _safety_row(ensg=None, source_id='P12345', datasource='AstraZeneca'),
@@ -292,14 +292,14 @@ def test_build_safety_liabilities_resolves_protein_id_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
     assert row.targetId == 'ENSG00000002'
 
 
-def test_build_safety_liabilities_resolves_symbol_for_non_coding_gene(spark):
+def test_build_target_safety_events_resolves_symbol_for_non_coding_gene(spark):
     """ToxCast rows for non-coding genes (null proteinIds) still resolve by symbol.
 
     Regression test for the MIR122 bug: a non-coding target has proteinIds=None
@@ -316,14 +316,14 @@ def test_build_safety_liabilities_resolves_symbol_for_non_coding_gene(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
     assert row.targetId == 'ENSG_MIR122'
 
 
-def test_build_safety_liabilities_drops_unresolvable_rows(spark):
+def test_build_target_safety_events_drops_unresolvable_rows(spark):
     """Rows with null id that cannot be resolved to an ENSG are dropped."""
     safety = spark.createDataFrame([
         _safety_row(ensg=None, source_id='UNKNOWN_SYMBOL', datasource='ToxCast'),
@@ -335,11 +335,11 @@ def test_build_safety_liabilities_drops_unresolvable_rows(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 0
 
 
-def test_build_safety_liabilities_drops_ids_not_in_target(spark):
+def test_build_target_safety_events_drops_ids_not_in_target(spark):
     """Rows whose id doesn't match any target in output/target are dropped, even if non-null."""
     safety = spark.createDataFrame([
         _safety_row(ensg='ENSG00000001', event='hepatotoxicity'),
@@ -352,14 +352,14 @@ def test_build_safety_liabilities_drops_ids_not_in_target(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
     assert row.targetId == 'ENSG00000001'
 
 
-def test_build_safety_liabilities_remaps_obsolete_efo(spark):
+def test_build_target_safety_events_remaps_obsolete_efo(spark):
     """Obsolete EFO disease IDs in eventId are replaced with current IDs."""
     safety = spark.createDataFrame([
         _safety_row(ensg='ENSG00000001', event_id='EFO_OBSOLETE'),
@@ -371,13 +371,13 @@ def test_build_safety_liabilities_remaps_obsolete_efo(spark):
         Row(id='EFO_CURRENT', obsoleteTerms=['EFO_OBSOLETE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
 
 
-def test_build_safety_liabilities_keeps_current_efo_unchanged(spark):
+def test_build_target_safety_events_keeps_current_efo_unchanged(spark):
     """EFO IDs that are not obsolete are left untouched."""
     safety = spark.createDataFrame([
         _safety_row(ensg='ENSG00000001', event_id='EFO_CURRENT'),
@@ -389,13 +389,13 @@ def test_build_safety_liabilities_keeps_current_efo_unchanged(spark):
         Row(id='EFO_OTHER', obsoleteTerms=['EFO_SOMETHINGELSE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
 
 
-def test_build_safety_liabilities_multiple_targets(spark):
+def test_build_target_safety_events_multiple_targets(spark):
     """Liabilities for different targets produce separate rows."""
     safety = spark.createDataFrame([
         _safety_row(ensg='ENSG00000001', event='hepatotoxicity'),
@@ -409,5 +409,5 @@ def test_build_safety_liabilities_multiple_targets(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
     assert result.count() == 2

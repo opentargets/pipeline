@@ -412,10 +412,10 @@ steps:
       destination: output/transcript
   ##################################################################################################
 
-  #: SAFETY_LIABILITY STEP :#############################################################################
-  safety_liability:
-    - name: pyspark safety_liability
-      pyspark: safety_liability
+  #: TARGET_SAFETY_EVENT STEP :##########################################################################
+  target_safety_event:
+    - name: pyspark target_safety_event
+      pyspark: target_safety_event
       settings:
         partition_count: 2
       source:
@@ -427,7 +427,7 @@ steps:
         pharmacogenetics: output/pharmacogenomics
         target: output/target
         diseases: output/disease
-      destination: output/safety_liability
+      destination: output/target_safety_event
   ##################################################################################################
 
   #: TARGET_TRACTABILITY STEP :#########################################################################
@@ -676,7 +676,7 @@ steps:
 
   # This is split so that we don't run into circularity issues
   # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_safety_liability → pts_pharmacogenetics.
+  # on pts_ontoma through pts_target_safety_event → pts_pharmacogenetics.
   literature_ontoma:
     - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
@@ -805,7 +805,7 @@ steps:
       source:
         targets: output/target
         tractability: output/target_tractability
-        safety_liability: output/safety_liability
+        target_safety_event: output/target_safety_event
         chemical_probes: output/chemical_probes
         homologues: output/homologues
         mouse_phenotypes: output/mouse_phenotype

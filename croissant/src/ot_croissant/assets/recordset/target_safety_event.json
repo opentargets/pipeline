@@ -25,7 +25,7 @@
   },
   {
     "id": "datasource",
-    "description": "Data source reporting the safety liability"
+    "description": "Data source reporting the safety event"
   },
   {
     "id": "effects",
@@ -49,7 +49,7 @@
   },
   {
     "id": "literature",
-    "description": "Literature references for the safety liability"
+    "description": "Literature references for the safety event"
   },
   {
     "id": "studies",
@@ -69,11 +69,11 @@
   },
   {
     "id": "targetId",
-    "description": "Ensembl gene identifier of the target the safety liability was reported on [bioregistry:ensembl]",
+    "description": "Ensembl gene identifier of the target the safety event was reported on [bioregistry:ensembl]",
     "foreign_key": "target/id"
   },
   {
     "id": "url",
-    "description": "URL linking to more details on the safety liability"
+    "description": "URL linking to more details on the safety event"
   }
 ]

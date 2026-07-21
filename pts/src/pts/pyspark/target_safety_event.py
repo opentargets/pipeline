@@ -1,11 +1,11 @@
-"""Safety liability dataset generation.
+"""Target safety event dataset generation.
 
 Harmonizes raw target-safety evidence from six heterogeneous sources (adverse
 events, safety risks, ToxCast, AOPWiki, Brennan/secondary pharmacology, and
 pharmacogenetics) into a common schema, then resolves it against output/target
 (ENSG ID resolution for symbol-keyed entries, target-ID validation) and
 output/disease (obsolete EFO term remapping) to produce the final per-record
-safety liability dataset.
+target safety event dataset.
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
 
-def safety_liability(
+def target_safety_event(
     source: dict[str, str],
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Generate the safety liability dataset.
+    """Generate the target safety event dataset.
 
     Harmonizes raw safety evidence from six sources, resolves ENSG IDs for
     symbol-keyed entries (ToxCast), remaps obsolete EFO disease terms to their
@@ -40,11 +40,11 @@ def safety_liability(
             ``brennan`` (raw safety evidence inputs), ``pharmacogenetics``
             (output/pharmacogenomics), ``target`` (output/target parquet),
             and ``diseases`` (output/disease parquet).
-        destination: Output path for the safety liability parquet dataset.
+        destination: Output path for the target safety event parquet dataset.
         settings: Step settings; supports ``partition_count`` (int, default 2).
         properties: Spark session properties passed to :class:`Session`.
     """
-    session = Session(app_name='safety_liability', properties=properties)
+    session = Session(app_name='target_safety_event', properties=properties)
     spark = session.spark
 
     logger.info(f'load data from {source}')
@@ -68,10 +68,10 @@ def safety_liability(
     ])
 
     ensg_lookup = _build_ensg_lookup(target_raw)
-    result = _build_safety_liabilities(safety_raw, ensg_lookup, diseases_raw, target_raw)
+    result = _build_target_safety_events(safety_raw, ensg_lookup, diseases_raw, target_raw)
 
     partition_count = (settings or {}).get('partition_count', 2)
-    logger.info(f'writing safety liability to {destination} ({partition_count} partitions)')
+    logger.info(f'writing target safety events to {destination} ({partition_count} partitions)')
     maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
 
 
@@ -520,13 +520,13 @@ def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
     )
 
 
-def _build_safety_liabilities(
+def _build_target_safety_events(
     safety_df: DataFrame,
     ensg_lookup: DataFrame,
     diseases_df: DataFrame,
     target_df: DataFrame,
 ) -> DataFrame:
-    """Build the safety liability output from harmonized safety evidence.
+    """Build the target safety event output from harmonized safety evidence.
 
     Resolves missing ENSG IDs via symbol/protein lookup, replaces obsolete
     EFO disease terms with their current equivalents, and drops any record
@@ -540,7 +540,7 @@ def _build_safety_liabilities(
             authoritative reference for target-ID validity.
 
     Returns:
-        DataFrame with one row per safety liability record and columns
+        DataFrame with one row per target safety event record and columns
         ``targetId``, ``event``, ``eventId``, ``effects``, ``biosamples``,
         ``datasource``, ``literature``, ``url``, ``studies``.
     """

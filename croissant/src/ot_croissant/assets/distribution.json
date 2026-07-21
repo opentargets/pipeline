@@ -482,12 +482,12 @@
     "description": "Chemical probes and their molecular characteristics, resolved to Ensembl target identifiers"
   },
   {
-    "id": "safety_liability",
-    "nice_name": "Target - safety liabilities",
+    "id": "target_safety_event",
+    "nice_name": "Target - safety events",
     "tags": [
       "Target"
     ],
-    "description": "Safety liabilities reported for targets, resolved to Ensembl target identifiers and remapped to current EFO disease terms"
+    "description": "Safety-related events associated with biological targets, including assay observations, affected biosamples, supporting studies, and evidence sources"
   },
   {
     "id": "target_tractability",
