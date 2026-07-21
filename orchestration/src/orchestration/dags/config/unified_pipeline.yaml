@@ -13,7 +13,7 @@ is_ppp: true
 
 # Pipeline package versions
 pis_version: '26.9.0.dev0.refactor-target.671c87e'
-pts_version: '26.9.0.dev0.refactor-target.c36addae'
+pts_version: '26.9.0.dev0.refactor-target.2538485'
 gentropy_version: '3.3.0-rc.1'
 vep_version: 'release_115.2'
 
@@ -100,9 +100,6 @@ steps:
       - pts_ontoma
       - pts_chembl_molecule
       - pts_drug_mechanism_of_action
-  pts_target_safety:
-    depends_on:
-      - pts_pharmacogenetics
   pts_pre_target:
     depends_on:
       - pis_target
@@ -119,7 +116,7 @@ steps:
       - pts_pre_target
   pts_safety_liability:
     depends_on:
-      - pts_target_safety
+      - pts_pharmacogenetics
       - pts_target
       - pts_disease
   pts_target_tractability:

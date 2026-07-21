@@ -1,5 +1,6 @@
 """Tests for the safety_liability PySpark module."""
 
+import pyspark.sql.functions as f
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
@@ -11,6 +12,10 @@ from pyspark.sql.types import (
 from pts.pyspark.safety_liability import (
     _build_ensg_lookup,
     _build_safety_liabilities,
+    _harmonize_safety_evidence,
+    clean_phenotype_to_describe_safety_event,
+    process_adverse_events,
+    process_toxcast,
 )
 
 # ---------------------------------------------------------------------------
@@ -57,6 +62,31 @@ DISEASE_SCHEMA = StructType([
     StructField('obsoleteTerms', ArrayType(StringType())),
 ])
 
+ADVERSE_EVENTS_SCHEMA = StructType([
+    StructField('biologicalSystem', StringType()),
+    StructField('effect', StringType()),
+    StructField('efoId', StringType()),
+    StructField('ensemblId', StringType()),
+    StructField('pmid', StringType()),
+    StructField('ref', StringType()),
+    StructField('symptom', StringType()),
+    StructField('target', StringType()),
+    StructField('uberonCode', StringType()),
+    StructField('url', StringType()),
+])
+
+TOXCAST_SCHEMA = StructType([
+    StructField('assay_component_endpoint_name', StringType()),
+    StructField('assay_component_desc', StringType()),
+    StructField('biological_process_target', StringType()),
+    StructField('tissue', StringType()),
+    StructField('cell_format', StringType()),
+    StructField('cell_short_name', StringType()),
+    StructField('assay_format_type', StringType()),
+    StructField('official_symbol', StringType()),
+    StructField('eventId', StringType()),
+])
+
 
 def _safety_row(*, ensg=None, source_id=None, event='hepatotoxicity', event_id='EFO_0001234',
                 datasource='AstraZeneca', literature=None, url=None):
@@ -72,6 +102,67 @@ def _safety_row(*, ensg=None, source_id=None, event='hepatotoxicity', event_id='
         biosamples=None,
         studies=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# process_* source harmonizers and _harmonize_safety_evidence
+# ---------------------------------------------------------------------------
+
+
+def test_process_adverse_events_maps_columns(spark):
+    """Raw adverse-events columns are renamed/restructured into the common evidence schema."""
+    row = Row(
+        biologicalSystem='gastrointestinal', effect='activation_general', efoId='EFO_0009836',
+        ensemblId='ENSG00000133019', pmid='23197038', ref='Bowes et al. (2012)',
+        symptom='bronchoconstriction', target='CHRM3', uberonCode='UBERON_0005409', url=None,
+    )
+    result = process_adverse_events(spark.createDataFrame([row], ADVERSE_EVENTS_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.id == 'ENSG00000133019'
+    assert out.event == 'bronchoconstriction'
+    assert out.eventId == 'EFO_0009836'
+    assert out.datasource == 'Bowes et al. (2012)'
+    assert out.effects[0].direction == 'Activation/Increase/Upregulation'
+
+
+def test_process_toxcast_maps_columns(spark):
+    """ToxCast rows are keyed by targetFromSourceId (symbol), not an ENSG id."""
+    row = Row(
+        assay_component_endpoint_name='ACEA_ER_80hr', assay_component_desc='some assay',
+        biological_process_target='cell proliferation', tissue=None, cell_format='cell line',
+        cell_short_name='T47D', assay_format_type='cell-based', official_symbol=' ESR1 ', eventId=None,
+    )
+    result = process_toxcast(spark.createDataFrame([row], TOXCAST_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.targetFromSourceId == 'ESR1'
+    assert out.event == 'cell proliferation'
+    assert out.datasource == 'ToxCast'
+
+
+def test_clean_phenotype_maps_toxicity_to_drug_toxicity(spark):
+    """The phenotype-cleaning column expression normalizes known phrases to a fixed vocabulary."""
+    schema = StructType([StructField('phenotypeText', StringType())])
+    df = spark.createDataFrame([Row(phenotypeText='toxicity')], schema)
+    result = df.withColumn('cleaned', clean_phenotype_to_describe_safety_event(f.col('phenotypeText')))
+    assert result.first().cleaned == 'drug toxicity'
+
+
+def test_harmonize_safety_evidence_dedupes_identical_source_rows(spark):
+    """Two identical raw adverse-event rows collapse into a single harmonized record."""
+    row = Row(
+        biologicalSystem='gastrointestinal', effect='activation_general', efoId='EFO_0009836',
+        ensemblId='ENSG00000133019', pmid='23197038', ref='Bowes et al. (2012)',
+        symptom='bronchoconstriction', target='CHRM3', uberonCode='UBERON_0005409', url=None,
+    )
+    processed = process_adverse_events(spark.createDataFrame([row, row], ADVERSE_EVENTS_SCHEMA))
+    # An empty (but fully-columned) second source lets unionByName(allowMissingColumns=True)
+    # fill in columns process_adverse_events doesn't produce (e.g. targetFromSourceId),
+    # mirroring how the real pipeline unions six heterogeneous sources together.
+    empty_toxcast = process_toxcast(spark.createDataFrame([], TOXCAST_SCHEMA))
+    result = _harmonize_safety_evidence([processed, empty_toxcast])
+    assert result.count() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +197,21 @@ def test_build_ensg_lookup_handles_empty_protein_ids(spark):
     assert 'GENE2' in row.name
 
 
+def test_build_ensg_lookup_handles_null_protein_ids(spark):
+    """Null proteinIds (non-coding genes, e.g. microRNAs) does not wipe out the symbol.
+
+    Regression test: flatten(array(proteinIds.id, [approvedSymbol])) returns NULL for
+    the whole array if proteinIds.id is NULL rather than an empty array, silently
+    dropping approvedSymbol too and breaking symbol-based ENSG resolution for every
+    non-coding gene.
+    """
+    rows = [Row(id='ENSG00000003', approvedSymbol='MIR122', proteinIds=None)]
+    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
+    row = lut.filter('ensgId = "ENSG00000003"').first()
+    assert row is not None
+    assert row.name == ['MIR122']
+
+
 def test_build_ensg_lookup_output_columns(spark):
     """Output has exactly ensgId and name columns."""
     rows = [Row(id='ENSG00000003', approvedSymbol='G3', proteinIds=[])]
@@ -130,7 +236,7 @@ def test_build_safety_liabilities_output_columns(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert set(result.columns) == {
         'targetId', 'event', 'eventId', 'effects', 'biosamples',
         'datasource', 'literature', 'url', 'studies',
@@ -150,7 +256,7 @@ def test_build_safety_liabilities_one_row_per_liability(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert result.count() == 2
     assert result.filter('targetId = "ENSG00000001"').count() == 2
 
@@ -167,7 +273,7 @@ def test_build_safety_liabilities_resolves_symbol_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
@@ -186,11 +292,35 @@ def test_build_safety_liabilities_resolves_protein_id_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert result.count() == 1
     row = result.first()
     assert row is not None
     assert row.targetId == 'ENSG00000002'
+
+
+def test_build_safety_liabilities_resolves_symbol_for_non_coding_gene(spark):
+    """ToxCast rows for non-coding genes (null proteinIds) still resolve by symbol.
+
+    Regression test for the MIR122 bug: a non-coding target has proteinIds=None
+    rather than [], which previously wiped out the whole ensg_lookup name array
+    (including approvedSymbol) via flatten(array(...)), dropping this event.
+    """
+    safety = spark.createDataFrame([
+        _safety_row(ensg=None, source_id='MIR122', datasource='ToxCast'),
+    ], SAFETY_SCHEMA)
+    target = spark.createDataFrame([
+        Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None),
+    ], TARGET_SCHEMA)
+    diseases = spark.createDataFrame(
+        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+    )
+    ensg_lut = _build_ensg_lookup(target)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    assert result.count() == 1
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG_MIR122'
 
 
 def test_build_safety_liabilities_drops_unresolvable_rows(spark):
@@ -205,8 +335,28 @@ def test_build_safety_liabilities_drops_unresolvable_rows(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert result.count() == 0
+
+
+def test_build_safety_liabilities_drops_ids_not_in_target(spark):
+    """Rows whose id doesn't match any target in output/target are dropped, even if non-null."""
+    safety = spark.createDataFrame([
+        _safety_row(ensg='ENSG00000001', event='hepatotoxicity'),
+        _safety_row(ensg='ENSG_STALE_ID', event='cardiotoxicity'),
+    ], SAFETY_SCHEMA)
+    target = spark.createDataFrame(
+        [Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[])], TARGET_SCHEMA
+    )
+    diseases = spark.createDataFrame(
+        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+    )
+    ensg_lut = _build_ensg_lookup(target)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
+    assert result.count() == 1
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG00000001'
 
 
 def test_build_safety_liabilities_remaps_obsolete_efo(spark):
@@ -221,7 +371,7 @@ def test_build_safety_liabilities_remaps_obsolete_efo(spark):
         Row(id='EFO_CURRENT', obsoleteTerms=['EFO_OBSOLETE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
@@ -239,7 +389,7 @@ def test_build_safety_liabilities_keeps_current_efo_unchanged(spark):
         Row(id='EFO_OTHER', obsoleteTerms=['EFO_SOMETHINGELSE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
@@ -259,5 +409,5 @@ def test_build_safety_liabilities_multiple_targets(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_safety_liabilities(safety, ensg_lut, diseases)
+    result = _build_safety_liabilities(safety, ensg_lut, diseases, target)
     assert result.count() == 2

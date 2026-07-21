@@ -419,7 +419,12 @@ steps:
       settings:
         partition_count: 2
       source:
-        safety_evidence: intermediate/target/safety.parquet
+        adverse_events: input/target/safety/adverse_effects.tsv
+        safety_risks: input/target/safety/safety_risks.tsv
+        brennan: input/target/safety/secondary_pharmacology.json
+        toxcast: input/target/safety/toxcast.tsv
+        aopwiki: input/target/safety/aopwiki.json
+        pharmacogenetics: output/pharmacogenomics
         target: output/target
         diseases: output/disease
       destination: output/safety_liability
@@ -450,19 +455,6 @@ steps:
         target: output/target
       destination: output/homologues
   ##################################################################################################
-
-  #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
-  target_safety:
-    - name: pyspark safety
-      pyspark: target_safety
-      source:
-        adverse_events: input/target/safety/adverse_effects.tsv
-        safety_risks: input/target/safety/safety_risks.tsv
-        brennan: input/target/safety/secondary_pharmacology.json
-        toxcast: input/target/safety/toxcast.tsv
-        aopwiki: input/target/safety/aopwiki.json
-        pharmacogenetics: output/pharmacogenomics
-      destination: intermediate/target/safety.parquet
 
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
@@ -684,7 +676,7 @@ steps:
 
   # This is split so that we don't run into circularity issues
   # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_target_safety → pts_pharmacogenetics.
+  # on pts_ontoma through pts_safety_liability → pts_pharmacogenetics.
   literature_ontoma:
     - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
