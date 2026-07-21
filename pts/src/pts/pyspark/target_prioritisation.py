@@ -26,7 +26,7 @@ def target_prioritisation(
         source: Dictionary with paths to:
             - targets: Target parquet
             - tractability: target_tractability parquet (output/target_tractability)
-            - safety_liability: safety_liability parquet (output/safety_liability)
+            - target_safety_event: target_safety_event parquet (output/target_safety_event)
             - chemical_probes: chemical_probes parquet (output/chemical_probes)
             - homologues: homologues parquet (output/homologues)
             - mouse_phenotypes: Mouse phenotype parquet
@@ -45,7 +45,7 @@ def target_prioritisation(
     logger.info(f'Loading data from {source}')
     targets_df = spark.load_data(source['targets'])
     tractability_df = spark.load_data(source['tractability'])
-    safety_liability_df = spark.load_data(source['safety_liability'])
+    target_safety_event_df = spark.load_data(source['target_safety_event'])
     chemical_probes_df = spark.load_data(source['chemical_probes'])
     homologues_df = spark.load_data(source['homologues'])
     mouse_df = spark.load_data(source['mouse_phenotypes'])
@@ -59,7 +59,7 @@ def target_prioritisation(
     output_df = compute_target_prioritisation(
         targets_df,
         tractability_df,
-        safety_liability_df,
+        target_safety_event_df,
         chemical_probes_df,
         homologues_df,
         mouse_df,
@@ -78,7 +78,7 @@ def target_prioritisation(
 def compute_target_prioritisation(
     targets: DataFrame,
     tractability: DataFrame,
-    safety_liability: DataFrame,
+    target_safety_event: DataFrame,
     chemical_probes: DataFrame,
     homologues: DataFrame,
     mouse_phenotypes: DataFrame,
@@ -93,7 +93,7 @@ def compute_target_prioritisation(
     Args:
         targets: Target data.
         tractability: target_tractability data (targetId, modality, id, value).
-        safety_liability: safety_liability data (one row per liability record).
+        target_safety_event: target_safety_event data (one row per event record).
         chemical_probes: chemical_probes data (one row per probe/target).
         homologues: homologues data (one row per target/homologue pair).
         mouse_phenotypes: Mouse phenotype data.
@@ -119,7 +119,7 @@ def compute_target_prioritisation(
         .transform(lambda df: _biotype_query(df, targets))
         .transform(lambda df: _target_membrane_query(df, targets, parent_child_cousins))
         .transform(lambda df: _ligand_pocket_query(df, tractability))
-        .transform(lambda df: _safety_query(df, safety_liability))
+        .transform(lambda df: _safety_query(df, target_safety_event))
         .transform(lambda df: _constraint_query(df, targets))
         .transform(lambda df: _paralogs_query(df, homologues))
         .transform(lambda df: _orthologs_mouse_query(df, homologues))
@@ -447,10 +447,10 @@ def _ligand_pocket_query(queryset: DataFrame, tractability: DataFrame) -> DataFr
     return queryset.join(filtered_targets, on='targetid', how='left')
 
 
-def _safety_query(queryset: DataFrame, safety_liability: DataFrame) -> DataFrame:
+def _safety_query(queryset: DataFrame, target_safety_event: DataFrame) -> DataFrame:
     """Extract safety event information."""
     agg_events = (
-        safety_liability
+        target_safety_event
         .select(f.col('targetId').alias('targetid'), f.col('event'))
         .groupBy('targetid')
         .agg(

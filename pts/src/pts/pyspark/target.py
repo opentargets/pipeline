@@ -5,7 +5,7 @@ assembling Ensembl, HGNC, Gene Ontology, UniProt, Reactome, genetic
 constraint, and NCBI data into one dataset. TEP, gene essentiality, safety
 liabilities, tractability, chemical probes, per-transcript data, and
 homologues each live in their own standalone PTS modules (see
-gene_essentiality.py, safety_liability.py, target_tractability.py,
+gene_essentiality.py, target_safety_event.py, target_tractability.py,
 chemical_probes.py, transcript.py, homologues.py).
 """
 

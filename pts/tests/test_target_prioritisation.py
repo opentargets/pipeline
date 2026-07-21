@@ -2,7 +2,7 @@
 
 Covers the query functions that were migrated off output/target's removed
 tractability, safetyLiabilities, chemicalProbes, and homologues fields onto
-the standalone target_tractability, safety_liability, chemical_probes, and
+the standalone target_tractability, target_safety_event, chemical_probes, and
 homologues datasets, so that _ligand_pocket_query/_safety_query/
 _chemical_probes_query/_paralogs_query/_orthologs_mouse_query work against
 the current output/target schema instead of crashing on a missing column.
@@ -33,7 +33,7 @@ TRACTABILITY_SCHEMA = StructType([
     StructField('value', BooleanType()),
 ])
 
-SAFETY_LIABILITY_SCHEMA = StructType([
+TARGET_SAFETY_EVENT_SCHEMA = StructType([
     StructField('targetId', StringType()),
     StructField('event', StringType()),
 ])
@@ -121,8 +121,8 @@ def test_ligand_pocket_query_ignores_unrelated_modality_ids(spark):
 
 
 def test_safety_query_flags_targets_with_events(spark):
-    """A target with at least one safety liability row gets hasSafetyEvent=Yes."""
-    safety = spark.createDataFrame([Row(targetId='T1', event='hepatotoxicity')], SAFETY_LIABILITY_SCHEMA)
+    """A target with at least one safety event row gets hasSafetyEvent=Yes."""
+    safety = spark.createDataFrame([Row(targetId='T1', event='hepatotoxicity')], TARGET_SAFETY_EVENT_SCHEMA)
     result = _safety_query(_queryset(spark, ['T1']), safety)
     row = result.filter('targetid = "T1"').first()
     assert row is not None
@@ -131,8 +131,8 @@ def test_safety_query_flags_targets_with_events(spark):
 
 
 def test_safety_query_target_with_no_events_left_null(spark):
-    """A target with no safety liability rows gets null hasSafetyEvent via the left join."""
-    safety = spark.createDataFrame([], SAFETY_LIABILITY_SCHEMA)
+    """A target with no safety event rows gets null hasSafetyEvent via the left join."""
+    safety = spark.createDataFrame([], TARGET_SAFETY_EVENT_SCHEMA)
     result = _safety_query(_queryset(spark, ['T1']), safety)
     row = result.filter('targetid = "T1"').first()
     assert row is not None
@@ -140,13 +140,13 @@ def test_safety_query_target_with_no_events_left_null(spark):
 
 
 def test_safety_query_counts_distinct_events(spark):
-    """Multiple safety liability rows for one target are counted and collected."""
+    """Multiple safety event rows for one target are counted and collected."""
     safety = spark.createDataFrame(
         [
             Row(targetId='T1', event='hepatotoxicity'),
             Row(targetId='T1', event='cardiotoxicity'),
         ],
-        SAFETY_LIABILITY_SCHEMA,
+        TARGET_SAFETY_EVENT_SCHEMA,
     )
     result = _safety_query(_queryset(spark, ['T1']), safety)
     row = result.filter('targetid = "T1"').first()
