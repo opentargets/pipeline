@@ -89,7 +89,8 @@ def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFram
 
     Aggregates the flat target_tractability dataset per target, collecting the
     ids of assessments with value=True into one array column per modality
-    (SM, AB, PR, OC), then left-joins the result onto targets_df.
+    (SM, AB, PR, OC), then left-joins the result onto targets_df. The join can
+    reorder rows, so the result is re-sorted by targetId for deterministic output.
 
     Args:
         targets_df: DataFrame with a `targetId` column to enrich.
@@ -97,7 +98,8 @@ def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFram
             modality, id, value.
 
     Returns:
-        DataFrame: targets_df enriched with the four facetTractability* columns.
+        DataFrame: targets_df enriched with the four facetTractability* columns,
+        ordered by targetId.
     """
 
     def facet_ids(modality: str):
@@ -110,7 +112,7 @@ def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFram
         facet_ids('OC').alias('facetTractabilityOthermodalities'),
     )
 
-    return targets_df.join(tractability_facets_df, ['targetId'], 'left_outer')
+    return targets_df.join(tractability_facets_df, ['targetId'], 'left_outer').orderBy('targetId')
 
 
 def association_otf(

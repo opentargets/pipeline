@@ -12,7 +12,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
 
 def gene_essentiality(
@@ -62,10 +62,7 @@ def gene_essentiality(
 
     logger.info('resolving ENSG IDs against output/target')
     ensg_lookup = _build_ensg_lookup(target_df)
-    result = (
-        _resolve_target_ids(aggregated_df, ensg_lookup)
-        .filter(f.col('targetId').isNotNull())
-    )
+    result = _resolve_target_ids(aggregated_df, ensg_lookup)
 
     partition_count = settings.get('partition_count')
     logger.info(f'writing output data to {destination}.')
@@ -84,10 +81,16 @@ def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
     """
     return target_df.select(
         f.col('id').alias('ensgId'),
-        f.flatten(f.array(
+        # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+        # microRNAs) since they have no protein product. flatten(array(...))
+        # returns NULL for the whole array if any element is NULL, which would
+        # silently drop approvedSymbol too -- safe_array_union coalesces each
+        # side to an empty array first, so non-coding targets still resolve by
+        # symbol.
+        safe_array_union(
             f.col('proteinIds.id'),
             f.array(f.col('approvedSymbol')),
-        )).alias('name'),
+        ).alias('name'),
     )
 
 
