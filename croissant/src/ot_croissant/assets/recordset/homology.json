@@ -1,0 +1,43 @@
+[
+  {
+    "id": "targetId",
+    "description": "Ensembl gene identifier of the query target [bioregistry:ensembl]",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "homologyType",
+    "description": "Type of homology relationship"
+  },
+  {
+    "id": "isHighConfidence",
+    "description": "Indicates if the homology is high confidence"
+  },
+  {
+    "id": "priority",
+    "description": "Priority score for the homologue"
+  },
+  {
+    "id": "queryPercentageIdentity",
+    "description": "Percentage identity of the query gene in the homologue"
+  },
+  {
+    "id": "speciesId",
+    "description": "Species ID for the homologue"
+  },
+  {
+    "id": "speciesName",
+    "description": "Species name for the homologue"
+  },
+  {
+    "id": "targetGeneId",
+    "description": "Target gene ID of the homologue"
+  },
+  {
+    "id": "targetGeneSymbol",
+    "description": "Gene symbol of the homologous target"
+  },
+  {
+    "id": "targetPercentageIdentity",
+    "description": "Percentage identity of the homologue in the query gene"
+  }
+]

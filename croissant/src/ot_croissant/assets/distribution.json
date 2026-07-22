@@ -474,6 +474,46 @@
     "description": "Target essentiality assessments based on dependencies exhibited when knocking-out genes in cancer cellular models using CRISPR screenings as reported in by the Cancer DepMap Project. Gene effects below -1 can be considered dependencies"
   },
   {
+    "id": "chemical_probes",
+    "nice_name": "Target - chemical probes",
+    "tags": [
+      "Target"
+    ],
+    "description": "Chemical probes and their molecular characteristics, resolved to Ensembl target identifiers"
+  },
+  {
+    "id": "target_safety_event",
+    "nice_name": "Target - safety events",
+    "tags": [
+      "Target"
+    ],
+    "description": "Safety-related events associated with biological targets, including assay observations, affected biosamples, supporting studies, and evidence sources"
+  },
+  {
+    "id": "target_tractability",
+    "nice_name": "Target - tractability",
+    "tags": [
+      "Target"
+    ],
+    "description": "Per-target tractability bucket assessments across small molecule, antibody, and other drug modalities"
+  },
+  {
+    "id": "homology",
+    "nice_name": "Target - homologues",
+    "tags": [
+      "Target"
+    ],
+    "description": "Ensembl compara homologue/ortholog pairs for each target, resolved to Ensembl target identifiers"
+  },
+  {
+    "id": "transcript",
+    "nice_name": "Target - transcripts",
+    "tags": [
+      "Target"
+    ],
+    "description": "Per-transcript index derived from GENCODE, including genomic coordinates, biotype, protein/UniProt identifiers, and curation flags (MANE, APPRIS, GENCODE Primary, Ensembl canonical)"
+  },
+  {
     "id": "target_prioritisation",
     "nice_name": "Target Prioritisation",
     "tags": [

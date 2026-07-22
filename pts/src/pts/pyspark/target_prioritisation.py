@@ -25,6 +25,10 @@ def target_prioritisation(
     Args:
         source: Dictionary with paths to:
             - targets: Target parquet
+            - tractability: target_tractability parquet (output/target_tractability)
+            - target_safety_event: target_safety_event parquet (output/target_safety_event)
+            - chemical_probes: chemical_probes parquet (output/chemical_probes)
+            - homology: homology parquet (output/homology)
             - mouse_phenotypes: Mouse phenotype parquet
             - molecule: Drug molecule parquet
             - mechanism_of_action: Mechanism of action parquet
@@ -40,6 +44,10 @@ def target_prioritisation(
 
     logger.info(f'Loading data from {source}')
     targets_df = spark.load_data(source['targets'])
+    tractability_df = spark.load_data(source['tractability'])
+    target_safety_event_df = spark.load_data(source['target_safety_event'])
+    chemical_probes_df = spark.load_data(source['chemical_probes'])
+    homology_df = spark.load_data(source['homology'])
     mouse_df = spark.load_data(source['mouse_phenotypes'])
     molecule_df = spark.load_data(source['molecule'])
     moa_df = spark.load_data(source['mechanism_of_action'])
@@ -50,6 +58,10 @@ def target_prioritisation(
     logger.info('Computing target prioritisation features')
     output_df = compute_target_prioritisation(
         targets_df,
+        tractability_df,
+        target_safety_event_df,
+        chemical_probes_df,
+        homology_df,
         mouse_df,
         molecule_df,
         moa_df,
@@ -65,6 +77,10 @@ def target_prioritisation(
 
 def compute_target_prioritisation(
     targets: DataFrame,
+    tractability: DataFrame,
+    target_safety_event: DataFrame,
+    chemical_probes: DataFrame,
+    homology: DataFrame,
     mouse_phenotypes: DataFrame,
     molecule: DataFrame,
     mechanism_of_action: DataFrame,
@@ -76,6 +92,10 @@ def compute_target_prioritisation(
 
     Args:
         targets: Target data.
+        tractability: target_tractability data (targetId, modality, id, value).
+        target_safety_event: target_safety_event data (one row per event record).
+        chemical_probes: chemical_probes data (one row per probe/target).
+        homology: homology data (one row per target/homologue pair).
         mouse_phenotypes: Mouse phenotype data.
         molecule: Drug molecule data.
         mechanism_of_action: Mechanism of action data.
@@ -98,15 +118,14 @@ def compute_target_prioritisation(
         queryset
         .transform(lambda df: _biotype_query(df, targets))
         .transform(lambda df: _target_membrane_query(df, targets, parent_child_cousins))
-        .transform(lambda df: _ligand_pocket_query(df, targets))
-        .transform(lambda df: _safety_query(df, targets))
+        .transform(lambda df: _ligand_pocket_query(df, tractability))
+        .transform(lambda df: _safety_query(df, target_safety_event))
         .transform(lambda df: _constraint_query(df, targets))
-        .transform(lambda df: _paralogs_query(df, targets))
-        .transform(lambda df: _orthologs_mouse_query(df, targets))
+        .transform(lambda df: _paralogs_query(df, homology))
+        .transform(lambda df: _orthologs_mouse_query(df, homology))
         .transform(lambda df: _driver_gene_query(df, targets))
-        .transform(lambda df: _tep_query(df, targets))
         .transform(lambda df: _mouse_model_query(df, mouse_phenotypes, mouse_pheno_scores))
-        .transform(lambda df: _chemical_probes_query(df, targets))
+        .transform(lambda df: _chemical_probes_query(df, chemical_probes))
         .transform(lambda df: _clin_trials_query(df, mechanism_of_action, molecule))
         .transform(lambda df: _baseline_query(df, baseline_expression))
     )
@@ -124,7 +143,6 @@ def compute_target_prioritisation(
         f.col('Nr_paralogs').alias('paralogMaxIdentityPercentage'),
         f.col('Nr_ortholog').alias('mouseOrthologMaxIdentityPercentage'),
         f.col('Nr_CDG').alias('isCancerDriverGene'),
-        f.col('Nr_TEP').alias('hasTEP'),
         f.col('negScaledHarmonicSum').alias('mouseKOScore'),
         f.col('Nr_chprob').alias('hasHighQualityChemicalProbes'),
         f.col('inClinicalTrials').alias('maxClinicalStage'),
@@ -405,23 +423,18 @@ def _target_membrane_query(
     )
 
 
-def _ligand_pocket_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
+def _ligand_pocket_query(queryset: DataFrame, tractability: DataFrame) -> DataFrame:
     """Extract ligand, pocket, and small molecule binder status from tractability."""
     filtered_targets = (
-        targets
+        tractability
         .select(
-            f.col('id').alias('targetid'),
-            f.explode_outer(f.col('tractability')).alias('new_struct'),
+            f.col('targetId').alias('targetid'),
+            f.col('id').alias('type'),
+            f.col('value').cast('int').alias('presence'),
         )
-        .filter(
-            (f.col('new_struct.id') == 'High-Quality Ligand')
-            | (f.col('new_struct.id') == 'High-Quality Pocket')
-            | (f.col('new_struct.id') == 'Small Molecule Binder')
-        )
-        .withColumn('type', f.col('new_struct').getItem('id'))
-        .withColumn('presence', f.col('new_struct').getItem('value').cast('int'))
+        .filter(f.col('type').isin('High-Quality Ligand', 'High-Quality Pocket', 'Small Molecule Binder'))
         .groupBy('targetid')
-        .pivot('type')
+        .pivot('type', ['High-Quality Ligand', 'High-Quality Pocket', 'Small Molecule Binder'])
         .agg(f.sum('presence'))
         .select(
             f.col('*'),
@@ -434,27 +447,19 @@ def _ligand_pocket_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     return queryset.join(filtered_targets, on='targetid', how='left')
 
 
-def _safety_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
+def _safety_query(queryset: DataFrame, target_safety_event: DataFrame) -> DataFrame:
     """Extract safety event information."""
     agg_events = (
-        targets
-        .withColumn(
-            'info',
-            f.when(f.size(f.col('safetyLiabilities')) > 0, f.lit('conInfo')).otherwise(f.lit('noReported')),
-        )
-        .select(
-            f.col('id').alias('targetid'),
-            f.explode_outer(f.col('safetyLiabilities')).alias('col'),
-            f.col('info'),
-        )
-        .groupBy('targetid', 'info')
+        target_safety_event
+        .select(f.col('targetId').alias('targetid'), f.col('event'))
+        .groupBy('targetid')
         .agg(
-            f.count(f.col('col.event')).alias('nEvents'),
-            f.array_distinct(f.collect_list('col.event')).alias('events'),
+            f.count(f.col('event')).alias('nEvents'),
+            f.array_distinct(f.collect_list('event')).alias('events'),
         )
         .withColumn(
             'hasSafetyEvent',
-            f.when((f.col('nEvents') > 0) & (f.col('info') == 'conInfo'), f.lit('Yes')).otherwise(f.lit(None)),
+            f.when(f.col('nEvents') > 0, f.lit('Yes')).otherwise(f.lit(None)),
         )
         .withColumn(
             'Nr_Event',
@@ -504,33 +509,23 @@ def _constraint_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     return queryset.join(constraints, on='targetid', how='left')
 
 
-def _paralogs_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
+def _paralogs_query(queryset: DataFrame, homology: DataFrame) -> DataFrame:
     """Compute paralog maximum identity percentage."""
-    exploded = (
-        targets
+    paralog = (
+        homology
         .select(
-            f.col('id').alias('targetid'),
-            f.when(f.size(f.col('homologues')) > f.lit(0), f.lit('hasInfo')).otherwise('noInfo/null').alias('hasInfo'),
-            f.explode(f.col('homologues')).alias('col'),
-        )
-        .withColumn(
-            'homoType',
+            f.col('targetId').alias('targetid'),
             f.regexp_replace(
                 f.regexp_replace(
-                    f.split(f.col('col.homologyType'), '_').getItem(0),
+                    f.split(f.col('homologyType'), '_').getItem(0),
                     'other',
                     'paralog_other',
                 ),
                 'within',
                 'paralog_intrasp',
-            ),
+            ).alias('homoType'),
+            f.col('queryPercentageIdentity'),
         )
-        .withColumn('howmany', f.split(f.col('col.homologyType'), '_').getItem(1))
-        .withColumn('queryPercentageIdentity', f.col('col.queryPercentageIdentity'))
-    )
-
-    paralog = (
-        exploded
         .filter(f.col('homoType').contains('paralog'))
         .groupBy('targetid')
         .agg(f.max('queryPercentageIdentity').alias('max'))
@@ -545,23 +540,13 @@ def _paralogs_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     return queryset.join(paralog, on='targetid', how='left')
 
 
-def _orthologs_mouse_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
+def _orthologs_mouse_query(queryset: DataFrame, homology: DataFrame) -> DataFrame:
     """Compute mouse ortholog maximum identity percentage."""
     orthologs = (
-        targets
-        .select(f.col('id').alias('targetid'), f.explode(f.col('homologues')).alias('col'))
-        .select(f.col('targetid'), f.col('col.*'))
+        homology
+        .select(f.col('targetId').alias('targetid'), 'homologyType', 'speciesName', 'queryPercentageIdentity')
         .withColumn('homoType', f.split(f.col('homologyType'), '_').getItem(0))
-        .withColumn('howmany', f.split(f.col('homologyType'), '_').getItem(1))
         .filter(f.col('homoType').contains('ortholog') & (f.col('speciesName') == 'Mouse'))
-        .select(
-            'targetid',
-            'homoType',
-            'howmany',
-            'targetGeneId',
-            'targetPercentageIdentity',
-            'queryPercentageIdentity',
-        )
         .groupBy('targetid')
         .agg(f.max('queryPercentageIdentity').alias('max'))
         .withColumn(
@@ -605,23 +590,6 @@ def _driver_gene_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     )
 
     return queryset.join(onco_targets, on='targetid', how='left')
-
-
-def _tep_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
-    """Check for Target Enabling Package."""
-    tep = targets.select(
-        f.col('id').alias('targetid'),
-        f.col('tep.*'),
-        f
-        .when(
-            f.col('tep.description').isNotNull() | (f.col('tep.description') != ''),
-            f.lit(1),
-        )
-        .otherwise(f.lit(None))
-        .alias('Nr_TEP'),
-    )
-
-    return queryset.join(tep, on='targetid', how='left')
 
 
 def _mouse_model_query(
@@ -698,28 +666,18 @@ def _mouse_model_query(
     )
 
 
-def _chemical_probes_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
+def _chemical_probes_query(queryset: DataFrame, chemical_probes: DataFrame) -> DataFrame:
     """Check for high-quality chemical probes."""
-    probes = targets.select(
-        f.col('id').alias('targetid'),
-        f.explode_outer(f.col('chemicalProbes')).alias('col'),
-        f.when(f.size(f.col('chemicalProbes')) > f.lit(0), f.lit('hasInfo')).otherwise(f.lit('noInfo')).alias('info'),
-    )
-
     grouped = (
-        probes
-        .withColumn(
-            'Nr_chprob',
+        chemical_probes
+        .filter(f.col('targetId').isNotNull())
+        .select(
+            f.col('targetId').alias('targetid'),
             f
-            .when(
-                (f.col('info') == 'hasInfo') & (f.col('col.isHighQuality') == True),  # noqa: E712
-                f.lit(1),
-            )
-            .when(
-                (f.col('info') == 'hasInfo') & (f.col('col.isHighQuality') == False),  # noqa: E712
-                f.lit(0),
-            )
-            .otherwise(f.lit(None)),
+            .when(f.col('isHighQuality') == True, f.lit(1))  # noqa: E712
+            .when(f.col('isHighQuality') == False, f.lit(0))  # noqa: E712
+            .otherwise(f.lit(None))
+            .alias('Nr_chprob'),
         )
         .groupBy('targetid')
         .agg(f.max(f.col('Nr_chprob')).alias('Nr_chprob'))

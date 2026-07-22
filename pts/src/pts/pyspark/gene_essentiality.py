@@ -1,4 +1,9 @@
-"""Parser to the gene-essentiality dataset."""
+"""Parser to the gene-essentiality dataset.
+
+Resolves DepMap gene-symbol essentiality data to ENSG IDs using output/target
+(symbol/protein-accession lookup), which also validates every entry against
+the target universe: symbols with no match are dropped.
+"""
 
 from typing import Any
 
@@ -7,6 +12,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
 
 def gene_essentiality(
@@ -15,8 +21,20 @@ def gene_essentiality(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Loads and processes inputs to generate the Gene Essentiality annotation."""
-    spark = Session(app_name='chemical_probes', properties=properties)
+    """Loads and processes inputs to generate the Gene Essentiality annotation.
+
+    Args:
+        source: Mapping of logical input names to paths. Expected keys:
+            ``models``, ``essential_genes``, ``gene_effects``, ``gene_expression``,
+            ``mutation_hotspots``, ``mutation_damaging``, ``depmap_tissue_mapping``
+            (DepMap CSVs), and ``target`` (output/target parquet, used for ENSG
+            ID resolution and validation).
+        destination: Output path for the gene essentiality parquet dataset.
+        settings: Step settings; supports ``keep_only_essentials`` (bool,
+            default True) and ``partition_count`` (int).
+        properties: Spark properties passed to :class:`Session`.
+    """
+    spark = Session(app_name='gene_essentiality', properties=properties)
     keep_only_essentials = settings.get('keep_only_essentials', True)
 
     logger.debug(f'loading data from: {source}')
@@ -27,6 +45,7 @@ def gene_essentiality(
     hotspots = spark.load_data(source['mutation_hotspots'], format='csv', sep=',', header=True)
     damaging_mutation = spark.load_data(source['mutation_damaging'], format='csv', sep=',', header=True)
     tissue_mapping = spark.load_data(source['depmap_tissue_mapping'], format='csv', sep=',', header=True)
+    target_df = spark.load_data(source['target'])
 
     depmap_essentials = DepMapEssentiality(
         models_df=models_df,
@@ -40,8 +59,67 @@ def gene_essentiality(
     ).transform()
     logger.info('aggregating into gene essentiality data model')
     aggregated_df = depmap_essentials.aggregate()
+
+    logger.info('resolving ENSG IDs against output/target')
+    ensg_lookup = _build_ensg_lookup(target_df)
+    result = _resolve_target_ids(aggregated_df, ensg_lookup)
+
+    partition_count = settings.get('partition_count')
     logger.info(f'writing output data to {destination}.')
-    aggregated_df.write.parquet(destination, mode='overwrite')
+    maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
+
+
+def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
+    """Build a symbol/proteinId → ENSG ID lookup from the target dataset.
+
+    Args:
+        target_df: Target parquet from ``output/target``.
+
+    Returns:
+        DataFrame with columns ``ensgId`` and ``name``
+        (``array<str>`` of protein accessions and approved symbol).
+    """
+    return target_df.select(
+        f.col('id').alias('ensgId'),
+        # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+        # microRNAs) since they have no protein product. flatten(array(...))
+        # returns NULL for the whole array if any element is NULL, which would
+        # silently drop approvedSymbol too -- safe_array_union coalesces each
+        # side to an empty array first, so non-coding targets still resolve by
+        # symbol.
+        safe_array_union(
+            f.col('proteinIds.id'),
+            f.array(f.col('approvedSymbol')),
+        ).alias('name'),
+    )
+
+
+def _resolve_target_ids(essentiality_df: DataFrame, ensg_lookup: DataFrame) -> DataFrame:
+    """Resolve gene essentiality entries to ENSG IDs and validate against output/target.
+
+    Ports addGeneEssentiality from Target.scala. Rows whose ``targetSymbol``
+    has no match in the target universe are dropped (implicit validation).
+
+    Args:
+        essentiality_df: Aggregated gene essentiality DataFrame (with
+            ``targetSymbol`` column) from :meth:`DepMapEssentiality.aggregate`.
+        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
+
+    Returns:
+        DataFrame with [targetId, isEssential, depMapEssentiality], one row per
+        ENSG ID. Rows are merged when more than one ``targetSymbol`` resolves
+        to the same ENSG ID (e.g. via a shared protein accession).
+    """
+    return (
+        essentiality_df
+        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetSymbol')), 'inner')
+        .select(f.col('ensgId').alias('targetId'), 'isEssential', 'depMapEssentiality')
+        .groupBy('targetId')
+        .agg(
+            f.max('isEssential').alias('isEssential'),
+            f.array_distinct(f.flatten(f.collect_list('depMapEssentiality'))).alias('depMapEssentiality'),
+        )
+    )
 
 
 class DepMapEssentiality:

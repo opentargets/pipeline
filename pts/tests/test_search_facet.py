@@ -154,30 +154,18 @@ def test_therapeutic_area_label_is_area_name(spark):
 # ---------------------------------------------------------------------------
 
 TRACTABILITY_SCHEMA = StructType([
+    StructField('targetId', StringType()),
+    StructField('modality', StringType()),
     StructField('id', StringType()),
-    StructField(
-        'tractability',
-        ArrayType(
-            StructType([
-                StructField('modality', StringType()),
-                StructField('id', StringType()),
-                StructField('value', BooleanType()),
-            ])
-        ),
-    ),
+    StructField('value', BooleanType()),
 ])
 
 
 def test_tractability_facet_produces_modality_categories(spark):
     """Tractability facet produces SM/AB/PR/OC modality categories."""
     data = [
-        Row(
-            id='ENSG00000001',
-            tractability=[
-                Row(modality='SM', id='Clinical Precedence', value=True),
-                Row(modality='AB', id='Predicted Tractable High', value=True),
-            ],
-        ),
+        Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True),
+        Row(targetId='ENSG00000001', modality='AB', id='Predicted Tractable High', value=True),
     ]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
@@ -190,13 +178,8 @@ def test_tractability_facet_produces_modality_categories(spark):
 def test_tractability_facet_only_true_values(spark):
     """Tractability facet only includes entries where value=True."""
     data = [
-        Row(
-            id='ENSG00000001',
-            tractability=[
-                Row(modality='SM', id='Clinical Precedence', value=True),
-                Row(modality='SM', id='Discovery Precedence', value=False),
-            ],
-        ),
+        Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True),
+        Row(targetId='ENSG00000001', modality='SM', id='Discovery Precedence', value=False),
     ]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
@@ -208,12 +191,7 @@ def test_tractability_facet_only_true_values(spark):
 
 def test_tractability_facet_entry_structure(spark):
     """Tractability facet entries have label, category, entityIds, datasourceId."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            tractability=[Row(modality='SM', id='Clinical Precedence', value=True)],
-        ),
-    ]
+    data = [Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True)]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
     row = result.collect()[0]

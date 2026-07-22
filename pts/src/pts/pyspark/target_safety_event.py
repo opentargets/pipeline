@@ -1,4 +1,14 @@
-"""This module puts together data from different sources that describe target safety liabilities."""
+"""Target safety event dataset generation.
+
+Harmonizes raw target-safety evidence from six heterogeneous sources (adverse
+events, safety risks, ToxCast, AOPWiki, Brennan/secondary pharmacology, and
+pharmacogenetics) into a common schema, then resolves it against output/target
+(ENSG ID resolution for symbol-keyed entries, target-ID validation) and
+output/disease (obsolete EFO term remapping) to produce the final per-record
+target safety event dataset.
+"""
+
+from __future__ import annotations
 
 from functools import partial, reduce
 from typing import Any
@@ -8,36 +18,75 @@ from loguru import logger
 from pyspark.sql import Column, DataFrame
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
 
-def target_safety(
+def target_safety_event(
     source: dict[str, str],
     destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """This module puts together data from different sources that describe target safety liabilities."""
-    spark = Session(app_name='target_safety', properties=properties)
+    """Generate the target safety event dataset.
+
+    Harmonizes raw safety evidence from six sources, resolves ENSG IDs for
+    symbol-keyed entries (ToxCast), remaps obsolete EFO disease terms to their
+    current equivalents, and drops any record whose target ID isn't an actual
+    target in output/target.
+
+    Args:
+        source: Mapping of logical input names to paths. Expected keys:
+            ``adverse_events``, ``safety_risks``, ``toxcast``, ``aopwiki``,
+            ``brennan`` (raw safety evidence inputs), ``pharmacogenetics``
+            (output/pharmacogenomics), ``target`` (output/target parquet),
+            and ``diseases`` (output/disease parquet).
+        destination: Output path for the target safety event parquet dataset.
+        settings: Step settings; supports ``partition_count`` (int, default 2).
+        properties: Spark session properties passed to :class:`Session`.
+    """
+    session = Session(app_name='target_safety_event', properties=properties)
+    spark = session.spark
 
     logger.info(f'load data from {source}')
-    adverse_events_df = spark.load_data(source['adverse_events'], format='csv', sep='\t', header=True)
-    safety_risks_df = spark.load_data(source['safety_risks'], format='csv', sep='\t', header=True)
-    toxcast_df = spark.load_data(source['toxcast'], format='csv', sep='\t', header=True)
-    aopwiki_df = spark.load_data(source['aopwiki'], format='json')
-    brennan_df = spark.load_data(source['brennan'], format='json')
-    pharmacogenetics_df = spark.load_data(source['pharmacogenetics'])
+    adverse_events_df = session.load_data(source['adverse_events'], format='csv', sep='\t', header=True)
+    safety_risks_df = session.load_data(source['safety_risks'], format='csv', sep='\t', header=True)
+    toxcast_df = session.load_data(source['toxcast'], format='csv', sep='\t', header=True)
+    aopwiki_df = session.load_data(source['aopwiki'], format='json')
+    brennan_df = session.load_data(source['brennan'], format='json')
+    pharmacogenetics_df = session.load_data(source['pharmacogenetics'])
+    target_raw = spark.read.parquet(source['target'])
+    diseases_raw = spark.read.parquet(source['diseases'])
 
-    logger.info('transforming target safety evidence')
-    safety_dfs = [
+    logger.info('harmonizing target safety evidence')
+    safety_raw = _harmonize_safety_evidence([
         process_adverse_events(adverse_events_df),
         process_safety_risk(safety_risks_df),
         process_toxcast(toxcast_df),
         process_aop(aopwiki_df),
         process_pharmacogenetics(pharmacogenetics_df),
         process_brennan(brennan_df),
-    ]
+    ])
 
-    logger.info('combine safety evidence')
+    ensg_lookup = _build_ensg_lookup(target_raw)
+    result = _build_target_safety_events(safety_raw, ensg_lookup, diseases_raw, target_raw)
+
+    partition_count = (settings or {}).get('partition_count', 2)
+    logger.info(f'writing target safety events to {destination} ({partition_count} partitions)')
+    maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
+
+
+def _harmonize_safety_evidence(safety_dfs: list[DataFrame]) -> DataFrame:
+    """Union the per-source safety evidence DataFrames into one common schema.
+
+    Args:
+        safety_dfs: Per-source DataFrames, each already normalized to the
+            common evidence schema by its own ``process_*`` function.
+
+    Returns:
+        DataFrame with one row per distinct evidence record, columns
+        ``id``, ``targetFromSourceId``, ``event``, ``eventId``, ``datasource``,
+        ``effects``, ``literature``, ``url``, ``biosamples``, ``studies``.
+    """
     evidence_unique_cols = [
         'id',
         'targetFromSourceId',
@@ -49,7 +98,7 @@ def target_safety(
         'url',
     ]
     union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
-    safety_df = (
+    return (
         reduce(union_by_diff_schema, safety_dfs)
         # Collect biosample and study metadata by grouping on the unique evidence fields
         .groupBy(evidence_unique_cols)
@@ -81,8 +130,6 @@ def target_safety(
         .drop('supporting_variation')
         .distinct()
     )
-    logger.info(f'save associations to {destination}')
-    safety_df.write.mode('overwrite').parquet(destination)
 
 
 def process_aop(aopwik_df: DataFrame) -> DataFrame:
@@ -439,3 +486,108 @@ def clean_phenotype_to_describe_safety_event(phenotype_col_name: Column) -> Colu
         cleaned_col = f.when(cleaned_col == original, f.lit(replacement)).otherwise(cleaned_col)
 
     return cleaned_col
+
+
+def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
+    """Build a symbol/proteinId → ENSG ID lookup from the target dataset.
+
+    ToxCast safety entries carry only a gene symbol or protein accession in
+    ``targetFromSourceId`` rather than an ENSG ID. This lookup enables resolving
+    those entries to their canonical ENSG ID.
+
+    Args:
+        target_df: Target parquet from ``output/target``.
+
+    Returns:
+        DataFrame with columns ``ensgId`` and ``name``
+        (``array<str>`` of protein accessions and approved symbol).
+    """
+    return (
+        target_df
+        .select(
+            f.col('id').alias('ensgId'),
+            # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+            # microRNAs) since they have no protein product. flatten(array(...))
+            # returns NULL for the whole array if any element is NULL, which would
+            # silently drop approvedSymbol too -- safe_array_union coalesces each
+            # side to an empty array first, so non-coding targets still resolve by
+            # symbol.
+            safe_array_union(
+                f.col('proteinIds.id'),
+                f.array(f.col('approvedSymbol')),
+            ).alias('name'),
+        )
+    )
+
+
+def _build_target_safety_events(
+    safety_df: DataFrame,
+    ensg_lookup: DataFrame,
+    diseases_df: DataFrame,
+    target_df: DataFrame,
+) -> DataFrame:
+    """Build the target safety event output from harmonized safety evidence.
+
+    Resolves missing ENSG IDs via symbol/protein lookup, replaces obsolete
+    EFO disease terms with their current equivalents, and drops any record
+    whose (resolved) target ID isn't an actual target in ``output/target``.
+
+    Args:
+        safety_df: Harmonized safety evidence from :func:`_harmonize_safety_evidence`.
+        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
+        diseases_df: Disease index parquet from ``output/disease``.
+        target_df: Target parquet from ``output/target``, used as the
+            authoritative reference for target-ID validity.
+
+    Returns:
+        DataFrame with one row per target safety event record and columns
+        ``targetId``, ``event``, ``eventId``, ``effects``, ``biosamples``,
+        ``datasource``, ``literature``, ``url``, ``studies``.
+    """
+    # Resolve ENSG IDs for symbol-keyed entries (ToxCast provides targetFromSourceId)
+    enriched = (
+        safety_df
+        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'left_outer')
+        .drop(*[c for c in ensg_lookup.columns if c != 'ensgId'])
+        .withColumn('id', f.coalesce(f.col('id'), f.col('ensgId')))
+        .drop('ensgId')
+    )
+
+    # Remap obsolete EFO terms to their current equivalents
+    disease_mapping = (
+        diseases_df
+        .select(
+            f.col('id').alias('diseaseId'),
+            f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm'),
+        )
+    )
+
+    remapped = (
+        enriched
+        .join(disease_mapping, enriched['eventId'] == disease_mapping['obsoleteTerm'], 'left_outer')
+        .withColumn('eventId', f.coalesce(f.col('diseaseId'), f.col('eventId')))
+        .drop('obsoleteTerm', 'diseaseId')
+    )
+
+    # Keep only records whose id is a real, current target. A left-semi join
+    # against output/target itself (not the derived ensg_lookup) drops both
+    # unresolved (null) ids and any id that doesn't exist in output/target
+    # (e.g. a stale/deprecated Ensembl ID supplied directly by a source),
+    # which a plain null check would miss.
+    valid_targets = target_df.select('id')
+
+    return (
+        remapped
+        .join(f.broadcast(valid_targets), 'id', 'left_semi')
+        .select(
+            f.col('id').alias('targetId'),
+            'event',
+            'eventId',
+            'effects',
+            'biosamples',
+            'datasource',
+            'literature',
+            'url',
+            'studies',
+        )
+    )

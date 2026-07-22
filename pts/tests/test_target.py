@@ -6,7 +6,6 @@ Ported from platform-etl-backend target step.
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
-    DoubleType,
     IntegerType,
     LongType,
     StringType,
@@ -20,9 +19,7 @@ from pts.pyspark.target import (
     _build_genetic_constraints,
     _build_hallmarks,
     _build_hgnc,
-    _build_homologues,
     _build_reactome,
-    _build_safety,
     _filter_ensembl,
     _map_uniprot_locations_to_ssl,
     _merge_hgnc_ensembl,
@@ -297,233 +294,7 @@ def test_go_grouping_by_aspect(spark):
 
 
 # ---------------------------------------------------------------------------
-# 4. Homologue filtering by species whitelist
-# ---------------------------------------------------------------------------
-
-
-def test_homologue_whitelist_filtering(spark):
-    """Only species in whitelist are included in homologues."""
-    homology_dict_schema = StructType([
-        StructField('#name', StringType()),
-        StructField('species', StringType()),
-        StructField('taxonomy_id', StringType()),
-    ])
-    homology_dict_data = [
-        Row(**{
-            '#name': 'mus_musculus',
-            'species': 'mus_musculus',
-            'taxonomy_id': '10090',
-        }),
-        Row(**{
-            '#name': 'rattus_norvegicus',
-            'species': 'rattus_norvegicus',
-            'taxonomy_id': '10116',
-        }),
-        Row(**{
-            '#name': 'danio_rerio',
-            'species': 'danio_rerio',
-            'taxonomy_id': '7955',
-        }),
-    ]
-    homology_dict_df = spark.createDataFrame(homology_dict_data, homology_dict_schema)
-
-    coding_proteins_schema = StructType([
-        StructField('gene_stable_id', StringType()),
-        StructField('protein_stable_id', StringType()),
-        StructField('species', StringType()),
-        StructField('identity', DoubleType()),
-        StructField('homology_type', StringType()),
-        StructField('homology_gene_stable_id', StringType()),
-        StructField('homology_protein_stable_id', StringType()),
-        StructField('homology_species', StringType()),
-        StructField('homology_identity', DoubleType()),
-        StructField('dn', DoubleType()),
-        StructField('ds', DoubleType()),
-        StructField('goc_score', DoubleType()),
-        StructField('wga_coverage', DoubleType()),
-        StructField('is_high_confidence', StringType()),
-        StructField('homology_id', StringType()),
-    ])
-    coding_proteins_data = [
-        Row(
-            gene_stable_id='ENSG0001',
-            protein_stable_id='P001',
-            species='homo_sapiens',
-            identity=100.0,
-            homology_type='ortholog_one2one',
-            homology_gene_stable_id='ENSMUSG0001',
-            homology_protein_stable_id='P002',
-            homology_species='mus_musculus',
-            homology_identity=88.0,
-            dn=None,
-            ds=None,
-            goc_score=None,
-            wga_coverage=None,
-            is_high_confidence='1',
-            homology_id='h001',
-        ),
-        # rat — NOT in whitelist
-        Row(
-            gene_stable_id='ENSG0001',
-            protein_stable_id='P001',
-            species='homo_sapiens',
-            identity=100.0,
-            homology_type='ortholog_one2one',
-            homology_gene_stable_id='ENSRNOG0001',
-            homology_protein_stable_id='P003',
-            homology_species='rattus_norvegicus',
-            homology_identity=85.0,
-            dn=None,
-            ds=None,
-            goc_score=None,
-            wga_coverage=None,
-            is_high_confidence='1',
-            homology_id='h002',
-        ),
-    ]
-    coding_proteins_df = spark.createDataFrame(coding_proteins_data, coding_proteins_schema)
-
-    gene_dict_schema = StructType([
-        StructField('id', StringType()),
-        StructField('name', StringType()),
-    ])
-    gene_dict_df = spark.createDataFrame(
-        [Row(id='ENSMUSG0001', name='Trp53')],
-        gene_dict_schema,
-    )
-
-    # Only mouse in whitelist (10090), not rat (10116)
-    whitelist = ['10090-mus_musculus']
-    result = _build_homologues(homology_dict_df, coding_proteins_df, gene_dict_df, whitelist)
-    rows = result.collect()
-    species_ids = {r.speciesId for r in rows}
-    assert '10090' in species_ids
-    assert '10116' not in species_ids
-
-
-# ---------------------------------------------------------------------------
-# 5. Safety evidence aggregation
-# ---------------------------------------------------------------------------
-
-
-def test_safety_evidence_aggregation(spark):
-    """Safety evidence is grouped by ENSG id into safetyLiabilities."""
-    safety_schema = StructType([
-        StructField('id', StringType()),
-        StructField('targetFromSourceId', StringType()),
-        StructField('event', StringType()),
-        StructField('eventId', StringType()),
-        StructField(
-            'effects',
-            ArrayType(
-                StructType([
-                    StructField('direction', StringType()),
-                    StructField('dosing', StringType()),
-                ])
-            ),
-        ),
-        StructField(
-            'biosamples',
-            ArrayType(
-                StructType([
-                    StructField('tissueLabel', StringType()),
-                    StructField('tissueId', StringType()),
-                    StructField('cellLabel', StringType()),
-                    StructField('cellFormat', StringType()),
-                ])
-            ),
-        ),
-        StructField('datasource', StringType()),
-        StructField('literature', StringType()),
-        StructField('url', StringType()),
-        StructField(
-            'studies',
-            ArrayType(
-                StructType([
-                    StructField('name', StringType()),
-                    StructField('description', StringType()),
-                    StructField('type', StringType()),
-                ])
-            ),
-        ),
-    ])
-    safety_data = [
-        Row(
-            id='ENSG00000141510',
-            targetFromSourceId='TP53',
-            event='heart failure',
-            eventId='EFO_0003777',
-            effects=[Row(direction='Activation/Increase/Upregulation', dosing='general')],
-            biosamples=None,
-            datasource='TestSource',
-            literature='12345678',
-            url=None,
-            studies=None,
-        ),
-        Row(
-            id='ENSG00000141510',
-            targetFromSourceId='TP53',
-            event='liver toxicity',
-            eventId='EFO_0001234',
-            effects=None,
-            biosamples=None,
-            datasource='TestSource2',
-            literature=None,
-            url=None,
-            studies=None,
-        ),
-        Row(
-            id='ENSG00000012048',
-            targetFromSourceId='BRCA1',
-            event='breast cancer',
-            eventId='MONDO_0007254',
-            effects=None,
-            biosamples=None,
-            datasource='TestSource',
-            literature=None,
-            url=None,
-            studies=None,
-        ),
-    ]
-    safety_df = spark.createDataFrame(safety_data, safety_schema)
-
-    # lookup df: ensgId -> name (array)
-    lookup_schema = StructType([
-        StructField('ensgId', StringType()),
-        StructField('name', ArrayType(StringType())),
-        StructField('uniprot', ArrayType(StringType())),
-        StructField('HGNC', ArrayType(StringType())),
-        StructField('symbols', ArrayType(StringType())),
-    ])
-    lookup_data = [
-        Row(
-            ensgId='ENSG00000141510',
-            name=['P04637', 'TP53'],
-            uniprot=['P04637'],
-            HGNC=['TP53'],
-            symbols=['TP53'],
-        ),
-    ]
-    lookup_df = spark.createDataFrame(lookup_data, lookup_schema)
-
-    # disease df for EFO replacement (empty — no obsolete terms to replace)
-    disease_schema = StructType([
-        StructField('id', StringType()),
-        StructField('obsoleteTerms', ArrayType(StringType())),
-    ])
-    disease_df = spark.createDataFrame([], disease_schema)
-
-    result = _build_safety(safety_df, lookup_df, disease_df)
-    rows = {r.id: r for r in result.collect()}
-
-    # Both ENSG ids should appear
-    assert 'ENSG00000141510' in rows
-    # TP53 has 2 safety liabilities
-    assert len(rows['ENSG00000141510'].safetyLiabilities) == 2
-
-
-# ---------------------------------------------------------------------------
-# 6. Genetic constraints
+# 5. Genetic constraints
 # ---------------------------------------------------------------------------
 
 
@@ -592,7 +363,7 @@ def test_genetic_constraints_structure(spark):
 
 
 # ---------------------------------------------------------------------------
-# 7. Hallmarks
+# 6. Hallmarks
 # ---------------------------------------------------------------------------
 
 
@@ -636,7 +407,7 @@ def test_hallmarks_split_cancer_vs_non_cancer(spark):
 
 
 # ---------------------------------------------------------------------------
-# 8. Reactome pathways
+# 7. Reactome pathways
 # ---------------------------------------------------------------------------
 
 
@@ -683,7 +454,7 @@ def test_reactome_pathways(spark):
 
 
 # ---------------------------------------------------------------------------
-# 9. HGNC + Ensembl merge
+# 8. HGNC + Ensembl merge
 # ---------------------------------------------------------------------------
 
 
@@ -801,7 +572,7 @@ def test_merge_hgnc_ensembl_prefers_hgnc_name(spark):
 
 
 # ---------------------------------------------------------------------------
-# 10. Output schema validation
+# 9. Output schema validation
 # ---------------------------------------------------------------------------
 
 REQUIRED_OUTPUT_COLUMNS = {
@@ -809,19 +580,13 @@ REQUIRED_OUTPUT_COLUMNS = {
     'approvedSymbol',
     'approvedName',
     'biotype',
-    'transcripts',
     'genomicLocation',
     'pathways',
     'go',
     'constraint',
-    'safety',
-    'tractability',
-    'homologues',
     'subcellularLocations',
     'targetClass',
     'hallmarks',
-    'chemicalProbes',
-    'tep',
 }
 
 
@@ -833,7 +598,7 @@ def test_output_schema_has_required_columns(spark):
 
 
 # ---------------------------------------------------------------------------
-# 11. Subcellular location struct schema alignment
+# 10. Subcellular location struct schema alignment
 # ---------------------------------------------------------------------------
 
 

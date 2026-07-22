@@ -1,0 +1,68 @@
+[
+  {
+    "id": "control",
+    "description": "Whether the chemical probe serves as a control"
+  },
+  {
+    "id": "drugFromSourceId",
+    "description": "Probe identifier from the source, used to cross-reference drug information"
+  },
+  {
+    "id": "drugId",
+    "description": "Open Targets molecule identifier of the drug associated with the chemical probe",
+    "foreign_key": "drug_molecule/id"
+  },
+  {
+    "id": "id",
+    "description": "Compound name of the chemical probe"
+  },
+  {
+    "id": "isHighQuality",
+    "description": "Indicates if the chemical probe is high quality"
+  },
+  {
+    "id": "mechanismOfAction",
+    "description": "Mechanism of action of the chemical probe"
+  },
+  {
+    "id": "origin",
+    "description": "Origin of the chemical probe (e.g. experimental, calculated)"
+  },
+  {
+    "id": "probeMinerScore",
+    "description": "Score from ProbeMiner for chemical probe quality"
+  },
+  {
+    "id": "probesDrugsScore",
+    "description": "Score for chemical probes related to druggability"
+  },
+  {
+    "id": "scoreInCells",
+    "description": "Score indicating chemical probe activity in cells"
+  },
+  {
+    "id": "scoreInOrganisms",
+    "description": "Score indicating chemical probe activity in organisms"
+  },
+  {
+    "id": "targetFromSourceId",
+    "description": "Gene symbol or protein accession identifying the target as reported by the probe source, prior to ENSG resolution"
+  },
+  {
+    "id": "targetId",
+    "description": "Ensembl gene identifier of the target, resolved from targetFromSourceId via output/target [bioregistry:ensembl]",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "urls",
+    "description": "URLs linking to more information about the chemical probe"
+  },
+  {
+    "id": "urls/niceName",
+    "description": "Nice name for the linked URL"
+  },
+  {
+    "id": "urls/url",
+    "description": "URL providing details about the chemical probe"
+  }
+]

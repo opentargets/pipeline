@@ -274,11 +274,14 @@ steps:
   chemical_probes:
     - name: pyspark chemical probes
       pyspark: chemical_probes
+      settings:
+        partition_count: 2
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
         chembl_molecule: intermediate/chembl_molecule
-      destination: intermediate/chemical_probes_evidence.parquet
+        target: output/target
+      destination: output/chemical_probes
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
@@ -375,11 +378,8 @@ steps:
     - name: pyspark target
       pyspark: target
       settings:
-        partition_count:
-          target: 3
-          gene_essentiality: 4
+        partition_count: 3
       source:
-        diseases: output/disease
         ensembl: intermediate/target/ensembl/homo_sapiens.parquet
         gene_code: input/target/gencode/gencode.gff3.gz
         genetic_constraints: input/target/gnomad/gnomad_constraint_metrics.tsv
@@ -389,31 +389,35 @@ steps:
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
         hgnc: input/target/genenames/hgnc_complete_set.json
-        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
-        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
-        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
         hpa: intermediate/target/hpa/subcellular_location.tsv.gz
         hpa_sl: intermediate/target/hpa/subcellular_locations_ssl.parquet
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        safety_evidence: intermediate/target/safety.parquet
-        tep: input/target/tep/tep.json.gz
-        tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
         chembl: input/target/chembl/chembl_target.jsonl
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
-        gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
-      destination:
-        target: output/target
-        gene_essentiality: output/target_essentiality
+      destination: output/target
   ##################################################################################################
 
-  #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
-  target_safety:
-    - name: pyspark safety
-      pyspark: target_safety
+  #: TRANSCRIPT STEP :#################################################################################
+  transcript:
+    - name: pyspark transcript
+      pyspark: transcript
+      settings:
+        partition_count: 2
+      source:
+        gene_code: input/target/gencode/gencode.gff3.gz
+        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
+      destination: output/transcript
+  ##################################################################################################
+
+  #: TARGET_SAFETY_EVENT STEP :##########################################################################
+  target_safety_event:
+    - name: pyspark target_safety_event
+      pyspark: target_safety_event
+      settings:
+        partition_count: 2
       source:
         adverse_events: input/target/safety/adverse_effects.tsv
         safety_risks: input/target/safety/safety_risks.tsv
@@ -421,9 +425,54 @@ steps:
         toxcast: input/target/safety/toxcast.tsv
         aopwiki: input/target/safety/aopwiki.json
         pharmacogenetics: output/pharmacogenomics
-      destination: intermediate/target/safety.parquet
+        target: output/target
+        diseases: output/disease
+      destination: output/target_safety_event
+  ##################################################################################################
 
-  #: TARGET_GENE_ESSENTIALITY STEP :#### - part of target, pyspark tasks must run standalone for now
+  #: TARGET_TRACTABILITY STEP :#########################################################################
+  target_tractability:
+    - name: pyspark target_tractability
+      pyspark: target_tractability
+      settings:
+        partition_count: 2
+      source:
+        tractability: input/target/tractability/tractability.tsv
+        target: output/target
+      destination: output/target_tractability
+  ##################################################################################################
+
+  #: HOMOLOGY STEP :#####################################################################################
+  homology:
+    - name: pyspark homology
+      pyspark: homology
+      settings:
+        partition_count: 2
+      source:
+        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
+        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
+        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
+        target: output/target
+      destination: output/homology
+  ##################################################################################################
+
+  #: TARGET_VIEW STEP :##################################################################################
+  target_view:
+    - name: pyspark target_view
+      pyspark: target_view
+      settings:
+        partition_count: 3
+      source:
+        target: output/target
+        homology: output/homology
+        target_tractability: output/target_tractability
+        target_safety_event: output/target_safety_event
+        chemical_probes: output/chemical_probes
+        transcript: output/transcript
+      destination: view/target_view
+  ##################################################################################################
+
+  #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
     - name: pyspark gene_essentiality
       pyspark: gene_essentiality
@@ -435,9 +484,11 @@ steps:
         mutation_hotspots: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixHotspot.csv
         mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
-      destination: intermediate/target/gene-essentiality/essentiality.parquet
+        target: output/target
+      destination: output/target_essentiality
       settings:
         keep_only_essentials: false
+        partition_count: 4
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
@@ -641,7 +692,7 @@ steps:
 
   # This is split so that we don't run into circularity issues
   # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_target_safety → pts_pharmacogenetics.
+  # on pts_ontoma through pts_target_safety_event → pts_pharmacogenetics.
   literature_ontoma:
     - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
@@ -694,7 +745,7 @@ steps:
         partition_count: 1
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
+        chemical_probes: output/chemical_probes
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
@@ -769,6 +820,10 @@ steps:
       pyspark: target_prioritisation
       source:
         targets: output/target
+        tractability: output/target_tractability
+        target_safety_event: output/target_safety_event
+        chemical_probes: output/chemical_probes
+        homology: output/homology
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action
@@ -1849,6 +1904,7 @@ steps:
         disease: output/disease
         evidence: output/evidence_*
         target: output/target
+        tractability: output/target_tractability
         association_direct: output/association_overall_direct
         association_indirect: output/association_overall_indirect
       destination: view/association_otf
@@ -1895,6 +1951,7 @@ steps:
         targets: output/target
         go: output/go
         reactome: output/reactome
+        tractability: output/target_tractability
       destination:
         targets: view/search_facet_target
         diseases: view/search_facet_disease
