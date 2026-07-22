@@ -474,6 +474,15 @@ steps:
     depends_on:
       - pts_target
 
+  pts_target_view:
+    depends_on:
+      - pts_target
+      - pts_homology
+      - pts_target_tractability
+      - pts_target_safety_event
+      - pts_chemical_probes
+      - pts_transcript
+
   pts_search_facet:
     depends_on:
       - pts_disease
