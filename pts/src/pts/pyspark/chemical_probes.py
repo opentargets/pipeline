@@ -15,7 +15,7 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common import Session
-from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
 # Chemical probe data sources
 PROBES_SETS = [
@@ -76,7 +76,7 @@ def chemical_probes(
     )
 
     ensg_lookup = _build_ensg_lookup(target_df)
-    result = _resolve_targets(evidence, ensg_lookup).filter(f.col('targetId').isNotNull())
+    result = _resolve_targets(evidence, ensg_lookup)
 
     partition_count = (settings or {}).get('partition_count', 2)
     maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
@@ -94,22 +94,24 @@ def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
     """
     return target_df.select(
         f.col('id').alias('ensgId'),
-        f.flatten(f.array(
+        # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+        # microRNAs) since they have no protein product. flatten(array(...))
+        # returns NULL for the whole array if any element is NULL, which would
+        # silently drop approvedSymbol too -- safe_array_union coalesces each
+        # side to an empty array first, so non-coding targets still resolve by
+        # symbol.
+        safe_array_union(
             f.col('proteinIds.id'),
             f.array(f.col('approvedSymbol')),
-        )).alias('name'),
+        ).alias('name'),
     )
 
 
 def _resolve_targets(evidence: DataFrame, ensg_lookup: DataFrame) -> DataFrame:
-    """Resolve targetFromSourceId to ENSG IDs.
+    """Resolve targetFromSourceId to ENSG IDs and validate against output/target.
 
-    Rows with no matching ENSG are kept with a null ``targetId``: the
-    drug/probe fields on this dataset (``drugId``, ``drugFromSourceId``) are
-    consumed independently of target resolution by ``drug_molecule``, so
-    dropping unresolvable rows here would silently shrink that dataset too.
-    Consumers that join on ``targetId`` (e.g. ``target.py``) naturally
-    exclude null-targetId rows since they match no real target id.
+    Rows whose ``targetFromSourceId`` has no match in the target universe are
+    dropped.
 
     Args:
         evidence: Chemical probes evidence DataFrame from
@@ -117,12 +119,12 @@ def _resolve_targets(evidence: DataFrame, ensg_lookup: DataFrame) -> DataFrame:
         ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
 
     Returns:
-        DataFrame with ``targetId`` column added (nullable) and
-        ``targetFromSourceId`` retained.
+        DataFrame with ``targetId`` column added and ``targetFromSourceId``
+        retained.
     """
     return (
         evidence
-        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'left_outer')
+        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'inner')
         .drop('name')
         .withColumnRenamed('ensgId', 'targetId')
     )

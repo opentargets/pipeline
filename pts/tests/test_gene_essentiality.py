@@ -55,6 +55,21 @@ def test_build_ensg_lookup_output_columns(spark):
     assert set(lut.columns) == {'ensgId', 'name'}
 
 
+def test_build_ensg_lookup_handles_null_protein_ids(spark):
+    """Null proteinIds (non-coding genes, e.g. microRNAs) does not wipe out the symbol.
+
+    Regression test: flatten(array(proteinIds.id, [approvedSymbol])) returns NULL for
+    the whole array if proteinIds.id is NULL rather than an empty array, silently
+    dropping approvedSymbol too and breaking symbol-based ENSG resolution for every
+    non-coding gene.
+    """
+    rows = [Row(id='ENSG00000003', approvedSymbol='MIR122', proteinIds=None)]
+    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
+    row = lut.filter('ensgId = "ENSG00000003"').first()
+    assert row is not None
+    assert row.name == ['MIR122']
+
+
 # ---------------------------------------------------------------------------
 # _resolve_target_ids
 # ---------------------------------------------------------------------------
@@ -99,6 +114,28 @@ def test_resolve_target_ids_drops_unresolvable_rows(spark):
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     assert result.count() == 0
+
+
+def test_resolve_target_ids_resolves_symbol_for_non_coding_gene(spark):
+    """Essentiality rows for non-coding genes (null proteinIds) still resolve by symbol.
+
+    Regression test for the MIR122-class bug: a non-coding target has
+    proteinIds=None rather than [], which previously wiped out the whole
+    ensg_lookup name array (including approvedSymbol) via flatten(array(...)),
+    dropping this entry.
+    """
+    essentiality = spark.createDataFrame(
+        [Row(targetSymbol='MIR122', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
+    )
+    target = spark.createDataFrame(
+        [Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None)], TARGET_SCHEMA
+    )
+    lut = _build_ensg_lookup(target)
+    result = _resolve_target_ids(essentiality, lut)
+    assert result.count() == 1
+    row = result.first()
+    assert row is not None
+    assert row.targetId == 'ENSG_MIR122'
 
 
 def test_resolve_target_ids_merges_multiple_entries_per_target(spark):
