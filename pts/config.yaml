@@ -456,6 +456,22 @@ steps:
       destination: output/homology
   ##################################################################################################
 
+  #: TARGET_VIEW STEP :##################################################################################
+  target_view:
+    - name: pyspark target_view
+      pyspark: target_view
+      settings:
+        partition_count: 3
+      source:
+        target: output/target
+        homology: output/homology
+        target_tractability: output/target_tractability
+        target_safety_event: output/target_safety_event
+        chemical_probes: output/chemical_probes
+        transcript: output/transcript
+      destination: view/target_view
+  ##################################################################################################
+
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
     - name: pyspark gene_essentiality
