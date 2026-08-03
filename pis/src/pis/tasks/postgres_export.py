@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import IO, Annotated, Any, Self
 
 import duckdb
-import pixeltable_pgserver as pgserver
 from loguru import logger
 from otter.manifest.model import Artifact
 from otter.storage.synchronous.filesystem import FilesystemStorage
@@ -31,6 +30,11 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError, TaskAbortedError, TaskValidationError
 from otter.validators import file
+
+# the package re-exports these from its __init__ without an __all__, which type
+# checkers read as private, so take them from the modules that define them
+from pixeltable_pgserver.postgres_server import PostgresServer, get_server
+from pixeltable_pgserver.utils import TARGET_POSTGRES_VERSION
 from pydantic import BaseModel, Field
 
 CHUNK_SIZE = 8 * 1024 * 1024
@@ -278,11 +282,11 @@ class PostgresExport(Task):
 
         return dump
 
-    def _start_server(self) -> pgserver.PostgresServer:
+    def _start_server(self) -> PostgresServer:
         pgdata = self.scratch / 'pgdata'
-        logger.info(f'starting an ephemeral postgres {pgserver.TARGET_POSTGRES_VERSION} server in {pgdata}')
+        logger.info(f'starting an ephemeral postgres {TARGET_POSTGRES_VERSION} server in {pgdata}')
         try:
-            return pgserver.get_server(pgdata, cleanup_mode='delete')
+            return get_server(pgdata, cleanup_mode='delete')
         except Exception as e:
             raise PostgresExportError(f'could not start postgres: {e}')
 
