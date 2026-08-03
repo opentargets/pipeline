@@ -172,8 +172,7 @@ steps:
       schema_name: ctgov
       tables:
         # these column lists reproduce what clinical_mining used to select.
-        # changing them, or turning off the deduplication postgres_export does by
-        # default, changes the row counts downstream
+        # changing them changes the row counts downstream
         - table: studies
           destination: input/clinical_report/aact/studies.parquet
           columns:
@@ -201,6 +200,42 @@ steps:
           destination: input/clinical_report/aact/brief_summaries.parquet
           columns: [nct_id, description]
 
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/drug/chembl_${chembl_version}.tar.gz
+
+    - name: postgres_export chembl tables
+      requires:
+        - copy chembl dump
+      source: input/drug/chembl_${chembl_version}.tar.gz
+      tables:
+        # note the two `refs` tables are named differently in chembl and in the
+        # release, because that is what pts already reads
+        - table: drug_indication
+          destination: input/clinical_report/chembl/drug_indication.parquet
+          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
+        - table: indication_refs
+          destination: input/clinical_report/chembl/drug_indication_refs.parquet
+          columns: [drugind_id, ref_type, ref_id, ref_url]
+        - table: drug_warning
+          destination: input/clinical_report/chembl/drug_warning.parquet
+          columns:
+            - warning_id
+            - molregno
+            - warning_type
+            - warning_year
+            - warning_country
+            - warning_class
+            - efo_id
+            - efo_term
+            - efo_id_for_warning_class
+        - table: warning_refs
+          destination: input/clinical_report/chembl/drug_warning_refs.parquet
+          columns: [warning_id, ref_type, ref_id, ref_url]
+        - table: molecule_dictionary
+          destination: input/clinical_report/chembl/molecule_dictionary.parquet
+          columns: [molregno, chembl_id, pref_name]
+
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
       glob: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/*
@@ -208,12 +243,6 @@ steps:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
           destination: input/clinical_report/${match_stem}.${match_ext}
-    - name: explode_glob clinical_report chembl
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl/*
-      do:
-        - name: copy clinical_report chembl ${match_stem} ${uuid}
-          source: ${uri}
-           destination: input/clinical_report/chembl/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
