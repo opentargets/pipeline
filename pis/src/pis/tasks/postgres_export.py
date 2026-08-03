@@ -82,13 +82,6 @@ class TableSpec(BaseModel):
     """Path for the parquet file, relative to the release root."""
     columns: list[str] | None = None
     """Columns to select. If omitted, every column is exported."""
-    distinct: bool = True
-    """Whether to deduplicate over the selected columns.
-
-        Defaults to ``True``: selecting a subset of the columns of a table usually
-        leaves duplicate rows behind, and no consumer has wanted them so far. Set
-        it to ``False`` for a table where the duplicates are meaningful, or where
-        the table is large enough that the hash aggregate is not worth paying for."""
     where: str | None = None
     """Optional SQL predicate, without the ``WHERE`` keyword."""
 
@@ -178,9 +171,8 @@ def _build_restore_args(uri: str, dump: Path, tables: list[str], jobs: int) -> l
 def _build_copy_sql(table: TableSpec, schema_name: str, destination: Path) -> str:
     """Build the DuckDB statement exporting one table to a parquet file."""
     columns = ', '.join(f'"{c}"' for c in table.columns) if table.columns else '*'
-    distinct = 'DISTINCT ' if table.distinct else ''
     where = f' WHERE {table.where}' if table.where else ''
-    query = f'SELECT {distinct}{columns} FROM pg."{schema_name}"."{table.table}"{where}'  # noqa: S608 trusted config
+    query = f'SELECT DISTINCT {columns} FROM pg."{schema_name}"."{table.table}"{where}'  # noqa: S608 trusted config
     return f'COPY ({query}) TO {_sql_str(str(destination))} (FORMAT parquet, COMPRESSION zstd)'
 
 
