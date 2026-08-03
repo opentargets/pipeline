@@ -1,17 +1,20 @@
 [project]
 name = "PIS"
-version = "26.9.0rc2"
+version = "26.9.0rc3"
 description = "Open Targets Pipeline Input Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+# pgserver publishes wheels for 3.9 to 3.12 only, and no sdist
+requires-python = ">=3.11,<3.13"
 license = { text = "Apache-2.0" }
 
 dependencies = [
+  "duckdb>=1.4",
   "elasticsearch>=7.17.12",
   "jq>=1.11.0",
   "loguru>=0.7.3",
   "opentargets-otter>=26.6.2",
+  "pgserver==0.1.4",
   "requests>=2.34.2",
   "urllib3>=2.7.0",
 ]
