@@ -1,8 +1,8 @@
 """Restore a postgres dump into an ephemeral database and export tables as parquet.
 
-The task spins up a throwaway postgres server (bundled by ``pgserver``, no docker
-or system install), restores only the tables it needs from a ``pg_dump`` archive,
-exports each one to parquet with DuckDB, and deletes the server again.
+The task spins up a throwaway postgres server (bundled by ``pixeltable-pgserver``,
+no docker or system install), restores only the tables it needs from a ``pg_dump``
+archive, exports each one to parquet with DuckDB, and deletes the server again.
 
 .. note:: Every large file this task touches lives under
     :py:obj:`otter.config.model.Config.work_path`. On the pipeline VM that is the
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import IO, Annotated, Any, Self
 
 import duckdb
-import pgserver
+import pixeltable_pgserver as pgserver
 from loguru import logger
 from otter.manifest.model import Artifact
 from otter.storage.synchronous.filesystem import FilesystemStorage
@@ -31,19 +31,19 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError, TaskAbortedError, TaskValidationError
 from otter.validators import file
-from pgserver._commands import POSTGRES_BIN_PATH
 from pydantic import BaseModel, Field
 
 CHUNK_SIZE = 8 * 1024 * 1024
 POLL_INTERVAL = 1.0
 
 DUMP_MAGIC = b'PGDMP'
-MAX_ARCHIVE_VERSION = (1, 15)
+MAX_ARCHIVE_VERSION = (1, 16)
 """Highest ``pg_dump`` archive version the bundled postgres can restore.
 
-``pgserver`` bundles PostgreSQL 16, whose ``K_VERS_MAX`` is 1.15. AACT and ChEMBL
-currently ship 1.14 and 1.13 respectively. A source moving to PostgreSQL 18 would
-start emitting 1.16, which needs a newer bundled postgres.
+``pixeltable-pgserver`` bundles PostgreSQL 18, which emits and reads 1.16. AACT
+and ChEMBL currently ship 1.14 and 1.13. A source on a postgres newer than the
+bundled one would emit an archive this cannot read, which is what the check is
+for.
 """
 
 DATABASE = 'postgres'
@@ -63,9 +63,9 @@ PG_SETTINGS = {
 }
 """Settings applied to the ephemeral server once it is up.
 
-Only settings that can be applied with a config reload are listed: ``pgserver``
-starts the server itself, so there is no hook to change postmaster-level settings
-without restarting it.
+Only settings that can be applied with a config reload are listed: the server is
+started for us, so there is no hook to change postmaster-level settings without
+restarting it.
 """
 
 
@@ -139,12 +139,12 @@ def _check_archive_version(dump: Path) -> None:
     if version > MAX_ARCHIVE_VERSION:
         raise PostgresExportError(
             f'the dump is a version {version[0]}.{version[1]} archive, but the bundled postgres can only read up '
-            f'to {MAX_ARCHIVE_VERSION[0]}.{MAX_ARCHIVE_VERSION[1]}; pgserver needs upgrading to a newer postgres'
+            f'to {MAX_ARCHIVE_VERSION[0]}.{MAX_ARCHIVE_VERSION[1]}; the bundled postgres needs upgrading'
         )
     logger.debug(f'dump is a version {version[0]}.{version[1]} archive')
 
 
-def _build_restore_args(uri: str, dump: Path, tables: list[str], jobs: int) -> list[list[str]]:
+def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: list[str], jobs: int) -> list[list[str]]:
     """Build the ``pg_restore`` invocations that load the requested tables.
 
     The restore runs in two passes. The first restores the schema of the whole
@@ -155,8 +155,7 @@ def _build_restore_args(uri: str, dump: Path, tables: list[str], jobs: int) -> l
 
     The second pass loads the data of the requested tables only.
     """
-    pg_restore = str(POSTGRES_BIN_PATH / 'pg_restore')
-    common = [pg_restore, '--no-owner', '--no-privileges', '--dbname', uri]
+    common = [str(bin_path / 'pg_restore'), '--no-owner', '--no-privileges', '--dbname', uri]
 
     pre_data = [*common, '--section=pre-data', str(dump)]
 
@@ -281,13 +280,13 @@ class PostgresExport(Task):
 
     def _start_server(self) -> pgserver.PostgresServer:
         pgdata = self.scratch / 'pgdata'
-        logger.info(f'starting ephemeral postgres in {pgdata}')
+        logger.info(f'starting an ephemeral postgres {pgserver.TARGET_POSTGRES_VERSION} server in {pgdata}')
         try:
             return pgserver.get_server(pgdata, cleanup_mode='delete')
         except Exception as e:
             raise PostgresExportError(f'could not start postgres: {e}')
 
-    def _psql(self, uri: str, commands: list[str]) -> None:
+    def _psql(self, bin_path: Path, uri: str, commands: list[str]) -> None:
         """Run commands through psql, one statement at a time.
 
         ``ALTER SYSTEM`` cannot run inside a transaction, and psql reading from
@@ -295,18 +294,18 @@ class PostgresExport(Task):
         """
         subprocess.run(
             # without ON_ERROR_STOP, psql reports success even when a statement failed
-            [str(POSTGRES_BIN_PATH / 'psql'), '--quiet', '-v', 'ON_ERROR_STOP=1', uri],
+            [str(bin_path / 'psql'), '--quiet', '-v', 'ON_ERROR_STOP=1', uri],
             input=';\n'.join(commands).encode(),
             check=True,
             capture_output=True,
         )
 
-    def _tune(self, uri: str) -> None:
+    def _tune(self, bin_path: Path, uri: str) -> None:
         logger.debug(f'applying settings to the ephemeral server: {PG_SETTINGS}')
         commands = [f'ALTER SYSTEM SET {k} = {_sql_str(v)}' for k, v in PG_SETTINGS.items()]
         commands.append('SELECT pg_reload_conf()')
         try:
-            self._psql(uri, commands)
+            self._psql(bin_path, uri, commands)
         except subprocess.CalledProcessError as e:
             logger.warning(f'could not apply settings, continuing with the defaults: {e.stderr.decode()}')
 
@@ -337,11 +336,11 @@ class PostgresExport(Task):
                 raise PostgresExportError(message)
             logger.warning(message)
 
-    def _restore(self, uri: str, dump: Path) -> None:
+    def _restore(self, bin_path: Path, uri: str, dump: Path) -> None:
         tables = [t.table for t in self.spec.tables]
         logger.info(f'restoring {len(tables)} tables into the ephemeral database')
 
-        pre_data, data = _build_restore_args(uri, dump, tables, self.spec.jobs)
+        pre_data, data = _build_restore_args(bin_path, uri, dump, tables, self.spec.jobs)
 
         # restoring someone else's schema reliably reports errors we do not care
         # about, such as roles that do not exist here, or comments on objects the
@@ -404,8 +403,8 @@ class PostgresExport(Task):
         try:
             server = self._start_server()
             uri = server.get_uri(database=DATABASE)
-            self._tune(uri)
-            self._restore(uri, dump)
+            self._tune(server.bin_path, uri)
+            self._restore(server.bin_path, uri, dump)
             self.artifacts = self._export(uri)
         finally:
             if server is not None:
