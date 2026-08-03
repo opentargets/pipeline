@@ -4,6 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  aact_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.88.0'
   ensembl_version: '115'
@@ -135,12 +136,60 @@ steps:
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
+    - name: copy aact dump
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/clinical_report/aact_${aact_version}.zip
+
+    - name: postgres_export aact tables
+      requires:
+        - copy aact dump
+      source: input/clinical_report/aact_${aact_version}.zip
+      schema_name: ctgov
+      tables:
+        # these column lists reproduce what clinical_mining used to select.
+        # changing them, or turning off the deduplication postgres_export does by
+        # default, changes the row counts downstream
+        - table: studies
+          destination: input/clinical_report/aact/studies.parquet
+          columns:
+            - nct_id
+            - overall_status
+            - phase
+            - study_type
+            - start_date
+            - why_stopped
+            - number_of_arms
+            - official_title
+        - table: interventions
+          destination: input/clinical_report/aact/interventions.parquet
+          columns: [nct_id, intervention_type, name]
+        - table: conditions
+          destination: input/clinical_report/aact/conditions.parquet
+          columns: [nct_id, downcase_name]
+        - table: study_references
+          destination: input/clinical_report/aact/study_references.parquet
+          columns: [nct_id, pmid, reference_type]
+        - table: designs
+          destination: input/clinical_report/aact/designs.parquet
+          columns: [nct_id, primary_purpose]
+        - table: brief_summaries
+          destination: input/clinical_report/aact/brief_summaries.parquet
+          columns: [nct_id, description]
+
+    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_stem}.${match_ext}
+
+    - name: explode_glob clinical_report chembl
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl/*
+      do:
+        - name: copy clinical_report chembl ${match_stem} ${uuid}
+          source: ${uri}
+          destination: input/clinical_report/chembl/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
