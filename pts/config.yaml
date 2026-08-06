@@ -485,6 +485,7 @@ steps:
         finngen_phenotypes: input/evidence/gene_burden/finngen/phenos
         genebass: input/evidence/gene_burden/genebass/**.parquet
         cvdi: input/evidence/gene_burden/cvdi.xlsx
+        genes_and_health: input/evidence/gene_burden/genes_health.xlsx
         curated_studies: input/ot_curation/gene_burden/curated_evidence.tsv
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
