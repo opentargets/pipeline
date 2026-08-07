@@ -682,7 +682,7 @@ steps:
       source:
         chembl_molecule: input/drug/chembl_molecule.jsonl
         drugbank: input/drug/drugbank.csv.gz
-        aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
+        aact_trial_extraction: input/clinical_report/aact_trial_extraction/*.parquet
       destination: intermediate/chembl_molecule
   ##################################################################################################
 
@@ -701,6 +701,37 @@ steps:
       destination:
         output: output/drug_molecule
         excluded: excluded/drug_molecule_failed_report
+  ##################################################################################################
+
+  #: AACT_TRIAL_EXTRACTION STEP :##################################################################
+  # Not part of a release. The `aact_trial_extraction` DAG runs this step with
+  # release_uri pointed at gs://aact_data/${aact_version}, so every path below
+  # resolves inside that snapshot, except for the cache
+  aact_trial_extraction:
+    - name: llm_extract aact trials
+      source:
+        studies: tables/studies.parquet
+        interventions: tables/interventions.parquet
+        conditions: tables/conditions.parquet
+        study_references: tables/study_references.parquet
+        brief_summaries: tables/brief_summaries.parquet
+        detailed_descriptions: tables/detailed_descriptions.parquet
+      destination:
+        prompts: prompts/prompts.parquet
+        extraction: extraction/extractions.parquet
+      cache_uri: gs://aact_data/cache/trial_extraction
+      # the AACT version, so a rerun against the same archive resumes from the
+      # shards the last attempt finished instead of paying for them again
+      snapshot: '{{snapshot}}'
+      model: gpt-4.1-mini
+      service_tier: flex
+      concurrency: 50
+      shard_size: 2000
+      retry_errors_after_days: 30
+      publications:
+        # see PublicationsSpec — this fetches abstracts for every trial, not
+        # only cache misses, so it needs its own cache before a full run
+        enabled: false
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
@@ -724,7 +755,7 @@ steps:
         chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
         chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
-        trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
+        trial_extraction: input/clinical_report/aact_trial_extraction/*.parquet
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
         output: output/clinical_report/clinical_report.parquet
