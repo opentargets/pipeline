@@ -25,6 +25,15 @@ gentropy_version: "3.3.0-rc.1"
 vep_version: "release_115.2"
 spark_nlp_version: "6.1.5"
 
+# Ingested dataset versions
+#
+# The aact_data snapshot this release reads, produced by the
+# `aact_trial_extraction` DAG. That DAG pins the raw CTTI archive separately and
+# may be ahead of this; bumping here is what moves the release onto a newer one.
+# If this names a snapshot the DAG never published, the pis_clinical_report step
+# fails on a missing path rather than reading the wrong data.
+aact_data_version: '2026-08-01'
+
 # Dependency graph
 # ----------------
 # The following section defines the dependencies between the different steps in

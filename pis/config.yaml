@@ -5,6 +5,7 @@ pool_size: 4
 
 scratchpad:
   aact_version: '2026-08-25'
+  aact_data_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.93.0'
   ensembl_version: '116'
@@ -159,46 +160,50 @@ steps:
       destination: input/chembl/chembl.tar.gz
   ##################################################################################################
 
-  #: CLINICAL_REPORT STEP :#########################################################################
-  clinical_report:
+  #: AACT_TABLES STEP :#############################################################################
+  # Restores the monthly AACT archive and exports the tables as parquet.
+  # This step is run by the `aact_trial_extraction` DAG, which publishes the
+  # result to `gs://aact_data/${aact_version}/tables` for releases to consume.
+  aact_tables:
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
-      destination: input/clinical_report/aact_${aact_version}.zip
+      destination: input/aact_${aact_version}.zip
 
     - name: postgres_export aact tables
       requires:
         - copy aact dump
-      source: input/clinical_report/aact_${aact_version}.zip
+      source: input/aact_${aact_version}.zip
       schema_name: ctgov
       tables:
-        # these column lists reproduce what clinical_mining used to select.
-        # changing them changes the row counts downstream
         - table: studies
-          destination: input/clinical_report/aact/studies.parquet
-          columns:
-            - nct_id
-            - overall_status
-            - phase
-            - study_type
-            - start_date
-            - why_stopped
-            - number_of_arms
-            - official_title
+          destination: tables/studies.parquet
+          columns: [nct_id, overall_status, phase, study_type, start_date, why_stopped, number_of_arms, official_title]
         - table: interventions
-          destination: input/clinical_report/aact/interventions.parquet
+          destination: tables/interventions.parquet
           columns: [nct_id, intervention_type, name]
         - table: conditions
-          destination: input/clinical_report/aact/conditions.parquet
+          destination: tables/conditions.parquet
           columns: [nct_id, downcase_name]
         - table: study_references
-          destination: input/clinical_report/aact/study_references.parquet
+          destination: tables/study_references.parquet
           columns: [nct_id, pmid, reference_type]
         - table: designs
-          destination: input/clinical_report/aact/designs.parquet
+          destination: tables/designs.parquet
           columns: [nct_id, primary_purpose]
         - table: brief_summaries
-          destination: input/clinical_report/aact/brief_summaries.parquet
+          destination: tables/brief_summaries.parquet
           columns: [nct_id, description]
+        - table: detailed_descriptions
+          destination: tables/detailed_descriptions.parquet
+          columns: [nct_id, description]
+  ##################################################################################################
+
+  #: CLINICAL_REPORT STEP :#########################################################################
+  clinical_report:
+    # AACT comes from the aact_trial_extraction DAG.
+    - name: copy_many aact tables
+      sources: gs://aact_data/${aact_data_version}/tables/*.parquet
+      destination: input/clinical_report/aact
 
     - name: copy chembl dump
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
@@ -275,12 +280,10 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
 
-    # AACT clinical-trial batch extraction — a standalone source consumed by
-    # chembl_molecule (and clinical_report). Downloaded in the drug step so
-    # chembl_molecule's existing pis_drug dependency covers it.
-    - name: copy_many aact extraction batch results
-      sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
-      destination: input/clinical_report/aact_extraction_batch_results
+    # AACT clinical-trial LLM extraction, produced by the extraction DAG.
+    - name: copy_many aact trial extraction
+      sources: gs://aact_data/${aact_data_version}/extraction/*.parquet
+      destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
