@@ -33,6 +33,22 @@ INSERT INTO warning_refs VALUES
     (2, 10, 'DOI', 'ref-b', 'http://b');
 """
 
+SCHEMA += """
+CREATE TABLE target_dictionary (tid int PRIMARY KEY, target_type text, pref_name text, chembl_id text);
+CREATE TABLE drug_mechanism (
+    mec_id int PRIMARY KEY, record_id int, molregno int, mechanism_of_action text, tid int, action_type text
+);
+CREATE TABLE mechanism_refs (mecref_id int PRIMARY KEY, mec_id int, ref_type text, ref_id text, ref_url text);
+"""
+
+DATA += """
+INSERT INTO target_dictionary VALUES (500, 'SINGLE PROTEIN', 'A target', 'CHEMBL_T1');
+INSERT INTO drug_mechanism VALUES
+    (20, 200, 1, 'Kinase inhibitor', 500, 'INHIBITOR'),
+    (21, 201, 3, 'Receptor agonist', NULL, NULL);
+INSERT INTO mechanism_refs VALUES (1, 20, 'PubMed', '12345', 'http://pm/12345');
+"""
+
 
 @pytest.fixture(scope='module')
 def chembl(tmp_path_factory: pytest.TempPathFactory) -> PostgresServer:
@@ -92,3 +108,37 @@ class TestDrugWarning:
 
     def test_no_refs_is_an_empty_list_not_null(self, rows: dict[int, dict]) -> None:
         assert rows[11]['warning_refs'] == []
+
+
+class TestMechanism:
+    @pytest.fixture(scope='class')
+    def rows(self, chembl: PostgresServer) -> dict[int, dict]:
+        return {r['record_id']: r for r in run_query(chembl, 'chembl_mechanism')}
+
+    def test_one_row_per_mechanism(self, rows: dict[int, dict]) -> None:
+        assert sorted(rows) == [200, 201]
+
+    def test_scalar_fields(self, rows: dict[int, dict]) -> None:
+        m = rows[200]
+        assert m['mechanism_of_action'] == 'Kinase inhibitor'
+        assert m['action_type'] == 'INHIBITOR'
+        assert m['molecule_chembl_id'] == 'CHEMBL1'
+        assert m['parent_molecule_chembl_id'] == 'CHEMBL2'
+
+    def test_target(self, rows: dict[int, dict]) -> None:
+        assert rows[200]['target_chembl_id'] == 'CHEMBL_T1'
+
+    def test_missing_target_is_null(self, rows: dict[int, dict]) -> None:
+        assert rows[201]['target_chembl_id'] is None
+
+    def test_all_molecule_chembl_ids(self, rows: dict[int, dict]) -> None:
+        assert sorted(rows[200]['_metadata']['all_molecule_chembl_ids']) == ['CHEMBL1', 'CHEMBL2']
+
+    def test_refs(self, rows: dict[int, dict]) -> None:
+        refs = rows[200]['mechanism_refs']
+        assert len(refs) == 1
+        assert refs[0]['ref_type'] == 'PubMed'
+        assert refs[0]['ref_id'] == '12345'
+
+    def test_no_refs_is_an_empty_list_not_null(self, rows: dict[int, dict]) -> None:
+        assert rows[201]['mechanism_refs'] == []
