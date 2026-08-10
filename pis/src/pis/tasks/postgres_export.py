@@ -164,6 +164,12 @@ def _sql_str(value: str) -> str:
     return f"'{escaped}'"
 
 
+def _quote_ident(name: str) -> str:
+    """Render a python string as a quoted SQL identifier."""
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
+
+
 def _load_query(name: str) -> str:
     """Read a SQL file shipped inside the package.
 
@@ -231,6 +237,16 @@ def _build_copy_sql(table: TableSpec, schema_name: str, destination: Path) -> st
     where = f' WHERE {table.where}' if table.where else ''
     query = f'SELECT DISTINCT {columns} FROM pg."{schema_name}"."{table.table}"{where}'  # noqa: S608 trusted config
     return f'COPY ({query}) TO {_sql_str(str(destination))} (FORMAT parquet, COMPRESSION zstd)'
+
+
+def _build_query_copy_sql(sql: str, destination: Path) -> str:
+    """Wrap a query from a SQL file in a COPY that writes it to parquet.
+
+    Unlike :py:func:`_build_copy_sql` this does not add ``DISTINCT``: a query
+    file is responsible for its own grain.
+    """
+    body = sql.strip().rstrip(';')
+    return f'COPY ({body}) TO {_sql_str(str(destination))} (FORMAT parquet, COMPRESSION zstd)'
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str, parameters: list[Any] | None = None) -> Any:
@@ -439,6 +455,33 @@ class PostgresExport(Task):
 
         return Artifact(source=f'{self.spec.source}#{table.table}', destination=dst.absolute)
 
+    def _export_query(self, con: duckdb.DuckDBPyConnection, query: QuerySpec) -> Artifact:
+        sql = _load_query(query.query)
+
+        local = Path(StorageHandle(query.destination, config=self.context.config, force_local=True).absolute)
+        local.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            rows = int(_scalar(con, _build_query_copy_sql(sql, local)))
+        except duckdb.Error as e:
+            # duckdb names the missing relation but not the query, and a config
+            # with several queries gives no other clue which one failed
+            raise PostgresExportError(f'query {query.query} failed: {e}')
+
+        if not rows:
+            raise PostgresExportError(f'query {query.query} exported no rows')
+
+        logger.info(f'exported {rows} rows from query {query.query} to {query.destination}')
+        self.row_counts[query.destination] = rows
+
+        dst = StorageHandle(query.destination, config=self.context.config)
+        if dst.absolute != str(local):
+            logger.debug(f'uploading {local} to {dst.absolute}')
+            with local.open('rb') as f, dst.open('wb') as g:
+                self._copy_stream(f, g)
+
+        return Artifact(source=f'{self.spec.source}#{query.query}', destination=dst.absolute)
+
     def _export(self, uri: str) -> list[Artifact]:
         temp_directory = self.scratch / 'duckdb'
         temp_directory.mkdir(parents=True, exist_ok=True)
@@ -455,6 +498,14 @@ class PostgresExport(Task):
             for table in self.spec.tables:
                 self._check_abort()
                 artifacts.append(self._export_table(con, table))
+
+            if self.spec.queries:
+                # the SQL files use bare table names; point the default catalog at
+                # the attached server so they do not have to spell out pg."schema"
+                con.execute(f'USE pg.{_quote_ident(self.spec.schema_name)}')
+                for query in self.spec.queries:
+                    self._check_abort()
+                    artifacts.append(self._export_query(con, query))
 
         return artifacts
 
@@ -488,21 +539,22 @@ class PostgresExport(Task):
         counts come from the row counts recorded during the run.
         """
         with closing(duckdb.connect()) as con:
-            for table in self.spec.tables:
-                file.exists(table.destination, config=self.context.config)
+            destinations = [t.destination for t in self.spec.tables] + [q.destination for q in self.spec.queries]
+            for destination in destinations:
+                file.exists(destination, config=self.context.config)
 
-                h = StorageHandle(table.destination, config=self.context.config)
+                h = StorageHandle(destination, config=self.context.config)
                 if not h.stat().size:
-                    raise TaskValidationError(f'{table.destination} is empty')
+                    raise TaskValidationError(f'{destination} is empty')
 
-                local = StorageHandle(table.destination, config=self.context.config, force_local=True).absolute
-                expected = self.row_counts.get(table.destination)
+                local = StorageHandle(destination, config=self.context.config, force_local=True).absolute
+                expected = self.row_counts.get(destination)
                 if expected is None or not Path(local).is_file():
-                    logger.warning(f'no local copy of {table.destination}, cannot check its row count')
+                    logger.warning(f'no local copy of {destination}, cannot check its row count')
                     continue
 
                 rows = int(_scalar(con, 'SELECT count(*) FROM read_parquet(?)', [local]))
                 if rows != expected:
-                    raise TaskValidationError(f'{table.destination} has {rows} rows, expected {expected}')
+                    raise TaskValidationError(f'{destination} has {rows} rows, expected {expected}')
 
         return self

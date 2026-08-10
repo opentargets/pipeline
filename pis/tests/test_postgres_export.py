@@ -26,6 +26,7 @@ from pis.tasks.postgres_export import (
     TableSpec,
     _build_copy_sql,
     _build_count_sql,
+    _build_query_copy_sql,
     _build_restore_args,
     _check_archive_version,
     _load_query,
@@ -34,6 +35,7 @@ from pis.tasks.postgres_export import (
 )
 
 DESTINATION = 'out/t.parquet'
+QUERY_DESTINATION = 'out/q.parquet'
 
 STUDIES = TableSpec(
     table='studies',
@@ -66,6 +68,19 @@ class TestBuildCopySql:
     def test_quotes_in_destination_are_escaped(self) -> None:
         table = TableSpec(table='t', destination="d's.parquet")
         assert "TO 'd''s.parquet'" in _build_copy_sql(table, 'public', Path("d's.parquet"))
+
+
+class TestBuildQueryCopySql:
+    def test_wraps_the_query(self) -> None:
+        sql = _build_query_copy_sql('SELECT 1 AS a', Path('/work/out.parquet'))
+        assert sql == "COPY (SELECT 1 AS a) TO '/work/out.parquet' (FORMAT parquet, COMPRESSION zstd)"
+
+    def test_strips_a_trailing_semicolon(self) -> None:
+        sql = _build_query_copy_sql('SELECT 1 AS a;\n', Path('/o.parquet'))
+        assert sql.startswith('COPY (SELECT 1 AS a)')
+
+    def test_does_not_deduplicate(self) -> None:
+        assert 'DISTINCT' not in _build_query_copy_sql('SELECT 1 AS a', Path('/o.parquet'))
 
 
 class TestBuildCountSql:
@@ -241,6 +256,26 @@ def _await(awaitable: Awaitable[Task]) -> Task:
         loop.close()
 
 
+@pytest.fixture(scope='module')
+def dump(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    path = tmp_path_factory.mktemp('source')
+    server = get_server(path / 'pgdata', cleanup_mode='delete')
+    try:
+        server.psql(
+            'CREATE SCHEMA demo;'
+            'CREATE TABLE demo.t (id int, txt text);'
+            "INSERT INTO demo.t SELECT i, 'x' || (i % 7) FROM generate_series(1, 1000) i;"
+        )
+        dump = path / 'demo.dmp'
+        subprocess.run(
+            [str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()],
+            check=True,
+        )
+        yield dump
+    finally:
+        server.cleanup()
+
+
 @pytest.mark.pgserver
 class TestRoundTrip:
     """Restore a real dump into a real server and export it, with nothing mocked.
@@ -248,25 +283,6 @@ class TestRoundTrip:
     This is what catches an embedded-postgres API change, an incompatible dump, or duckdb
     failing to reach postgres over its unix socket.
     """
-
-    @pytest.fixture(scope='class')
-    def dump(self, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-        path = tmp_path_factory.mktemp('source')
-        server = get_server(path / 'pgdata', cleanup_mode='delete')
-        try:
-            server.psql(
-                'CREATE SCHEMA demo;'
-                'CREATE TABLE demo.t (id int, txt text);'
-                "INSERT INTO demo.t SELECT i, 'x' || (i % 7) FROM generate_series(1, 1000) i;"
-            )
-            dump = path / 'demo.dmp'
-            subprocess.run(
-                [str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()],
-                check=True,
-            )
-            yield dump
-        finally:
-            server.cleanup()
 
     def _build(self, work_path: Path, source: str) -> PostgresExport:
         spec = PostgresExportSpec(
@@ -333,6 +349,50 @@ class TestRoundTrip:
         work = tmp_path / 'work'
         self._run(work, str(dump))
         assert not list((work / '.scratch').glob('*'))
+
+
+@pytest.mark.pgserver
+class TestQueryRoundTrip:
+    """Run a SQL file against a real restored database and export the result."""
+
+    def _build(self, work_path: Path, source: str, monkeypatch: pytest.MonkeyPatch) -> PostgresExport:
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
+        spec = PostgresExportSpec(
+            name='postgres_export demo query',
+            source=source,
+            schema_name='demo',
+            queries=[
+                QuerySpec(
+                    query='_test_demo',
+                    destination=QUERY_DESTINATION,
+                    requires_tables=['t'],
+                )
+            ],
+        )
+        config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=2, log_level='DEBUG')
+        context = TaskContext(config=config, scratchpad=Scratchpad())
+        context.abort = Event()
+        return PostgresExport(spec, context)
+
+    def test_exports_a_query(self, dump: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        work = tmp_path / 'work'
+        task = self._build(work, str(dump), monkeypatch)
+        _await(task.run())
+        assert task.manifest.result != Result.FAILURE, task.manifest.failure_reason
+        _await(task.validate())
+        assert task.manifest.result == Result.SUCCESS, task.manifest.failure_reason
+
+        out = work / QUERY_DESTINATION
+        # the demo table has 1000 rows over 7 distinct txt values
+        assert _count(out) == (7,)
+
+    def test_a_failing_query_names_itself(self, dump: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        task = self._build(tmp_path / 'work', str(dump), monkeypatch)
+        task.spec.queries[0].requires_tables = ['no_such_table']
+        _await(task.run())
+        assert task.manifest.result == Result.FAILURE
+        assert task.manifest.failure_reason is not None
+        assert '_test_demo' in task.manifest.failure_reason
 
 
 class TestRestoreTableNames:
