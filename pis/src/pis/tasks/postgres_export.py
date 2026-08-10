@@ -445,15 +445,27 @@ class PostgresExport(Task):
         logger.info(f'exported {rows} of {source_rows} rows from {table.table} to {table.destination}')
         self.row_counts[table.destination] = rows
 
-        dst = StorageHandle(table.destination, config=self.context.config)
+        return self._upload_local(local, table.destination, table.table)
+
+    def _upload_local(self, local: Path, destination: str, source_id: str) -> Artifact:
+        """Upload a locally written file to its final destination and record it.
+
+        Args:
+            local: The file as written on the local disk.
+            destination: Path for the file, relative to the release root.
+            source_id: What produced it, for the artifact's source field.
+
+        Returns:
+            The artifact describing where the file landed.
+        """
+        dst = StorageHandle(destination, config=self.context.config)
         if dst.absolute != str(local):
             logger.debug(f'uploading {local} to {dst.absolute}')
             # open() streams the upload, unlike write(), which needs the whole
             # object in memory
             with local.open('rb') as f, dst.open('wb') as g:
                 self._copy_stream(f, g)
-
-        return Artifact(source=f'{self.spec.source}#{table.table}', destination=dst.absolute)
+        return Artifact(source=f'{self.spec.source}#{source_id}', destination=dst.absolute)
 
     def _export_query(self, con: duckdb.DuckDBPyConnection, query: QuerySpec) -> Artifact:
         sql = _load_query(query.query)
@@ -474,13 +486,7 @@ class PostgresExport(Task):
         logger.info(f'exported {rows} rows from query {query.query} to {query.destination}')
         self.row_counts[query.destination] = rows
 
-        dst = StorageHandle(query.destination, config=self.context.config)
-        if dst.absolute != str(local):
-            logger.debug(f'uploading {local} to {dst.absolute}')
-            with local.open('rb') as f, dst.open('wb') as g:
-                self._copy_stream(f, g)
-
-        return Artifact(source=f'{self.spec.source}#{query.query}', destination=dst.absolute)
+        return self._upload_local(local, query.destination, query.query)
 
     def _export(self, uri: str) -> list[Artifact]:
         temp_directory = self.scratch / 'duckdb'
@@ -533,7 +539,7 @@ class PostgresExport(Task):
 
     @report
     def validate(self) -> Self:
-        """Check every table landed in the release with the number of rows it was exported with.
+        """Check every table and query result landed in the release with the number of rows it was exported with.
 
         The ephemeral database is long gone by the time validation runs, so the
         counts come from the row counts recorded during the run.
