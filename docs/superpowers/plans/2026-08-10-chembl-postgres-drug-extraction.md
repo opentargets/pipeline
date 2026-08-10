@@ -280,7 +280,7 @@ class TestRestoreTableNames:
         spec = PostgresExportSpec(
             name='postgres_export mixed', source='d.dmp', tables=tables, queries=queries
         )
-        config = Config(step='demo', steps=['demo'], work_path=tmp_path, pool_size=1, log_level='DEBUG')
+        config = Config(step='demo', steps=['demo'], work_path=tmp_path, pool_size=2, log_level='DEBUG')
         return PostgresExport(spec, TaskContext(config=config, scratchpad=Scratchpad()))
 
     def test_unions_tables_and_query_requirements(self, tmp_path: Path) -> None:
@@ -445,7 +445,7 @@ class TestQueryRoundTrip:
                 )
             ],
         )
-        config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=1, log_level='DEBUG')
+        config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=2, log_level='DEBUG')
         context = TaskContext(config=config, scratchpad=Scratchpad())
         context.abort = Event()
         return PostgresExport(spec, context)
