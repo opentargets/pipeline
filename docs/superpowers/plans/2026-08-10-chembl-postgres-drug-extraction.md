@@ -29,6 +29,7 @@
 | --- | --- |
 | `pis/src/pis/tasks/postgres_export.py` | Modified. Adds `QuerySpec`, `queries` field, SQL loading, restore-list union, query export loop. |
 | `pis/src/pis/sql/__init__.py` | Created. Makes `pis.sql` an importable package so `importlib.resources` can read the SQL. |
+| `pis/tests/sql/__init__.py`, `pis/tests/sql/_test_demo.sql` | Created. Test-only query fixture, deliberately outside `src/` so it never ships. |
 | `pis/src/pis/sql/chembl_drug_warning.sql` | Created. Rebuilds the drug warning document. |
 | `pis/src/pis/sql/chembl_mechanism.sql` | Created. Rebuilds the mechanism document. |
 | `pis/src/pis/sql/chembl_molecule.sql` | Created. Rebuilds the molecule document. |
@@ -49,6 +50,7 @@ The comparison harness is a development tool, not a deliverable. It lives outsid
 **Files:**
 - Modify: `pis/src/pis/tasks/postgres_export.py:80-120`
 - Create: `pis/src/pis/sql/__init__.py`
+- Create: `pis/tests/sql/__init__.py`, `pis/tests/sql/_test_demo.sql`
 - Test: `pis/tests/test_postgres_export.py`
 
 **Interfaces:**
@@ -106,13 +108,17 @@ class TestQuerySpec:
 
 
 class TestLoadQuery:
-    def test_reads_a_shipped_sql_file(self) -> None:
-        assert 'SELECT' in _load_query('chembl_drug_warning').upper()
+    def test_reads_a_sql_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # the fixture lives in tests/sql so nothing test-only ships in the wheel
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
+        assert 'SELECT' in _load_query('_test_demo').upper()
 
     def test_raises_for_a_missing_file(self) -> None:
         with pytest.raises(PostgresExportError, match='no SQL file for query'):
             _load_query('does_not_exist')
 ```
+
+Add `from pis.tasks import postgres_export` to the test module's imports — `monkeypatch.setattr` needs the module object, not the names imported from it.
 
 Extend the existing import block from `pis.tasks.postgres_export` to add `QuerySpec` and `_load_query`.
 
@@ -198,15 +204,25 @@ def _load_query(name: str) -> str:
 
 Remove the now-wrong `Annotated[list[TableSpec], Field(min_length=1)]` annotation on `tables`.
 
-- [ ] **Step 5: Create a placeholder SQL file so the loader test has something to read**
+- [ ] **Step 5: Create the test-only SQL fixture**
 
-Create `pis/src/pis/sql/chembl_drug_warning.sql` with exactly:
+This lives under `tests/`, never under `src/`, so it cannot ship in the wheel or the Docker image.
 
-```sql
-SELECT 1 AS placeholder
+Create `pis/tests/sql/__init__.py` with exactly:
+
+```python
+"""SQL fixtures for the postgres_export query tests."""
 ```
 
-Task 5 replaces this with the real query.
+Create `pis/tests/sql/_test_demo.sql` with exactly:
+
+```sql
+SELECT txt, count(*) AS n
+FROM t
+GROUP BY txt
+```
+
+Task 3's round-trip test runs this against the demo database. No placeholder file is created — `chembl_drug_warning.sql` is written for the first time in Task 5.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -441,13 +457,13 @@ class TestQueryRoundTrip:
 
 Move the `dump` fixture from `TestRoundTrip` to module scope so both classes can use it — change `@pytest.fixture(scope='class')` to `@pytest.fixture(scope='module')` and lift it out of the class body, dropping the `self` parameter.
 
-Create the fixture SQL file `pis/src/pis/sql/_test_demo.sql`:
+`pis/tests/sql/_test_demo.sql` already exists from Task 1. `TestQueryRoundTrip._build` must point the task at it by setting `QUERY_PACKAGE`, since the task loads queries from `pis.sql` by default. Add to `_build`, before constructing the spec:
 
-```sql
-SELECT txt, count(*) AS n
-FROM t
-GROUP BY txt
+```python
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
 ```
+
+and thread `monkeypatch: pytest.MonkeyPatch` through `_build` and both test methods. Spec validation calls `_load_query`, so the patch must be in place before `PostgresExportSpec(...)` is constructed.
 
 - [ ] **Step 6: Run it to verify it fails**
 
@@ -718,7 +734,7 @@ Expected: no line mentioning `compare_chembl_es.py`. There is deliberately no co
 ### Task 5: `chembl_drug_warning.sql`
 
 **Files:**
-- Modify: `pis/src/pis/sql/chembl_drug_warning.sql` (replacing the Task 1 placeholder)
+- Create: `pis/src/pis/sql/chembl_drug_warning.sql`
 - Create: `pis/tests/test_chembl_queries.py`
 
 **Interfaces:**
@@ -829,7 +845,7 @@ class TestDrugWarning:
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `uv run --frozen --directory pis pytest tests/test_chembl_queries.py -rxs`
-Expected: FAIL — the placeholder SQL returns `SELECT 1 AS placeholder`, so `warning_id` is missing.
+Expected: FAIL with `PostgresExportError: no SQL file for query chembl_drug_warning` — the file does not exist yet.
 
 - [ ] **Step 3: Write the query**
 
@@ -1504,7 +1520,7 @@ git commit -m "pis: rebuild chembl targets from postgres"
 **Files:**
 - Modify: `pis/config.yaml:136-215` (drug/clinical_report step), `:950-965` (target step)
 
-`pis/src/pis/sql/_test_demo.sql` stays: it is the fixture the Task 3 round-trip test runs, not dead code.
+After this task `pis/src/pis/sql/` holds exactly the four real queries — the test fixture lives under `pis/tests/sql/` and never ships.
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-8.
