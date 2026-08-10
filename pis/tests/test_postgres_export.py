@@ -333,3 +333,48 @@ class TestRoundTrip:
         work = tmp_path / 'work'
         self._run(work, str(dump))
         assert not list((work / '.scratch').glob('*'))
+
+
+class TestRestoreTableNames:
+    def _task(
+        self, tables: list[TableSpec], queries: list[QuerySpec], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> PostgresExport:
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
+        spec = PostgresExportSpec(
+            name='postgres_export mixed', source='d.dmp', tables=tables, queries=queries
+        )
+        config = Config(step='demo', steps=['demo'], work_path=tmp_path, pool_size=2, log_level='DEBUG')
+        return PostgresExport(spec, TaskContext(config=config, scratchpad=Scratchpad()))
+
+    def test_unions_tables_and_query_requirements(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        task = self._task(
+            [STUDIES],
+            [
+                QuerySpec(
+                    query='_test_demo',
+                    destination='d.parquet',
+                    requires_tables=['drug_warning', 'warning_refs'],
+                )
+            ],
+            tmp_path,
+            monkeypatch,
+        )
+        assert task._restore_table_names() == ['drug_warning', 'studies', 'warning_refs']
+
+    def test_deduplicates_a_table_named_twice(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        task = self._task(
+            [STUDIES],
+            [QuerySpec(query='_test_demo', destination='d.parquet', requires_tables=['studies'])],
+            tmp_path,
+            monkeypatch,
+        )
+        assert task._restore_table_names() == ['studies']
+
+    def test_queries_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        task = self._task(
+            [],
+            [QuerySpec(query='_test_demo', destination='d.parquet', requires_tables=['drug_warning'])],
+            tmp_path,
+            monkeypatch,
+        )
+        assert task._restore_table_names() == ['drug_warning']

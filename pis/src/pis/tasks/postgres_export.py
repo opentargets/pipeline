@@ -394,8 +394,15 @@ class PostgresExport(Task):
                 raise PostgresExportError(message)
             logger.warning(message)
 
+    def _restore_table_names(self) -> list[str]:
+        """Every table the restore must load, for table exports and queries alike."""
+        names = {t.table for t in self.spec.tables}
+        for query in self.spec.queries:
+            names.update(query.requires_tables)
+        return sorted(names)
+
     def _restore(self, bin_path: Path, uri: str, dump: Path) -> None:
-        tables = [t.table for t in self.spec.tables]
+        tables = self._restore_table_names()
         logger.info(f'restoring {len(tables)} tables into the ephemeral database')
 
         pre_data, data = _build_restore_args(bin_path, uri, dump, tables, self.spec.jobs)
