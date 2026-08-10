@@ -15,17 +15,20 @@ from otter.task.model import Task, TaskContext
 from pixeltable_pgserver.postgres_server import get_server
 from pydantic import ValidationError
 
+from pis.tasks import postgres_export
 from pis.tasks.postgres_export import (
     DUMP_MAGIC,
     MAX_ARCHIVE_VERSION,
     PostgresExport,
     PostgresExportError,
     PostgresExportSpec,
+    QuerySpec,
     TableSpec,
     _build_copy_sql,
     _build_count_sql,
     _build_restore_args,
     _check_archive_version,
+    _load_query,
     _resolve_archive_member,
     _slug,
 )
@@ -159,6 +162,65 @@ class TestSpec:
         assert spec.task_type == 'postgres_export'
         assert spec.archive_member == '*.dmp'
         assert spec.schema_name == 'public'
+
+
+class TestQuerySpec:
+    # chembl_molecule.sql is not written until Task 7 (see task-1-brief.md step 5:
+    # "no placeholder file is created"), so `_sql_files_exist` correctly rejects this
+    # spec today. Remove this marker once that file lands; xfail(strict=True) will
+    # turn an unexpected pass into a failure so the removal isn't forgotten.
+    @pytest.mark.xfail(strict=True, reason='chembl_molecule.sql does not exist until Task 7')
+    def test_accepts_a_query(self) -> None:
+        spec = PostgresExportSpec(
+            name='postgres_export chembl',
+            source='d.tar.gz',
+            queries=[
+                QuerySpec(
+                    query='chembl_molecule',
+                    destination='input/drug/chembl_molecule.parquet',
+                    requires_tables=['molecule_dictionary'],
+                )
+            ],
+        )
+        assert spec.tables == []
+        assert spec.queries[0].query == 'chembl_molecule'
+
+    def test_rejects_a_spec_with_neither_tables_nor_queries(self) -> None:
+        with pytest.raises(ValidationError, match='at least one of tables or queries'):
+            PostgresExportSpec(name='postgres_export nothing', source='d.dmp')
+
+    def test_rejects_a_query_with_no_required_tables(self) -> None:
+        with pytest.raises(ValidationError):
+            QuerySpec(query='chembl_molecule', destination='d.parquet', requires_tables=[])
+
+    def test_rejects_a_query_with_no_sql_file(self) -> None:
+        with pytest.raises(ValidationError, match='no SQL file for query'):
+            PostgresExportSpec(
+                name='postgres_export missing',
+                source='d.dmp',
+                queries=[QuerySpec(query='does_not_exist', destination='d.parquet', requires_tables=['t'])],
+            )
+
+    def test_tables_only_still_works(self) -> None:
+        spec = PostgresExportSpec(name='postgres_export some tables', source='d.dmp', tables=[STUDIES])
+        assert spec.queries == []
+
+
+class TestLoadQuery:
+    # pis/tests/ has no __init__.py, so 'tests' is not an importable package from the
+    # pytest rootdir here and 'tests.sql' raises ModuleNotFoundError. Fixing that is a
+    # packaging decision left to task-1-brief.md's author, not invented here (see the
+    # brief's note on this). xfail(strict=True) turns an unexpected pass into a
+    # failure so a later fix isn't left with a stale marker.
+    @pytest.mark.xfail(strict=True, reason="'tests.sql' is not importable: pis/tests/ has no __init__.py")
+    def test_reads_a_sql_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # the fixture lives in tests/sql so nothing test-only ships in the wheel
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
+        assert 'SELECT' in _load_query('_test_demo').upper()
+
+    def test_raises_for_a_missing_file(self) -> None:
+        with pytest.raises(PostgresExportError, match='no SQL file for query'):
+            _load_query('does_not_exist')
 
 
 class TestSlug:

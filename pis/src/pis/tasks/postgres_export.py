@@ -18,6 +18,7 @@ import time
 import zipfile
 from contextlib import closing, suppress
 from fnmatch import fnmatch
+from importlib import resources
 from pathlib import Path
 from typing import IO, Annotated, Any, Self
 
@@ -35,7 +36,7 @@ from otter.validators import file
 # checkers read as private, so take them from the modules that define them
 from pixeltable_pgserver.postgres_server import PostgresServer, get_server
 from pixeltable_pgserver.utils import TARGET_POSTGRES_VERSION
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 CHUNK_SIZE = 8 * 1024 * 1024
 POLL_INTERVAL = 1.0
@@ -52,6 +53,9 @@ for.
 
 DATABASE = 'postgres'
 """Database on the ephemeral server the dump is restored into."""
+
+QUERY_PACKAGE = 'pis.sql'
+"""Package holding the SQL files named by ``QuerySpec.query``."""
 
 PG_SETTINGS = {
     'fsync': 'off',
@@ -90,6 +94,22 @@ class TableSpec(BaseModel):
     """Optional SQL predicate, without the ``WHERE`` keyword."""
 
 
+class QuerySpec(BaseModel):
+    """One SQL query to run against the restored database and export."""
+
+    query: str
+    """Name of the SQL file in :py:obj:`QUERY_PACKAGE`, without the ``.sql`` suffix."""
+    destination: str
+    """Path for the parquet file, relative to the release root."""
+    requires_tables: Annotated[list[str], Field(min_length=1)]
+    """Tables ``pg_restore`` must load for this query to run.
+
+    The restore is selective, so a table a query reads but does not declare will
+    simply not be there. ChEMBL's large tables make restoring everything
+    impractical, which is why this is explicit rather than inferred.
+    """
+
+
 class PostgresExportSpec(Spec):
     """Configuration fields for the postgres_export task.
 
@@ -107,10 +127,31 @@ class PostgresExportSpec(Spec):
         member."""
     schema_name: str = 'public'
     """The schema the tables live in."""
-    tables: Annotated[list[TableSpec], Field(min_length=1)]
-    """The tables to restore and export."""
+    tables: list[TableSpec] = []
+    """The tables to restore and export verbatim."""
+    queries: list[QuerySpec] = []
+    """The queries to run against the restored database and export."""
     jobs: int = 8
     """How many tables ``pg_restore`` loads concurrently."""
+
+    @field_validator('queries')
+    @classmethod
+    def _sql_files_exist(cls, value: list[QuerySpec]) -> list[QuerySpec]:
+        for query in value:
+            try:
+                _load_query(query.query)
+            except PostgresExportError as e:
+                # pydantic only turns ValueError/TypeError/AssertionError raised by a
+                # validator into a ValidationError; PostgresExportError would otherwise
+                # propagate unchanged and skip the spec-level error reporting
+                raise ValueError(str(e)) from e
+        return value
+
+    @model_validator(mode='after')
+    def _has_work(self) -> Self:
+        if not self.tables and not self.queries:
+            raise ValueError('postgres_export needs at least one of tables or queries')
+        return self
 
 
 def _slug(name: str) -> str:
@@ -121,6 +162,19 @@ def _sql_str(value: str) -> str:
     """Render a python string as a single quoted SQL literal."""
     escaped = value.replace("'", "''")
     return f"'{escaped}'"
+
+
+def _load_query(name: str) -> str:
+    """Read a SQL file shipped inside the package.
+
+    Reading through ``importlib.resources`` rather than a path relative to this
+    module means it works the same whether the package is installed in the image
+    or run from the source tree.
+    """
+    try:
+        return resources.files(QUERY_PACKAGE).joinpath(f'{name}.sql').read_text(encoding='utf-8')
+    except (FileNotFoundError, ModuleNotFoundError, OSError) as e:
+        raise PostgresExportError(f'no SQL file for query {name}: {e}')
 
 
 def _resolve_archive_member(names: list[str], pattern: str) -> str:
