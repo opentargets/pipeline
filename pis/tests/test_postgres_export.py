@@ -165,25 +165,23 @@ class TestSpec:
 
 
 class TestQuerySpec:
-    # chembl_molecule.sql is not written until Task 7 (see task-1-brief.md step 5:
-    # "no placeholder file is created"), so `_sql_files_exist` correctly rejects this
-    # spec today. Remove this marker once that file lands; xfail(strict=True) will
-    # turn an unexpected pass into a failure so the removal isn't forgotten.
-    @pytest.mark.xfail(strict=True, reason='chembl_molecule.sql does not exist until Task 7')
-    def test_accepts_a_query(self) -> None:
+    def test_accepts_a_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # _test_demo is the only SQL file that exists at this point in the plan;
+        # the four real queries arrive in Tasks 5-8
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
         spec = PostgresExportSpec(
             name='postgres_export chembl',
             source='d.tar.gz',
             queries=[
                 QuerySpec(
-                    query='chembl_molecule',
-                    destination='input/drug/chembl_molecule.parquet',
+                    query='_test_demo',
+                    destination='input/drug/demo.parquet',
                     requires_tables=['molecule_dictionary'],
                 )
             ],
         )
         assert spec.tables == []
-        assert spec.queries[0].query == 'chembl_molecule'
+        assert spec.queries[0].query == '_test_demo'
 
     def test_rejects_a_spec_with_neither_tables_nor_queries(self) -> None:
         with pytest.raises(ValidationError, match='at least one of tables or queries'):
@@ -207,12 +205,6 @@ class TestQuerySpec:
 
 
 class TestLoadQuery:
-    # pis/tests/ has no __init__.py, so 'tests' is not an importable package from the
-    # pytest rootdir here and 'tests.sql' raises ModuleNotFoundError. Fixing that is a
-    # packaging decision left to task-1-brief.md's author, not invented here (see the
-    # brief's note on this). xfail(strict=True) turns an unexpected pass into a
-    # failure so a later fix isn't left with a stale marker.
-    @pytest.mark.xfail(strict=True, reason="'tests.sql' is not importable: pis/tests/ has no __init__.py")
     def test_reads_a_sql_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # the fixture lives in tests/sql so nothing test-only ships in the wheel
         monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
