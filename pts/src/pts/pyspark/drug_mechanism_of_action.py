@@ -75,7 +75,7 @@ def process_mechanism_of_action(
         mechanism
         .join(references, on='id', how='outer')
         .join(target, on='target_chembl_id', how='outer')
-        .drop('mechanism_refs', 'record_id', 'target_chembl_id')
+        .drop('mechanism_refs', 'record_id', 'target_chembl_id', 'id')
         .filter(
             """
             mechanismOfAction is not null
@@ -83,8 +83,6 @@ def process_mechanism_of_action(
             and chemblIds is not null and size(chemblIds) > 0
             """
         )
-        .drop('id')
-        .distinct()
     )
 
     return _consolidate_duplicate_references(result)
@@ -165,15 +163,17 @@ def _chembl_target(target_df: DataFrame, gene_df: DataFrame) -> DataFrame:
 
 
 def _consolidate_duplicate_references(df: DataFrame) -> DataFrame:
-    """Consolidate duplicate rows by merging their references.
+    """Consolidate mechanism rows that are identical for the same drug.
 
-    Args:
-        df: DataFrame with potential duplicate rows.
-
-    Returns:
-        DataFrame with consolidated references.
+    ChEMBL propagates the mechanism for their child/salt molecules in
+    ``_metadata.all_molecule_chembl_ids`` to include the parent. When the parent has
+    the same mechanism, these rows carry identical display information and differ only
+    by ``chemblIds`` (and the per-molecule ``id``, already dropped). This step avoids the
+    duplication on the mechanism for the parent once the data is exploded
+    by ``chemblId`` downstream.
     """
-    cols = [c for c in df.columns if c != 'references']
-    return (
-        df.groupBy(*cols).agg(f.collect_set('references').alias('r')).withColumn('references', f.flatten('r')).drop('r')
+    key_cols = [c for c in df.columns if c not in ('references', 'chemblIds')]
+    return df.groupBy(*key_cols).agg(
+        f.array_distinct(f.flatten(f.collect_list('chemblIds'))).alias('chemblIds'),
+        f.flatten(f.collect_set('references')).alias('references'),
     )
