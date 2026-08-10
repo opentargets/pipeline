@@ -35,12 +35,12 @@
 | `pis/src/pis/sql/chembl_target.sql` | Created. Rebuilds the target document, including the recursive protein-class walk. |
 | `pis/tests/test_postgres_export.py` | Modified. Tests for the spec, the restore union, and query export. |
 | `pis/tests/test_chembl_queries.py` | Created. Fixture-database tests for the four SQL files. |
-| `pis/scripts/compare_chembl_es.py` | Created. Compares new parquet against the 26.06 JSONL baselines. |
+| `/tmp/chembl-baseline/compare_chembl_es.py` | Created outside the repo, never committed. Compares new parquet against the 26.06 JSONL baselines. |
 | `pis/config.yaml` | Modified. Adds `queries:`, removes five `elasticsearch` tasks. |
 | `pts/config.yaml` | Modified. Repoints four sources to parquet. |
 | `pts/src/pts/pyspark/{drug_warning,drug_mechanism_of_action,chembl_molecule,target}.py` | Modified. Format change only. |
 
-**Deliberate deviation from the spec:** the spec calls the comparison script "throwaway, not shipped". This plan commits it at `pis/scripts/compare_chembl_es.py` instead. It is outside `src/`, so it is not in the wheel, and it will be needed again at every ChEMBL version bump. Delete it before merge if you disagree.
+The comparison harness is a development tool, not a deliverable. It lives outside the repository and is never committed, so nothing about it can reach the release or the wheel. Its output is the deliverable, pasted into the PR description.
 
 ---
 
@@ -536,23 +536,25 @@ git commit -m "pis: export postgres_export queries to parquet"
 ### Task 4: Comparison harness
 
 **Files:**
-- Create: `pis/scripts/compare_chembl_es.py`
+- Create: `/tmp/chembl-baseline/compare_chembl_es.py` — **outside the repository. Never `git add` this file.**
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks; it reads files.
-- Produces: a CLI `uv run --directory pis python scripts/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>` that exits non-zero on any difference. Tasks 5-8 each run it.
+- Produces: a CLI `uv run --directory pis python /tmp/chembl-baseline/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>` that exits non-zero on any difference. Tasks 5-8 each run it.
 
 This task has no unit tests — it is the test harness. Its correctness is established by running it against a baseline compared with itself in Step 3.
 
+This task has **no commit**. The harness is a development tool whose output is the deliverable, not the file itself. If `git status` ever lists it, it is in the wrong place — move it out of the working tree.
+
 - [ ] **Step 1: Write the script**
 
-Create `pis/scripts/compare_chembl_es.py`:
+Run `mkdir -p /tmp/chembl-baseline` first, then create `/tmp/chembl-baseline/compare_chembl_es.py`:
 
 ```python
 """Compare a rebuilt ChEMBL parquet against the Elasticsearch JSONL it replaces.
 
 Usage:
-    python scripts/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>
+    python /tmp/chembl-baseline/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>
 
 ``dataset`` is one of chembl_molecule, chembl_mechanism, chembl_target,
 chembl_drug_warning. Exits 1 if the two differ.
@@ -700,18 +702,16 @@ uv run --frozen --directory pis python -c "
 import duckdb
 duckdb.connect().execute(\"COPY (SELECT * FROM read_json_auto('/tmp/chembl-baseline/chembl_drug_warning.jsonl')) TO '/tmp/chembl-baseline/self.parquet' (FORMAT parquet)\")
 "
-uv run --frozen --directory pis python scripts/compare_chembl_es.py \
+uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
   chembl_drug_warning /tmp/chembl-baseline/self.parquet /tmp/chembl-baseline/chembl_drug_warning.jsonl
 ```
 
 Expected: `MATCH`, exit 0. If it reports differences, fix `_normalise` before going further — every later task depends on this.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Confirm nothing was added to the repository**
 
-```bash
-git add pis/scripts/compare_chembl_es.py
-git commit -m "pis: add ChEMBL Elasticsearch comparison harness"
-```
+Run: `git status --porcelain`
+Expected: no line mentioning `compare_chembl_es.py`. There is deliberately no commit in this task.
 
 ---
 
@@ -894,7 +894,7 @@ Expected: PASS
 This needs the real ChEMBL dump restored. Run the task end to end against it with a local `work_path`, then:
 
 ```bash
-uv run --frozen --directory pis python scripts/compare_chembl_es.py \
+uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
   chembl_drug_warning <work_path>/input/drug/chembl_drug_warning.parquet \
   /tmp/chembl-baseline/chembl_drug_warning.jsonl
 ```
@@ -1046,7 +1046,7 @@ Expected: PASS
 - [ ] **Step 5: Compare against the real baseline**
 
 ```bash
-uv run --frozen --directory pis python scripts/compare_chembl_es.py \
+uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
   chembl_mechanism <work_path>/input/drug/chembl_mechanism.parquet \
   /tmp/chembl-baseline/chembl_mechanism.jsonl
 ```
@@ -1245,7 +1245,7 @@ Expected: PASS
 - [ ] **Step 5: Compare against the real baseline and settle `cross_references`**
 
 ```bash
-uv run --frozen --directory pis python scripts/compare_chembl_es.py \
+uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
   chembl_molecule <work_path>/input/drug/chembl_molecule.parquet \
   /tmp/chembl-baseline/chembl_molecule.jsonl
 ```
@@ -1467,7 +1467,7 @@ Expected: PASS
 - [ ] **Step 5: Compare against the real baseline and settle the class-selection rule**
 
 ```bash
-uv run --frozen --directory pis python scripts/compare_chembl_es.py \
+uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
   chembl_target <work_path>/input/drug/chembl_target.parquet \
   /tmp/chembl-baseline/chembl_target.jsonl
 ```
