@@ -50,7 +50,7 @@ The comparison harness is a development tool, not a deliverable. It lives outsid
 **Files:**
 - Modify: `pis/src/pis/tasks/postgres_export.py:80-120`
 - Create: `pis/src/pis/sql/__init__.py`
-- Create: `pis/tests/sql/__init__.py`, `pis/tests/sql/_test_demo.sql`
+- Create: `pis/tests/__init__.py`, `pis/tests/sql/__init__.py`, `pis/tests/sql/_test_demo.sql`
 - Test: `pis/tests/test_postgres_export.py`
 
 **Interfaces:**
@@ -71,20 +71,23 @@ Append to `pis/tests/test_postgres_export.py`:
 
 ```python
 class TestQuerySpec:
-    def test_accepts_a_query(self) -> None:
+    def test_accepts_a_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # _test_demo is the only SQL file that exists at this point in the plan;
+        # the four real queries arrive in Tasks 5-8
+        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
         spec = PostgresExportSpec(
             name='postgres_export chembl',
             source='d.tar.gz',
             queries=[
                 QuerySpec(
-                    query='chembl_molecule',
-                    destination='input/drug/chembl_molecule.parquet',
+                    query='_test_demo',
+                    destination='input/drug/demo.parquet',
                     requires_tables=['molecule_dictionary'],
                 )
             ],
         )
         assert spec.tables == []
-        assert spec.queries[0].query == 'chembl_molecule'
+        assert spec.queries[0].query == '_test_demo'
 
     def test_rejects_a_spec_with_neither_tables_nor_queries(self) -> None:
         with pytest.raises(ValidationError, match='at least one of tables or queries'):
@@ -176,7 +179,12 @@ Change `PostgresExportSpec.tables` and add `queries` plus the validators:
     @classmethod
     def _sql_files_exist(cls, value: list[QuerySpec]) -> list[QuerySpec]:
         for query in value:
-            _load_query(query.query)
+            # pydantic only converts ValueError and AssertionError into a
+            # ValidationError; a PostgresExportError would escape the spec layer
+            try:
+                _load_query(query.query)
+            except PostgresExportError as e:
+                raise ValueError(str(e))
         return value
 
     @model_validator(mode='after')
@@ -207,6 +215,14 @@ Remove the now-wrong `Annotated[list[TableSpec], Field(min_length=1)]` annotatio
 - [ ] **Step 5: Create the test-only SQL fixture**
 
 This lives under `tests/`, never under `src/`, so it cannot ship in the wheel or the Docker image.
+
+`importlib.resources` can only read from an importable package, so `pis/tests/` must itself become one. Create `pis/tests/__init__.py` with exactly:
+
+```python
+"""Tests for the pis package."""
+```
+
+This is verified to work: with it present, `resources.files('tests.sql')` resolves under the pytest rootdir, and the existing suite still collects.
 
 Create `pis/tests/sql/__init__.py` with exactly:
 
