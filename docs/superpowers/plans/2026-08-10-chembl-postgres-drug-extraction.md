@@ -574,9 +574,13 @@ git commit -m "pis: export postgres_export queries to parquet"
 - Consumes: nothing from earlier tasks; it reads files.
 - Produces: a CLI `uv run --directory pis python /tmp/chembl-baseline/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>` that exits non-zero on any difference. Tasks 5-8 each run it.
 
-This task has no unit tests — it is the test harness. Its correctness is established by running it against a baseline compared with itself in Step 3.
+This task has no unit tests — it is the test harness. Its correctness is established by comparing a baseline against itself in Step 3.
 
 This task has **no commit**. The harness is a development tool whose output is the deliverable, not the file itself. If `git status` ever lists it, it is in the wrong place — move it out of the working tree.
+
+**Why the comparison runs in DuckDB, not Python.** `chembl_molecule.jsonl` is 10.4 GB and `chembl_target.jsonl` is 874 MB. Loading either side into Python dicts needs tens of GB of RAM. DuckDB streams both sides and spills to disk, so the same comparison runs in bounded memory.
+
+**How fields are chosen.** The harness derives the fields to compare from the **parquet** schema, never from the baseline. That is exactly the semantics we want: fields we deliberately pruned (`standard_inchi`, `molecule_hierarchy.active_chembl_id`, the `l*_desc` variants, the four dead molecule scalars) simply never appear as leaves, so they are never compared. Any field present in the parquet but absent or different in the baseline is a real finding.
 
 - [ ] **Step 1: Write the script**
 
@@ -586,16 +590,17 @@ Run `mkdir -p /tmp/chembl-baseline` first, then create `/tmp/chembl-baseline/com
 """Compare a rebuilt ChEMBL parquet against the Elasticsearch JSONL it replaces.
 
 Usage:
-    python /tmp/chembl-baseline/compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>
+    python compare_chembl_es.py <dataset> <parquet> <baseline.jsonl>
 
-``dataset`` is one of chembl_molecule, chembl_mechanism, chembl_target,
-chembl_drug_warning. Exits 1 if the two differ.
+Exits 1 if the two differ. The whole comparison runs inside DuckDB because
+chembl_molecule.jsonl is 10.4 GB and will not fit in memory.
+
+The fields compared are derived from the parquet schema. Fields deliberately
+pruned from the rebuild never appear as leaves and are therefore never compared;
+anything the parquet does carry must match the baseline exactly.
 """
 
-import json
 import sys
-from collections import Counter
-from typing import Any
 
 import duckdb
 
@@ -606,58 +611,60 @@ KEYS = {
     'chembl_drug_warning': ['warning_id'],
 }
 
-# fields deliberately dropped as unread by pts; see the design doc
-PRUNED = {
-    'chembl_molecule': {'first_approval', 'max_phase', 'withdrawn_flag', 'black_box_warning'},
-    'chembl_mechanism': set(),
-    'chembl_target': set(),
-    'chembl_drug_warning': set(),
-}
+SEP = "'\\x1f'"
+"""Unit separator, joined between a struct's fields so element identity survives."""
 
 
-def _normalise(value: Any) -> Any:
-    """Make two representations of the same value compare equal.
+def _struct_fields(type_sql: str) -> list[tuple[str, str]]:
+    """Split a DuckDB STRUCT(...) type string into its (name, type) pairs."""
+    inner = type_sql[type_sql.index('(') + 1 : type_sql.rindex(')')]
+    fields, depth, current = [], 0, ''
+    for char in inner:
+        if char in '(<':
+            depth += 1
+        elif char in ')>':
+            depth -= 1
+        if char == ',' and depth == 0:
+            fields.append(current)
+            current = ''
+        else:
+            current += char
+    fields.append(current)
+    out = []
+    for field in fields:
+        name, _, ftype = field.strip().partition(' ')
+        out.append((name.strip('"'), ftype.strip()))
+    return out
 
-    Lists of structs come out of parquet in a fixed order and out of ES in an
-    arbitrary one, and parquet gives an empty list where ES sometimes gives null.
+
+def _leaves(name: str, type_sql: str, path: str) -> list[tuple[str, str]]:
+    """Build (label, SQL expression) pairs for one column of the parquet schema.
+
+    Scalars compare as text. A struct is flattened so each kept subfield is its
+    own comparison. A list is canonicalised to a sorted array of joined text, so
+    element order does not matter but element identity does.
     """
-    if isinstance(value, dict):
-        return tuple(sorted((k, _normalise(v)) for k, v in value.items()))
-    if isinstance(value, (list, tuple)):
-        return tuple(sorted((repr(_normalise(v)) for v in value)))
-    return value
+    upper = type_sql.upper()
 
+    if upper.startswith('STRUCT'):
+        out = []
+        for sub, subtype in _struct_fields(type_sql):
+            out += _leaves(f'{name}.{sub}', subtype, f'{path}."{sub}"')
+        return out
 
-def _load_baseline(path: str, dataset: str) -> dict[tuple, dict]:
-    decoder = json.JSONDecoder(strict=False)
-    rows = {}
-    for line in open(path, errors='replace'):
-        line = line.strip()
-        if not line.startswith('{'):
-            continue
-        doc = decoder.decode(line)
-        key = tuple(_flat(doc, k) for k in KEYS[dataset])
-        rows[key] = doc
-    return rows
+    if upper.endswith('[]'):
+        element = type_sql[:-2]
+        if element.upper().startswith('STRUCT'):
+            parts = ' || '.join(
+                f'coalesce(x."{sub}"::VARCHAR, \'\')'
+                for sub, _ in _struct_fields(element)
+            )
+            expr = f'list_sort(list_transform(coalesce({path}, []), x -> {parts}))'
+        else:
+            expr = f'list_sort(list_transform(coalesce({path}, []), x -> x::VARCHAR))'
+        return [(name, expr)]
 
-
-def _flat(doc: dict, path: str) -> Any:
-    cur: Any = doc
-    for part in path.split('.'):
-        cur = (cur or {}).get(part)
-    return cur
-
-
-def _load_parquet(path: str, dataset: str) -> dict[tuple, dict]:
-    con = duckdb.connect()
-    con.execute(f"CREATE VIEW v AS SELECT * FROM read_parquet('{path}')")
-    columns = [r[0] for r in con.execute('DESCRIBE v').fetchall()]
-    rows = {}
-    for record in con.execute('SELECT * FROM v').fetchall():
-        doc = dict(zip(columns, record, strict=True))
-        key = tuple(_flat(doc, k) for k in KEYS[dataset])
-        rows[key] = doc
-    return rows
+    return [(name, f'{path}::VARCHAR')]
 
 
 def main() -> int:
@@ -666,45 +673,60 @@ def main() -> int:
         print(f'unknown dataset {dataset}; expected one of {sorted(KEYS)}')
         return 2
 
-    new = _load_parquet(parquet, dataset)
-    old = _load_baseline(baseline, dataset)
+    con = duckdb.connect()
+    con.execute("SET temp_directory = '/tmp/chembl-baseline/duckdb-tmp'")
+    con.execute('SET preserve_insertion_order = false')
 
-    print(f'{dataset}: {len(new)} parquet rows, {len(old)} baseline rows')
-    failed = False
+    schema = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{parquet}')").fetchall()
+    columns = {row[0]: row[1] for row in schema}
 
-    only_new, only_old = set(new) - set(old), set(old) - set(new)
+    # read the baseline with the parquet's own types, so pruned subfields are
+    # dropped by the JSON reader and both sides compare like for like
+    column_spec = ', '.join(f"'{n}': '{t}'" for n, t in columns.items())
+    con.execute(f"CREATE VIEW new AS SELECT * FROM read_parquet('{parquet}')")
+    con.execute(
+        f"CREATE VIEW old AS SELECT * FROM read_json('{baseline}', "
+        f'columns = {{{column_spec}}}, format = \'newline_delimited\')'
+    )
+
+    fields = []
+    for name, type_sql in columns.items():
+        fields += _leaves(name, type_sql, f'"{name}"')
+
+    keys = KEYS[dataset]
+    on = ' AND '.join(f'n."{k}" IS NOT DISTINCT FROM o."{k}"' for k in keys)
+
+    new_rows = con.execute('SELECT count(*) FROM new').fetchone()[0]
+    old_rows = con.execute('SELECT count(*) FROM old').fetchone()[0]
+    print(f'{dataset}: {new_rows} parquet rows, {old_rows} baseline rows')
+    failed = new_rows != old_rows
+    if failed:
+        print('  ROW COUNT MISMATCH')
+
+    only_new = con.execute(f'SELECT count(*) FROM new n ANTI JOIN old o ON {on}').fetchone()[0]
+    only_old = con.execute(f'SELECT count(*) FROM old o ANTI JOIN new n ON {on}').fetchone()[0]
     if only_new or only_old:
         failed = True
-        print(f'  KEY MISMATCH: {len(only_new)} only in parquet, {len(only_old)} only in baseline')
-        for k in list(only_new)[:5]:
-            print(f'    only in parquet:  {k}')
-        for k in list(only_old)[:5]:
-            print(f'    only in baseline: {k}')
+        print(f'  KEY MISMATCH: {only_new} only in parquet, {only_old} only in baseline')
+        sample = con.execute(
+            f'SELECT {", ".join(f\'n."{k}"\' for k in keys)} FROM new n ANTI JOIN old o ON {on} LIMIT 5'
+        ).fetchall()
+        for row in sample:
+            print(f'    only in parquet: {row}')
 
-    expected_fields = (set().union(*(d.keys() for d in old.values())) if old else set()) - PRUNED[dataset]
-    actual_fields = set().union(*(d.keys() for d in new.values())) if new else set()
-    if expected_fields - actual_fields:
-        failed = True
-        print(f'  MISSING FIELDS: {sorted(expected_fields - actual_fields)}')
-    if actual_fields - expected_fields:
-        failed = True
-        print(f'  UNEXPECTED FIELDS: {sorted(actual_fields - expected_fields)}')
+    counts = ', '.join(
+        f'sum(CASE WHEN ({expr.replace(chr(34) + name.split(chr(46))[0] + chr(34), "n." + chr(34) + name.split(chr(46))[0] + chr(34))}) '
+        f'IS DISTINCT FROM ({expr.replace(chr(34) + name.split(chr(46))[0] + chr(34), "o." + chr(34) + name.split(chr(46))[0] + chr(34))}) '
+        f'THEN 1 ELSE 0 END) AS "{label}"'
+        for label, expr in [(lbl, e) for lbl, e in fields]
+        for name in [label]
+    )
+    row = con.execute(f'SELECT {counts} FROM new n JOIN old o ON {on}').fetchone()
 
-    mismatches: Counter = Counter()
-    samples: dict[str, tuple] = {}
-    for key in set(new) & set(old):
-        for field in expected_fields & actual_fields:
-            a, b = _normalise(new[key].get(field)), _normalise(old[key].get(field))
-            if a != b:
-                mismatches[field] += 1
-                samples.setdefault(field, (key, new[key].get(field), old[key].get(field)))
-
-    for field, count in mismatches.most_common():
-        failed = True
-        key, got, want = samples[field]
-        print(f'  FIELD {field}: {count} mismatches, e.g. key={key}')
-        print(f'    parquet:  {str(got)[:200]}')
-        print(f'    baseline: {str(want)[:200]}')
+    for (label, _), mismatches in zip([f for f in fields], row, strict=True):
+        if mismatches:
+            failed = True
+            print(f'  FIELD {label}: {mismatches} mismatches')
 
     print('  MATCH' if not failed else '  DIFFERENCES FOUND')
     return 1 if failed else 0
@@ -714,20 +736,23 @@ if __name__ == '__main__':
     sys.exit(main())
 ```
 
+The expression-rewriting in `counts` is the fiddly part: each leaf expression is built against a bare column name and must be evaluated once with the `n.` alias and once with `o.`. If the string surgery above proves brittle, build the expressions twice instead — call `_leaves(name, type_sql, 'n."{name}"')` and `_leaves(name, type_sql, 'o."{name}"')` and zip the two lists. That is the cleaner implementation and you should prefer it.
+
 - [ ] **Step 2: Download the baselines**
 
 ```bash
 mkdir -p /tmp/chembl-baseline
-for f in chembl_molecule chembl_mechanism chembl_target chembl_drug_warning; do
+for f in chembl_drug_warning chembl_mechanism chembl_target chembl_molecule; do
   gcloud storage cp "gs://open-targets-data-releases/26.06/input/drug/$f.jsonl" "/tmp/chembl-baseline/$f.jsonl"
 done
+df -h /tmp
 ```
 
-These are large. Confirm `gcloud auth login` is current first.
+Sizes: `chembl_drug_warning` 1.9 MB, `chembl_mechanism` 4.5 MB, `chembl_target` 874 MB, `chembl_molecule` 10.4 GB — 10.5 GB total, ordered smallest first so failures surface early. Confirm `gcloud auth print-access-token` succeeds before starting, and that `/tmp` has at least 15 GB free.
 
 - [ ] **Step 3: Sanity-check the harness against itself**
 
-Convert one baseline to parquet and compare it with its own source. A harness that reports differences here is broken.
+Convert the smallest baseline to parquet and compare it with its own source. A harness that reports differences here is broken, and every later task depends on it.
 
 ```bash
 uv run --frozen --directory pis python -c "
@@ -738,12 +763,28 @@ uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py
   chembl_drug_warning /tmp/chembl-baseline/self.parquet /tmp/chembl-baseline/chembl_drug_warning.jsonl
 ```
 
-Expected: `MATCH`, exit 0. If it reports differences, fix `_normalise` before going further — every later task depends on this.
+Expected: `MATCH`, exit 0.
 
-- [ ] **Step 4: Confirm nothing was added to the repository**
+- [ ] **Step 4: Prove it scales**
+
+Run the same self-comparison against the 874 MB target baseline, which has the deepest nesting of the four:
+
+```bash
+uv run --frozen --directory pis python -c "
+import duckdb
+duckdb.connect().execute(\"COPY (SELECT * FROM read_json_auto('/tmp/chembl-baseline/chembl_target.jsonl')) TO '/tmp/chembl-baseline/self_target.parquet' (FORMAT parquet)\")
+"
+/usr/bin/time -l uv run --frozen --directory pis python /tmp/chembl-baseline/compare_chembl_es.py \
+  chembl_target /tmp/chembl-baseline/self_target.parquet /tmp/chembl-baseline/chembl_target.jsonl
+```
+
+Expected: `MATCH`, and peak RSS well under available RAM. If it OOMs or spills unboundedly, report BLOCKED rather than reducing the comparison to a sample — a harness that silently checks less than it claims is worse than none.
+
+- [ ] **Step 5: Confirm nothing was added to the repository**
 
 Run: `git status --porcelain`
 Expected: no line mentioning `compare_chembl_es.py`. There is deliberately no commit in this task.
+
 
 ---
 
