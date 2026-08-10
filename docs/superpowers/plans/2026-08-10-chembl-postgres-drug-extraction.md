@@ -646,12 +646,9 @@ def _leaves(name: str, type_sql: str, path: str) -> list[tuple[str, str]]:
     """
     upper = type_sql.upper()
 
-    if upper.startswith('STRUCT'):
-        out = []
-        for sub, subtype in _struct_fields(type_sql):
-            out += _leaves(f'{name}.{sub}', subtype, f'{path}."{sub}"')
-        return out
-
+    # the list check MUST come first: DuckDB renders LIST(STRUCT(...)) as
+    # "STRUCT(...)[]", which also startswith STRUCT, so testing for a struct
+    # first misparses every list-of-struct column
     if upper.endswith('[]'):
         element = type_sql[:-2]
         if element.upper().startswith('STRUCT'):
@@ -663,6 +660,12 @@ def _leaves(name: str, type_sql: str, path: str) -> list[tuple[str, str]]:
         else:
             expr = f'list_sort(list_transform(coalesce({path}, []), x -> x::VARCHAR))'
         return [(name, expr)]
+
+    if upper.startswith('STRUCT'):
+        out = []
+        for sub, subtype in _struct_fields(type_sql):
+            out += _leaves(f'{name}.{sub}', subtype, f'{path}."{sub}"')
+        return out
 
     return [(name, f'{path}::VARCHAR')]
 
@@ -689,9 +692,12 @@ def main() -> int:
         f'columns = {{{column_spec}}}, format = \'newline_delimited\')'
     )
 
-    fields = []
+    # build each leaf expression twice, once per join alias, so the two lists
+    # line up element for element and no string rewriting is needed
+    new_fields, old_fields = [], []
     for name, type_sql in columns.items():
-        fields += _leaves(name, type_sql, f'"{name}"')
+        new_fields += _leaves(name, type_sql, f'n."{name}"')
+        old_fields += _leaves(name, type_sql, f'o."{name}"')
 
     keys = KEYS[dataset]
     on = ' AND '.join(f'n."{k}" IS NOT DISTINCT FROM o."{k}"' for k in keys)
@@ -708,22 +714,22 @@ def main() -> int:
     if only_new or only_old:
         failed = True
         print(f'  KEY MISMATCH: {only_new} only in parquet, {only_old} only in baseline')
+        # built outside the f-string: a backslash in an f-string expression is a
+        # SyntaxError before Python 3.12, and pis runs 3.11
+        key_cols = ', '.join(f'n."{k}"' for k in keys)
         sample = con.execute(
-            f'SELECT {", ".join(f\'n."{k}"\' for k in keys)} FROM new n ANTI JOIN old o ON {on} LIMIT 5'
+            f'SELECT {key_cols} FROM new n ANTI JOIN old o ON {on} LIMIT 5'
         ).fetchall()
         for row in sample:
             print(f'    only in parquet: {row}')
 
     counts = ', '.join(
-        f'sum(CASE WHEN ({expr.replace(chr(34) + name.split(chr(46))[0] + chr(34), "n." + chr(34) + name.split(chr(46))[0] + chr(34))}) '
-        f'IS DISTINCT FROM ({expr.replace(chr(34) + name.split(chr(46))[0] + chr(34), "o." + chr(34) + name.split(chr(46))[0] + chr(34))}) '
-        f'THEN 1 ELSE 0 END) AS "{label}"'
-        for label, expr in [(lbl, e) for lbl, e in fields]
-        for name in [label]
+        f'sum(CASE WHEN ({new_expr}) IS DISTINCT FROM ({old_expr}) THEN 1 ELSE 0 END) AS "{label}"'
+        for (label, new_expr), (_, old_expr) in zip(new_fields, old_fields, strict=True)
     )
     row = con.execute(f'SELECT {counts} FROM new n JOIN old o ON {on}').fetchone()
 
-    for (label, _), mismatches in zip([f for f in fields], row, strict=True):
+    for (label, _), mismatches in zip(new_fields, row, strict=True):
         if mismatches:
             failed = True
             print(f'  FIELD {label}: {mismatches} mismatches')
@@ -736,7 +742,10 @@ if __name__ == '__main__':
     sys.exit(main())
 ```
 
-The expression-rewriting in `counts` is the fiddly part: each leaf expression is built against a bare column name and must be evaluated once with the `n.` alias and once with `o.`. If the string surgery above proves brittle, build the expressions twice instead — call `_leaves(name, type_sql, 'n."{name}"')` and `_leaves(name, type_sql, 'o."{name}"')` and zip the two lists. That is the cleaner implementation and you should prefer it.
+Two traps this code already avoids, both hit during implementation:
+
+- **List detection must precede struct detection.** DuckDB renders `LIST(STRUCT(...))` as `STRUCT(...)[]`, which also satisfies `startswith('STRUCT')`. Testing for a struct first misparses every list-of-struct column and DuckDB raises a `BinderException`.
+- **No backslashes inside f-string expressions.** `pis` runs Python 3.11, where that is a `SyntaxError`; the relaxation landed in 3.12. Build such fragments in a local variable first.
 
 - [ ] **Step 2: Download the baselines**
 
