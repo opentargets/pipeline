@@ -210,6 +210,37 @@ steps:
         - table: molecule_dictionary
           destination: input/clinical_report/chembl/molecule_dictionary.parquet
           columns: [molregno, chembl_id, pref_name]
+      queries:
+        - query: chembl_molecule
+          destination: input/drug/chembl_molecule.parquet
+          requires_tables:
+            - molecule_dictionary
+            - compound_structures
+            - molecule_hierarchy
+            - molecule_synonyms
+        - query: chembl_mechanism
+          destination: input/drug/chembl_mechanism.parquet
+          requires_tables:
+            - drug_mechanism
+            - mechanism_refs
+            - molecule_dictionary
+            - molecule_hierarchy
+            - target_dictionary
+        - query: chembl_target
+          destination: input/drug/chembl_target.parquet
+          requires_tables:
+            - target_dictionary
+            - target_components
+            - component_sequences
+            - component_class
+            - protein_classification
+        - query: chembl_drug_warning
+          destination: input/drug/chembl_drug_warning.parquet
+          requires_tables:
+            - drug_warning
+            - warning_refs
+            - molecule_dictionary
+            - molecule_hierarchy
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
@@ -257,63 +288,6 @@ steps:
       sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
       destination: input/clinical_report/aact_extraction_batch_results
 
-    - name: elasticsearch chembl drug warning
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_drug_warning.jsonl
-      index: chembl_${chembl_version}_drug_warning
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - parent_molecule_chembl_id
-        - efo_id
-        - efo_term
-        - efo_id_for_warning_class
-        - warning_class
-        - warning_country
-        - warning_description
-        - warning_id
-        - warning_refs
-        - warning_type
-        - warning_year
-    - name: elasticsearch chembl mechanism of action
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_mechanism.jsonl
-      index: chembl_${chembl_version}_mechanism
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - target_chembl_id
-        - action_type
-        - mechanism_of_action
-        - mechanism_refs
-        - record_id
-        - parent_molecule_chembl_id
-    - name: elasticsearch chembl molecule
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_molecule.jsonl
-      index: chembl_${chembl_version}_molecule
-      fields:
-        - molecule_chembl_id
-        - molecule_hierarchy
-        - molecule_type
-        - pref_name
-        - first_approval
-        - max_phase
-        - withdrawn_flag
-        - black_box_warning
-        - molecule_synonyms
-        - cross_references
-        - molecule_structures
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
@@ -951,17 +925,6 @@ steps:
 
   #: TARGET STEP :##################################################################################
   target:
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/target/chembl/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
-
     - name: copy chemical probes
       source: https://www.probes-drugs.org/media/download/probes/pd_export_${probes_drugs_version}_probes_standardized.xlsx
       destination: input/target/chemicalprobes/probes.xlsx
