@@ -1,5 +1,7 @@
 """Run the ChEMBL rebuild queries against a small fixture database."""
 
+from contextlib import closing
+
 import duckdb
 import pytest
 from pixeltable_pgserver.postgres_server import PostgresServer, get_server
@@ -61,21 +63,27 @@ def chembl(tmp_path_factory: pytest.TempPathFactory) -> PostgresServer:
 
 def run_query(server: PostgresServer, name: str) -> list[dict]:
     """Run a shipped SQL file against the fixture database and return rows as dicts."""
-    con = duckdb.connect()
-    con.execute('LOAD postgres')
-    con.execute(f"ATTACH '{server.get_uri(database='postgres')}' AS pg (TYPE postgres, READ_ONLY)")
-    con.execute('USE pg."public"')
-    result = con.execute(_load_query(name))
-    columns = [d[0] for d in result.description]
-    return [dict(zip(columns, row, strict=True)) for row in result.fetchall()]
+    with closing(duckdb.connect()) as con:
+        con.execute('LOAD postgres')
+        con.execute(f"ATTACH '{server.get_uri(database='postgres')}' AS pg (TYPE postgres, READ_ONLY)")
+        con.execute('USE pg."public"')
+        result = con.execute(_load_query(name))
+        columns = [d[0] for d in result.description]
+        return [dict(zip(columns, row, strict=True)) for row in result.fetchall()]
 
 
 class TestDrugWarning:
     @pytest.fixture(scope='class')
-    def rows(self, chembl: PostgresServer) -> dict[int, dict]:
-        return {r['warning_id']: r for r in run_query(chembl, 'chembl_drug_warning')}
+    def raw(self, chembl: PostgresServer) -> list[dict]:
+        return run_query(chembl, 'chembl_drug_warning')
 
-    def test_one_row_per_warning(self, rows: dict[int, dict]) -> None:
+    @pytest.fixture(scope='class')
+    def rows(self, raw: list[dict]) -> dict[int, dict]:
+        return {r['warning_id']: r for r in raw}
+
+    def test_one_row_per_warning(self, raw: list[dict], rows: dict[int, dict]) -> None:
+        # assert on the list BEFORE the dict collapses duplicates
+        assert len(raw) == 2
         assert sorted(rows) == [10, 11]
 
     def test_scalar_fields(self, rows: dict[int, dict]) -> None:
