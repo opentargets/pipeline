@@ -41,8 +41,11 @@ including the `_metadata.*` structs. Branches with no consumer are dropped.
 
 This keeps the PTS diff to a format change, and avoids reverse-engineering large
 ES-only structures (`_metadata.target_component`, `_metadata.es_completion`,
-`_metadata.related_*`, `_metadata.source`, `_metadata.organism_taxonomy`) that
-nothing validates.
+`_metadata.related_*`, `_metadata.source`, `_metadata.organism_taxonomy`,
+`_metadata.generated_resources`) that nothing validates.
+
+The exhaustive per-column prune list, measured against the 26.06 release rather
+than asserted, is in "Verification" below.
 
 Dropped as provably dead — requested from ES today, read by no PTS module:
 `first_approval`, `max_phase`, `withdrawn_flag`, `black_box_warning` on molecule.
@@ -214,6 +217,12 @@ Base `drug_mechanism` (`dm`), one row per `mec_id`.
 | `record_id` | `dm.record_id` |
 | `mechanism_refs[]` | `mechanism_refs` on `mec_id` → `{ref_id, ref_type, ref_url}` |
 
+Pruned as unread: `_metadata.parent_molecule_chembl_id`. The Elasticsearch
+document carries the parent id twice — once at the top level and once inside
+`_metadata` — and `drug_mechanism_of_action.py:67-68` takes only
+`_metadata.all_molecule_chembl_ids` before dropping `_metadata` entirely. The
+top-level `parent_molecule_chembl_id` is kept, so nothing is lost.
+
 ### `chembl_target`
 
 Base `target_dictionary` (`td`), one row per `tid`.
@@ -383,6 +392,40 @@ natural key in the ES document.
 
 This script is also what answers the two open questions: write the query, diff,
 adjust until the diff is empty. Results go in the PR description.
+
+### Measured result
+
+All four datasets were exported from one restore of the real ChEMBL 37 dump and
+compared against the shipped 26.06 release. **Row counts and key sets are
+identical on all four.** Of 35 leaf columns compared, 33 are identical and 2
+differ, both for known reasons.
+
+| Dataset | Rows | Columns identical | Columns differing | Columns pruned |
+| --- | --- | --- | --- | --- |
+| `chembl_drug_warning` | 2,304 | 13 of 13 | — | 0 |
+| `chembl_mechanism` | 7,561 | 8 of 8 | — | 1 |
+| `chembl_target` | 18,552 | 5 of 5 | — | 20 |
+| `chembl_molecule` | 2,921,148 | 7 of 9 | 2 | 7 |
+
+The two differing columns, both in `chembl_molecule`:
+
+- `molecule_structures.molfile`, 2,897,819 rows — differs **by construction**.
+  The Elasticsearch value is a full SD-file record; the relational column holds
+  only the molblock. After `chembl_molecule.py:166`'s truncation regex is applied
+  to both sides, zero of 2,921,148 rows differ.
+- `cross_references`, 4,246 rows — the accepted, documented loss above.
+
+The 28 pruned columns are exactly those no PTS module reads:
+`_metadata.parent_molecule_chembl_id` on mechanism; the 20 ES-only `_metadata`
+structures on target; and on molecule `molecule_structures.standard_inchi`,
+`molecule_hierarchy.{active_chembl_id,molecule_chembl_id}`, `first_approval`,
+`max_phase`, `withdrawn_flag`, `black_box_warning`.
+
+One caveat on that prune list: the three small baselines were read whole, but
+`chembl_molecule.jsonl` is 9.7 GiB, so its Elasticsearch schema was inferred
+from a 400,000-row sample. A field null throughout that sample could be missing
+from the list. The *compared* columns are unaffected — those come from the
+parquet schema and were checked across all 2,921,148 rows.
 
 ## Testing
 
