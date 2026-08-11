@@ -1258,6 +1258,20 @@ def _build_protein_classification(
     # rather than an arbitrary pick. The ordering is recoverable exactly:
     # `git show a9fc1f46^:pis/src/pis/sql/chembl_target.sql`.
     #
+    # The SQL ordered by two keys, (component_id, protein_class_id), and this
+    # groups by ONE — component_id — which is the faithful reading rather than a
+    # shortcut. `single_component_tids` above guarantees every surviving target
+    # has exactly one component, so grouping per component is grouping per
+    # target, and the leading component_id sort key is constant inside each
+    # group. That equivalence is forced by the filter in this function, not by
+    # any property of the data.
+    #
+    # Note this is deliberately NOT grouped per accession. Per-accession happens
+    # to agree on ChEMBL 37 only because no accession spans two component_ids,
+    # which is a measured fact about one release rather than an invariant; if a
+    # future release broke it, per-accession would silently diverge from the SQL
+    # and this would not.
+    #
     # Keeping every row instead — which is what the raw tables support, and what
     # this function did before this commit — adds classes to 161 accessions
     # across 97 genes that the release does not have them for. `output/target` is

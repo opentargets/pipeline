@@ -955,18 +955,20 @@ class TestProteinClassification:
         #
         # Components 2 and 3 carry classes but belong only to the two-component
         # target 102, so nothing they classify may reach the output.
+        # Component 4 is classified but has no accession, which is what produced
+        # the old pipeline's junk accession=NULL record.
         component_class = spark.createDataFrame(
-            [(1, 1, 20), (2, 1, 6), (3, 2, 20), (4, 3, 6), (5, 1, 21)],
+            [(1, 1, 20), (2, 1, 6), (3, 2, 20), (4, 3, 6), (5, 1, 21), (6, 4, 20)],
             'comp_class_id int, component_id int, protein_class_id int',
         )
         sequences = spark.createDataFrame(
-            [(1, 'P00001'), (2, 'P00002'), (3, 'P00003')],
+            [(1, 'P00001'), (2, 'P00002'), (3, 'P00003'), (4, None)],
             'component_id int, accession string',
         )
         # component 1 sits under two single-component targets, so its accession
         # must be deduplicated; target 102 has two components and is skipped
         components = spark.createDataFrame(
-            [(1, 100, 1), (2, 101, 1), (3, 102, 2), (4, 102, 3)],
+            [(1, 100, 1), (2, 101, 1), (3, 102, 2), (4, 102, 3), (5, 103, 4)],
             'targcomp_id int, tid int, component_id int',
         )
         targets = spark.createDataFrame(
@@ -974,6 +976,7 @@ class TestProteinClassification:
                 (100, 'CHEMBL_T1', 'A', 'SINGLE PROTEIN'),
                 (101, 'CHEMBL_T2', 'B', 'SINGLE PROTEIN'),
                 (102, 'CHEMBL_T3', 'C', 'PROTEIN COMPLEX'),
+                (103, 'CHEMBL_T4', 'D', 'SINGLE PROTEIN'),
             ],
             'tid int, chembl_id string, pref_name string, target_type string',
         )
@@ -1048,3 +1051,10 @@ class TestProteinClassification:
         # single-component restriction is retained for release-equivalence, so
         # neither accession may appear -- see the comment on the filter.
         assert set(self._by_accession(chembl)) == {'P00001'}
+
+    def test_no_junk_null_accession_row_is_emitted(self, chembl):
+        # Component 4 is classified but has no accession. The old pipeline's
+        # arrays_zip padding produced an accession=NULL record for exactly this
+        # shape; it never reached output/target, and reproducing it would
+        # preserve an artefact rather than the release.
+        assert None not in set(self._by_accession(chembl))
