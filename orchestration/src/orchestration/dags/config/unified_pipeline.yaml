@@ -40,6 +40,7 @@ steps:
   # PIS STEPS
   pis_encode:
   pis_baseline_expression:
+  pis_chembl:
   pis_clinical_report:
   pis_biosample:
   pis_disease:
@@ -348,14 +349,17 @@ steps:
   # clinical mining updates:
   pts_drug_warning:
     depends_on:
-      - pis_clinical_report
+      - pis_chembl
   pts_chembl_molecule:
     depends_on:
+      # drugbank.csv.gz from pis_drug, aact_extraction_batch_results from
+      # pis_clinical_report, the chembl tables from pis_chembl
       - pis_drug
       - pis_clinical_report
+      - pis_chembl
   pts_drug_mechanism_of_action:
     depends_on:
-      - pis_clinical_report
+      - pis_chembl
       - pts_pre_target
   pts_drug_molecule:
     depends_on:
@@ -364,7 +368,10 @@ steps:
       - pts_clinical_report
   pts_clinical_report:
     depends_on:
+      # aact tables and the curated clinical_report files from
+      # pis_clinical_report, the chembl tables from pis_chembl
       - pis_clinical_report
+      - pis_chembl
       - pts_chembl_molecule
       - pts_disease
       - pts_drug_warning
@@ -433,7 +440,7 @@ steps:
   pts_target:
     num_partitions: 10
     depends_on:
-      - pis_clinical_report
+      - pis_chembl
       - pts_pre_target
       - pts_reactome
       - pts_target_safety
