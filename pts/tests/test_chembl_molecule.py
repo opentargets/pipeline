@@ -13,29 +13,34 @@ from pyspark.sql.types import (
 
 from pts.pyspark.chembl_molecule import _molecule_preprocess, process_molecules
 
-# A short but structurally valid MDL molblock (single carbon atom), terminated by
-# `M  END` with no trailing newline. The relaxed terminator regex never leaves a
-# trailing newline behind, so this is always what PTS should emit.
-SAMPLE_MOLBLOCK = (
+# A short but structurally valid MDL molblock (single carbon atom), with no
+# terminator newline of its own -- the raw variants below add zero, one, or
+# two trailing newlines on top of this.
+_BARE_MOLBLOCK = (
     '\n     RDKit          2D\n\n'
     '  1  0  0  0  0  0  0  0  0  0999 V2000\n'
     '    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0\n'
     'M  END'
 )
 
+# PTS always emits exactly one trailing newline after `M  END`: every one of
+# the 2,897,819 molblocks in the 26.06 release ends "M  END\n", so this is
+# the truncated shape regardless of how the raw value was terminated.
+SAMPLE_MOLBLOCK = _BARE_MOLBLOCK + '\n'
+
 # ChEMBL ships some `molfile` values as a full SD-file record: the molblock plus
 # appended SDF property tags, separated by a single newline (the old
 # Elasticsearch shape). PTS truncates this back to the bare molblock.
 SAMPLE_MOLFILE_WITH_SDF_TAGS = (
-    SAMPLE_MOLBLOCK + '\n> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n'
+    _BARE_MOLBLOCK + '\n> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n'
 )
 
 # The raw column is otherwise inconsistent about a trailing newline after the
 # terminator: most real values have none, a minority have one, and some are
-# malformed with more than one. All must truncate to the same bare molblock.
-MOLBLOCK_ZERO_TRAILING_NEWLINES = SAMPLE_MOLBLOCK
-MOLBLOCK_ONE_TRAILING_NEWLINE = SAMPLE_MOLBLOCK + '\n'
-MOLBLOCK_TWO_TRAILING_NEWLINES = SAMPLE_MOLBLOCK + '\n\n'
+# malformed with more than one. All must truncate to the same SAMPLE_MOLBLOCK.
+MOLBLOCK_ZERO_TRAILING_NEWLINES = _BARE_MOLBLOCK
+MOLBLOCK_ONE_TRAILING_NEWLINE = _BARE_MOLBLOCK + '\n'
+MOLBLOCK_TWO_TRAILING_NEWLINES = _BARE_MOLBLOCK + '\n\n'
 
 # A molfile-shaped string with no `M  END` terminator. PTS has nothing to
 # truncate here, so it must pass through unchanged.
@@ -164,11 +169,14 @@ class TestMoleculePreprocess:
         assert rows['CHEMBL3'] == 'lone drug'
 
     def test_molblock_terminator_variants_all_truncate(self, tables, drugbank):
-        """Zero, one, or two trailing newlines after `M  END` all truncate the same way."""
+        """Zero, one, or two trailing newlines after `M  END` all truncate to exactly one."""
+        # Every molblock in the 26.06 release ends "M  END\n" -- dropping that
+        # newline would change a published column, so this must be exact, not lenient.
         result = _preprocess(tables, drugbank)
         rows = {r['id']: r['molblock'] for r in result.collect()}
         for chembl_id in ('CHEMBL5', 'CHEMBL6', 'CHEMBL7'):
-            assert rows[chembl_id].endswith('M  END\n') or rows[chembl_id].endswith('M  END')
+            assert rows[chembl_id] == SAMPLE_MOLBLOCK
+            assert rows[chembl_id].endswith('M  END\n')
             assert '> <chembl_id>' not in rows[chembl_id]
 
 

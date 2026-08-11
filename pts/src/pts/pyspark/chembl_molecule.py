@@ -224,9 +224,11 @@ def _molecule_preprocess(
                 f.col('molfile'),
                 # the terminator may or may not be followed by a newline: the
                 # relational column is inconsistent, unlike the ES value which
-                # always had one before its SDF property block
+                # always had one before its SDF property block. Emit exactly one
+                # either way -- all 2,897,819 molblocks in the 26.06 release end
+                # "M  END\n", so dropping it would change a published column.
                 r'(?s)(\nM  END)\n?.*',
-                '$1',
+                '$1\n',
             ).alias('molblock'),
             f.coalesce(f.col('molecule_type'), f.lit('Unknown')).alias('drugType'),
             f.trim(f.col('pref_name')).alias('name'),
