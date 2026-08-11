@@ -1309,6 +1309,12 @@ def _build_protein_classification(
 
     class_per_level = f.array(*[
         f.struct(
+            # The cast restores the released column type. `protein_class_id` is
+            # postgres `integer`; the old ES JSON reader inferred `long` for it, and
+            # parquet carries postgres `integer` straight through, so reading from
+            # parquet narrows int64 -> int32 versus the release. The cast puts it
+            # back. This is not compensating for `min()` -- `min` over an
+            # IntegerType column returns IntegerType, not a widened aggregate type.
             f.col('protein_class_id').cast(LongType()).alias('id'),
             f.col(f'l{i}').alias('label'),
             f.lit(f'l{i}').alias('level'),

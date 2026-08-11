@@ -66,6 +66,10 @@ def process_drug_warnings(
     chembl_ids = _chembl_ids(warnings, molecules, hierarchy)
     references = _references(refs)
 
+    # `warning_year` narrows int64 (BIGINT) -> int32 (postgres `integer`) versus the
+    # released `year` column, the same ES-to-parquet type shift as the `protein_class_id`
+    # cast at target.py's `_build_protein_classification`. Resolved the other way here:
+    # the narrowing is accepted uncast because the values are identical, not cast back.
     return (
         warnings.join(chembl_ids, on='warning_id', how='left')
         .join(references, on='warning_id', how='left')
