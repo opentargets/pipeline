@@ -734,11 +734,11 @@ steps:
         aact_study_references: input/clinical_report/aact/study_references.parquet
         aact_designs: input/clinical_report/aact/designs.parquet
         aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: input/clinical_report/chembl/drug_indication.parquet
-        chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
-        chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
-        chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
-        chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
+        chembl_indication: input/chembl/drug_indication.parquet
+        chembl_indication_references: input/chembl/indication_refs.parquet
+        chembl_drug_warning: input/chembl/drug_warning.parquet
+        chembl_drug_warning_references: input/chembl/warning_refs.parquet
+        chembl_molecule_dictionary: input/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet
