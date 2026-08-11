@@ -660,7 +660,11 @@ steps:
   drug_warning:
     - name: pyspark drug_warning
       pyspark: drug_warning
-      source: input/drug/chembl_drug_warning.parquet
+      source:
+        drug_warning: input/chembl/drug_warning.parquet
+        warning_refs: input/chembl/warning_refs.parquet
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
       destination: output/drug_warning
   ##################################################################################################
 
