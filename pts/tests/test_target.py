@@ -1058,3 +1058,37 @@ class TestProteinClassification:
         # shape; it never reached output/target, and reproducing it would
         # preserve an artefact rather than the release.
         assert None not in set(self._by_accession(chembl))
+
+    def test_class_level_above_max_triggers_a_warning(self, spark):
+        # If ChEMBL ever adds a class_level 7 tier, a level-7 leaf still gets
+        # l1..l6 from its ancestors -- only its own, most specific label
+        # silently vanishes. Nothing else catches this, so it must warn.
+        from loguru import logger
+
+        classes = spark.createDataFrame(
+            [
+                (1, None, 'Enzyme', 1),
+                (2, 1, 'Kinase', 7),
+            ],
+            'protein_class_id int, parent_id int, pref_name string, class_level int',
+        )
+        messages = []
+        sink_id = logger.add(messages.append, level='WARNING')
+        try:
+            _flatten_protein_classification(classes)
+        finally:
+            logger.remove(sink_id)
+
+        assert any('7' in message for message in messages)
+
+    def test_class_level_at_max_does_not_warn(self, chembl):
+        from loguru import logger
+
+        messages = []
+        sink_id = logger.add(messages.append, level='WARNING')
+        try:
+            _flatten_protein_classification(chembl['protein_classification'])
+        finally:
+            logger.remove(sink_id)
+
+        assert messages == []

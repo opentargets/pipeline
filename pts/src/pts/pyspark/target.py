@@ -1159,6 +1159,15 @@ def _flatten_protein_classification(protein_classification: DataFrame) -> DataFr
     Returns:
         DataFrame with [leaf_id, l1, l2, l3, l4, l5, l6].
     """
+    max_level_row = protein_classification.agg(f.max('class_level')).first()
+    max_observed_level = max_level_row[0] if max_level_row is not None else None
+    if max_observed_level is not None and max_observed_level > _MAX_CLASS_LEVEL:
+        logger.warning(
+            f'protein_classification has class_level up to {max_observed_level}, above the '
+            f'_MAX_CLASS_LEVEL={_MAX_CLASS_LEVEL} this function walks to. Labels at levels beyond '
+            f'{_MAX_CLASS_LEVEL} will be silently dropped from targetClass.'
+        )
+
     # Distinct column names on the right-hand side keep the repeated self-join
     # unambiguous.
     parents = protein_classification.select(
