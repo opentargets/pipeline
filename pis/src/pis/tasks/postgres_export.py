@@ -18,7 +18,6 @@ import time
 import zipfile
 from contextlib import closing, suppress
 from fnmatch import fnmatch
-from importlib import resources
 from pathlib import Path
 from typing import IO, Annotated, Any, Self
 
@@ -36,7 +35,7 @@ from otter.validators import file
 # checkers read as private, so take them from the modules that define them
 from pixeltable_pgserver.postgres_server import PostgresServer, get_server
 from pixeltable_pgserver.utils import TARGET_POSTGRES_VERSION
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
 
 CHUNK_SIZE = 8 * 1024 * 1024
 POLL_INTERVAL = 1.0
@@ -53,9 +52,6 @@ for.
 
 DATABASE = 'postgres'
 """Database on the ephemeral server the dump is restored into."""
-
-QUERY_PACKAGE = 'pis.sql'
-"""Package holding the SQL files named by ``QuerySpec.query``."""
 
 PG_SETTINGS = {
     'fsync': 'off',
@@ -94,22 +90,6 @@ class TableSpec(BaseModel):
     """Optional SQL predicate, without the ``WHERE`` keyword."""
 
 
-class QuerySpec(BaseModel):
-    """One SQL query to run against the restored database and export."""
-
-    query: str
-    """Name of the SQL file in :py:obj:`QUERY_PACKAGE`, without the ``.sql`` suffix."""
-    destination: str
-    """Path for the parquet file, relative to the release root."""
-    requires_tables: Annotated[list[str], Field(min_length=1)]
-    """Tables ``pg_restore`` must load for this query to run.
-
-    The restore is selective, so a table a query reads but does not declare will
-    simply not be there. ChEMBL's large tables make restoring everything
-    impractical, which is why this is explicit rather than inferred.
-    """
-
-
 class PostgresExportSpec(Spec):
     """Configuration fields for the postgres_export task.
 
@@ -127,31 +107,10 @@ class PostgresExportSpec(Spec):
         member."""
     schema_name: str = 'public'
     """The schema the tables live in."""
-    tables: list[TableSpec] = []
-    """The tables to restore and export verbatim."""
-    queries: list[QuerySpec] = []
-    """The queries to run against the restored database and export."""
+    tables: Annotated[list[TableSpec], Field(min_length=1)]
+    """The tables to restore and export."""
     jobs: int = 8
     """How many tables ``pg_restore`` loads concurrently."""
-
-    @field_validator('queries')
-    @classmethod
-    def _sql_files_exist(cls, value: list[QuerySpec]) -> list[QuerySpec]:
-        for query in value:
-            try:
-                _load_query(query.query)
-            except PostgresExportError as e:
-                # pydantic only turns ValueError/TypeError/AssertionError raised by a
-                # validator into a ValidationError; PostgresExportError would otherwise
-                # propagate unchanged and skip the spec-level error reporting
-                raise ValueError(str(e)) from e
-        return value
-
-    @model_validator(mode='after')
-    def _has_work(self) -> Self:
-        if not self.tables and not self.queries:
-            raise ValueError('postgres_export needs at least one of tables or queries')
-        return self
 
 
 def _slug(name: str) -> str:
@@ -162,25 +121,6 @@ def _sql_str(value: str) -> str:
     """Render a python string as a single quoted SQL literal."""
     escaped = value.replace("'", "''")
     return f"'{escaped}'"
-
-
-def _quote_ident(name: str) -> str:
-    """Render a python string as a quoted SQL identifier."""
-    escaped = name.replace('"', '""')
-    return f'"{escaped}"'
-
-
-def _load_query(name: str) -> str:
-    """Read a SQL file shipped inside the package.
-
-    Reading through ``importlib.resources`` rather than a path relative to this
-    module means it works the same whether the package is installed in the image
-    or run from the source tree.
-    """
-    try:
-        return resources.files(QUERY_PACKAGE).joinpath(f'{name}.sql').read_text(encoding='utf-8')
-    except (FileNotFoundError, ModuleNotFoundError, OSError) as e:
-        raise PostgresExportError(f'no SQL file for query {name}: {e}')
 
 
 def _resolve_archive_member(names: list[str], pattern: str) -> str:
@@ -237,16 +177,6 @@ def _build_copy_sql(table: TableSpec, schema_name: str, destination: Path) -> st
     where = f' WHERE {table.where}' if table.where else ''
     query = f'SELECT DISTINCT {columns} FROM pg."{schema_name}"."{table.table}"{where}'  # noqa: S608 trusted config
     return f'COPY ({query}) TO {_sql_str(str(destination))} (FORMAT parquet, COMPRESSION zstd)'
-
-
-def _build_query_copy_sql(sql: str, destination: Path) -> str:
-    """Wrap a query from a SQL file in a COPY that writes it to parquet.
-
-    Unlike :py:func:`_build_copy_sql` this does not add ``DISTINCT``: a query
-    file is responsible for its own grain.
-    """
-    body = sql.strip().rstrip(';')
-    return f'COPY ({body}) TO {_sql_str(str(destination))} (FORMAT parquet, COMPRESSION zstd)'
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str, parameters: list[Any] | None = None) -> Any:
@@ -411,11 +341,8 @@ class PostgresExport(Task):
             logger.warning(message)
 
     def _restore_table_names(self) -> list[str]:
-        """Every table the restore must load, for table exports and queries alike."""
-        names = {t.table for t in self.spec.tables}
-        for query in self.spec.queries:
-            names.update(query.requires_tables)
-        return sorted(names)
+        """Every table the restore must load."""
+        return sorted({t.table for t in self.spec.tables})
 
     def _restore(self, bin_path: Path, uri: str, dump: Path) -> None:
         tables = self._restore_table_names()
@@ -467,27 +394,6 @@ class PostgresExport(Task):
                 self._copy_stream(f, g)
         return Artifact(source=f'{self.spec.source}#{source_id}', destination=dst.absolute)
 
-    def _export_query(self, con: duckdb.DuckDBPyConnection, query: QuerySpec) -> Artifact:
-        sql = _load_query(query.query)
-
-        local = Path(StorageHandle(query.destination, config=self.context.config, force_local=True).absolute)
-        local.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            rows = int(_scalar(con, _build_query_copy_sql(sql, local)))
-        except duckdb.Error as e:
-            # duckdb names the missing relation but not the query, and a config
-            # with several queries gives no other clue which one failed
-            raise PostgresExportError(f'query {query.query} failed: {e}')
-
-        if not rows:
-            raise PostgresExportError(f'query {query.query} exported no rows')
-
-        logger.info(f'exported {rows} rows from query {query.query} to {query.destination}')
-        self.row_counts[query.destination] = rows
-
-        return self._upload_local(local, query.destination, query.query)
-
     def _export(self, uri: str) -> list[Artifact]:
         temp_directory = self.scratch / 'duckdb'
         temp_directory.mkdir(parents=True, exist_ok=True)
@@ -504,14 +410,6 @@ class PostgresExport(Task):
             for table in self.spec.tables:
                 self._check_abort()
                 artifacts.append(self._export_table(con, table))
-
-            if self.spec.queries:
-                # the SQL files use bare table names; point the default catalog at
-                # the attached server so they do not have to spell out pg."schema"
-                con.execute(f'USE pg.{_quote_ident(self.spec.schema_name)}')
-                for query in self.spec.queries:
-                    self._check_abort()
-                    artifacts.append(self._export_query(con, query))
 
         return artifacts
 
@@ -539,14 +437,13 @@ class PostgresExport(Task):
 
     @report
     def validate(self) -> Self:
-        """Check every table and query result landed in the release with the number of rows it was exported with.
+        """Check every table result landed in the release with the number of rows it was exported with.
 
         The ephemeral database is long gone by the time validation runs, so the
         counts come from the row counts recorded during the run.
         """
         with closing(duckdb.connect()) as con:
-            destinations = [t.destination for t in self.spec.tables] + [q.destination for q in self.spec.queries]
-            for destination in destinations:
+            for destination in [t.destination for t in self.spec.tables]:
                 file.exists(destination, config=self.context.config)
 
                 h = StorageHandle(destination, config=self.context.config)

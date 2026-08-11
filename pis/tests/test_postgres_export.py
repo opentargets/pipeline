@@ -15,27 +15,22 @@ from otter.task.model import Task, TaskContext
 from pixeltable_pgserver.postgres_server import get_server
 from pydantic import ValidationError
 
-from pis.tasks import postgres_export
 from pis.tasks.postgres_export import (
     DUMP_MAGIC,
     MAX_ARCHIVE_VERSION,
     PostgresExport,
     PostgresExportError,
     PostgresExportSpec,
-    QuerySpec,
     TableSpec,
     _build_copy_sql,
     _build_count_sql,
-    _build_query_copy_sql,
     _build_restore_args,
     _check_archive_version,
-    _load_query,
     _resolve_archive_member,
     _slug,
 )
 
 DESTINATION = 'out/t.parquet'
-QUERY_DESTINATION = 'out/q.parquet'
 
 STUDIES = TableSpec(
     table='studies',
@@ -68,19 +63,6 @@ class TestBuildCopySql:
     def test_quotes_in_destination_are_escaped(self) -> None:
         table = TableSpec(table='t', destination="d's.parquet")
         assert "TO 'd''s.parquet'" in _build_copy_sql(table, 'public', Path("d's.parquet"))
-
-
-class TestBuildQueryCopySql:
-    def test_wraps_the_query(self) -> None:
-        sql = _build_query_copy_sql('SELECT 1 AS a', Path('/work/out.parquet'))
-        assert sql == "COPY (SELECT 1 AS a) TO '/work/out.parquet' (FORMAT parquet, COMPRESSION zstd)"
-
-    def test_strips_a_trailing_semicolon(self) -> None:
-        sql = _build_query_copy_sql('SELECT 1 AS a;\n', Path('/o.parquet'))
-        assert sql.startswith('COPY (SELECT 1 AS a)')
-
-    def test_does_not_deduplicate(self) -> None:
-        assert 'DISTINCT' not in _build_query_copy_sql('SELECT 1 AS a', Path('/o.parquet'))
 
 
 class TestBuildCountSql:
@@ -177,57 +159,6 @@ class TestSpec:
         assert spec.task_type == 'postgres_export'
         assert spec.archive_member == '*.dmp'
         assert spec.schema_name == 'public'
-
-
-class TestQuerySpec:
-    def test_accepts_a_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # _test_demo is the only SQL file that exists at this point in the plan;
-        # the four real queries arrive in Tasks 5-8
-        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
-        spec = PostgresExportSpec(
-            name='postgres_export chembl',
-            source='d.tar.gz',
-            queries=[
-                QuerySpec(
-                    query='_test_demo',
-                    destination='input/drug/demo.parquet',
-                    requires_tables=['molecule_dictionary'],
-                )
-            ],
-        )
-        assert spec.tables == []
-        assert spec.queries[0].query == '_test_demo'
-
-    def test_rejects_a_spec_with_neither_tables_nor_queries(self) -> None:
-        with pytest.raises(ValidationError, match='at least one of tables or queries'):
-            PostgresExportSpec(name='postgres_export nothing', source='d.dmp')
-
-    def test_rejects_a_query_with_no_required_tables(self) -> None:
-        with pytest.raises(ValidationError):
-            QuerySpec(query='chembl_molecule', destination='d.parquet', requires_tables=[])
-
-    def test_rejects_a_query_with_no_sql_file(self) -> None:
-        with pytest.raises(ValidationError, match='no SQL file for query'):
-            PostgresExportSpec(
-                name='postgres_export missing',
-                source='d.dmp',
-                queries=[QuerySpec(query='does_not_exist', destination='d.parquet', requires_tables=['t'])],
-            )
-
-    def test_tables_only_still_works(self) -> None:
-        spec = PostgresExportSpec(name='postgres_export some tables', source='d.dmp', tables=[STUDIES])
-        assert spec.queries == []
-
-
-class TestLoadQuery:
-    def test_reads_a_sql_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # the fixture lives in tests/sql so nothing test-only ships in the wheel
-        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
-        assert 'SELECT' in _load_query('_test_demo').upper()
-
-    def test_raises_for_a_missing_file(self) -> None:
-        with pytest.raises(PostgresExportError, match='no SQL file for query'):
-            _load_query('does_not_exist')
 
 
 class TestSlug:
@@ -351,90 +282,17 @@ class TestRoundTrip:
         assert not list((work / '.scratch').glob('*'))
 
 
-@pytest.mark.pgserver
-class TestQueryRoundTrip:
-    """Run a SQL file against a real restored database and export the result."""
-
-    def _build(self, work_path: Path, source: str, monkeypatch: pytest.MonkeyPatch) -> PostgresExport:
-        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
-        spec = PostgresExportSpec(
-            name='postgres_export demo query',
-            source=source,
-            schema_name='demo',
-            queries=[
-                QuerySpec(
-                    query='_test_demo',
-                    destination=QUERY_DESTINATION,
-                    requires_tables=['t'],
-                )
-            ],
-        )
-        config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=2, log_level='DEBUG')
-        context = TaskContext(config=config, scratchpad=Scratchpad())
-        context.abort = Event()
-        return PostgresExport(spec, context)
-
-    def test_exports_a_query(self, dump: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        work = tmp_path / 'work'
-        task = self._build(work, str(dump), monkeypatch)
-        _await(task.run())
-        assert task.manifest.result != Result.FAILURE, task.manifest.failure_reason
-        _await(task.validate())
-        assert task.manifest.result == Result.SUCCESS, task.manifest.failure_reason
-
-        out = work / QUERY_DESTINATION
-        # the demo table has 1000 rows over 7 distinct txt values
-        assert _count(out) == (7,)
-
-    def test_a_failing_query_names_itself(self, dump: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        task = self._build(tmp_path / 'work', str(dump), monkeypatch)
-        task.spec.queries[0].requires_tables = ['no_such_table']
-        _await(task.run())
-        assert task.manifest.result == Result.FAILURE
-        assert task.manifest.failure_reason is not None
-        assert '_test_demo' in task.manifest.failure_reason
-
-
 class TestRestoreTableNames:
-    def _task(
-        self, tables: list[TableSpec], queries: list[QuerySpec], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> PostgresExport:
-        monkeypatch.setattr(postgres_export, 'QUERY_PACKAGE', 'tests.sql')
+    def test_deduplicates_and_sorts(self, tmp_path: Path) -> None:
         spec = PostgresExportSpec(
-            name='postgres_export mixed', source='d.dmp', tables=tables, queries=queries
+            name='postgres_export mixed',
+            source='d.dmp',
+            tables=[
+                TableSpec(table='studies', destination='a.parquet'),
+                TableSpec(table='conditions', destination='b.parquet'),
+                TableSpec(table='studies', destination='c.parquet'),
+            ],
         )
         config = Config(step='demo', steps=['demo'], work_path=tmp_path, pool_size=2, log_level='DEBUG')
-        return PostgresExport(spec, TaskContext(config=config, scratchpad=Scratchpad()))
-
-    def test_unions_tables_and_query_requirements(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        task = self._task(
-            [STUDIES],
-            [
-                QuerySpec(
-                    query='_test_demo',
-                    destination='d.parquet',
-                    requires_tables=['drug_warning', 'warning_refs'],
-                )
-            ],
-            tmp_path,
-            monkeypatch,
-        )
-        assert task._restore_table_names() == ['drug_warning', 'studies', 'warning_refs']
-
-    def test_deduplicates_a_table_named_twice(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        task = self._task(
-            [STUDIES],
-            [QuerySpec(query='_test_demo', destination='d.parquet', requires_tables=['studies'])],
-            tmp_path,
-            monkeypatch,
-        )
-        assert task._restore_table_names() == ['studies']
-
-    def test_queries_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        task = self._task(
-            [],
-            [QuerySpec(query='_test_demo', destination='d.parquet', requires_tables=['drug_warning'])],
-            tmp_path,
-            monkeypatch,
-        )
-        assert task._restore_table_names() == ['drug_warning']
+        task = PostgresExport(spec, TaskContext(config=config, scratchpad=Scratchpad()))
+        assert task._restore_table_names() == ['conditions', 'studies']
