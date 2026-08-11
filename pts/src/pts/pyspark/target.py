@@ -1146,12 +1146,18 @@ _MAX_CLASS_LEVEL = 6
 def _flatten_protein_classification(protein_classification: DataFrame) -> DataFrame:
     """Flatten each protein class to its ancestor chain, one column per level.
 
-    Spark has no recursive CTE, so walk up `parent_id` a bounded six times —
-    `class_level` never exceeds 6 in ChEMBL's 905-row curated tree, so the walk
-    terminates by construction and needs no cycle guard. Each ancestor's
-    `pref_name` is placed at its OWN `class_level`, not at its distance from the
-    leaf, so a level-3 leaf fills l1, l2 and l3 and leaves l4-l6 null. The tree's
-    root sits at `class_level` 0 and therefore falls out.
+    Spark has no recursive CTE, so walk up `parent_id` a bounded six times. The
+    walk terminates by construction — it is a fixed `range(_MAX_CLASS_LEVEL)`
+    loop, not a while-loop following `parent_id` until some condition holds — so
+    no cycle guard is needed regardless of the data; a `parent_id` cycle would
+    not hang it, it would just contribute duplicate ancestor rows that the
+    `f.max` in the final aggregation absorbs. `class_level` never exceeding 6 in
+    ChEMBL's 905-row curated tree is a separate fact: it is what makes six
+    iterations enough to reach every real ancestor, not what makes the loop
+    terminate. Each ancestor's `pref_name` is placed at its OWN `class_level`,
+    not at its distance from the leaf, so a level-3 leaf fills l1, l2 and l3 and
+    leaves l4-l6 null. The tree's root sits at `class_level` 0 and therefore
+    falls out.
 
     Args:
         protein_classification: Raw ChEMBL protein_classification table.
@@ -1198,6 +1204,10 @@ def _flatten_protein_classification(protein_classification: DataFrame) -> DataFr
         )
         chain = chain.unionByName(frontier)
 
+    # If a leaf's ancestor chain held two nodes at the same class_level, f.max
+    # picks the lexicographically greater pref_name with no signal that a
+    # collision happened. Inherited verbatim from the SQL this replaces, so this
+    # is not a behaviour change -- just noting the tie-break exists.
     return chain.groupBy('leaf_id').agg(*[
         f.max(f.when(f.col('class_level') == i, f.col('pref_name'))).alias(f'l{i}')
         for i in range(1, _MAX_CLASS_LEVEL + 1)
@@ -1264,16 +1274,26 @@ def _build_protein_classification(
     # null accession, which downstream joins then discarded. Element 0 is the
     # lowest protein_class_id because component_id is constant within a
     # single-component target, which is why `min` is the faithful translation
-    # rather than an arbitrary pick. The ordering is recoverable exactly:
-    # `git show a9fc1f46^:pis/src/pis/sql/chembl_target.sql`.
+    # rather than an arbitrary pick. This is not a documentation claim taken on
+    # faith: it was measured directly, comparing this function's output against
+    # the old ES-based function's own output at the accession grain. Result: 0 of
+    # 11,083 accessions have a differing class set; the junk `accession = NULL`
+    # row the old function produced (1) is gone here (0); and the gene-level
+    # differences against the release are unchanged at 6, with 0 of those
+    # attributable to this change.
     #
-    # The SQL ordered by two keys, (component_id, protein_class_id), and this
-    # groups by ONE — component_id — which is the faithful reading rather than a
-    # shortcut. `single_component_tids` above guarantees every surviving target
-    # has exactly one component, so grouping per component is grouping per
-    # target, and the leading component_id sort key is constant inside each
-    # group. That equivalence is forced by the filter in this function, not by
-    # any property of the data.
+    # Grouping by ONE key — component_id — rather than the SQL's two,
+    # (component_id, protein_class_id), is safe for a stronger reason than "the
+    # sort key happens to be constant": no predicate anywhere in this function is
+    # a function of `protein_class_id` or `comp_class_id`. Every predicate
+    # (`tid` in target_dictionary, `tid` in single_component_tids, join on
+    # component_id, accession IS NOT NULL) is therefore constant within a
+    # component_id group, so pre-scoping can only delete whole groups, never a
+    # proper subset of one. `min` over a surviving group is identical before or
+    # after scoping, and the inner join below (on `zipped_class_per_component`)
+    # discards exactly the groups scoping would remove. Do not add a predicate
+    # that discriminates within a component_id group (e.g. `class_level >= 2`)
+    # without re-deriving this.
     #
     # Note this is deliberately NOT grouped per accession. Per-accession happens
     # to agree on ChEMBL 37 only because no accession spans two component_ids,
