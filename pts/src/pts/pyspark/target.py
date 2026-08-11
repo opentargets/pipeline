@@ -1204,8 +1204,10 @@ def _build_protein_classification(
 ) -> DataFrame:
     """Build protein target classification from the raw ChEMBL tables.
 
-    Every `component_class` row is kept: a component may carry more than one
-    class and there is no rule that picks between them.
+    Reproduces the released dataset, which means reproducing two quirks of the
+    pipeline this replaces — see the comments on `single_component_tids` and
+    `zipped_class_per_component` below. Both should go when their follow-up
+    issues are taken.
 
     Args:
         target_dictionary: Raw ChEMBL target_dictionary table.
@@ -1238,6 +1240,36 @@ def _build_protein_classification(
         .select('tid')
     )
 
+    # Keep only the lowest protein_class_id per component, DISCARDING THE REST.
+    #
+    # THIS DROPS REAL CLASSIFICATIONS AND IS DELIBERATE. A component may carry
+    # several component_class rows, and this keeps exactly one of them. It is not
+    # a de-duplication and it is not a selection rule with any biological
+    # meaning: it reproduces a positional bug in the pipeline this replaces.
+    #
+    # That pipeline built an Elasticsearch document per target holding a
+    # `protein_classification` array ordered by (component_id, protein_class_id)
+    # and a separate `target_components` array, then zipped the two by position.
+    # On a single-component target the second array has length 1, so `arrays_zip`
+    # paired element 0 with the accession and padded every later class against a
+    # null accession, which downstream joins then discarded. Element 0 is the
+    # lowest protein_class_id because component_id is constant within a
+    # single-component target, which is why `min` is the faithful translation
+    # rather than an arbitrary pick. The ordering is recoverable exactly:
+    # `git show a9fc1f46^:pis/src/pis/sql/chembl_target.sql`.
+    #
+    # Keeping every row instead — which is what the raw tables support, and what
+    # this function did before this commit — adds classes to 161 accessions
+    # across 97 genes that the release does not have them for. `output/target` is
+    # published, so that correction gets its own issue rather than riding along
+    # inside a refactor. REMOVE THIS when that issue is taken; the rest of the
+    # function already handles the many-to-many correctly.
+    zipped_class_per_component = (
+        component_class
+        .groupBy('component_id')
+        .agg(f.min('protein_class_id').alias('protein_class_id'))
+    )
+
     # Components are reached through their target, mirroring the grain of the
     # ChEMBL target document this replaces: a component hanging off a tid that
     # is absent from target_dictionary contributed nothing there either.
@@ -1246,7 +1278,7 @@ def _build_protein_classification(
         .join(target_dictionary.select('tid'), 'tid', 'inner')
         .join(single_component_tids, 'tid', 'inner')
         .join(component_sequences.select('component_id', 'accession'), 'component_id', 'inner')
-        .join(component_class.select('component_id', 'protein_class_id'), 'component_id', 'inner')
+        .join(zipped_class_per_component, 'component_id', 'inner')
         .filter(f.col('accession').isNotNull())
         .select('accession', 'protein_class_id')
         .join(levels, f.col('protein_class_id') == levels['leaf_id'], 'left_outer')

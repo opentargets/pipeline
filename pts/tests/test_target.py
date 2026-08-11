@@ -944,13 +944,19 @@ class TestProteinClassification:
                 (5, 4, 'TK group', 5),
                 (6, 5, 'TK family', 6),
                 (20, None, 'Transporter', 1),
+                (21, None, 'Ion channel', 1),
             ],
             'protein_class_id int, parent_id int, pref_name string, class_level int',
         )
-        # components 2 and 3 carry classes but belong only to the two-component
-        # target 102, so nothing they classify may reach the output
+        # Component 1 carries three classes. They are listed so that the lowest
+        # protein_class_id (6) is NOT the first row by comp_class_id (20), so a
+        # test pinning "the lowest id survives" cannot also pass for an
+        # implementation that just takes whichever row comes first.
+        #
+        # Components 2 and 3 carry classes but belong only to the two-component
+        # target 102, so nothing they classify may reach the output.
         component_class = spark.createDataFrame(
-            [(1, 1, 6), (2, 1, 20), (3, 2, 20), (4, 3, 6)],
+            [(1, 1, 20), (2, 1, 6), (3, 2, 20), (4, 3, 6), (5, 1, 21)],
             'comp_class_id int, component_id int, protein_class_id int',
         )
         sequences = spark.createDataFrame(
@@ -1004,10 +1010,15 @@ class TestProteinClassification:
         assert flat[20]['l2'] is None
         assert flat[20]['l6'] is None
 
-    def test_a_component_keeps_every_class(self, chembl):
-        by_accession = self._by_accession(chembl)
-        # component 1 carries classes 6 and 20; both survive, none is chosen
-        assert {c['id'] for c in by_accession['P00001']} == {6, 20}
+    def test_only_the_positionally_zipped_class_survives(self, chembl):
+        # Component 1 carries three classes -- 20, 6 and 21 -- and contributes
+        # exactly one. The old pipeline zipped a (component_id, protein_class_id)
+        # ordered array against a length-1 accession array, so only the lowest
+        # protein_class_id kept its accession. Retained for release-equivalence;
+        # see the comment on zipped_class_per_component.
+        ids = {c['id'] for c in self._by_accession(chembl)['P00001']}
+        # 6, not 20 (the first component_class row) and not 21
+        assert ids == {6}
 
     def test_every_ancestor_becomes_its_own_class_entry(self, chembl):
         by_accession = self._by_accession(chembl)
@@ -1026,11 +1037,11 @@ class TestProteinClassification:
         accessions = [r['accession'] for r in rows]
         assert len(accessions) == len(set(accessions))
         # P00001 is reached through tid 100 and tid 101, both single-component;
-        # the classes are the same either way, so the six levels of class 6 plus
-        # the one level of class 20 stay seven entries rather than fourteen
+        # the surviving class is the same either way, so the six levels of
+        # class 6 stay six entries rather than twelve
         classes = {r['accession']: r['targetClass'] for r in rows}['P00001']
-        assert len(classes) == 7
-        assert len({(c['id'], c['label'], c['level']) for c in classes}) == 7
+        assert len(classes) == 6
+        assert len({(c['id'], c['label'], c['level']) for c in classes}) == 6
 
     def test_multi_component_target_contributes_no_accessions(self, chembl):
         # Target 102 has two components, 2 and 3, and both carry classes. The
