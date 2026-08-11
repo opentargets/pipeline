@@ -178,11 +178,11 @@ Base `molecule_dictionary` (`md`), one row per `molregno`.
 | Output field | Source |
 | --- | --- |
 | `molecule_chembl_id` | `md.chembl_id` |
-| `pref_name` | `md.pref_name` |
+| `pref_name` | `trim(md.pref_name)` — 18 ChEMBL 37 values carry a trailing space that ChEMBL's own indexer trims |
 | `molecule_type` | `md.molecule_type` |
 | `molecule_structures.canonical_smiles` | `compound_structures.canonical_smiles` |
 | `molecule_structures.standard_inchi_key` | `compound_structures.standard_inchi_key` |
-| `molecule_structures.molfile` | `compound_structures.molfile` |
+| `molecule_structures.molfile` | `rtrim(compound_structures.molfile, chr(10)) \|\| chr(10)` — normalises the molblock terminator, since `compound_structures` is inconsistent about a trailing newline after `M  END` and pts's truncation regex requires it |
 | `molecule_hierarchy.parent_chembl_id` | `md.chembl_id` via `molecule_hierarchy.parent_molregno` |
 | `molecule_synonyms[].molecule_synonym` | `molecule_synonyms.synonyms` |
 | `molecule_synonyms[].syn_type` | `molecule_synonyms.syn_type` |
@@ -435,8 +435,14 @@ into the release.
 | `pts/src/pts/pyspark/chembl_molecule.py` | molecule load → parquet |
 | `pts/src/pts/pyspark/target.py:146` | `spark.read.json` → `spark.read.parquet` |
 | `pts/config.yaml` | four `input/drug/*.jsonl` sources → `.parquet`; `target` step source repointed |
+| `orchestration/src/orchestration/dags/config/unified_pipeline.yaml` | `pts_drug_warning`, `pts_chembl_molecule`, `pts_drug_mechanism_of_action`, and `pts_target` each gain `pis_clinical_report` in `depends_on` |
 
 No logic changes, because column names and nesting are preserved.
+
+The four `chembl_*` parquet files moved from the `drug` PIS step to the
+`clinical_report` PIS step (`postgres_export chembl tables`), so the PTS steps
+that read them need an explicit dependency edge on `pis_clinical_report`; their
+existing `pis_drug` edge no longer covers the files they actually read.
 
 ## Out of scope
 
