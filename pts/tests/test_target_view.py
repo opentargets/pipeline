@@ -76,6 +76,54 @@ def test_build_homologues_groups_by_target(spark):
     assert species == {'10090', '10116'}
 
 
+def test_build_homologues_sorted_by_priority(spark):
+    """Homologues is sorted ascending by priority, regardless of input row order."""
+    data = [
+        Row(
+            targetId='ENSG1',
+            speciesId='9598',
+            speciesName='chimp',
+            homologyType='ortholog_one2one',
+            targetGeneId='ENSPTRG1',
+            isHighConfidence='1',
+            targetGeneSymbol='TP53',
+            queryPercentageIdentity=99.0,
+            targetPercentageIdentity=99.0,
+            priority=2,
+        ),
+        Row(
+            targetId='ENSG1',
+            speciesId='10090',
+            speciesName='mouse',
+            homologyType='ortholog_one2one',
+            targetGeneId='ENSMUSG1',
+            isHighConfidence='1',
+            targetGeneSymbol='Trp53',
+            queryPercentageIdentity=90.0,
+            targetPercentageIdentity=88.0,
+            priority=0,
+        ),
+        Row(
+            targetId='ENSG1',
+            speciesId='10116',
+            speciesName='rat',
+            homologyType='ortholog_one2one',
+            targetGeneId='ENSRNOG1',
+            isHighConfidence='1',
+            targetGeneSymbol='Tp53',
+            queryPercentageIdentity=85.0,
+            targetPercentageIdentity=80.0,
+            priority=1,
+        ),
+    ]
+    df = spark.createDataFrame(data, HOMOLOGY_SCHEMA)
+    result = _build_homologues(df)
+    row = result.first()
+    assert row is not None
+    assert [h.priority for h in row.homologues] == [0, 1, 2]
+    assert [h.speciesId for h in row.homologues] == ['10090', '10116', '9598']
+
+
 def test_build_homologues_absent_target_gets_no_row(spark):
     """A target with no homology rows simply has no row (null after left join)."""
     df = spark.createDataFrame([], HOMOLOGY_SCHEMA)

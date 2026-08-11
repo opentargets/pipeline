@@ -112,7 +112,10 @@ def _build_homologues(df: DataFrame) -> DataFrame:
         )
         .groupBy('targetId')
         .agg(f.collect_list('homologue').alias('homologues'))
-        .withColumnRenamed('targetId', 'id')
+        .select(
+            f.col('targetId').alias('id'),
+            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)').alias('homologues')
+        )
     )
 
 
