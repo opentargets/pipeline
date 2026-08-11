@@ -689,7 +689,10 @@ steps:
     - name: pyspark chembl_molecule
       pyspark: chembl_molecule
       source:
-        chembl_molecule: input/drug/chembl_molecule.parquet
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        compound_structures: input/chembl/compound_structures.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
+        molecule_synonyms: input/chembl/molecule_synonyms.parquet
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
