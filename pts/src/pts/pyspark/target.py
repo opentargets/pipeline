@@ -1219,12 +1219,32 @@ def _build_protein_classification(
     """
     levels = _flatten_protein_classification(protein_classification)
 
+    # Restrict to single-component ChEMBL targets.
+    #
+    # DO NOT DELETE THIS AS REDUNDANT. It is redundant on its own terms: the
+    # filter only ever existed to stop a positional `arrays_zip` misattributing
+    # classes across the subunits of a complex, and there is no positional array
+    # here — this function maps an accession to its classes directly, so nothing
+    # can be misattributed. It is retained because `output/target` is a
+    # published dataset and dropping the filter adds protein classes to 1,288
+    # accessions that the release does not have them for (11,083 -> 12,371,
+    # measured against the real dump). That may well be an improvement, but it
+    # is one to raise on its own merits rather than to make silently.
+    single_component_tids = (
+        target_components
+        .groupBy('tid')
+        .agg(f.count('*').alias('component_count'))
+        .filter(f.col('component_count') == 1)
+        .select('tid')
+    )
+
     # Components are reached through their target, mirroring the grain of the
     # ChEMBL target document this replaces: a component hanging off a tid that
     # is absent from target_dictionary contributed nothing there either.
     accession_class = (
         target_components.select('tid', 'component_id')
         .join(target_dictionary.select('tid'), 'tid', 'inner')
+        .join(single_component_tids, 'tid', 'inner')
         .join(component_sequences.select('component_id', 'accession'), 'component_id', 'inner')
         .join(component_class.select('component_id', 'protein_class_id'), 'component_id', 'inner')
         .filter(f.col('accession').isNotNull())

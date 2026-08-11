@@ -947,21 +947,28 @@ class TestProteinClassification:
             ],
             'protein_class_id int, parent_id int, pref_name string, class_level int',
         )
+        # components 2 and 3 carry classes but belong only to the two-component
+        # target 102, so nothing they classify may reach the output
         component_class = spark.createDataFrame(
-            [(1, 1, 6), (2, 1, 20), (3, 2, 20)],
+            [(1, 1, 6), (2, 1, 20), (3, 2, 20), (4, 3, 6)],
             'comp_class_id int, component_id int, protein_class_id int',
         )
         sequences = spark.createDataFrame(
-            [(1, 'P00001'), (2, 'P00002')],
+            [(1, 'P00001'), (2, 'P00002'), (3, 'P00003')],
             'component_id int, accession string',
         )
-        # P00001 sits under two targets, so accession must be deduplicated
+        # component 1 sits under two single-component targets, so its accession
+        # must be deduplicated; target 102 has two components and is skipped
         components = spark.createDataFrame(
-            [(1, 100, 1), (2, 101, 1), (3, 101, 2)],
+            [(1, 100, 1), (2, 101, 1), (3, 102, 2), (4, 102, 3)],
             'targcomp_id int, tid int, component_id int',
         )
         targets = spark.createDataFrame(
-            [(100, 'CHEMBL_T1', 'A', 'SINGLE PROTEIN'), (101, 'CHEMBL_T2', 'B', 'PROTEIN COMPLEX')],
+            [
+                (100, 'CHEMBL_T1', 'A', 'SINGLE PROTEIN'),
+                (101, 'CHEMBL_T2', 'B', 'SINGLE PROTEIN'),
+                (102, 'CHEMBL_T3', 'C', 'PROTEIN COMPLEX'),
+            ],
             'tid int, chembl_id string, pref_name string, target_type string',
         )
         return {
@@ -1001,7 +1008,6 @@ class TestProteinClassification:
         by_accession = self._by_accession(chembl)
         # component 1 carries classes 6 and 20; both survive, none is chosen
         assert {c['id'] for c in by_accession['P00001']} == {6, 20}
-        assert {c['id'] for c in by_accession['P00002']} == {20}
 
     def test_every_ancestor_becomes_its_own_class_entry(self, chembl):
         by_accession = self._by_accession(chembl)
@@ -1019,9 +1025,15 @@ class TestProteinClassification:
         rows = _build_protein_classification(**chembl).collect()
         accessions = [r['accession'] for r in rows]
         assert len(accessions) == len(set(accessions))
-        # P00001 is reached through tid 100 and tid 101; the classes are the
-        # same either way, so the six levels of class 6 plus the one level of
-        # class 20 stay seven entries rather than fourteen
+        # P00001 is reached through tid 100 and tid 101, both single-component;
+        # the classes are the same either way, so the six levels of class 6 plus
+        # the one level of class 20 stay seven entries rather than fourteen
         classes = {r['accession']: r['targetClass'] for r in rows}['P00001']
         assert len(classes) == 7
         assert len({(c['id'], c['label'], c['level']) for c in classes}) == 7
+
+    def test_multi_component_target_contributes_no_accessions(self, chembl):
+        # Target 102 has two components, 2 and 3, and both carry classes. The
+        # single-component restriction is retained for release-equivalence, so
+        # neither accession may appear -- see the comment on the filter.
+        assert set(self._by_accession(chembl)) == {'P00001'}
