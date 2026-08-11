@@ -1284,8 +1284,8 @@ def _build_protein_classification(
     #
     # Grouping by ONE key — component_id — rather than the SQL's two,
     # (component_id, protein_class_id), is safe for a stronger reason than "the
-    # sort key happens to be constant": no predicate anywhere in this function is
-    # a function of `protein_class_id` or `comp_class_id`. Every predicate
+    # sort key happens to be constant": no predicate UPSTREAM OF THIS AGGREGATION
+    # is a function of `protein_class_id` or `comp_class_id`. Every such predicate
     # (`tid` in target_dictionary, `tid` in single_component_tids, join on
     # component_id, accession IS NOT NULL) is therefore constant within a
     # component_id group, so pre-scoping can only delete whole groups, never a
