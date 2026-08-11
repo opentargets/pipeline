@@ -120,10 +120,16 @@ class TestDrugWarning:
 
 class TestMechanism:
     @pytest.fixture(scope='class')
-    def rows(self, chembl: PostgresServer) -> dict[int, dict]:
-        return {r['record_id']: r for r in run_query(chembl, 'chembl_mechanism')}
+    def raw(self, chembl: PostgresServer) -> list[dict]:
+        return run_query(chembl, 'chembl_mechanism')
 
-    def test_one_row_per_mechanism(self, rows: dict[int, dict]) -> None:
+    @pytest.fixture(scope='class')
+    def rows(self, raw: list[dict]) -> dict[int, dict]:
+        return {r['record_id']: r for r in raw}
+
+    def test_one_row_per_mechanism(self, raw: list[dict], rows: dict[int, dict]) -> None:
+        # assert on the list BEFORE the dict collapses duplicates
+        assert len(raw) == 2
         assert sorted(rows) == [200, 201]
 
     def test_scalar_fields(self, rows: dict[int, dict]) -> None:
