@@ -35,6 +35,8 @@ ENSEMBL_SCHEMA = StructType([
             StructField('id', StringType()),
             StructField('uniprot_swissprot', ArrayType(StringType())),
             StructField('uniprot_trembl', ArrayType(StringType())),
+            StructField('uniprot_isoform', ArrayType(StringType())),
+            StructField('alphafold', ArrayType(StringType())),
         ])),
     ),
 ])
@@ -44,6 +46,16 @@ def _gff(chrom, feature, start, end, strand, attrs):
     return Row(
         _c0=chrom, _c1='HAVANA', _c2=feature,
         _c3=str(start), _c4=str(end), _c5='.', _c6=strand, _c7='.', _c8=attrs,
+    )
+
+
+def _ensembl_tx(id, uniprot_swissprot=None, uniprot_trembl=None, uniprot_isoform=None, alphafold=None):
+    return Row(
+        id=id,
+        uniprot_swissprot=uniprot_swissprot,
+        uniprot_trembl=uniprot_trembl,
+        uniprot_isoform=uniprot_isoform,
+        alphafold=alphafold,
     )
 
 
@@ -253,37 +265,40 @@ def test_parse_exons_exon_struct_fields(spark):
 # ---------------------------------------------------------------------------
 
 
-def test_build_uniprot_lut_merges_swissprot_and_trembl(spark):
-    """UniprotIds contains both Swiss-Prot and TrEMBL IDs."""
+def test_build_uniprot_lut_keeps_swissprot_and_trembl_separate(spark):
+    """Swiss-Prot and TrEMBL IDs pass through as distinct columns, not merged."""
     data = [Row(id='ENSG00000001', transcripts=[
-        Row(id='ENST00000001', uniprot_swissprot=['P12345'], uniprot_trembl=['A0A001']),
+        _ensembl_tx('ENST00000001', uniprot_swissprot=['P12345'], uniprot_trembl=['A0A001']),
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000001"').first()
     assert row is not None
-    assert set(row.uniprotIds) == {'P12345', 'A0A001'}
+    assert row.uniprotSwissprotIds == ['P12345']
+    assert row.uniprotTremblIds == ['A0A001']
 
 
 def test_build_uniprot_lut_handles_null_trembl(spark):
-    """Null uniprot_trembl does not cause an error."""
+    """Null uniprot_trembl does not cause an error and stays null (not an empty array)."""
     data = [Row(id='ENSG00000002', transcripts=[
-        Row(id='ENST00000002', uniprot_swissprot=['P99999'], uniprot_trembl=None),
+        _ensembl_tx('ENST00000002', uniprot_swissprot=['P99999'], uniprot_trembl=None),
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000002"').first()
     assert row is not None
-    assert row.uniprotIds == ['P99999']
+    assert row.uniprotSwissprotIds == ['P99999']
+    assert row.uniprotTremblIds is None
 
 
-def test_build_uniprot_lut_deduplicates(spark):
-    """Duplicate IDs appearing in both swissprot and trembl are deduplicated."""
-    data = [Row(id='ENSG00000003', transcripts=[
-        Row(id='ENST00000003', uniprot_swissprot=['P11111'], uniprot_trembl=['P11111']),
+def test_build_uniprot_lut_propagates_isoform_and_alphafold(spark):
+    """uniprotIsoformIds/alphafoldIds pass through untouched from the Ensembl parquet."""
+    data = [Row(id='ENSG00000005', transcripts=[
+        _ensembl_tx('ENST00000005', uniprot_isoform=['P12345-2'], alphafold=['AF-P12345-F1']),
     ])]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
-    row = result.filter('transcriptId = "ENST00000003"').first()
+    row = result.filter('transcriptId = "ENST00000005"').first()
     assert row is not None
-    assert row.uniprotIds.count('P11111') == 1
+    assert row.uniprotIsoformIds == ['P12345-2']
+    assert row.alphafoldIds == ['AF-P12345-F1']
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +309,8 @@ def test_build_uniprot_lut_deduplicates(spark):
 def test_join_and_finalise_output_schema(spark):
     """Output contains exactly the expected columns."""
     expected_cols = {
-        'targetId', 'transcriptId', 'biotype', 'proteinId', 'uniprotIds',
+        'targetId', 'transcriptId', 'biotype', 'proteinId',
+        'uniprotSwissprotIds', 'uniprotTremblIds', 'uniprotIsoformIds', 'alphafoldIds',
         'isEnsemblCanonical', 'chromosome', 'start', 'end', 'strand',
         'transcriptionStartSite', 'flags', 'exons',
     }
@@ -305,7 +321,7 @@ def test_join_and_finalise_output_schema(spark):
     exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
 
     ensembl_data = [Row(id='ENSG00000186092', transcripts=[
-        Row(id='ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
+        _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
     ])]
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
@@ -322,11 +338,20 @@ def test_join_and_finalise_propagates_uniprot_ids(spark):
     exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
 
     ensembl_data = [Row(id='ENSG00000186092', transcripts=[
-        Row(id='ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
+        _ensembl_tx(
+            'ENST00000641515',
+            uniprot_swissprot=['A0A2U3U0J3'],
+            uniprot_trembl=None,
+            uniprot_isoform=['A0A2U3U0J3-2'],
+            alphafold=['AF-A0A2U3U0J3-F1'],
+        ),
     ])]
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
     row = _join_and_finalise(gff, exons, uniprot).first()
     assert row is not None
-    assert row.uniprotIds == ['A0A2U3U0J3']
+    assert row.uniprotSwissprotIds == ['A0A2U3U0J3']
+    assert row.uniprotTremblIds is None
+    assert row.uniprotIsoformIds == ['A0A2U3U0J3-2']
+    assert row.alphafoldIds == ['AF-A0A2U3U0J3-F1']
     assert len(row.exons) == 1

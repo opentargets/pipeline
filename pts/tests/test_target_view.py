@@ -287,7 +287,10 @@ TRANSCRIPT_SCHEMA = StructType([
     StructField('transcriptId', StringType()),
     StructField('biotype', StringType()),
     StructField('proteinId', StringType()),
-    StructField('uniprotIds', ArrayType(StringType())),
+    StructField('uniprotSwissprotIds', ArrayType(StringType())),
+    StructField('uniprotTremblIds', ArrayType(StringType())),
+    StructField('uniprotIsoformIds', ArrayType(StringType())),
+    StructField('alphafoldIds', ArrayType(StringType())),
     StructField('isEnsemblCanonical', BooleanType()),
     StructField('chromosome', StringType()),
     StructField('start', LongType()),
@@ -305,7 +308,10 @@ def _transcript_row(**kwargs):
         'transcriptId': 'ENST1',
         'biotype': 'protein_coding',
         'proteinId': 'ENSP1',
-        'uniprotIds': ['P12345'],
+        'uniprotSwissprotIds': ['P12345'],
+        'uniprotTremblIds': None,
+        'uniprotIsoformIds': None,
+        'alphafoldIds': None,
         'isEnsemblCanonical': False,
         'chromosome': '17',
         'start': 100,
@@ -340,30 +346,91 @@ def test_build_transcripts_maps_translation_id_from_protein_id(spark):
     assert row.transcripts[0].translationId == 'ENSP99'
 
 
-def test_build_transcripts_uniprot_id_takes_first_of_list(spark):
-    """The uniprotId field collapses the uniprotIds list to its first element."""
-    df = spark.createDataFrame([_transcript_row(uniprotIds=['P1', 'P2'])], TRANSCRIPT_SCHEMA)
+def test_build_transcripts_uniprot_id_prefers_swissprot(spark):
+    """The uniprotId field takes the first Swiss-Prot id when one is present."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=['P1', 'P2'], uniprotTremblIds=['A1'])],
+        TRANSCRIPT_SCHEMA,
+    )
     row = _build_transcripts(df).first()
     assert row is not None
     assert row.transcripts[0].uniprotId == 'P1'
 
 
-def test_build_transcripts_uniprot_id_null_when_list_empty(spark):
-    df = spark.createDataFrame([_transcript_row(uniprotIds=[])], TRANSCRIPT_SCHEMA)
+def test_build_transcripts_uniprot_id_falls_back_to_trembl(spark):
+    """The uniprotId field falls back to the first TrEMBL id when no Swiss-Prot id exists."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=None, uniprotTremblIds=['A1', 'A2'])],
+        TRANSCRIPT_SCHEMA,
+    )
+    row = _build_transcripts(df).first()
+    assert row is not None
+    assert row.transcripts[0].uniprotId == 'A1'
+
+
+def test_build_transcripts_uniprot_id_null_when_neither_present(spark):
+    """The uniprotId field is null when neither Swiss-Prot nor TrEMBL has an entry."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=None, uniprotTremblIds=None)],
+        TRANSCRIPT_SCHEMA,
+    )
     row = _build_transcripts(df).first()
     assert row is not None
     assert row.transcripts[0].uniprotId is None
 
 
-def test_build_transcripts_legacy_fields_are_stubbed(spark):
-    """The isUniprotReviewed field is always false; alphafoldId/uniprotIsoformId are always null."""
+def test_build_transcripts_is_uniprot_reviewed_true_when_swissprot_present(spark):
+    """A transcript with a Swiss-Prot entry is reviewed, regardless of TrEMBL."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=['P12345'], uniprotTremblIds=['A0A001'])],
+        TRANSCRIPT_SCHEMA,
+    )
+    row = _build_transcripts(df).first()
+    assert row is not None
+    assert row.transcripts[0].isUniprotReviewed is True
+
+
+def test_build_transcripts_is_uniprot_reviewed_false_when_only_trembl_present(spark):
+    """A transcript with only a TrEMBL entry is unreviewed."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=None, uniprotTremblIds=['A0A001'])],
+        TRANSCRIPT_SCHEMA,
+    )
+    row = _build_transcripts(df).first()
+    assert row is not None
+    assert row.transcripts[0].isUniprotReviewed is False
+
+
+def test_build_transcripts_is_uniprot_reviewed_null_when_neither_present(spark):
+    """A transcript with no UniProt mapping at all is neither reviewed nor unreviewed."""
+    df = spark.createDataFrame(
+        [_transcript_row(uniprotSwissprotIds=None, uniprotTremblIds=None)],
+        TRANSCRIPT_SCHEMA,
+    )
+    row = _build_transcripts(df).first()
+    assert row is not None
+    assert row.transcripts[0].isUniprotReviewed is None
+
+
+def test_build_transcripts_alphafold_and_isoform_ids_take_first_of_list(spark):
+    """alphafoldId/uniprotIsoformId collapse their source lists to the first element."""
+    df = spark.createDataFrame(
+        [_transcript_row(alphafoldIds=['AF-P1-F1', 'AF-P1-F2'], uniprotIsoformIds=['P1-2', 'P1-3'])],
+        TRANSCRIPT_SCHEMA,
+    )
+    row = _build_transcripts(df).first()
+    assert row is not None
+    assert row.transcripts[0].alphafoldId == 'AF-P1-F1'
+    assert row.transcripts[0].uniprotIsoformId == 'P1-2'
+
+
+def test_build_transcripts_alphafold_and_isoform_ids_null_when_absent(spark):
+    """alphafoldId/uniprotIsoformId are null when the source lists are absent."""
     df = spark.createDataFrame([_transcript_row()], TRANSCRIPT_SCHEMA)
     row = _build_transcripts(df).first()
     assert row is not None
-    transcript = row.transcripts[0]
-    assert transcript.isUniprotReviewed is False
-    assert transcript.alphafoldId is None
-    assert transcript.uniprotIsoformId is None
+    assert row.transcripts[0].alphafoldId is None
+    assert row.transcripts[0].uniprotIsoformId is None
 
 
 def test_build_transcripts_canonical_transcript_struct(spark):

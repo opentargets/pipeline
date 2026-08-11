@@ -7,11 +7,9 @@ schema-compatibility view for consumers that still expect the old nested
 shape (Platform, API, croissant), not a replacement for output/target within
 the pipeline.
 
-Two legacy fields are not reproduced: ``tep`` (dropped) and
-``alternativeGenes`` (no source data anywhere in the current pipeline).
-``transcripts[].isUniprotReviewed`` is always false and
-``transcripts[].alphafoldId``/``uniprotIsoformId`` are always null, since the
-new transcript dataset carries no equivalent data.
+One legacy field is not reproduced: ``tep`` (dropped, no replacement).
+``alternativeGenes`` was always null pre-refactor too, but is kept as a
+typed null column here so schema-compatible consumers can still select it.
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ from typing import Any
 import pyspark.sql.functions as f
 from loguru import logger
 from pyspark.sql import DataFrame
+from pyspark.sql.types import ArrayType, StringType
 
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
@@ -76,6 +75,7 @@ def target_view(
         .join(safety_liabilities, 'id', 'left_outer')
         .join(chemical_probes, 'id', 'left_outer')
         .join(transcripts, 'id', 'left_outer')
+        .withColumn('alternativeGenes', f.lit(None).cast(ArrayType(StringType())))
     )
 
     partition_count = (settings or {}).get('partition_count')
@@ -222,7 +222,20 @@ def _build_transcripts(df: DataFrame) -> DataFrame:
     """
     per_transcript = (
         df
-        .withColumn('uniprotId', f.element_at(f.col('uniprotIds'), 1))
+        .withColumn(
+            'uniprotId',
+            f.coalesce(
+                f.element_at(f.col('uniprotSwissprotIds'), 1),
+                f.element_at(f.col('uniprotTremblIds'), 1),
+            ),
+        )
+        .withColumn('alphafoldId', f.element_at(f.col('alphafoldIds'), 1))
+        .withColumn('uniprotIsoformId', f.element_at(f.col('uniprotIsoformIds'), 1))
+        .withColumn(
+            'isUniprotReviewed',
+            f.when(f.col('uniprotSwissprotIds').isNotNull(), f.lit(True))
+            .when(f.col('uniprotTremblIds').isNotNull(), f.lit(False)),
+        )
         .select(
             'targetId',
             'transcriptId',
@@ -230,10 +243,10 @@ def _build_transcripts(df: DataFrame) -> DataFrame:
                 'transcriptId',
                 'biotype',
                 'uniprotId',
-                f.lit(False).alias('isUniprotReviewed'),
+                'isUniprotReviewed',
                 f.col('proteinId').alias('translationId'),
-                f.lit(None).cast('string').alias('alphafoldId'),
-                f.lit(None).cast('string').alias('uniprotIsoformId'),
+                'alphafoldId',
+                'uniprotIsoformId',
                 'isEnsemblCanonical',
             ).alias('transcript'),
         )

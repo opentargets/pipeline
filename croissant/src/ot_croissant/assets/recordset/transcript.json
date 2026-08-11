@@ -1,5 +1,9 @@
 [
   {
+    "id": "alphafoldIds",
+    "description": "AlphaFold structure identifiers for the protein translated from the transcript"
+  },
+  {
     "id": "biotype",
     "description": "Biotype classification of the transcript"
   },
@@ -78,7 +82,15 @@
     "description": "Transcription Start Site (TSS) genomic position, derived from the transcript's strand and coordinates"
   },
   {
-    "id": "uniprotIds",
-    "description": "UniProt identifiers of the protein translated from the transcript"
+    "id": "uniprotIsoformIds",
+    "description": "UniProt isoform identifiers for the protein translated from the transcript [bioregistry:uniprot]"
+  },
+  {
+    "id": "uniprotSwissprotIds",
+    "description": "Reviewed (Swiss-Prot) UniProt identifiers for the protein translated from the transcript [bioregistry:uniprot]"
+  },
+  {
+    "id": "uniprotTremblIds",
+    "description": "Unreviewed (TrEMBL) UniProt identifiers for the protein translated from the transcript [bioregistry:uniprot]"
   }
 ]

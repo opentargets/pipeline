@@ -14,7 +14,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import IntegerType, LongType
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
+from pts.pyspark.common.utils import maybe_coalesce
 
 INCLUDE_CHROMOSOMES = [str(i) for i in range(1, 23)] + ['X', 'Y', 'MT']
 
@@ -211,17 +211,21 @@ def _parse_exons(df: DataFrame) -> DataFrame:
 
 
 def _build_uniprot_lut(ensembl_df: DataFrame) -> DataFrame:
-    """Build a (targetId, transcriptId) → uniprotIds lookup from the Ensembl parquet.
+    """Build a per-transcript UniProt/AlphaFold lookup from the Ensembl parquet.
 
     The Ensembl parquet (produced by pts_pre_target) stores per-transcript
-    uniprot_swissprot and uniprot_trembl arrays. Explodes the transcripts array
-    and merges both into a single deduplicated uniprotIds list.
+    uniprot_swissprot, uniprot_trembl, uniprot_isoform, and alphafold arrays.
+    Explodes the transcripts array and passes each through as-is, keeping
+    Swiss-Prot (reviewed) and TrEMBL (unreviewed) separate so consumers can
+    derive provenance rather than working from an opinionated merge.
 
     Args:
         ensembl_df: Ensembl parquet from ``intermediate/target/ensembl/homo_sapiens.parquet``.
 
     Returns:
-        DataFrame with columns ``targetId``, ``transcriptId``, and ``uniprotIds``.
+        DataFrame with columns ``targetId``, ``transcriptId``,
+        ``uniprotSwissprotIds``, ``uniprotTremblIds``, ``uniprotIsoformIds``,
+        and ``alphafoldIds``.
     """
     return (
         ensembl_df
@@ -229,13 +233,11 @@ def _build_uniprot_lut(ensembl_df: DataFrame) -> DataFrame:
         .select(
             f.col('targetId'),
             f.col('tx.id').alias('transcriptId'),
-            f.col('tx.uniprot_swissprot').alias('_swissprot'),
-            f.col('tx.uniprot_trembl').alias('_trembl'),
+            f.col('tx.uniprot_swissprot').alias('uniprotSwissprotIds'),
+            f.col('tx.uniprot_trembl').alias('uniprotTremblIds'),
+            f.col('tx.uniprot_isoform').alias('uniprotIsoformIds'),
+            f.col('tx.alphafold').alias('alphafoldIds'),
         )
-        .withColumn('uniprotIds',
-            f.array_distinct(safe_array_union(f.col('_swissprot'), f.col('_trembl')))
-        )
-        .select('targetId', 'transcriptId', 'uniprotIds')
     )
 
 
@@ -259,7 +261,10 @@ def _join_and_finalise(gff: DataFrame, exon_lut: DataFrame, uniprot_lut: DataFra
             'transcriptId',
             'biotype',
             'proteinId',
-            'uniprotIds',
+            'uniprotSwissprotIds',
+            'uniprotTremblIds',
+            'uniprotIsoformIds',
+            'alphafoldIds',
             'isEnsemblCanonical',
             'chromosome',
             'start',
