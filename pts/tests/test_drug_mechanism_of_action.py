@@ -81,8 +81,10 @@ class TestProcessMechanismOfAction:
         assert rows['Target TwentyOne']['actionType'] == 'ANTAGONIST'
 
     def test_chembl_ids_has_molecule_and_parent(self, tables: dict) -> None:
+        # Order is [molecule, parent] by construction; assert it directly rather
+        # than sorting, so swapping the f.array(...) arguments would fail here.
         rows = rows_by_target(process_mechanism_of_action(**tables))
-        assert sorted(rows['Target Twenty']['chemblIds']) == ['CHEMBL1', 'CHEMBL2']
+        assert rows['Target Twenty']['chemblIds'] == ['CHEMBL1', 'CHEMBL2']
 
     def test_chembl_ids_deduplicates_a_self_parent(self, tables: dict) -> None:
         rows = rows_by_target(process_mechanism_of_action(**tables))

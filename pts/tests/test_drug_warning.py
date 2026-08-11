@@ -51,7 +51,9 @@ class TestProcessDrugWarnings:
         assert w['efoIdForWarningClass'] == 'EFO_2'
 
     def test_chembl_ids_has_molecule_and_parent(self, tables: dict) -> None:
-        assert sorted(rows_by_id(process_drug_warnings(**tables))[10]['chemblIds']) == ['CHEMBL1', 'CHEMBL2']
+        # Order is [molecule, parent] by construction; assert it directly rather
+        # than sorting, so swapping the f.array(...) arguments would fail here.
+        assert rows_by_id(process_drug_warnings(**tables))[10]['chemblIds'] == ['CHEMBL1', 'CHEMBL2']
 
     def test_chembl_ids_deduplicates_a_self_parent(self, tables: dict) -> None:
         assert rows_by_id(process_drug_warnings(**tables))[11]['chemblIds'] == ['CHEMBL3']
