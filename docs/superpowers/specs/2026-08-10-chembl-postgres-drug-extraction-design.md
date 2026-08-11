@@ -325,10 +325,46 @@ Both are resolved by the comparison script, not by guessing.
 
    `compound_records` and `source` are consequently **not** in the query's
    `requires_tables`.
-2. **Protein class selection.** `component_class` is many-to-many, but the ES
-   document carries one classification per component. The selection rule — lowest
-   `protein_class_id`, deepest `class_level`, or something else — needs pinning
-   against the real data.
+2. **Protein class selection.** **Resolved: there is no selection. The question
+   was based on a false premise.**
+
+   `_metadata.protein_classification` is **not** one entry per component. It is
+   the concatenation of *every* `component_class` row of every component the
+   target uses — no class is chosen and none is dropped. Proven by exact set
+   equality over the whole 26.06 baseline: the 12,575 distinct
+   `(component_id, protein_class_id)` pairs the baseline asserts are precisely
+   `component_class` restricted to the 12,383 components those targets use —
+   12,575 against 12,575, zero only in the baseline, zero only in the database.
+
+   The earlier 1:1 impression came from sampling. Across all 17,284 component
+   entries the class counts are 1 → 16,972, 2 → 295, 3 → 15, 5 → 2: the
+   multi-class case is real but rare enough that a small sample misses it.
+
+   Consequently `len(target_components) == len(_metadata.protein_classification)`
+   is **false for 258 of 18,552 targets, and that is correct** — the baseline
+   returns the same 258, and the two sides agree on both array lengths for every
+   target. Enforcing 1:1 would have meant inventing a selection rule and
+   discarding 605 real classification entries.
+
+   **The rule:** keep every `component_class` row, grouped by component in
+   `component_id` order, ordered within a component by ascending
+   `protein_class_id`.
+
+   **Ordering correction.** `target_components` follows **`component_id`, not
+   `targcomp_id`**. The two disagree for 1,108 targets, and the baseline follows
+   `component_id` for all 18,552. This was invisible to the comparison harness,
+   which sorts lists before comparing, and was caught only by checking order
+   explicitly.
+
+   **Known downstream wrinkle, pre-existing and unchanged.**
+   `pts/src/pts/pyspark/target.py:1150` zips `_metadata.protein_classification`
+   with `target_components.accession`, having filtered to single-component
+   targets at `:1146`. For the 162 single-component targets that carry more than
+   one class, `arrays_zip` pads the one-element accession array with nulls, so
+   the second and later classes pair with a null accession and are dropped. That
+   is exactly what happens with the Elasticsearch input today — the rebuild
+   reproduces it unchanged — so it is a separate follow-up, not something to fix
+   under an equivalence change.
 
 ## Verification
 
