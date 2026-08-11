@@ -4,6 +4,7 @@ from functools import reduce
 from typing import Any
 
 from loguru import logger
+from pyspark.sql import Row
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
@@ -74,7 +75,7 @@ def crispr_screens(
 
     logger.info('processing crispr screens into evidence')
     screen_rows = [{**v, **v.get('metadata', {})} for v in screens_obj.values() if isinstance(v, dict)]
-    screens_df = session.spark.createDataFrame(screen_rows)
+    screens_df = session.spark.createDataFrame(Row(**row) for row in screen_rows)
     screens_df = screens_df.withColumn('studySummary', f.expr('parsing_experiment("Description")'))
     studies_df = (
         screens_df
