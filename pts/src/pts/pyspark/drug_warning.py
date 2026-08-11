@@ -11,6 +11,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.drug_utils.chembl_ids import chembl_ids as _chembl_ids
 
 
 def drug_warning(
@@ -63,7 +64,7 @@ def process_drug_warnings(
     Returns:
         One row per warning_id, in the Open Targets output format.
     """
-    chembl_ids = _chembl_ids(warnings, molecules, hierarchy)
+    ids = _chembl_ids(warnings, molecules, hierarchy, key='warning_id')
     references = _references(refs)
 
     # `warning_year` narrows int64 (BIGINT) -> int32 (postgres `integer`) versus the
@@ -71,7 +72,7 @@ def process_drug_warnings(
     # cast at target.py's `_build_protein_classification`. Resolved the other way here:
     # the narrowing is accepted uncast because the values are identical, not cast back.
     return (
-        warnings.join(chembl_ids, on='warning_id', how='left')
+        warnings.join(ids, on='warning_id', how='left')
         .join(references, on='warning_id', how='left')
         .withColumn('references', f.coalesce(f.col('references'), f.array()))
         .selectExpr(
@@ -86,40 +87,6 @@ def process_drug_warnings(
             'efo_term as efoTerm',
             'efo_id as efoId',
             'efo_id_for_warning_class as efoIdForWarningClass',
-        )
-    )
-
-
-def _chembl_ids(warnings: DataFrame, molecules: DataFrame, hierarchy: DataFrame) -> DataFrame:
-    """Resolve the deduplicated {molecule, parent molecule} ChEMBL id pair per warning.
-
-    Replaces the old `_metadata.all_molecule_chembl_ids` field from the Elasticsearch
-    document, which was always exactly this deduplicated pair.
-
-    Args:
-        warnings: Raw ChEMBL drug_warning table.
-        molecules: Raw ChEMBL molecule_dictionary table.
-        hierarchy: Raw ChEMBL molecule_hierarchy table.
-
-    Returns:
-        DataFrame with warning_id and chemblIds columns.
-    """
-    parent = (
-        hierarchy.join(
-            molecules.withColumnRenamed('chembl_id', 'parent_chembl_id'),
-            hierarchy['parent_molregno'] == molecules['molregno'],
-            'left',
-        ).select(hierarchy['molregno'], 'parent_chembl_id')
-    )
-    return (
-        warnings.select('warning_id', 'molregno')
-        .join(molecules, on='molregno', how='left')
-        .join(parent, on='molregno', how='left')
-        .select(
-            'warning_id',
-            f.array_distinct(f.array_compact(f.array(f.col('chembl_id'), f.col('parent_chembl_id')))).alias(
-                'chemblIds'
-            ),
         )
     )
 

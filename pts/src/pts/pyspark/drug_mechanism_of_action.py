@@ -11,6 +11,7 @@ from loguru import logger
 from pyspark.sql import DataFrame
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.drug_utils.chembl_ids import chembl_ids as _chembl_ids
 
 
 def drug_mechanism_of_action(
@@ -88,7 +89,7 @@ def process_mechanism_of_action(
     Returns:
         Processed mechanism of action DataFrame.
     """
-    chembl_ids = _chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy)
+    ids = _chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy, key='mec_id')
     mechanism_refs_agg = mechanism_refs.groupBy('mec_id').agg(
         f.collect_list(
             f.struct(
@@ -102,7 +103,7 @@ def process_mechanism_of_action(
     mechanism = (
         _with_target_chembl_id(drug_mechanism, target_dictionary)
         .join(molecule_dictionary.select('molregno', f.col('chembl_id').alias('id')), on='molregno', how='left')
-        .join(chembl_ids, on='mec_id', how='left')
+        .join(ids, on='mec_id', how='left')
         .join(mechanism_refs_agg, on='mec_id', how='left')
         .withColumnRenamed('mechanism_of_action', 'mechanismOfAction')
         .withColumnRenamed('action_type', 'actionType')
@@ -129,40 +130,6 @@ def process_mechanism_of_action(
     )
 
     return _consolidate_duplicate_references(result)
-
-
-def _chembl_ids(mechanism: DataFrame, molecules: DataFrame, hierarchy: DataFrame) -> DataFrame:
-    """Resolve the deduplicated {molecule, parent molecule} ChEMBL id pair per mechanism.
-
-    Replaces the old `_metadata.all_molecule_chembl_ids` field from the Elasticsearch
-    document, which was always exactly this deduplicated pair.
-
-    Args:
-        mechanism: Raw ChEMBL drug_mechanism table.
-        molecules: Raw ChEMBL molecule_dictionary table.
-        hierarchy: Raw ChEMBL molecule_hierarchy table.
-
-    Returns:
-        DataFrame with mec_id and chemblIds columns.
-    """
-    parent = (
-        hierarchy.join(
-            molecules.withColumnRenamed('chembl_id', 'parent_chembl_id'),
-            hierarchy['parent_molregno'] == molecules['molregno'],
-            'left',
-        ).select(hierarchy['molregno'], 'parent_chembl_id')
-    )
-    return (
-        mechanism.select('mec_id', 'molregno')
-        .join(molecules, on='molregno', how='left')
-        .join(parent, on='molregno', how='left')
-        .select(
-            'mec_id',
-            f.array_distinct(f.array_compact(f.array(f.col('chembl_id'), f.col('parent_chembl_id')))).alias(
-                'chemblIds'
-            ),
-        )
-    )
 
 
 def _with_target_chembl_id(mechanism: DataFrame, target_dictionary: DataFrame) -> DataFrame:
