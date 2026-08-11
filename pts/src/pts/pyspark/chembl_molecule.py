@@ -199,7 +199,11 @@ def _molecule_preprocess(
     )
 
     # One struct array per molecule, ordered by molsyn_id: replaces the old
-    # arrays_zip of two parallel nested arrays.
+    # arrays_zip of two parallel nested arrays. The ordering is
+    # determinism-in-principle only and does not reach the output: `syns` is
+    # dropped in `process_molecules` below, and its only consumer,
+    # `_process_molecule_synonyms`, explodes it into two `collect_set`
+    # aggregations where order cannot survive.
     synonyms = (
         molecule_synonyms
         .groupBy('molregno')
