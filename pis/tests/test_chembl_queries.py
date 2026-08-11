@@ -51,6 +51,30 @@ INSERT INTO drug_mechanism VALUES
 INSERT INTO mechanism_refs VALUES (1, 20, 'PubMed', '12345', 'http://pm/12345');
 """
 
+SCHEMA += """
+CREATE TABLE compound_structures (
+    molregno int PRIMARY KEY, molfile text, standard_inchi text, standard_inchi_key text, canonical_smiles text
+);
+CREATE TABLE molecule_synonyms (molsyn_id int PRIMARY KEY, molregno int, syn_type text, synonyms text);
+CREATE TABLE source (src_id int PRIMARY KEY, src_short_name text, src_description text);
+CREATE TABLE compound_records (
+    record_id int PRIMARY KEY, molregno int, doc_id int, src_id int, src_compound_id text
+);
+"""
+
+DATA += """
+INSERT INTO compound_structures VALUES
+    (1, 'MOLBLOCK1', 'InChI=1S/x', 'INCHIKEY1', 'CCO'),
+    (2, 'MOLBLOCK2', 'InChI=1S/y', 'INCHIKEY2', 'CCC');
+INSERT INTO molecule_synonyms VALUES
+    (1, 1, 'TRADE_NAME', 'Tradey'),
+    (2, 1, 'INN', 'childium');
+INSERT INTO source VALUES (1, 'LITERATURE', 'Scientific Literature'), (63, 'INN', 'INN');
+INSERT INTO compound_records VALUES
+    (100, 1, 900, 63, '24616'),
+    (101, 1, 901, 1, 'IGNORED');
+"""
+
 
 @pytest.fixture(scope='module')
 def chembl(tmp_path_factory: pytest.TempPathFactory) -> PostgresServer:
@@ -156,3 +180,58 @@ class TestMechanism:
 
     def test_no_refs_is_an_empty_list_not_null(self, rows: dict[int, dict]) -> None:
         assert rows[201]['mechanism_refs'] == []
+
+
+class TestMolecule:
+    @pytest.fixture(scope='class')
+    def raw(self, chembl: PostgresServer) -> list[dict]:
+        return run_query(chembl, 'chembl_molecule')
+
+    @pytest.fixture(scope='class')
+    def rows(self, raw: list[dict]) -> dict[str, dict]:
+        return {r['molecule_chembl_id']: r for r in raw}
+
+    def test_one_row_per_molecule(self, raw: list[dict], rows: dict[str, dict]) -> None:
+        # assert on the list BEFORE the dict collapses duplicates
+        assert len(raw) == 3
+        assert sorted(rows) == ['CHEMBL1', 'CHEMBL2', 'CHEMBL3']
+
+    def test_scalar_fields(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL1']['pref_name'] == 'child drug'
+        assert rows['CHEMBL1']['molecule_type'] == 'Small molecule'
+
+    def test_structures(self, rows: dict[str, dict]) -> None:
+        s = rows['CHEMBL1']['molecule_structures']
+        assert s['canonical_smiles'] == 'CCO'
+        assert s['standard_inchi_key'] == 'INCHIKEY1'
+        assert s['molfile'] == 'MOLBLOCK1'
+
+    def test_standard_inchi_is_pruned(self, rows: dict[str, dict]) -> None:
+        assert 'standard_inchi' not in rows['CHEMBL1']['molecule_structures']
+
+    def test_missing_structures_is_null(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL3']['molecule_structures'] is None
+
+    def test_hierarchy_has_only_parent(self, rows: dict[str, dict]) -> None:
+        h = rows['CHEMBL1']['molecule_hierarchy']
+        assert h['parent_chembl_id'] == 'CHEMBL2'
+        assert set(h) == {'parent_chembl_id'}
+
+    def test_synonyms(self, rows: dict[str, dict]) -> None:
+        syns = rows['CHEMBL1']['molecule_synonyms']
+        assert {s['molecule_synonym'] for s in syns} == {'Tradey', 'childium'}
+        assert {s['syn_type'] for s in syns} == {'TRADE_NAME', 'INN'}
+
+    def test_no_synonyms_is_an_empty_list_not_null(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL3']['molecule_synonyms'] == []
+
+    def test_cross_references_is_empty_for_every_molecule(self, raw: list[dict]) -> None:
+        # the Elasticsearch document's cross_references cannot be rebuilt from the
+        # relational schema, so the field is emitted empty. CHEMBL1 has a non
+        # literature compound_records row precisely so that a future attempt to
+        # populate it from compound_records fails here rather than in production.
+        assert [r['cross_references'] for r in raw] == [[], [], []]
+
+    def test_dead_fields_are_absent(self, rows: dict[str, dict]) -> None:
+        for dead in ('first_approval', 'max_phase', 'withdrawn_flag', 'black_box_warning'):
+            assert dead not in rows['CHEMBL1']

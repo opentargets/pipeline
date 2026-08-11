@@ -137,8 +137,6 @@ this is not a concern.
         - compound_structures
         - molecule_hierarchy
         - molecule_synonyms
-        - compound_records
-        - source
     - query: chembl_mechanism
       destination: input/drug/chembl_mechanism.parquet
       requires_tables:
@@ -188,8 +186,8 @@ Base `molecule_dictionary` (`md`), one row per `molregno`.
 | `molecule_hierarchy.parent_chembl_id` | `md.chembl_id` via `molecule_hierarchy.parent_molregno` |
 | `molecule_synonyms[].molecule_synonym` | `molecule_synonyms.synonyms` |
 | `molecule_synonyms[].syn_type` | `molecule_synonyms.syn_type` |
-| `cross_references[].xref_id` | see open question 1 |
-| `cross_references[].xref_src` | see open question 1 |
+| `cross_references[].xref_id` | not reconstructible; emitted empty (see open question 1) |
+| `cross_references[].xref_src` | not reconstructible; emitted empty (see open question 1) |
 
 Two name differences to note: the ES field `molecule_structures` comes from the
 table **`compound_structures`**, and `molecule_synonym` comes from the column
@@ -272,11 +270,61 @@ across the full files before relying on it.
 
 Both are resolved by the comparison script, not by guessing.
 
-1. **`cross_references` on molecule.** ChEMBL has no compound-xref table. The
-   hypothesis is `compound_records.src_compound_id` as `xref_id` joined to
-   `source.src_short_name` as `xref_src`, likely excluding `src_id = 1`
-   (scientific literature). Every molecule in the sampled head of the 26.06 file
-   has an empty array, so the sample cannot confirm it.
+1. **`cross_references` on molecule.** **Resolved: it cannot be rebuilt from the
+   dump, and is emitted as an empty array.**
+
+   The `compound_records` hypothesis is wrong: not one of the 6,011 `xref_id`
+   values equals the `compound_records.src_compound_id` of its own molecule for
+   its own source, and `DailyMed` is not a row of `source` at all.
+
+   **Two tempting justifications for the conclusion are false. Do not repeat
+   them.** The identifiers *are* in the dump: `fampyra`, `fampridine-accord`,
+   `oxyglobin` and `inbrija` are all `molecule_synonyms` rows of the right
+   molecule with `syn_type = 'TRADE_NAME'`. And registration *is* recorded:
+   `compound_records` joined to `source` on `src_short_name = 'EMA'` identifies
+   EMA-registered molecules almost exactly — 1,046 such molecules against 1,045
+   with an EPAR link, 100% of linked molecules having a record.
+
+   What is genuinely absent is the **product-level mapping**. ChEMBL holds one
+   EMA record per molecule; EMA issues one EPAR per marketed product.
+   TELMISARTAN has a single record (`compound_key='TELMISARTAN'`,
+   `src_compound_id='3472'`) against eight EPARs — `micardis`, `pritor`,
+   `tolura`, `telmisartan-teva`, `veterinary/EPAR/semintra` and others. Only 767
+   of 1,045 molecules have matching counts, CHEMBL599 being 19 EPARs to 1 record,
+   and `compound_key` never equals an EPAR slug (0 of 1,788). Nothing records the
+   human-versus-veterinary branch either.
+
+   Measured reconstruction quality, which is what actually decides this:
+
+   | candidate rule | precision | recall |
+   | --- | --- | --- |
+   | every `molecule_synonyms` value, all four sources | 0.89% | 3,481/6,011 |
+   | every `products.trade_name`, EMA only | 3.4% | 361/1,788 |
+   | EMA-recorded molecules × their `TRADE_NAME` synonyms | **44%** | 1,566/1,788 |
+
+   The best rule fabricates 1,991 links to recover 1,566 real ones. Per-source
+   recall from synonyms is DailyMed 100%, EMA 88%, USAN 24%, INN 0% — INN's
+   `xref_id` is a WHO list number, not a name. No rule reaches a precision worth
+   shipping, and the project's standard is that no record may be fabricated.
+
+   `chembl_molecule.sql` therefore emits
+   `[]::STRUCT(xref_id VARCHAR, xref_src VARCHAR)[]`. The field is kept rather
+   than pruned because `chembl_molecule.py:294` reads `cross_references.xref_id`
+   and `.xref_src`; an empty array keeps PTS working unchanged and leaves one
+   line to change if ChEMBL ever ships the data. The DrugBank cross-references
+   PTS merges in come from a separate input and are unaffected.
+
+   **This is a backwards-incompatible change and must be called out in the
+   release notes.** 4,246 molecules lose their ChEMBL-side `crossReferences`,
+   6,011 entries in total. 2,078 of those molecules are approved drugs
+   (`max_phase = 4`) — LEVODOPA, TELMISARTAN, PROGESTERONE and DICLOFENAC among
+   them — so the loss is visible on Platform drug pages, not confined to obscure
+   compounds. Decision taken 2026-08-11: accepted in preference to keeping a
+   narrow Elasticsearch fetch, which would leave the public ChEMBL cluster on the
+   release critical path for one field.
+
+   `compound_records` and `source` are consequently **not** in the query's
+   `requires_tables`.
 2. **Protein class selection.** `component_class` is many-to-many, but the ES
    document carries one classification per component. The selection rule — lowest
    `protein_class_id`, deepest `class_level`, or something else — needs pinning
