@@ -402,7 +402,11 @@ steps:
         tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        chembl: input/drug/chembl_target.parquet
+        target_dictionary: input/chembl/target_dictionary.parquet
+        target_components: input/chembl/target_components.parquet
+        component_sequences: input/chembl/component_sequences.parquet
+        component_class: input/chembl/component_class.parquet
+        protein_classification: input/chembl/protein_classification.parquet
         chemical_probes: intermediate/chemical_probes_evidence.parquet
         gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
       destination:

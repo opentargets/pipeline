@@ -3,6 +3,7 @@
 Ported from platform-etl-backend target step.
 """
 
+import pytest
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
@@ -21,9 +22,11 @@ from pts.pyspark.target import (
     _build_hallmarks,
     _build_hgnc,
     _build_homologues,
+    _build_protein_classification,
     _build_reactome,
     _build_safety,
     _filter_ensembl,
+    _flatten_protein_classification,
     _map_uniprot_locations_to_ssl,
     _merge_hgnc_ensembl,
 )
@@ -919,3 +922,106 @@ def test_subcellular_location_struct_schema_alignment(spark):
         f'UniProt-only fields: {set(uniprot_fields) - set(hpa_fields)}\n'
         f'Type mismatches:     {type_mismatches}'
     )
+
+
+# ---------------------------------------------------------------------------
+# 12. Protein classification (raw ChEMBL tables)
+# ---------------------------------------------------------------------------
+
+
+class TestProteinClassification:
+    @pytest.fixture
+    def chembl(self, spark):
+        # a full six-level chain, plus a second level-1 class on the same
+        # component: the multi-class case is what sampling misses -- only 312
+        # of 17,284 real components carry more than one
+        classes = spark.createDataFrame(
+            [
+                (1, None, 'Enzyme', 1),
+                (2, 1, 'Kinase', 2),
+                (3, 2, 'Protein Kinase', 3),
+                (4, 3, 'TK', 4),
+                (5, 4, 'TK group', 5),
+                (6, 5, 'TK family', 6),
+                (20, None, 'Transporter', 1),
+            ],
+            'protein_class_id int, parent_id int, pref_name string, class_level int',
+        )
+        component_class = spark.createDataFrame(
+            [(1, 1, 6), (2, 1, 20), (3, 2, 20)],
+            'comp_class_id int, component_id int, protein_class_id int',
+        )
+        sequences = spark.createDataFrame(
+            [(1, 'P00001'), (2, 'P00002')],
+            'component_id int, accession string',
+        )
+        # P00001 sits under two targets, so accession must be deduplicated
+        components = spark.createDataFrame(
+            [(1, 100, 1), (2, 101, 1), (3, 101, 2)],
+            'targcomp_id int, tid int, component_id int',
+        )
+        targets = spark.createDataFrame(
+            [(100, 'CHEMBL_T1', 'A', 'SINGLE PROTEIN'), (101, 'CHEMBL_T2', 'B', 'PROTEIN COMPLEX')],
+            'tid int, chembl_id string, pref_name string, target_type string',
+        )
+        return {
+            'target_dictionary': targets,
+            'target_components': components,
+            'component_sequences': sequences,
+            'component_class': component_class,
+            'protein_classification': classes,
+        }
+
+    @staticmethod
+    def _flat(chembl):
+        flat = _flatten_protein_classification(chembl['protein_classification'])
+        return {r['leaf_id']: r.asDict() for r in flat.collect()}
+
+    @staticmethod
+    def _by_accession(chembl):
+        return {r['accession']: r['targetClass'] for r in _build_protein_classification(**chembl).collect()}
+
+    def test_full_six_level_chain_is_flattened(self, chembl):
+        deep = self._flat(chembl)[6]
+        assert deep['l1'] == 'Enzyme'
+        assert deep['l2'] == 'Kinase'
+        assert deep['l3'] == 'Protein Kinase'
+        assert deep['l4'] == 'TK'
+        assert deep['l5'] == 'TK group'
+        assert deep['l6'] == 'TK family'
+
+    def test_labels_land_at_their_own_level_not_their_depth(self, chembl):
+        # class 20 is level 1 with no parent: only l1 is filled
+        flat = self._flat(chembl)
+        assert flat[20]['l1'] == 'Transporter'
+        assert flat[20]['l2'] is None
+        assert flat[20]['l6'] is None
+
+    def test_a_component_keeps_every_class(self, chembl):
+        by_accession = self._by_accession(chembl)
+        # component 1 carries classes 6 and 20; both survive, none is chosen
+        assert {c['id'] for c in by_accession['P00001']} == {6, 20}
+        assert {c['id'] for c in by_accession['P00002']} == {20}
+
+    def test_every_ancestor_becomes_its_own_class_entry(self, chembl):
+        by_accession = self._by_accession(chembl)
+        chain = {c['level']: c['label'] for c in by_accession['P00001'] if c['id'] == 6}
+        assert chain == {
+            'l1': 'Enzyme',
+            'l2': 'Kinase',
+            'l3': 'Protein Kinase',
+            'l4': 'TK',
+            'l5': 'TK group',
+            'l6': 'TK family',
+        }
+
+    def test_accession_under_two_targets_is_not_duplicated(self, chembl):
+        rows = _build_protein_classification(**chembl).collect()
+        accessions = [r['accession'] for r in rows]
+        assert len(accessions) == len(set(accessions))
+        # P00001 is reached through tid 100 and tid 101; the classes are the
+        # same either way, so the six levels of class 6 plus the one level of
+        # class 20 stay seven entries rather than fourteen
+        classes = {r['accession']: r['targetClass'] for r in rows}['P00001']
+        assert len(classes) == 7
+        assert len({(c['id'], c['label'], c['level']) for c in classes}) == 7
