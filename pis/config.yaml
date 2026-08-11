@@ -184,63 +184,62 @@ steps:
         - copy chembl dump
       source: input/drug/chembl_${chembl_version}.tar.gz
       tables:
-        # note the two `refs` tables are named differently in chembl and in the
-        # release, because that is what pts already reads
-        - table: drug_indication
-          destination: input/clinical_report/chembl/drug_indication.parquet
-          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
-        - table: indication_refs
-          destination: input/clinical_report/chembl/drug_indication_refs.parquet
-          columns: [drugind_id, ref_type, ref_id, ref_url]
+        - table: molecule_dictionary
+          destination: input/chembl/molecule_dictionary.parquet
+          columns: [molregno, chembl_id, pref_name, molecule_type]
+        - table: compound_structures
+          destination: input/chembl/compound_structures.parquet
+          columns: [molregno, canonical_smiles, standard_inchi_key, molfile]
+        - table: molecule_hierarchy
+          destination: input/chembl/molecule_hierarchy.parquet
+          columns: [molregno, parent_molregno]
+        - table: molecule_synonyms
+          destination: input/chembl/molecule_synonyms.parquet
+          columns: [molsyn_id, molregno, synonyms, syn_type]
+        - table: drug_mechanism
+          destination: input/chembl/drug_mechanism.parquet
+          columns: [mec_id, record_id, molregno, mechanism_of_action, tid, action_type]
+        - table: mechanism_refs
+          destination: input/chembl/mechanism_refs.parquet
+          columns: [mecref_id, mec_id, ref_type, ref_id, ref_url]
+        - table: target_dictionary
+          destination: input/chembl/target_dictionary.parquet
+          columns: [tid, chembl_id, pref_name, target_type]
+        - table: target_components
+          destination: input/chembl/target_components.parquet
+          columns: [targcomp_id, tid, component_id]
+        - table: component_sequences
+          destination: input/chembl/component_sequences.parquet
+          columns: [component_id, accession]
+        - table: component_class
+          destination: input/chembl/component_class.parquet
+          columns: [comp_class_id, component_id, protein_class_id]
+        - table: protein_classification
+          destination: input/chembl/protein_classification.parquet
+          columns: [protein_class_id, parent_id, pref_name, class_level]
         - table: drug_warning
-          destination: input/clinical_report/chembl/drug_warning.parquet
+          destination: input/chembl/drug_warning.parquet
           columns:
             - warning_id
+            - record_id
             - molregno
             - warning_type
-            - warning_year
-            - warning_country
             - warning_class
-            - efo_id
+            - warning_country
+            - warning_description
+            - warning_year
             - efo_term
+            - efo_id
             - efo_id_for_warning_class
         - table: warning_refs
-          destination: input/clinical_report/chembl/drug_warning_refs.parquet
-          columns: [warning_id, ref_type, ref_id, ref_url]
-        - table: molecule_dictionary
-          destination: input/clinical_report/chembl/molecule_dictionary.parquet
-          columns: [molregno, chembl_id, pref_name]
-      queries:
-        - query: chembl_molecule
-          destination: input/drug/chembl_molecule.parquet
-          requires_tables:
-            - molecule_dictionary
-            - compound_structures
-            - molecule_hierarchy
-            - molecule_synonyms
-        - query: chembl_mechanism
-          destination: input/drug/chembl_mechanism.parquet
-          requires_tables:
-            - drug_mechanism
-            - mechanism_refs
-            - molecule_dictionary
-            - molecule_hierarchy
-            - target_dictionary
-        - query: chembl_target
-          destination: input/drug/chembl_target.parquet
-          requires_tables:
-            - target_dictionary
-            - target_components
-            - component_sequences
-            - component_class
-            - protein_classification
-        - query: chembl_drug_warning
-          destination: input/drug/chembl_drug_warning.parquet
-          requires_tables:
-            - drug_warning
-            - warning_refs
-            - molecule_dictionary
-            - molecule_hierarchy
+          destination: input/chembl/warning_refs.parquet
+          columns: [warnref_id, warning_id, ref_type, ref_id, ref_url]
+        - table: drug_indication
+          destination: input/chembl/drug_indication.parquet
+          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
+        - table: indication_refs
+          destination: input/chembl/indication_refs.parquet
+          columns: [drugind_id, ref_type, ref_id, ref_url]
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
