@@ -221,7 +221,6 @@ steps:
           destination: input/chembl/drug_warning.parquet
           columns:
             - warning_id
-            - record_id
             - molregno
             - warning_type
             - warning_class
@@ -239,7 +238,7 @@ steps:
           columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
         - table: indication_refs
           destination: input/chembl/indication_refs.parquet
-          columns: [drugind_id, ref_type, ref_id, ref_url]
+          columns: [indref_id, drugind_id, ref_type, ref_id, ref_url]
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
