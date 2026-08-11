@@ -673,8 +673,13 @@ steps:
     - name: pyspark drug_mechanism_of_action
       pyspark: drug_mechanism_of_action
       source:
-        chembl_mechanism: input/drug/chembl_mechanism.parquet
-        chembl_target: input/drug/chembl_target.parquet
+        drug_mechanism: input/chembl/drug_mechanism.parquet
+        mechanism_refs: input/chembl/mechanism_refs.parquet
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
+        target_dictionary: input/chembl/target_dictionary.parquet
+        target_components: input/chembl/target_components.parquet
+        component_sequences: input/chembl/component_sequences.parquet
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
