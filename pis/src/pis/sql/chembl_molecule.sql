@@ -27,12 +27,21 @@ parent AS (
 )
 SELECT
     md.chembl_id AS molecule_chembl_id,
-    md.pref_name,
+    -- 18 pref_names in ChEMBL 37 carry a trailing space. ChEMBL's own indexer
+    -- trims them, and pts turns this straight into the platform-visible drug
+    -- name, so reproducing the trim is what equivalence means here.
+    trim(md.pref_name) AS pref_name,
     md.molecule_type,
     CASE WHEN cs.molregno IS NULL THEN NULL ELSE struct_pack(
         canonical_smiles := cs.canonical_smiles,
         standard_inchi_key := cs.standard_inchi_key,
-        molfile := cs.molfile
+        -- the trailing newline is deliberate: do not "tidy" it away. A molblock
+        -- conventionally terminates with `M  END\n`, but compound_structures is
+        -- inconsistent -- 31676 of 2897819 values carry the newline and the rest
+        -- stop at `M  END`. Normalising to exactly one also keeps pts working
+        -- unchanged: chembl_molecule.py truncates with `(?s)(\nM  END\n).*`,
+        -- which needs the terminating newline to match at all.
+        molfile := rtrim(cs.molfile, chr(10)) || chr(10)
     ) END AS molecule_structures,
     struct_pack(parent_chembl_id := p.parent_chembl_id) AS molecule_hierarchy,
     coalesce(

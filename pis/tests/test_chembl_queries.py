@@ -25,7 +25,8 @@ DATA = """
 INSERT INTO molecule_dictionary VALUES
     (1, 'CHEMBL1', 'child drug', 'Small molecule'),
     (2, 'CHEMBL2', 'parent drug', 'Small molecule'),
-    (3, 'CHEMBL3', 'lone drug', 'Small molecule');
+    -- ChEMBL 37 has 18 pref_names with a trailing space; chembl_molecule.sql trims
+    (3, 'CHEMBL3', '  lone drug ', 'Small molecule');
 INSERT INTO molecule_hierarchy VALUES (1, 2, 2), (2, 2, 2), (3, 3, 3);
 INSERT INTO drug_warning VALUES
     (10, 100, 1, 'Withdrawn', 'Cardiotoxicity', 'France', 'bad things', 2009, 'term', 'EFO_1', 'EFO_2'),
@@ -63,9 +64,11 @@ CREATE TABLE compound_records (
 """
 
 DATA += """
+-- compound_structures is inconsistent about the molblock terminator: molregno 1
+-- stops at `M  END`, molregno 2 already carries the trailing newline
 INSERT INTO compound_structures VALUES
-    (1, 'MOLBLOCK1', 'InChI=1S/x', 'INCHIKEY1', 'CCO'),
-    (2, 'MOLBLOCK2', 'InChI=1S/y', 'INCHIKEY2', 'CCC');
+    (1, 'MOLBLOCK1' || chr(10) || 'M  END', 'InChI=1S/x', 'INCHIKEY1', 'CCO'),
+    (2, 'MOLBLOCK2' || chr(10) || 'M  END' || chr(10), 'InChI=1S/y', 'INCHIKEY2', 'CCC');
 INSERT INTO molecule_synonyms VALUES
     (1, 1, 'TRADE_NAME', 'Tradey'),
     (2, 1, 'INN', 'childium');
@@ -200,11 +203,21 @@ class TestMolecule:
         assert rows['CHEMBL1']['pref_name'] == 'child drug'
         assert rows['CHEMBL1']['molecule_type'] == 'Small molecule'
 
+    def test_pref_name_is_trimmed(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL3']['pref_name'] == 'lone drug'
+
     def test_structures(self, rows: dict[str, dict]) -> None:
         s = rows['CHEMBL1']['molecule_structures']
         assert s['canonical_smiles'] == 'CCO'
         assert s['standard_inchi_key'] == 'INCHIKEY1'
-        assert s['molfile'] == 'MOLBLOCK1'
+        assert s['molfile'] == 'MOLBLOCK1\nM  END\n'
+
+    def test_molfile_terminator_is_normalised_to_one_newline(self, rows: dict[str, dict]) -> None:
+        # pts truncates the molblock with `(?s)(\nM  END\n).*`, which only matches
+        # when `M  END` is followed by a newline. Both source shapes must come out
+        # with exactly one, so neither a missing nor a doubled newline reaches pts.
+        assert rows['CHEMBL1']['molecule_structures']['molfile'] == 'MOLBLOCK1\nM  END\n'
+        assert rows['CHEMBL2']['molecule_structures']['molfile'] == 'MOLBLOCK2\nM  END\n'
 
     def test_standard_inchi_is_pruned(self, rows: dict[str, dict]) -> None:
         assert 'standard_inchi' not in rows['CHEMBL1']['molecule_structures']
