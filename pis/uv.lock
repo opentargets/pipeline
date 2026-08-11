@@ -6,9 +6,6 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
-[manifest]
-overrides = [{ name = "urllib3", specifier = ">=2.7.0" }]
-
 [[package]]
 name = "aiofiles"
 version = "25.1.0"
@@ -361,19 +358,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3e/c5/41bef391fb8b23dbc133c9f2ba016e7a7a8124513d2cc1b430f1897d87e4/duckdb-1.5.5-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:078e6a60dd8eedde5832f45422ca5c4a6b8c837aeabd8a56ca0b7d933f588053", size = 21511060, upload-time = "2026-07-22T10:54:42.788Z" },
     { url = "https://files.pythonhosted.org/packages/07/9f/c44dfc1f924ac29b3252dc1b91393c01d009dbfe9f8ed33f10b986151bd1/duckdb-1.5.5-cp313-cp313-win_amd64.whl", hash = "sha256:6826504277dba513c0c5d71d828456c94d729c9d2482f94b2e289f90a9167e28", size = 13168028, upload-time = "2026-07-22T10:54:46.127Z" },
     { url = "https://files.pythonhosted.org/packages/ca/88/591384b2cd59abddd6f5dc175e60374f9abae6064429f0c4402854c10f44/duckdb-1.5.5-cp313-cp313-win_arm64.whl", hash = "sha256:baa9c5702002fabb559ded2a39008f9f421fcbc7237d388b8213eff1e08858de", size = 13989955, upload-time = "2026-07-22T10:54:49.262Z" },
-]
-
-[[package]]
-name = "elasticsearch"
-version = "7.17.12"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "certifi" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/07/ee/68fdc04a4ef1a5026d6331196109714c8569ee70d072af8a479fa60f33c8/elasticsearch-7.17.12.tar.gz", hash = "sha256:a1f5733ae8cf1dbf0a78593389f2503c87dd97429976099832bf0626cdfaac8b", size = 248018, upload-time = "2024-09-19T07:30:22.503Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/9b/3dbb82aa27b4cbafd2600dcd74c88c4c710cfdacc3249d9c581916cfe359/elasticsearch-7.17.12-py2.py3-none-any.whl", hash = "sha256:468fd5eef703c0d9238e29bcaf3a6fe4d6b092f917959fbf41f48f8fea3df2f8", size = 385970, upload-time = "2024-09-19T07:30:18.008Z" },
 ]
 
 [[package]]
@@ -824,7 +808,6 @@ version = "26.9.0rc3"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
-    { name = "elasticsearch" },
     { name = "jq" },
     { name = "loguru" },
     { name = "opentargets-otter" },
@@ -845,7 +828,6 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.4" },
-    { name = "elasticsearch", specifier = ">=7.17.12" },
     { name = "jq", specifier = ">=1.11.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "opentargets-otter", specifier = ">=26.6.2" },
