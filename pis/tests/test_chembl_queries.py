@@ -78,6 +78,48 @@ INSERT INTO compound_records VALUES
     (101, 1, 901, 1, 'IGNORED');
 """
 
+SCHEMA += """
+CREATE TABLE component_sequences (component_id int PRIMARY KEY, accession text, component_type text);
+CREATE TABLE target_components (targcomp_id int PRIMARY KEY, tid int, component_id int, homologue int);
+CREATE TABLE protein_classification (
+    protein_class_id int PRIMARY KEY, parent_id int, pref_name text, short_name text, class_level int
+);
+CREATE TABLE component_class (comp_class_id int PRIMARY KEY, component_id int, protein_class_id int);
+"""
+
+DATA += """
+INSERT INTO target_dictionary VALUES
+    (501, 'SINGLE PROTEIN', 'Single target', 'CHEMBL_T2'),
+    (502, 'PROTEIN COMPLEX', 'Complex target', 'CHEMBL_T3'),
+    (503, 'CELL-LINE', 'No components', 'CHEMBL_T4'),
+    (504, 'NUCLEIC-ACID', 'Unclassified target', 'CHEMBL_T5');
+-- 27 of ChEMBL 37's components have no accession, and the RNA one here is also
+-- the component with no component_class row
+INSERT INTO component_sequences VALUES
+    (1, 'P00001', 'PROTEIN'),
+    (2, 'P00002', 'PROTEIN'),
+    (3, NULL, 'RNA');
+-- targcomp_id runs against component_id for target 502, so that a query ordering
+-- by the wrong one comes out backwards
+INSERT INTO target_components VALUES
+    (1, 501, 1, 0),
+    (2, 502, 2, 0),
+    (3, 502, 1, 0),
+    (4, 504, 3, 0);
+-- protein_class_id 0 is the tree's root in ChEMBL 37 and sits at class_level 0,
+-- below l1; it must never surface as a level
+INSERT INTO protein_classification VALUES
+    (0, NULL, 'Protein class', 'pc', 0),
+    (10, 0, 'Enzyme', 'enz', 1),
+    (11, 10, 'Kinase', 'kin', 2),
+    (12, 11, 'Protein Kinase', 'pk', 3),
+    (20, 0, 'Transporter', 'tra', 1);
+INSERT INTO component_class VALUES
+    (1, 1, 12),
+    (2, 1, 20),
+    (3, 2, 11);
+"""
+
 
 @pytest.fixture(scope='module')
 def chembl(tmp_path_factory: pytest.TempPathFactory) -> PostgresServer:
@@ -248,3 +290,69 @@ class TestMolecule:
     def test_dead_fields_are_absent(self, rows: dict[str, dict]) -> None:
         for dead in ('first_approval', 'max_phase', 'withdrawn_flag', 'black_box_warning'):
             assert dead not in rows['CHEMBL1']
+
+
+class TestTarget:
+    @pytest.fixture(scope='class')
+    def raw(self, chembl: PostgresServer) -> list[dict]:
+        return run_query(chembl, 'chembl_target')
+
+    @pytest.fixture(scope='class')
+    def rows(self, raw: list[dict]) -> dict[str, dict]:
+        return {r['target_chembl_id']: r for r in raw}
+
+    def test_one_row_per_target(self, raw: list[dict], rows: dict[str, dict]) -> None:
+        # assert on the list BEFORE the dict collapses duplicates
+        assert len(raw) == 5
+        assert sorted(rows) == ['CHEMBL_T1', 'CHEMBL_T2', 'CHEMBL_T3', 'CHEMBL_T4', 'CHEMBL_T5']
+
+    def test_scalar_fields(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL_T2']['pref_name'] == 'Single target'
+        assert rows['CHEMBL_T2']['target_type'] == 'SINGLE PROTEIN'
+
+    def test_components_carry_only_accession(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL_T2']['target_components'] == [{'accession': 'P00001'}]
+
+    def test_target_with_no_components_is_an_empty_list(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL_T4']['target_components'] == []
+        assert rows['CHEMBL_T4']['_metadata']['protein_classification'] == []
+
+    def test_components_are_ordered_by_component_id(self, rows: dict[str, dict]) -> None:
+        # target 502 lists component 2 first by targcomp_id, but the Elasticsearch
+        # document orders target_components by component_id in all 18552 targets
+        assert [c['accession'] for c in rows['CHEMBL_T3']['target_components']] == ['P00001', 'P00002']
+
+    def test_every_class_of_a_component_is_kept(self, rows: dict[str, dict]) -> None:
+        # component 1 carries both Protein Kinase (12) and Transporter (20), so a
+        # single-component target ends up with two classifications and one component
+        single = rows['CHEMBL_T2']
+        assert len(single['target_components']) == 1
+        assert [c['protein_class_id'] for c in single['_metadata']['protein_classification']] == [12, 20]
+
+    def test_classification_groups_by_component_then_class_id(self, rows: dict[str, dict]) -> None:
+        # component 1 (classes 12 and 20) before component 2 (class 11)
+        classes = rows['CHEMBL_T3']['_metadata']['protein_classification']
+        assert [c['protein_class_id'] for c in classes] == [12, 20, 11]
+
+    def test_ancestors_are_flattened_into_levels(self, rows: dict[str, dict]) -> None:
+        pc = rows['CHEMBL_T2']['_metadata']['protein_classification'][0]
+        assert pc['l1'] == 'Enzyme'
+        assert pc['l2'] == 'Kinase'
+        assert pc['l3'] == 'Protein Kinase'
+        assert pc['l4'] is None
+        assert pc['l5'] is None
+        assert pc['l6'] is None
+
+    def test_the_root_of_the_class_tree_is_not_a_level(self, rows: dict[str, dict]) -> None:
+        # every class descends from protein_class_id 0, 'Protein class', at level 0
+        for target in rows.values():
+            for pc in target['_metadata']['protein_classification']:
+                assert 'Protein class' not in pc.values()
+
+    def test_component_without_a_class_contributes_no_entry(self, rows: dict[str, dict]) -> None:
+        assert rows['CHEMBL_T5']['target_components'] == [{'accession': None}]
+        assert rows['CHEMBL_T5']['_metadata']['protein_classification'] == []
+
+    def test_classification_keeps_only_what_pts_reads(self, rows: dict[str, dict]) -> None:
+        pc = rows['CHEMBL_T2']['_metadata']['protein_classification'][0]
+        assert set(pc) == {'protein_class_id', 'l1', 'l2', 'l3', 'l4', 'l5', 'l6'}
