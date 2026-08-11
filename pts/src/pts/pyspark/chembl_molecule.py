@@ -27,7 +27,7 @@ def chembl_molecule(
 
     Args:
         source: Dictionary with paths to:
-            - chembl_molecule: ChEMBL molecule JSONL
+            - chembl_molecule: ChEMBL molecule parquet
             - drugbank: Drugbank to ChEMBL ID mapping CSV
             - aact_extraction_batch_results: (optional) OpenAI batch output for
               clinical-trial synonym mining; when present, AACT synonyms are
@@ -39,7 +39,7 @@ def chembl_molecule(
     spark = Session(app_name='chembl_molecule', properties=properties)
 
     logger.info(f'Loading data from {source}')
-    molecule_df = spark.load_data(source['chembl_molecule'], format='json')
+    molecule_df = spark.load_data(source['chembl_molecule'])
     drugbank_df = spark.load_data(
         source['drugbank'],
         format='csv',

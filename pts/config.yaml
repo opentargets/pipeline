@@ -402,7 +402,7 @@ steps:
         tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        chembl: input/target/chembl/chembl_target.jsonl
+        chembl: input/drug/chembl_target.parquet
         chemical_probes: intermediate/chemical_probes_evidence.parquet
         gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
       destination:
@@ -660,7 +660,7 @@ steps:
   drug_warning:
     - name: pyspark drug_warning
       pyspark: drug_warning
-      source: input/drug/chembl_drug_warning.jsonl
+      source: input/drug/chembl_drug_warning.parquet
       destination: output/drug_warning
   ##################################################################################################
 
@@ -669,8 +669,8 @@ steps:
     - name: pyspark drug_mechanism_of_action
       pyspark: drug_mechanism_of_action
       source:
-        chembl_mechanism: input/drug/chembl_mechanism.jsonl
-        chembl_target: input/drug/chembl_target.jsonl
+        chembl_mechanism: input/drug/chembl_mechanism.parquet
+        chembl_target: input/drug/chembl_target.parquet
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
@@ -680,7 +680,7 @@ steps:
     - name: pyspark chembl_molecule
       pyspark: chembl_molecule
       source:
-        chembl_molecule: input/drug/chembl_molecule.jsonl
+        chembl_molecule: input/drug/chembl_molecule.parquet
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule

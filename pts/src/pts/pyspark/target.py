@@ -143,7 +143,7 @@ def target(
     tep_raw = spark.read.json(source['tep'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
-    chembl_raw = spark.read.json(source['chembl'])
+    chembl_raw = spark.read.parquet(source['chembl'])
     genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
     homology_dict_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['homology_dictionary'])
     homology_coding_proteins_raw = (

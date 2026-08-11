@@ -23,8 +23,8 @@ def drug_mechanism_of_action(
 
     Args:
         source: Dictionary with paths to:
-            - chembl_mechanism: ChEMBL mechanism JSONL
-            - chembl_target: ChEMBL target JSONL
+            - chembl_mechanism: ChEMBL mechanism parquet
+            - chembl_target: ChEMBL target parquet
             - target: Target parquet (gene data)
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
@@ -33,8 +33,8 @@ def drug_mechanism_of_action(
     spark = Session(app_name='drug_mechanism_of_action', properties=properties)
 
     logger.info(f'Loading data from {source}')
-    mechanism_df = spark.load_data(source['chembl_mechanism'], format='json')
-    target_df = spark.load_data(source['chembl_target'], format='json')
+    mechanism_df = spark.load_data(source['chembl_mechanism'])
+    target_df = spark.load_data(source['chembl_target'])
     gene_df = spark.load_data(source['target'])
 
     logger.info('Processing mechanisms of action')

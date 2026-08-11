@@ -21,7 +21,7 @@ def drug_warning(
     """Transform ChEMBL drug warnings into the Open Targets format.
 
     Args:
-        source: Path to the ChEMBL drug warnings JSONL file.
+        source: Path to the ChEMBL drug warnings parquet file.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
         properties: Spark configuration options.
@@ -29,7 +29,7 @@ def drug_warning(
     spark = Session(app_name='drug_warning', properties=properties)
 
     logger.info(f'Loading drug warnings from {source}')
-    warnings_df = spark.load_data(source, format='json')
+    warnings_df = spark.load_data(source)
 
     logger.info('Preparing drug warnings')
     output_df = warnings_df.selectExpr(
