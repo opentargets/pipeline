@@ -282,6 +282,23 @@ class PostgresExport(Task):
 
         return dump
 
+    def _reset_scratch(self) -> None:
+        """Start every attempt from an empty scratch directory.
+
+        A killed run cannot clean up after itself: otter SIGKILLs its workers as
+        soon as any task in the step fails, and SIGKILL cannot be caught, so
+        run()'s finally never executes. A surviving pgdata makes get_server skip
+        initdb and restart the previous cluster, still holding the previous
+        restore -- and the data pass then COPYs every row a second time. Nothing
+        downstream shows it, because every export applies SELECT DISTINCT and the
+        duplicates collapse on the way out.
+
+        Removing it also puts pgserver's own leftover-postmaster killer back in
+        play: that only runs when PG_VERSION is absent.
+        """
+        shutil.rmtree(self.scratch, ignore_errors=True)
+        self.scratch.mkdir(parents=True, exist_ok=True)
+
     def _start_server(self) -> PostgresServer:
         pgdata = self.scratch / 'pgdata'
         logger.info(f'starting an ephemeral postgres {TARGET_POSTGRES_VERSION} server in {pgdata}')
@@ -399,7 +416,7 @@ class PostgresExport(Task):
 
     @report
     def run(self) -> Self:
-        self.scratch.mkdir(parents=True, exist_ok=True)
+        self._reset_scratch()
         dump = self._extract_dump(self._stage_archive())
         _check_archive_version(dump)
 

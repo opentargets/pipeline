@@ -187,6 +187,38 @@ def _await(awaitable: Awaitable[Task]) -> Task:
         loop.close()
 
 
+class TestResetScratch:
+    def _build(self, work_path: Path) -> PostgresExport:
+        spec = PostgresExportSpec(
+            name='postgres_export demo',
+            source='demo.dmp',
+            tables=[TableSpec(table='t', destination=DESTINATION, columns=['id'])],
+        )
+        config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=2, log_level='DEBUG')
+        context = TaskContext(config=config, scratchpad=Scratchpad())
+        # the worker assigns this when it hands a task out; here nobody does
+        context.abort = Event()
+        return PostgresExport(spec, context)
+
+    def test_a_surviving_cluster_is_removed(self, tmp_path: Path) -> None:
+        """A killed run leaves pgdata behind; the next attempt must not reuse it."""
+        task = self._build(tmp_path / 'work')
+        pgdata = task.scratch / 'pgdata'
+        pgdata.mkdir(parents=True)
+        # PG_VERSION is what makes get_server skip initdb and restart the cluster
+        (pgdata / 'PG_VERSION').write_text('16\n')
+
+        task._reset_scratch()
+
+        assert task.scratch.is_dir(), 'the scratch directory itself must still exist'
+        assert not pgdata.exists(), 'a surviving cluster would be restarted with its old data'
+
+    def test_it_is_safe_when_nothing_survived(self, tmp_path: Path) -> None:
+        task = self._build(tmp_path / 'work')
+        task._reset_scratch()
+        assert task.scratch.is_dir()
+
+
 @pytest.mark.pgserver
 class TestRoundTrip:
     """Restore a real dump into a real server and export it, with nothing mocked.
