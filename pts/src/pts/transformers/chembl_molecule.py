@@ -7,7 +7,8 @@ own cross-reference table is deliberately not joined here (see
 
 Clinical-trial (AACT) synonym mining lives in this module too (``_parse_aact_entries``
 onward) -- it moved here from the ``pts.pyspark.drug_utils.aact_synonyms`` port, since
-it only ever runs as part of this step. ``parse_batch_results`` (from ``clinical_mining``,
+it only ever runs as part of this step; that module has since been deleted, so this is
+the only copy of the logic. ``parse_batch_results`` (from ``clinical_mining``,
 already used by ``clinical_report``) reads the OpenAI batch output straight into polars;
 everything downstream of it -- normalizing candidate names, anchoring them to ChEMBL
 molecules, and the eleven cleanup rules -- is a field-for-field polars port of that module.
@@ -185,7 +186,10 @@ def process_molecules(
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
         entries = _parse_aact_entries(aact_batch)
-        # mine_aact_synonyms / _build_chembl_indexes expect non-null arrays; fill here.
+        # The fills mirror what the pyspark reference passes to its own index input,
+        # 1:1. They are not load-bearing: removing them was measured to change nothing,
+        # because the explode below uses `keep_nulls=False` and every downstream consumer
+        # fills independently. Kept because matching the reference exactly is the point.
         mol_for_index = mol_combined.select(
             'id',
             'name',
@@ -201,9 +205,9 @@ def process_molecules(
     # deliberately NOT coalesced here: the reference leaves it null for a molecule with
     # no children (only synonyms/tradeNames are coalesced to []), and the vast majority
     # of molecules have no children, so filling it would change a published column
-    # across nearly the whole dataset. The AACT-branch fill above is a different,
-    # correct case: mine_aact_synonyms/_build_chembl_indexes need a non-null array to
-    # index over, matching what the pyspark reference does for its own index input.
+    # across nearly the whole dataset. The AACT-branch fill above is a different case:
+    # it mirrors the reference's own index input rather than being needed for the code
+    # to work -- see the comment there.
     return (
         mol_combined.with_columns(
             synonyms=pl.col('synonyms').fill_null([]),
@@ -299,9 +303,15 @@ def _molecule_preprocess(
             )
             .alias('molblock'),
             pl.col('molecule_type').fill_null('Unknown').alias('drugType'),
-            # str.strip_chars() with no argument strips all Unicode whitespace; Spark's
-            # trim() strips only the ASCII space. Pinned to ' ' explicitly so this
-            # matches the reference rather than happening to agree on today's data.
+            # The reference does not trim at all here -- it is a bare
+            # `f.col('pref_name').alias('name')`. The trim compensates for something
+            # else: the relational `pref_name` carries trailing spaces that the
+            # Elasticsearch value the reference read did not, and with it `name`
+            # matches the release on all 2,921,148 rows.
+            #
+            # Pinned to ' ' rather than left bare because `str.strip_chars()` with no
+            # argument strips all Unicode whitespace, which would be a wider change than
+            # undoing the padding this column actually has.
             pl.col('pref_name').str.strip_chars(' ').alias('name'),
             'parentId',
             'syns',
@@ -436,7 +446,7 @@ def _process_singleton_cross_references(
 # --- AACT synonym mining -----------------------------------------------------
 #
 # Mines candidate drug synonyms from the OpenAI/AACT clinical-trial extraction and
-# anchors them to ChEMBL molecules. A polars port of the pyspark
+# anchors them to ChEMBL molecules. A polars port of the now-deleted pyspark
 # `pts.pyspark.drug_utils.aact_synonyms` module (itself a port of the
 # `work/clinical_pairs/` experiment).
 #
