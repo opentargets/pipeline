@@ -75,7 +75,9 @@ class TestBuildCountSql:
 class TestBuildRestoreArgs:
     @pytest.fixture
     def passes(self) -> list[list[str]]:
-        return _build_restore_args(Path('/bin'), 'postgresql://x', Path('/dump.dmp'), ['studies', 'conditions'], 8)
+        return _build_restore_args(
+            Path('/bin'), 'postgresql://x', Path('/dump.dmp'), ['studies', 'conditions'], 'public', 8
+        )
 
     def test_two_passes(self, passes: list[list[str]]) -> None:
         assert len(passes) == 2
@@ -105,11 +107,22 @@ class TestBuildRestoreArgs:
         for p in passes:
             assert p[-1] == '/dump.dmp'
 
+    def test_the_data_pass_is_schema_qualified(self) -> None:
+        """An unqualified --table restores same-named tables from every schema."""
+        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
+        assert '--schema' in data
+        assert data[data.index('--schema') + 1] == 'ctgov'
+
+    def test_the_pre_data_pass_is_not_schema_qualified(self) -> None:
+        """Filtering pre-data would skip CREATE SCHEMA and any types the tables need."""
+        pre_data, _ = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
+        assert '--schema' not in pre_data
+
 
 class TestAllowEmpty:
     def test_the_data_pass_uses_strict_names(self) -> None:
         """A --table that matches nothing must fail the restore, not exit 0."""
-        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 8)
+        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'public', 8)
         assert '--strict-names' in data
 
     def test_count_sql_applies_the_where(self) -> None:

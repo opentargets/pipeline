@@ -152,7 +152,9 @@ def _check_archive_version(dump: Path) -> None:
     logger.debug(f'dump is a version {version[0]}.{version[1]} archive')
 
 
-def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: list[str], jobs: int) -> list[list[str]]:
+def _build_restore_args(
+    bin_path: Path, uri: str, dump: Path, tables: list[str], schema_name: str, jobs: int
+) -> list[list[str]]:
     """Build the ``pg_restore`` invocations that load the requested tables.
 
     The restore runs in two passes. The first restores the schema of the whole
@@ -169,7 +171,11 @@ def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: list[str],
 
     # without --strict-names, a --table matching nothing in the archive exits 0
     # and restores silently nothing
-    data = [*common, '--section=data', '--strict-names', '--jobs', str(jobs)]
+    # --schema on the data pass only: pg_restore's --table matches the bare name
+    # across every schema in the archive, so an unqualified restore loads every
+    # same-named table from every other schema and never reads them. The pre-data
+    # pass stays unqualified on purpose -- see the docstring above.
+    data = [*common, '--section=data', '--strict-names', '--schema', schema_name, '--jobs', str(jobs)]
     for table in tables:
         data += ['--table', table]
     data.append(str(dump))
@@ -370,7 +376,7 @@ class PostgresExport(Task):
         tables = [t.table for t in self.spec.tables]
         logger.info(f'restoring {len(tables)} tables into the ephemeral database')
 
-        pre_data, data = _build_restore_args(bin_path, uri, dump, tables, self.spec.jobs)
+        pre_data, data = _build_restore_args(bin_path, uri, dump, tables, self.spec.schema_name, self.spec.jobs)
 
         # restoring someone else's schema reliably reports errors we do not care
         # about, such as roles that do not exist here, or comments on objects the
