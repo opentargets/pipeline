@@ -4,6 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  chembl_version: '37'
   string_version: '12.0'
 
 steps:
@@ -402,11 +403,11 @@ steps:
         tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        target_dictionary: input/chembl/target_dictionary.parquet
-        target_components: input/chembl/target_components.parquet
-        component_sequences: input/chembl/component_sequences.parquet
-        component_class: input/chembl/component_class.parquet
-        protein_classification: input/chembl/protein_classification.parquet
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
         chemical_probes: intermediate/chemical_probes_evidence.parquet
         gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
       destination:
@@ -660,15 +661,77 @@ steps:
         disease_target_drug_label_lut: intermediate/ontoma/disease_target_drug_label_lookup_table.parquet
   ##################################################################################################
 
+  #: CHEMBL STEP :##################################################################################
+  chembl:
+    - name: postgres_export chembl tables
+      source: input/chembl/chembl_${chembl_version}.tar.gz
+      tables:
+        - table: molecule_dictionary
+          destination: intermediate/chembl/molecule_dictionary.parquet
+          columns: [molregno, chembl_id, pref_name, molecule_type]
+        - table: compound_structures
+          destination: intermediate/chembl/compound_structures.parquet
+          columns: [molregno, canonical_smiles, standard_inchi_key, molfile]
+        - table: molecule_hierarchy
+          destination: intermediate/chembl/molecule_hierarchy.parquet
+          columns: [molregno, parent_molregno]
+        - table: molecule_synonyms
+          destination: intermediate/chembl/molecule_synonyms.parquet
+          columns: [molsyn_id, molregno, synonyms, syn_type]
+        - table: drug_mechanism
+          destination: intermediate/chembl/drug_mechanism.parquet
+          columns: [mec_id, record_id, molregno, mechanism_of_action, tid, action_type]
+        - table: mechanism_refs
+          destination: intermediate/chembl/mechanism_refs.parquet
+          columns: [mecref_id, mec_id, ref_type, ref_id, ref_url]
+        - table: target_dictionary
+          destination: intermediate/chembl/target_dictionary.parquet
+          columns: [tid, chembl_id, pref_name, target_type]
+        - table: target_components
+          destination: intermediate/chembl/target_components.parquet
+          columns: [targcomp_id, tid, component_id]
+        - table: component_sequences
+          destination: intermediate/chembl/component_sequences.parquet
+          columns: [component_id, accession]
+        - table: component_class
+          destination: intermediate/chembl/component_class.parquet
+          columns: [comp_class_id, component_id, protein_class_id]
+        - table: protein_classification
+          destination: intermediate/chembl/protein_classification.parquet
+          columns: [protein_class_id, parent_id, pref_name, class_level]
+        - table: drug_warning
+          destination: intermediate/chembl/drug_warning.parquet
+          columns:
+            - warning_id
+            - molregno
+            - warning_type
+            - warning_class
+            - warning_country
+            - warning_description
+            - warning_year
+            - efo_term
+            - efo_id
+            - efo_id_for_warning_class
+        - table: warning_refs
+          destination: intermediate/chembl/warning_refs.parquet
+          columns: [warnref_id, warning_id, ref_type, ref_id, ref_url]
+        - table: drug_indication
+          destination: intermediate/chembl/drug_indication.parquet
+          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
+        - table: indication_refs
+          destination: intermediate/chembl/indication_refs.parquet
+          columns: [indref_id, drugind_id, ref_type, ref_id, ref_url]
+  ##################################################################################################
+
   #: DRUG_WARNING STEP :############################################################################
   drug_warning:
     - name: pyspark drug_warning
       pyspark: drug_warning
       source:
-        drug_warning: input/chembl/drug_warning.parquet
-        warning_refs: input/chembl/warning_refs.parquet
-        molecule_dictionary: input/chembl/molecule_dictionary.parquet
-        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
+        drug_warning: intermediate/chembl/drug_warning.parquet
+        warning_refs: intermediate/chembl/warning_refs.parquet
+        molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: intermediate/chembl/molecule_hierarchy.parquet
       destination: output/drug_warning
   ##################################################################################################
 
@@ -677,13 +740,13 @@ steps:
     - name: pyspark drug_mechanism_of_action
       pyspark: drug_mechanism_of_action
       source:
-        drug_mechanism: input/chembl/drug_mechanism.parquet
-        mechanism_refs: input/chembl/mechanism_refs.parquet
-        molecule_dictionary: input/chembl/molecule_dictionary.parquet
-        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
-        target_dictionary: input/chembl/target_dictionary.parquet
-        target_components: input/chembl/target_components.parquet
-        component_sequences: input/chembl/component_sequences.parquet
+        drug_mechanism: intermediate/chembl/drug_mechanism.parquet
+        mechanism_refs: intermediate/chembl/mechanism_refs.parquet
+        molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: intermediate/chembl/molecule_hierarchy.parquet
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
@@ -693,10 +756,10 @@ steps:
     - name: pyspark chembl_molecule
       pyspark: chembl_molecule
       source:
-        molecule_dictionary: input/chembl/molecule_dictionary.parquet
-        compound_structures: input/chembl/compound_structures.parquet
-        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
-        molecule_synonyms: input/chembl/molecule_synonyms.parquet
+        molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
+        compound_structures: intermediate/chembl/compound_structures.parquet
+        molecule_hierarchy: intermediate/chembl/molecule_hierarchy.parquet
+        molecule_synonyms: intermediate/chembl/molecule_synonyms.parquet
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
@@ -734,11 +797,11 @@ steps:
         aact_study_references: input/clinical_report/aact/study_references.parquet
         aact_designs: input/clinical_report/aact/designs.parquet
         aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: input/chembl/drug_indication.parquet
-        chembl_indication_references: input/chembl/indication_refs.parquet
-        chembl_drug_warning: input/chembl/drug_warning.parquet
-        chembl_drug_warning_references: input/chembl/warning_refs.parquet
-        chembl_molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        chembl_indication: intermediate/chembl/drug_indication.parquet
+        chembl_indication_references: intermediate/chembl/indication_refs.parquet
+        chembl_drug_warning: intermediate/chembl/drug_warning.parquet
+        chembl_drug_warning_references: intermediate/chembl/warning_refs.parquet
+        chembl_molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet
