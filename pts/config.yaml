@@ -663,13 +663,9 @@ steps:
 
   #: DRUG_WARNING STEP :############################################################################
   drug_warning:
-    - name: pyspark drug_warning
-      pyspark: drug_warning
-      source:
-        drug_warning: intermediate/chembl/drug_warning.parquet
-        warning_refs: intermediate/chembl/warning_refs.parquet
-        molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
-        molecule_hierarchy: intermediate/chembl/molecule_hierarchy.parquet
+    - name: drug_warning
+      transformer: drug_warning
+      source: input/chembl/chembl_${chembl_version}.tar.gz
       destination: output/drug_warning
   ##################################################################################################
 
