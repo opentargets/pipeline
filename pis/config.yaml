@@ -133,6 +133,13 @@ steps:
       destination: input/biosample/efo.json
   ##################################################################################################
 
+  #: CHEMBL STEP :##################################################################################
+  chembl:
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/chembl/chembl_${chembl_version}.tar.gz
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
     - name: explode_glob clinical_report
