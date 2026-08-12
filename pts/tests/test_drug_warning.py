@@ -3,7 +3,7 @@
 import polars as pl
 import pytest
 
-from pts.transformers.drug_warning import _deduplicate_warnings, process_drug_warnings
+from pts.transformers.drug_warning import ORDER_BY, _deduplicate_warnings, process_drug_warnings
 
 REFERENCE_SCHEMA = pl.Struct({'id': pl.String, 'source': pl.String, 'url': pl.String})
 
@@ -175,3 +175,46 @@ class TestDeduplicateWarnings:
         exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
 
         assert exploded.filter(pl.col('drugId') == 'CHEMBL1200916').height == 1
+
+
+class TestOrderIsDeterministic:
+    """`references` is a published array, and it used to come out in scan order.
+
+    Two things have to hold together: the read is ordered (``ORDER_BY``), and the
+    polars pipeline keeps that order through its joins and group_bys. Measured
+    against the published 26.06 artefact, the ordered read reproduces
+    `drug_warning.references` exactly on all 2,009 rows; unordered it managed
+    1,351.
+    """
+
+    def test_order_by_covers_the_tables_whose_order_reaches_the_output(self) -> None:
+        """`warning_refs` becomes the references array; `drug_warning` drives row order."""
+        assert ORDER_BY == {'drug_warning': ['warning_id'], 'warning_refs': ['warnref_id']}
+
+    def test_every_ordered_column_is_in_that_table_s_projection(self) -> None:
+        """A SELECT DISTINCT cannot order by a column it does not select."""
+        from pts.transformers.drug_warning import TABLES
+
+        for table, columns in ORDER_BY.items():
+            assert set(columns) <= set(TABLES[table]), table
+
+    def test_the_output_does_not_depend_on_the_order_the_rows_arrived_in(self, tables: dict) -> None:
+        """Shuffle the inputs, re-apply ORDER_BY as the read does, and get the same frame."""
+        ordered = {
+            'warnings': tables['warnings'].sort(ORDER_BY['drug_warning']),
+            'refs': tables['refs'].sort(ORDER_BY['warning_refs']),
+            'molecules': tables['molecules'],
+            'hierarchy': tables['hierarchy'],
+        }
+        baseline = _deduplicate_warnings(process_drug_warnings(**ordered))
+
+        for seed in (1, 2, 3):
+            shuffled = {
+                'warnings': tables['warnings'].sample(fraction=1.0, shuffle=True, seed=seed).sort(
+                    ORDER_BY['drug_warning']
+                ),
+                'refs': tables['refs'].sample(fraction=1.0, shuffle=True, seed=seed).sort(ORDER_BY['warning_refs']),
+                'molecules': tables['molecules'].sample(fraction=1.0, shuffle=True, seed=seed),
+                'hierarchy': tables['hierarchy'].sample(fraction=1.0, shuffle=True, seed=seed),
+            }
+            assert _deduplicate_warnings(process_drug_warnings(**shuffled)).equals(baseline)

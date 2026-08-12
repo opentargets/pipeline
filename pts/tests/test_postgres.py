@@ -26,6 +26,7 @@ from pts.postgres import (
     _build_restore_args,
     _build_select_sql,
     _check_archive_version,
+    _check_order_by,
     _resolve_archive_member,
     read_dump_tables,
     restored_dump,
@@ -43,6 +44,25 @@ def test_reads_are_always_distinct() -> None:
     assert _build_select_sql('studies', 'ctgov', ['nct_id', 'phase']) == (
         'SELECT DISTINCT "nct_id", "phase" FROM "ctgov"."studies"'
     )
+
+
+def test_an_ordered_read_says_so_in_the_sql() -> None:
+    """Without ORDER BY the row order is the plan's business, and it reaches published arrays."""
+    assert _build_select_sql('warning_refs', 'public', ['warnref_id', 'ref_id'], ['warnref_id']) == (
+        'SELECT DISTINCT "warnref_id", "ref_id" FROM "public"."warning_refs" ORDER BY "warnref_id"'
+    )
+
+
+def test_ordering_by_a_column_outside_the_projection_is_caught_before_the_restore() -> None:
+    """A SELECT DISTINCT can only order by what it selects, and a restore takes minutes."""
+    with pytest.raises(PostgresError, match='not in its projection'):
+        _check_order_by({'warning_refs': ['warning_id']}, {'warning_refs': ['warnref_id']})
+
+
+def test_ordering_a_table_that_is_not_being_read_is_caught() -> None:
+    """Almost always a typo, and silently ignoring it would leave the read unordered."""
+    with pytest.raises(PostgresError, match='not one of the tables being read'):
+        _check_order_by({'warning_refs': None}, {'warning_ref': ['warnref_id']})
 
 
 def test_restores_only_the_requested_tables_and_skips_the_indexes() -> None:
@@ -143,6 +163,17 @@ class TestRoundTrip:
         # postgres `integer` must come back as Int32, not widened to Int64: steps such as
         # drug_warning rely on this narrowing to reach the released `year` column untouched.
         assert df.schema['id'] == pl.Int32
+
+    def test_an_ordered_read_comes_back_ordered(self, dump: Path, tmp_path: Path) -> None:
+        """The rows arrive in the asked-for order, not the plan's."""
+        df = read_dump_tables(
+            str(dump),
+            {'t': ['id', 'txt']},
+            schema_name='demo',
+            order_by={'t': ['id']},
+            scratch_root=tmp_path,
+        )['t']
+        assert df.get_column('id').to_list() == sorted(df.get_column('id').to_list())
 
     def test_reads_are_distinct_end_to_end(self, dump: Path, tmp_path: Path) -> None:
         """Projecting to ``txt`` alone collapses the rows, as it does for the real sources."""

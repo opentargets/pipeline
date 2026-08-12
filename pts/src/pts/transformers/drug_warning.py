@@ -28,6 +28,39 @@ TABLES = {
 }
 """ChEMBL tables and columns this step needs, restored from the dump."""
 
+ORDER_BY = {
+    'drug_warning': ['warning_id'],
+    'warning_refs': ['warnref_id'],
+}
+"""Reads whose row order reaches the output and therefore must not float.
+
+``_references`` collects ``warning_refs`` into the published ``references`` array
+in scan order. Unordered, that order is whatever the plan produced -- against the
+26.06 release only 1,351 of 2,009 rows came back with their references in the
+published order, the other 658 carrying the same references shuffled. Ordering by
+``warnref_id``, the table's key and already in the projection, reproduces the
+release exactly on all 2,009. It also matters beyond cosmetics: ``references`` is
+part of ``_deduplicate_warnings``' grouping key, so an unstable order can decide
+which rows merge.
+
+``drug_warning`` is ordered for the same reason one step further out:
+``_deduplicate_warnings`` groups with ``maintain_order=True`` and unions
+``chemblIds`` in first-appearance order, so both the output row order and the
+contents of a merged ``chemblIds`` follow this table's scan order.
+
+``molecule_dictionary`` and ``molecule_hierarchy`` are deliberately absent. They
+are only ever joined row-wise on ``molregno`` inside ``chembl_ids``, whose joins
+keep the left frame's order, so their scan order reaches nothing -- and they are
+the two large tables here, so ordering them would buy a sort of millions of rows
+for nothing.
+
+Ordering the reads is only half of it: polars makes no promise about row order out
+of a join or a ``group_by`` unless asked, so this module also pins
+``maintain_order`` everywhere the order can reach the output. With both halves the
+step reproduces itself exactly -- whole frame, row order included -- across four
+different scan orders of the same dump.
+"""
+
 
 def drug_warning(
     source: Path,
@@ -49,7 +82,9 @@ def drug_warning(
     # of it. On the pipeline VM `work_path` is the dedicated work disk; the
     # container root filesystem and /tmp, where tempfile would otherwise put this,
     # are on a much smaller boot disk that it would fill.
-    tables = read_dump_tables(str(source), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
+    tables = read_dump_tables(
+        str(source), TABLES, schema_name=SCHEMA_NAME, order_by=ORDER_BY, scratch_root=config.work_path
+    )
 
     logger.info('Preparing drug warnings')
     output_df = process_drug_warnings(
@@ -88,8 +123,8 @@ def process_drug_warnings(
     # cast at target.py's `_build_protein_classification`. Resolved the other way here:
     # the narrowing is accepted uncast because the values are identical, not cast back.
     return (
-        warnings.join(ids, on='warning_id', how='left')
-        .join(references, on='warning_id', how='left')
+        warnings.join(ids, on='warning_id', how='left', maintain_order='left')
+        .join(references, on='warning_id', how='left', maintain_order='left')
         .with_columns(pl.col('references').fill_null([]))
         .select(
             'chemblIds',
@@ -116,7 +151,7 @@ def _references(refs: pl.DataFrame) -> pl.DataFrame:
     Returns:
         DataFrame with warning_id and references columns.
     """
-    return refs.group_by('warning_id').agg(
+    return refs.group_by('warning_id', maintain_order=True).agg(
         pl.struct(
             pl.col('ref_id').alias('id'),
             pl.col('ref_type').alias('source'),

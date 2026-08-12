@@ -4,6 +4,8 @@ import polars as pl
 import pytest
 
 from pts.transformers.drug_mechanism_of_action import (
+    ORDER_BY,
+    TABLES,
     _chembl_target,
     _consolidate_duplicate_references,
     _with_target_chembl_id,
@@ -256,3 +258,56 @@ class TestConsolidateDuplicateReferences:
         exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
 
         assert exploded.filter(pl.col('drugId') == 'CHEMBL1200916').height == 1
+
+
+class TestOrderIsDeterministic:
+    """This step used to produce a different answer every time it ran.
+
+    Measured on the real ChEMBL 37 dump, 527 of 1,751 output rows differed between
+    two runs *on byte-identical inputs*, because polars promises nothing about row
+    order out of a join, a `group_by` or a `unique`. On top of that the reads
+    themselves were unordered, so `references` came out in whatever order the query
+    plan produced. Both halves are pinned now; this is the guard.
+    """
+
+    def test_order_by_covers_the_tables_whose_order_reaches_the_output(self) -> None:
+        assert ORDER_BY == {
+            'drug_mechanism': ['mec_id'],
+            'mechanism_refs': ['mecref_id'],
+            'target_dictionary': ['tid'],
+            'target_components': ['tid', 'component_id'],
+            'component_sequences': ['component_id', 'accession'],
+        }
+
+    def test_every_ordered_column_is_in_that_table_s_projection(self) -> None:
+        """A SELECT DISTINCT cannot order by a column it does not select."""
+        for table, columns in ORDER_BY.items():
+            assert set(columns) <= set(TABLES[table]), table
+
+    def test_mecref_id_is_read_only_so_the_refs_can_be_ordered(self) -> None:
+        """It is in the projection for no other reason, so say so where it would be removed."""
+        assert 'mecref_id' in TABLES['mechanism_refs']
+
+    def test_the_output_does_not_depend_on_the_order_the_rows_arrived_in(self, tables: dict) -> None:
+        """Shuffle every input, re-apply ORDER_BY as the read does, and get the same frame."""
+        key = {
+            'drug_mechanism': 'drug_mechanism',
+            'mechanism_refs': 'mechanism_refs',
+            'target_dictionary': 'target_dictionary',
+            'target_components': 'target_components',
+            'component_sequences': 'component_sequences',
+        }
+
+        def prepare(seed: int | None) -> dict:
+            prepared = {}
+            for name, df in tables.items():
+                if seed is not None and isinstance(df, pl.DataFrame):
+                    df = df.sample(fraction=1.0, shuffle=True, seed=seed)
+                if name in key:
+                    df = df.sort(ORDER_BY[key[name]])
+                prepared[name] = df
+            return prepared
+
+        baseline = process_mechanism_of_action(**prepare(None))
+        for seed in (1, 2, 3):
+            assert process_mechanism_of_action(**prepare(seed)).equals(baseline)

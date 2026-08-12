@@ -19,7 +19,10 @@ SCHEMA_NAME = 'public'
 
 TABLES = {
     'drug_mechanism': ['mec_id', 'record_id', 'molregno', 'mechanism_of_action', 'tid', 'action_type'],
-    'mechanism_refs': ['mec_id', 'ref_type', 'ref_id', 'ref_url'],
+    # mecref_id is the table's key and is otherwise unused: it is here only so the
+    # read can be ordered by it, see ORDER_BY. Adding it does not change the
+    # SELECT DISTINCT -- the projection without it already returns all 13,600 rows.
+    'mechanism_refs': ['mecref_id', 'mec_id', 'ref_type', 'ref_id', 'ref_url'],
     'molecule_dictionary': ['molregno', 'chembl_id'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
     'target_dictionary': ['tid', 'chembl_id', 'pref_name', 'target_type'],
@@ -27,6 +30,44 @@ TABLES = {
     'component_sequences': ['component_id', 'accession'],
 }
 """ChEMBL tables and columns this step needs, restored from the dump."""
+
+ORDER_BY = {
+    'drug_mechanism': ['mec_id'],
+    'mechanism_refs': ['mecref_id'],
+    'target_dictionary': ['tid'],
+    'target_components': ['tid', 'component_id'],
+    'component_sequences': ['component_id', 'accession'],
+}
+"""Reads whose row order reaches the output and therefore must not float.
+
+``_chembl_mechanism_references`` collects ``mechanism_refs`` into the published
+``references`` array in scan order, and ``_chembl_target`` collects ``targets``
+the same way. Unordered, that order is an artefact of the plan and of the physical
+order of the restored dump: two scan orders of the same dump agreed on only 890 of
+1,751 output rows. ``drug_mechanism`` is in here too because it drives the row
+order the references are then grouped in, and because
+``_consolidate_duplicate_references`` groups with ``maintain_order=True``.
+
+Where the table's key is in the projection (``mecref_id``, ``mec_id``, ``tid``)
+that is what it is ordered by; the other two are ordered by their whole
+projection, which the ``SELECT DISTINCT`` makes a total order. Every one of these
+is a small table, so the sort is free.
+
+Ordering the reads is only half of it. Polars makes no promise about row order out
+of a join, a ``group_by`` or a ``unique`` unless asked, and measured on the real
+dump this module produced 527 of its 1,751 rows differently between two runs *on
+byte-identical inputs*. So it also pins ``maintain_order`` everywhere the order can
+reach the output. With both halves the step reproduces itself exactly -- whole
+frame, row order included -- across four different scan orders of the same dump.
+
+That is reproducibility, not equality with a past release: the pyspark original's
+``collect_set`` was nondeterministic in its own right. But a step that cannot
+reproduce its own output cannot be diffed at all.
+
+``molecule_dictionary`` and ``molecule_hierarchy`` are deliberately absent: they
+are joined row-wise on ``molregno`` by joins that keep the left frame's order, so
+their scan order reaches nothing, and they are the large tables here.
+"""
 
 
 def drug_mechanism_of_action(
@@ -48,7 +89,9 @@ def drug_mechanism_of_action(
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
     # scratch_root: the restore needs gigabytes, and `work_path` is the work disk.
     # See the note in drug_warning.
-    tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
+    tables = read_dump_tables(
+        str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, order_by=ORDER_BY, scratch_root=config.work_path
+    )
 
     logger.info(f'Reading target data from {source["target"]}')
     gene_df = pl.read_parquet(source['target'])
@@ -95,7 +138,7 @@ def process_mechanism_of_action(
         Processed mechanism of action DataFrame, one row per surviving `mec_id`.
     """
     ids = _chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy, key='mec_id')
-    mechanism_refs_agg = mechanism_refs.group_by('mec_id').agg(
+    mechanism_refs_agg = mechanism_refs.group_by('mec_id', maintain_order=True).agg(
         pl.struct(
             pl.col('ref_type'),
             pl.col('ref_id'),
@@ -105,9 +148,14 @@ def process_mechanism_of_action(
 
     mechanism = (
         _with_target_chembl_id(drug_mechanism, target_dictionary)
-        .join(molecule_dictionary.select('molregno', pl.col('chembl_id').alias('id')), on='molregno', how='left')
-        .join(ids, on='mec_id', how='left')
-        .join(mechanism_refs_agg, on='mec_id', how='left')
+        .join(
+            molecule_dictionary.select('molregno', pl.col('chembl_id').alias('id')),
+            on='molregno',
+            how='left',
+            maintain_order='left',
+        )
+        .join(ids, on='mec_id', how='left', maintain_order='left')
+        .join(mechanism_refs_agg, on='mec_id', how='left', maintain_order='left')
         .rename({'mechanism_of_action': 'mechanismOfAction', 'action_type': 'actionType'})
         .drop('mec_id', 'molregno')
     )
@@ -116,8 +164,8 @@ def process_mechanism_of_action(
     target = _chembl_target(target_dictionary, target_components, component_sequences, gene_df)
 
     result = (
-        mechanism.join(references, on='id', how='full', coalesce=True)
-        .join(target, on='target_chembl_id', how='full', coalesce=True)
+        mechanism.join(references, on='id', how='full', coalesce=True, maintain_order='left_right')
+        .join(target, on='target_chembl_id', how='full', coalesce=True, maintain_order='left_right')
         .with_columns(pl.col('references').fill_null([]))
         .drop('mechanism_refs', 'record_id', 'target_chembl_id', 'id')
         .filter(
@@ -149,6 +197,7 @@ def _with_target_chembl_id(mechanism: pl.DataFrame, target_dictionary: pl.DataFr
             target_dictionary.select('tid', pl.col('chembl_id').alias('target_chembl_id')),
             on='tid',
             how='left',
+            maintain_order='left',
         ).drop('tid')
     )
 
@@ -169,7 +218,7 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
         .explode('mechanism_refs')
         .filter(pl.col('mechanism_refs').is_not_null())
         .unnest('mechanism_refs')
-        .group_by('id', 'ref_type')
+        .group_by('id', 'ref_type', maintain_order=True)
         .agg(
             # collect_list on the pyspark side drops nulls; polars' bare list aggregation
             # does not, so a NULL ref_id/ref_url (e.g. an 'Expert' or 'KEGG' reference with
@@ -185,7 +234,7 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
                 pl.col('urls'),
             )
         )
-        .group_by('id')
+        .group_by('id', maintain_order=True)
         .agg(pl.col('references'))
     )
 
@@ -208,8 +257,8 @@ def _chembl_target(
         DataFrame with target_chembl_id, targetName, targetType, and targets.
     """
     target_components_flat = (
-        target_components.join(component_sequences, on='component_id', how='inner')
-        .join(target_dictionary, on='tid', how='inner')
+        target_components.join(component_sequences, on='component_id', how='inner', maintain_order='left')
+        .join(target_dictionary, on='tid', how='inner', maintain_order='left')
         .filter(pl.col('accession').is_not_null())
         .select(
             pl.col('pref_name').alias('targetName'),
@@ -235,12 +284,12 @@ def _chembl_target(
         .drop_nulls('uniprot_id')
     )
     genes_by_id = gene_df.select(pl.col('id').alias('geneId'), pl.col('id').alias('uniprot_id'))
-    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique()
+    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique(maintain_order=True)
 
-    joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left')
+    joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left', maintain_order='left')
 
-    return joined.group_by('target_chembl_id', 'targetName', 'targetType').agg(
-        pl.col('geneId').drop_nulls().unique().alias('targets')
+    return joined.group_by('target_chembl_id', 'targetName', 'targetType', maintain_order=True).agg(
+        pl.col('geneId').drop_nulls().unique(maintain_order=True).alias('targets')
     )
 
 

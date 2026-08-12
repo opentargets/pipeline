@@ -359,7 +359,9 @@ def restored_dump(
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _build_select_sql(table: str, schema_name: str, columns: Sequence[str] | None = None) -> str:
+def _build_select_sql(
+    table: str, schema_name: str, columns: Sequence[str] | None = None, order_by: Sequence[str] | None = None
+) -> str:
     """Build the statement that reads one table.
 
     ``DISTINCT`` is not an optimisation. These dumps carry rows that become
@@ -367,9 +369,40 @@ def _build_select_sql(table: str, schema_name: str, columns: Sequence[str] | Non
     every row count downstream of here was measured with those removed. It is
     part of the contract, which is why it is spelled out here and pinned by a
     test rather than left to whatever a query helper does by default.
+
+    ``ORDER BY`` is not one either. Without it the row order is whatever the plan
+    happens to produce -- a hash aggregate over the physical order of a restored
+    dump -- and a caller that collects a column into a list hands that
+    nondeterminism straight to a published artefact. See ``order_by`` in
+    :func:`read_dump_tables` for when to ask for it.
     """
     selected = ', '.join(f'"{c}"' for c in columns) if columns else '*'
-    return f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
+    sql = f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
+    if order_by:
+        sql += ' ORDER BY ' + ', '.join(f'"{c}"' for c in order_by)
+    return sql
+
+
+def _check_order_by(
+    tables: Mapping[str, Sequence[str] | None], order_by: Mapping[str, Sequence[str]]
+) -> None:
+    """Reject an ordering that names a table or a column that is not being read.
+
+    ``SELECT DISTINCT`` can only order by expressions in the select list, so a
+    column outside the projection is a postgres error in the middle of the read.
+    Catching it here says which table and column, before anything is restored.
+    """
+    for table, columns in order_by.items():
+        if table not in tables:
+            raise PostgresError(f'order_by names {table}, which is not one of the tables being read: {list(tables)}')
+        projection = tables[table]
+        if projection is None:
+            continue
+        if missing := [c for c in columns if c not in projection]:
+            raise PostgresError(
+                f'order_by names {missing} for {table}, which is not in its projection: {list(projection)}. '
+                f'A SELECT DISTINCT can only be ordered by columns it selects.'
+            )
 
 
 def read_dump_tables(
@@ -378,6 +411,7 @@ def read_dump_tables(
     *,
     schema_name: str,
     archive_member: str = '*.dmp',
+    order_by: Mapping[str, Sequence[str]] | None = None,
     scratch_root: str | Path | None = None,
 ) -> dict[str, pl.DataFrame]:
     """Restore tables from a ``pg_dump`` archive and read each one into polars.
@@ -389,6 +423,18 @@ def read_dump_tables(
         schema_name: The schema the tables live in.
         archive_member: Name or glob of the dump inside ``source``, when
             ``source`` is a zip or a tar.
+        order_by: Table name to the columns to order that table's read by. Rows
+            come back in whatever order the plan produced otherwise, which is a
+            function of the postgres version and of the physical order of the
+            dump, and is not stable across releases of either.
+
+            **Every table whose row order can reach the output needs an entry
+            here** — anything a caller aggregates into a list without sorting it
+            afterwards. Pick columns that are unique together, usually the
+            table's own key, so the ordering is total and the read is
+            reproducible. It is opt-in rather than the default because ordering
+            a large projection (``compound_structures`` is several gigabytes)
+            costs a sort that most reads have no use for.
         scratch_root: See :func:`restored_dump`.
 
     Returns:
@@ -399,12 +445,16 @@ def read_dump_tables(
             is otherwise silent — ``pg_restore`` is happy, the query works, and
             the step carries on with no rows — so it is checked here. A caller
             that genuinely expects an empty table wants :func:`restored_dump`.
+            Also if ``order_by`` names a table or a column that is not being read.
     """
+    order_by = order_by or {}
+    _check_order_by(tables, order_by)
+
     with restored_dump(
         source, tables=list(tables), schema_name=schema_name, archive_member=archive_member, scratch_root=scratch_root
     ) as uri:
         frames = {
-            name: pl.read_database_uri(_build_select_sql(name, schema_name, columns), uri)
+            name: pl.read_database_uri(_build_select_sql(name, schema_name, columns, order_by.get(name)), uri)
             for name, columns in tables.items()
         }
 
