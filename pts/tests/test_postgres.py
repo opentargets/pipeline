@@ -137,6 +137,9 @@ class TestRoundTrip:
         df = self._read(dump, tmp_path, ['id', 'txt'])
         assert df.height == ROWS
         assert df.columns == ['id', 'txt']
+        # postgres `integer` must come back as Int32, not widened to Int64: steps such as
+        # drug_warning rely on this narrowing to reach the released `year` column untouched.
+        assert df.schema['id'] == pl.Int32
 
     def test_reads_are_distinct_end_to_end(self, dump: Path, tmp_path: Path) -> None:
         """Projecting to ``txt`` alone collapses the rows, as it does for the real sources."""

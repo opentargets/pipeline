@@ -666,7 +666,7 @@ steps:
     - name: drug_warning
       transformer: drug_warning
       source: input/chembl/chembl_${chembl_version}.tar.gz
-      destination: output/drug_warning
+      destination: output/drug_warning/drug_warning.parquet
   ##################################################################################################
 
   #: DRUG_MECHANISM_OF_ACTION STEP :###############################################################
