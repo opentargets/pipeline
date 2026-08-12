@@ -169,8 +169,12 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
         .unnest('mechanism_refs')
         .group_by('id', 'ref_type')
         .agg(
-            pl.col('ref_id').alias('ids'),
-            pl.col('ref_url').alias('urls'),
+            # collect_list on the pyspark side drops nulls; polars' bare list aggregation
+            # does not, so a NULL ref_id/ref_url (e.g. an 'Expert' or 'KEGG' reference with
+            # no id) would otherwise survive as `None` inside the array instead of being
+            # dropped, and would desynchronise `ids` and `urls` differently than pyspark does.
+            pl.col('ref_id').drop_nulls().alias('ids'),
+            pl.col('ref_url').drop_nulls().alias('urls'),
         )
         .with_columns(
             references=pl.struct(
@@ -247,6 +251,14 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     by ``chemblIds`` (and the per-molecule ``id``, already dropped). This step avoids the
     duplication on the mechanism for the parent once the data is exploded
     by ``chemblId`` downstream.
+
+    ``chemblIds`` and ``references`` are deduplicated at different granularities, matching
+    the pyspark reference exactly: ``chemblIds`` unions the individual ids across the group
+    (element-level distinct after flattening, mirroring ``array_distinct(flatten(collect_list(...)))``).
+    ``references`` instead dedupes whole per-row lists first and only then concatenates the
+    survivors (mirroring ``flatten(collect_set(...))``), so two rows whose reference lists are
+    not byte-identical can still contribute overlapping/duplicate reference structs to the
+    result -- that mismatch is in the published data and not accidental here.
     """
     key_cols = [c for c in df.columns if c not in ('references', 'chemblIds')]
     return (
@@ -255,7 +267,7 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
             pl.col('chemblIds').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
                 'chemblIds'
             ),
-            pl.col('references').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
+            pl.col('references').unique(maintain_order=True).list.explode(keep_nulls=False, empty_as_null=False).alias(
                 'references'
             ),
         )

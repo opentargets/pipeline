@@ -123,6 +123,25 @@ class TestProcessMechanismOfAction:
         rows = rows_by_target(process_mechanism_of_action(**tables))
         assert rows['Target TwentyOne']['references'] == []
 
+    def test_null_ref_id_and_url_do_not_survive_inside_the_list(self, tables: dict) -> None:
+        """A reference with no id/url gets ``ids: []`` / ``urls: []``, not ``[None]``.
+
+        Reproduces published references such as 'Expert' or 'KEGG' entries. ``collect_list``
+        on the pyspark side drops nulls, and the polars aggregation must too.
+        """
+        tables = dict(tables)
+        tables['mechanism_refs'] = pl.concat([
+            tables['mechanism_refs'],
+            pl.DataFrame(
+                {'mecref_id': [3], 'mec_id': [100], 'ref_type': ['Expert'], 'ref_id': [None], 'ref_url': [None]},
+                schema=tables['mechanism_refs'].schema,
+            ),
+        ])
+        refs = rows_by_target(process_mechanism_of_action(**tables))['Target Twenty']['references']
+        by_source = {r['source']: r for r in refs}
+        assert by_source['Expert']['ids'] == []
+        assert by_source['Expert']['urls'] == []
+
     def test_target_components_join_produces_all_component_accessions(self, tables: dict) -> None:
         rows = rows_by_target(process_mechanism_of_action(**tables))
         # tid=20 has two components (accessions P100 and P200); both must resolve to genes
