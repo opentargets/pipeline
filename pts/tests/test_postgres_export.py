@@ -106,6 +106,20 @@ class TestBuildRestoreArgs:
             assert p[-1] == '/dump.dmp'
 
 
+class TestAllowEmpty:
+    def test_the_data_pass_uses_strict_names(self) -> None:
+        """A --table that matches nothing must fail the restore, not exit 0."""
+        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 8)
+        assert '--strict-names' in data
+
+    def test_count_sql_applies_the_where(self) -> None:
+        table = TableSpec(table='studies', destination=DESTINATION, where='phase = 1')
+        assert 'WHERE phase = 1' in _build_count_sql(table, 'ctgov')
+
+    def test_allow_empty_defaults_to_false(self) -> None:
+        assert TableSpec(table='studies', destination=DESTINATION).allow_empty is False
+
+
 class TestResolveArchiveMember:
     def test_exact_name(self) -> None:
         assert _resolve_archive_member(['a.txt', 'postgres.dmp'], 'postgres.dmp') == 'postgres.dmp'
@@ -236,6 +250,7 @@ class TestRoundTrip:
                 'CREATE SCHEMA demo;'
                 'CREATE TABLE demo.t (id int, txt text);'
                 "INSERT INTO demo.t SELECT i, 'x' || (i % 7) FROM generate_series(1, 1000) i;"
+                'CREATE TABLE demo.empty (id int, txt text);'
             )
             dump = path / 'demo.dmp'
             subprocess.run(
@@ -246,12 +261,12 @@ class TestRoundTrip:
         finally:
             server.cleanup()
 
-    def _build(self, work_path: Path, source: str) -> PostgresExport:
+    def _build(self, work_path: Path, source: str, tables: list[TableSpec] | None = None) -> PostgresExport:
         spec = PostgresExportSpec(
             name='postgres_export demo',
             source=source,
             schema_name='demo',
-            tables=[TableSpec(table='t', destination=DESTINATION, columns=['id', 'txt'])],
+            tables=tables or [TableSpec(table='t', destination=DESTINATION, columns=['id', 'txt'])],
         )
         config = Config(step='demo', steps=['demo'], work_path=work_path, pool_size=2, log_level='DEBUG')
         context = TaskContext(config=config, scratchpad=Scratchpad())
@@ -306,6 +321,30 @@ class TestRoundTrip:
         assert task.manifest.result == Result.FAILURE
         assert task.manifest.failure_reason is not None
         assert 'has 10 rows, expected 1000' in task.manifest.failure_reason
+
+    def test_an_empty_table_fails_without_allow_empty(self, dump: Path, tmp_path: Path) -> None:
+        """A genuinely empty table must not export silently: it might just as well be a missed restore."""
+        work = tmp_path / 'work'
+        table = TableSpec(table='empty', destination=DESTINATION, columns=['id', 'txt'])
+        task = self._build(work, str(dump), tables=[table])
+
+        _await(task.run())
+
+        assert task.manifest.result == Result.FAILURE
+        assert task.manifest.failure_reason is not None
+        assert 'exported no rows from empty' in task.manifest.failure_reason
+
+    def test_an_empty_table_succeeds_with_allow_empty(self, dump: Path, tmp_path: Path) -> None:
+        work = tmp_path / 'work'
+        table = TableSpec(table='empty', destination=DESTINATION, columns=['id', 'txt'], allow_empty=True)
+        task = self._build(work, str(dump), tables=[table])
+
+        _await(task.run())
+        assert task.manifest.result != Result.FAILURE, task.manifest.failure_reason
+        _await(task.validate())
+        assert task.manifest.result == Result.SUCCESS, task.manifest.failure_reason
+
+        assert _count(work / DESTINATION) == (0,)
 
     def test_scratch_is_cleaned_up(self, dump: Path, tmp_path: Path) -> None:
         work = tmp_path / 'work'

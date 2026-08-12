@@ -88,6 +88,10 @@ class TableSpec(BaseModel):
     """Columns to select. If omitted, every column is exported."""
     where: str | None = None
     """Optional SQL predicate, without the ``WHERE`` keyword."""
+    allow_empty: bool = False
+    """Whether an export of zero rows is acceptable. Off by default: a silent
+        empty parquet surfaces much later and much further away, in PTS, as an
+        unexplained empty join."""
 
 
 class PostgresExportSpec(Spec):
@@ -163,7 +167,9 @@ def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: list[str],
 
     pre_data = [*common, '--section=pre-data', str(dump)]
 
-    data = [*common, '--section=data', '--jobs', str(jobs)]
+    # without --strict-names, a --table matching nothing in the archive exits 0
+    # and restores silently nothing
+    data = [*common, '--section=data', '--strict-names', '--jobs', str(jobs)]
     for table in tables:
         data += ['--table', table]
     data.append(str(dump))
@@ -191,9 +197,12 @@ def _build_count_sql(table: TableSpec, schema_name: str) -> str:
     """Build the DuckDB statement counting the rows of one table in postgres.
 
     ``postgres_query`` pushes the aggregate down to the server instead of
-    transferring the table to count it here.
+    transferring the table to count it here. The predicate must match
+    :py:func:`_build_copy_sql`, or a ``where`` that legitimately selects nothing
+    reads as a failed restore.
     """
-    inner = f'SELECT count(*) FROM "{schema_name}"."{table.table}"'  # noqa: S608 trusted config
+    where = f' WHERE {table.where}' if table.where else ''
+    inner = f'SELECT count(*) FROM "{schema_name}"."{table.table}"{where}'  # noqa: S608 trusted config
     return f'SELECT * FROM postgres_query({_sql_str("pg")}, {_sql_str(inner)})'  # noqa: S608 trusted config
 
 
@@ -377,10 +386,11 @@ class PostgresExport(Task):
         local.parent.mkdir(parents=True, exist_ok=True)
         rows = int(_scalar(con, _build_copy_sql(table, self.spec.schema_name, local)))
 
-        if source_rows and not rows:
+        if not rows and not table.allow_empty:
             raise PostgresExportError(
                 f'exported no rows from {table.table}, which has {source_rows} in the database: '
-                'the restore did not load it'
+                'either the restore did not load it, or it is genuinely empty. '
+                'set allow_empty on the table if empty is expected'
             )
         logger.info(f'exported {rows} of {source_rows} rows from {table.table} to {table.destination}')
         self.row_counts[table.destination] = rows
