@@ -33,7 +33,7 @@ def drug_mechanism_of_action(
     source: dict[str, Path],
     destination: Path,
     _settings: dict[str, Any],
-    _config: Config,
+    config: Config,
 ) -> None:
     """Transform ChEMBL mechanism of action data into the Open Targets format.
 
@@ -43,10 +43,12 @@ def drug_mechanism_of_action(
             - target: Path to the target parquet (gene data).
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
-        _config: Config object (not used).
+        config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
-    tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME)
+    # scratch_root: the restore needs gigabytes, and `work_path` is the work disk.
+    # See the note in drug_warning.
+    tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading target data from {source["target"]}')
     gene_df = pl.read_parquet(source['target'])

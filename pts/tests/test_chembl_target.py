@@ -10,6 +10,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 from pixeltable_pgserver.postgres_server import get_server
 
 from pts.transformers.chembl_target import TABLES, chembl_target
@@ -17,6 +18,11 @@ from pts.transformers.chembl_target import TABLES, chembl_target
 EXPECTED_TABLES = {
     'target_dictionary', 'target_components', 'component_sequences', 'component_class', 'protein_classification',
 }
+
+
+def _config(work_path: Path) -> Config:
+    """The transformer reads `work_path` off the config to place the restore scratch."""
+    return Config(step='chembl_target', steps=['chembl_target'], work_path=work_path)
 
 
 def test_tables_pins_the_five_names_and_columns() -> None:
@@ -65,21 +71,21 @@ class TestChemblTarget:
     def test_it_writes_the_five_tables(self, dump: Path, tmp_path: Path) -> None:
         """`target` reads exactly these five, by these names."""
         destination = {name: tmp_path / f'{name}.parquet' for name in TABLES}
-        chembl_target(dump, destination, {}, None)
+        chembl_target(dump, destination, {}, _config(tmp_path))
 
         written = {p.stem for p in tmp_path.glob('*.parquet')}
         assert written == EXPECTED_TABLES
 
     def test_each_file_has_only_the_declared_columns(self, dump: Path, tmp_path: Path) -> None:
         destination = {name: tmp_path / f'{name}.parquet' for name in TABLES}
-        chembl_target(dump, destination, {}, None)
+        chembl_target(dump, destination, {}, _config(tmp_path))
 
         for name, columns in TABLES.items():
             assert pl.read_parquet(destination[name]).columns == columns
 
     def test_no_join_no_flatten_the_rows_pass_through_untouched(self, dump: Path, tmp_path: Path) -> None:
         destination = {name: tmp_path / f'{name}.parquet' for name in TABLES}
-        chembl_target(dump, destination, {}, None)
+        chembl_target(dump, destination, {}, _config(tmp_path))
 
         target_dictionary = pl.read_parquet(destination['target_dictionary'])
         assert target_dictionary.to_dicts() == [

@@ -11,10 +11,13 @@ import tarfile
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 from pixeltable_pgserver.postgres_server import get_server
+from pytest_mock import MockerFixture
 
 from pts.postgres import (
     DUMP_MAGIC,
@@ -196,3 +199,55 @@ class TestRestoreArgsImprovements:
         """Filtering pre-data would skip CREATE SCHEMA and any types the tables need."""
         pre_data, _ = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
         assert '--schema' not in pre_data
+
+
+class _CapturedError(Exception):
+    """Raised by the stub once it has the kwargs, to stop the transformer there."""
+
+
+WORK_PATH = Path('/mnt/disks/work')
+"""What `work_path` is on the pipeline VM, where the work disk is mounted."""
+
+CALL_SITES = {
+    'chembl_target': ('pts.transformers.chembl_target', Path('chembl.tar.gz'), {}),
+    'drug_warning': ('pts.transformers.drug_warning', Path('chembl.tar.gz'), Path('out.parquet')),
+    'drug_mechanism_of_action': (
+        'pts.transformers.drug_mechanism_of_action',
+        {'chembl': Path('chembl.tar.gz'), 'target': Path('genes.parquet')},
+        Path('out.parquet'),
+    ),
+    'chembl_molecule': (
+        'pts.transformers.chembl_molecule',
+        {'chembl': Path('chembl.tar.gz'), 'drugbank': Path('drugbank.csv.gz')},
+        Path('out.parquet'),
+    ),
+}
+"""The four transformers that restore a dump, with the arguments they take."""
+
+
+@pytest.mark.parametrize('transformer', list(CALL_SITES), ids=list(CALL_SITES))
+def test_the_restore_scratch_goes_on_the_work_disk(transformer: str, mocker: MockerFixture) -> None:
+    """A restore that defaults to /tmp fills the VM's boot disk and dies mid-restore.
+
+    On the pipeline VM the 300 GB work disk is mounted at `work_path` and the
+    container root filesystem, `/tmp` included, is on a boot disk an order of
+    magnitude smaller. The archive, the extracted dump and the whole pgdata
+    directory all land in the scratch, so every one of these transformers has to
+    point it at `work_path` rather than take `tempfile`'s default.
+    """
+    module_name, source, destination = CALL_SITES[transformer]
+    module = __import__(module_name, fromlist=['read_dump_tables'])
+
+    captured: dict[str, Any] = {}
+
+    def stub(*args: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        raise _CapturedError
+
+    mocker.patch.object(module, 'read_dump_tables', stub)
+    config = Config(step=transformer, steps=[transformer], work_path=WORK_PATH)
+
+    with pytest.raises(_CapturedError):
+        getattr(module, transformer)(source, destination, {}, config)
+
+    assert captured.get('scratch_root') == WORK_PATH

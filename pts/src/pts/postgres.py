@@ -7,10 +7,12 @@ usually wants. :func:`restored_dump` underneath it spins up a throwaway server
 yields a connection URI, and deletes the server again.
 
 .. note:: The archive, the dump and the database are all large, and all of them
-    go in a temporary directory that is removed again on the way out. That
-    directory is created wherever :py:mod:`tempfile` puts things, so ``TMPDIR``
-    is the knob if the default lands somewhere too small for the source in
-    question — a full ChEMBL restore wants tens of gigabytes.
+    go in a temporary directory that is removed again on the way out. A caller
+    running on the pipeline VM **must** pass ``scratch_root=config.work_path``:
+    that is the dedicated work disk, while the container root filesystem and
+    ``/tmp``, where :py:mod:`tempfile` would otherwise put this, are on a much
+    smaller boot disk that a single restore would fill. ``TMPDIR`` is the same
+    knob from outside the process. A full ChEMBL restore wants tens of gigabytes.
 """
 
 from __future__ import annotations

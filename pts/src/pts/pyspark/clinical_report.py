@@ -102,6 +102,13 @@ def clinical_report(
     disease_index_spark = spark.read.parquet(source['disease'])
     chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
 
+    # No `scratch_root` here, unlike the four polars chembl transformers. Those run
+    # on a GCE VM whose container /tmp is on a small boot disk, so they point the
+    # restore at `config.work_path`, the 300 GB work disk. This step runs on the
+    # dataproc master instead: a pyspark job is not handed a `Config`, `work_path`
+    # (/mnt/disks/work) is only ever mounted by the GCE operator and does not exist
+    # there, and the master's own disk -- which /tmp is on -- is 512 GB. The default
+    # is the right place here.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME)
     chembl_indication = chembl_tables['drug_indication']

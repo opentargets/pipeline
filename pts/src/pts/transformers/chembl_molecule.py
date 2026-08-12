@@ -88,7 +88,7 @@ def chembl_molecule(
     source: dict[str, Path],
     destination: Path,
     _settings: dict[str, Any],
-    _config: Config,
+    config: Config,
 ) -> None:
     """Transform raw ChEMBL molecule tables into the Open Targets molecule format.
 
@@ -101,10 +101,13 @@ def chembl_molecule(
               appended to the molecules.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
-        _config: Config object (not used).
+        config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
-    tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME)
+    # scratch_root: this is the largest of the four restores -- compound_structures
+    # alone is ~7.5 GB -- and `work_path` is the work disk. See the note in
+    # drug_warning.
+    tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading drugbank lookup from {source["drugbank"]}')
     drugbank_lookup = pl.read_csv(source['drugbank'], separator='\t')

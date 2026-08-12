@@ -32,7 +32,7 @@ def chembl_target(
     source: Path,
     destination: dict[str, Path],
     _settings: dict[str, Any],
-    _config: Config,
+    config: Config,
 ) -> None:
     """Restore the ChEMBL target tables and write each one to parquet, untouched.
 
@@ -40,10 +40,12 @@ def chembl_target(
         source: Path to the ChEMBL ``pg_dump`` archive.
         destination: Table name to the parquet path to write it to.
         _settings: Custom settings (not used).
-        _config: Config object (not used).
+        config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source}')
-    tables = read_dump_tables(str(source), TABLES, schema_name=SCHEMA_NAME)
+    # scratch_root: the restore needs gigabytes, and `work_path` is the work disk.
+    # See the note in drug_warning.
+    tables = read_dump_tables(str(source), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     for name, df in tables.items():
         logger.info(f'Writing {name} to {destination[name]}')

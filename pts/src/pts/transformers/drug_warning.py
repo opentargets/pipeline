@@ -33,7 +33,7 @@ def drug_warning(
     source: Path,
     destination: Path,
     _settings: dict[str, Any],
-    _config: Config,
+    config: Config,
 ) -> None:
     """Transform ChEMBL drug warnings into the Open Targets format.
 
@@ -41,10 +41,15 @@ def drug_warning(
         source: Path to the ChEMBL ``pg_dump`` archive.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
-        _config: Config object (not used).
+        config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source}')
-    tables = read_dump_tables(str(source), TABLES, schema_name=SCHEMA_NAME)
+    # scratch_root is not optional in production: the restore stages the archive,
+    # the extracted dump and the whole pgdata directory into it, several gigabytes
+    # of it. On the pipeline VM `work_path` is the dedicated work disk; the
+    # container root filesystem and /tmp, where tempfile would otherwise put this,
+    # are on a much smaller boot disk that it would fill.
+    tables = read_dump_tables(str(source), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info('Preparing drug warnings')
     output_df = process_drug_warnings(
