@@ -667,7 +667,7 @@ steps:
   # since a database restore has no use for spark workers. target keeps its verified
   # implementation and reads these five tables back at intermediate/chembl/*.parquet.
   chembl_target:
-    - name: chembl_target
+    - name: transform chembl_target
       transformer: chembl_target
       source: input/chembl/chembl_${chembl_version}.tar.gz
       destination:
@@ -680,7 +680,7 @@ steps:
 
   #: DRUG_WARNING STEP :############################################################################
   drug_warning:
-    - name: drug_warning
+    - name: transform drug_warning
       transformer: drug_warning
       source: input/chembl/chembl_${chembl_version}.tar.gz
       destination: output/drug_warning/drug_warning.parquet
@@ -688,7 +688,7 @@ steps:
 
   #: DRUG_MECHANISM_OF_ACTION STEP :###############################################################
   drug_mechanism_of_action:
-    - name: drug_mechanism_of_action
+    - name: transform drug_mechanism_of_action
       transformer: drug_mechanism_of_action
       source:
         chembl: input/chembl/chembl_${chembl_version}.tar.gz
@@ -698,7 +698,7 @@ steps:
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
   chembl_molecule:
-    - name: chembl_molecule
+    - name: transform chembl_molecule
       transformer: chembl_molecule
       source:
         chembl: input/chembl/chembl_${chembl_version}.tar.gz
