@@ -347,19 +347,19 @@ steps:
       - pis_literature
 
   # clinical mining updates:
-  pts_chembl:
+  pts_chembl_target:
     depends_on:
       - pis_chembl
   pts_drug_warning:
     depends_on:
-      - pts_chembl
+      - pis_chembl
   pts_chembl_molecule:
     depends_on:
-      - pts_chembl
+      - pis_chembl
       - pis_drug
   pts_drug_mechanism_of_action:
     depends_on:
-      - pts_chembl
+      - pis_chembl
       - pts_pre_target
   pts_drug_molecule:
     depends_on:
@@ -369,6 +369,7 @@ steps:
   pts_clinical_report:
     depends_on:
       - pis_clinical_report
+      - pis_chembl
       - pts_chembl_molecule
       - pts_disease
       - pts_drug_warning
@@ -442,7 +443,7 @@ steps:
       - pts_target_safety
       - pts_target_gene_essentiality
       - pts_disease
-      - pts_chembl
+      - pts_chembl_target
 
   pts_search_facet:
     depends_on:

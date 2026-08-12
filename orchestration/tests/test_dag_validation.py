@@ -43,15 +43,21 @@ def test_three_or_less_retries(dag_bag: DagBag) -> None:
         assert dag.default_args['retries'] <= 3
 
 
-def test_the_chembl_step_runs_on_gce_not_dataproc() -> None:
-    """A restore belongs on a single VM, not on a Spark cluster.
+def test_the_polars_chembl_steps_run_on_gce_not_dataproc() -> None:
+    """A restore belongs on a single VM, not on a spark cluster.
 
     pts_step_from_config routes a step to dataproc as soon as one of its tasks is
-    named 'pyspark ...'. The chembl step restores a 15 GB dump and exports
-    parquet; adding a pyspark task to it would move that onto a cluster whose
+    named 'pyspark ...'. These steps restore a dump and read it into polars;
+    adding a pyspark task to any of them would move that onto a cluster whose
     workers would sit idle throughout.
     """
-    step = pts_step_from_config('pts_chembl', UnifiedPipelineConfig())
-
-    assert step.is_gce, 'the chembl step must run on GCE: it restores a database'
-    assert not step.is_dataproc
+    config = UnifiedPipelineConfig()
+    for name in (
+        'pts_chembl_target',
+        'pts_drug_warning',
+        'pts_drug_mechanism_of_action',
+        'pts_chembl_molecule',
+    ):
+        step = pts_step_from_config(name, config)
+        assert step.is_gce, f'{name} must run on GCE: it restores a database'
+        assert not step.is_dataproc
