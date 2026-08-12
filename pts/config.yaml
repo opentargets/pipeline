@@ -402,7 +402,11 @@ steps:
         tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        chembl: input/target/chembl/chembl_target.jsonl
+        target_dictionary: input/chembl/target_dictionary.parquet
+        target_components: input/chembl/target_components.parquet
+        component_sequences: input/chembl/component_sequences.parquet
+        component_class: input/chembl/component_class.parquet
+        protein_classification: input/chembl/protein_classification.parquet
         chemical_probes: intermediate/chemical_probes_evidence.parquet
         gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
       destination:
@@ -660,7 +664,11 @@ steps:
   drug_warning:
     - name: pyspark drug_warning
       pyspark: drug_warning
-      source: input/drug/chembl_drug_warning.jsonl
+      source:
+        drug_warning: input/chembl/drug_warning.parquet
+        warning_refs: input/chembl/warning_refs.parquet
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
       destination: output/drug_warning
   ##################################################################################################
 
@@ -669,8 +677,13 @@ steps:
     - name: pyspark drug_mechanism_of_action
       pyspark: drug_mechanism_of_action
       source:
-        chembl_mechanism: input/drug/chembl_mechanism.jsonl
-        chembl_target: input/drug/chembl_target.jsonl
+        drug_mechanism: input/chembl/drug_mechanism.parquet
+        mechanism_refs: input/chembl/mechanism_refs.parquet
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
+        target_dictionary: input/chembl/target_dictionary.parquet
+        target_components: input/chembl/target_components.parquet
+        component_sequences: input/chembl/component_sequences.parquet
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
@@ -680,7 +693,10 @@ steps:
     - name: pyspark chembl_molecule
       pyspark: chembl_molecule
       source:
-        chembl_molecule: input/drug/chembl_molecule.jsonl
+        molecule_dictionary: input/chembl/molecule_dictionary.parquet
+        compound_structures: input/chembl/compound_structures.parquet
+        molecule_hierarchy: input/chembl/molecule_hierarchy.parquet
+        molecule_synonyms: input/chembl/molecule_synonyms.parquet
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
@@ -718,11 +734,11 @@ steps:
         aact_study_references: input/clinical_report/aact/study_references.parquet
         aact_designs: input/clinical_report/aact/designs.parquet
         aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: input/clinical_report/chembl/drug_indication.parquet
-        chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
-        chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
-        chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
-        chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
+        chembl_indication: input/chembl/drug_indication.parquet
+        chembl_indication_references: input/chembl/indication_refs.parquet
+        chembl_drug_warning: input/chembl/drug_warning.parquet
+        chembl_drug_warning_references: input/chembl/warning_refs.parquet
+        chembl_molecule_dictionary: input/chembl/molecule_dictionary.parquet
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet

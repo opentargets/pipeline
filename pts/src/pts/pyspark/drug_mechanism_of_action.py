@@ -1,7 +1,7 @@
 """Mechanism of Action processing for drugs.
 
-Prepares the mechanism of action section of the drug object by joining
-ChEMBL mechanism data with target and gene information.
+Prepares the mechanism of action section of the drug object by joining raw
+ChEMBL mechanism, target, and reference tables with target/gene information.
 """
 
 from typing import Any
@@ -11,6 +11,7 @@ from loguru import logger
 from pyspark.sql import DataFrame
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.drug_utils.chembl_ids import chembl_ids as _chembl_ids
 
 
 def drug_mechanism_of_action(
@@ -23,9 +24,14 @@ def drug_mechanism_of_action(
 
     Args:
         source: Dictionary with paths to:
-            - chembl_mechanism: ChEMBL mechanism JSONL
-            - chembl_target: ChEMBL target JSONL
-            - target: Target parquet (gene data)
+            - drug_mechanism: Raw ChEMBL drug_mechanism parquet.
+            - mechanism_refs: Raw ChEMBL mechanism_refs parquet.
+            - molecule_dictionary: Raw ChEMBL molecule_dictionary parquet.
+            - molecule_hierarchy: Raw ChEMBL molecule_hierarchy parquet.
+            - target_dictionary: Raw ChEMBL target_dictionary parquet.
+            - target_components: Raw ChEMBL target_components parquet.
+            - component_sequences: Raw ChEMBL component_sequences parquet.
+            - target: Target parquet (gene data).
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
         properties: Spark configuration options.
@@ -33,43 +39,79 @@ def drug_mechanism_of_action(
     spark = Session(app_name='drug_mechanism_of_action', properties=properties)
 
     logger.info(f'Loading data from {source}')
-    mechanism_df = spark.load_data(source['chembl_mechanism'], format='json')
-    target_df = spark.load_data(source['chembl_target'], format='json')
+    drug_mechanism = spark.load_data(source['drug_mechanism'])
+    mechanism_refs = spark.load_data(source['mechanism_refs'])
+    molecule_dictionary = spark.load_data(source['molecule_dictionary'])
+    molecule_hierarchy = spark.load_data(source['molecule_hierarchy'])
+    target_dictionary = spark.load_data(source['target_dictionary'])
+    target_components = spark.load_data(source['target_components'])
+    component_sequences = spark.load_data(source['component_sequences'])
     gene_df = spark.load_data(source['target'])
 
     logger.info('Processing mechanisms of action')
-    output_df = process_mechanism_of_action(mechanism_df, target_df, gene_df)
+    output_df = process_mechanism_of_action(
+        drug_mechanism,
+        mechanism_refs,
+        molecule_dictionary,
+        molecule_hierarchy,
+        target_dictionary,
+        target_components,
+        component_sequences,
+        gene_df,
+    )
 
     logger.info(f'Writing mechanism of action to {destination}')
     output_df.write.parquet(destination, mode='overwrite')
 
 
 def process_mechanism_of_action(
-    mechanism_df: DataFrame,
-    target_df: DataFrame,
+    drug_mechanism: DataFrame,
+    mechanism_refs: DataFrame,
+    molecule_dictionary: DataFrame,
+    molecule_hierarchy: DataFrame,
+    target_dictionary: DataFrame,
+    target_components: DataFrame,
+    component_sequences: DataFrame,
     gene_df: DataFrame,
 ) -> DataFrame:
-    """Process mechanism of action by joining mechanism, target, and gene data.
+    """Build mechanisms of action by joining raw ChEMBL tables with target and gene data.
 
     Args:
-        mechanism_df: Raw ChEMBL mechanism data.
-        target_df: Raw ChEMBL target data.
-        gene_df: Gene parquet data from target step.
+        drug_mechanism: Raw ChEMBL drug_mechanism table.
+        mechanism_refs: Raw ChEMBL mechanism_refs table.
+        molecule_dictionary: Raw ChEMBL molecule_dictionary table.
+        molecule_hierarchy: Raw ChEMBL molecule_hierarchy table.
+        target_dictionary: Raw ChEMBL target_dictionary table.
+        target_components: Raw ChEMBL target_components table.
+        component_sequences: Raw ChEMBL component_sequences table.
+        gene_df: Gene parquet data from the target step.
 
     Returns:
         Processed mechanism of action DataFrame.
     """
+    ids = _chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy, key='mec_id')
+    mechanism_refs_agg = mechanism_refs.groupBy('mec_id').agg(
+        f.collect_list(
+            f.struct(
+                f.col('ref_type'),
+                f.col('ref_id'),
+                f.col('ref_url'),
+            )
+        ).alias('mechanism_refs')
+    )
+
     mechanism = (
-        mechanism_df
-        .withColumnRenamed('molecule_chembl_id', 'id')
+        _with_target_chembl_id(drug_mechanism, target_dictionary)
+        .join(molecule_dictionary.select('molregno', f.col('chembl_id').alias('id')), on='molregno', how='left')
+        .join(ids, on='mec_id', how='left')
+        .join(mechanism_refs_agg, on='mec_id', how='left')
         .withColumnRenamed('mechanism_of_action', 'mechanismOfAction')
         .withColumnRenamed('action_type', 'actionType')
-        .withColumn('chemblIds', f.col('_metadata.all_molecule_chembl_ids'))
-        .drop('_metadata', 'parent_molecule_chembl_id')
+        .drop('mec_id', 'molregno')
     )
 
     references = _chembl_mechanism_references(mechanism)
-    target = _chembl_target(target_df, gene_df)
+    target = _chembl_target(target_dictionary, target_components, component_sequences, gene_df)
 
     result = (
         mechanism
@@ -86,6 +128,30 @@ def process_mechanism_of_action(
     )
 
     return _consolidate_duplicate_references(result)
+
+
+def _with_target_chembl_id(mechanism: DataFrame, target_dictionary: DataFrame) -> DataFrame:
+    """Resolve each mechanism's `tid` to a `target_chembl_id`.
+
+    Uses a left join, so a null or unmatched `tid` yields a null `target_chembl_id`
+    rather than dropping the mechanism row.
+
+    Args:
+        mechanism: Raw ChEMBL drug_mechanism table.
+        target_dictionary: Raw ChEMBL target_dictionary table.
+
+    Returns:
+        `mechanism` with `tid` replaced by `target_chembl_id`.
+    """
+    return (
+        mechanism
+        .join(
+            target_dictionary.select('tid', f.col('chembl_id').alias('target_chembl_id')),
+            on='tid',
+            how='left',
+        )
+        .drop('tid')
+    )
 
 
 def _chembl_mechanism_references(df: DataFrame) -> DataFrame:
@@ -118,26 +184,33 @@ def _chembl_mechanism_references(df: DataFrame) -> DataFrame:
     )
 
 
-def _chembl_target(target_df: DataFrame, gene_df: DataFrame) -> DataFrame:
+def _chembl_target(
+    target_dictionary: DataFrame,
+    target_components: DataFrame,
+    component_sequences: DataFrame,
+    gene_df: DataFrame,
+) -> DataFrame:
     """Process ChEMBL target data and join with gene information.
 
     Args:
-        target_df: Raw ChEMBL target data.
+        target_dictionary: Raw ChEMBL target_dictionary table.
+        target_components: Raw ChEMBL target_components table.
+        component_sequences: Raw ChEMBL component_sequences table.
         gene_df: Gene parquet data with proteinIds.
 
     Returns:
         DataFrame with target_chembl_id, targetName, targetType, and targets.
     """
-    # Process target data - explode target_components and filter
-    target = (
-        target_df
-        .withColumn('target_components', f.explode('target_components'))
-        .filter(f.col('target_components.accession').isNotNull())
+    target_components_flat = (
+        target_components
+        .join(component_sequences, on='component_id', how='inner')
+        .join(target_dictionary, on='tid', how='inner')
+        .filter(f.col('accession').isNotNull())
         .select(
             f.col('pref_name').alias('targetName'),
-            f.col('target_components.accession').alias('uniprot_id'),
+            f.col('accession').alias('uniprot_id'),
             f.lower(f.col('target_type')).alias('targetType'),
-            f.col('target_chembl_id'),
+            f.col('chembl_id').alias('target_chembl_id'),
         )
     )
 
@@ -151,9 +224,10 @@ def _chembl_target(target_df: DataFrame, gene_df: DataFrame) -> DataFrame:
     ).select('geneId', f.explode('uniprotIds').alias('uniprot_id'))
 
     # Join target with genes on uniprot_id or geneId
-    joined = target.join(
+    joined = target_components_flat.join(
         genes,
-        (target['uniprot_id'] == genes['uniprot_id']) | (target['uniprot_id'] == genes['geneId']),
+        (target_components_flat['uniprot_id'] == genes['uniprot_id'])
+        | (target_components_flat['uniprot_id'] == genes['geneId']),
         how='left_outer',
     )
 
