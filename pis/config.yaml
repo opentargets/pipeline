@@ -4,6 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  aact_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.88.0'
   ensembl_version: '115'
@@ -142,6 +143,13 @@ steps:
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
+    # both dumps are copied whole and left alone. pts restores the tables it
+    # needs from them, so the tables and columns are declared there, next to the
+    # code that depends on them
+    - name: copy aact dump
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/clinical_report/aact_${aact_version}.zip
+
     - name: explode_glob clinical_report
       glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
       do:
