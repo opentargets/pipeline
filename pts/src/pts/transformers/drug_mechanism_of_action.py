@@ -271,6 +271,20 @@ def _chembl_target(
     # Gene lookup keyed by uniprot accession, plus an identity mapping keyed by the gene id
     # itself -- the original pyspark join matched on `uniprot_id == genes.uniprot_id OR
     # uniprot_id == genes.geneId`, which a single equi-join cannot express directly.
+    #
+    # ACCEPTED DIVERGENCE FROM THE PYSPARK REFERENCE, and the reason `genes_by_id` is built
+    # from the whole of `gene_df` rather than from the rows that survive the explode below.
+    # The reference built its lookup as `explode(array_union(uniprot_trembl, uniprot_swissprot))`
+    # and matched both branches of the OR against *that*. `explode` drops empty arrays, so a
+    # gene with no uniprot accession never entered the lookup at all and its `geneId` branch
+    # could not fire, however the ChEMBL accession was spelled. Three microRNA mechanisms
+    # come out resolved here and empty in the reference: ENSG00000284190, ENSG00000283904,
+    # ENSG00000284440. This is deliberate -- it was reviewed and accepted as a correctness
+    # fix, and it needs a release-note line.
+    #
+    # The exposure is much larger than three: 58,332 of 78,691 genes have no uniprot
+    # accession. Only three are reached by a ChEMBL mechanism today, so if ChEMBL adds
+    # mechanisms against more of them the difference grows without anything here changing.
     genes_by_uniprot = (
         gene_df.select(
             pl.col('id').alias('geneId'),
