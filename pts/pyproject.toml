@@ -27,7 +27,6 @@ dependencies = [
   "clinical-mining",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
-  "duckdb>=1.4",
   "pixeltable-pgserver>=0.6,<0.7",
 ]
 
