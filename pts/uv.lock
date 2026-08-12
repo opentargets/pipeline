@@ -758,6 +758,15 @@ sparse = [
 ]
 
 [[package]]
+name = "fasteners"
+version = "0.20"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/18/7881a99ba5244bfc82f06017316ffe93217dbbbcfa52b887caa1d4f2a6d3/fasteners-0.20.tar.gz", hash = "sha256:55dce8792a41b56f727ba6e123fcaee77fd87e638a6863cec00007bfea84c8d8", size = 25087, upload-time = "2025-08-11T10:19:37.785Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/ac/e5d886f892666d2d1e5cb8c1a41146e1d79ae8896477b1153a21711d3b44/fasteners-0.20-py3-none-any.whl", hash = "sha256:9422c40d1e350e4259f509fb2e608d6bc43c0136f79a00db1b49046029d0b3b7", size = 18702, upload-time = "2025-08-11T10:19:35.716Z" },
+]
+
+[[package]]
 name = "fastexcel"
 version = "0.20.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2439,6 +2448,37 @@ wheels = [
 ]
 
 [[package]]
+name = "pixeltable-pgserver"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fasteners" },
+    { name = "platformdirs" },
+    { name = "psutil" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/9b/be1f7decf58d4e5369f299b938b0c0b3502335c6be1737dddfcdcdab8e2b/pixeltable_pgserver-0.6.0-cp311-cp311-macosx_10_13_x86_64.whl", hash = "sha256:ed130ab59b1fddde938087eb42cd586a35e8c0a8c151d11780da77001940ff37", size = 21748524, upload-time = "2026-07-14T16:27:51.633Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/26/dea5088948687a9ed0f605a7a2de2acc89f240457ab573c60249ca5a7a7a/pixeltable_pgserver-0.6.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:b746f44886dbffe43214cd67097802eaf535c777e4bb39995633f4a64ce1b591", size = 20841627, upload-time = "2026-07-14T16:27:54.444Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/fc/0488b2446339621230fd9e8c2958faa574d78b9adf0f846bf9d97e24ef5a/pixeltable_pgserver-0.6.0-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e8dc68805dabf0124b9137496611eeaadaaa75216b02106965ad729ac5ab24c5", size = 24587329, upload-time = "2026-07-14T16:27:57.395Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/8f/2735bd381d83e68bd46b7960a1b03ae94f8b8760e9c0096e26cb317c596c/pixeltable_pgserver-0.6.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:620f397b925a6a6ea39544084d3d86e3775acf41db6a56f8f3b800488bd33c6d", size = 24704024, upload-time = "2026-07-14T16:28:00.55Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/b2/577a7bb036920b7fca2c3a9213bb50babca8354bd3663ad9765f86d90349/pixeltable_pgserver-0.6.0-cp311-cp311-win_amd64.whl", hash = "sha256:af510f724ae377eaf10bfd07bb6e19a41af724e18f3492a1f0455fbc3b83ecae", size = 29292692, upload-time = "2026-07-14T16:28:03.674Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/ba/6af5404f80d72727fc7d014fafc31658a640622980708fa6eb6f619c45db/pixeltable_pgserver-0.6.0-cp311-cp311-win_arm64.whl", hash = "sha256:c3d62de7c5b852025b295bb0826476acd1d0a27437f05a07ad2d29426cffb893", size = 29291650, upload-time = "2026-07-14T16:28:06.54Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/3f/268a819f37bf1c973aa2646dcd3a3243ed184b653ab3df0a35ce8161fe23/pixeltable_pgserver-0.6.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:dfadcf5e55040635f35f7d97157e22e4ee046a7a9fe0d41fb66b6a2808e11419", size = 21748515, upload-time = "2026-07-14T16:28:10.263Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/34/4bfbb7382d5ba72e2594b432b5b582e64ccabf4b52fe640fdc68026e1a05/pixeltable_pgserver-0.6.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:78f8cfc12ad3b08567cf23565fe44cd69fa4f6cba9ed39852a439ae116b6cd49", size = 20841662, upload-time = "2026-07-14T16:28:12.767Z" },
+    { url = "https://files.pythonhosted.org/packages/51/ac/74e2c8ed3a97f51c1a9a98204e42a630fd6127934db5d3d04455ff97daa8/pixeltable_pgserver-0.6.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f02b1423ac75dd7e9b2448551e9d20e3a878e174f1904703ec454a5d85db51e2", size = 24587537, upload-time = "2026-07-14T16:28:15.338Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/43/77d707f8e367481548e43376b69a84350d3954c52aee0abf53594b968aee/pixeltable_pgserver-0.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4cfb6276750a05a142135c077a9ed7e30d439ce2bb38f29f0db3fb958cc6d1a9", size = 24704230, upload-time = "2026-07-14T16:28:17.799Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/21/e2bc94743809dce7f20e3c60daeff04ce313ff70e7f50c70f97a4d175825/pixeltable_pgserver-0.6.0-cp312-cp312-win_amd64.whl", hash = "sha256:71386d9098eba1824420476bc8d104fa2750476adccfda94f9e62ee0bfd4a4d4", size = 29292702, upload-time = "2026-07-14T16:28:20.804Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/93/3656e2fc0db3215929cd4fdf011f65dc3da6ed65d818ae99aa1f6a02d311/pixeltable_pgserver-0.6.0-cp312-cp312-win_arm64.whl", hash = "sha256:be2f92f269f359cc35b345c9e2be1cfeff26bd1ee223bf86310cfdf374d735b4", size = 29291656, upload-time = "2026-07-14T16:28:23.846Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/5f/20ba7ddd84f428e0b7b2e7819f9be4351e27afac1924fa5ed4f91d26074b/pixeltable_pgserver-0.6.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:1b8b92797ae18ade254a64c059492ad24c1c8b0ac9725638de7a317e02dfdedc", size = 21748513, upload-time = "2026-07-14T16:28:26.733Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/31/92009b3475390f1344014e9073b828f3297cfe85bdc7cd5b3737833932e9/pixeltable_pgserver-0.6.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:03ba09bf1de4c661fd76c924a7055d3ba31618e0e2cfffc967f2bc90d710bb68", size = 20841665, upload-time = "2026-07-14T16:28:29.496Z" },
+    { url = "https://files.pythonhosted.org/packages/14/cf/61b8c435ce0c039f4490b25cd30f6c820a85c4e9acc56f8b9980214b9431/pixeltable_pgserver-0.6.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d0bceedb89eff62126375486130cd6f56facfb315b22525afd9c4c1276b9c0d7", size = 24587533, upload-time = "2026-07-14T16:28:32.02Z" },
+    { url = "https://files.pythonhosted.org/packages/08/36/70d71036312bd1d78ac5c064f8a7765782f03bd7ffde9e91d3f6e5aefedc/pixeltable_pgserver-0.6.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:27ecb034b37c6a259b945fcc0b27413c9b9e75f477d5a6c9c7dd88baafba15f9", size = 24704218, upload-time = "2026-07-14T16:28:34.748Z" },
+    { url = "https://files.pythonhosted.org/packages/68/34/ca2974701a7331485c94c7234cd941c0b61c9a96ec2f882d33868a25a3ef/pixeltable_pgserver-0.6.0-cp313-cp313-win_amd64.whl", hash = "sha256:53d8f210d587de0e8dd6030c71916d3afbab674f0593823fc7818665d41d200c", size = 29292702, upload-time = "2026-07-14T16:28:37.294Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/99/9945bd48856e0d9560aa43418770992a2ff616f51c0572a06d328c145b41/pixeltable_pgserver-0.6.0-cp313-cp313-win_arm64.whl", hash = "sha256:d9b7f6b2e23b64e090f500ad37a616529d5ca8552753fe7183d2f0ca0f2c41d8", size = 29291653, upload-time = "2026-07-14T16:28:39.958Z" },
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.11.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2708,6 +2748,7 @@ dependencies = [
     { name = "ot-literature" },
     { name = "pandas" },
     { name = "pdfplumber" },
+    { name = "pixeltable-pgserver" },
     { name = "polars" },
     { name = "polars-hash" },
     { name = "pyspark" },
@@ -2754,6 +2795,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pandas", marker = "extra == 'baseline-expression'", specifier = "<3" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
+    { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
     { name = "polars", specifier = ">=1.41.2" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyspark", specifier = ">=3.5.7" },
