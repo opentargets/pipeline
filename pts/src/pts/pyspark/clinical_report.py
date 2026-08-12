@@ -96,12 +96,11 @@ def clinical_report(
         properties: Dictionary containing Spark properties
     """
     logger.info(f'source paths: {source}')
-    spark = spark_session()
-
-    molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
-    disease_index_spark = spark.read.parquet(source['disease'])
     chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
 
+    # The two restores below take minutes each and use no spark at all, so the
+    # session is not started until they are done -- otherwise the driver, and the
+    # cluster's autoscaled workers, sit idle waiting for a database to come up.
     # No `scratch_root` here, unlike the four polars chembl transformers. Those run
     # on a GCE VM whose container /tmp is on a small boot disk, so they point the
     # restore at `config.work_path`, the 300 GB work disk. This step runs on the
@@ -127,6 +126,10 @@ def clinical_report(
     aact_study_references = aact_tables['study_references']
     aact_designs = aact_tables['designs']
     aact_summaries = aact_tables['brief_summaries']
+
+    spark = spark_session()
+    molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
+    disease_index_spark = spark.read.parquet(source['disease'])
 
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
     llm_indications = llm_batch_results.select(
