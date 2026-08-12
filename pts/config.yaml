@@ -4,6 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  aact_version: '2026-08-01'
   chembl_version: '37'
   string_version: '12.0'
 
@@ -716,17 +717,8 @@ steps:
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
         ema: input/clinical_report/ema_medicines.xlsx
-        aact_studies: input/clinical_report/aact/studies.parquet
-        aact_interventions: input/clinical_report/aact/interventions.parquet
-        aact_conditions: input/clinical_report/aact/conditions.parquet
-        aact_study_references: input/clinical_report/aact/study_references.parquet
-        aact_designs: input/clinical_report/aact/designs.parquet
-        aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: intermediate/chembl/drug_indication.parquet
-        chembl_indication_references: intermediate/chembl/indication_refs.parquet
-        chembl_drug_warning: intermediate/chembl/drug_warning.parquet
-        chembl_drug_warning_references: intermediate/chembl/warning_refs.parquet
-        chembl_molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
+        chembl: input/chembl/chembl_${chembl_version}.tar.gz
+        aact: input/clinical_report/aact_${aact_version}.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet

@@ -26,7 +26,53 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
+from pts.postgres import read_dump_tables
 from pts.transformers.utils import update_quality_flag
+
+CHEMBL_SCHEMA_NAME = 'public'
+"""Schema the ChEMBL tables live in inside the restored dump."""
+
+CHEMBL_TABLES = {
+    'drug_indication': ['drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'],
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name'],
+    'drug_warning': [
+        'warning_id',
+        'molregno',
+        'warning_type',
+        'warning_year',
+        'warning_country',
+        'warning_class',
+        'efo_id',
+        'efo_term',
+        'efo_id_for_warning_class',
+    ],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+"""ChEMBL tables and columns this step needs, restored from the dump."""
+
+AACT_SCHEMA_NAME = 'ctgov'
+"""Schema the AACT tables live in inside the restored dump."""
+
+AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+"""The AACT zip's only dump member -- checked directly against a live monthly export, which
+carries it alongside ``nlm_protocol_definitions.html``, ``nlm_results_definitions.html``,
+``schema.png`` and ``data_dictionary.csv``. The default ``*.dmp`` glob already matches it
+uniquely, but it is spelled out here rather than relied on implicitly.
+"""
+
+AACT_TABLES = {
+    'studies': [
+        'nct_id', 'overall_status', 'phase', 'study_type', 'start_date', 'why_stopped', 'number_of_arms',
+        'official_title',
+    ],
+    'interventions': ['nct_id', 'intervention_type', 'name'],
+    'conditions': ['nct_id', 'downcase_name'],
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'designs': ['nct_id', 'primary_purpose'],
+    'brief_summaries': ['nct_id', 'description'],
+}
+"""AACT tables and columns this step needs, restored from the dump."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -55,48 +101,26 @@ def clinical_report(
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
     chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
-    aact_studies = pl.read_parquet(source['aact_studies']).select(
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
+
+    logger.info(f'restoring chembl tables from {source["chembl"]}')
+    chembl_tables = read_dump_tables(str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME)
+    chembl_indication = chembl_tables['drug_indication']
+    chembl_indication_references = chembl_tables['indication_refs']
+    chembl_molecule_dictionary = chembl_tables['molecule_dictionary']
+    chembl_drug_warning = chembl_tables['drug_warning']
+    chembl_drug_warning_references = chembl_tables['warning_refs']
+
+    logger.info(f'restoring aact tables from {source["aact"]}')
+    aact_tables = read_dump_tables(
+        str(source['aact']), AACT_TABLES, schema_name=AACT_SCHEMA_NAME, archive_member=AACT_ARCHIVE_MEMBER
     )
-    aact_interventions = pl.read_parquet(source['aact_interventions']).select(
-        'nct_id',
-        'intervention_type',
-        'name',
-    )
-    aact_conditions = pl.read_parquet(source['aact_conditions']).select('nct_id', 'downcase_name')
-    aact_study_references = pl.read_parquet(source['aact_study_references']).select('nct_id', 'pmid', 'reference_type')
-    aact_designs = pl.read_parquet(source['aact_designs']).select('nct_id', 'primary_purpose')
-    aact_summaries = pl.read_parquet(source['aact_summaries']).select('nct_id', 'description')
-    chembl_indication = pl.read_parquet(source['chembl_indication']).select(
-        'drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'
-    )
-    chembl_indication_references = pl.read_parquet(source['chembl_indication_references']).select(
-        'drugind_id', 'ref_type', 'ref_id', 'ref_url'
-    )
-    chembl_molecule_dictionary = pl.read_parquet(source['chembl_molecule_dictionary']).select(
-        'molregno', 'chembl_id', 'pref_name'
-    )
-    chembl_drug_warning = pl.read_parquet(source['chembl_drug_warning']).select(
-        'warning_id',
-        'molregno',
-        'warning_type',
-        'warning_year',
-        'warning_country',
-        'warning_class',
-        'efo_id',
-        'efo_term',
-        'efo_id_for_warning_class',
-    )
-    chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
-        'warning_id', 'ref_type', 'ref_id', 'ref_url'
-    )
+    aact_studies = aact_tables['studies']
+    aact_interventions = aact_tables['interventions']
+    aact_conditions = aact_tables['conditions']
+    aact_study_references = aact_tables['study_references']
+    aact_designs = aact_tables['designs']
+    aact_summaries = aact_tables['brief_summaries']
+
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
     llm_indications = llm_batch_results.select(
         'id',
