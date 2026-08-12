@@ -681,16 +681,13 @@ steps:
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
   chembl_molecule:
-    - name: pyspark chembl_molecule
-      pyspark: chembl_molecule
+    - name: chembl_molecule
+      transformer: chembl_molecule
       source:
-        molecule_dictionary: intermediate/chembl/molecule_dictionary.parquet
-        compound_structures: intermediate/chembl/compound_structures.parquet
-        molecule_hierarchy: intermediate/chembl/molecule_hierarchy.parquet
-        molecule_synonyms: intermediate/chembl/molecule_synonyms.parquet
+        chembl: input/chembl/chembl_${chembl_version}.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
-      destination: intermediate/chembl_molecule
+      destination: intermediate/chembl_molecule/chembl_molecule.parquet
   ##################################################################################################
 
   #: DRUG_MOLECULE STEP :##########################################################################
