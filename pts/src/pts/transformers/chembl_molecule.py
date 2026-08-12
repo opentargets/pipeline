@@ -194,12 +194,17 @@ def process_molecules(
         aact_df = mine_aact_synonyms(mol_for_index, entries)
         mol_combined = merge_aact_synonyms(mol_combined, aact_df)
 
-    # Final processing -- ensure name is populated and deduplicate
+    # Final processing -- ensure name is populated and deduplicate. childChemblIds is
+    # deliberately NOT coalesced here: the reference leaves it null for a molecule with
+    # no children (only synonyms/tradeNames are coalesced to []), and the vast majority
+    # of molecules have no children, so filling it would change a published column
+    # across nearly the whole dataset. The AACT-branch fill above is a different,
+    # correct case: mine_aact_synonyms/_build_chembl_indexes need a non-null array to
+    # index over, matching what the pyspark reference does for its own index input.
     return (
         mol_combined.with_columns(
             synonyms=pl.col('synonyms').fill_null([]),
             tradeNames=pl.col('tradeNames').fill_null([]),
-            childChemblIds=pl.col('childChemblIds').fill_null([]),
         )
         .with_columns(
             name=pl.coalesce(
@@ -291,7 +296,10 @@ def _molecule_preprocess(
             )
             .alias('molblock'),
             pl.col('molecule_type').fill_null('Unknown').alias('drugType'),
-            pl.col('pref_name').str.strip_chars().alias('name'),
+            # str.strip_chars() with no argument strips all Unicode whitespace; Spark's
+            # trim() strips only the ASCII space. Pinned to ' ' explicitly so this
+            # matches the reference rather than happening to agree on today's data.
+            pl.col('pref_name').str.strip_chars(' ').alias('name'),
             'parentId',
             'syns',
         )

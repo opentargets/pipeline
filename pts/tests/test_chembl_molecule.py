@@ -190,6 +190,41 @@ class TestProcessMolecules:
         result = _process(t)
         assert result.height == t['molecule_dictionary'].height
 
+    def test_childless_molecule_has_null_childchemblids_not_empty_list(self):
+        """A molecule with no children gets a null childChemblIds, not []."""
+        # The reference coalesces synonyms/tradeNames to [] but deliberately leaves
+        # childChemblIds null after the left join -- the vast majority of molecules
+        # have no children, so filling this to [] would change a published column
+        # across nearly the whole dataset.
+        t = tables()
+        row = rows_by_id(_process(t))['CHEMBL1']
+        assert row['childChemblIds'] is None
+
+    def test_parent_with_children_gets_populated_childchemblids(self):
+        """A molecule with children still gets the real childChemblIds list."""
+        molecule_dictionary = pl.DataFrame(
+            [(30, 'CHEMBLPARENT', 'Parent', 'Small molecule'), (31, 'CHEMBLCHILD', 'Child', 'Small molecule')],
+            schema=['molregno', 'chembl_id', 'pref_name', 'molecule_type'],
+            orient='row',
+        )
+        compound_structures = pl.DataFrame(schema=tables()['compound_structures'].schema)
+        molecule_hierarchy = pl.DataFrame(
+            [(30, 30), (31, 30)], schema=['molregno', 'parent_molregno'], orient='row'
+        )
+        molecule_synonyms = pl.DataFrame(
+            schema={'molsyn_id': pl.Int64, 'molregno': pl.Int64, 'synonyms': pl.Utf8, 'syn_type': pl.Utf8}
+        )
+        result = process_molecules(
+            molecule_dictionary,
+            compound_structures,
+            molecule_hierarchy,
+            molecule_synonyms,
+            tables()['drugbank_lookup'],
+        )
+        rows = rows_by_id(result)
+        assert rows['CHEMBLPARENT']['childChemblIds'] == ['CHEMBLCHILD']
+        assert rows['CHEMBLCHILD']['childChemblIds'] is None
+
 
 class TestCrossReferences:
     def test_drugbank_survives_while_chembl_cross_references_are_gone(self):
