@@ -1,8 +1,9 @@
 """Tests for the AACT synonym-mining helpers inside chembl_molecule.
 
-These are a polars port of the ``pts.pyspark.drug_utils.aact_synonyms`` module (see
-``tests/test_aact_synonyms.py`` for the pyspark originals), covering the private helper
-functions individually rather than through the two AACT scenarios ported in
+These are a polars port of the ``pts.pyspark.drug_utils.aact_synonyms`` module, which
+was deleted once nothing ran it; these tests are now the only ones on this logic. They
+cover the private helper functions individually rather than through the two AACT
+scenarios ported in
 ``test_chembl_molecule.py``. Not part of the fifteen ported chembl_molecule tests --
 added because this ~500-line mining pipeline is new surface area that the ported tests
 barely touch, and it is exactly the kind of translation where pyspark/polars null and
