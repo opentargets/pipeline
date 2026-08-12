@@ -2413,6 +2413,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/22/28f62d24f7db56ac4343588f9362d49b7b4177e55ac47a466fe696b0099b/polars-1.41.2-py3-none-any.whl", hash = "sha256:23ce9a2910b6e3e8d4258770bf44aa17170958df7af6e85feedf4458a04d8d29", size = 833445, upload-time = "2026-05-29T17:37:05.576Z" },
 ]
 
+[package.optional-dependencies]
+connectorx = [
+    { name = "connectorx" },
+]
+
 [[package]]
 name = "polars-hash"
 version = "0.6.0"
@@ -2607,7 +2612,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pdfplumber" },
     { name = "pixeltable-pgserver" },
-    { name = "polars" },
+    { name = "polars", extra = ["connectorx"] },
     { name = "polars-hash" },
     { name = "pyspark" },
     { name = "torch", version = "2.12.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
@@ -2654,7 +2659,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'baseline-expression'", specifier = "<3" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
-    { name = "polars", specifier = ">=1.41.2" },
+    { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyspark", specifier = ">=3.5.7" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
