@@ -1,16 +1,18 @@
 """AACT clinical-trial synonym mining for ChEMBL molecules.
 
 Mines candidate drug synonyms from the OpenAI/AACT clinical-trial extraction and anchors
-them to ChEMBL molecules. A polars port of the deleted pyspark
-``pts.pyspark.drug_utils.aact_synonyms`` module (itself a port of the
-``work/clinical_pairs/`` experiment), kept standalone for the same reason that one was:
-it is a self-contained pipeline that :mod:`pts.transformers.chembl_molecule` calls through
-three functions, and holding it apart lets the port be diffed against its reference.
+them to ChEMBL molecules. :mod:`pts.transformers.chembl_molecule` is the only consumer and
+reaches it through three functions: :func:`parse_aact_entries`,
+:func:`mine_aact_synonyms` and :func:`merge_aact_synonyms`.
 
 Pipeline: parsed batch output (from ``clinical_mining``'s ``parse_batch_results``) ->
 normalized drug member sets -> anchor against a ChEMBL name index (with an ambiguity cap)
 -> eleven cleanup rules -> keep candidates seen in ``MIN_TRIALS`` distinct trials -> merge
 into the molecule synonyms.
+
+The mining is heuristic throughout: it reads free-text trial arm descriptions, so the
+cleanup rules and the two thresholds below are calibrated against the corpus rather than
+derived from anything, and are expected to need revisiting as coverage grows.
 """
 
 import polars as pl
@@ -23,10 +25,8 @@ AACT_SOURCE = ClinicalSource.AACT.value
 AMBIGUITY_CAP = 10
 MIN_TRIALS = 2
 
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
 CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
 
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
 CONTROL_TERMS = {
     'placebo',
     'vehicle',
@@ -40,7 +40,6 @@ CONTROL_TERMS = {
     'air',
     'normal saline',
 }
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
 CLASS_KEYWORDS = [
     'inhibitor',
     'agonist',
@@ -67,23 +66,18 @@ _CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
 def _normalize_name(expr: pl.Expr) -> pl.Expr:
     r"""Lowercase, strip trademark symbols, trim, collapse internal whitespace.
 
-    A literal transliteration of the pyspark reference's ``\s+`` collapse below -- but
-    the two regex engines disagree about what ``\s`` matches. Java's ``java.util.regex``
-    (Spark) treats it as ASCII whitespace only (``[ \t\n\x0B\f\r]``); Rust's ``regex``
-    crate (polars) treats it as full Unicode ``White_Space``, which additionally covers
-    U+00A0 (NBSP), U+2000-200A, U+3000, and friends. This corpus has no leading/trailing
-    tabs or newlines, so only this mid-string collapse is affected -- the
-    ``strip_chars(' ')`` pinned to the ASCII space in
-    :func:`pts.transformers.chembl_molecule._molecule_preprocess` is
-    the deliberately opposite call, kept narrow there for byte-for-byte Spark fidelity.
-    Here the wider polars behavior is kept instead: it is the more correct one --
-    'rosuvastatin 20\xa0mg' and 'rosuvastatin 20 mg' are the same drug label, and
-    treating them as distinct AACT candidates is a defect of the reference, not a
-    feature worth preserving. Measured cost: one changed published value in the 26.06
-    release, CHEMBL1496 gains the synonym 'rosuvastatin 20 mg' (it has two supporting
-    trials that spell the label with an NBSP vs. a plain space; polars unifies them past
-    MIN_TRIALS, Spark does not). Accepted deliberately -- see the AACT mining tests for
-    the pinned case.
+    The ``\s+`` collapse is Unicode-aware: Rust's ``regex`` crate matches the full
+    ``White_Space`` property, so U+00A0 (NBSP), U+2000-200A and U+3000 fold to a plain
+    space along with the ASCII ones. That is wanted here. Trial free text is copy-pasted
+    from all sorts of places, and two arms spelling a dose as ``'drug 20\xa0mg'`` and
+    ``'drug 20 mg'`` are naming the same thing -- keeping them apart would split the
+    trial evidence for one label across two candidates, and each half could then fall
+    below ``MIN_TRIALS``.
+
+    Note this is deliberately wider than the ``strip_chars(' ')`` in
+    :func:`pts.transformers.chembl_molecule._molecule_preprocess`, which is pinned to the
+    ASCII space because it is undoing padding on a published column rather than
+    normalizing free text. The two are not inconsistent; they are doing different jobs.
     """
     stripped = expr.str.replace_all(r'[®™©℠]', '')
     collapsed = stripped.str.strip_chars().str.replace_all(r'\s+', ' ')
@@ -116,8 +110,7 @@ def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
         batch
         .select(pl.col('id').alias('nct_id'), roles.alias('entry'))
         .explode('entry')
-        # pyspark's default `explode` drops rows with an empty or null array; polars'
-        # keeps a null row for both cases, so it is dropped explicitly here.
+        # a trial with no extracted drugs explodes to a null row rather than to nothing
         .drop_nulls('entry')
         .unnest('entry')
         .with_columns(members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([])))
@@ -222,9 +215,8 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
     """
     # Deterministic per-entry key (nct_id + sorted member set), joined on a control
     # character that cannot occur in a normalized name or an NCT id, so two distinct
-    # entries cannot collide onto the same key -- unlike pyspark, polars has no
-    # adaptive-replanning hazard to guard against, so a plain deterministic string
-    # (rather than a hash) is enough here.
+    # entries cannot collide onto the same key. A plain string rather than a hash:
+    # collisions here would silently merge unrelated trials.
     entries = entries.with_columns(
         entry_id=pl.col('nct_id') + pl.lit('\x1f') + pl.col('members').list.sort().list.join('\x1f')
     )
@@ -251,9 +243,7 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
         resolved
         .select('entry_id', pl.col('ids').alias('anchor_id'))
         .explode('anchor_id')
-        # collect_set drops nulls and dedups; an entry whose every member resolves to
-        # zero molecules contributes no rows here at all, matching pyspark's explode
-        # of an empty array.
+        # an entry none of whose members resolve to a molecule drops out entirely here
         .drop_nulls('anchor_id')
         .group_by('entry_id')
         .agg(pl.col('anchor_id').unique().alias('anchor_ids'))
@@ -457,8 +447,8 @@ def merge_aact_synonyms(mol_combined: pl.DataFrame, aact_df: pl.DataFrame) -> pl
 
     Returns:
         ``mol_combined`` with ``synonyms`` carrying the fresh AACT labels appended.
-        ``tradeNames`` is untouched -- AACT labels never become trade names, matching
-        the pyspark reference.
+        ``tradeNames`` is untouched: a trade name is a registered brand, and a label
+        mined from trial free text has not been established to be one.
     """
     aact_grouped = aact_df.group_by('id').agg(pl.col('label').drop_nulls().unique().alias('aact_labels'))
 

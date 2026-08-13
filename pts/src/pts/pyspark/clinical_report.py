@@ -101,13 +101,13 @@ def clinical_report(
     # The two restores below take minutes each and use no spark at all, so the
     # session is not started until they are done -- otherwise the driver, and the
     # cluster's autoscaled workers, sit idle waiting for a database to come up.
-    # No `scratch_root` here, unlike the four polars chembl transformers. Those run
-    # on a GCE VM whose container /tmp is on a small boot disk, so they point the
-    # restore at `config.work_path`, the 300 GB work disk. This step runs on the
-    # dataproc master instead: a pyspark job is not handed a `Config`, `work_path`
-    # (/mnt/disks/work) is only ever mounted by the GCE operator and does not exist
-    # there, and the master's own disk -- which /tmp is on -- is 512 GB. The default
-    # is the right place here.
+    # No `scratch_root` here, unlike the polars chembl transformers. Those run on a
+    # GCE VM whose container /tmp is on a small boot disk, so they point the restore
+    # at `config.work_path`. This step runs on the dataproc master instead: a pyspark
+    # job is not handed a `Config`, and `work_path` (/mnt/disks/work) is mounted only
+    # by the GCE operator, so it does not exist here. The master's own disk, which
+    # /tmp is on, is provisioned large enough for the restore -- the default is the
+    # right place on this executor.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME)
     chembl_indication = chembl_tables['drug_indication']

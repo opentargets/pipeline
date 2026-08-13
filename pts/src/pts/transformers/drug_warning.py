@@ -43,13 +43,11 @@ ORDER_BY = {
 """Reads whose row order reaches the output and therefore must not float.
 
 ``_references`` collects ``warning_refs`` into the published ``references`` array
-in scan order. Unordered, that order is whatever the plan produced -- against the
-26.06 release only 1,351 of 2,009 rows came back with their references in the
-published order, the other 658 carrying the same references shuffled. Ordering by
-``warnref_id``, the table's key and already in the projection, reproduces the
-release exactly on all 2,009. It also matters beyond cosmetics: ``references`` is
-part of ``_deduplicate_warnings``' grouping key, so an unstable order can decide
-which rows merge.
+in scan order, so an unordered read leaves that array in whatever order the query
+plan produced -- the same references, shuffled, on a large share of rows. Ordering
+by ``warnref_id``, the table's key and already in the projection, pins it. This
+matters beyond cosmetics: ``references`` is part of ``_deduplicate_warnings``'
+grouping key, so an unstable order can decide which rows merge.
 
 ``drug_warning`` is ordered for the same reason one step further out:
 ``_deduplicate_warnings`` groups with ``maintain_order=True`` and unions
@@ -126,10 +124,11 @@ def process_drug_warnings(
     ids = _chembl_ids(warnings, molecules, hierarchy, key='warning_id')
     references = _references(refs)
 
-    # `warning_year` is int32 (postgres `integer`), narrower than the released `year`
-    # column's int64 (BIGINT), the same ES-to-parquet type shift as the `protein_class_id`
-    # cast at target.py's `_build_protein_classification`. Resolved the other way here:
-    # the narrowing is accepted uncast because the values are identical, not cast back.
+    # `warning_year` is postgres `integer`, so `year` comes out int32 where the published
+    # column is int64. Left uncast deliberately: a year needs nothing wider, and the
+    # values are unaffected. The `protein_class_id` cast in target.py's
+    # `_build_protein_classification` is the same situation resolved the other way,
+    # because that column's width is part of a nested struct consumers read.
     return (
         warnings
         .join(ids, on='warning_id', how='left', maintain_order='left')

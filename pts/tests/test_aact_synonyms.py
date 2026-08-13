@@ -55,12 +55,9 @@ class TestNormalizeName:
         assert out['Aspirin™'] == 'aspirin'
 
     def test_non_breaking_space_collapses_like_ascii_space(self):
-        # Pins a deliberate divergence from the pyspark reference: polars' `\s+` matches
-        # full Unicode whitespace (incl. U+00A0 NBSP), Spark's only matches ASCII. This is
-        # the case that actually bites the AACT corpus -- CHEMBL1496 gains a published
-        # synonym under polars that Spark never produces, because one supporting trial
-        # spells the label with an NBSP and another with a plain space. See the comment on
-        # `_normalize_name`.
+        # Trial free text spells the same dose with an NBSP or a plain space, and both
+        # must fold to one candidate -- split across two, each half can fall below
+        # MIN_TRIALS and the label is lost. See the comment on `_normalize_name`.
         df = pl.DataFrame({'raw': ['rosuvastatin 20\xa0mg', 'rosuvastatin 20 mg']})
         out = df.with_columns(norm=_normalize_name(pl.col('raw')))['norm'].to_list()
         assert out[0] == out[1] == 'rosuvastatin 20 mg'

@@ -933,8 +933,8 @@ class TestProteinClassification:
     @pytest.fixture
     def chembl(self, spark):
         # a full six-level chain, plus a second level-1 class on the same
-        # component: the multi-class case is what sampling misses -- only 312
-        # of 17,284 real components carry more than one
+        # component: multi-class components are a small minority of the table, so
+        # the case is easy to miss by sampling and is pinned explicitly here
         classes = spark.createDataFrame(
             [
                 (1, None, 'Enzyme', 1),

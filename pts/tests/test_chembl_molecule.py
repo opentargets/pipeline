@@ -14,14 +14,13 @@ _BARE_MOLBLOCK = (
     'M  END'
 )
 
-# PTS always emits exactly one trailing newline after `M  END`: every one of the
-# 2,897,819 molblocks in the 26.06 release ends "M  END\n", so this is the
-# truncated shape regardless of how the raw value was terminated.
+# PTS always emits exactly one trailing newline after `M  END`, which is how the
+# published molblocks are terminated, regardless of how the raw value ended.
 SAMPLE_MOLBLOCK = _BARE_MOLBLOCK + '\n'
 
 # ChEMBL ships some `molfile` values as a full SD-file record: the molblock plus
-# appended SDF property tags, separated by a single newline (the old Elasticsearch
-# shape). PTS truncates this back to the bare molblock.
+# appended SDF property tags, separated by a single newline. PTS truncates this
+# back to the bare molblock.
 SAMPLE_MOLFILE_WITH_SDF_TAGS = _BARE_MOLBLOCK + '\n> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n'
 
 # The raw column is otherwise inconsistent about a trailing newline after the
@@ -151,16 +150,16 @@ class TestMoleculePreprocess:
 
     def test_pref_name_is_trimmed(self):
         """Leading and trailing whitespace on pref_name is stripped from name."""
-        # 18 ChEMBL 37 values carry a trailing space that ChEMBL's own indexer
-        # trims; left untrimmed they would reach the Platform as the drug name.
+        # A handful of pref_name values carry a trailing space; left untrimmed
+        # they would reach the Platform as the drug name.
         t = tables()
         result = _preprocess(t, drugbank())
         assert rows_by_id(result)['CHEMBL3']['name'] == 'lone drug'
 
     def test_molblock_terminator_variants_all_truncate(self):
         """Zero, one, or two trailing newlines after `M  END` all truncate to exactly one."""
-        # Every molblock in the 26.06 release ends "M  END\n" -- dropping that
-        # newline would change a published column, so this must be exact, not lenient.
+        # The published molblock ends "M  END\n" -- dropping that newline would
+        # change the column, so this must be exact rather than lenient.
         t = tables()
         result = _preprocess(t, drugbank())
         rows = rows_by_id(result)
@@ -190,10 +189,9 @@ class TestProcessMolecules:
 
     def test_childless_molecule_has_null_childchemblids_not_empty_list(self):
         """A molecule with no children gets a null childChemblIds, not []."""
-        # The reference coalesces synonyms/tradeNames to [] but deliberately leaves
-        # childChemblIds null after the left join -- the vast majority of molecules
-        # have no children, so filling this to [] would change a published column
-        # across nearly the whole dataset.
+        # synonyms/tradeNames are coalesced to [] but childChemblIds is deliberately
+        # left null: most molecules have no children, so filling it would rewrite
+        # the column on nearly every row.
         t = tables()
         row = rows_by_id(_process(t))['CHEMBL1']
         assert row['childChemblIds'] is None

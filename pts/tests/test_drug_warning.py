@@ -178,13 +178,11 @@ class TestDeduplicateWarnings:
 
 
 class TestOrderIsDeterministic:
-    """`references` is a published array, and it used to come out in scan order.
+    """`references` is a published array whose element order must not float.
 
     Two things have to hold together: the read is ordered (``ORDER_BY``), and the
-    polars pipeline keeps that order through its joins and group_bys. Measured
-    against the published 26.06 artefact, the ordered read reproduces
-    `drug_warning.references` exactly on all 2,009 rows; unordered it managed
-    1,351.
+    polars pipeline keeps that order through its joins and group_bys. Either one
+    alone leaves the array at the mercy of the query plan.
     """
 
     def test_order_by_covers_the_tables_whose_order_reaches_the_output(self) -> None:

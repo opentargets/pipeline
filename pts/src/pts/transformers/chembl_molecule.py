@@ -6,11 +6,11 @@ own cross-reference table is deliberately not joined here (see
 :func:`_process_molecule_cross_references`).
 
 Clinical-trial (AACT) synonym mining is this step's only consumer, but it lives in
-:mod:`pts.transformers.utils.aact_synonyms` rather than here -- a self-contained pipeline
-reached through three functions, and a polars port of a module that stood alone in pyspark
-too, so keeping it apart lets the port be diffed against its reference. This module reads
-the OpenAI batch output (``parse_batch_results``, from ``clinical_mining``, already used by
-``clinical_report``) and hands it over.
+:mod:`pts.transformers.utils.aact_synonyms` rather than here: it is a self-contained
+pipeline reached through three functions, and it is large enough to obscure the molecule
+transform it sits next to. This module reads the OpenAI batch output
+(``parse_batch_results``, from ``clinical_mining``, also used by ``clinical_report``) and
+hands it over.
 """
 
 from pathlib import Path
@@ -58,9 +58,8 @@ def chembl_molecule(
         config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
-    # scratch_root: this is the largest of the four restores -- compound_structures
-    # alone is ~7.5 GB -- and `work_path` is the work disk. See the note in
-    # drug_warning.
+    # scratch_root: `compound_structures` makes this much the largest of the ChEMBL
+    # restores, and `work_path` is the work disk. See the note in drug_warning.
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading drugbank lookup from {source["drugbank"]}')
@@ -140,10 +139,9 @@ def process_molecules(
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
         entries = parse_aact_entries(aact_batch)
-        # The fills mirror what the pyspark reference passes to its own index input,
-        # 1:1. They are not load-bearing: removing them was measured to change nothing,
-        # because the explode below uses `keep_nulls=False` and every downstream consumer
-        # fills independently. Kept because matching the reference exactly is the point.
+        # `mine_aact_synonyms` documents a non-null contract on these list columns. The
+        # fills satisfy it explicitly rather than relying on the mining internals to
+        # tolerate nulls.
         mol_for_index = mol_combined.select(
             'id',
             'name',
@@ -155,13 +153,10 @@ def process_molecules(
         aact_df = mine_aact_synonyms(mol_for_index, entries)
         mol_combined = merge_aact_synonyms(mol_combined, aact_df)
 
-    # Final processing -- ensure name is populated and deduplicate. childChemblIds is
-    # deliberately NOT coalesced here: the reference leaves it null for a molecule with
-    # no children (only synonyms/tradeNames are coalesced to []), and the vast majority
-    # of molecules have no children, so filling it would change a published column
-    # across nearly the whole dataset. The AACT-branch fill above is a different case:
-    # it mirrors the reference's own index input rather than being needed for the code
-    # to work -- see the comment there.
+    # Final processing -- ensure name is populated and deduplicate. Only synonyms and
+    # tradeNames are coalesced to []; childChemblIds is deliberately left null for a
+    # molecule with no children, which is how the column is published. Most molecules
+    # have no children, so filling it would rewrite nearly every row.
     return (
         mol_combined
         .with_columns(
@@ -247,28 +242,19 @@ def _molecule_preprocess(
             pl
             .col('molfile')
             .str.replace_all(
-                # the terminator may or may not be followed by a newline: the
-                # relational column is inconsistent, unlike the ES value which always
-                # had one before its SDF property block. Emit exactly one either way --
-                # all 2,897,819 molblocks in the 26.06 release end "M  END\n", so
-                # dropping it would change a published column.
+                # the terminator is inconsistently followed by a newline in the source
+                # column. Emit exactly one either way -- the published column carries a
+                # trailing newline, so dropping it would change every molblock.
                 r'(?s)(\nM  END)\n?.*',
                 '$1\n',
             )
             .alias('molblock'),
             pl.col('molecule_type').fill_null('Unknown').alias('drugType'),
-            # The reference does not trim at all here -- it is a bare
-            # `f.col('pref_name').alias('name')`. The trim compensates for something
-            # else: the relational `pref_name` carries trailing spaces that the
-            # Elasticsearch value the reference read did not, and with it `name`
-            # matches the release on all 2,921,148 rows.
-            #
-            # Pinned to ' ' rather than left bare because `str.strip_chars()` with no
-            # argument strips all Unicode whitespace, which would be a wider change than
-            # undoing the padding this column actually has. This is the deliberately
-            # opposite call to the `\s+` collapse in `utils.aact_synonyms._normalize_name`:
-            # ASCII-only here for Spark fidelity, full Unicode there because it fixes a
-            # defect in the reference. That function's docstring explains why they coexist.
+            # `pref_name` carries trailing spaces that must not reach the published
+            # `name`. Pinned to ' ' rather than left bare because `str.strip_chars()`
+            # with no argument strips all Unicode whitespace, which is wider than the
+            # padding this column actually has -- and wider than what the published
+            # values were produced with.
             pl.col('pref_name').str.strip_chars(' ').alias('name'),
             'parentId',
             'syns',
@@ -292,9 +278,8 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
         preprocessed_mols
         .select('id', 'syns')
         .explode('syns')
-        # A molecule with no molecule_synonyms rows at all joins to a null `syns`
-        # array. pyspark's default `explode` drops that row entirely; polars' keeps
-        # it as a null row instead, so it is dropped explicitly here.
+        # A molecule with no molecule_synonyms rows joins to a null `syns` array, which
+        # polars' explode keeps as a null row rather than discarding.
         .drop_nulls('syns')
         .unnest('syns')
         .with_columns(
@@ -307,10 +292,8 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
         synonyms
         .filter(pl.col('syn_type') == 'TRADE_NAME')
         .group_by('id')
-        # collect_set on the pyspark side drops nulls and dedups. polars' bare list
-        # aggregation does neither, so a NULL `synonyms` text (a molecule_synonyms row
-        # with no label) would otherwise survive as `None` inside the array instead of
-        # being dropped.
+        # drop_nulls before unique: a molecule_synonyms row with no label would
+        # otherwise contribute a `None` element to the published array.
         .agg(pl.col('synonym').drop_nulls().unique().alias('_trade'))
     )
 

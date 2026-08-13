@@ -1151,13 +1151,14 @@ def _flatten_protein_classification(protein_classification: DataFrame) -> DataFr
     loop, not a while-loop following `parent_id` until some condition holds — so
     no cycle guard is needed regardless of the data; a `parent_id` cycle would
     not hang it, it would just contribute duplicate ancestor rows that the
-    `f.max` in the final aggregation absorbs. `class_level` never exceeding 6 in
-    ChEMBL's 905-row curated tree is a separate fact: it is what makes six
-    iterations enough to reach every real ancestor, not what makes the loop
-    terminate. Each ancestor's `pref_name` is placed at its OWN `class_level`,
-    not at its distance from the leaf, so a level-3 leaf fills l1, l2 and l3 and
-    leaves l4-l6 null. The tree's root sits at `class_level` 0 and therefore
-    falls out.
+    `f.max` in the final aggregation absorbs. That the tree is no deeper than
+    `_MAX_CLASS_LEVEL` is a separate matter: it is what makes six iterations
+    enough to reach every ancestor, and it is asserted below rather than assumed,
+    so a deeper tree fails loudly instead of silently losing levels.
+
+    Each ancestor's `pref_name` is placed at its OWN `class_level`, not at its
+    distance from the leaf, so a level-3 leaf fills l1, l2 and l3 and leaves
+    l4-l6 null. The tree's root sits at `class_level` 0 and therefore falls out.
 
     Args:
         protein_classification: Raw ChEMBL protein_classification table.
@@ -1242,15 +1243,13 @@ def _build_protein_classification(
 
     # Restrict to single-component ChEMBL targets.
     #
-    # DO NOT DELETE THIS AS REDUNDANT. It is redundant on its own terms: the
-    # filter only ever existed to stop a positional `arrays_zip` misattributing
-    # classes across the subunits of a complex, and there is no positional array
-    # here — this function maps an accession to its classes directly, so nothing
-    # can be misattributed. It is retained because `output/target` is a
-    # published dataset and dropping the filter adds protein classes to 1,288
-    # accessions that the release does not have them for (11,083 -> 12,371,
-    # measured against the real dump). That may well be an improvement, but it
-    # is one to raise on its own merits rather than to make silently.
+    # DO NOT DELETE THIS AS REDUNDANT. Nothing in this function needs it: an
+    # accession is mapped to its classes directly, so a multi-subunit complex
+    # could be handled correctly here. It is retained because `output/target` is
+    # published and does not carry protein classes for the accessions this filter
+    # excludes. Dropping it would add classes to thousands of accessions --
+    # plausibly an improvement, but one to raise on its own merits rather than
+    # make silently.
     single_component_tids = (
         target_components
         .groupBy('tid')
@@ -1262,58 +1261,38 @@ def _build_protein_classification(
     # Keep only the lowest protein_class_id per component, DISCARDING THE REST.
     #
     # THIS DROPS REAL CLASSIFICATIONS AND IS DELIBERATE. A component may carry
-    # several component_class rows, and this keeps exactly one of them. It is not
-    # a de-duplication and it is not a selection rule with any biological
-    # meaning: it reproduces a positional bug in the pipeline this replaces.
+    # several component_class rows and this keeps exactly one. It is not a
+    # de-duplication and it carries no biological meaning: the published dataset
+    # holds a single class per component, and this is what reproduces that.
     #
-    # That pipeline built an Elasticsearch document per target holding a
-    # `protein_classification` array ordered by (component_id, protein_class_id)
-    # and a separate `target_components` array, then zipped the two by position.
-    # On a single-component target the second array has length 1, so `arrays_zip`
-    # paired element 0 with the accession and padded every later class against a
-    # null accession, which downstream joins then discarded. Element 0 is the
-    # lowest protein_class_id because component_id is constant within a
-    # single-component target, which is why `min` is the faithful translation
-    # rather than an arbitrary pick. This is not a documentation claim taken on
-    # faith: it was measured directly, comparing this function's output against
-    # the old ES-based function's own output at the accession grain. Result: 0 of
-    # 11,083 accessions have a differing class set; the junk `accession = NULL`
-    # row the old function produced (1) is gone here (0); and the gene-level
-    # differences against the release are unchanged at 6, with 0 of those
-    # attributable to this change.
-    #
-    # Grouping by ONE key — component_id — rather than the SQL's two,
-    # (component_id, protein_class_id), is safe for a stronger reason than "the
-    # sort key happens to be constant": no predicate UPSTREAM OF THIS AGGREGATION
-    # is a function of `protein_class_id` or `comp_class_id`. Every such predicate
-    # (`tid` in target_dictionary, `tid` in single_component_tids, join on
-    # component_id, accession IS NOT NULL) is therefore constant within a
-    # component_id group, so pre-scoping can only delete whole groups, never a
-    # proper subset of one. `min` over a surviving group is identical before or
-    # after scoping, and the inner join below (on `zipped_class_per_component`)
+    # Grouping by ONE key — component_id — rather than the pair
+    # (component_id, protein_class_id) is safe because no predicate UPSTREAM OF
+    # THIS AGGREGATION is a function of `protein_class_id` or `comp_class_id`.
+    # Every such predicate (`tid` in target_dictionary, `tid` in
+    # single_component_tids, the join on component_id, accession IS NOT NULL) is
+    # constant within a component_id group, so scoping can only delete whole
+    # groups, never a proper subset of one. `min` over a surviving group is
+    # therefore identical before or after scoping, and the inner join below
     # discards exactly the groups scoping would remove. Do not add a predicate
     # that discriminates within a component_id group (e.g. `class_level >= 2`)
     # without re-deriving this.
     #
-    # Note this is deliberately NOT grouped per accession. Per-accession happens
-    # to agree on ChEMBL 37 only because no accession spans two component_ids,
-    # which is a measured fact about one release rather than an invariant; if a
-    # future release broke it, per-accession would silently diverge from the SQL
-    # and this would not.
+    # Deliberately NOT grouped per accession. That agrees today only because no
+    # accession spans two component_ids, which is a property of the current data
+    # rather than an invariant; grouping per component holds either way.
     #
-    # Keeping every row instead — which is what the raw tables support, and what
-    # this function did before this commit — adds classes to 161 accessions
-    # across 97 genes that the release does not have them for. `output/target` is
-    # published, so that correction gets its own issue rather than riding along
-    # inside a refactor. REMOVE THIS when that issue is taken; the rest of the
-    # function already handles the many-to-many correctly.
+    # Keeping every row instead is what the raw tables support and is arguably
+    # the correct behaviour, but it adds classes to accessions the published
+    # dataset does not have them for. That correction gets its own issue rather
+    # than riding along inside a refactor. REMOVE THIS when the issue is taken;
+    # the rest of the function already handles the many-to-many correctly.
     zipped_class_per_component = component_class.groupBy('component_id').agg(
         f.min('protein_class_id').alias('protein_class_id')
     )
 
-    # Components are reached through their target, mirroring the grain of the
-    # ChEMBL target document this replaces: a component hanging off a tid that
-    # is absent from target_dictionary contributed nothing there either.
+    # Components are reached through their target rather than read directly, so a
+    # component hanging off a tid absent from target_dictionary contributes
+    # nothing -- classes are published per ChEMBL target, not per bare component.
     accession_class = (
         target_components
         .select('tid', 'component_id')
@@ -1328,12 +1307,10 @@ def _build_protein_classification(
 
     class_per_level = f.array(*[
         f.struct(
-            # The cast restores the released column type. `protein_class_id` is
-            # postgres `integer`; the old ES JSON reader inferred `long` for it, and
-            # parquet carries postgres `integer` straight through, so reading from
-            # parquet narrows int64 -> int32 versus the release. The cast puts it
-            # back. This is not compensating for `min()` -- `min` over an
-            # IntegerType column returns IntegerType, not a widened aggregate type.
+            # `targetClass.id` is published as a long. `protein_class_id` is postgres
+            # `integer` and parquet carries that through as int32, so the cast is what
+            # holds the published type. It is not compensating for `min()`, which
+            # returns its input type rather than a widened one.
             f.col('protein_class_id').cast(LongType()).alias('id'),
             f.col(f'l{i}').alias('label'),
             f.lit(f'l{i}').alias('level'),

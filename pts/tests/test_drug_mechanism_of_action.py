@@ -261,13 +261,12 @@ class TestConsolidateDuplicateReferences:
 
 
 class TestOrderIsDeterministic:
-    """This step used to produce a different answer every time it ran.
+    """This step has to produce the same answer on every run, and needs help to.
 
-    Measured on the real ChEMBL 37 dump, 527 of 1,751 output rows differed between
-    two runs *on byte-identical inputs*, because polars promises nothing about row
-    order out of a join, a `group_by` or a `unique`. On top of that the reads
-    themselves were unordered, so `references` came out in whatever order the query
-    plan produced. Both halves are pinned now; this is the guard.
+    Polars promises nothing about row order out of a join, a `group_by` or a
+    `unique`, and the reads are `SELECT DISTINCT` against a restored dump, so
+    without both `ORDER_BY` and `maintain_order` the output differs run to run on
+    byte-identical inputs. Both halves are pinned; this is the guard on them.
     """
 
     def test_order_by_covers_the_tables_whose_order_reaches_the_output(self) -> None:

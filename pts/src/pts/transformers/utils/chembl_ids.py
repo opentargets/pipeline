@@ -1,10 +1,9 @@
 """Shared `chemblIds` resolution for ChEMBL drug datasets.
 
 Used by both ``drug_warning`` and ``drug_mechanism_of_action``, which each key a
-molecule/parent ChEMBL id pair off a different id column but otherwise apply the
-identical join and dedup logic -- kept here once so the release-equivalence claim
-about what `_metadata.all_molecule_chembl_ids` used to contain cannot drift
-between the two copies.
+molecule/parent ChEMBL id pair off a different id column but otherwise apply
+identical join and dedup logic. Kept here once so the two cannot drift apart:
+``chemblIds`` is published by both datasets and has to mean the same thing in each.
 """
 
 import polars as pl
@@ -13,8 +12,9 @@ import polars as pl
 def chembl_ids(records: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.DataFrame, key: str) -> pl.DataFrame:
     """Resolve the deduplicated {molecule, parent molecule} ChEMBL id pair per record.
 
-    Replaces the old `_metadata.all_molecule_chembl_ids` field from the Elasticsearch
-    document, which was always exactly this deduplicated pair.
+    A record states one molregno; the published `chemblIds` carries that molecule and
+    its parent, deduplicated, so a record attached to a salt is also found under the
+    parent drug. A molecule that is its own parent yields a single id.
 
     Args:
         records: Raw ChEMBL table with `key` and `molregno` columns.

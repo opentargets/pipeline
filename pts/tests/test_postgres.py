@@ -256,8 +256,8 @@ CALL_SITES = {
 def test_the_restore_scratch_goes_on_the_work_disk(transformer: str, mocker: MockerFixture) -> None:
     """A restore that defaults to /tmp fills the VM's boot disk and dies mid-restore.
 
-    On the pipeline VM the 300 GB work disk is mounted at `work_path` and the
-    container root filesystem, `/tmp` included, is on a boot disk an order of
+    On the pipeline VM the large work disk is mounted at `work_path`, while the
+    container root filesystem -- `/tmp` included -- is on a boot disk an order of
     magnitude smaller. The archive, the extracted dump and the whole pgdata
     directory all land in the scratch, so every one of these transformers has to
     point it at `work_path` rather than take `tempfile`'s default.

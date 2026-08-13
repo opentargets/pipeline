@@ -20,8 +20,8 @@ SCHEMA_NAME = 'public'
 TABLES = {
     'drug_mechanism': ['mec_id', 'record_id', 'molregno', 'mechanism_of_action', 'tid', 'action_type'],
     # mecref_id is the table's key and is otherwise unused: it is here only so the
-    # read can be ordered by it, see ORDER_BY. Adding it does not change the
-    # SELECT DISTINCT -- the projection without it already returns all 13,600 rows.
+    # read can be ordered by it, see ORDER_BY. The key is unique, so including it
+    # cannot change what the SELECT DISTINCT returns.
     'mechanism_refs': ['mecref_id', 'mec_id', 'ref_type', 'ref_id', 'ref_url'],
     'molecule_dictionary': ['molregno', 'chembl_id'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
@@ -42,11 +42,10 @@ ORDER_BY = {
 
 ``_chembl_mechanism_references`` collects ``mechanism_refs`` into the published
 ``references`` array in scan order, and ``_chembl_target`` collects ``targets``
-the same way. Unordered, that order is an artefact of the plan and of the physical
-order of the restored dump: two scan orders of the same dump agreed on only 890 of
-1,751 output rows. ``drug_mechanism`` is in here too because it drives the row
-order the references are then grouped in, and because
-``_consolidate_duplicate_references`` groups with ``maintain_order=True``.
+the same way, so an unordered read leaves that array order at the mercy of the
+query plan and the physical layout of the restored dump. ``drug_mechanism`` is in
+here too because it drives the row order the references are grouped in, and
+because ``_consolidate_duplicate_references`` groups with ``maintain_order=True``.
 
 Where the table's key is in the projection (``mecref_id``, ``mec_id``, ``tid``)
 that is what it is ordered by; the other two are ordered by their whole
@@ -54,15 +53,10 @@ projection, which the ``SELECT DISTINCT`` makes a total order. Every one of thes
 is a small table, so the sort is free.
 
 Ordering the reads is only half of it. Polars makes no promise about row order out
-of a join, a ``group_by`` or a ``unique`` unless asked, and measured on the real
-dump this module produced 527 of its 1,751 rows differently between two runs *on
-byte-identical inputs*. So it also pins ``maintain_order`` everywhere the order can
-reach the output. With both halves the step reproduces itself exactly -- whole
-frame, row order included -- across four different scan orders of the same dump.
-
-That is reproducibility, not equality with a past release: the pyspark original's
-``collect_set`` was nondeterministic in its own right. But a step that cannot
-reproduce its own output cannot be diffed at all.
+of a join, a ``group_by`` or a ``unique`` unless asked, so ``maintain_order`` is
+pinned everywhere the order can reach the output. Without both halves the step does
+not reproduce its own output on byte-identical inputs, and a step that cannot
+reproduce itself cannot be diffed at all.
 
 ``molecule_dictionary`` and ``molecule_hierarchy`` are deliberately absent: they
 are joined row-wise on ``molregno`` by joins that keep the left frame's order, so
@@ -220,10 +214,10 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
         .unnest('mechanism_refs')
         .group_by('id', 'ref_type', maintain_order=True)
         .agg(
-            # collect_list on the pyspark side drops nulls; polars' bare list aggregation
-            # does not, so a NULL ref_id/ref_url (e.g. an 'Expert' or 'KEGG' reference with
-            # no id) would otherwise survive as `None` inside the array instead of being
-            # dropped, and would desynchronise `ids` and `urls` differently than pyspark does.
+            # drop_nulls is load-bearing: a reference with no id or url (an 'Expert' or
+            # 'KEGG' entry, say) would otherwise contribute a `None` element, and since
+            # the two columns are null in different rows, `ids` and `urls` would come out
+            # positionally desynchronised inside the published struct.
             pl.col('ref_id').drop_nulls().alias('ids'),
             pl.col('ref_url').drop_nulls().alias('urls'),
         )
@@ -269,23 +263,13 @@ def _chembl_target(
         )
     )
 
-    # Gene lookup keyed by uniprot accession, plus an identity mapping keyed by the gene id
-    # itself -- the original pyspark join matched on `uniprot_id == genes.uniprot_id OR
-    # uniprot_id == genes.geneId`, which a single equi-join cannot express directly.
-    #
-    # ACCEPTED DIVERGENCE FROM THE PYSPARK REFERENCE, and the reason `genes_by_id` is built
-    # from the whole of `gene_df` rather than from the rows that survive the explode below.
-    # The reference built its lookup as `explode(array_union(uniprot_trembl, uniprot_swissprot))`
-    # and matched both branches of the OR against *that*. `explode` drops empty arrays, so a
-    # gene with no uniprot accession never entered the lookup at all and its `geneId` branch
-    # could not fire, however the ChEMBL accession was spelled. Three microRNA mechanisms
-    # come out resolved here and empty in the reference: ENSG00000284190, ENSG00000283904,
-    # ENSG00000284440. This is deliberate -- it was reviewed and accepted as a correctness
-    # fix, and it needs a release-note line.
-    #
-    # The exposure is much larger than three: 58,332 of 78,691 genes have no uniprot
-    # accession. Only three are reached by a ChEMBL mechanism today, so if ChEMBL adds
-    # mechanisms against more of them the difference grows without anything here changing.
+    # ChEMBL spells a target either as a uniprot accession or as an Ensembl gene id, so
+    # resolution needs two lookups: one keyed by accession, one keyed by the gene id
+    # itself. `genes_by_id` is deliberately built from the whole of `gene_df` rather than
+    # from the rows that survive the explode below -- the explode drops genes whose
+    # accession lists are both empty, and those genes must still be resolvable by id.
+    # Most genes have no uniprot accession at all, so restricting the id lookup to
+    # exploded rows would silently drop every mechanism ChEMBL states as a gene id.
     genes_by_uniprot = (
         gene_df
         .select(
@@ -319,13 +303,12 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     duplication on the mechanism for the parent once the data is exploded
     by ``chemblId`` downstream.
 
-    ``chemblIds`` and ``references`` are deduplicated at different granularities, matching
-    the pyspark reference exactly: ``chemblIds`` unions the individual ids across the group
-    (element-level distinct after flattening, mirroring ``array_distinct(flatten(collect_list(...)))``).
-    ``references`` instead dedupes whole per-row lists first and only then concatenates the
-    survivors (mirroring ``flatten(collect_set(...))``), so two rows whose reference lists are
-    not byte-identical can still contribute overlapping/duplicate reference structs to the
-    result -- that mismatch is in the published data and not accidental here.
+    ``chemblIds`` and ``references`` are deduplicated at different granularities, which is
+    deliberate: ``chemblIds`` is flattened and then distinct-ed element by element, while
+    ``references`` dedupes whole per-row lists first and only then concatenates the
+    survivors. Two rows whose reference lists are not byte-identical can therefore still
+    contribute overlapping reference structs. That asymmetry is present in the published
+    data, so it is preserved rather than tidied up.
     """
     key_cols = [c for c in df.columns if c not in ('references', 'chemblIds')]
     return (
