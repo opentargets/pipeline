@@ -369,7 +369,6 @@ steps:
   pts_clinical_report:
     depends_on:
       - pis_clinical_report
-      - pis_chembl
       - pts_chembl_molecule
       - pts_disease
       - pts_drug_warning
