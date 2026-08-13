@@ -311,7 +311,10 @@ def _molecule_preprocess(
             #
             # Pinned to ' ' rather than left bare because `str.strip_chars()` with no
             # argument strips all Unicode whitespace, which would be a wider change than
-            # undoing the padding this column actually has.
+            # undoing the padding this column actually has. This is the deliberately
+            # opposite call to `_normalize_name`'s `\s+` collapse below: ASCII-only here
+            # for Spark fidelity, full Unicode there because it fixes a defect in the
+            # reference. See the comment on `_normalize_name` for why the two coexist.
             pl.col('pref_name').str.strip_chars(' ').alias('name'),
             'parentId',
             'syns',
@@ -457,7 +460,25 @@ def _process_singleton_cross_references(
 
 
 def _normalize_name(expr: pl.Expr) -> pl.Expr:
-    """Lowercase, strip trademark symbols, trim, collapse internal whitespace."""
+    r"""Lowercase, strip trademark symbols, trim, collapse internal whitespace.
+
+    A literal transliteration of the pyspark reference's ``\s+`` collapse below -- but
+    the two regex engines disagree about what ``\s`` matches. Java's ``java.util.regex``
+    (Spark) treats it as ASCII whitespace only (``[ \t\n\x0B\f\r]``); Rust's ``regex``
+    crate (polars) treats it as full Unicode ``White_Space``, which additionally covers
+    U+00A0 (NBSP), U+2000-200A, U+3000, and friends. This corpus has no leading/trailing
+    tabs or newlines, so only this mid-string collapse is affected -- the
+    ``strip_chars(' ')`` pinned to the ASCII space above in ``_molecule_preprocess`` is
+    the deliberately opposite call, kept narrow there for byte-for-byte Spark fidelity.
+    Here the wider polars behavior is kept instead: it is the more correct one --
+    'rosuvastatin 20\xa0mg' and 'rosuvastatin 20 mg' are the same drug label, and
+    treating them as distinct AACT candidates is a defect of the reference, not a
+    feature worth preserving. Measured cost: one changed published value in the 26.06
+    release, CHEMBL1496 gains the synonym 'rosuvastatin 20 mg' (it has two supporting
+    trials that spell the label with an NBSP vs. a plain space; polars unifies them past
+    MIN_TRIALS, Spark does not). Accepted deliberately -- see the AACT mining tests for
+    the pinned case.
+    """
     stripped = expr.str.replace_all(r'[®™©℠]', '')
     collapsed = stripped.str.strip_chars().str.replace_all(r'\s+', ' ')
     return collapsed.str.to_lowercase()
