@@ -5,13 +5,12 @@ including synonyms, DrugBank cross-references, and molecule hierarchy. ChEMBL's
 own cross-reference table is deliberately not joined here (see
 :func:`_process_molecule_cross_references`).
 
-Clinical-trial (AACT) synonym mining lives in this module too (``_parse_aact_entries``
-onward) -- it moved here from the ``pts.pyspark.drug_utils.aact_synonyms`` port, since
-it only ever runs as part of this step; that module has since been deleted, so this is
-the only copy of the logic. ``parse_batch_results`` (from ``clinical_mining``,
-already used by ``clinical_report``) reads the OpenAI batch output straight into polars;
-everything downstream of it -- normalizing candidate names, anchoring them to ChEMBL
-molecules, and the eleven cleanup rules -- is a field-for-field polars port of that module.
+Clinical-trial (AACT) synonym mining is this step's only consumer, but it lives in
+:mod:`pts.transformers.utils.aact_synonyms` rather than here -- a self-contained pipeline
+reached through three functions, and a polars port of a module that stood alone in pyspark
+too, so keeping it apart lets the port be diffed against its reference. This module reads
+the OpenAI batch output (``parse_batch_results``, from ``clinical_mining``, already used by
+``clinical_report``) and hands it over.
 """
 
 from pathlib import Path
@@ -19,11 +18,11 @@ from typing import Any
 
 import polars as pl
 from clinical_mining.data_sources.aact.llm_extractor import parse_batch_results
-from clinical_mining.schemas import ClinicalSource
 from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 
 SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -37,52 +36,6 @@ TABLES = {
 """ChEMBL tables and columns this step needs, restored from the dump."""
 
 CHEMBL_SOURCE = 'ChEMBL'
-AACT_SOURCE = ClinicalSource.AACT.value
-
-# --- AACT synonym mining tunables --------------------------------------------
-
-AMBIGUITY_CAP = 10
-MIN_TRIALS = 2
-
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
-CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
-
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
-CONTROL_TERMS = {
-    'placebo',
-    'vehicle',
-    'saline',
-    'sham',
-    'soc',
-    'standard of care',
-    'study drug',
-    'sodium chloride',
-    'water',
-    'air',
-    'normal saline',
-}
-# v1 port of the experiment's cleanup blacklists -- expected to grow with corpus coverage.
-CLASS_KEYWORDS = [
-    'inhibitor',
-    'agonist',
-    'antagonist',
-    'antibody',
-    'analogue',
-    'analog',
-    'therapy',
-    'statin',
-    'steroid',
-    'nsaid',
-    'cell',
-    'cells',
-    'lymphocyte',
-    'lymphocytes',
-    'mesenchymal',
-    'stromal',
-    'progenitor',
-    'fibroblast',
-]
-_CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
 
 
 def chembl_molecule(
@@ -185,7 +138,7 @@ def process_molecules(
     # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
-        entries = _parse_aact_entries(aact_batch)
+        entries = parse_aact_entries(aact_batch)
         # The fills mirror what the pyspark reference passes to its own index input,
         # 1:1. They are not load-bearing: removing them was measured to change nothing,
         # because the explode below uses `keep_nulls=False` and every downstream consumer
@@ -312,9 +265,9 @@ def _molecule_preprocess(
             # Pinned to ' ' rather than left bare because `str.strip_chars()` with no
             # argument strips all Unicode whitespace, which would be a wider change than
             # undoing the padding this column actually has. This is the deliberately
-            # opposite call to `_normalize_name`'s `\s+` collapse below: ASCII-only here
-            # for Spark fidelity, full Unicode there because it fixes a defect in the
-            # reference. See the comment on `_normalize_name` for why the two coexist.
+            # opposite call to the `\s+` collapse in `utils.aact_synonyms._normalize_name`:
+            # ASCII-only here for Spark fidelity, full Unicode there because it fixes a
+            # defect in the reference. That function's docstring explains why they coexist.
             pl.col('pref_name').str.strip_chars(' ').alias('name'),
             'parentId',
             'syns',
@@ -443,439 +396,4 @@ def _process_singleton_cross_references(
             crossReferences=pl.concat_list(pl.struct(pl.lit(source).alias('source'), pl.col('ids')))
         )
         .select('id', 'crossReferences')
-    )
-
-
-# --- AACT synonym mining -----------------------------------------------------
-#
-# Mines candidate drug synonyms from the OpenAI/AACT clinical-trial extraction and
-# anchors them to ChEMBL molecules. A polars port of the now-deleted pyspark
-# `pts.pyspark.drug_utils.aact_synonyms` module (itself a port of the
-# `work/clinical_pairs/` experiment).
-#
-# Pipeline: parse batch output (via clinical_mining's `parse_batch_results`) -> normalized
-# drug member sets -> anchor against a ChEMBL name index (with an ambiguity cap) -> eleven
-# cleanup rules -> keep candidates seen in `MIN_TRIALS` distinct trials -> merge into the
-# molecule synonyms.
-
-
-def _normalize_name(expr: pl.Expr) -> pl.Expr:
-    r"""Lowercase, strip trademark symbols, trim, collapse internal whitespace.
-
-    A literal transliteration of the pyspark reference's ``\s+`` collapse below -- but
-    the two regex engines disagree about what ``\s`` matches. Java's ``java.util.regex``
-    (Spark) treats it as ASCII whitespace only (``[ \t\n\x0B\f\r]``); Rust's ``regex``
-    crate (polars) treats it as full Unicode ``White_Space``, which additionally covers
-    U+00A0 (NBSP), U+2000-200A, U+3000, and friends. This corpus has no leading/trailing
-    tabs or newlines, so only this mid-string collapse is affected -- the
-    ``strip_chars(' ')`` pinned to the ASCII space above in ``_molecule_preprocess`` is
-    the deliberately opposite call, kept narrow there for byte-for-byte Spark fidelity.
-    Here the wider polars behavior is kept instead: it is the more correct one --
-    'rosuvastatin 20\xa0mg' and 'rosuvastatin 20 mg' are the same drug label, and
-    treating them as distinct AACT candidates is a defect of the reference, not a
-    feature worth preserving. Measured cost: one changed published value in the 26.06
-    release, CHEMBL1496 gains the synonym 'rosuvastatin 20 mg' (it has two supporting
-    trials that spell the label with an NBSP vs. a plain space; polars unifies them past
-    MIN_TRIALS, Spark does not). Accepted deliberately -- see the AACT mining tests for
-    the pinned case.
-    """
-    stripped = expr.str.replace_all(r'[®™©℠]', '')
-    collapsed = stripped.str.strip_chars().str.replace_all(r'\s+', ' ')
-    return collapsed.str.to_lowercase()
-
-
-def _has_class_keyword(expr: pl.Expr) -> pl.Expr:
-    """True when the candidate text contains any drug-class / cell-therapy keyword as a whole word."""
-    return expr.str.contains(_CLASS_PATTERN)
-
-
-def _parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
-    """Turn parsed AACT batch extractions into one row per drug entry with a normalized member set.
-
-    Args:
-        batch: DataFrame as returned by
-            :func:`clinical_mining.data_sources.aact.llm_extractor.parse_batch_results`
-            (or, for tests, anything carrying the same ``id``,
-            ``investigated_drugs``/``comparator_drugs``/``supportive_drugs`` columns).
-
-    Returns:
-        DataFrame[nct_id, members: list[str]] (normalized, deduped, non-empty).
-    """
-    roles = pl.concat_list(
-        pl.col('investigated_drugs').fill_null([]),
-        pl.col('comparator_drugs').fill_null([]),
-        pl.col('supportive_drugs').fill_null([]),
-    )
-    return (
-        batch.select(pl.col('id').alias('nct_id'), roles.alias('entry'))
-        .explode('entry')
-        # pyspark's default `explode` drops rows with an empty or null array; polars'
-        # keeps a null row for both cases, so it is dropped explicitly here.
-        .drop_nulls('entry')
-        .unnest('entry')
-        .with_columns(
-            members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([]))
-        )
-        .with_columns(
-            members=pl.col('members')
-            .list.eval(_normalize_name(pl.element()))
-            .list.eval(pl.element().filter(pl.element().is_not_null() & (pl.element().str.len_chars() > 0)))
-            .list.unique(maintain_order=True)
-        )
-        .filter(pl.col('members').list.len() > 0)
-        .select('nct_id', 'members')
-    )
-
-
-def _build_chembl_indexes(mol_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Build (name_index, regimen_index, parent_child) from ChEMBL-source names.
-
-    Args:
-        mol_df: Molecule DataFrame with non-null id, name, synonyms, tradeNames,
-            parentId, childChemblIds columns (synonyms/tradeNames/childChemblIds
-            already filled to ``[]`` where absent).
-
-    Returns:
-        name_index:    DataFrame[name_norm, ids: list[str]]
-        regimen_index: DataFrame[regimen_norm, ids: list[str]]  (suppression only)
-        parent_child:  DataFrame[id, related: list[str]]  (parent + children)
-    """
-    labels = (
-        mol_df.select(
-            'id',
-            pl.concat_list(
-                pl.concat_list(pl.col('name')),
-                pl.concat_list(
-                    pl.col('synonyms').list.eval(pl.element().struct.field('label')),
-                    pl.col('tradeNames').list.eval(pl.element().struct.field('label')),
-                ),
-            ).alias('labels'),
-        )
-        .explode('labels')
-        .rename({'labels': 'label'})
-        .with_columns(name_norm=_normalize_name(pl.col('label')))
-        .filter(pl.col('name_norm').str.len_chars() > 0)
-    )
-
-    name_index = labels.group_by('name_norm').agg(pl.col('id').drop_nulls().unique().alias('ids'))
-
-    # "<ingredient> COMPONENT OF <regimen>" -> regimen token (normalized text is lowercased)
-    regimen_index = (
-        labels.with_columns(regimen_norm=pl.col('name_norm').str.extract(r'\bcomponent of\s+(.+)$', 1))
-        .filter(pl.col('regimen_norm').is_not_null() & (pl.col('regimen_norm').str.len_chars() > 0))
-        .group_by('regimen_norm')
-        .agg(pl.col('id').drop_nulls().unique().alias('ids'))
-    )
-
-    children = mol_df.select('id', pl.col('childChemblIds').alias('related'))
-    parents = mol_df.filter(pl.col('parentId').is_not_null()).select(
-        'id', pl.concat_list(pl.col('parentId')).alias('related')
-    )
-    parent_child = (
-        pl.concat([children, parents])
-        .group_by('id')
-        .agg(
-            pl.col('related').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
-                'related'
-            )
-        )
-    )
-
-    return name_index, regimen_index, parent_child
-
-
-def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_child: pl.DataFrame) -> pl.DataFrame:
-    """Anchor member sets to molecules and emit (id, candidate, nct_id, status).
-
-    For each trial drug entry (a normalized member set), resolve members against
-    name_index to find which ChEMBL molecule(s) the entry anchors to, then emit each
-    member that is NOT already on an anchored molecule as a candidate synonym,
-    classified by status.
-
-    Entries where any single member resolves to more than AMBIGUITY_CAP molecules are
-    dropped entirely.
-
-    Note: the same (id, candidate, nct_id) may appear with more than one status when a
-    trial contributes multiple drug entries; downstream trial counting must use
-    n_unique(nct_id).
-
-    Args:
-        entries: DataFrame[nct_id, members: list[str]]
-        name_index: DataFrame[name_norm, ids: list[str]]
-        parent_child: DataFrame[id, related: list[str]]
-
-    Returns:
-        DataFrame[id, candidate, nct_id, status] where id is an anchored molecule,
-        candidate is a member not already on id, and status is one of
-        NOVEL / PARENT_CHILD / CONFLICT.
-    """
-    # Deterministic per-entry key (nct_id + sorted member set), joined on a control
-    # character that cannot occur in a normalized name or an NCT id, so two distinct
-    # entries cannot collide onto the same key -- unlike pyspark, polars has no
-    # adaptive-replanning hazard to guard against, so a plain deterministic string
-    # (rather than a hash) is enough here.
-    entries = entries.with_columns(
-        entry_id=pl.col('nct_id') + pl.lit('\x1f') + pl.col('members').list.sort().list.join('\x1f')
-    )
-
-    members = entries.select('entry_id', 'nct_id', pl.col('members').alias('member')).explode('member')
-
-    resolved = (
-        members.join(name_index, left_on='member', right_on='name_norm', how='left')
-        .with_columns(ids=pl.col('ids').fill_null([]))
-        .select('entry_id', 'nct_id', 'member', 'ids')
-    )
-
-    poisoned = (
-        resolved.group_by('entry_id')
-        .agg(pl.col('ids').list.len().max().alias('max_ids'))
-        .filter(pl.col('max_ids') > AMBIGUITY_CAP)
-        .select('entry_id')
-    )
-    resolved = resolved.join(poisoned, on='entry_id', how='anti')
-
-    anchors = (
-        resolved.select('entry_id', pl.col('ids').alias('anchor_id'))
-        .explode('anchor_id')
-        # collect_set drops nulls and dedups; an entry whose every member resolves to
-        # zero molecules contributes no rows here at all, matching pyspark's explode
-        # of an empty array.
-        .drop_nulls('anchor_id')
-        .group_by('entry_id')
-        .agg(pl.col('anchor_id').unique().alias('anchor_ids'))
-    )
-
-    cand = resolved.join(anchors, on='entry_id', how='inner').explode('anchor_ids').rename({'anchor_ids': 'anchor_id'})
-    cand = cand.filter(~pl.col('ids').list.contains(pl.col('anchor_id')))
-
-    pc = parent_child.rename({'id': 'anchor_id', 'related': 'pc_related'})
-    cand = cand.join(pc, on='anchor_id', how='left')
-
-    cand = cand.with_columns(
-        status=pl.when(pl.col('ids').list.len() == 0)
-        .then(pl.lit('NOVEL'))
-        .when(pl.col('ids').list.set_intersection(pl.col('pc_related').fill_null([])).list.len() > 0)
-        .then(pl.lit('PARENT_CHILD'))
-        .otherwise(pl.lit('CONFLICT'))
-    )
-
-    return cand.select(
-        pl.col('anchor_id').alias('id'),
-        pl.col('member').alias('candidate'),
-        'nct_id',
-        'status',
-    ).unique()
-
-
-def _rewrite_and_reclassify_codes(
-    cand: pl.DataFrame, name_index: pl.DataFrame, parent_child: pl.DataFrame
-) -> pl.DataFrame:
-    """Rule #8: rewrite descriptor phrases to their bare R&D code, then re-resolve.
-
-    Rewriting e.g. ``akt inhibitor mk2206`` -> ``mk2206`` changes the candidate's
-    identity, so its anchor-time status is stale. We re-resolve the rewritten candidate
-    against ``name_index`` and reclassify:
-
-    - drop it if it is now already a label of the anchor molecule (redundant)
-    - drop it if the rewritten code is now over-ambiguous (> AMBIGUITY_CAP)
-    - recompute NOVEL / PARENT_CHILD / CONFLICT so a code belonging to the anchor's
-      parent/child family is marked PARENT_CHILD and dropped downstream
-
-    Idempotent for candidates that are not rewritten (their resolution is unchanged
-    from anchoring time).
-
-    Args:
-        cand: DataFrame[id, candidate, nct_id, status]
-        name_index: DataFrame[name_norm, ids: list[str]]
-        parent_child: DataFrame[id, related: list[str]]
-
-    Returns:
-        DataFrame[id, candidate, nct_id, status] with rewritten, reclassified candidates.
-    """
-    # rule #8: descriptor-wrapped code -> bare code (phrase has a class word AND a code)
-    code = pl.col('candidate').str.extract(CODE_REGEX, 0)
-    cand = cand.with_columns(
-        candidate=pl.when(code.is_not_null() & _has_class_keyword(pl.col('candidate'))).then(code).otherwise(
-            pl.col('candidate')
-        )
-    ).drop('status')
-
-    # re-resolve the (possibly rewritten) candidate against the ChEMBL name index
-    resolved = (
-        cand.join(name_index, left_on='candidate', right_on='name_norm', how='left')
-        .with_columns(ids=pl.col('ids').fill_null([]))
-        .select('id', 'candidate', 'nct_id', 'ids')
-    )
-
-    # a rewritten code that is now over-ambiguous or already on the anchor molecule is
-    # not a candidate for it
-    resolved = resolved.filter(pl.col('ids').list.len() <= AMBIGUITY_CAP)
-    resolved = resolved.filter(~pl.col('ids').list.contains(pl.col('id')))
-
-    # reclassify status against the anchor molecule's parent/child family
-    pc = parent_child.rename({'related': 'pc_related'})
-    resolved = resolved.join(pc, on='id', how='left')
-
-    return (
-        resolved.with_columns(
-            status=pl.when(pl.col('ids').list.len() == 0)
-            .then(pl.lit('NOVEL'))
-            .when(pl.col('ids').list.set_intersection(pl.col('pc_related').fill_null([])).list.len() > 0)
-            .then(pl.lit('PARENT_CHILD'))
-            .otherwise(pl.lit('CONFLICT'))
-        )
-        .select('id', 'candidate', 'nct_id', 'status')
-        .unique()
-    )
-
-
-def _apply_cleanup_rules(
-    cand: pl.DataFrame, regimen_index: pl.DataFrame, existing_per_id: pl.DataFrame
-) -> pl.DataFrame:
-    """Apply rules #5-#11 + drop PARENT_CHILD. Returns DataFrame[id, candidate, nct_id].
-
-    Args:
-        cand: DataFrame[id, candidate, nct_id, status]
-        regimen_index: DataFrame[regimen_norm, ids: list[str]]
-        existing_per_id: DataFrame[id, existing: list[str]]
-
-    Returns:
-        DataFrame[id, candidate, nct_id] with noise filtered out.
-    """
-    # drop PARENT_CHILD (keep NOVEL + CONFLICT). Descriptor-code extraction (#8) already
-    # happened upstream in _rewrite_and_reclassify_codes, which also re-resolved the
-    # rewritten code so PARENT_CHILD here reflects the bare code.
-    cand = cand.filter(pl.col('status') != 'PARENT_CHILD')
-
-    # #10: single-character
-    cand = cand.filter(pl.col('candidate').str.len_chars() > 1)
-
-    # #9: insulin units + any '%'
-    cand = cand.filter(~pl.col('candidate').str.contains(r'^(u|gla)[- ]?\d{2,3}$'))
-    cand = cand.filter(~pl.col('candidate').str.contains('%', literal=True))
-
-    # #5: control noise
-    cand = cand.filter(~pl.col('candidate').is_in(sorted(CONTROL_TERMS)))
-
-    # #6: drug-class / cell-therapy keyword present, UNLESS the candidate is a bare
-    # R&D code (descriptor phrases were already rewritten to their code upstream)
-    cand = cand.filter(~_has_class_keyword(pl.col('candidate')) | pl.col('candidate').str.contains(CODE_REGEX))
-
-    # #7: regimen suppression (candidate equals a known regimen token)
-    regimen_keys = regimen_index.select(pl.col('regimen_norm').alias('candidate')).unique()
-    cand = cand.join(regimen_keys.with_columns(_is_regimen=pl.lit(True)), on='candidate', how='left')
-    cand = cand.filter(pl.col('_is_regimen').is_null()).drop('_is_regimen')
-
-    # #11: plural suppression (singular already on M)
-    length = pl.col('candidate').str.len_chars()
-    cand = cand.with_columns(
-        singular=pl.when(pl.col('candidate').str.ends_with('ies'))
-        .then(pl.col('candidate').str.slice(0, length - 3) + 'y')
-        .when(pl.col('candidate').str.ends_with('es'))
-        .then(pl.col('candidate').str.slice(0, length - 2))
-        .when(pl.col('candidate').str.ends_with('s'))
-        .then(pl.col('candidate').str.slice(0, length - 1))
-        .otherwise(pl.col('candidate'))
-    )
-    cand = cand.join(existing_per_id, on='id', how='left')
-    cand = cand.filter(
-        (pl.col('singular') == pl.col('candidate'))
-        | ~pl.col('existing').fill_null([]).list.contains(pl.col('singular'))
-    ).drop('singular', 'existing')
-
-    return cand.select('id', 'candidate', 'nct_id').unique()
-
-
-def mine_aact_synonyms(mol_df: pl.DataFrame, entries: pl.DataFrame) -> pl.DataFrame:
-    """Full AACT mining: anchor -> cleanup -> n_trials>=MIN_TRIALS -> DataFrame[id, label].
-
-    The stored label is the normalized candidate string (v1: normalized form, which
-    matches the anchor index; surface-form refinement is deferred).
-
-    Args:
-        mol_df: See :func:`_build_chembl_indexes`.
-        entries: See :func:`_parse_aact_entries`.
-
-    Returns:
-        DataFrame[id, label] of candidate AACT synonyms clearing MIN_TRIALS.
-    """
-    name_index, regimen_index, parent_child = _build_chembl_indexes(mol_df)
-
-    # Per-molecule set of normalized existing names (name + synonym/tradeName labels),
-    # used by rule #11 plural suppression. Intentionally parallels the label collection
-    # in _build_chembl_indexes (different shape: grouped array vs exploded rows).
-    existing_per_id = mol_df.select(
-        'id',
-        pl.concat_list(
-            pl.concat_list(_normalize_name(pl.col('name'))),
-            pl.concat_list(
-                pl.col('synonyms').list.eval(_normalize_name(pl.element().struct.field('label'))),
-                pl.col('tradeNames').list.eval(_normalize_name(pl.element().struct.field('label'))),
-            ),
-        ).alias('existing'),
-    )
-
-    anchored = _anchor_candidates(entries, name_index, parent_child)
-    reclassified = _rewrite_and_reclassify_codes(anchored, name_index, parent_child)
-    cleaned = _apply_cleanup_rules(reclassified, regimen_index, existing_per_id)
-
-    return (
-        cleaned.group_by('id', 'candidate')
-        .agg(pl.col('nct_id').n_unique().alias('n_trials'))
-        .filter(pl.col('n_trials') >= MIN_TRIALS)
-        .select('id', pl.col('candidate').alias('label'))
-    )
-
-
-def merge_aact_synonyms(mol_combined: pl.DataFrame, aact_df: pl.DataFrame) -> pl.DataFrame:
-    """Append AACT labels (deduped vs existing ChEMBL labels) as {label,'AACT'} structs.
-
-    Args:
-        mol_combined: Molecule DataFrame with id and synonyms (possibly null) columns.
-        aact_df: DataFrame[id, label] as returned by :func:`mine_aact_synonyms`.
-
-    Returns:
-        ``mol_combined`` with ``synonyms`` carrying the fresh AACT labels appended.
-        ``tradeNames`` is untouched -- AACT labels never become trade names, matching
-        the pyspark reference.
-    """
-    aact_grouped = aact_df.group_by('id').agg(pl.col('label').drop_nulls().unique().alias('aact_labels'))
-
-    merged = mol_combined.join(aact_grouped, on='id', how='left').with_columns(
-        synonyms_filled=pl.col('synonyms').fill_null([]),
-        aact_labels_filled=pl.col('aact_labels').fill_null([]),
-    )
-
-    existing_lc = merged.select(
-        'id',
-        pl.col('synonyms_filled').list.eval(pl.element().struct.field('label').str.to_lowercase()).alias(
-            'existing_lc'
-        ),
-    )
-
-    fresh = (
-        merged.select('id', 'aact_labels_filled')
-        .explode('aact_labels_filled')
-        .drop_nulls('aact_labels_filled')
-        .join(existing_lc, on='id', how='left')
-        .filter(~pl.col('existing_lc').list.contains(pl.col('aact_labels_filled').str.to_lowercase()))
-        .select(
-            'id',
-            pl.struct(
-                pl.col('aact_labels_filled').alias('label'), pl.lit(AACT_SOURCE).alias('source')
-            ).alias('new_struct'),
-        )
-        .group_by('id')
-        .agg(pl.col('new_struct'))
-    )
-
-    return (
-        merged.join(fresh, on='id', how='left')
-        .with_columns(
-            # array_union already dedups identical structs; list.unique here matches that.
-            synonyms=pl.concat_list(pl.col('synonyms_filled'), pl.col('new_struct').fill_null([]))
-            .list.unique(maintain_order=True)
-            .list.sort()
-        )
-        .drop('aact_labels', 'synonyms_filled', 'aact_labels_filled', 'new_struct')
     )

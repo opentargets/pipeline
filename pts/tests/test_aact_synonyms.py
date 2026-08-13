@@ -1,4 +1,4 @@
-"""Tests for the AACT synonym-mining helpers inside chembl_molecule.
+"""Tests for the AACT synonym-mining helpers in pts.transformers.utils.aact_synonyms.
 
 These are a polars port of the ``pts.pyspark.drug_utils.aact_synonyms`` module, which
 was deleted once nothing ran it; these tests are now the only ones on this logic. They
@@ -12,15 +12,15 @@ join semantics silently diverge.
 
 import polars as pl
 
-from pts.transformers.chembl_molecule import (
+from pts.transformers.utils.aact_synonyms import (
     _anchor_candidates,
     _apply_cleanup_rules,
     _build_chembl_indexes,
     _normalize_name,
-    _parse_aact_entries,
     _rewrite_and_reclassify_codes,
     merge_aact_synonyms,
     mine_aact_synonyms,
+    parse_aact_entries,
 )
 
 _ENTRIES_SCHEMA = {'nct_id': pl.Utf8, 'members': pl.List(pl.Utf8)}
@@ -91,7 +91,7 @@ class TestParseAactEntries:
             comparator=[{'drug': 'Dexamethasone', 'synonyms': []}],
             supportive=[{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
         )
-        out = _parse_aact_entries(batch)
+        out = parse_aact_entries(batch)
         member_sets = [set(m) for m in out['members'].to_list()]
         assert {'cc-5013', 'lenalidomide', 'revlimid'} in member_sets
         assert {'filgrastim', 'g-csf'} in member_sets
@@ -100,7 +100,7 @@ class TestParseAactEntries:
 
     def test_no_drug_entries_yields_no_rows(self):
         batch = self._batch(investigated=[], comparator=[], supportive=[])
-        assert _parse_aact_entries(batch).height == 0
+        assert parse_aact_entries(batch).height == 0
 
 
 class TestChemblIndexes:
