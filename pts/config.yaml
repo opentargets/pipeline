@@ -370,6 +370,18 @@ steps:
       transformer: uniprot
       source: input/target/uniprot/uniprot.txt.gz
       destination: intermediate/target/uniprot/uniprot.parquet
+
+    # Keep this step free of any `pyspark` task: that is what routes it to a GCE VM
+    # rather than a Dataproc cluster, and the restore below has no use for spark workers.
+    - name: transform chembl_target_class_dump
+      transformer: chembl_target_class_dump
+      source: input/chembl/chembl_${chembl_version}.tar.gz
+      destination:
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
   ##################################################################################################
 
   #: TARGET STEP (pyspark) :#######################################################################
@@ -660,22 +672,6 @@ steps:
         drug_index: output/drug_molecule
       destination:
         disease_target_drug_label_lut: intermediate/ontoma/disease_target_drug_label_lookup_table.parquet
-  ##################################################################################################
-
-  #: CHEMBL_TARGET_CLASS_DUMP STEP :################################################################
-  # No pyspark task on purpose: this routes the step to a GCE VM rather than a Dataproc cluster,
-  # since a database restore has no use for spark workers. target keeps its verified
-  # implementation and reads these five tables back at intermediate/chembl/*.parquet.
-  chembl_target_class_dump:
-    - name: transform chembl_target_class_dump
-      transformer: chembl_target_class_dump
-      source: input/chembl/chembl_${chembl_version}.tar.gz
-      destination:
-        target_dictionary: intermediate/chembl/target_dictionary.parquet
-        target_components: intermediate/chembl/target_components.parquet
-        component_sequences: intermediate/chembl/component_sequences.parquet
-        component_class: intermediate/chembl/component_class.parquet
-        protein_classification: intermediate/chembl/protein_classification.parquet
   ##################################################################################################
 
   #: DRUG_WARNING STEP :############################################################################

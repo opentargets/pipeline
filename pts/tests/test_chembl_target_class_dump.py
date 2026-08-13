@@ -26,7 +26,7 @@ EXPECTED_TABLES = {
 
 def _config(work_path: Path) -> Config:
     """The transformer reads `work_path` off the config to place the restore scratch."""
-    return Config(step='chembl_target_class_dump', steps=['chembl_target_class_dump'], work_path=work_path)
+    return Config(step='pre_target', steps=['pre_target'], work_path=work_path)
 
 
 def test_tables_pins_the_five_names_and_columns() -> None:

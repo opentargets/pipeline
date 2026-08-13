@@ -130,6 +130,7 @@ steps:
   pts_pre_target:
     depends_on:
       - pis_target
+      - pis_chembl
   pts_target_safety:
     depends_on:
       - pts_pharmacogenetics
@@ -347,9 +348,6 @@ steps:
       - pis_literature
 
   # clinical mining updates:
-  pts_chembl_target_class_dump:
-    depends_on:
-      - pis_chembl
   pts_drug_warning:
     depends_on:
       - pis_chembl
@@ -442,7 +440,6 @@ steps:
       - pts_target_safety
       - pts_target_gene_essentiality
       - pts_disease
-      - pts_chembl_target_class_dump
 
   pts_search_facet:
     depends_on:

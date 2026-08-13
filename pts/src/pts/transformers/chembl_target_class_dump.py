@@ -1,10 +1,13 @@
 """Dump the five ChEMBL tables `target` builds its protein classification from.
 
-This step does nothing but restore and write: no joins, no flattening, no
-reshaping. `target` is a Dataproc step with a dozen and a half other inputs and it
-already knows how to derive the classification from these tables, so the only job
-here is to get them out of the dump and into parquet where a Spark step can read
-them.
+Runs as a task of the ``pre_target`` step, alongside the ensembl, uniprot and
+homology preparations: same purpose -- stage an input `target` needs -- and same
+shape, a local transform writing to ``intermediate/``.
+
+It does nothing but restore and write: no joins, no flattening, no reshaping.
+`target` already knows how to derive the classification from these tables, so the
+only job here is to get them out of the dump and into parquet where a Spark step
+can read them.
 """
 
 from pathlib import Path

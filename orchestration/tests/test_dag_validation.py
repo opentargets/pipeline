@@ -50,10 +50,14 @@ def test_the_polars_chembl_steps_run_on_gce_not_dataproc() -> None:
     named 'pyspark ...'. These steps restore a dump and read it into polars;
     adding a pyspark task to any of them would move that onto a cluster whose
     workers would sit idle throughout.
+
+    pts_pre_target is in here because it carries the chembl_target_class_dump task.
+    It is the one whose membership is not obvious from the step name, and the one
+    most likely to acquire a pyspark task later.
     """
     config = UnifiedPipelineConfig()
     for name in (
-        'pts_chembl_target_class_dump',
+        'pts_pre_target',
         'pts_drug_warning',
         'pts_drug_mechanism_of_action',
         'pts_chembl_molecule',
