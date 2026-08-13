@@ -53,7 +53,7 @@ def test_the_polars_chembl_steps_run_on_gce_not_dataproc() -> None:
     """
     config = UnifiedPipelineConfig()
     for name in (
-        'pts_chembl_target',
+        'pts_chembl_target_class_dump',
         'pts_drug_warning',
         'pts_drug_mechanism_of_action',
         'pts_chembl_molecule',

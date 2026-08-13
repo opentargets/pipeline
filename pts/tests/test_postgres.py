@@ -236,7 +236,7 @@ WORK_PATH = Path('/mnt/disks/work')
 """What `work_path` is on the pipeline VM, where the work disk is mounted."""
 
 CALL_SITES = {
-    'chembl_target': ('pts.transformers.chembl_target', Path('chembl.tar.gz'), {}),
+    'chembl_target_class_dump': ('pts.transformers.chembl_target_class_dump', Path('chembl.tar.gz'), {}),
     'drug_warning': ('pts.transformers.drug_warning', Path('chembl.tar.gz'), Path('out.parquet')),
     'drug_mechanism_of_action': (
         'pts.transformers.drug_mechanism_of_action',

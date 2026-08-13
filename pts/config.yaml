@@ -662,13 +662,13 @@ steps:
         disease_target_drug_label_lut: intermediate/ontoma/disease_target_drug_label_lookup_table.parquet
   ##################################################################################################
 
-  #: CHEMBL_TARGET STEP :###########################################################################
+  #: CHEMBL_TARGET_CLASS_DUMP STEP :################################################################
   # No pyspark task on purpose: this routes the step to a GCE VM rather than a Dataproc cluster,
   # since a database restore has no use for spark workers. target keeps its verified
   # implementation and reads these five tables back at intermediate/chembl/*.parquet.
-  chembl_target:
-    - name: transform chembl_target
-      transformer: chembl_target
+  chembl_target_class_dump:
+    - name: transform chembl_target_class_dump
+      transformer: chembl_target_class_dump
       source: input/chembl/chembl_${chembl_version}.tar.gz
       destination:
         target_dictionary: intermediate/chembl/target_dictionary.parquet

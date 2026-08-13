@@ -1,10 +1,10 @@
-"""Stage the five ChEMBL tables `target` reads.
+"""Dump the five ChEMBL tables `target` builds its protein classification from.
 
-`target` is a Dataproc step with a dozen and a half other inputs, and the protein
-classification it builds from these tables took three rounds to get right against
-the release -- it is not being re-derived here. This step restores the five tables
-`target` already expects and writes each straight to parquet: no joins, no
-flattening, nothing `target`'s own verified implementation doesn't already do.
+This step does nothing but restore and write: no joins, no flattening, no
+reshaping. `target` is a Dataproc step with a dozen and a half other inputs and it
+already knows how to derive the classification from these tables, so the only job
+here is to get them out of the dump and into parquet where a Spark step can read
+them.
 """
 
 from pathlib import Path
@@ -28,7 +28,7 @@ TABLES = {
 """ChEMBL tables and columns `target` needs, restored from the dump."""
 
 
-def chembl_target(
+def chembl_target_class_dump(
     source: Path,
     destination: dict[str, Path],
     _settings: dict[str, Any],
