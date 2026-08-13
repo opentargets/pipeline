@@ -29,22 +29,22 @@ def chembl_ids(records: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.Dat
     # `maintain_order='left'` throughout: a polars join makes no promise about row
     # order by default, and the caller's row order is what ends up deciding the
     # element order of published arrays such as `references`.
-    parent = (
-        hierarchy.join(
-            molecules.rename({'chembl_id': 'parent_chembl_id'}),
-            left_on='parent_molregno',
-            right_on='molregno',
-            how='left',
-            maintain_order='left',
-        ).select('molregno', 'parent_chembl_id')
-    )
+    parent = hierarchy.join(
+        molecules.rename({'chembl_id': 'parent_chembl_id'}),
+        left_on='parent_molregno',
+        right_on='molregno',
+        how='left',
+        maintain_order='left',
+    ).select('molregno', 'parent_chembl_id')
     return (
-        records.select(key, 'molregno')
+        records
+        .select(key, 'molregno')
         .join(molecules, on='molregno', how='left', maintain_order='left')
         .join(parent, on='molregno', how='left', maintain_order='left')
         .select(
             key,
-            pl.concat_list('chembl_id', 'parent_chembl_id')
+            pl
+            .concat_list('chembl_id', 'parent_chembl_id')
             .list.drop_nulls()
             .list.unique(maintain_order=True)
             .alias('chemblIds'),

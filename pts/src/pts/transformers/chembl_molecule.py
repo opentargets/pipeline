@@ -129,7 +129,8 @@ def process_molecules(
     hierarchy = _process_molecule_hierarchy(mols)
 
     mol_combined = (
-        mols.drop('syns')
+        mols
+        .drop('syns')
         .join(synonyms, on='id', how='left')
         .join(cross_references, on='id', how='left')
         .join(hierarchy, on='id', how='left')
@@ -162,14 +163,16 @@ def process_molecules(
     # it mirrors the reference's own index input rather than being needed for the code
     # to work -- see the comment there.
     return (
-        mol_combined.with_columns(
+        mol_combined
+        .with_columns(
             synonyms=pl.col('synonyms').fill_null([]),
             tradeNames=pl.col('tradeNames').fill_null([]),
         )
         .with_columns(
             name=pl.coalesce(
                 pl.col('name'),
-                pl.col('synonyms')
+                pl
+                .col('synonyms')
                 .list.eval(pl.element().filter(pl.element().struct.field('source') == CHEMBL_SOURCE))
                 .list.first()
                 .struct.field('label'),
@@ -212,27 +215,24 @@ def _molecule_preprocess(
     Returns:
         Preprocessed molecule DataFrame.
     """
-    parent = (
-        molecule_hierarchy.join(
-            molecule_dictionary.select(
-                pl.col('molregno').alias('parent_molregno'),
-                pl.col('chembl_id').alias('parentId'),
-            ),
-            on='parent_molregno',
-            how='left',
-        ).select('molregno', 'parentId')
-    )
+    parent = molecule_hierarchy.join(
+        molecule_dictionary.select(
+            pl.col('molregno').alias('parent_molregno'),
+            pl.col('chembl_id').alias('parentId'),
+        ),
+        on='parent_molregno',
+        how='left',
+    ).select('molregno', 'parentId')
 
     # One struct array per molecule. The ordering is determinism-in-principle only
     # and does not reach the output: `syns` is dropped in `process_molecules` above,
     # and its only consumer, `_process_molecule_synonyms`, explodes it into two set
     # aggregations where order cannot survive.
-    synonyms = molecule_synonyms.group_by('molregno').agg(
-        pl.struct('molsyn_id', 'synonyms', 'syn_type').alias('syns')
-    )
+    synonyms = molecule_synonyms.group_by('molregno').agg(pl.struct('molsyn_id', 'synonyms', 'syn_type').alias('syns'))
 
     return (
-        molecule_dictionary.rename({'chembl_id': 'id'})
+        molecule_dictionary
+        .rename({'chembl_id': 'id'})
         .join(compound_structures, on='molregno', how='left')
         .join(parent, on='molregno', how='left')
         .join(synonyms, on='molregno', how='left')
@@ -244,7 +244,8 @@ def _molecule_preprocess(
             # appended SDF property tags); truncate to the bare molblock by dropping
             # everything after the `M  END` terminator. If `M  END` is absent the
             # string is left unchanged.
-            pl.col('molfile')
+            pl
+            .col('molfile')
             .str.replace_all(
                 # the terminator may or may not be followed by a newline: the
                 # relational column is inconsistent, unlike the ES value which always
@@ -273,9 +274,7 @@ def _molecule_preprocess(
             'syns',
         )
         # Remove circular references
-        .with_columns(
-            parentId=pl.when(pl.col('parentId') == pl.col('id')).then(None).otherwise(pl.col('parentId'))
-        )
+        .with_columns(parentId=pl.when(pl.col('parentId') == pl.col('id')).then(None).otherwise(pl.col('parentId')))
         .join(drugbank, on='id', how='left')
     )
 
@@ -290,7 +289,8 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
         DataFrame with id, tradeNames, and synonyms columns ({label, source} structs).
     """
     synonyms = (
-        preprocessed_mols.select('id', 'syns')
+        preprocessed_mols
+        .select('id', 'syns')
         .explode('syns')
         # A molecule with no molecule_synonyms rows at all joins to a null `syns`
         # array. pyspark's default `explode` drops that row entirely; polars' keeps
@@ -304,7 +304,8 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
     )
 
     trade_names = (
-        synonyms.filter(pl.col('syn_type') == 'TRADE_NAME')
+        synonyms
+        .filter(pl.col('syn_type') == 'TRADE_NAME')
         .group_by('id')
         # collect_set on the pyspark side drops nulls and dedups. polars' bare list
         # aggregation does neither, so a NULL `synonyms` text (a molecule_synonyms row
@@ -314,7 +315,8 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
     )
 
     other_synonyms = (
-        synonyms.filter(pl.col('syn_type') != 'TRADE_NAME')
+        synonyms
+        .filter(pl.col('syn_type') != 'TRADE_NAME')
         .group_by('id')
         .agg(pl.col('synonym').drop_nulls().unique().alias('_syn'))
     )
@@ -322,11 +324,13 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
     full = trade_names.join(other_synonyms, on='id', how='full', coalesce=True)
 
     return full.with_columns(
-        synonyms=pl.col('_syn')
+        synonyms=pl
+        .col('_syn')
         .fill_null([])
         .list.eval(pl.struct(pl.element().alias('label'), pl.lit(CHEMBL_SOURCE).alias('source')))
         .list.sort(),
-        tradeNames=pl.col('_trade')
+        tradeNames=pl
+        .col('_trade')
         .fill_null([])
         .list.eval(pl.struct(pl.element().alias('label'), pl.lit(CHEMBL_SOURCE).alias('source')))
         .list.sort(),
@@ -343,7 +347,8 @@ def _process_molecule_hierarchy(preprocessed_mols: pl.DataFrame) -> pl.DataFrame
         DataFrame with id and childChemblIds columns.
     """
     return (
-        preprocessed_mols.select('id', 'parentId')
+        preprocessed_mols
+        .select('id', 'parentId')
         .filter(pl.col('id') != pl.col('parentId'))
         .filter(pl.col('parentId').is_not_null())
         .group_by('parentId')
@@ -385,15 +390,14 @@ def _process_singleton_cross_references(
         DataFrame with id and crossReferences (array<struct<source,ids>>) columns.
     """
     return (
-        preprocessed_mols.filter(pl.col(reference_id_column).is_not_null())
+        preprocessed_mols
+        .filter(pl.col(reference_id_column).is_not_null())
         .select('id', pl.col(reference_id_column).cast(pl.Utf8))
         .group_by('id')
         # collect_set drops nulls and dedups; the pre-filter above already removes
         # nulls, but drop_nulls().unique() is kept to match the site's contract
         # explicitly rather than relying on the filter alone.
         .agg(pl.col(reference_id_column).drop_nulls().unique().alias('ids'))
-        .with_columns(
-            crossReferences=pl.concat_list(pl.struct(pl.lit(source).alias('source'), pl.col('ids')))
-        )
+        .with_columns(crossReferences=pl.concat_list(pl.struct(pl.lit(source).alias('source'), pl.col('ids'))))
         .select('id', 'crossReferences')
     )

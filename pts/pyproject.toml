@@ -11,9 +11,6 @@ dependencies = [
   "loguru>=0.7.3",
   "opentargets-otter>=26.6.2",
   "pandas>=2.3.3",
-  # the connectorx extra is what backs `pl.read_database_uri`, which pts.postgres
-  # uses to read every restored dump. It was only ever present transitively, via
-  # clinical-mining, so a move there would have broken the chembl and aact steps.
   "polars[connectorx]>=1.41.2",
   "pyspark>=3.5.7",
   "openai>=2.41.1",

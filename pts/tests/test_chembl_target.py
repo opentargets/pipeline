@@ -16,7 +16,11 @@ from pixeltable_pgserver.postgres_server import get_server
 from pts.transformers.chembl_target import TABLES, chembl_target
 
 EXPECTED_TABLES = {
-    'target_dictionary', 'target_components', 'component_sequences', 'component_class', 'protein_classification',
+    'target_dictionary',
+    'target_components',
+    'component_sequences',
+    'component_class',
+    'protein_classification',
 }
 
 
@@ -55,7 +59,7 @@ class TestChemblTarget:
                 '(comp_class_id int, component_id int, protein_class_id int);'
                 'CREATE TABLE public.protein_classification '
                 '(protein_class_id int, parent_id int, pref_name text, class_level int);'
-                "INSERT INTO public.target_dictionary VALUES "
+                'INSERT INTO public.target_dictionary VALUES '
                 "(20, 'CHEMBL_T20', 'Target Twenty', 'SINGLE PROTEIN');"
                 'INSERT INTO public.target_components VALUES (2001, 20, 300);'
                 "INSERT INTO public.component_sequences VALUES (300, 'P100');"

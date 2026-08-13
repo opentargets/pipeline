@@ -383,9 +383,7 @@ def _build_select_sql(
     return sql
 
 
-def _check_order_by(
-    tables: Mapping[str, Sequence[str] | None], order_by: Mapping[str, Sequence[str]]
-) -> None:
+def _check_order_by(tables: Mapping[str, Sequence[str] | None], order_by: Mapping[str, Sequence[str]]) -> None:
     """Reject an ordering that names a table or a column that is not being read.
 
     ``SELECT DISTINCT`` can only order by expressions in the select list, so a

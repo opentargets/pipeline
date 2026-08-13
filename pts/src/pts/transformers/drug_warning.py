@@ -19,8 +19,16 @@ SCHEMA_NAME = 'public'
 
 TABLES = {
     'drug_warning': [
-        'warning_id', 'molregno', 'warning_type', 'warning_class', 'warning_country',
-        'warning_description', 'warning_year', 'efo_term', 'efo_id', 'efo_id_for_warning_class',
+        'warning_id',
+        'molregno',
+        'warning_type',
+        'warning_class',
+        'warning_country',
+        'warning_description',
+        'warning_year',
+        'efo_term',
+        'efo_id',
+        'efo_id_for_warning_class',
     ],
     'warning_refs': ['warnref_id', 'warning_id', 'ref_type', 'ref_id', 'ref_url'],
     'molecule_dictionary': ['molregno', 'chembl_id'],
@@ -123,7 +131,8 @@ def process_drug_warnings(
     # cast at target.py's `_build_protein_classification`. Resolved the other way here:
     # the narrowing is accepted uncast because the values are identical, not cast back.
     return (
-        warnings.join(ids, on='warning_id', how='left', maintain_order='left')
+        warnings
+        .join(ids, on='warning_id', how='left', maintain_order='left')
         .join(references, on='warning_id', how='left', maintain_order='left')
         .with_columns(pl.col('references').fill_null([]))
         .select(
@@ -177,12 +186,15 @@ def _deduplicate_warnings(df: pl.DataFrame) -> pl.DataFrame:
     """
     group_cols = [c for c in df.columns if c not in ('id', 'chemblIds')]
     return (
-        df.group_by(group_cols, maintain_order=True)
+        df
+        .group_by(group_cols, maintain_order=True)
         .agg(
             pl.col('id').min().alias('id'),
-            pl.col('chemblIds').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
-                'chemblIds'
-            ),
+            pl
+            .col('chemblIds')
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .alias('chemblIds'),
         )
         .select(df.columns)
     )

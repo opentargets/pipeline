@@ -1307,17 +1307,16 @@ def _build_protein_classification(
     # published, so that correction gets its own issue rather than riding along
     # inside a refactor. REMOVE THIS when that issue is taken; the rest of the
     # function already handles the many-to-many correctly.
-    zipped_class_per_component = (
-        component_class
-        .groupBy('component_id')
-        .agg(f.min('protein_class_id').alias('protein_class_id'))
+    zipped_class_per_component = component_class.groupBy('component_id').agg(
+        f.min('protein_class_id').alias('protein_class_id')
     )
 
     # Components are reached through their target, mirroring the grain of the
     # ChEMBL target document this replaces: a component hanging off a tid that
     # is absent from target_dictionary contributed nothing there either.
     accession_class = (
-        target_components.select('tid', 'component_id')
+        target_components
+        .select('tid', 'component_id')
         .join(target_dictionary.select('tid'), 'tid', 'inner')
         .join(single_component_tids, 'tid', 'inner')
         .join(component_sequences.select('component_id', 'accession'), 'component_id', 'inner')

@@ -22,9 +22,7 @@ SAMPLE_MOLBLOCK = _BARE_MOLBLOCK + '\n'
 # ChEMBL ships some `molfile` values as a full SD-file record: the molblock plus
 # appended SDF property tags, separated by a single newline (the old Elasticsearch
 # shape). PTS truncates this back to the bare molblock.
-SAMPLE_MOLFILE_WITH_SDF_TAGS = (
-    _BARE_MOLBLOCK + '\n> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n'
-)
+SAMPLE_MOLFILE_WITH_SDF_TAGS = _BARE_MOLBLOCK + '\n> <chembl_id>\nCHEMBL1\n\n> <chembl_pref_name>\nDRUG A\n\n$$$$\n'
 
 # The raw column is otherwise inconsistent about a trailing newline after the
 # terminator: most real values have none, a minority have one, and some are
@@ -208,9 +206,7 @@ class TestProcessMolecules:
             orient='row',
         )
         compound_structures = pl.DataFrame(schema=tables()['compound_structures'].schema)
-        molecule_hierarchy = pl.DataFrame(
-            [(30, 30), (31, 30)], schema=['molregno', 'parent_molregno'], orient='row'
-        )
+        molecule_hierarchy = pl.DataFrame([(30, 30), (31, 30)], schema=['molregno', 'parent_molregno'], orient='row')
         molecule_synonyms = pl.DataFrame(
             schema={'molsyn_id': pl.Int64, 'molregno': pl.Int64, 'synonyms': pl.Utf8, 'syn_type': pl.Utf8}
         )

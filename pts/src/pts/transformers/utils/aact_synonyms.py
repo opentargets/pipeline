@@ -113,17 +113,17 @@ def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
         pl.col('supportive_drugs').fill_null([]),
     )
     return (
-        batch.select(pl.col('id').alias('nct_id'), roles.alias('entry'))
+        batch
+        .select(pl.col('id').alias('nct_id'), roles.alias('entry'))
         .explode('entry')
         # pyspark's default `explode` drops rows with an empty or null array; polars'
         # keeps a null row for both cases, so it is dropped explicitly here.
         .drop_nulls('entry')
         .unnest('entry')
+        .with_columns(members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([])))
         .with_columns(
-            members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([]))
-        )
-        .with_columns(
-            members=pl.col('members')
+            members=pl
+            .col('members')
             .list.eval(_normalize_name(pl.element()))
             .list.eval(pl.element().filter(pl.element().is_not_null() & (pl.element().str.len_chars() > 0)))
             .list.unique(maintain_order=True)
@@ -147,7 +147,8 @@ def _build_chembl_indexes(mol_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFr
         parent_child:  DataFrame[id, related: list[str]]  (parent + children)
     """
     labels = (
-        mol_df.select(
+        mol_df
+        .select(
             'id',
             pl.concat_list(
                 pl.concat_list(pl.col('name')),
@@ -167,7 +168,8 @@ def _build_chembl_indexes(mol_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFr
 
     # "<ingredient> COMPONENT OF <regimen>" -> regimen token (normalized text is lowercased)
     regimen_index = (
-        labels.with_columns(regimen_norm=pl.col('name_norm').str.extract(r'\bcomponent of\s+(.+)$', 1))
+        labels
+        .with_columns(regimen_norm=pl.col('name_norm').str.extract(r'\bcomponent of\s+(.+)$', 1))
         .filter(pl.col('regimen_norm').is_not_null() & (pl.col('regimen_norm').str.len_chars() > 0))
         .group_by('regimen_norm')
         .agg(pl.col('id').drop_nulls().unique().alias('ids'))
@@ -178,12 +180,15 @@ def _build_chembl_indexes(mol_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFr
         'id', pl.concat_list(pl.col('parentId')).alias('related')
     )
     parent_child = (
-        pl.concat([children, parents])
+        pl
+        .concat([children, parents])
         .group_by('id')
         .agg(
-            pl.col('related').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
-                'related'
-            )
+            pl
+            .col('related')
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .alias('related')
         )
     )
 
@@ -227,13 +232,15 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
     members = entries.select('entry_id', 'nct_id', pl.col('members').alias('member')).explode('member')
 
     resolved = (
-        members.join(name_index, left_on='member', right_on='name_norm', how='left')
+        members
+        .join(name_index, left_on='member', right_on='name_norm', how='left')
         .with_columns(ids=pl.col('ids').fill_null([]))
         .select('entry_id', 'nct_id', 'member', 'ids')
     )
 
     poisoned = (
-        resolved.group_by('entry_id')
+        resolved
+        .group_by('entry_id')
         .agg(pl.col('ids').list.len().max().alias('max_ids'))
         .filter(pl.col('max_ids') > AMBIGUITY_CAP)
         .select('entry_id')
@@ -241,7 +248,8 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
     resolved = resolved.join(poisoned, on='entry_id', how='anti')
 
     anchors = (
-        resolved.select('entry_id', pl.col('ids').alias('anchor_id'))
+        resolved
+        .select('entry_id', pl.col('ids').alias('anchor_id'))
         .explode('anchor_id')
         # collect_set drops nulls and dedups; an entry whose every member resolves to
         # zero molecules contributes no rows here at all, matching pyspark's explode
@@ -258,7 +266,8 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
     cand = cand.join(pc, on='anchor_id', how='left')
 
     cand = cand.with_columns(
-        status=pl.when(pl.col('ids').list.len() == 0)
+        status=pl
+        .when(pl.col('ids').list.len() == 0)
         .then(pl.lit('NOVEL'))
         .when(pl.col('ids').list.set_intersection(pl.col('pc_related').fill_null([])).list.len() > 0)
         .then(pl.lit('PARENT_CHILD'))
@@ -301,14 +310,16 @@ def _rewrite_and_reclassify_codes(
     # rule #8: descriptor-wrapped code -> bare code (phrase has a class word AND a code)
     code = pl.col('candidate').str.extract(CODE_REGEX, 0)
     cand = cand.with_columns(
-        candidate=pl.when(code.is_not_null() & _has_class_keyword(pl.col('candidate'))).then(code).otherwise(
-            pl.col('candidate')
-        )
+        candidate=pl
+        .when(code.is_not_null() & _has_class_keyword(pl.col('candidate')))
+        .then(code)
+        .otherwise(pl.col('candidate'))
     ).drop('status')
 
     # re-resolve the (possibly rewritten) candidate against the ChEMBL name index
     resolved = (
-        cand.join(name_index, left_on='candidate', right_on='name_norm', how='left')
+        cand
+        .join(name_index, left_on='candidate', right_on='name_norm', how='left')
         .with_columns(ids=pl.col('ids').fill_null([]))
         .select('id', 'candidate', 'nct_id', 'ids')
     )
@@ -323,8 +334,10 @@ def _rewrite_and_reclassify_codes(
     resolved = resolved.join(pc, on='id', how='left')
 
     return (
-        resolved.with_columns(
-            status=pl.when(pl.col('ids').list.len() == 0)
+        resolved
+        .with_columns(
+            status=pl
+            .when(pl.col('ids').list.len() == 0)
             .then(pl.lit('NOVEL'))
             .when(pl.col('ids').list.set_intersection(pl.col('pc_related').fill_null([])).list.len() > 0)
             .then(pl.lit('PARENT_CHILD'))
@@ -375,7 +388,8 @@ def _apply_cleanup_rules(
     # #11: plural suppression (singular already on M)
     length = pl.col('candidate').str.len_chars()
     cand = cand.with_columns(
-        singular=pl.when(pl.col('candidate').str.ends_with('ies'))
+        singular=pl
+        .when(pl.col('candidate').str.ends_with('ies'))
         .then(pl.col('candidate').str.slice(0, length - 3) + 'y')
         .when(pl.col('candidate').str.ends_with('es'))
         .then(pl.col('candidate').str.slice(0, length - 2))
@@ -426,7 +440,8 @@ def mine_aact_synonyms(mol_df: pl.DataFrame, entries: pl.DataFrame) -> pl.DataFr
     cleaned = _apply_cleanup_rules(reclassified, regimen_index, existing_per_id)
 
     return (
-        cleaned.group_by('id', 'candidate')
+        cleaned
+        .group_by('id', 'candidate')
         .agg(pl.col('nct_id').n_unique().alias('n_trials'))
         .filter(pl.col('n_trials') >= MIN_TRIALS)
         .select('id', pl.col('candidate').alias('label'))
@@ -454,32 +469,33 @@ def merge_aact_synonyms(mol_combined: pl.DataFrame, aact_df: pl.DataFrame) -> pl
 
     existing_lc = merged.select(
         'id',
-        pl.col('synonyms_filled').list.eval(pl.element().struct.field('label').str.to_lowercase()).alias(
-            'existing_lc'
-        ),
+        pl.col('synonyms_filled').list.eval(pl.element().struct.field('label').str.to_lowercase()).alias('existing_lc'),
     )
 
     fresh = (
-        merged.select('id', 'aact_labels_filled')
+        merged
+        .select('id', 'aact_labels_filled')
         .explode('aact_labels_filled')
         .drop_nulls('aact_labels_filled')
         .join(existing_lc, on='id', how='left')
         .filter(~pl.col('existing_lc').list.contains(pl.col('aact_labels_filled').str.to_lowercase()))
         .select(
             'id',
-            pl.struct(
-                pl.col('aact_labels_filled').alias('label'), pl.lit(AACT_SOURCE).alias('source')
-            ).alias('new_struct'),
+            pl.struct(pl.col('aact_labels_filled').alias('label'), pl.lit(AACT_SOURCE).alias('source')).alias(
+                'new_struct'
+            ),
         )
         .group_by('id')
         .agg(pl.col('new_struct'))
     )
 
     return (
-        merged.join(fresh, on='id', how='left')
+        merged
+        .join(fresh, on='id', how='left')
         .with_columns(
             # array_union already dedups identical structs; list.unique here matches that.
-            synonyms=pl.concat_list(pl.col('synonyms_filled'), pl.col('new_struct').fill_null([]))
+            synonyms=pl
+            .concat_list(pl.col('synonyms_filled'), pl.col('new_struct').fill_null([]))
             .list.unique(maintain_order=True)
             .list.sort()
         )

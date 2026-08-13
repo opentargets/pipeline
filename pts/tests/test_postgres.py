@@ -142,11 +142,7 @@ class TestRoundTrip:
         server = get_server(path / 'pgdata', cleanup_mode='delete')
         try:
             rows = f"SELECT i, 'x' || (i % {DISTINCT_TXT}) FROM generate_series(1, {ROWS}) i"  # noqa: S608 fixture
-            server.psql(
-                'CREATE SCHEMA demo;'
-                'CREATE TABLE demo.t (id int, txt text);'
-                f'INSERT INTO demo.t {rows};'
-            )
+            server.psql(f'CREATE SCHEMA demo;CREATE TABLE demo.t (id int, txt text);INSERT INTO demo.t {rows};')
             dump = path / 'demo.dmp'
             subprocess.run([str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()], check=True)
             yield dump

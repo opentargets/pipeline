@@ -164,7 +164,8 @@ def process_mechanism_of_action(
     target = _chembl_target(target_dictionary, target_components, component_sequences, gene_df)
 
     result = (
-        mechanism.join(references, on='id', how='full', coalesce=True, maintain_order='left_right')
+        mechanism
+        .join(references, on='id', how='full', coalesce=True, maintain_order='left_right')
         .join(target, on='target_chembl_id', how='full', coalesce=True, maintain_order='left_right')
         .with_columns(pl.col('references').fill_null([]))
         .drop('mechanism_refs', 'record_id', 'target_chembl_id', 'id')
@@ -192,14 +193,12 @@ def _with_target_chembl_id(mechanism: pl.DataFrame, target_dictionary: pl.DataFr
     Returns:
         `mechanism` with `tid` replaced by `target_chembl_id`.
     """
-    return (
-        mechanism.join(
-            target_dictionary.select('tid', pl.col('chembl_id').alias('target_chembl_id')),
-            on='tid',
-            how='left',
-            maintain_order='left',
-        ).drop('tid')
-    )
+    return mechanism.join(
+        target_dictionary.select('tid', pl.col('chembl_id').alias('target_chembl_id')),
+        on='tid',
+        how='left',
+        maintain_order='left',
+    ).drop('tid')
 
 
 def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
@@ -214,7 +213,8 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
         left by ids with none.
     """
     return (
-        df.select('id', 'mechanism_refs')
+        df
+        .select('id', 'mechanism_refs')
         .explode('mechanism_refs')
         .filter(pl.col('mechanism_refs').is_not_null())
         .unnest('mechanism_refs')
@@ -257,7 +257,8 @@ def _chembl_target(
         DataFrame with target_chembl_id, targetName, targetType, and targets.
     """
     target_components_flat = (
-        target_components.join(component_sequences, on='component_id', how='inner', maintain_order='left')
+        target_components
+        .join(component_sequences, on='component_id', how='inner', maintain_order='left')
         .join(target_dictionary, on='tid', how='inner', maintain_order='left')
         .filter(pl.col('accession').is_not_null())
         .select(
@@ -286,7 +287,8 @@ def _chembl_target(
     # accession. Only three are reached by a ChEMBL mechanism today, so if ChEMBL adds
     # mechanisms against more of them the difference grows without anything here changing.
     genes_by_uniprot = (
-        gene_df.select(
+        gene_df
+        .select(
             pl.col('id').alias('geneId'),
             pl.concat_list(
                 pl.col('uniprot_trembl').fill_null([]),
@@ -327,14 +329,19 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     """
     key_cols = [c for c in df.columns if c not in ('references', 'chemblIds')]
     return (
-        df.group_by(key_cols, maintain_order=True)
+        df
+        .group_by(key_cols, maintain_order=True)
         .agg(
-            pl.col('chemblIds').list.explode(keep_nulls=False, empty_as_null=False).unique(maintain_order=True).alias(
-                'chemblIds'
-            ),
-            pl.col('references').unique(maintain_order=True).list.explode(keep_nulls=False, empty_as_null=False).alias(
-                'references'
-            ),
+            pl
+            .col('chemblIds')
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .alias('chemblIds'),
+            pl
+            .col('references')
+            .unique(maintain_order=True)
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .alias('references'),
         )
         .select(df.columns)
     )
