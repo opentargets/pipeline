@@ -1526,18 +1526,17 @@ steps:
           END
 
   evidence_postprocess_intogen:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/intogen.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/intogen
-        evidence: output/evidence_intogen
+        failed_evidence: excluded/evidence/intogen/intogen.parquet
+        evidence: output/evidence_intogen/evidence_intogen.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: intogen
         score_expression: >-
