@@ -305,6 +305,7 @@ CLASS_KEYWORDS = [
     'stromal',
     'progenitor',
     'fibroblast',
+    'chemotherapy',
 ]
 _CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
 
