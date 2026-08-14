@@ -31,7 +31,7 @@ class EvidenceFlags(StrEnum):
     INVALID_BIOTYPE = 'Invalid biotype'
 
 
-class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- matches `UnsupportedExpression` in spark_sql.py
+class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condition, not an error type
     """A `unique_fields` dtype (or value) without a verified spark string-cast rendering.
 
     `spark_cast_to_string` feeds the sha1 that becomes the evidence `id`, a user-visible

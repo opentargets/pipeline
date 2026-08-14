@@ -582,9 +582,8 @@ class TestHarmonisation:
 class TestSparkParityForCastToString:
     """Direct spark-vs-polars checks for `spark_cast_to_string`.
 
-    Mirrors test_spark_sql.py's `SPARK_PARITY_CASES` pattern: run both engines against the same
-    data and diff the output, rather than pin a hand-copied expected string that could quietly
-    drift from real spark.
+    Runs both engines against the same data and diffs the output, rather than pinning a
+    hand-copied expected string that could quietly drift from real spark.
     """
 
     def test_double_matches_spark(self, spark) -> None:
