@@ -1,4 +1,8 @@
-"""Tests for the polars evidence post-processing."""
+"""Tests for the polars evidence post-processing.
+
+Two things live here: the validation look-up-table builders (`validation_lut.py`), and the
+`Evidence` class -- harmonisation, entity validation and identifier assignment (`evidence.py`).
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.utils.evidence import (
+    QC_COLUMN,
+    Evidence,
+    EvidenceFlags,
+    UnsupportedIdentifierField,
+    spark_cast_to_string,
+)
+from pts.transformers.utils.schemas import load_spark_schema_as_polars
 from pts.transformers.utils.validation_lut import (
     build_disease_lut,
     build_publication_lut,
@@ -22,6 +34,8 @@ TARGET_SCHEMA = {
     'proteinIds': pl.List(pl.Struct({'id': pl.String, 'source': pl.String})),
     'hallmarks': pl.Struct({'attributes': pl.List(pl.Struct({'description': pl.String}))}),
 }
+
+EVIDENCE_SCHEMA = load_spark_schema_as_polars('evidence.json')
 
 
 def _write_parquet(directory: Path, frame: pl.DataFrame) -> str:
@@ -251,3 +265,318 @@ def test_builders_fail_loudly_on_an_empty_dataset(tmp_path: Path, builder, patte
 
     with pytest.raises(ValueError, match=f'no {pattern.replace("*", ".")} '):
         builder(str(empty))
+
+
+# --------------------------------------------------------------------------- evidence
+
+
+class TestSparkCastToStringStringAndList:
+    def test_string_is_identity(self) -> None:
+        df = pl.DataFrame({'v': ['a', '', None]})
+        assert df.select(spark_cast_to_string('v', pl.String).alias('o'))['o'].to_list() == ['a', '', None]
+
+    def test_list_string_renders_like_spark(self) -> None:
+        df = pl.DataFrame({'lit': [['1', '2'], [], None]}, schema={'lit': pl.List(pl.String)})
+        got = df.select(spark_cast_to_string('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
+        assert got == ['[1, 2]', '[]', None]
+
+    def test_list_string_null_element_keeps_literal_null_token(self) -> None:
+        # Measured against spark (precheck-parity.md Q1): a null element renders as the bare
+        # token `null`, not as a dropped element -- `list.join` alone silently drops it.
+        df = pl.DataFrame({'lit': [['a', None]]}, schema={'lit': pl.List(pl.String)})
+        got = df.select(spark_cast_to_string('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
+        assert got == ['[a, null]']
+
+
+class TestSparkCastToStringFloat:
+    # Every value here (and its expected rendering) was measured against real spark; see
+    # task-8-report.md. Spark's `CAST(DOUBLE AS STRING)` matches Java's `Double.toString`:
+    # plain decimal for 0.001 <= |x| < 1e7, scientific `d.dddEn` outside that range.
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [
+            (1.0, '1.0'),
+            (0.5, '0.5'),
+            (1e-10, '1.0E-10'),
+            (123456789.123, '1.23456789123E8'),
+            (-0.0, '-0.0'),
+            (0.0, '0.0'),
+            (100.0, '100.0'),
+            (999999.9, '999999.9'),
+            (10000000.0, '1.0E7'),
+            (0.001, '0.001'),
+            (0.0001, '1.0E-4'),
+            (-5.5, '-5.5'),
+        ],
+    )
+    def test_matches_measured_spark_rendering(self, value: float, expected: str) -> None:
+        df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
+        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [expected]
+
+    def test_null_stays_null(self) -> None:
+        df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
+        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [None]
+
+    def test_large_magnitude_raises_even_though_some_such_values_happen_to_match_spark(self) -> None:
+        # Measured (task-8-report.md): a fuzz run against real spark found the java rendering
+        # algorithm start emitting non-shortest digits at ~1.83e16, but *not* for every value up
+        # there -- e.g. 1.5e20 and Double.MAX_VALUE (1.7976931348623157e308) individually still
+        # matched spark exactly when measured directly. Since which large values are safe is not
+        # predictable without re-measuring each one, and no real resourceScore is ever this big,
+        # the cutoff refuses the whole range >= 1e15 rather than special-case the ones observed
+        # to be fine.
+        df = pl.DataFrame({'v': [1e15, 1.5e20, 1.7976931348623157e308]}, schema={'v': pl.Float64})
+        with pytest.raises(UnsupportedIdentifierField, match='1e15'):
+            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+
+    def test_subnormal_raises_rather_than_guess(self) -> None:
+        # Measured (task-8-report.md): java's legacy Double.toString algorithm is not truly
+        # shortest-round-trip for subnormals (e.g. Double.MIN_VALUE renders '4.9E-324' in java,
+        # but python's shortest round-trip repr is '5e-324') and, separately, for magnitudes
+        # above ~1.8e16. No evidence.json double field ever reaches either range, so refuse
+        # loudly instead of silently emitting a value that could diverge from spark and change
+        # an evidence id.
+        df = pl.DataFrame({'v': [5e-324]}, schema={'v': pl.Float64})
+        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
+            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+
+
+class TestSparkCastToStringListOfStruct:
+    CELL_TYPE = pl.List(pl.Struct({'id': pl.String, 'name': pl.String, 'tissue': pl.String, 'tissueId': pl.String}))
+
+    def test_matches_measured_spark_rendering(self) -> None:
+        # Measured against real spark (task-8-report.md): a struct element renders as
+        # `{f1, f2, f3, f4}` (curly braces, no field names, comma-space separated), a null
+        # field renders as the literal token `null`, and the whole thing nests inside the
+        # usual `[...]` array rendering.
+        df = pl.DataFrame(
+            {
+                'cells': [
+                    [{'id': 'CL_1', 'name': 'HeLa', 'tissue': 'cervix', 'tissueId': 'UBERON_1'}],
+                    [
+                        {'id': 'CL_1', 'name': 'HeLa', 'tissue': 'cervix', 'tissueId': 'UBERON_1'},
+                        {'id': 'CL_2', 'name': 'HEK293', 'tissue': None, 'tissueId': 'UBERON_2'},
+                    ],
+                    [],
+                    None,
+                    [{'id': None, 'name': None, 'tissue': None, 'tissueId': None}],
+                ]
+            },
+            schema={'cells': self.CELL_TYPE},
+        )
+        got = df.select(spark_cast_to_string('cells', self.CELL_TYPE).alias('v'))['v'].to_list()
+        assert got == [
+            '[{CL_1, HeLa, cervix, UBERON_1}]',
+            '[{CL_1, HeLa, cervix, UBERON_1}, {CL_2, HEK293, null, UBERON_2}]',
+            '[]',
+            None,
+            '[{null, null, null, null}]',
+        ]
+
+    def test_non_string_struct_field_raises(self) -> None:
+        dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Int64}))
+        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}]]}, schema={'v': dtype})
+        with pytest.raises(UnsupportedIdentifierField, match='count'):
+            df.select(spark_cast_to_string('v', dtype).alias('o'))
+
+
+class TestSparkCastToStringUnsupported:
+    def test_unsupported_dtype_raises(self) -> None:
+        df = pl.DataFrame({'v': [True]})
+        with pytest.raises(UnsupportedIdentifierField, match='Boolean'):
+            df.select(spark_cast_to_string('v', pl.Boolean).alias('o'))
+
+    def test_unsupported_list_element_dtype_raises(self) -> None:
+        df = pl.DataFrame({'v': [[1, 2]]}, schema={'v': pl.List(pl.Int64)})
+        with pytest.raises(UnsupportedIdentifierField, match='Int64'):
+            df.select(spark_cast_to_string('v', pl.List(pl.Int64)).alias('o'))
+
+
+class TestFlagNullQualityControls:
+    """Correction 1: a null qualityControls column must normalise to [] in both branches."""
+
+    def test_null_qc_condition_true_becomes_flag_list(self) -> None:
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['NOPE'], 'datasourceId': ['x']}).with_columns(
+            pl.lit(None, dtype=pl.List(pl.String)).alias(QC_COLUMN)
+        )
+        lut = pl.DataFrame(
+            {'diseaseFromSourceMappedId': [], 'diseaseId': []},
+            schema={'diseaseFromSourceMappedId': pl.String, 'diseaseId': pl.String},
+        )
+        out = Evidence(lf).validate_diseases(lut).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.INVALID_DISEASE]]
+
+    def test_null_qc_condition_false_becomes_empty_list_not_null(self) -> None:
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'datasourceId': ['x']}).with_columns(
+            pl.lit(None, dtype=pl.List(pl.String)).alias(QC_COLUMN)
+        )
+        lut = pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']})
+        out = Evidence(lf).validate_diseases(lut).lf.collect()
+        # Not [] AND not null-as-a-python-None: a null-qc row that fails neither the "has
+        # flags" nor the "no flags" predicate would silently vanish from both valid and
+        # failed evidence -- measured in precheck-parity.md Q2.
+        assert out[QC_COLUMN].to_list() == [[]]
+
+
+class TestValidateDiseases:
+    def test_invalid_disease_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['EFO_1', 'NOPE'], 'datasourceId': ['x', 'x']})
+        lut = pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']})
+        out = Evidence(lf).validate_diseases(lut).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_DISEASE]]
+
+
+class TestValidateTarget:
+    def test_invalid_target_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'NOPE']})
+        lut = pl.DataFrame(
+            {'targetId': ['T1'], 'biotype': ['protein_coding'], 'targetFromSourceId': ['ENSG1']}
+        )
+        out = Evidence(lf).validate_target(lut).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_TARGET]]
+        assert 'biotype' not in out.columns
+
+    def test_invalid_biotype_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'ENSG2']})
+        lut = pl.DataFrame(
+            {
+                'targetId': ['T1', 'T2'],
+                'biotype': ['pseudogene', 'protein_coding'],
+                'targetFromSourceId': ['ENSG1', 'ENSG2'],
+            }
+        )
+        out = Evidence(lf).validate_target(lut, invalid_biotypes=['pseudogene']).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.INVALID_BIOTYPE], []]
+
+    def test_no_invalid_biotypes_provided_skips_biotype_flag(self) -> None:
+        lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1']})
+        lut = pl.DataFrame({'targetId': ['T1'], 'biotype': ['pseudogene'], 'targetFromSourceId': ['ENSG1']})
+        out = Evidence(lf).validate_target(lut).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[]]
+
+
+class TestValidateDatasource:
+    def test_filters_to_the_requested_datasource(self) -> None:
+        lf = pl.LazyFrame({'datasourceId': ['a', 'b', 'a']})
+        out = Evidence(lf).validate_datasource('a').lf.collect()
+        assert out['datasourceId'].to_list() == ['a', 'a']
+
+
+class TestAssignEvidenceIdentifier:
+    def test_identifier_is_unique_per_distinct_field_combination(self) -> None:
+        lf = pl.LazyFrame({
+            'targetId': ['T1', 'T1', 'T2'],
+            'datasourceId': ['d', 'd', 'd'],
+        })
+        out = Evidence(lf).assign_evidence_identifier(['targetId', 'datasourceId']).lf.collect()
+        ids = out['id'].to_list()
+        assert ids[0] == ids[1]
+        assert ids[0] != ids[2]
+        assert all(len(i) == 40 for i in ids)
+
+    def test_missing_unique_field_is_silently_skipped(self) -> None:
+        # Not every unique_fields entry from config.yaml is present on every datasource's
+        # frame; assign_evidence_identifier must not raise, mirroring the pyspark
+        # `if col in self.df.columns` guard.
+        lf = pl.LazyFrame({'targetId': ['T1']})
+        out = Evidence(lf).assign_evidence_identifier(['targetId', 'doesNotExist']).lf.collect()
+        assert len(out['id'][0]) == 40
+
+    def test_null_field_value_is_hashed_as_the_null_token(self) -> None:
+        # coalesce(col, 'null') semantics: a genuinely-null unique field must not collide with
+        # an empty string, and must be deterministic (the 'null' token, like spark's coalesce).
+        lf = pl.LazyFrame({'targetId': [None, 'null']}, schema={'targetId': pl.String})
+        out = Evidence(lf).assign_evidence_identifier(['targetId']).lf.collect()
+        assert out['id'][0] == out['id'][1]
+
+
+class TestHarmonisation:
+    def test_qc_column_added_when_missing(self) -> None:
+        out = Evidence(pl.LazyFrame({'targetId': ['T1']})).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[]]
+        assert out.schema[QC_COLUMN] == pl.List(pl.String)
+
+    def test_qc_column_left_alone_when_already_present(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1']}).with_columns(pl.lit(['x']).alias(QC_COLUMN))
+        out = Evidence(lf).lf.collect()
+        assert out[QC_COLUMN].to_list() == [['x']]
+
+    def test_column_not_in_target_schema_is_left_alone(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1'], 'notInSchema': [1]})
+        out = Evidence(lf).lf.collect()
+        assert out['notInSchema'].to_list() == [1]
+
+    def test_type_mismatch_is_cast_to_the_schema_type(self) -> None:
+        # pValueExponent is `long` in evidence.json; a frame producing it as a plain Int32 (or
+        # any other numeric dtype) must be cast, not left as-is.
+        lf = pl.LazyFrame({'pValueExponent': [1, 2]}, schema={'pValueExponent': pl.Int32})
+        out = Evidence(lf).lf.collect()
+        assert out.schema['pValueExponent'] == EVIDENCE_SCHEMA['pValueExponent'] == pl.Int64
+
+    def test_struct_field_missing_from_source_is_added_as_null(self) -> None:
+        # biomarkers.geneExpression is List(Struct({id, name})); dropping `name` from the
+        # source must add it back as null, not raise or drop the whole struct.
+        dtype = pl.Struct({'geneExpression': pl.List(pl.Struct({'id': pl.String}))})
+        lf = pl.LazyFrame({'biomarkers': [{'geneExpression': [{'id': 'g1'}]}]}, schema={'biomarkers': dtype})
+        out = Evidence(lf).lf.collect()
+        assert out['biomarkers'][0]['geneExpression'][0] == {'id': 'g1', 'name': None}
+
+    def test_source_only_struct_field_is_dropped(self) -> None:
+        # urls is List(Struct({niceName, url})); `extra` has no home in the target schema and
+        # must disappear, while `url` (present in both) survives and `niceName` (target-only)
+        # is added as null.
+        dtype = pl.Struct({'url': pl.String, 'extra': pl.Int64})
+        lf = pl.LazyFrame({'urls': [[{'url': 'http://x', 'extra': 1}]]}, schema={'urls': pl.List(dtype)})
+        out = Evidence(lf).lf.collect()
+        assert out['urls'][0][0] == {'niceName': None, 'url': 'http://x'}
+
+    def test_qualitycontrols_ends_as_list_string_even_when_source_prebuilds_it(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1']}).with_columns(
+            pl.lit(['x']).cast(pl.List(pl.String)).alias(QC_COLUMN)
+        )
+        out = Evidence(lf).lf.collect()
+        assert out.schema[QC_COLUMN] == pl.List(pl.String)
+
+
+class TestSparkParityForCastToString:
+    """Direct spark-vs-polars checks for `spark_cast_to_string`.
+
+    Mirrors test_spark_sql.py's `SPARK_PARITY_CASES` pattern: run both engines against the same
+    data and diff the output, rather than pin a hand-copied expected string that could quietly
+    drift from real spark.
+    """
+
+    def test_double_matches_spark(self, spark) -> None:
+        values = [1.0, 0.5, 1e-10, 123456789.123, -0.0, 0.0, 100.0, 999999.9, 10000000.0, 0.001, 0.0001, -5.5, None]
+        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
+        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_list_string_matches_spark(self, spark) -> None:
+        values = [['1', '2'], [], None, ['a', None]]
+        rows = spark.createDataFrame([(v,) for v in values], 'v ARRAY<STRING>').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.List(pl.String)})
+        got = df.select(spark_cast_to_string('v', pl.List(pl.String)).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_list_struct_matches_spark(self, spark) -> None:
+        dtype = pl.List(pl.Struct({'id': pl.String, 'name': pl.String, 'tissue': pl.String, 'tissueId': pl.String}))
+        values = [
+            [{'id': 'CL_1', 'name': 'HeLa', 'tissue': 'cervix', 'tissueId': 'UBERON_1'}],
+            [
+                {'id': 'CL_1', 'name': 'HeLa', 'tissue': 'cervix', 'tissueId': 'UBERON_1'},
+                {'id': 'CL_2', 'name': 'HEK293', 'tissue': None, 'tissueId': 'UBERON_2'},
+            ],
+            [],
+            None,
+            [{'id': None, 'name': None, 'tissue': None, 'tissueId': None}],
+        ]
+        spark_schema = 'v ARRAY<STRUCT<id: STRING, name: STRING, tissue: STRING, tissueId: STRING>>'
+        rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': dtype})
+        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        assert got == expected
