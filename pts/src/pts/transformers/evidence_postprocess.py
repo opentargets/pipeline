@@ -17,7 +17,8 @@ config.yaml for every datasource at once.
 
 from __future__ import annotations
 
-from typing import Any
+import bz2
+from typing import IO, Any
 
 import polars as pl
 from loguru import logger
@@ -57,6 +58,56 @@ def _json_parts(path: str) -> list[str]:
     return parts
 
 
+def _open_evidence_bytes(path: str) -> IO[bytes]:
+    """Binary content of one json evidence part, decompressed if it is bzip2.
+
+    polars' ndjson reader decompresses gzip transparently -- relied on everywhere else in this
+    module via a plain `StorageHandle(path).open()` -- but not bzip2: fed a `.bz2` file, it does
+    not refuse, it silently reads the still-compressed bytes as if they were plain content and
+    raises `ComputeError: stream did not contain valid UTF-8`. `expression_atlas`'s evidence
+    source (`input/evidence/atlas.json.bz2`) is bzip2, so this decompresses explicitly, keyed off
+    the actual suffix rather than assuming atlas is the only `.bz2` source there will ever be.
+    """
+    raw = StorageHandle(path).open('rb')
+    return bz2.open(raw, 'rb') if path.endswith('.bz2') else raw
+
+
+def _json_schema(path: str) -> dict[str, Any]:
+    """The schema to pin for one json evidence part: every column it actually carries, typed.
+
+    A full `schema=load_spark_schema_as_polars('evidence.json')` pin does not just constrain
+    dtypes, it MATERIALISES every one of the schema's 109 fields whether or not the source
+    carries it -- measured: `reactome.json.gz`'s 12 real columns became 109 that way, filled with
+    ~97 spurious all-null columns spark never produced (the published `evidence_reactome` output
+    has 19 -- reactome's 12 plus `id`/`diseaseId`/etc. the `Evidence` chain adds on top). Spark's
+    own json reader infers only the columns actually present, and `_harmonise_to_schema` only
+    casts columns that are in both the frame and the target schema -- it never adds a schema
+    field the frame lacks at the top level (that only happens one level down, inside a struct;
+    see `_harmonise_expr`) -- so a wholesale materialise-every-field pin has no spark equivalent
+    to justify it.
+
+    The fix discovers the columns actually present with a FULL-file scan
+    (`infer_schema_length=None`), not a bounded sample: a bounded 5,000-row sample measurably
+    missed one of `cosmic.json.gz`'s real 9 columns in a real run here, the same class of defect
+    `validation_lut.LITERATURE_SCHEMA` exists to avoid. Each discovered column is then typed with
+    evidence.json's dtype where the column is one of its fields -- so casting downstream still
+    lands on evidence.json's type, and the leading-rows dtype bug can't recur for any column this
+    measurement covers -- or the inferred dtype otherwise, mapping an inferred Null (an all-null
+    column with no evidence.json field to borrow a type from) to String.
+
+    Args:
+        path: location of one json evidence part.
+
+    Returns:
+        `{column: dtype}` for exactly the columns `path` carries.
+    """
+    inferred = pl.scan_ndjson(_open_evidence_bytes(path), infer_schema_length=None).collect_schema()
+    target_schema = load_spark_schema_as_polars('evidence.json')
+    return {
+        name: target_schema.get(name, dtype if dtype != pl.Null else pl.String) for name, dtype in inferred.items()
+    }
+
+
 def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
     """Read one datasource's raw evidence, before harmonisation to the evidence.json schema.
 
@@ -72,21 +123,8 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
         is_dir = StorageHandle(path).stat().is_dir
         return pl.scan_parquet(f'{path}/*.parquet' if is_dir else path)
 
-    # A bare `pl.read_ndjson(path)` infers each column's dtype from a sample of the leading
-    # rows, which -- under `ignore_errors=True` -- is the exact construct that silently
-    # discarded 386,627 pmids elsewhere in this port (see validation_lut.LITERATURE_SCHEMA).
-    # Pinning the full evidence.json schema removes that risk, but trades in a different one:
-    # `schema=` (not `schema_overrides=`) restricts the read to exactly the named columns, so a
-    # raw column the source carries but evidence.json doesn't would be silently dropped rather
-    # than passed through for `Evidence.__post_init__`/`_harmonise_to_schema` to leave alone.
-    # Checked, not assumed: every json evidence source staged for this release --
-    # atlas (242,545 rows), cosmic (102,872), eva (4,126,114, the largest), reactome (11,492),
-    # uniprot_literature (7,697), uniprot_variants (47,867), validation_lab (1,125) -- was
-    # scanned end to end, and every raw column each one carries is already a field of
-    # evidence.json, so the full-schema pin drops nothing for any of them today.
-    target_schema = load_spark_schema_as_polars('evidence.json')
     return pl.concat([
-        pl.read_ndjson(StorageHandle(part).open(), schema=target_schema).lazy() for part in _json_parts(path)
+        pl.read_ndjson(_open_evidence_bytes(part), schema=_json_schema(part)).lazy() for part in _json_parts(path)
     ])
 
 

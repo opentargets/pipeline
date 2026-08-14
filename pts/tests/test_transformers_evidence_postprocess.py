@@ -8,6 +8,7 @@ this module adds on top of the pieces it assembles.
 
 from __future__ import annotations
 
+import bz2
 import gzip
 import json
 from pathlib import Path
@@ -15,7 +16,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence_postprocess import _json_parts, _read_evidence, evidence_postprocess
+from pts.transformers.evidence_postprocess import _json_parts, _json_schema, _read_evidence, evidence_postprocess
+from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
 
 def _write_parquet_dir(directory: Path, frame: pl.DataFrame) -> str:
@@ -30,6 +32,14 @@ def _write_json_gz(path: Path, rows: list[dict]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = '\n'.join(json.dumps(row) for row in rows).encode()
     path.write_bytes(gzip.compress(payload))
+    return str(path)
+
+
+def _write_json_bz2(path: Path, rows: list[dict]) -> str:
+    """Write one bzip2-compressed newline delimited json file, the shape `atlas.json.bz2` is."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = '\n'.join(json.dumps(row) for row in rows).encode()
+    path.write_bytes(bz2.compress(payload))
     return str(path)
 
 
@@ -99,12 +109,48 @@ def test_read_evidence_json_from_a_directory_reads_every_part(tmp_path: Path) ->
     assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
 
 
-def test_read_evidence_json_pins_the_full_evidence_schema(tmp_path: Path) -> None:
-    """A column absent from a part's leading rows must not be inferred Null and dropped.
+def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
+    """The pinned schema must match the SOURCE's columns, not evidence.json's full 109 fields.
 
-    Same defect class as `build_publication_lut` (see validation_lut.py): unlike that table,
-    which only needs five columns, evidence needs the whole schema, so the pin here is the
-    full `evidence.json` schema, not a handful of named fields.
+    A full `schema=load_spark_schema_as_polars('evidence.json')` pin materialises every field
+    the schema knows about, whether or not the source carries it -- measured on real data,
+    `reactome.json.gz`'s 12 real columns became 109 that way. Two columns in, two columns out.
+    """
+    rows = [{'targetFromSourceId': 't1', 'resourceScore': 0.5}]
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
+
+    schema = _json_schema(path)
+
+    assert set(schema) == {'targetFromSourceId', 'resourceScore'}
+    full_schema_field_count = len(load_spark_schema_as_polars('evidence.json'))
+    assert len(schema) < full_schema_field_count
+
+
+def test_json_schema_prefers_the_evidence_json_dtype_for_a_known_column(tmp_path: Path) -> None:
+    """A column that IS one of evidence.json's fields is typed from evidence.json, not inferred."""
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'resourceScore': 1}])  # inferred as Int64
+
+    schema = _json_schema(path)
+
+    assert schema['resourceScore'] == load_spark_schema_as_polars('evidence.json')['resourceScore']
+    assert schema['resourceScore'] != pl.Int64
+
+
+def test_json_schema_keeps_a_column_outside_evidence_json(tmp_path: Path) -> None:
+    """A raw column with no evidence.json field is kept (typed by inference), not dropped."""
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'targetFromSourceId': 't1', 'notInSchema': 'x'}])
+
+    schema = _json_schema(path)
+
+    assert 'notInSchema' in schema
+    assert schema['notInSchema'] == pl.String
+
+
+def test_read_evidence_json_finds_a_column_absent_from_a_bounded_sample(tmp_path: Path) -> None:
+    """A column that only appears past a bounded sample must not be inferred Null and dropped.
+
+    Same defect class `validation_lut.LITERATURE_SCHEMA` exists to avoid, here guarded by a
+    full-file scan (`infer_schema_length=None`) rather than a named-column pin.
     """
     rows = [{'targetFromSourceId': f't{i}'} for i in range(200)]
     rows.append({'targetFromSourceId': 't200', 'resourceScore': 0.5})
@@ -113,6 +159,17 @@ def test_read_evidence_json_pins_the_full_evidence_schema(tmp_path: Path) -> Non
     frame = _read_evidence(path, 'json').collect()
 
     assert frame.filter(pl.col('targetFromSourceId') == 't200')['resourceScore'].item() == 0.5
+
+
+def test_read_evidence_json_reads_a_bzip2_source(tmp_path: Path) -> None:
+    """`expression_atlas`'s evidence source is bzip2; polars' ndjson reader has no native support
+    for it and misreads the compressed bytes as invalid UTF-8 unless decompressed first.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    path = _write_json_bz2(tmp_path / 'evidence.json.bz2', [{'targetFromSourceId': 't1'}, {'targetFromSourceId': 't2'}])
+
+    frame = _read_evidence(path, 'json').collect()
+
+    assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
 
 
 # --------------------------------------------------------------------------- registry lookup
