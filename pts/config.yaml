@@ -51,12 +51,12 @@ steps:
 
   #: REACTOME STEP :################################################################################
   reactome:
-    - name: pyspark reactome
-      pyspark: reactome
+    - name: transform reactome
+      transformer: reactome
       source:
         pathways: input/reactome/ReactomePathways.txt
         relations: input/reactome/ReactomePathwaysRelation.txt
-      destination: output/reactome
+      destination: output/reactome/reactome.parquet
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
