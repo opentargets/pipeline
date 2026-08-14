@@ -3,10 +3,10 @@ revision = 3
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and sys_platform == 'emscripten'",
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
@@ -2333,8 +2333,8 @@ version = "0.15.6"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version < '3.12' and sys_platform == 'darwin'",
@@ -2549,7 +2549,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.9.0rc4"
+version = "26.9.0rc5"
 source = { editable = "." }
 dependencies = [
     { name = "clinical-mining" },
@@ -3416,10 +3416,10 @@ version = "1.12.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform == 'darwin'",
 ]
 dependencies = [
@@ -3560,10 +3560,10 @@ version = "0.0.8"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform == 'darwin'",
 ]
 dependencies = [
@@ -3847,8 +3847,8 @@ version = "2.12.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version < '3.12' and sys_platform == 'emscripten'",
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
@@ -4147,10 +4147,10 @@ version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform == 'darwin'",
 ]
 dependencies = [
