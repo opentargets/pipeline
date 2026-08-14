@@ -917,7 +917,6 @@ steps:
         evidence: output/evidence_gwas_credible_sets/evidence_gwas_credible_sets.parquet
       settings:
         evidence_format: parquet
-        score_expression: resourceScore
         datasource_id: gwas_credible_sets
         unique_fields:
           - targetId
@@ -940,16 +939,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: expression_atlas
-        score_expression: >-
-          array_min(array(1.0,
-            (CASE
-              WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-              WHEN resourceScore <= 0 THEN 1.0
-              ELSE LEAST(1.0, GREATEST(0.0,
-                (1.0 - 0.0) * (log10(resourceScore) - log10(1.0)) / (log10(1e-10) - log10(1.0)) + 0.0
-              ))
-            END) * (abs(log2FoldChangeValue) / 10) * (log2FoldChangePercentileRank / 100)
-          ))
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -991,56 +980,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: eva
-        score_expression: |
-          coalesce(
-            array_max(
-              transform(
-                clinicalSignificances,
-                x -> element_at(
-                  map(
-                    'association not found', 0.0,
-                    'benign', 0.0,
-                    'not provided', 0.0,
-                    'likely benign', 0.0,
-                    'evidence only', 0.0,
-                    'likely risk allele', 0.3,
-                    'low penetrance', 0.3,
-                    'conflicting interpretations of pathogenicity', 0.3,
-                    'conflicting data from submitters', 0.3,
-                    'other', 0.3,
-                    'uncertain significance', 0.3,
-                    'uncertain risk allele', 0.3,
-                    'established risk allele', 0.5,
-                    'risk factor', 0.5,
-                    'affects', 0.5,
-                    'likely pathogenic', 0.7,
-                    'confers sensitivity', 0.9,
-                    'association', 0.9,
-                    'drug response', 0.9,
-                    'protective', 0.9,
-                    'pathogenic', 0.9
-                  ),
-                  x
-                )
-              )
-            ),
-            0.0
-          ) + coalesce(
-            element_at(
-              map(
-                'practice guideline', 0.1,
-                'reviewed by expert panel', 0.07,
-                'criteria provided, multiple submitters, no conflicts', 0.05,
-                'criteria provided, conflicting interpretations', 0.02,
-                'criteria provided, single submitter', 0.02,
-                'no assertion for the individual variant', 0.0,
-                'no assertion criteria provided', 0.0,
-                'no assertion provided', 0.0
-              ),
-              confidence
-            ),
-            0.0
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1048,26 +987,6 @@ steps:
           - datasourceId
           - studyId
           - variantId
-        direction_on_trait_expression: |
-          CASE WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)pathogenic'
-          AND CONCAT_WS('', clinicalSignificances) RLIKE '(?i)protect' THEN null
-          WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)pathogenic' THEN 'risk'
-          WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)protect' THEN 'protect'
-          ELSE null
-          END
-        direction_on_target_expression: |
-          CASE
-            WHEN variantFunctionalConsequenceId IN (
-              'SO_0001589',
-              'SO_0001587',
-              'SO_0001574',
-              'SO_0001575',
-              'SO_0002012',
-              'SO_0001578',
-              'SO_0001893'
-            ) THEN 'LoF'
-            ELSE null
-          END
 
   evidence_postprocess_clinvar_somatic:
     - name: transform evidence_postprocess
@@ -1083,56 +1002,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: eva_somatic
-        score_expression: |
-          coalesce(
-            array_max(
-              transform(
-                clinicalSignificances,
-                x -> element_at(
-                  map(
-                    'association not found', 0.0,
-                    'benign', 0.0,
-                    'not provided', 0.0,
-                    'likely benign', 0.0,
-                    'evidence only', 0.0,
-                    'likely risk allele', 0.3,
-                    'conflicting interpretations of pathogenicity', 0.3,
-                    'conflicting data from submitters', 0.3,
-                    'other', 0.3,
-                    'uncertain significance', 0.3,
-                    'low penetrance', 0.3,
-                    'uncertain risk allele', 0.3,
-                    'established risk allele', 0.5,
-                    'risk factor', 0.5,
-                    'affects', 0.5,
-                    'likely pathogenic', 0.7,
-                    'confers sensitivity', 0.9,
-                    'association', 0.9,
-                    'drug response', 0.9,
-                    'protective', 0.9,
-                    'pathogenic', 0.9
-                  ),
-                  x
-                )
-              )
-            ),
-            0.0
-          ) + coalesce(
-            element_at(
-              map(
-                'practice guideline', 0.1,
-                'reviewed by expert panel', 0.07,
-                'criteria provided, multiple submitters, no conflicts', 0.05,
-                'criteria provided, conflicting interpretations', 0.02,
-                'criteria provided, single submitter', 0.02,
-                'no assertion for the individual variant', 0.0,
-                'no assertion criteria provided', 0.0,
-                'no assertion provided', 0.0
-              ),
-              confidence
-            ),
-            0.0
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1140,26 +1009,6 @@ steps:
           - datasourceId
           - studyId
           - variantId
-        direction_on_trait_expression: |
-          CASE WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)pathogenic'
-          AND CONCAT_WS('', clinicalSignificances) RLIKE '(?i)protect' THEN null
-          WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)pathogenic' THEN 'risk'
-          WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)protect' THEN 'protect'
-          ELSE null
-          END
-        direction_on_target_expression: |
-          CASE
-            WHEN variantFunctionalConsequenceId IN (
-              'SO_0001589',
-              'SO_0001587',
-              'SO_0001574',
-              'SO_0001575',
-              'SO_0002012',
-              'SO_0001578',
-              'SO_0001893'
-            ) THEN 'LoF'
-            ELSE null
-          END
 
   evidence_postprocess_uniprot_variants:
     - name: transform evidence_postprocess
@@ -1175,14 +1024,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: uniprot_variants
-        score_expression: |
-          element_at(
-            map(
-              'high', 1.0,
-              'medium', 0.5
-            ),
-            confidence
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1207,14 +1048,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: uniprot_literature
-        score_expression: |
-          element_at(
-            map(
-              'high', 1.0,
-              'medium', 0.5
-            ),
-            confidence
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1236,19 +1069,6 @@ steps:
       settings:
         datasource_id: clingen
         evidence_format: parquet
-        score_expression: |
-          element_at(
-            map(
-              'No Known Disease Relationship', 0.01,
-              'Refuted', 0.01,
-              'Disputed', 0.01,
-              'Limited', 0.01,
-              'Moderate', 0.5,
-              'Strong', 1.0,
-              'Definitive', 1.0
-            ),
-            confidence
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1272,7 +1092,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: cancer_biomarkers
-        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1302,59 +1121,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: clinical_precedence
-        score_expression: |
-          element_at(
-            map(
-              'APPROVAL', 1.0,
-              'PHASE_4', 1.0,
-              'WITHDRAWAL', 1.0,
-              'PREAPPROVAL', 0.8,
-              'PHASE_3', 0.7,
-              'PHASE_2_3', 0.5,
-              'PHASE_2', 0.2,
-              'PHASE_1_2', 0.15,
-              'PHASE_1', 0.1,
-              'EARLY_PHASE_1', 0.05,
-              'IND', 0.05,
-              'PRECLINICAL', 0.01,
-              'UNKNOWN', 0.01
-            ),
-            clinicalStage
-          )
-          *
-          CASE
-          WHEN trialStopReasonCategories IS NULL THEN
-            double(1.0)
-          ELSE
-            array_min(
-              transform(
-                trialStopReasonCategories,
-                x -> element_at(
-                  map(
-                    'Another_Study', double(1.0),
-                    'Business_Administrative', double(1.0),
-                    'Covid19', double(1.0),
-                    'Ethical_Reason', double(1.0),
-                    'Insufficient_Data', double(1.0),
-                    'Insufficient_Enrollment', double(1.0),
-                    'Interim_Analysis', double(1.0),
-                    'Invalid_Reason', double(1.0),
-                    'Logistics_Resources', double(1.0),
-                    'Endpoint_Met', double(1.0),
-                    'Negative', double(0.5),
-                    'No_Context', double(1.0),
-                    'Regulatory', double(1.0),
-                    'Safety_Sideeffects', double(0.5),
-                    'Study_Design', double(1.0),
-                    'Study_Staff_Moved', double(1.0),
-                    'Success', double(1.0),
-                    'Uncategorised', double(1.0)
-                  ),
-                  x
-                )
-              )
-            )
-          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1362,34 +1128,6 @@ steps:
           - datasourceId
           - drugId
           - clinicalReportId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'protect' END
-        direction_on_target_expression: |
-          CASE
-            WHEN actionType IN (
-              'RNAI INHIBITOR',
-              'NEGATIVE MODULATOR',
-              'NEGATIVE ALLOSTERIC MODULATOR',
-              'ANTAGONIST',
-              'ANTISENSE INHIBITOR',
-              'BLOCKER',
-              'INHIBITOR',
-              'DEGRADER',
-              'INVERSE AGONIST',
-              'ALLOSTERIC ANTAGONIST',
-              'DISRUPTING AGENT',
-              'GENE EDITING NEGATIVE MODULATOR'
-            ) THEN 'LoF'
-            WHEN actionType IN (
-              'PARTIAL AGONIST',
-              'ACTIVATOR',
-              'POSITIVE ALLOSTERIC MODULATOR',
-              'POSITIVE MODULATOR',
-              'AGONIST',
-              'SEQUESTERING AGENT',
-              'STABILISER'
-            ) THEN 'GoF'
-            ELSE NULL
-          END
 
   evidence_postprocess_reactome:
     - name: transform evidence_postprocess
@@ -1405,7 +1143,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: reactome
-        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1429,7 +1166,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: impc
-        score_expression: resourceScore / 100
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1439,8 +1175,6 @@ steps:
           - targetInModel
           - biologicalModelAllelicComposition
           - diseaseFromSource
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
-        direction_on_target_expression: CASE WHEN diseaseId IS NOT NULL THEN 'LoF' END
 
   evidence_postprocess_orphanet:
     - name: transform evidence_postprocess
@@ -1456,20 +1190,12 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: orphanet
-        score_expression: element_at(map('Assessed', 1.0, 'Not yet assessed', 0.5), confidence)
         unique_fields:
           - targetId
           - targetFromSourceId
           - diseaseId
           - datasourceId
           - diseaseFromSourceId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
-        direction_on_target_expression: |
-          CASE
-            WHEN variantFunctionalConsequenceId == 'SO_0002053' THEN 'GoF'
-            WHEN variantFunctionalConsequenceId == 'SO_0002054' THEN 'LoF'
-            ELSE null
-          END
 
   evidence_postprocess_gene2phenotype:
     - name: transform evidence_postprocess
@@ -1485,17 +1211,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: gene2phenotype
-        score_expression: |
-          element_at(
-            map(
-              'definitive', 1.0,
-              'both RD and IF', 1.0,
-              'strong', 1.0,
-              'moderate', 0.5,
-              'limited', 0.01
-            ),
-            confidence
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1504,13 +1219,6 @@ steps:
           - diseaseFromSource
           - allelicRequirements
           - studyId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
-        direction_on_target_expression: |
-          CASE
-            WHEN variantFunctionalConsequenceId == 'SO_0002315' THEN 'GoF'
-            WHEN variantFunctionalConsequenceId == 'SO_0002317' THEN 'LoF'
-            ELSE null
-          END
 
   evidence_postprocess_intogen:
     - name: transform evidence_postprocess
@@ -1526,40 +1234,12 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: intogen
-        score_expression: >-
-          CASE
-            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-            WHEN resourceScore <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.25,
-              (1.0 - 0.25) * (log10(resourceScore) - log10(0.1)) / (log10(1e-10) - log10(0.1)) + 0.25
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId
           - diseaseId
           - datasourceId
           - cohortShortName
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
-        direction_on_target_expression: |
-          CASE
-            WHEN mutatedSamples IS NOT NULL AND
-              exists(
-                transform(
-                  mutatedSamples,
-                  x -> x.functionalConsequenceId
-                ), y -> y IN ("SO_0002054")
-              )
-            THEN 'LoF'
-            WHEN mutatedSamples IS NOT NULL AND
-              exists(
-                transform(
-                  mutatedSamples,
-                  x -> x.functionalConsequenceId
-                ), y -> y IN ("SO_0002053")
-              )
-            THEN 'GoF'
-          END
 
   evidence_postprocess_gene_burden:
     - name: transform evidence_postprocess
@@ -1575,14 +1255,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: gene_burden
-        score_expression: >-
-          CASE
-            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-            WHEN resourceScore <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.25,
-              (1.0 - 0.25) * (log10(resourceScore) - log10(1e-7)) / (log10(1e-17) - log10(1e-7)) + 0.25
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1592,14 +1264,6 @@ steps:
           - diseaseFromSource
           - statisticalMethod
           - projectId
-        direction_on_trait_expression: |
-          CASE WHEN oddsRatio > 1.0 THEN 'risk'
-          WHEN oddsRatio < 1.0 THEN 'protect'
-          WHEN beta > 0.0 THEN 'risk'
-          WHEN beta < 0.0 THEN 'protect'
-          END
-        direction_on_target_expression: |
-          'LoF'
 
   evidence_postprocess_crispr_screens:
     - name: transform evidence_postprocess
@@ -1615,14 +1279,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: crispr_screen
-        score_expression: >-
-          CASE
-            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-            WHEN resourceScore <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.0,
-              (1.0 - 0.0) * (log10(resourceScore) - log10(0.5)) / (log10(0.005) - log10(0.5)) + 0.0
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1644,7 +1300,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: europepmc
-        score_expression: array_min(array(resourceScore / 100.0, 1.0))
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1666,14 +1321,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: genomics_england
-        score_expression: |
-          element_at(
-            map(
-              'amber', 0.5,
-              'green', 1.0
-            ),
-            confidence
-          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1696,7 +1343,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: crispr
-        score_expression: linear_rescale(resourceScore, 41.5, 100, 0.415, 1.0)
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1717,19 +1363,11 @@ steps:
       settings:
         evidence_format: json
         datasource_id: cancer_gene_census
-        score_expression: resourceScore
         unique_fields:
           - targetId
           - targetFromSourceId
           - diseaseId
           - datasourceId
-        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
-        direction_on_target_expression: |
-          CASE
-            WHEN TSorOncogene == 'oncogene' THEN 'GoF'
-            WHEN TSorOncogene == 'tsg' THEN 'LoF'
-            ELSE null
-          END
 
   evidence_postprocess_ot_crispr:
     - name: transform evidence_postprocess
@@ -1745,7 +1383,6 @@ steps:
       settings:
         evidence_format: parquet
         datasource_id: ot_crispr
-        score_expression: '1.0'
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1771,14 +1408,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: encore
-        score_expression: >-
-          CASE
-            WHEN geneticInteractionPValue IS NULL OR isnan(geneticInteractionPValue) THEN NULL
-            WHEN geneticInteractionPValue <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.0,
-              (1.0 - 0.0) * (log10(geneticInteractionPValue) - log10(1.0)) / (log10(0.01) - log10(1.0)) + 0.0
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1803,7 +1432,6 @@ steps:
       settings:
         evidence_format: json
         datasource_id: ot_crispr_validation
-        score_expression: resourceScore
         unique_fields:
           - targetId
           - targetFromSourceId

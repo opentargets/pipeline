@@ -3,6 +3,14 @@
 No spark dependency here -- the registry's parity with real spark is verified separately (see
 `.superpowers/sdd/plan/registry-parity-output.txt` and `task-registry-report.md`), and the
 handful of expected values hard-coded below were measured against that spark run, not guessed.
+
+`pts/config.yaml` no longer carries `score_expression` / `direction_on_trait_expression` /
+`direction_on_target_expression` -- those were stripped once the registry below became the sole
+source of truth (see `evidence_expressions.py`'s module docstring for where the original SQL a
+given entry was translated from still lives in git history). So config.yaml can no longer serve as
+this test's oracle for *which* fields a datasource has; the checks below are what config.yaml can
+still ground: that every step's `datasource_id` maps to a registry entry and back, and that every
+entry is actually usable.
 """
 
 from __future__ import annotations
@@ -16,52 +24,40 @@ import yaml
 from pts.transformers.utils.evidence_expressions import EXPRESSIONS
 
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
-EXPRESSION_FIELDS = {
-    'score_expression': 'score',
-    'direction_on_trait_expression': 'direction_on_trait',
-    'direction_on_target_expression': 'direction_on_target',
-}
 
 
-def _config_datasources() -> dict[str, dict[str, str | None]]:
-    """`datasource_id -> {field: sql or None}` for every `evidence_postprocess_*` step."""
+def _config_datasource_ids() -> set[str]:
+    """`datasource_id` for every `evidence_postprocess_*` step in config.yaml."""
     steps = yaml.safe_load(CONFIG.read_text())['steps']
-    found: dict[str, dict[str, str | None]] = {}
-    for step_name, tasks in steps.items():
-        if not step_name.startswith('evidence_postprocess'):
-            continue
-        settings = tasks[0]['settings']
-        datasource_id = settings['datasource_id']
-        found[datasource_id] = {field: settings.get(cfg_key) for cfg_key, field in EXPRESSION_FIELDS.items()}
-    return found
+    return {
+        tasks[0]['settings']['datasource_id']
+        for step_name, tasks in steps.items()
+        if step_name.startswith('evidence_postprocess')
+    }
 
 
-CONFIG_DATASOURCES = _config_datasources()
+CONFIG_DATASOURCE_IDS = _config_datasource_ids()
 
 
 def test_every_config_datasource_has_a_registry_entry() -> None:
-    missing = set(CONFIG_DATASOURCES) - set(EXPRESSIONS)
+    missing = CONFIG_DATASOURCE_IDS - set(EXPRESSIONS)
     assert not missing
 
 
 def test_registry_has_no_unexpected_datasources() -> None:
-    extra = set(EXPRESSIONS) - set(CONFIG_DATASOURCES)
+    extra = set(EXPRESSIONS) - CONFIG_DATASOURCE_IDS
     assert not extra
-
-
-@pytest.mark.parametrize('datasource_id', sorted(CONFIG_DATASOURCES))
-def test_registry_field_presence_matches_config(datasource_id: str) -> None:
-    """A field with SQL in config.yaml has a non-None registry expression, and vice versa."""
-    entry = EXPRESSIONS[datasource_id]
-    for field in EXPRESSION_FIELDS.values():
-        has_sql = bool(CONFIG_DATASOURCES[datasource_id][field])
-        has_expr = getattr(entry, field) is not None
-        assert has_sql == has_expr, f'{datasource_id}.{field}: config has SQL={has_sql}, registry has expr={has_expr}'
 
 
 @pytest.mark.parametrize('datasource_id', sorted(EXPRESSIONS))
 def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
+    """Every entry's `score` is a usable, non-None polars expression.
+
+    The direction fields are each either absent or a polars expression -- never a leftover string,
+    a spark Column, or some other stand-in.
+    """
     entry = EXPRESSIONS[datasource_id]
+    assert entry.score is not None
     assert isinstance(entry.score, pl.Expr)
     for field in ('direction_on_trait', 'direction_on_target'):
         value = getattr(entry, field)

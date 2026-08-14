@@ -30,6 +30,14 @@ copy-pasted:
   everything else linearly interpolated in log10 space and clamped) is shared by `intogen`,
   `gene_burden`, `crispr_screen`, `encore` and the inner CASE of `expression_atlas` -- only the
   reference points and output column differ, so `_log10_rescaled_score` takes them as arguments.
+
+Provenance: `pts/config.yaml` no longer carries the original `score_expression` /
+`direction_on_trait_expression` / `direction_on_target_expression` SQL strings -- git commit
+`834f1db7` (just before they were stripped) has the last copy, one per `evidence_postprocess_*`
+step, if you need to see the source SQL a given entry below was translated from. The translation
+was verified 41/41 against real spark: on synthetic data covering the null/edge-case branches of
+every expression, and separately on 20/20 real staged datasources end to end -- see
+`task-registry-report.md` and `registry-parity-output.txt` for the runs.
 """
 
 from __future__ import annotations
