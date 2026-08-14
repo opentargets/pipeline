@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import random
 from pathlib import Path
 
 import polars as pl
@@ -317,29 +318,38 @@ class TestSparkCastToStringFloat:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
         assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [None]
 
-    def test_large_magnitude_falls_back_to_a_deterministic_non_spark_rendering(self) -> None:
-        # Measured (task-8-report.md): a fuzz run against real spark found the java rendering
-        # algorithm start emitting non-shortest digits at ~1.83e16, but *not* for every value up
-        # there -- e.g. 1.5e20 and Double.MAX_VALUE (1.7976931348623157e308) individually still
-        # matched spark exactly when measured directly. Since which large values are safe is not
-        # predictable without re-measuring each one, and no real resourceScore is ever this big,
-        # everything >= 1e15 falls back to python's `repr` rather than special-case the ones
-        # observed to be fine -- not exact, but deterministic and distinct-preserving, which is
-        # all the id computation needs to keep this datasource's evidence runnable.
-        values = [1e15, 1.5e20, 1.7976931348623157e308]
+    def test_boundary_values_still_render_exactly(self) -> None:
+        # Regression pin for the reviewer's finding against an earlier, over-conservative
+        # `1e15` cutoff: these values render exactly and must not be pushed into a raise (or a
+        # non-exact fallback) by too wide a guard.
+        values = [1e15, 1.5e16, 1.6999e16]
+        expected = ['1.0E15', '1.5E16', '1.6999E16']
         df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        got = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list()
-        assert got == [repr(v) for v in values]
-        assert len(set(got)) == len(values)  # distinct values never collide
+        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == expected
 
-    def test_subnormal_falls_back_to_a_deterministic_non_spark_rendering(self) -> None:
+    def test_large_magnitude_raises_rather_than_guess(self) -> None:
+        # Measured (task-8-report.md): a 200,000-sample dense fuzz run against real spark in
+        # [1e15, 2e16) found the java rendering algorithm's first non-shortest-digit mismatch at
+        # 1.801526131658083e16 (spark '1.8029536657783832E16' vs shortest round-trip
+        # '1.802953665778383E16' for a nearby value) -- and the onset is not a clean cutoff, only
+        # some values past it mismatch. `1.7e16` is a cutoff with measured headroom (0 mismatches
+        # in 85,297 + 150,000 dense samples below it), not the literal boundary. No real
+        # resourceScore is ever this large, so raising here costs nothing in practice, and a
+        # wrong-but-plausible id is worse than an unrunnable datasource that never actually needs
+        # this path.
+        df = pl.DataFrame({'v': [1.7e16, 1.5e20, 1.7976931348623157e308]}, schema={'v': pl.Float64})
+        with pytest.raises(UnsupportedIdentifierField, match=r'1\.7e16'):
+            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+
+    def test_subnormal_raises_rather_than_guess(self) -> None:
         # Measured (task-8-report.md): java's legacy Double.toString algorithm is not truly
         # shortest-round-trip for subnormals (e.g. Double.MIN_VALUE renders '4.9E-324' in java,
         # but python's shortest round-trip repr is '5e-324'). No evidence.json double field ever
-        # reaches this range, so the fallback (python's `repr`, not a raise) is never exercised
-        # by real data -- but a run that somehow produces one still completes rather than abort.
+        # reaches this range, so refuse loudly instead of silently emitting a value that could
+        # diverge from spark and change an evidence id.
         df = pl.DataFrame({'v': [5e-324]}, schema={'v': pl.Float64})
-        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [repr(5e-324)]
+        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
+            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
 
 
 class TestSparkCastToStringListOfStruct:
@@ -374,15 +384,14 @@ class TestSparkCastToStringListOfStruct:
             '[{null, null, null, null}]',
         ]
 
-    def test_non_string_struct_field_falls_back_to_a_plain_string_cast(self) -> None:
+    def test_non_string_struct_field_raises(self) -> None:
         # No evidence.json List(Struct) unique_fields type has a non-String field
-        # (diseaseCellLines, the only one, is all-String) -- unmeasured against spark, so this
-        # renders deterministically rather than blocking the column, same trade as the Float64
-        # out-of-range fallback.
+        # (diseaseCellLines, the only one, is all-String) -- unmeasured against spark, so refuse
+        # rather than guess at a rendering.
         dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Int64}))
-        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}], [{'id': 'b', 'count': None}]]}, schema={'v': dtype})
-        got = df.select(spark_cast_to_string('v', dtype).alias('o'))['o'].to_list()
-        assert got == ['[{a, 1}]', '[{b, null}]']
+        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}]]}, schema={'v': dtype})
+        with pytest.raises(UnsupportedIdentifierField, match='count'):
+            df.select(spark_cast_to_string('v', dtype).alias('o'))
 
 
 class TestSparkCastToStringUnsupported:
@@ -422,6 +431,20 @@ class TestFlagNullQualityControls:
         # failed evidence -- measured in precheck-parity.md Q2.
         assert out[QC_COLUMN].to_list() == [[]]
 
+    def test_null_element_in_incoming_qc_sorts_last_like_spark(self) -> None:
+        # polars `list.sort()` puts a null element first by default; spark's `array_sort` puts
+        # it last. The flag text itself is never null (it comes from the EvidenceFlags enum), so
+        # this exercises a null already present in an incoming qualityControls list.
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['NOPE']}).with_columns(
+            pl.Series(QC_COLUMN, [['z', None]], dtype=pl.List(pl.String))
+        )
+        lut = pl.DataFrame(
+            {'diseaseFromSourceMappedId': [], 'diseaseId': []},
+            schema={'diseaseFromSourceMappedId': pl.String, 'diseaseId': pl.String},
+        )
+        out = Evidence(lf).validate_diseases(lut).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.INVALID_DISEASE, 'z', None]]
+
 
 class TestValidateDiseases:
     def test_invalid_disease_is_flagged(self) -> None:
@@ -453,11 +476,15 @@ class TestValidateTarget:
         out = Evidence(lf).validate_target(lut, invalid_biotypes=['pseudogene']).lf.collect()
         assert out[QC_COLUMN].to_list() == [[EvidenceFlags.INVALID_BIOTYPE], []]
 
-    def test_no_invalid_biotypes_provided_skips_biotype_flag(self) -> None:
-        lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1']})
-        lut = pl.DataFrame({'targetId': ['T1'], 'biotype': ['pseudogene'], 'targetFromSourceId': ['ENSG1']})
-        out = Evidence(lf).validate_target(lut).lf.collect()
-        assert out[QC_COLUMN].to_list() == [[]]
+    # A prior version of this class had a
+    # `test_no_invalid_biotypes_provided_skips_biotype_flag` test asserting `QC_COLUMN == [[]]`
+    # with `invalid_biotypes` omitted. Deleted on review: `is_in([])` is always False, so a
+    # version of `validate_target` that always applies the biotype `_flag` (rather than skipping
+    # it when `invalid_biotypes` is falsy) produces the identical `[[]]` result -- there is no
+    # assertion on the QC list itself that can distinguish "the branch was skipped" from "the
+    # branch ran as a no-op", so the test could not fail against a broken implementation.
+    # `test_invalid_target_is_flagged` already covers calling `validate_target` without
+    # `invalid_biotypes` and dropping `biotype`.
 
 
 class TestValidateDatasource:
@@ -493,6 +520,15 @@ class TestAssignEvidenceIdentifier:
         lf = pl.LazyFrame({'targetId': [None, 'null']}, schema={'targetId': pl.String})
         out = Evidence(lf).assign_evidence_identifier(['targetId']).lf.collect()
         assert out['id'][0] == out['id'][1]
+
+    def test_no_unique_field_present_hashes_the_empty_string_like_spark(self) -> None:
+        # pl.concat_str([]) raises ComputeError on an empty expression list; spark's
+        # concat_ws('') over zero columns is well-defined and yields '', so the id must be
+        # sha1(''), not a crash. Unreachable with today's config.yaml, but a raw ComputeError
+        # leaking out of assign_evidence_identifier would be a real regression if that changes.
+        lf = pl.LazyFrame({'targetId': ['T1']})
+        out = Evidence(lf).assign_evidence_identifier(['doesNotExist']).lf.collect()
+        assert out['id'][0] == 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
 
 
 class TestHarmonisation:
@@ -584,4 +620,19 @@ class TestSparkParityForCastToString:
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
         got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_double_is_exact_immediately_below_the_1_7e16_cutoff(self, spark) -> None:
+        # Guards the measured cutoff itself: _java_double_to_string raises at |x| >= 1.7e16, a
+        # value chosen with a full 1e15 of headroom below the smallest real mismatch found
+        # (1.801526131658083e16, task-8-report.md). A dense 300-value sample seeded for
+        # determinism, concentrated right below the cutoff -- if the cutoff is ever widened
+        # without re-measuring, a sample this dense just inside [1.6e16, 1.7e16) is likely to
+        # catch a real divergence rather than let it slip through untested.
+        rng = random.Random(20260814)
+        values = [rng.uniform(1.6, 1.699999) * 1e16 for _ in range(300)]
+        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
+        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
         assert got == expected
