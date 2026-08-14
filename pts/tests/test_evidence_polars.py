@@ -317,28 +317,29 @@ class TestSparkCastToStringFloat:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
         assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [None]
 
-    def test_large_magnitude_raises_even_though_some_such_values_happen_to_match_spark(self) -> None:
+    def test_large_magnitude_falls_back_to_a_deterministic_non_spark_rendering(self) -> None:
         # Measured (task-8-report.md): a fuzz run against real spark found the java rendering
         # algorithm start emitting non-shortest digits at ~1.83e16, but *not* for every value up
         # there -- e.g. 1.5e20 and Double.MAX_VALUE (1.7976931348623157e308) individually still
         # matched spark exactly when measured directly. Since which large values are safe is not
         # predictable without re-measuring each one, and no real resourceScore is ever this big,
-        # the cutoff refuses the whole range >= 1e15 rather than special-case the ones observed
-        # to be fine.
-        df = pl.DataFrame({'v': [1e15, 1.5e20, 1.7976931348623157e308]}, schema={'v': pl.Float64})
-        with pytest.raises(UnsupportedIdentifierField, match='1e15'):
-            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+        # everything >= 1e15 falls back to python's `repr` rather than special-case the ones
+        # observed to be fine -- not exact, but deterministic and distinct-preserving, which is
+        # all the id computation needs to keep this datasource's evidence runnable.
+        values = [1e15, 1.5e20, 1.7976931348623157e308]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
+        got = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list()
+        assert got == [repr(v) for v in values]
+        assert len(set(got)) == len(values)  # distinct values never collide
 
-    def test_subnormal_raises_rather_than_guess(self) -> None:
+    def test_subnormal_falls_back_to_a_deterministic_non_spark_rendering(self) -> None:
         # Measured (task-8-report.md): java's legacy Double.toString algorithm is not truly
         # shortest-round-trip for subnormals (e.g. Double.MIN_VALUE renders '4.9E-324' in java,
-        # but python's shortest round-trip repr is '5e-324') and, separately, for magnitudes
-        # above ~1.8e16. No evidence.json double field ever reaches either range, so refuse
-        # loudly instead of silently emitting a value that could diverge from spark and change
-        # an evidence id.
+        # but python's shortest round-trip repr is '5e-324'). No evidence.json double field ever
+        # reaches this range, so the fallback (python's `repr`, not a raise) is never exercised
+        # by real data -- but a run that somehow produces one still completes rather than abort.
         df = pl.DataFrame({'v': [5e-324]}, schema={'v': pl.Float64})
-        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
-            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [repr(5e-324)]
 
 
 class TestSparkCastToStringListOfStruct:
@@ -373,11 +374,15 @@ class TestSparkCastToStringListOfStruct:
             '[{null, null, null, null}]',
         ]
 
-    def test_non_string_struct_field_raises(self) -> None:
+    def test_non_string_struct_field_falls_back_to_a_plain_string_cast(self) -> None:
+        # No evidence.json List(Struct) unique_fields type has a non-String field
+        # (diseaseCellLines, the only one, is all-String) -- unmeasured against spark, so this
+        # renders deterministically rather than blocking the column, same trade as the Float64
+        # out-of-range fallback.
         dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Int64}))
-        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}]]}, schema={'v': dtype})
-        with pytest.raises(UnsupportedIdentifierField, match='count'):
-            df.select(spark_cast_to_string('v', dtype).alias('o'))
+        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}], [{'id': 'b', 'count': None}]]}, schema={'v': dtype})
+        got = df.select(spark_cast_to_string('v', dtype).alias('o'))['o'].to_list()
+        assert got == ['[{a, 1}]', '[{b, null}]']
 
 
 class TestSparkCastToStringUnsupported:

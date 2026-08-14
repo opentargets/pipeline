@@ -32,12 +32,15 @@ class EvidenceFlags(StrEnum):
 
 
 class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- matches `UnsupportedExpression` in spark_sql.py
-    """A `unique_fields` dtype (or value) without a verified spark string-cast rendering.
+    """A `unique_fields` column dtype `spark_cast_to_string` has no rendering for at all.
 
     `spark_cast_to_string` feeds the sha1 that becomes the evidence `id`, a user-visible
-    identifier, so a wrong rendering silently changes ids. Raising here is deliberate: a loud
-    failure at config-load/run time is an acceptable outcome for an unmeasured type or value; a
-    wrong id is not.
+    identifier, so this is reserved for a dtype with no real `unique_fields` use to keep
+    runnable (e.g. a Boolean column, or a List of anything other than String/Struct) -- a
+    genuine misconfiguration is worth failing loudly on at config/run time. An unmeasured but
+    *legitimate* type or value (an out-of-range Float64, a non-String struct field) instead
+    falls back to a deterministic, non-spark-matching rendering rather than raising -- see
+    `_java_double_to_string` and `spark_cast_to_string`'s docstrings.
     """
 
 
@@ -51,7 +54,14 @@ def _java_double_to_string(x: float | None) -> str | None:
     double -- the same guarantee `Double.toString` makes for ordinary doubles -- and reformatting
     those digits under spark's plain/scientific threshold instead of python's own.
 
-    That guarantee has two measured exceptions, both refused rather than guessed at:
+    That guarantee has two measured exceptions, neither of which reaches a real `resourceScore`
+    (evidence.json's only `Float64` `unique_fields` type), so both fall back to python's own
+    `repr` -- an ACCEPTED, DELIBERATE divergence from spark, not a raise. `repr` is still
+    deterministic and injective (distinct doubles never collide on the same string, and a given
+    double always renders the same way), which is all an evidence id actually needs from this
+    path; it just is not byte-identical to what spark would have printed. Its format (lowercase
+    `e`, a `+` before a positive exponent) cannot collide with the exact `d.dddEn` format above,
+    so a fallback string and an exact one are never confusable.
 
     * Subnormal doubles (`0 < |x| < sys.float_info.min`): java's legacy `Double.toString`
       algorithm is not actually shortest-round-trip here (`Double.MIN_VALUE` renders
@@ -63,18 +73,16 @@ def _java_double_to_string(x: float | None) -> str | None:
       found for 13,000+ sampled magnitudes below that boundary, spanning `1e-307` to `1.8e16`.
 
     No double field in evidence.json (`resourceScore`, `log2FoldChangeValue`, etc.) ever holds a
-    biological measurement anywhere near either range, so both are refused with `1e15` as a
-    conservative cutoff -- nearly two orders of magnitude below the measured onset -- rather than
-    risk emitting a value spark would have rendered differently.
+    biological measurement anywhere near either range, so `1e15` is used as a conservative cutoff
+    -- nearly two orders of magnitude below the measured onset -- purely so the fallback is never
+    reached by real data, not because reaching it would be unsafe.
 
     Args:
         x: the double value to render, or None.
 
     Returns:
-        The spark-equivalent string rendering, or None for a null input.
-
-    Raises:
-        UnsupportedIdentifierField: if `x` is subnormal or `|x| >= 1e15`.
+        The spark-equivalent string rendering for a value in the measured range; python's `repr`
+        (deterministic, but not spark-equivalent) outside it; or None for a null input.
     """
     if x is None:
         return None
@@ -88,11 +96,7 @@ def _java_double_to_string(x: float | None) -> str | None:
     negative = x < 0
     ax = -x if negative else x
     if ax < sys.float_info.min or ax >= 1e15:
-        msg = (
-            f'spark_cast_to_string: double {x!r} is outside the range verified against spark '
-            '(subnormal, or |x| >= 1e15) -- see _java_double_to_string docstring'
-        )
-        raise UnsupportedIdentifierField(msg)
+        return repr(x)
 
     digits, point_pos = _shortest_round_trip_digits(ax)
     exponent = point_pos - 1
@@ -140,23 +144,30 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
       null, and a null *element* as the literal token `null` -- `list.join` alone silently drops
       a null element instead, so it is filled first.
     * `Float64`: see `_java_double_to_string`.
-    * `List(Struct(...))` with all-String fields (evidence.json's only such `unique_fields`
-      type, `diseaseCellLines`): a struct element renders as `'{f1, f2, f3, f4}'` (braces, no
-      field names, comma-space separated, a null field as the literal token `null`), nested
-      inside the same `'[...]'` array rendering as `List(String)`.
+    * `List(Struct(...))`: a struct element renders as `'{f1, f2, f3, f4}'` (braces, no field
+      names, comma-space separated, a null field as the literal token `null`), nested inside the
+      same `'[...]'` array rendering as `List(String)` -- measured exact for evidence.json's only
+      such `unique_fields` type, `diseaseCellLines`, whose fields are all String. A struct field
+      that is not String is an unmeasured combination (none exists in evidence.json today); it
+      falls back to a plain non-strict string cast rather than blocking the whole column, the
+      same accepted-divergence trade as `_java_double_to_string`'s out-of-range fallback.
 
-    Anything else -- an unmeasured dtype, or a `List(Struct(...))` with a non-String field --
-    raises rather than guess at a rendering that could silently change an evidence id.
+    An entirely unsupported column dtype (e.g. Boolean, or a list of anything other than String
+    or Struct) still raises: unlike the two fallbacks above, there is no real `unique_fields`
+    entry of that shape to keep runnable, so raising loudly at config/run time remains the right
+    default for a genuine misconfiguration.
 
     Args:
         name: column to render.
         dtype: the column's polars dtype.
 
     Returns:
-        An expression yielding spark's string rendering of the column.
+        An expression yielding spark's string rendering of the column, or a deterministic
+        (but not spark-matching) fallback rendering for the narrow cases documented above.
 
     Raises:
-        UnsupportedIdentifierField: for a dtype this function has not been measured against.
+        UnsupportedIdentifierField: for a column dtype that is neither String, Float64, nor a
+            List of String or Struct.
     """
     column = pl.col(name)
 
@@ -171,16 +182,19 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
         if inner == pl.String:
             rendered = column.list.eval(pl.element().fill_null('null'))
         elif isinstance(inner, pl.Struct):
-            non_string = [f.name for f in inner.fields if f.dtype != pl.String]
-            if non_string:
-                msg = (
-                    f'spark_cast_to_string: List(Struct) field(s) {non_string} of column {name!r} '
-                    f'are not String ({inner}) -- only all-String struct fields have been measured'
+            # A String field renders exactly (measured); a non-String field is an unmeasured
+            # combination -- no evidence.json List(Struct) `unique_fields` type has one today
+            # (diseaseCellLines is all-String) -- so it falls back to a plain non-strict string
+            # cast rather than raising and blocking the column. See the module docstring.
+            field_exprs = [
+                (
+                    pl.element().struct.field(f.name).fill_null('null')
+                    if f.dtype == pl.String
+                    else pl.element().struct.field(f.name).cast(pl.String, strict=False).fill_null('null')
                 )
-                raise UnsupportedIdentifierField(msg)
-            element = pl.concat_str(
-                [pl.element().struct.field(f.name).fill_null('null') for f in inner.fields], separator=', '
-            )
+                for f in inner.fields
+            ]
+            element = pl.concat_str(field_exprs, separator=', ')
             rendered = column.list.eval(pl.lit('{') + element + pl.lit('}'))
         else:
             msg = f'spark_cast_to_string: unsupported list element dtype {inner!r} for column {name!r}'
