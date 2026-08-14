@@ -18,6 +18,7 @@ import polars as pl
 import pytest
 
 from pts.transformers.evidence_postprocess import _json_parts, _json_schema, _read_evidence, evidence_postprocess
+from pts.transformers.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
 from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
 
@@ -68,10 +69,39 @@ def test_read_evidence_parquet_skips_underscore_prefixed_files(tmp_path: Path) -
     assert frame['targetFromSourceId'].to_list() == ['t1']
 
 
+def test_read_evidence_parquet_preserves_the_file_column_order(tmp_path: Path) -> None:
+    """The json-reader ordering defect (below) does not apply to parquet: spark's parquet reader
+    preserves the file's own column order, and so does polars' -- only the json path needs a fix,
+    and this pins that the fix (`_json_schema`) was not accidentally applied here too.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    path = _write_parquet_dir(tmp_path / 'evidence', pl.DataFrame({'zebra': [1], 'alpha': [2], 'mango': [3]}))
+
+    frame = _read_evidence(path, 'parquet').collect()
+
+    assert frame.columns == ['zebra', 'alpha', 'mango']
+
+
+def test_read_evidence_parquet_raises_on_a_directory_of_only_underscore_prefixed_files(tmp_path: Path) -> None:
+    """Consistent with `_json_parts`'s legible `ValueError` for the equivalent empty-source case.
+
+    Left unguarded, `pl.scan_parquet([])` (`_read_evidence`, fed `_parquet_parts`'s now-filtered
+    empty list) raises its own `ComputeError: empty input: paths: []` instead -- correct, but a
+    less legible failure for the same underlying "no data files found" situation.
+    """
+    directory = tmp_path / 'evidence'
+    directory.mkdir()
+    pl.DataFrame({'targetFromSourceId': ['hidden']}).write_parquet(directory / '_hidden.parquet')
+
+    with pytest.raises(ValueError, match='no parquet files found'):
+        _read_evidence(str(directory), 'parquet')
+
+
 def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
     """`intermediate/evidence/*.parquet` is always a directory in config.yaml, but the reader
-    checks rather than assumes -- `StorageHandle(path).open()` raises `IsADirectoryError` on the
-    other shape, so a bare `pl.scan_parquet(path)` on a directory would fail the same way.
+    checks rather than assumes: `StorageHandle(path).open()` raises `IsADirectoryError` on that
+    other shape, elsewhere in this module (`_json_parts`), which is why `_parquet_parts` checks
+    too -- a bare `pl.scan_parquet(path)` on a directory does not actually fail (measured), it
+    just returns every part unfiltered, skipping the `_`-prefix skip covered separately above.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     file_path = tmp_path / 'evidence.parquet'
     pl.DataFrame({'targetFromSourceId': ['t1']}).write_parquet(file_path)
@@ -113,6 +143,59 @@ def test_read_evidence_json_from_a_single_file(tmp_path: Path) -> None:
 
     assert frame.height == 1
     assert frame['targetFromSourceId'].to_list() == ['t1']
+
+
+def test_read_evidence_json_orders_columns_alphabetically_like_spark(tmp_path: Path) -> None:
+    """Spark's json reader sorts its inferred columns alphabetically; polars' keeps file order.
+
+    Measured on this exact fixture: spark yields `['alpha', 'mango', 'zebra']`, polars' own
+    (unsorted) order is `['zebra', 'alpha', 'mango']`.
+
+    Not cosmetic: `_harmonise_to_schema` is order-preserving (`with_columns`), so an unsorted
+    reader's column order becomes the frame's column order all the way to
+    `validate_uniqueness`, which hashes columns in whatever order the frame is actually in --
+    see `test_read_evidence_json_column_order_changes_the_uniqueness_survivor` below for the
+    consequence this has downstream.
+    """
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'zebra': 1, 'alpha': 2, 'mango': 3}])
+
+    frame = _read_evidence(path, 'json').collect()
+
+    assert frame.columns == ['alpha', 'mango', 'zebra']
+
+
+def test_read_evidence_json_column_order_changes_the_uniqueness_survivor(tmp_path: Path) -> None:
+    """Pins the actual consequence of the ordering defect, not just the reader's column order.
+
+    Two rows share an `id` (same `keyField`) and differ only in `zCol`; `aCol` is constant so it
+    cannot itself decide the ranking. With the reader's (alphabetical, spark-matching) column
+    order the row with `zCol='a'` survives; forced back into FILE order -- simulating the
+    pre-fix reader, `zCol`/`aCol` swapped -- the SAME two rows pick the OTHER row as the
+    survivor. Same content, same id, different published row: this is what "a different column
+    order gives a different surviving row" (task-10-report.md) means concretely.
+
+    The fixture was not hand-picked to "look plausible": a brute-force search over `zCol`/`aCol`
+    values, run through the real `Evidence` pipeline (not a hand-rolled hash), found this as the
+    first pair whose survivor actually flips between the two orderings.
+    """
+    rows = [
+        {'keyField': 'same', 'zCol': 'a', 'aCol': 'a'},
+        {'keyField': 'same', 'zCol': 'c', 'aCol': 'a'},
+    ]
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
+    lf = _read_evidence(path, 'json')
+    assert lf.collect_schema().names() == ['aCol', 'keyField', 'zCol']
+
+    survivor = Evidence(lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
+    flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in survivor.to_dicts()}
+    assert flagged == {'a': False, 'c': True}  # 'a' survives with spark's (alphabetical) column order
+
+    # Force the columns back into FILE order -- what the pre-fix reader would have produced --
+    # and show the survivor flips to the OTHER row, same two rows, same id.
+    pre_fix_lf = lf.select('keyField', 'zCol', 'aCol')
+    pre_fix = Evidence(pre_fix_lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
+    pre_fix_flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in pre_fix.to_dicts()}
+    assert pre_fix_flagged == {'a': True, 'c': False}
 
 
 def test_read_evidence_json_from_a_directory_reads_every_part(tmp_path: Path) -> None:

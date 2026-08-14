@@ -110,12 +110,24 @@ def _json_schema(source: str | bytes) -> dict[str, Any]:
             or the already-decompressed bytes of a bzip2 part.
 
     Returns:
-        `{column: dtype}` for exactly the columns `source` carries.
+        `{column: dtype}` for exactly the columns `source` carries, in ALPHABETICAL order (see the
+        sort below for why).
     """
     inferred = pl.scan_ndjson(source, infer_schema_length=None).collect_schema()
     target_schema = load_spark_schema_as_polars('evidence.json')
+    # Sorted by name, not `inferred`'s own order: passing this dict as `pl.scan_ndjson(schema=...)`
+    # (`_scan_json_part`) also fixes the resulting frame's COLUMN ORDER, not just its dtypes -- and
+    # that order must be alphabetical to match spark. Spark's json reader sorts inferred columns
+    # alphabetically; polars' keeps the order columns first appear in the file. Measured on a
+    # one-line `{"zebra":..,"alpha":..,"mango":..}` fixture: spark yields
+    # `['alpha', 'mango', 'zebra']`, polars (pre-sort) yields `['zebra', 'alpha', 'mango']`. Left
+    # unsorted, that source order propagates through `_harmonise_to_schema` (order-preserving
+    # `with_columns`) all the way to `validate_uniqueness`'s content hash, which iterates the
+    # frame's columns in whatever order they are in -- an unsorted reader silently picks a
+    # different surviving row among same-`id` duplicates than spark did.
     return {
-        name: target_schema.get(name, dtype if dtype != pl.Null else pl.String) for name, dtype in inferred.items()
+        name: target_schema.get(name, inferred[name] if inferred[name] != pl.Null else pl.String)
+        for name in sorted(inferred)
     }
 
 
@@ -157,11 +169,21 @@ def _parquet_parts(path: str) -> str | list[str]:
     Returns:
         `path` unchanged when it is a single file, otherwise its sorted non-`_`-prefixed part
         locations.
+
+    Raises:
+        ValueError: if `path` is a directory with no non-`_`-prefixed `*.parquet` part. Left
+            unguarded, `pl.scan_parquet([])` (`_read_evidence`) raises its own
+            `ComputeError: empty input: paths: []` -- legible enough once you know to look here,
+            but `_json_parts` already raises a clear `ValueError` for the equivalent json case, so
+            this matches it rather than leaving the two readers inconsistent.
     """
     handle = StorageHandle(path)
     if not handle.stat().is_dir:
         return path
-    return sorted(part for part in handle.glob('*.parquet') if not Path(part).name.startswith('_'))
+    parts = sorted(part for part in handle.glob('*.parquet') if not Path(part).name.startswith('_'))
+    if not parts:
+        raise ValueError(f'no parquet files found in {path}')
+    return parts
 
 
 def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
