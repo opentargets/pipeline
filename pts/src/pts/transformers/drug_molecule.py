@@ -3,10 +3,6 @@
 Combines molecule data with clinical reports, mechanisms of action, and chemical probes
 to produce the final drug index. Filters to include only molecules that qualify as
 "drugs" and generates human-readable descriptions.
-
-Ported from the pyspark implementation. Two deliberate divergences from it are recorded
-inline: the per-drug indication order (see `_INDICATION_SORT`) and the trim used on
-disease names (see `_disease_names`).
 """
 
 from __future__ import annotations
@@ -28,18 +24,17 @@ APPROVED_STAGE_CODE = 'APPROVAL'
 PROBES_AND_DRUGS_SOURCE = 'Probes&Drugs'
 DRUGBANK_SOURCE = 'drugbank'
 
-# Nothing downstream currently observes the order of the indications list: it is dropped
-# before the output is written, and the description sorts the labels it takes from it. The
-# sort is here so that a future change which does expose the order cannot silently
-# reintroduce a nondeterministic one, since polars' group_by does not promise row order.
+# `group_by` does not promise row order, so the indications list is sorted to keep it
+# stable. Nothing observes that order today -- the list is dropped before the output is
+# written, and the description sorts the labels it takes from it -- but a change that does
+# expose it should not have to reintroduce the sort.
 _INDICATION_SORT = 'diseaseId'
 
 
 def _stage_rank(stage: pl.Expr) -> pl.Expr:
     """Rank a clinical stage, folding WITHDRAWAL and PHASE_4 into APPROVAL.
 
-    A lower rank is a more advanced stage. Unrecognised and null stages fall back to the
-    UNKNOWN rank, matching the pyspark `coalesce(map[stage], UNKNOWN)`.
+    A lower rank is a more advanced stage. Unrecognised and null stages rank as UNKNOWN.
     """
     return (
         stage
@@ -148,7 +143,6 @@ def process_drug_index(
         .filter(pl.col('drugId').is_not_null())
         .sort('drugFromSourceId')
         .group_by(pl.col('drugId').alias('id'), maintain_order=True)
-        # collect_set skips nulls and deduplicates; drop_nulls().unique() is the equivalent
         .agg(pl.col('drugFromSourceId').drop_nulls().unique(maintain_order=True).alias('_probeIds'))
     )
 
@@ -156,7 +150,7 @@ def process_drug_index(
         mechanism_of_action
         .select(pl.col('chemblIds').alias('id'))
         .explode('id')
-        # spark's explode drops null and empty arrays, polars' emits a null row for them
+        # exploding a null or empty list yields a null row, which is not a mechanism
         .drop_nulls()
         .unique()
         .with_columns(_hasMechanismOfAction=pl.lit(value=True))
@@ -176,11 +170,11 @@ def process_drug_index(
 
     return (
         drug
-        # description reads maximumClinicalStage before it is defaulted, as the pyspark
-        # implementation did, so a molecule with no clinical report gets no phase clause
+        # the description reads maximumClinicalStage before it is defaulted below, so a
+        # molecule with no clinical report gets no clinical stage clause at all
         .with_columns(description=_describe())
         .with_columns(maximumClinicalStage=pl.col('maximumClinicalStage').fill_null(_DEFAULT_STAGE_NAME_VALUE))
-        # molecule.id is already unique, so this only guards against an upstream regression
+        # molecule ids are expected to be unique; this guards against an upstream regression
         .unique(subset=['id'], keep='first', maintain_order=True)
         .sort('id')
         .select(drug_molecule_schema.keys())
@@ -191,9 +185,9 @@ def process_drug_index(
 def _with_probe_xref() -> pl.Expr:
     """Append the Probes&Drugs cross-reference when the molecule is a chemical probe.
 
-    `pl.concat_list` propagates null rather than treating a null list as empty, and
-    crossReferences is null for the vast majority of molecules, so the null case is
-    spelled out instead of relying on the pyspark `coalesce(crossReferences, array())`.
+    Most molecules have no cross-references at all, and `pl.concat_list` returns null
+    rather than a one-element list when the list it is given is null, so that case is
+    handled on its own branch.
     """
     probe_xref = pl.struct(source=pl.lit(PROBES_AND_DRUGS_SOURCE), ids=pl.col('_probeIds'))
     return (
@@ -210,9 +204,8 @@ def _is_drug() -> pl.Expr:
     """Whether a molecule qualifies as a drug.
 
     True when it has a drugbank cross-reference, appears in a clinical report, has a
-    mechanism of action, or is a chemical probe. A molecule with no cross-references at
-    all yields null here rather than false, which `filter` drops either way — the same
-    three-valued behaviour the pyspark expression had.
+    mechanism of action, or is a chemical probe. A molecule that fails all four and has
+    no cross-references at all yields null rather than false, which `filter` also drops.
     """
     return (
         pl.col('crossReferences').list.eval(pl.element().struct.field('source')).list.contains(DRUGBANK_SOURCE)
@@ -323,9 +316,9 @@ def _process_clinical_report_indications(
 def _disease_names(disease: pl.DataFrame) -> pl.DataFrame:
     """Lowercased, trimmed disease names keyed by disease id.
 
-    Spark's `trim` strips the space character only, while polars' bare `strip_chars`
-    strips every unicode whitespace character. One disease name in the index differs
-    between the two, so the space-only form is kept.
+    Only the space character is stripped. A bare `strip_chars()` would also take the
+    other unicode whitespace characters that a handful of disease names carry, changing
+    the name rather than trimming it.
     """
     return disease.select(
         pl.col('id').alias('diseaseId'),
@@ -365,14 +358,11 @@ def _generate_description(
     indication_str = ''
     if indication_stages is not None and indication_labels is not None:
         pairs = zip(indication_stages, indication_labels, strict=False)
-        # dict.fromkeys deduplicates while preserving order, where the pyspark
-        # implementation used a set and let the order fall out arbitrarily
+        # dict.fromkeys deduplicates without disturbing the order
         indications = list(dict.fromkeys((s, lbl) for s, lbl in pairs if s is not None and lbl is not None))
 
-        # The pyspark implementation listed the approved labels in python set-iteration
-        # order. That was stable, because pyspark pins PYTHONHASHSEED for its workers, but
-        # it was also meaningless. Sorting changes 397 of the 22,407 descriptions in the
-        # 26.06 data, all of them drugs with exactly two approved indications.
+        # sorted, because with two or fewer approved indications the labels are named in
+        # the sentence and their order is visible to the reader
         approved = sorted(label for stage, label in indications if stage == APPROVED_STAGE_CODE)
         investigational_count = sum(1 for stage, _ in indications if stage != APPROVED_STAGE_CODE)
 

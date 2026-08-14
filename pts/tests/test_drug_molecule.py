@@ -246,8 +246,7 @@ class TestProcessClinicalReportIndications:
     def test_null_diseases_array_is_dropped(self):
         """A report with a null diseases array contributes no indication.
 
-        Spark's explode drops a null array outright; polars' emits a null row, which the
-        diseaseId filter then has to remove.
+        Exploding a null array yields a null row, which the diseaseId filter removes.
         """
         reports = pl.DataFrame(
             [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], None)],
@@ -258,7 +257,7 @@ class TestProcessClinicalReportIndications:
         assert _process_clinical_report_indications(reports, disease).height == 0
 
     def test_efo_name_is_lowercased_and_space_trimmed(self):
-        """Names are lowercased and stripped of spaces, matching spark's trim."""
+        """Names are lowercased and stripped of leading and trailing spaces."""
         reports = pl.DataFrame(
             [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease', 'EFO_0001')])],
             schema=CLINICAL_REPORT_SCHEMA,
@@ -269,10 +268,10 @@ class TestProcessClinicalReportIndications:
         assert rows['CHEMBL_X'][0]['efoName'] == 'disease x'
 
     def test_non_space_whitespace_is_kept(self):
-        """Spark's trim strips the space character only, so other whitespace survives.
+        """Only the space character is stripped, so other whitespace survives the trim.
 
-        Polars' bare `strip_chars` would remove these too, which would silently diverge
-        from the published output for the disease names that carry them.
+        A bare `strip_chars()` would take these too, changing the name rather than
+        trimming it.
         """
         reports = pl.DataFrame(
             [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease', 'EFO_0001')])],
@@ -286,7 +285,7 @@ class TestProcessClinicalReportIndications:
         assert rows['CHEMBL_X'][0]['efoName'] == '\xa0disease x\xa0'
 
     def test_indications_are_sorted_by_disease_id(self, disease_df):
-        """The indication list is ordered, so nothing downstream can depend on hash order."""
+        """The indication list is ordered by disease id regardless of the input order."""
         reports = pl.DataFrame(
             [
                 _report('r1', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease Z', 'EFO_0003')]),
@@ -327,7 +326,7 @@ class TestGenerateDescription:
         assert 'approval for 3 indications' in result
 
     def test_two_approved_indications_are_listed_alphabetically(self):
-        """The pyspark implementation listed these in python set order; sorting is stable."""
+        """Named labels are sorted, so the sentence does not depend on the input order."""
         result = _generate_description(
             'Small molecule', 'APPROVAL', ['APPROVAL', 'APPROVAL'], ['zebra disease', 'aardvark disease']
         )
@@ -341,7 +340,7 @@ class TestGenerateDescription:
         assert '1 investigational indication' in result
 
     def test_duplicate_indications_are_counted_once(self):
-        """The pyspark implementation deduplicated the (stage, label) pairs; so does this."""
+        """Repeated (stage, label) pairs count once."""
         result = _generate_description(
             'Small molecule', 'PHASE_2', ['PHASE_2', 'PHASE_2'], ['disease a', 'disease a']
         )
