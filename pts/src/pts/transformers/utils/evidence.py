@@ -1,9 +1,18 @@
-"""Evidence post-processing in polars: harmonisation, entity validation, identifier assignment.
+"""Evidence post-processing in polars: harmonisation through scoring and direction of effect.
 
-Polars port of `pts.pyspark.evidence_utils.evidence.Evidence`'s first half. Scoring, directions,
-uniqueness and dating (the pyspark class's other half) land in a follow-up task on top of this
-module -- `Evidence`'s methods each return a new `Evidence`, so that half can chain onto this one
-without changing this file.
+Polars port of `pts.pyspark.evidence_utils.evidence.Evidence`. `Evidence`'s methods each return a
+new `Evidence`, so a caller can chain the full sequence -- `validate_diseases` ->
+`validate_target` -> `validate_datasource` -> `assign_evidence_identifier` ->
+`validate_uniqueness` -> `resolve_publication_date` ->
+`resolve_evidence_date` -> `calculate_evidence_score` -> `assign_direction_on_trait` ->
+`assign_direction_on_target` -> `hash_long_variant_identifiers` -> `valid()`/`invalid()` -- exactly
+as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class.
+
+`calculate_evidence_score`, `assign_direction_on_trait` and `assign_direction_on_target` take a
+`pl.Expr | None` rather than a spark SQL string: the SQL compiler that used to back these
+(`pts.transformers.utils.spark_sql.compile_expression`) has been deleted, and
+`pts.transformers.utils.evidence_expressions.EXPRESSIONS` now carries a pre-translated, native
+polars `pl.Expr` per `datasourceId` for the caller to look up and pass straight in.
 """
 
 from __future__ import annotations
@@ -21,6 +30,14 @@ import polars_hash as plh
 from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
 QC_COLUMN = 'qualityControls'
+
+#: Columns considered when dating evidence, in `resolve_evidence_date` -- mirrors pyspark's
+#: `Evidence.EVIDENCE_DATE_COLUMNS`.
+DATE_COLUMNS = ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
+
+#: `variantId` length above which `hash_long_variant_identifiers` hashes it -- mirrors pyspark's
+#: `Evidence.VARIANT_HASH_LENGHT` (kept the correct spelling here; the pyspark name is a typo).
+VARIANT_HASH_LENGTH = 300
 
 
 class EvidenceFlags(StrEnum):
@@ -138,25 +155,103 @@ def _scientific_notation(digits: str, exponent: int) -> str:
     return f'{digits[0]}.{fraction}E{exponent}'
 
 
+def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
+    """Render a String/Int64/Boolean/Float64 leaf as spark's `CAST(x AS STRING)` would.
+
+    Nulls are preserved (not substituted) here -- the caller decides whether a null means "the
+    whole column is null" (real `None`, `spark_cast_to_string`'s job) or "a nested element/field
+    is null" (the literal token `'null'`, `_render_nested`'s job).
+
+    Int64 and Boolean cast identically in both engines (measured, task-9-report.md): spark's
+    long-to-string and boolean-to-string agree digit-for-digit and `true`/`false`-for-`true`/
+    `false` with `.cast(pl.String)`, no formatting quirk to reproduce -- unlike Float64's Java
+    `Double.toString` behaviour (`_java_double_to_string`).
+
+    Args:
+        expr: the leaf expression to render.
+        dtype: its polars dtype. Typed `Any` for the same reason as `_harmonise_expr`'s
+            `source_dtype`/`target_dtype` -- see that function's docstring.
+        name: the originating column name, threaded through only for the raise message.
+
+    Returns:
+        A string expression, null-preserving.
+
+    Raises:
+        UnsupportedIdentifierField: for a dtype this function has not been measured against.
+    """
+    if dtype == pl.String:
+        return expr.cast(pl.String)
+    if dtype in (pl.Int64, pl.Boolean):
+        return expr.cast(pl.String)
+    if dtype == pl.Float64:
+        return expr.map_elements(_java_double_to_string, return_dtype=pl.String)
+    msg = f'spark_cast_to_string: unsupported scalar dtype {dtype!r} for column {name!r}'
+    raise UnsupportedIdentifierField(msg)
+
+
+def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
+    """Render a struct field or list element the way spark's nested `CAST(... AS STRING)` does.
+
+    Recurses through `Struct` and `List` the same way `_harmonise_expr` recurses through the
+    target schema -- evidence.json's `biomarkers` is a `Struct` of `List(Struct)`, so a struct
+    renderer that only handles one level deep cannot cover it. Measured against real spark
+    (task-9-report.md), including that exact struct-of-list-of-struct shape: a null value at ANY
+    nesting level -- a null leaf, a null nested list, or a null nested struct -- renders as the
+    bare token `'null'`, not an empty/absent value (`{geneExpression: null} -> '{null}'`, not
+    `'{[]}'`). So every branch below folds a null into the literal token `'null'` rather than
+    propagating a real `None` up through the surrounding `{...}`/`[...]`.
+
+    The measurements are per-shape (a struct's `{f1, f2, ...}` braces, a list's `[e1, e2, ...]`
+    brackets, each leaf type's own rendering, and the null-anywhere-becomes-`'null'` rule); an
+    arbitrary composition of them (e.g. a `List(Struct)` nested inside a `Struct` nested inside a
+    `List`) is not separately re-measured for every possible shape, only verified for the one
+    real evidence.json needs (`biomarkers`) -- see the module's `_render_nested` spark-parity
+    test.
+
+    Args:
+        expr: the field/element expression to render.
+        dtype: its polars dtype (typed `Any`, same reason as `_cast_scalar_to_string`'s `dtype`).
+        name: the originating column name (or a dotted field path), for the raise message.
+
+    Returns:
+        A string expression that is never null -- a null value renders as the token `'null'`.
+
+    Raises:
+        UnsupportedIdentifierField: for a dtype this function has not been measured against.
+    """
+    if isinstance(dtype, pl.Struct):
+        fields = [_render_nested(expr.struct.field(f.name), f.dtype, f'{name}.{f.name}') for f in dtype.fields]
+        rendered = pl.lit('{') + pl.concat_str(fields, separator=', ') + pl.lit('}')
+        return pl.when(expr.is_null()).then(pl.lit('null')).otherwise(rendered)
+    if isinstance(dtype, pl.List):
+        element = expr.list.eval(_render_nested(pl.element(), dtype.inner, name))
+        rendered = pl.lit('[') + element.list.join(', ') + pl.lit(']')
+        return pl.when(expr.is_null()).then(pl.lit('null')).otherwise(rendered)
+    return _cast_scalar_to_string(expr, dtype, name).fill_null('null')
+
+
 def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
     """Reproduce spark's `cast(x AS STRING)` for the `unique_fields` types evidence.json carries.
 
-    Every case is measured against real spark (task-8-report.md), not assumed:
+    Every case is measured against real spark (task-8-report.md / task-9-report.md), not assumed:
 
     * String: identity cast.
-    * `List(String)`: spark renders `['1','2']` as `'[1, 2]'`, `[]` as `'[]'`, a null list as
-      null, and a null *element* as the literal token `null` -- `list.join` alone silently drops
-      a null element instead, so it is filled first.
+    * `Int64`, `Boolean`: identical rendering in both engines -- see `_cast_scalar_to_string`.
     * `Float64`: see `_java_double_to_string`.
-    * `List(Struct(...))` with all-String fields (evidence.json's only such `unique_fields`
-      type, `diseaseCellLines`): a struct element renders as `'{f1, f2, f3, f4}'` (braces, no
-      field names, comma-space separated, a null field as the literal token `null`), nested
-      inside the same `'[...]'` array rendering as `List(String)`.
+    * `List(...)`: spark renders `['1','2']` as `'[1, 2]'`, `[]` as `'[]'`, a null list as null,
+      and a null *element* -- of any supported element type, not just String -- as the literal
+      token `null`.
+    * `Struct(...)`: `{f1, f2, ...}` -- braces, no field names, comma-space separated, a null
+      field as the literal token `null`, a null struct column as null.
+    * `List(Struct(...))`: the two shapes above composed -- a struct element renders `{...}`
+      nested inside the list's `[...]`.
+    * A `Struct`/`List` field can itself be a `List`/`Struct` (evidence.json's `biomarkers` is a
+      `Struct` of `List(Struct)`); `_render_nested` recurses to cover that.
 
-    Anything else -- an unmeasured dtype, or a `List(Struct(...))` with a non-String field --
-    raises rather than guess at a rendering that could silently change an evidence id. This
-    module never trades exactness for keeping a datasource runnable; see `_java_double_to_string`
-    for why that trade is unnecessary in practice.
+    Anything else -- an unmeasured leaf dtype anywhere in the (possibly nested) shape -- raises
+    rather than guess at a rendering that could silently change an evidence id. This module never
+    trades exactness for keeping a datasource runnable; see `_java_double_to_string` for why that
+    trade is unnecessary in practice.
 
     Args:
         name: column to render.
@@ -169,37 +264,9 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
         UnsupportedIdentifierField: for a dtype this function has not been measured against.
     """
     column = pl.col(name)
-
-    if dtype == pl.String:
-        return column.cast(pl.String)
-
-    if dtype == pl.Float64:
-        return column.map_elements(_java_double_to_string, return_dtype=pl.String)
-
-    if isinstance(dtype, pl.List):
-        inner = dtype.inner
-        if inner == pl.String:
-            rendered = column.list.eval(pl.element().fill_null('null'))
-        elif isinstance(inner, pl.Struct):
-            non_string = [f.name for f in inner.fields if f.dtype != pl.String]
-            if non_string:
-                msg = (
-                    f'spark_cast_to_string: List(Struct) field(s) {non_string} of column {name!r} '
-                    f'are not String ({inner}) -- only all-String struct fields have been measured'
-                )
-                raise UnsupportedIdentifierField(msg)
-            element = pl.concat_str(
-                [pl.element().struct.field(f.name).fill_null('null') for f in inner.fields], separator=', '
-            )
-            rendered = column.list.eval(pl.lit('{') + element + pl.lit('}'))
-        else:
-            msg = f'spark_cast_to_string: unsupported list element dtype {inner!r} for column {name!r}'
-            raise UnsupportedIdentifierField(msg)
-        joined = pl.lit('[') + rendered.list.join(', ') + pl.lit(']')
-        return pl.when(column.is_null()).then(None).otherwise(joined)
-
-    msg = f'spark_cast_to_string: unsupported dtype {dtype!r} for column {name!r}'
-    raise UnsupportedIdentifierField(msg)
+    if isinstance(dtype, (pl.Struct, pl.List)):
+        return pl.when(column.is_null()).then(None).otherwise(_render_nested(column, dtype, name))
+    return _cast_scalar_to_string(column, dtype, name)
 
 
 def _flag(condition: pl.Expr, flag: EvidenceFlags) -> pl.Expr:
@@ -362,3 +429,199 @@ class Evidence:
             .with_columns(plh.col('_id_input').nchash.sha1().alias('id'))
             .drop('_id_input')
         )
+
+    def validate_uniqueness(self) -> Evidence:
+        """Flag every row but one within each `id`, ordered by a content hash.
+
+        The content hash makes the surviving row reproducible for a given implementation and
+        library version -- deterministic across runs, not dependent on an optimizer-induced
+        reshuffle. It is NOT reproducible against the pyspark implementation's own pick, though:
+        measured (task-9-report.md), the two disagree even on the SAME input, for two reasons --
+        spark's `on=<str>` join moves the join key column to the front of its result, which
+        `validate_diseases`/`validate_target`'s polars `.join` does not, so the two engines reach
+        this method with their columns in different order; and this hash excludes `id` (constant
+        within the `over('id', ...)` partition being ranked, so it cannot change which row wins)
+        while spark's does not. Matching spark's pick exactly would mean reproducing spark's
+        join-key-reordering quirk generically inside the earlier join methods -- out of scope
+        here; see the report for the measured column-order divergence.
+
+        Returns:
+            Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within
+            each `id`.
+        """
+        schema = self.lf.collect_schema()
+        parts = [spark_cast_to_string(c, schema[c]).fill_null('null') for c in schema.names() if c != 'id']
+        return Evidence(
+            self.lf.with_columns(pl.concat_str(parts).alias('_content'))
+            .with_columns(plh.col('_content').chash.sha2_256().alias('_content_hash'))
+            .with_columns(pl.int_range(pl.len()).over('id', order_by='_content_hash').alias('_rank'))
+            .with_columns(_flag(pl.col('_rank') != 0, EvidenceFlags.DUPLICATED).alias(QC_COLUMN))
+            .drop('_rank', '_content', '_content_hash')
+        )
+
+    def resolve_publication_date(self, publication_lut: pl.DataFrame) -> Evidence:
+        """Date evidence by the earliest publication date among its `literature` references.
+
+        `id` is a mandatory column for this to run; the presence of `literature` is not -- self
+        is returned unchanged if the column is absent.
+
+        Args:
+            publication_lut: look-up table of `publicationId` -> `publicationDate`
+                (`pts.transformers.utils.validation_lut.build_publication_lut`).
+
+        Returns:
+            Evidence with a new `publicationDate` column when `literature` is present.
+        """
+        if 'literature' not in self.lf.collect_schema().names():
+            return self
+        dated = (
+            self.lf.select('id', pl.col('literature').alias('_lit'))
+            .explode('_lit')
+            # Spark's `trim` strips the ASCII space only; polars' no-argument `str.strip_chars()`
+            # also strips tab/newline/non-breaking-space, which could map two distinct
+            # publication ids onto the same lookup key (measured, task-9-report.md).
+            .select('id', pl.col('_lit').str.strip_chars(' ').str.to_uppercase().alias('publicationId'))
+            .unique()
+            .join(publication_lut.lazy(), on='publicationId', how='inner')
+            .group_by('id')
+            .agg(pl.col('publicationDate').min())
+        )
+        return Evidence(self.lf.join(dated, on='id', how='left'))
+
+    def resolve_evidence_date(self) -> Evidence:
+        """Assign `evidenceDate` as the earliest of the present `DATE_COLUMNS`.
+
+        `evidenceDate` is always added, even when none of `DATE_COLUMNS` are present.
+
+        Returns:
+            Evidence with a new `evidenceDate` column.
+        """
+        present = [c for c in DATE_COLUMNS if c in self.lf.collect_schema().names()]
+        # `pl.min_horizontal` already ignores nulls (measured): unlike spark's `array_min`, which
+        # returns null if ANY element is null and so needs its inputs pre-filtered, no equivalent
+        # filter step is needed here.
+        expression = pl.min_horizontal(present) if present else pl.lit(None, dtype=pl.String)
+        return Evidence(self.lf.with_columns(expression.alias('evidenceDate')))
+
+    def calculate_evidence_score(self, score_expression: pl.Expr | None) -> Evidence:
+        """Assign `score` from a datasource-specific expression, flagging out-of-range values.
+
+        Args:
+            score_expression: the datasource's score expression from
+                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
+                evidence unchanged.
+
+        Returns:
+            Evidence with a new `score` column, and `EvidenceFlags.NO_VALID_SCORE` set where it
+            is missing or outside `[0, 1]`.
+        """
+        if score_expression is None:
+            return self
+        # Non-strict: spark's cast yields null on an unconvertible value rather than raising.
+        score = score_expression.cast(pl.Float64, strict=False)
+        return Evidence(
+            self.lf.with_columns(score.alias('score')).with_columns(
+                _flag(
+                    pl.col('score').is_null() | (pl.col('score') < 0) | (pl.col('score') > 1),
+                    EvidenceFlags.NO_VALID_SCORE,
+                ).alias(QC_COLUMN)
+            )
+        )
+
+    def assign_direction_on_trait(self, direction_expression: pl.Expr | None) -> Evidence:
+        """Assign `directionOnTrait` from a datasource-specific expression.
+
+        Args:
+            direction_expression: the datasource's `direction_on_trait` expression from
+                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
+                evidence unchanged.
+
+        Returns:
+            Evidence with a new `directionOnTrait` column when an expression is given.
+        """
+        if direction_expression is None:
+            return self
+        return Evidence(self.lf.with_columns(direction_expression.alias('directionOnTrait')))
+
+    def assign_direction_on_target(
+        self, direction_expression: pl.Expr | None, target_lut: pl.DataFrame | None
+    ) -> Evidence:
+        """Assign `directionOnTarget` from a datasource-specific expression.
+
+        Args:
+            direction_expression: the datasource's `direction_on_target` expression from
+                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
+                evidence unchanged.
+            target_lut: when given, joined in on `targetId` to provide `TSorOncogene` for
+                expressions that need it (e.g. `cancer_gene_census`).
+
+        Returns:
+            Evidence with a new `directionOnTarget` column when an expression is given, and
+            `actionType`/`TSorOncogene` dropped (present on some datasources' raw evidence, or
+            joined in here, but not part of the published schema).
+        """
+        if direction_expression is None:
+            return self
+        lf = self.lf
+        if target_lut is not None:
+            lf = lf.join(target_lut.lazy().select('targetId', 'TSorOncogene').unique(), on='targetId', how='left')
+        return Evidence(
+            lf.with_columns(direction_expression.alias('directionOnTarget')).drop(
+                'actionType', 'TSorOncogene', strict=False
+            )
+        )
+
+    def hash_long_variant_identifiers(self) -> Evidence:
+        """Hash `variantId` values longer than `VARIANT_HASH_LENGTH`.
+
+        Self is returned unchanged if `variantId` is absent.
+
+        Returns:
+            Evidence with long `variantId` values replaced by an `OTVAR_...` hash.
+        """
+        if 'variantId' not in self.lf.collect_schema().names():
+            return self
+        variant_id = pl.col('variantId')
+        pattern = r'^([0-9XYMT]{1,2})_([0-9]+)_([ACGTN]+)_([ACGTN]+)$'
+
+        def _spark_like_extract(group: int) -> pl.Expr:
+            # Spark's `regexp_extract` returns the EMPTY STRING on a non-match; polars'
+            # `str.extract` returns null (measured, task-9-report.md). So in spark the
+            # `chr.isNull() | pos.isNull()` branch below is reachable ONLY when `variantId`
+            # itself is null -- reproduced by extracting null only for a null input, and '' for
+            # anything else (a match with no captured group, or no match at all).
+            return (
+                pl.when(variant_id.is_null())
+                .then(None)
+                .otherwise(variant_id.str.extract(pattern, group).fill_null(''))
+            )
+
+        chrom = _spark_like_extract(1)
+        position = _spark_like_extract(2)
+        digest = plh.col('variantId').nchash.md5()
+        return Evidence(
+            self.lf.with_columns(
+                pl.when(chrom.is_null() | position.is_null())
+                .then(pl.lit('OTVAR_') + digest)
+                .when(variant_id.str.len_chars() > VARIANT_HASH_LENGTH)
+                .then(pl.concat_str([pl.lit('OTVAR'), chrom, position, digest], separator='_'))
+                .otherwise(variant_id)
+                .alias('variantId')
+            )
+        )
+
+    def valid(self) -> pl.LazyFrame:
+        """Evidence with an empty `qualityControls` list.
+
+        Returns:
+            LazyFrame filtered to evidence that passed every validation.
+        """
+        return self.lf.filter(pl.col(QC_COLUMN).list.len() == 0)
+
+    def invalid(self) -> pl.LazyFrame:
+        """Evidence with a non-empty `qualityControls` list.
+
+        Returns:
+            LazyFrame filtered to evidence that failed at least one validation.
+        """
+        return self.lf.filter(pl.col(QC_COLUMN).list.len() != 0)

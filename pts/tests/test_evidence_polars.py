@@ -1,7 +1,8 @@
 """Tests for the polars evidence post-processing.
 
 Two things live here: the validation look-up-table builders (`validation_lut.py`), and the
-`Evidence` class -- harmonisation, entity validation and identifier assignment (`evidence.py`).
+`Evidence` class -- harmonisation, entity validation, identifier assignment, uniqueness, dating,
+scoring and direction of effect (`evidence.py`).
 """
 
 from __future__ import annotations
@@ -9,13 +10,16 @@ from __future__ import annotations
 import gzip
 import json
 import random
+from datetime import date
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from pts.transformers.utils.evidence import (
+    DATE_COLUMNS,
     QC_COLUMN,
+    VARIANT_HASH_LENGTH,
     Evidence,
     EvidenceFlags,
     UnsupportedIdentifierField,
@@ -385,25 +389,29 @@ class TestSparkCastToStringListOfStruct:
         ]
 
     def test_non_string_struct_field_raises(self) -> None:
-        # No evidence.json List(Struct) unique_fields type has a non-String field
-        # (diseaseCellLines, the only one, is all-String) -- unmeasured against spark, so refuse
-        # rather than guess at a rendering.
-        dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Int64}))
-        df = pl.DataFrame({'v': [[{'id': 'a', 'count': 1}]]}, schema={'v': dtype})
+        # Int64/Boolean struct fields are now measured and supported (task-9-report.md,
+        # mutatedSamples/textMiningSentences/assays) -- Date stands in as a genuinely unmeasured
+        # struct field dtype instead, to keep this pin meaningful.
+        dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Date}))
+        df = pl.DataFrame({'v': [[{'id': 'a', 'count': date(2020, 1, 1)}]]}, schema={'v': dtype})
         with pytest.raises(UnsupportedIdentifierField, match='count'):
             df.select(spark_cast_to_string('v', dtype).alias('o'))
 
 
 class TestSparkCastToStringUnsupported:
     def test_unsupported_dtype_raises(self) -> None:
-        df = pl.DataFrame({'v': [True]})
-        with pytest.raises(UnsupportedIdentifierField, match='Boolean'):
-            df.select(spark_cast_to_string('v', pl.Boolean).alias('o'))
+        # Boolean is now measured and supported (task-9-report.md) -- Date stands in as a
+        # genuinely unmeasured top-level scalar dtype instead.
+        df = pl.DataFrame({'v': [None]}, schema={'v': pl.Date})
+        with pytest.raises(UnsupportedIdentifierField, match='Date'):
+            df.select(spark_cast_to_string('v', pl.Date).alias('o'))
 
     def test_unsupported_list_element_dtype_raises(self) -> None:
-        df = pl.DataFrame({'v': [[1, 2]]}, schema={'v': pl.List(pl.Int64)})
-        with pytest.raises(UnsupportedIdentifierField, match='Int64'):
-            df.select(spark_cast_to_string('v', pl.List(pl.Int64)).alias('o'))
+        # Int64 list elements are now measured and supported (task-9-report.md) -- Date stands in
+        # as a genuinely unmeasured list-element dtype instead.
+        df = pl.DataFrame({'v': [[None]]}, schema={'v': pl.List(pl.Date)})
+        with pytest.raises(UnsupportedIdentifierField, match='Date'):
+            df.select(spark_cast_to_string('v', pl.List(pl.Date)).alias('o'))
 
 
 class TestFlagNullQualityControls:
@@ -625,9 +633,13 @@ class TestSparkParityForCastToString:
         # Guards the measured cutoff itself: _java_double_to_string raises at |x| >= 1.7e16, a
         # value chosen with a full 1e15 of headroom below the smallest real mismatch found
         # (1.801526131658083e16, task-8-report.md). A dense 300-value sample seeded for
-        # determinism, concentrated right below the cutoff -- if the cutoff is ever widened
+        # determinism, concentrated right below the cutoff -- if the cutoff is ever NARROWED
         # without re-measuring, a sample this dense just inside [1.6e16, 1.7e16) is likely to
-        # catch a real divergence rather than let it slip through untested.
+        # catch a real divergence (these values would start raising) rather than let it slip
+        # through untested. A WIDENED cutoff is caught by a different test:
+        # test_large_magnitude_raises_rather_than_guess pins that 1.7e16 itself still raises, so
+        # widening the threshold past it fails that test instead -- this fuzz test only samples
+        # values already below the cutoff, so it cannot observe a widening.
         rng = random.Random(20260814)
         values = [rng.uniform(1.6, 1.699999) * 1e16 for _ in range(300)]
         rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
@@ -635,3 +647,323 @@ class TestSparkParityForCastToString:
         df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
         got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
         assert got == expected
+
+    def test_int64_matches_spark(self, spark) -> None:
+        values = [5, -5, 0, None]
+        rows = spark.createDataFrame([(v,) for v in values], 'v LONG').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Int64})
+        got = df.select(spark_cast_to_string('v', pl.Int64).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_boolean_matches_spark(self, spark) -> None:
+        values = [True, False, None]
+        rows = spark.createDataFrame([(v,) for v in values], 'v BOOLEAN').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Boolean})
+        got = df.select(spark_cast_to_string('v', pl.Boolean).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_list_struct_with_int_boolean_leaves_matches_spark(self, spark) -> None:
+        # The reviewer's exact examples (task-9-report.md): mutatedSamples/textMiningSentences
+        # have Int64 struct leaves, assays has a Boolean one -- these used to abort
+        # validate_uniqueness's plan build entirely (UnsupportedIdentifierField) before every
+        # real evidence.json column was measured.
+        dtype = pl.List(pl.Struct({'a': pl.String, 'b': pl.Int64, 'c': pl.Int64, 'd': pl.Int64}))
+        values = [
+            [{'a': 'SO_1', 'b': 3, 'c': 100, 'd': 7}],
+            [{'a': None, 'b': None, 'c': 0, 'd': -5}],
+        ]
+        spark_schema = 'v ARRAY<STRUCT<a: STRING, b: LONG, c: LONG, d: LONG>>'
+        rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': dtype})
+        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        assert got == expected
+
+        dtype2 = pl.List(pl.Struct({'d': pl.String, 'e': pl.Boolean, 'f': pl.String}))
+        values2 = [
+            [{'d': 'd', 'e': True, 'f': 's'}],
+            [{'d': None, 'e': False, 'f': None}],
+        ]
+        spark_schema2 = 'v ARRAY<STRUCT<d: STRING, e: BOOLEAN, f: STRING>>'
+        rows2 = spark.createDataFrame([(v,) for v in values2], spark_schema2).selectExpr('CAST(v AS STRING) as s')
+        expected2 = [r['s'] for r in rows2.collect()]
+        df2 = pl.DataFrame({'v': values2}, schema={'v': dtype2})
+        got2 = df2.select(spark_cast_to_string('v', dtype2).alias('v'))['v'].to_list()
+        assert got2 == expected2
+
+    def test_bare_struct_matches_spark(self, spark) -> None:
+        # biomarkers is a bare top-level Struct (not List(Struct)) -- the renderer that used to
+        # be inlined inside the List branch could not handle this shape at all.
+        dtype = pl.Struct({'x': pl.String, 'y': pl.String})
+        values = [{'x': 'a', 'y': 'b'}, {'x': None, 'y': 'b'}, None]
+        rows = spark.createDataFrame(
+            [(v,) for v in values], 'v STRUCT<x: STRING, y: STRING>'
+        ).selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': dtype})
+        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        assert got == expected
+
+    def test_struct_of_list_struct_matches_spark(self, spark) -> None:
+        # biomarkers's actual shape: a Struct whose fields are List(Struct) -- the reviewer's
+        # structural requirement was that the struct renderer be extracted and made recursive
+        # specifically because this two-level nesting exists in real evidence.json data. Includes
+        # a null nested List(Struct) field, which spark renders as the bare token 'null', not
+        # '[]' or an absent field.
+        dtype = pl.Struct(
+            {
+                'geneExpression': pl.List(pl.Struct({'id': pl.String})),
+                'geneticVariation': pl.List(pl.Struct({'id': pl.String})),
+            }
+        )
+        values = [{'geneExpression': [{'id': 'g1'}], 'geneticVariation': None}]
+        spark_schema = (
+            'v STRUCT<geneExpression: ARRAY<STRUCT<id: STRING>>, geneticVariation: ARRAY<STRUCT<id: STRING>>>'
+        )
+        rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': dtype})
+        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        assert got == expected
+
+
+class TestValidateUniqueness:
+    def test_duplicates_all_but_one_are_flagged(self) -> None:
+        lf = pl.LazyFrame({'id': ['a', 'a', 'b'], 'v': ['1', '2', '3']})
+        out = Evidence(lf).validate_uniqueness().lf.collect().sort('v')
+        flagged = [EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]]
+        assert sum(flagged) == 1
+
+    def test_the_same_row_is_picked_every_run(self) -> None:
+        # The content hash has to be a pure function of the row's own content, not of row
+        # position/partition order -- rerunning must always flag the same row.
+        lf = pl.LazyFrame({'id': ['a', 'a', 'a'], 'v': ['1', '2', '3']})
+        first = Evidence(lf).validate_uniqueness().lf.collect().sort('v')[QC_COLUMN].to_list()
+        second = Evidence(lf).validate_uniqueness().lf.collect().sort('v')[QC_COLUMN].to_list()
+        assert first == second
+
+    def test_unique_rows_are_not_flagged(self) -> None:
+        lf = pl.LazyFrame({'id': ['a', 'b', 'c'], 'v': ['1', '2', '3']})
+        out = Evidence(lf).validate_uniqueness().lf.collect()
+        assert all(EvidenceFlags.DUPLICATED not in qc for qc in out[QC_COLUMN])
+
+    def test_int64_and_boolean_columns_no_longer_abort_the_plan(self) -> None:
+        # Correction E: before extending spark_cast_to_string, a bare Int64/Boolean column
+        # (e.g. publicationYear, primaryProjectHit) raised UnsupportedIdentifierField at plan
+        # build time -- validate_uniqueness could never run on a real evidence frame at all.
+        lf = pl.LazyFrame(
+            {'id': ['a', 'a'], 'n': [1, 2], 'flag': [True, False]},
+            schema={'id': pl.String, 'n': pl.Int64, 'flag': pl.Boolean},
+        )
+        out = Evidence(lf).validate_uniqueness().lf.collect()
+        assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
+
+    def test_id_column_itself_is_excluded_from_the_content_hash(self) -> None:
+        # id is constant within the id-partitioned window being ranked, so hashing it in would
+        # add nothing but noise to which row wins -- this pins that it is genuinely excluded, by
+        # checking two ids whose sole non-id content is identical still produce a stable pick.
+        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['same', 'same']})
+        out = Evidence(lf).validate_uniqueness().lf.collect()
+        assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
+
+
+class TestResolvePublicationDate:
+    def test_earliest_publication_date_wins(self) -> None:
+        lf = pl.LazyFrame({'id': ['e1'], 'literature': [['P2', 'P1']]})
+        lut = pl.DataFrame({'publicationId': ['P1', 'P2'], 'publicationDate': ['2001-01-01', '1999-01-01']})
+        out = Evidence(lf).resolve_publication_date(lut).lf.collect()
+        assert out['publicationDate'].to_list() == ['1999-01-01']
+
+    def test_missing_literature_column_is_a_no_op(self) -> None:
+        lf = pl.LazyFrame({'id': ['e1']})
+        lut = pl.DataFrame(
+            {'publicationId': [], 'publicationDate': []},
+            schema={'publicationId': pl.String, 'publicationDate': pl.String},
+        )
+        out = Evidence(lf).resolve_publication_date(lut).lf.collect()
+        assert 'publicationDate' not in out.columns
+
+    def test_publication_id_is_uppercased_and_trimmed_before_lookup(self) -> None:
+        lf = pl.LazyFrame({'id': ['e1'], 'literature': [[' p1 ']]})
+        lut = pl.DataFrame({'publicationId': ['P1'], 'publicationDate': ['2020-01-01']})
+        out = Evidence(lf).resolve_publication_date(lut).lf.collect()
+        assert out['publicationDate'].to_list() == ['2020-01-01']
+
+    def test_trim_only_strips_ascii_space_like_spark(self) -> None:
+        # Correction C: spark's `trim` strips the ASCII space only; the no-argument polars
+        # `str.strip_chars()` also strips tab/newline/non-breaking-space -- which would collapse
+        # two distinct publication ids onto one lookup key. A tab-padded id must NOT match a
+        # lookup keyed on the untouched (tab-free) id.
+        lf = pl.LazyFrame({'id': ['e1'], 'literature': [['\tP1\t']]})
+        lut = pl.DataFrame({'publicationId': ['P1'], 'publicationDate': ['2020-01-01']})
+        out = Evidence(lf).resolve_publication_date(lut).lf.collect()
+        assert out['publicationDate'].to_list() == [None]
+
+    def test_no_matching_publication_leaves_date_null(self) -> None:
+        lf = pl.LazyFrame({'id': ['e1'], 'literature': [['NOPE']]})
+        lut = pl.DataFrame({'publicationId': ['P1'], 'publicationDate': ['2020-01-01']})
+        out = Evidence(lf).resolve_publication_date(lut).lf.collect()
+        assert out['publicationDate'].to_list() == [None]
+
+
+class TestResolveEvidenceDate:
+    def test_earliest_of_the_present_date_columns_wins(self) -> None:
+        lf = pl.LazyFrame({'publicationDate': ['2001-01-01'], 'curationDate': ['1999-01-01']})
+        out = Evidence(lf).resolve_evidence_date().lf.collect()
+        assert out['evidenceDate'].to_list() == ['1999-01-01']
+
+    def test_a_null_date_column_does_not_null_the_whole_min(self) -> None:
+        # Unlike spark's array_min (null-propagating, so the pyspark implementation pre-filters),
+        # pl.min_horizontal already ignores nulls -- a null studyStartDate must not blank out an
+        # otherwise-present publicationDate.
+        lf = pl.LazyFrame(
+            {'publicationDate': ['2001-01-01'], 'studyStartDate': [None]},
+            schema={'publicationDate': pl.String, 'studyStartDate': pl.String},
+        )
+        out = Evidence(lf).resolve_evidence_date().lf.collect()
+        assert out['evidenceDate'].to_list() == ['2001-01-01']
+
+    def test_no_date_columns_present_still_adds_a_null_column(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1']})
+        out = Evidence(lf).resolve_evidence_date().lf.collect()
+        assert out['evidenceDate'].to_list() == [None]
+        assert out.schema['evidenceDate'] == pl.String
+
+    def test_covers_all_four_date_columns(self) -> None:
+        assert DATE_COLUMNS == ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
+
+
+class TestCalculateEvidenceScore:
+    def test_score_out_of_range_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'resourceScore': [50.0, 500.0]})
+        out = Evidence(lf).calculate_evidence_score(pl.col('resourceScore') / 100.0).lf.collect()
+        assert out['score'].to_list() == [0.5, 5.0]
+        assert [EvidenceFlags.NO_VALID_SCORE in qc for qc in out[QC_COLUMN]] == [False, True]
+
+    def test_none_expression_is_a_no_op(self) -> None:
+        lf = pl.LazyFrame({'resourceScore': [0.5]})
+        out = Evidence(lf).calculate_evidence_score(None).lf.collect()
+        assert 'score' not in out.columns
+
+    def test_negative_score_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'resourceScore': [-0.1]})
+        out = Evidence(lf).calculate_evidence_score(pl.col('resourceScore')).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.NO_VALID_SCORE]]
+
+    def test_missing_score_is_flagged(self) -> None:
+        lf = pl.LazyFrame({'resourceScore': [None]}, schema={'resourceScore': pl.Float64})
+        out = Evidence(lf).calculate_evidence_score(pl.col('resourceScore')).lf.collect()
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.NO_VALID_SCORE]]
+
+    def test_unconvertible_value_casts_to_null_rather_than_raising(self) -> None:
+        # Correction D: spark's cast yields null on an unconvertible value; a strict polars cast
+        # raises instead -- strict=False is required to mirror spark rather than crash the step.
+        lf = pl.LazyFrame({'resourceScore': ['not-a-number']})
+        out = Evidence(lf).calculate_evidence_score(pl.col('resourceScore').cast(pl.String)).lf.collect()
+        assert out['score'].to_list() == [None]
+        assert out[QC_COLUMN].to_list() == [[EvidenceFlags.NO_VALID_SCORE]]
+
+
+class TestAssignDirectionOnTrait:
+    def test_expression_is_applied(self) -> None:
+        lf = pl.LazyFrame({'diseaseId': ['EFO_1', None]})
+        expr = pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit('risk')).otherwise(None)
+        out = Evidence(lf).assign_direction_on_trait(expr).lf.collect()
+        assert out['directionOnTrait'].to_list() == ['risk', None]
+
+    def test_none_expression_is_a_no_op(self) -> None:
+        lf = pl.LazyFrame({'diseaseId': ['EFO_1']})
+        out = Evidence(lf).assign_direction_on_trait(None).lf.collect()
+        assert 'directionOnTrait' not in out.columns
+
+
+class TestAssignDirectionOnTarget:
+    def test_expression_is_applied(self) -> None:
+        lf = pl.LazyFrame({'diseaseId': ['EFO_1', None]})
+        expr = pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit('LoF')).otherwise(None)
+        out = Evidence(lf).assign_direction_on_target(expr, None).lf.collect()
+        assert out['directionOnTarget'].to_list() == ['LoF', None]
+
+    def test_none_expression_is_a_no_op(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1']})
+        out = Evidence(lf).assign_direction_on_target(None, None).lf.collect()
+        assert 'directionOnTarget' not in out.columns
+
+    def test_target_lut_is_joined_and_dropped_afterwards(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1', 'T2']})
+        lut = pl.DataFrame({'targetId': ['T1'], 'TSorOncogene': ['oncogene']})
+        expr = pl.col('TSorOncogene').replace_strict({'oncogene': 'GoF', 'tsg': 'LoF'}, default=None)
+        out = Evidence(lf).assign_direction_on_target(expr, lut).lf.collect()
+        assert out['directionOnTarget'].to_list() == ['GoF', None]
+        assert 'TSorOncogene' not in out.columns
+        assert 'actionType' not in out.columns
+
+
+class TestHashLongVariantIdentifiers:
+    """Correction B: the null branch is reachable only when variantId itself is null.
+
+    Every row is one of the team-lead's measured spark values (task-9-report.md).
+    """
+
+    def test_short_matching_id_is_unchanged(self) -> None:
+        lf = pl.LazyFrame({'variantId': ['1_12345_A_T']})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert out['variantId'].to_list() == ['1_12345_A_T']
+
+    def test_long_matching_id_is_hashed_with_chr_and_pos(self) -> None:
+        variant_id = '1_12345_' + 'A' * 200 + '_' + 'T' * 200
+        assert len(variant_id) == 409
+        lf = pl.LazyFrame({'variantId': [variant_id]})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        got = out['variantId'][0]
+        assert got.startswith('OTVAR_1_12345_')
+        assert got != variant_id
+
+    def test_short_non_matching_id_is_unchanged(self) -> None:
+        lf = pl.LazyFrame({'variantId': ['rs12345']})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert out['variantId'].to_list() == ['rs12345']
+
+    def test_long_non_matching_id_gets_triple_underscore(self) -> None:
+        # concat_ws('_', 'OTVAR', '', '', md5) joins two empty strings -- the extraction is ''
+        # (not null) for a non-match on a non-null input, per correction B.
+        variant_id = 'rs' + '9' * 400
+        assert len(variant_id) == 402
+        lf = pl.LazyFrame({'variantId': [variant_id]})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        got = out['variantId'][0]
+        assert got.startswith('OTVAR___')
+        assert not got.startswith('OTVAR____')
+
+    def test_empty_string_id_is_unchanged(self) -> None:
+        lf = pl.LazyFrame({'variantId': ['']})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert out['variantId'].to_list() == ['']
+
+    def test_null_id_stays_null(self) -> None:
+        lf = pl.LazyFrame({'variantId': [None]}, schema={'variantId': pl.String})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert out['variantId'].to_list() == [None]
+
+    def test_missing_variantid_column_is_a_no_op(self) -> None:
+        lf = pl.LazyFrame({'targetId': ['T1']})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert 'variantId' not in out.columns
+
+    def test_hash_length_constant_matches_pyspark(self) -> None:
+        assert VARIANT_HASH_LENGTH == 300
+
+
+class TestValidAndInvalid:
+    def test_valid_and_invalid_split(self) -> None:
+        lf = pl.LazyFrame({QC_COLUMN: [[], ['x']]}, schema={QC_COLUMN: pl.List(pl.String)})
+        ev = Evidence(lf)
+        assert ev.valid().collect().height == 1
+        assert ev.invalid().collect().height == 1
+
+    def test_valid_and_invalid_partition_every_row_exactly_once(self) -> None:
+        lf = pl.LazyFrame({QC_COLUMN: [[], ['x'], [], ['y', 'z']]}, schema={QC_COLUMN: pl.List(pl.String)})
+        ev = Evidence(lf)
+        assert ev.valid().collect().height + ev.invalid().collect().height == 4
