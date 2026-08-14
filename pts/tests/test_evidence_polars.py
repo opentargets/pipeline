@@ -825,13 +825,25 @@ class TestValidateUniqueness:
         # actually rank by content) would pass a self-comparison test like "rerun and check the
         # same row wins" without ever computing a real hash. This instead computes the expected
         # winner independently via hashlib.sha256 over the exact content string this method
-        # builds -- schema-ordered columns, '' separator, id included -- and asserts the actual
-        # survivor matches that computation, not just itself.
+        # builds, and asserts the actual survivor matches that computation, not just itself.
+        #
+        # Fix round 2, minor: the content string is built via spark_cast_to_string over the real
+        # `collect_schema()`, the same way validate_uniqueness itself builds it -- not a
+        # hand-written approximation. An earlier version hand-wrote 'a1'/'a2' as the content,
+        # silently omitting `qualityControls` (the real content is 'a1[]'/'a2[]'); both happened
+        # to pick survivor '2' anyway, so the test passed by coincidence, not because it actually
+        # caught a wrong rendering or column order -- it could not have failed against either.
+        # Only the HASHING is independent (hashlib, not chash.sha2_256); the content string must
+        # match what's actually hashed, or this test drifts from the code it's meant to pin.
         lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
-        out = Evidence(lf).validate_uniqueness().lf.collect()
-        contents = {row['v']: f'{row["id"]}{row["v"]}' for row in out.to_dicts()}
-        digests = {v: hashlib.sha256(content.encode()).hexdigest() for v, content in contents.items()}
+        ev = Evidence(lf)
+        schema = ev.lf.collect_schema()
+        parts = [spark_cast_to_string(name, schema[name]).fill_null('null') for name in schema.names()]
+        contents = ev.lf.select(pl.concat_str(parts).alias('_content'), 'v').collect()
+        digests = {row['v']: hashlib.sha256(row['_content'].encode()).hexdigest() for row in contents.to_dicts()}
         expected_survivor = min(digests, key=lambda v: digests[v])
+
+        out = ev.validate_uniqueness().lf.collect()
         flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
         assert flagged[expected_survivor] is False
         assert all(flagged[v] for v in flagged if v != expected_survivor)

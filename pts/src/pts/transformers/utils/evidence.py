@@ -594,7 +594,7 @@ class Evidence:
             .group_by('id')
             .agg(pl.col('publicationDate').min())
         )
-        return Evidence(self.lf.join(dated, on='id', how='left'))
+        return Evidence(_join_matching_spark_order(self.lf, dated, on='id', how='left'))
 
     def resolve_evidence_date(self) -> Evidence:
         """Assign `evidenceDate` as the earliest of the present `DATE_COLUMNS`.
@@ -681,7 +681,9 @@ class Evidence:
             return self
         lf = self.lf
         if target_lut is not None:
-            lf = lf.join(target_lut.lazy().select('targetId', 'TSorOncogene').unique(), on='targetId', how='left')
+            lf = _join_matching_spark_order(
+                lf, target_lut.lazy().select('targetId', 'TSorOncogene').unique(), on='targetId', how='left'
+            )
         return Evidence(
             lf.with_columns(direction_expression.alias('directionOnTarget')).drop(
                 'actionType', 'TSorOncogene', strict=False
