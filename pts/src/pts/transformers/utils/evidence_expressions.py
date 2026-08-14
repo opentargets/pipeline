@@ -318,6 +318,11 @@ def _expression_atlas_score() -> pl.Expr:
     """
     base = _log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
     magnitude = base * (pl.col('log2FoldChangeValue').abs() / 10) * (pl.col('log2FoldChangePercentileRank') / 100)
+    # A null or NaN resourceScore makes `base` (and so `magnitude`) null -- min_horizontal, like
+    # spark's array_min, skips a null element rather than propagating it, so the row scores 1.0
+    # instead of null. That is faithful to spark's `array_min` null-skipping and deliberate, not an
+    # oversight; `europepmc`'s score below is shaped the same way and null/NaN-scores 1.0 for the
+    # same reason.
     return pl.min_horizontal(pl.lit(1.0), magnitude)
 
 
@@ -398,6 +403,11 @@ def _intogen_direction_on_target() -> pl.Expr:
     ```
     """
     consequences = pl.col('mutatedSamples').list.eval(pl.element().struct.field('functionalConsequenceId'))
+    # `mutated_present` is unreachable in polars: spark's `exists` is three-valued and would return
+    # NULL (not false) on a NULL `mutatedSamples`, which is why the source SQL guards it explicitly.
+    # polars' `list.contains` instead returns false for every list shape here -- [x], [null], [],
+    # and null itself -- so the guard never actually changes the result; it is kept only because it
+    # is faithful to the SQL it was translated from.
     mutated_present = pl.col('mutatedSamples').is_not_null()
     return (
         pl.when(mutated_present & consequences.list.contains('SO_0002054'))
@@ -470,6 +480,8 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_target=pl.lit('LoF'),
     ),
     'crispr_screen': DatasourceExpressions(score=_log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
+    # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
+    # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(pl.col('resourceScore') / 100.0, pl.lit(1.0))),
     'genomics_england': DatasourceExpressions(score=_confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
     'crispr': DatasourceExpressions(score=_linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),

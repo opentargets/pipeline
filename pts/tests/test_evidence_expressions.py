@@ -72,31 +72,72 @@ def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
 
 def test_eva_score_sums_significance_and_confidence() -> None:
     df = pl.DataFrame({
-        'clinicalSignificances': [['pathogenic'], [None], ['unknown_value'], None],
-        'confidence': ['practice guideline', 'criteria provided, single submitter', 'unknown_conf', None],
+        'clinicalSignificances': [
+            ['pathogenic'],
+            [None],
+            ['unknown_value'],
+            None,
+            ['likely pathogenic', 'pathogenic'],
+        ],
+        'confidence': [
+            'practice guideline',
+            'criteria provided, single submitter',
+            'unknown_conf',
+            None,
+            'criteria provided, single submitter',
+        ],
     })
-    # measured against spark: 0.9+0.1, 0.0+0.02, 0.0+0.0, 0.0+0.0
+    # measured against spark: 0.9+0.1, 0.0+0.02, 0.0+0.0, 0.0+0.0, max(0.7,0.9)+0.02
+    # the last row is deliberately two matching, non-equal-scoring elements: array_max picks 0.9 and
+    # scores 0.92 -- a sum (0.7+0.9=1.6, +0.02=1.62) would go undetected by every other row here,
+    # which each carries only zero or one nonzero-scoring element.
     got = df.with_columns(EXPRESSIONS['eva'].score.alias('score'))['score'].to_list()
-    assert got == pytest.approx([1.0, 0.02, 0.0, 0.0])
+    assert got == pytest.approx([1.0, 0.02, 0.0, 0.0, 0.92])
 
 
 def test_eva_direction_on_trait_null_when_both_pathogenic_and_protective() -> None:
     direction_on_trait = EXPRESSIONS['eva'].direction_on_trait
     assert direction_on_trait is not None
-    df = pl.DataFrame({'clinicalSignificances': [['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None]]})
+    df = pl.DataFrame({
+        'clinicalSignificances': [['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']]
+    })
     got = df.with_columns(direction_on_trait.alias('d'))['d'].to_list()
-    assert got == ['risk', 'protect', None, None]
+    # the trailing capitalised 'Pathogenic' pins the '(?i)' case-insensitivity flag: every other row
+    # here is already lowercase, so a match on 'pathogenic' would pass with or without that flag.
+    assert got == ['risk', 'protect', None, None, 'risk']
 
 
 def test_log10_rescaled_score_saturates_at_zero_and_null_propagates() -> None:
     # crispr_screen: out_min=0.0, weak_ref=0.5, strong_ref=0.005 -- measured against spark.
-    df = pl.DataFrame({'resourceScore': [0.5, 0.005, 0.0, -1.0, None]})
+    df = pl.DataFrame({'resourceScore': [0.5, 0.005, 0.0, -1.0, None, float('nan')]})
     got = df.with_columns(EXPRESSIONS['crispr_screen'].score.alias('s'))['s'].to_list()
     assert got[0] == pytest.approx(0.0)
     assert got[1] == pytest.approx(1.0)
     assert got[2] == pytest.approx(1.0)  # non-positive input saturates to 1.0
     assert got[3] == pytest.approx(1.0)
     assert got[4] is None
+    # NaN pins the '| value.is_nan()' guard separately from is_null(): without it a NaN resourceScore
+    # scores `nan` instead of None, and 0.005 lands so close to 1.0 (0.9999999999999998) that
+    # pytest.approx would let a broken NaN guard hide behind that row instead.
+    assert got[5] is None
+
+
+def test_expression_atlas_and_europepmc_score_one_for_null_or_nan_resource_score() -> None:
+    # Both scores route null/NaN resourceScore through a min_horizontal(..., 1.0) that, like spark's
+    # array_min, ignores a null/NaN element rather than propagating it -- so the score saturates to
+    # 1.0 instead of going null. Deliberate (see the production comment); pinned here so a refactor
+    # that drops the min_horizontal wrapping is caught rather than silently reintroducing nulls.
+    df = pl.DataFrame({
+        'resourceScore': [None, float('nan')],
+        'log2FoldChangeValue': [2.0, 2.0],
+        'log2FoldChangePercentileRank': [50.0, 50.0],
+    })
+    got = df.with_columns(EXPRESSIONS['expression_atlas'].score.alias('s'))['s'].to_list()
+    assert got == pytest.approx([1.0, 1.0])
+
+    df2 = pl.DataFrame({'resourceScore': [None, float('nan')]})
+    got2 = df2.with_columns(EXPRESSIONS['europepmc'].score.alias('s'))['s'].to_list()
+    assert got2 == pytest.approx([1.0, 1.0])
 
 
 def test_linear_rescale_clamps_project_score() -> None:
@@ -108,14 +149,18 @@ def test_linear_rescale_clamps_project_score() -> None:
 
 def test_clinical_precedence_score_multiplies_stage_by_stop_reason_minimum() -> None:
     df = pl.DataFrame({
-        'clinicalStage': ['PHASE_2_3', 'PRECLINICAL', 'PHASE_1'],
-        'trialStopReasonCategories': [['Success', 'Negative'], [], ['unknown_reason']],
+        'clinicalStage': ['PHASE_2_3', 'PRECLINICAL', 'PHASE_1', 'PHASE_2_3'],
+        'trialStopReasonCategories': [['Success', 'Negative'], [], ['unknown_reason'], None],
     })
-    # measured against spark: 0.5*0.5, 0.01*null, 0.1*null
+    # measured against spark: 0.5*0.5, 0.01*null, 0.1*null, 0.5*1.0
     got = df.with_columns(EXPRESSIONS['clinical_precedence'].score.alias('s'))['s'].to_list()
     assert got[0] == pytest.approx(0.25)
     assert got[1] is None
     assert got[2] is None
+    # a NULL trialStopReasonCategories (as opposed to an empty, non-null list) takes the
+    # `IS NULL -> 1.0` branch and scores the stage score alone -- deleting that branch collapses
+    # this case into the empty-list case above and it would score None instead of 0.5.
+    assert got[3] == pytest.approx(0.5)
 
 
 def test_intogen_direction_on_target_needs_a_matching_consequence() -> None:

@@ -1119,6 +1119,17 @@ class TestValidAndInvalid:
         assert ev.invalid().collect().height == 1
 
     def test_valid_and_invalid_partition_every_row_exactly_once(self) -> None:
-        lf = pl.LazyFrame({QC_COLUMN: [[], ['x'], [], ['y', 'z']]}, schema={QC_COLUMN: pl.List(pl.String)})
+        # An 'id' per row, checked by value rather than by count: a `valid()` that returned every
+        # row and an `invalid()` that returned none would also sum to 4 without actually
+        # partitioning anything (test_valid_and_invalid_split already catches that specific
+        # implementation via separate per-side counts, but this test's own name promised more).
+        lf = pl.LazyFrame(
+            {'id': ['r0', 'r1', 'r2', 'r3'], QC_COLUMN: [[], ['x'], [], ['y', 'z']]},
+            schema={'id': pl.String, QC_COLUMN: pl.List(pl.String)},
+        )
         ev = Evidence(lf)
-        assert ev.valid().collect().height + ev.invalid().collect().height == 4
+        valid_ids = set(ev.valid().collect()['id'].to_list())
+        invalid_ids = set(ev.invalid().collect()['id'].to_list())
+        assert valid_ids == {'r0', 'r2'}
+        assert invalid_ids == {'r1', 'r3'}
+        assert valid_ids.isdisjoint(invalid_ids)
