@@ -10,24 +10,30 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
-from clinical_mining.dataset.clinical_indication import CATEGORY_RANKS_STR, RANK_TO_CATEGORY_STR
+from clinical_mining.dataset.clinical_indication import (
+    CATEGORY_RANKS_STR,
+    RANK_TO_CATEGORY_STR,
+    ClinicalStageCategory,
+)
 from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
 
-STAGE_FOR_MAX_MAPPING = {'WITHDRAWAL': 'APPROVAL', 'PHASE_4': 'APPROVAL'}
-_DEFAULT_STAGE_RANK_VALUE = CATEGORY_RANKS_STR['UNKNOWN']
+APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
+
+STAGE_FOR_MAX_MAPPING = {
+    ClinicalStageCategory.WITHDRAWAL.value: APPROVED_STAGE_CODE,
+    ClinicalStageCategory.PHASE_4.value: APPROVED_STAGE_CODE,
+}
+_DEFAULT_STAGE_RANK_VALUE = CATEGORY_RANKS_STR[ClinicalStageCategory.UNKNOWN.value]
 _DEFAULT_STAGE_NAME_VALUE = RANK_TO_CATEGORY_STR[_DEFAULT_STAGE_RANK_VALUE]
 
-APPROVED_STAGE_CODE = 'APPROVAL'
-PROBES_AND_DRUGS_SOURCE = 'Probes&Drugs'
+# the source string as chembl_molecule writes it, matched exactly by the is_drug filter
 DRUGBANK_SOURCE = 'drugbank'
+PROBES_AND_DRUGS_SOURCE = 'Probes&Drugs'
 
-# `group_by` does not promise row order, so the indications list is sorted to keep it
-# stable. Nothing observes that order today -- the list is dropped before the output is
-# written, and the description sorts the labels it takes from it -- but a change that does
-# expose it should not have to reintroduce the sort.
+# sorted because `group_by` does not promise row order
 _INDICATION_SORT = 'diseaseId'
 
 
@@ -296,9 +302,17 @@ def _process_clinical_report_indications(
         .with_columns(maxClinicalStage=_stage_name_from_rank(pl.col('bestRank')))
     )
 
+    # only the space character is stripped from the name: a bare `strip_chars()` would
+    # also take the other unicode whitespace a handful of disease names carry, changing
+    # the name rather than trimming it
+    disease_names = disease.select(
+        pl.col('id').alias('diseaseId'),
+        pl.col('name').str.to_lowercase().str.strip_chars(' ').alias('efoName'),
+    )
+
     return (
         per_indication
-        .join(_disease_names(disease), on='diseaseId', how='left')
+        .join(disease_names, on='diseaseId', how='left')
         .sort(_INDICATION_SORT)
         .group_by(pl.col('drugId').alias('id'), maintain_order=True)
         .agg(
@@ -310,19 +324,6 @@ def _process_clinical_report_indications(
             )
             .alias('indications')
         )
-    )
-
-
-def _disease_names(disease: pl.DataFrame) -> pl.DataFrame:
-    """Lowercased, trimmed disease names keyed by disease id.
-
-    Only the space character is stripped. A bare `strip_chars()` would also take the
-    other unicode whitespace characters that a handful of disease names carry, changing
-    the name rather than trimming it.
-    """
-    return disease.select(
-        pl.col('id').alias('diseaseId'),
-        pl.col('name').str.to_lowercase().str.strip_chars(' ').alias('efoName'),
     )
 
 
