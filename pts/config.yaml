@@ -905,18 +905,17 @@ steps:
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
   evidence_postprocess_gwas_credible_sets:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/l2g_evidence
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gwas_credible_sets
-        evidence: output/evidence_gwas_credible_sets
+        failed_evidence: excluded/evidence/gwas_credible_sets/gwas_credible_sets.parquet
+        evidence: output/evidence_gwas_credible_sets/evidence_gwas_credible_sets.parquet
       settings:
-        partition_count: 3
         evidence_format: parquet
         score_expression: resourceScore
         datasource_id: gwas_credible_sets
@@ -928,18 +927,17 @@ steps:
           - studyLocusId
 
   evidence_postprocess_expression_atlas:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/atlas.json.bz2
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/expression_atlas
-        evidence: output/evidence_expression_atlas
+        failed_evidence: excluded/evidence/expression_atlas/expression_atlas.parquet
+        evidence: output/evidence_expression_atlas/evidence_expression_atlas.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: expression_atlas
         score_expression: >-
@@ -980,18 +978,17 @@ steps:
           - 'unprocessed_pseudogene'
 
   evidence_postprocess_clinvar:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/eva.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/eva
-        evidence: output/evidence_eva
+        failed_evidence: excluded/evidence/eva/eva.parquet
+        evidence: output/evidence_eva/evidence_eva.parquet
       settings:
-        partition_count: 8
         evidence_format: json
         datasource_id: eva
         score_expression: |
@@ -1073,18 +1070,17 @@ steps:
           END
 
   evidence_postprocess_clinvar_somatic:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/eva.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/eva_somatic
-        evidence: output/evidence_eva_somatic
+        failed_evidence: excluded/evidence/eva_somatic/eva_somatic.parquet
+        evidence: output/evidence_eva_somatic/evidence_eva_somatic.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: eva_somatic
         score_expression: |
@@ -1166,18 +1162,17 @@ steps:
           END
 
   evidence_postprocess_uniprot_variants:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/uniprot_variants.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/uniprot_variants
-        evidence: output/evidence_uniprot_variants
+        failed_evidence: excluded/evidence/uniprot_variants/uniprot_variants.parquet
+        evidence: output/evidence_uniprot_variants/evidence_uniprot_variants.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: uniprot_variants
         score_expression: |
@@ -1199,18 +1194,17 @@ steps:
           - literature
 
   evidence_postprocess_uniprot_literature:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/uniprot_literature.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/uniprot_literature
-        evidence: output/evidence_uniprot_literature
+        failed_evidence: excluded/evidence/uniprot_literature/uniprot_literature.parquet
+        evidence: output/evidence_uniprot_literature/evidence_uniprot_literature.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: uniprot_literature
         score_expression: |
@@ -1229,18 +1223,17 @@ steps:
           - diseaseFromSource
 
   evidence_postprocess_clingen:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/clingen.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/clingen
-        evidence: output/evidence_clingen
+        failed_evidence: excluded/evidence/clingen/clingen.parquet
+        evidence: output/evidence_clingen/evidence_clingen.parquet
       settings:
-        partition_count: 1
         datasource_id: clingen
         evidence_format: parquet
         score_expression: |
@@ -1266,18 +1259,17 @@ steps:
           - allelicRequirements
 
   evidence_postprocess_cancer_biomarkers:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/cancer_biomarkers.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/cancer_biomarkers
-        evidence: output/evidence_cancer_biomarkers
+        failed_evidence: excluded/evidence/cancer_biomarkers/cancer_biomarkers.parquet
+        evidence: output/evidence_cancer_biomarkers/evidence_cancer_biomarkers.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: cancer_biomarkers
         score_expression: '1.0'
@@ -1293,22 +1285,21 @@ steps:
           - drugResponse
 
   evidence_postprocess_clinical_precedence:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/clinical_precedence.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/clinical_precedence
-        evidence: output/evidence_clinical_precedence
+        failed_evidence: excluded/evidence/clinical_precedence/clinical_precedence.parquet
+        evidence: output/evidence_clinical_precedence/evidence_clinical_precedence.parquet
       properties:
         spark.driver.memory: 8g
         spark.executor.memory: 8g
         spark.sql.shuffle.partitions: '800'
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: clinical_precedence
         score_expression: |
@@ -1401,18 +1392,17 @@ steps:
           END
 
   evidence_postprocess_reactome:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/reactome.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/reactome
-        evidence: output/evidence_reactome
+        failed_evidence: excluded/evidence/reactome/reactome.parquet
+        evidence: output/evidence_reactome/evidence_reactome.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: reactome
         score_expression: '1.0'
@@ -1426,18 +1416,17 @@ steps:
           - reactionId
 
   evidence_postprocess_impc:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/impc.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/impc
-        evidence: output/evidence_impc
+        failed_evidence: excluded/evidence/impc/impc.parquet
+        evidence: output/evidence_impc/evidence_impc.parquet
       settings:
-        partition_count: 25
         evidence_format: parquet
         datasource_id: impc
         score_expression: resourceScore / 100
@@ -1454,18 +1443,17 @@ steps:
         direction_on_target_expression: CASE WHEN diseaseId IS NOT NULL THEN 'LoF' END
 
   evidence_postprocess_orphanet:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/orphanet.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/orphanet
-        evidence: output/evidence_orphanet
+        failed_evidence: excluded/evidence/orphanet/orphanet.parquet
+        evidence: output/evidence_orphanet/evidence_orphanet.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: orphanet
         score_expression: element_at(map('Assessed', 1.0, 'Not yet assessed', 0.5), confidence)
@@ -1484,18 +1472,17 @@ steps:
           END
 
   evidence_postprocess_gene2phenotype:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/gene2phenotype.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gene2phenotype
-        evidence: output/evidence_gene2phenotype
+        failed_evidence: excluded/evidence/gene2phenotype/gene2phenotype.parquet
+        evidence: output/evidence_gene2phenotype/evidence_gene2phenotype.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: gene2phenotype
         score_expression: |
@@ -1575,18 +1562,17 @@ steps:
           END
 
   evidence_postprocess_gene_burden:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/gene_burden.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gene_burden
-        evidence: output/evidence_gene_burden
+        failed_evidence: excluded/evidence/gene_burden/gene_burden.parquet
+        evidence: output/evidence_gene_burden/evidence_gene_burden.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: gene_burden
         score_expression: >-
@@ -1616,18 +1602,17 @@ steps:
           'LoF'
 
   evidence_postprocess_crispr_screens:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/crispr_screens.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/crispr_screen
-        evidence: output/evidence_crispr_screen
+        failed_evidence: excluded/evidence/crispr_screen/crispr_screen.parquet
+        evidence: output/evidence_crispr_screen/evidence_crispr_screen.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: crispr_screen
         score_expression: >-
@@ -1646,18 +1631,17 @@ steps:
           - studyId
 
   evidence_postprocess_europepmc:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/literature_epmc
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/europepmc
-        evidence: output/evidence_europepmc
+        failed_evidence: excluded/evidence/europepmc/europepmc.parquet
+        evidence: output/evidence_europepmc/evidence_europepmc.parquet
       settings:
-        partition_count: 125
         evidence_format: parquet
         datasource_id: europepmc
         score_expression: array_min(array(resourceScore / 100.0, 1.0))
@@ -1669,18 +1653,17 @@ steps:
           - literature
 
   evidence_postprocess_panel_app:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/panel_app.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/panel_app
-        evidence: output/evidence_genomics_england
+        failed_evidence: excluded/evidence/panel_app/panel_app.parquet
+        evidence: output/evidence_genomics_england/evidence_genomics_england.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: genomics_england
         score_expression: |
@@ -1700,18 +1683,17 @@ steps:
           - studyId
 
   evidence_postprocess_project_score:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/project_score.parquet
         target_path: output/target
         disease_path: output/disease/
         publication_date_lut: input/literature/literature_export/
       destination:
-        failed_evidence: excluded/evidence/crispr
-        evidence: output/evidence_crispr
+        failed_evidence: excluded/evidence/crispr/crispr.parquet
+        evidence: output/evidence_crispr/evidence_crispr.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: crispr
         score_expression: linear_rescale(resourceScore, 41.5, 100, 0.415, 1.0)
@@ -1722,18 +1704,17 @@ steps:
           - datasourceId
 
   evidence_postprocess_cosmic:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/cosmic.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/cancer_gene_census
-        evidence: output/evidence_cancer_gene_census
+        failed_evidence: excluded/evidence/cancer_gene_census/cancer_gene_census.parquet
+        evidence: output/evidence_cancer_gene_census/evidence_cancer_gene_census.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: cancer_gene_census
         score_expression: resourceScore
@@ -1751,18 +1732,17 @@ steps:
           END
 
   evidence_postprocess_ot_crispr:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/ot_crispr.parquet
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/ot_crispr
-        evidence: output/evidence_ot_crispr
+        failed_evidence: excluded/evidence/ot_crispr/ot_crispr.parquet
+        evidence: output/evidence_ot_crispr/evidence_ot_crispr.parquet
       settings:
-        partition_count: 1
         evidence_format: parquet
         datasource_id: ot_crispr
         score_expression: '1.0'
@@ -1778,18 +1758,17 @@ steps:
           - statisticalTestTail
 
   evidence_postprocess_encore:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/encore.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/encore
-        evidence: output/evidence_encore
+        failed_evidence: excluded/evidence/encore/encore.parquet
+        evidence: output/evidence_encore/evidence_encore.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: encore
         score_expression: >-
@@ -1811,18 +1790,17 @@ steps:
           - diseaseCellLines
 
   evidence_postprocess_validation_lab:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform evidence_postprocess
+      transformer: evidence_postprocess
       source:
         evidence_path: input/evidence/validation_lab.json.gz
         target_path: output/target
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/ot_crispr_validation
-        evidence: output/evidence_ot_crispr_validation
+        failed_evidence: excluded/evidence/ot_crispr_validation/ot_crispr_validation.parquet
+        evidence: output/evidence_ot_crispr_validation/evidence_ot_crispr_validation.parquet
       settings:
-        partition_count: 1
         evidence_format: json
         datasource_id: ot_crispr_validation
         score_expression: resourceScore
