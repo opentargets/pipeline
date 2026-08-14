@@ -536,9 +536,23 @@ class Evidence:
         schema = self.lf.collect_schema()
         _require_id_column(schema.names(), 'validate_uniqueness')
         parts = [spark_cast_to_string(c, schema[c]).fill_null('null') for c in schema.names()]
-        # pl.concat_str([]) raises ComputeError on an empty expression list; unreachable here
-        # (schema always has at least `id`, just required above), but assign_evidence_identifier
-        # guards the identical shape, so match it rather than leave the asymmetry.
+        # `pl.concat_str`'s default separator is '', deliberately matching spark's ACTUAL
+        # `concat_ws('', ...)` call -- not an oversight. Spark's own comment above that call
+        # claims the separator is ASCII SOH (U+0001) "so distinct field values can never
+        # collide", but the code it comments passes ''; the comment is wrong about its own code.
+        # Following spark's comment instead of its code would change every row's content string,
+        # hence every hash, hence every partition's survivor -- exactly the divergence this
+        # method exists to remove (measured, task-9-report.md). The collision this leaves open is
+        # real but unobserved: ('ab', 'c') and ('a', 'bc') both render the joined string 'abc...',
+        # so two genuinely different rows CAN share a content string, and the tie-break between
+        # them is then unspecified in BOTH engines -- 0 shared content strings found across
+        # 935,018 real staged rows. A pre-existing upstream defect to report, not one to repair
+        # inside this port: repairing it here would itself be the divergence.
+        #
+        # pl.concat_str([]) also raises ComputeError on an empty expression list; unreachable
+        # here (schema always has at least `id`, just required above), but
+        # assign_evidence_identifier guards the identical shape, so match it rather than leave
+        # the asymmetry.
         content = pl.concat_str(parts) if parts else pl.lit('')
         return Evidence(
             self.lf.with_columns(content.alias('_content'))
