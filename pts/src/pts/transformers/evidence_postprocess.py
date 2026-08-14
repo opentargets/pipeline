@@ -18,7 +18,8 @@ config.yaml for every datasource at once.
 from __future__ import annotations
 
 import bz2
-from typing import IO, Any
+from pathlib import Path
+from typing import Any
 
 import polars as pl
 from loguru import logger
@@ -58,21 +59,29 @@ def _json_parts(path: str) -> list[str]:
     return parts
 
 
-def _open_evidence_bytes(path: str) -> IO[bytes]:
-    """Binary content of one json evidence part, decompressed if it is bzip2.
+def _decompress_bz2(path: str) -> bytes:
+    """The fully decompressed bytes of one bzip2 json evidence part.
 
-    polars' ndjson reader decompresses gzip transparently -- relied on everywhere else in this
-    module via a plain `StorageHandle(path).open()` -- but not bzip2: fed a `.bz2` file, it does
-    not refuse, it silently reads the still-compressed bytes as if they were plain content and
-    raises `ComputeError: stream did not contain valid UTF-8`. `expression_atlas`'s evidence
+    polars' ndjson reader decompresses gzip transparently -- relied on for every other json
+    source via a plain path string, see `_scan_json_part` -- but not bzip2: fed a `.bz2` source,
+    it does not refuse, it silently reads the still-compressed bytes as if they were plain content
+    and raises `ComputeError: stream did not contain valid UTF-8`. `expression_atlas`'s evidence
     source (`input/evidence/atlas.json.bz2`) is bzip2, so this decompresses explicitly, keyed off
     the actual suffix rather than assuming atlas is the only `.bz2` source there will ever be.
+
+    Returns plain `bytes`, not a stream: `pl.scan_ndjson` accepts a `bytes` source directly and
+    reuses it across two separate calls with no reset/seek bookkeeping (unlike a file-like
+    object, which a first read would leave exhausted), so `_scan_json_part` can pin a schema and
+    then scan the same bytes without decompressing bzip2's CPU-heavy stream twice.
     """
-    raw = StorageHandle(path).open('rb')
-    return bz2.open(raw, 'rb') if path.endswith('.bz2') else raw
+    handle = StorageHandle(path).open('rb')
+    try:
+        return bz2.decompress(handle.read())
+    finally:
+        handle.close()
 
 
-def _json_schema(path: str) -> dict[str, Any]:
+def _json_schema(source: str | bytes) -> dict[str, Any]:
     """The schema to pin for one json evidence part: every column it actually carries, typed.
 
     A full `schema=load_spark_schema_as_polars('evidence.json')` pin does not just constrain
@@ -96,16 +105,63 @@ def _json_schema(path: str) -> dict[str, Any]:
     column with no evidence.json field to borrow a type from) to String.
 
     Args:
-        path: location of one json evidence part.
+        source: one json evidence part's path (plain or gzip -- polars decompresses gzip
+            natively from a path, which is also what keeps the read lazy, see `_scan_json_part`),
+            or the already-decompressed bytes of a bzip2 part.
 
     Returns:
-        `{column: dtype}` for exactly the columns `path` carries.
+        `{column: dtype}` for exactly the columns `source` carries.
     """
-    inferred = pl.scan_ndjson(_open_evidence_bytes(path), infer_schema_length=None).collect_schema()
+    inferred = pl.scan_ndjson(source, infer_schema_length=None).collect_schema()
     target_schema = load_spark_schema_as_polars('evidence.json')
     return {
         name: target_schema.get(name, dtype if dtype != pl.Null else pl.String) for name, dtype in inferred.items()
     }
+
+
+def _scan_json_part(part: str) -> pl.LazyFrame:
+    """Lazily scan one json evidence part, its own schema discovered and pinned.
+
+    Passes `part`'s path straight to `pl.scan_ndjson` rather than an opened file object: doing so
+    lets polars' Rust engine own the read (gzip decompressed natively, streamed rather than
+    materialised) instead of going through `pl.read_ndjson` on a Python file handle, which is
+    eager regardless of a trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the
+    largest json evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here,
+    same row count. bzip2 has no such native support (`_decompress_bz2`), so a `.bz2` part is
+    decompressed once and that same in-memory buffer is reused for both the schema pass and the
+    actual scan -- not re-opened/re-decompressed per call, which would double bzip2's CPU cost for
+    no benefit.
+
+    Args:
+        part: location of one json evidence part; see `_json_parts`.
+
+    Returns:
+        LazyFrame of `part`'s raw evidence, in its source columns/dtypes.
+    """
+    source = _decompress_bz2(part) if part.endswith('.bz2') else part
+    return pl.scan_ndjson(source, schema=_json_schema(source))
+
+
+def _parquet_parts(path: str) -> str | list[str]:
+    """The parquet part(s) making up one evidence source, spark's `_`-prefix skip applied.
+
+    Spark's parquet reader silently skips files whose name starts with `_` -- it treats them as
+    metadata (`_SUCCESS`, `_common_metadata`), not data. A bare `f'{path}/*.parquet'` glob does
+    not: measured, planting a `_hidden.parquet` in a real directory makes it contribute rows to a
+    `pl.scan_parquet` read here, a real divergence from spark. This lists and filters explicitly
+    so a stray metadata-shaped file can't silently join the evidence.
+
+    Args:
+        path: location of the evidence -- a single parquet file or a directory of parts.
+
+    Returns:
+        `path` unchanged when it is a single file, otherwise its sorted non-`_`-prefixed part
+        locations.
+    """
+    handle = StorageHandle(path)
+    if not handle.stat().is_dir:
+        return path
+    return sorted(part for part in handle.glob('*.parquet') if not Path(part).name.startswith('_'))
 
 
 def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
@@ -113,19 +169,30 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
 
     Args:
         path: location of the evidence -- a directory of parquet parts or a single
-            (possibly gzip/bz2-compressed) ndjson file; see `_json_parts`.
+            (possibly gzip/bz2-compressed) ndjson file; see `_json_parts`/`_parquet_parts`.
         evidence_format: `settings['evidence_format']`, `'parquet'` or `'json'`.
 
     Returns:
         LazyFrame of the raw evidence, in its source columns/dtypes.
+
+    Raises:
+        ValueError: if `evidence_format` is neither `'parquet'` nor `'json'` -- only those two
+            occur in config.yaml today, so an unrecognised value is a config error, not a case
+            to fall through to the json reader silently.
     """
     if evidence_format == 'parquet':
-        is_dir = StorageHandle(path).stat().is_dir
-        return pl.scan_parquet(f'{path}/*.parquet' if is_dir else path)
-
-    return pl.concat([
-        pl.read_ndjson(_open_evidence_bytes(part), schema=_json_schema(part)).lazy() for part in _json_parts(path)
-    ])
+        return pl.scan_parquet(_parquet_parts(path))
+    if evidence_format == 'json':
+        # how='diagonal': spark's json reader unions differing per-part schemas rather than
+        # demanding they match. Every evidence_postprocess step today points at a single json
+        # file (`_json_parts` returns one part, so this never actually unions), but the default
+        # how='vertical' raises the moment a step's source is a multi-part directory with any
+        # schema drift between parts -- InvalidOperationError on a differing column set, ShapeError
+        # on a differing column order -- so 'diagonal' is set now rather than left to be found the
+        # hard way once a multi-part json step is wired.
+        return pl.concat([_scan_json_part(part) for part in _json_parts(path)], how='diagonal')
+    msg = f'unrecognised evidence_format {evidence_format!r} for {path!r}, expected "parquet" or "json"'
+    raise ValueError(msg)
 
 
 def evidence_postprocess(

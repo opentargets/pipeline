@@ -1,9 +1,10 @@
 """Tests for the `evidence_postprocess` transformer entry point.
 
 `Evidence` and the LUT builders it wires together are already covered end to end in
-`test_evidence_polars.py`; what is new here is the reader's file-vs-directory handling
-(`_read_evidence`/`_json_parts`) and the registry lookup failure -- the two behaviours
-this module adds on top of the pieces it assembles.
+`test_evidence_polars.py`; what is new here is the reader -- file-vs-directory handling for both
+formats, the `_`-prefix skip and unrecognised-format rejection, the json schema pin, and the
+multi-part diagonal union -- and the registry lookup failure, the behaviours this module adds on
+top of the pieces it assembles.
 """
 
 from __future__ import annotations
@@ -50,6 +51,21 @@ def test_read_evidence_parquet_from_a_directory_of_parts(tmp_path: Path) -> None
     path = _write_parquet_dir(tmp_path / 'evidence', pl.DataFrame({'targetFromSourceId': ['t1', 't2']}))
 
     assert _read_evidence(path, 'parquet').collect().height == 2
+
+
+def test_read_evidence_parquet_skips_underscore_prefixed_files(tmp_path: Path) -> None:
+    """Spark's parquet reader treats a `_`-prefixed file as metadata (`_SUCCESS` etc.) and skips
+    it; a bare `pl.scan_parquet(dir)` does not discriminate and would pick up its rows too, so
+    this fails without the explicit filter in `_parquet_parts`.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    directory = tmp_path / 'evidence'
+    directory.mkdir()
+    pl.DataFrame({'targetFromSourceId': ['t1']}).write_parquet(directory / 'part-00000.parquet')
+    pl.DataFrame({'targetFromSourceId': ['hidden']}).write_parquet(directory / '_hidden.parquet')
+
+    frame = _read_evidence(str(directory), 'parquet').collect()
+
+    assert frame['targetFromSourceId'].to_list() == ['t1']
 
 
 def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
@@ -100,13 +116,21 @@ def test_read_evidence_json_from_a_single_file(tmp_path: Path) -> None:
 
 
 def test_read_evidence_json_from_a_directory_reads_every_part(tmp_path: Path) -> None:
+    """Parts carry DIFFERING column sets, pinning the union (`how='diagonal'`) behaviour: spark's
+    json reader unions differing per-part schemas rather than demanding they match, and the
+    default `pl.concat` (`how='vertical'`) raises the moment two parts' column sets differ, so a
+    same-column fixture would pass for a narrower reason than this test's name claims.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
     directory = tmp_path / 'evidence'
     _write_json_gz(directory / 'part-00000.json.gz', [{'targetFromSourceId': 't1'}])
-    _write_json_gz(directory / 'part-00001.json.gz', [{'targetFromSourceId': 't2'}])
+    _write_json_gz(directory / 'part-00001.json.gz', [{'targetFromSourceId': 't2', 'resourceScore': 0.5}])
 
     frame = _read_evidence(str(directory), 'json').collect()
 
+    assert set(frame.columns) == {'targetFromSourceId', 'resourceScore'}
     assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
+    by_target = frame.sort('targetFromSourceId')
+    assert by_target['resourceScore'].to_list() == [None, 0.5]
 
 
 def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
@@ -172,11 +196,25 @@ def test_read_evidence_json_reads_a_bzip2_source(tmp_path: Path) -> None:
     assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
 
 
+def test_read_evidence_rejects_an_unrecognised_evidence_format(tmp_path: Path) -> None:
+    """Only 'parquet' and 'json' occur in config.yaml; anything else must fail loudly rather than
+    silently falling through to the json reader.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    with pytest.raises(ValueError, match="unrecognised evidence_format 'csv'"):
+        _read_evidence(str(tmp_path), 'csv')
+
+
 # --------------------------------------------------------------------------- registry lookup
 
 
 def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_path: Path) -> None:
-    """The registry lookup happens before any LUT is built or file is read, so this fails fast."""
+    """The registry lookup happens before any LUT is built or file is read, so this fails fast.
+
+    Asserts the CUSTOM message's own wording ('no score/direction expressions registered'), not
+    just the datasource id: a bare `EXPRESSIONS[id]` KeyError also carries the id in its message
+    (`KeyError: 'not_a_real_datasource'`), so matching on the id alone would pass even if the
+    `try/except` that builds the clearer message were deleted.
+    """
     settings = {'datasource_id': 'not_a_real_datasource', 'evidence_format': 'parquet', 'unique_fields': []}
     missing = str(tmp_path / 'does_not_exist')
     source = {
@@ -186,5 +224,5 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
         'publication_date_lut': missing,
     }
 
-    with pytest.raises(KeyError, match='not_a_real_datasource'):
+    with pytest.raises(KeyError, match='no score/direction expressions registered for datasource'):
         evidence_postprocess(source, {}, settings, None)
