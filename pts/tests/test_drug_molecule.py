@@ -3,7 +3,8 @@
 import polars as pl
 import pytest
 
-from pts.schemas.drug_molecule import drug_molecule_schema, label_source_schema
+from pts.schemas.disease import schema as disease_index_schema
+from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
 from pts.transformers.drug_molecule import (
     _compute_max_phase_per_drug,
     _generate_description,
@@ -14,6 +15,14 @@ from pts.transformers.drug_molecule import (
 
 # --- Schemas used to build test DataFrames ---
 
+# the two datasets that declare a schema are taken from it, so a column renamed upstream
+# breaks these tests rather than leaving them asserting against a stale shape
+MOLECULE_SCHEMA = molecule_schema
+
+DISEASE_SCHEMA = {name: disease_index_schema[name] for name in ('id', 'name')}
+
+# clinical_report, chemical_probes and drug_mechanism_of_action declare no schema, so
+# these are hand written and hold only the columns this step reads
 DRUG_LIST = pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String}))
 DISEASE_LIST = pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))
 
@@ -24,22 +33,6 @@ CLINICAL_REPORT_SCHEMA = {
     'diseases': DISEASE_LIST,
     'qualityControls': pl.List(pl.String),
 }
-
-MOLECULE_SCHEMA = {
-    'id': pl.String,
-    'canonicalSmiles': pl.String,
-    'inchiKey': pl.String,
-    'molblock': pl.String,
-    'drugType': pl.String,
-    'name': pl.String,
-    'parentId': pl.String,
-    'synonyms': label_source_schema,
-    'tradeNames': label_source_schema,
-    'crossReferences': drug_molecule_schema['crossReferences'],
-    'childChemblIds': pl.List(pl.String),
-}
-
-DISEASE_SCHEMA = {'id': pl.String, 'name': pl.String}
 
 CHEMICAL_PROBES_SCHEMA = {'id': pl.String, 'drugFromSourceId': pl.String, 'drugId': pl.String}
 
