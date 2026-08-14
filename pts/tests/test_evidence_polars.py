@@ -248,6 +248,26 @@ def test_publication_lut_reads_a_column_absent_from_the_leading_rows(tmp_path: P
     assert '999' in set(build_publication_lut(path)['publicationId'])
 
 
+def test_publication_lut_ignores_an_unpinned_column_typed_null_from_leading_rows(tmp_path: Path) -> None:
+    """An UNPINNED column the lookup table never uses can still abort the whole read.
+
+    Real 26.06 data: one export file has a `dateOfPublication` column (not one of `LITERATURE_
+    SCHEMA`'s five pinned fields) that infers as Null from its leading rows -- absent there --
+    then hits a non-null value ('2005 Oct') later. `schema_overrides=` only pins the columns it
+    names; polars still infers every OTHER column in the file, so the read raises `ComputeError:
+    got non-null value for NULL-typed column` on a column the table doesn't even select. `schema=`
+    instead of `schema_overrides=` restricts parsing to exactly the five pinned columns, so an
+    unpinned column's shape can never break the read -- this is the case that actually broke in
+    production; `test_publication_lut_reads_a_column_absent_from_the_leading_rows` above only
+    covers a PINNED column having this shape.
+    """
+    rows = [{**_publication(None, f'MED_{i}', None, '2020-01-01'), 'dateOfPublication': None} for i in range(200)]
+    rows.append({**_publication('999', 'MED_999', None, '2020-01-01'), 'dateOfPublication': '2005 Oct'})
+    path = _write_ndjson(tmp_path / 'literature', rows)
+
+    assert '999' in set(build_publication_lut(path)['publicationId'])
+
+
 def test_publication_lut_reads_every_part(tmp_path: Path) -> None:
     """Each part infers its own schema, so parts have to be read under one pinned schema."""
     path = _write_ndjson(

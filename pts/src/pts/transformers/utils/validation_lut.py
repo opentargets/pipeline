@@ -3,7 +3,10 @@
 Polars port of `pts.pyspark.evidence_utils.validation_lut.LookUpTables`. Every builder
 below was diffed against the spark implementation on the real 26.06 release: disease
 54,961 rows, target 511,837 rows and the publication table over three of the export's
-56 parts, all exact matches including `TSorOncogene`.
+56 parts, all exact matches including `TSorOncogene`. `build_publication_lut` was
+additionally run end to end over the full 56-part export (53,703,675 rows) to confirm
+the read itself completes -- see `_publication_part`'s `schema=` comment for the
+defect that surfaced.
 
 Divergences worth naming, because each one is deliberate:
 
@@ -155,7 +158,13 @@ def _publication_part(part: str) -> pl.DataFrame:
     53.7M rows and only the two output columns survive it.
     """
     return (
-        pl.read_ndjson(StorageHandle(part).open(), schema_overrides=LITERATURE_SCHEMA)
+        # `schema=`, not `schema_overrides=`: overrides only pins the five named columns and
+        # still infers every OTHER column in the file from its leading rows -- one real 26.06
+        # part has an unpinned `dateOfPublication` that infers Null there and later holds a
+        # non-null value ('2005 Oct'), which raised ComputeError on a column this table never
+        # even selects. `schema=` restricts parsing to exactly the five columns named, so no
+        # other column's shape can break the read.
+        pl.read_ndjson(StorageHandle(part).open(), schema=LITERATURE_SCHEMA)
         .filter(pl.col('source').is_in(LITERATURE_SOURCES))
         .select(
             pl.col('firstPublicationDate').alias('publicationDate'),
