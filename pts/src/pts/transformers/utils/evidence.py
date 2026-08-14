@@ -18,11 +18,12 @@ polars `pl.Expr` per `datasourceId` for the caller to look up and pass straight 
 from __future__ import annotations
 
 import math
+import struct
 import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import polars_hash as plh
@@ -60,6 +61,16 @@ class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condit
     """
 
 
+def _subnormal_mantissa_popcount(ax: float) -> int:
+    """The number of set bits in a positive subnormal double's mantissa.
+
+    A subnormal has biased exponent 0 and sign 0 (the input is already the absolute value), so
+    its raw IEEE-754 bit pattern *is* the mantissa -- no masking needed.
+    """
+    bits = struct.unpack('<Q', struct.pack('<d', ax))[0]
+    return bits.bit_count()
+
+
 def _java_double_to_string(x: float | None) -> str | None:
     """Render a double exactly as spark's `CAST(DOUBLE AS STRING)` does.
 
@@ -72,13 +83,8 @@ def _java_double_to_string(x: float | None) -> str | None:
 
     That guarantee has two measured exceptions, both refused rather than guessed at -- a wrong
     rendering here silently changes a published evidence id, and that is worse than an
-    unrunnable datasource. In practice it costs nothing: this is a VALUE-level check, not a
-    dtype-level rejection, and no real `resourceScore` (evidence.json's only `Float64`
-    `unique_fields` type) ever reaches either range.
+    unrunnable datasource:
 
-    * Subnormal doubles (`0 < |x| < sys.float_info.min`): java's legacy `Double.toString`
-      algorithm is not actually shortest-round-trip here (`Double.MIN_VALUE` renders
-      `'4.9E-324'` in java but python's shortest round-trip repr is `'5e-324'`).
     * Magnitudes at or above `1.7e16`: a dense fuzz run of 200,000+ random doubles against real
       spark in `[1e15, 2e16)` found the same algorithm emitting extra, non-shortest digits
       starting at `1.801526131658083e16` (e.g. spark's `1.802953665778383e16` renders
@@ -91,6 +97,32 @@ def _java_double_to_string(x: float | None) -> str | None:
       of this guard used `1e15` -- conservative enough to also reject values like `1e15` and
       `1.5e16` that render exactly; `1.7e16` keeps those exact while still refusing the range
       that measurably diverges.
+    * Subnormal doubles (`0 < |x| < sys.float_info.min`) with a LOW-POPCOUNT mantissa: java's
+      legacy `Double.toString` algorithm is not shortest-round-trip for a subnormal whose 52-bit
+      mantissa has very few bits set -- e.g. `Double.MIN_VALUE` (mantissa `1`, `4.9e-324`) renders
+      `'4.9E-324'` in java but python's shortest round-trip repr is `'5.0E-324'`.
+
+      This is NOT a magnitude boundary the way the large-value guard is -- it was measured to
+      recur, sparsely, at every magnitude up to nearly `sys.float_info.min` (e.g. mantissa
+      `2**49`, value `2.781342323134e-309`, still mismatches), interleaved with values at the SAME
+      magnitude that render exactly (`gene_burden.resourceScore` carries two real subnormals,
+      `1.66880539388046e-308` and `5.498e-320`, both exact). A magnitude cutoff cannot separate
+      them: gene_burden's `5.498e-320` sits between two confirmed-mismatching mantissas
+      (`2**11=2048 -> 1.012e-320` and `2**14=16384 -> 8.095e-320`) at the same order of magnitude,
+      so any threshold that excludes those two also excludes gene_burden's real, correctly-
+      rendering value.
+
+      What actually predicts a mismatch is the mantissa's Hamming weight (popcount), not its
+      magnitude: every mismatch found across dense sequential sampling (mantissas 1..20,000),
+      targeted probing of every power of two up to `2**51`, and 2,000-sample-per-popcount random
+      fuzzing had mantissa popcount <= 3. A dedicated recheck at the boundary (20,000 random
+      samples each, random magnitudes) found popcount 3 still mismatches (147/20,000, 0.7%);
+      popcount 4, 5 and 6 each showed 0/20,000 (0/22,000 including the earlier pass). Both of
+      gene_burden's real values have popcount 8. A real biological score's mantissa is
+      effectively a random 52-bit pattern (popcount concentrated around 26); the probability of
+      one having popcount <= 3 by chance is on the order of 1e-11, so this guard, like the large-
+      magnitude one, costs nothing in practice for genuine data -- it exists for the deliberately
+      round test values (and any future ones) that hit it.
 
     Args:
         x: the double value to render, or None.
@@ -99,7 +131,8 @@ def _java_double_to_string(x: float | None) -> str | None:
         The spark-equivalent string rendering, or None for a null input.
 
     Raises:
-        UnsupportedIdentifierField: if `x` is subnormal or `|x| >= 1.7e16`.
+        UnsupportedIdentifierField: if `|x| >= 1.7e16`, or `x` is a subnormal with mantissa
+            popcount <= 3.
     """
     if x is None:
         return None
@@ -112,10 +145,16 @@ def _java_double_to_string(x: float | None) -> str | None:
 
     negative = x < 0
     ax = -x if negative else x
-    if ax < sys.float_info.min or ax >= 1.7e16:
+    if ax >= 1.7e16:
         msg = (
-            f'spark_cast_to_string: double {x!r} is outside the range verified against spark '
-            '(subnormal, or |x| >= 1.7e16) -- see _java_double_to_string docstring'
+            f'spark_cast_to_string: double {x!r} has magnitude >= 1.7e16, outside the range '
+            'verified against spark -- see _java_double_to_string docstring'
+        )
+        raise UnsupportedIdentifierField(msg)
+    if ax < sys.float_info.min and _subnormal_mantissa_popcount(ax) <= 3:
+        msg = (
+            f'spark_cast_to_string: double {x!r} is a subnormal with a low-popcount mantissa, '
+            'outside the range verified against spark -- see _java_double_to_string docstring'
         )
         raise UnsupportedIdentifierField(msg)
 
@@ -344,6 +383,38 @@ def _harmonise_to_schema(lf: pl.LazyFrame, target_schema: dict[str, pl.DataType]
     return lf.with_columns(casts) if casts else lf
 
 
+def _join_matching_spark_order(lf: pl.LazyFrame, other: pl.LazyFrame, on: str, how: Literal['left']) -> pl.LazyFrame:
+    """`lf.join(other, on=on, how=how)`, with spark's `on=<str>` join column order restored.
+
+    Measured (task-9-report.md): spark's `.join(other, on=<str>, how=...)` moves the join key
+    column to the FRONT of the result -- `[key] + [left minus key] + [right minus key]`. Polars'
+    `.join` instead leaves the left frame's column order untouched and appends right-only columns
+    at the end. The two diverge on every one of the 10 staged evidence inputs (none has its join
+    key already first), and it is not cosmetic: `validate_uniqueness`'s survivor-selecting content
+    hash is built by iterating whatever column order the frame is actually in when it runs, and
+    spark's hash input order is `self.df.columns` at the equivalent point.
+
+    `how` is typed `Literal['left']`, the only strategy either caller uses today, rather than
+    polars' own `JoinStrategy` -- that alias lives in the private `polars._typing` module (same
+    situation as `_harmonise_expr`'s `source_dtype`/`target_dtype`, see that function's docstring).
+    """
+    left_columns = lf.collect_schema().names()
+    right_only = [c for c in other.collect_schema().names() if c != on]
+    return lf.join(other, on=on, how=how).select(on, *[c for c in left_columns if c != on], *right_only)
+
+
+def _require_id_column(schema_names: list[str], method_name: str) -> None:
+    """Raise clearly if `id` is missing, mirroring pyspark's `@required_columns(['id'])`.
+
+    Neither `validate_uniqueness` nor `resolve_publication_date` ported that decorator; without
+    this, a missing `id` leaked a raw, unhelpful `ColumnNotFoundError` from deep inside the
+    `.over('id', ...)` / `.select('id', ...)` machinery instead of naming the actual problem.
+    """
+    if 'id' not in schema_names:
+        msg = f"Column 'id' required by '{method_name}' is missing. Available columns: {schema_names}"
+        raise ValueError(msg)
+
+
 @dataclass
 class Evidence:
     """A lazy evidence frame carrying a quality-control column, harmonised to `evidence.json`."""
@@ -365,10 +436,11 @@ class Evidence:
             Evidence with `diseaseId` joined in, and `EvidenceFlags.INVALID_DISEASE` set for
             evidence without a match.
         """
+        joined = _join_matching_spark_order(
+            self.lf, disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left'
+        )
         return Evidence(
-            self.lf.join(disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left').with_columns(
-                _flag(pl.col('diseaseId').is_null(), EvidenceFlags.INVALID_DISEASE).alias(QC_COLUMN)
-            )
+            joined.with_columns(_flag(pl.col('diseaseId').is_null(), EvidenceFlags.INVALID_DISEASE).alias(QC_COLUMN))
         )
 
     def validate_target(self, target_lut: pl.DataFrame, invalid_biotypes: list[str] | None = None) -> Evidence:
@@ -382,7 +454,8 @@ class Evidence:
         Returns:
             Evidence with `targetId` joined in and `biotype` dropped.
         """
-        joined = self.lf.join(
+        joined = _join_matching_spark_order(
+            self.lf,
             target_lut.lazy().select('targetId', 'biotype', 'targetFromSourceId'),
             on='targetFromSourceId',
             how='left',
@@ -433,26 +506,42 @@ class Evidence:
     def validate_uniqueness(self) -> Evidence:
         """Flag every row but one within each `id`, ordered by a content hash.
 
-        The content hash makes the surviving row reproducible for a given implementation and
-        library version -- deterministic across runs, not dependent on an optimizer-induced
-        reshuffle. It is NOT reproducible against the pyspark implementation's own pick, though:
-        measured (task-9-report.md), the two disagree even on the SAME input, for two reasons --
-        spark's `on=<str>` join moves the join key column to the front of its result, which
-        `validate_diseases`/`validate_target`'s polars `.join` does not, so the two engines reach
-        this method with their columns in different order; and this hash excludes `id` (constant
-        within the `over('id', ...)` partition being ranked, so it cannot change which row wins)
-        while spark's does not. Matching spark's pick exactly would mean reproducing spark's
-        join-key-reordering quirk generically inside the earlier join methods -- out of scope
-        here; see the report for the measured column-order divergence.
+        Reproduces spark's own survivor pick, not merely a self-consistent one (task-9-report.md,
+        reversing an earlier design choice after measurement showed it was unsafe):
+
+        * `id` is included in the hash. Spark iterates `self.df.columns`, which by this point
+          already includes `id` (added by `assign_evidence_identifier`); an earlier version of
+          this method excluded it, reasoning it was constant within the `over('id', ...)`
+          partition being ranked and so could not affect which row wins. That reasoning is FALSE
+          -- measured over 2,000 two-row same-`id` partitions, excluding `id` changed the
+          survivor in 962 of them (48.1%, a coin flip): sha256 ordering is not preserved under a
+          constant infix.
+        * Column ORDER matches spark's `self.df.columns` at the equivalent point.
+          `validate_diseases`/`validate_target` restore spark's `on=<str>` join-key-to-front
+          ordering (`_join_matching_spark_order`) specifically so `schema.names()` below iterates
+          in the same order spark would.
+
+        With the rendering (`spark_cast_to_string`, measured exact per dtype), the column order,
+        and the hash input (`id` included) all matching, the two engines' sha2-256 digests are
+        byte-identical for equivalent row content, so the ranking -- and hence the survivor --
+        matches spark's.
 
         Returns:
             Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within
             each `id`.
+
+        Raises:
+            ValueError: if `id` is missing.
         """
         schema = self.lf.collect_schema()
-        parts = [spark_cast_to_string(c, schema[c]).fill_null('null') for c in schema.names() if c != 'id']
+        _require_id_column(schema.names(), 'validate_uniqueness')
+        parts = [spark_cast_to_string(c, schema[c]).fill_null('null') for c in schema.names()]
+        # pl.concat_str([]) raises ComputeError on an empty expression list; unreachable here
+        # (schema always has at least `id`, just required above), but assign_evidence_identifier
+        # guards the identical shape, so match it rather than leave the asymmetry.
+        content = pl.concat_str(parts) if parts else pl.lit('')
         return Evidence(
-            self.lf.with_columns(pl.concat_str(parts).alias('_content'))
+            self.lf.with_columns(content.alias('_content'))
             .with_columns(plh.col('_content').chash.sha2_256().alias('_content_hash'))
             .with_columns(pl.int_range(pl.len()).over('id', order_by='_content_hash').alias('_rank'))
             .with_columns(_flag(pl.col('_rank') != 0, EvidenceFlags.DUPLICATED).alias(QC_COLUMN))
@@ -471,8 +560,13 @@ class Evidence:
 
         Returns:
             Evidence with a new `publicationDate` column when `literature` is present.
+
+        Raises:
+            ValueError: if `id` is missing.
         """
-        if 'literature' not in self.lf.collect_schema().names():
+        schema_names = self.lf.collect_schema().names()
+        _require_id_column(schema_names, 'resolve_publication_date')
+        if 'literature' not in schema_names:
             return self
         dated = (
             self.lf.select('id', pl.col('literature').alias('_lit'))
@@ -503,20 +597,29 @@ class Evidence:
         expression = pl.min_horizontal(present) if present else pl.lit(None, dtype=pl.String)
         return Evidence(self.lf.with_columns(expression.alias('evidenceDate')))
 
-    def calculate_evidence_score(self, score_expression: pl.Expr | None) -> Evidence:
+    def calculate_evidence_score(self, score_expression: pl.Expr) -> Evidence:
         """Assign `score` from a datasource-specific expression, flagging out-of-range values.
+
+        Unlike `assign_direction_on_trait`/`assign_direction_on_target`, `None` is not accepted
+        here and is not a silent no-op: every `evidence_postprocess_*` step in config.yaml
+        carries a `score_expression` (`settings['score_expression']`, not `.get(...)`), so a
+        missing one is a caller bug, not a genuinely optional field -- spark's `f.expr(...)`
+        would itself fail loudly on a missing expression rather than skip scoring.
 
         Args:
             score_expression: the datasource's score expression from
-                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
-                evidence unchanged.
+                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`.
 
         Returns:
             Evidence with a new `score` column, and `EvidenceFlags.NO_VALID_SCORE` set where it
             is missing or outside `[0, 1]`.
+
+        Raises:
+            ValueError: if `score_expression` is `None`.
         """
         if score_expression is None:
-            return self
+            msg = 'calculate_evidence_score requires a score_expression -- every datasource has one'
+            raise ValueError(msg)
         # Non-strict: spark's cast yields null on an unconvertible value rather than raising.
         score = score_expression.cast(pl.Float64, strict=False)
         return Evidence(

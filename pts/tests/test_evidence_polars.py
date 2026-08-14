@@ -8,12 +8,15 @@ scoring and direction of effect (`evidence.py`).
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import random
+import struct
 from datetime import date
 from pathlib import Path
 
 import polars as pl
+import polars_hash as plh
 import pytest
 
 from pts.transformers.utils.evidence import (
@@ -345,15 +348,47 @@ class TestSparkCastToStringFloat:
         with pytest.raises(UnsupportedIdentifierField, match=r'1\.7e16'):
             df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
 
-    def test_subnormal_raises_rather_than_guess(self) -> None:
-        # Measured (task-8-report.md): java's legacy Double.toString algorithm is not truly
-        # shortest-round-trip for subnormals (e.g. Double.MIN_VALUE renders '4.9E-324' in java,
-        # but python's shortest round-trip repr is '5e-324'). No evidence.json double field ever
-        # reaches this range, so refuse loudly instead of silently emitting a value that could
-        # diverge from spark and change an evidence id.
+    def test_subnormal_with_low_popcount_mantissa_raises_rather_than_guess(self) -> None:
+        # Measured (task-9-report.md, fix round 1): java's legacy Double.toString algorithm is
+        # not truly shortest-round-trip for a subnormal whose mantissa has very few bits set
+        # (e.g. Double.MIN_VALUE, mantissa 1, renders '4.9E-324' in java, but python's shortest
+        # round-trip repr is '5.0E-324'). Unlike the large-magnitude case, this is NOT a magnitude
+        # boundary -- real gene_burden.resourceScore values ARE subnormal and DO render exactly
+        # (see test_subnormal_with_ordinary_mantissa_matches_gene_burden below); only a mantissa
+        # with popcount <= 3 is refused.
         df = pl.DataFrame({'v': [5e-324]}, schema={'v': pl.Float64})
         with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
             df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+
+    @pytest.mark.parametrize(
+        'value',
+        [
+            5e-324,  # mantissa 1 (Double.MIN_VALUE)
+            5e-323,  # mantissa 10
+            6e-323,  # mantissa 12
+            8e-323,  # mantissa 16 (2**4)
+            1.6e-322,  # mantissa 32 (2**5)
+            6.3e-322,  # mantissa 128 (2**7)
+            1.012e-320,  # mantissa 2048 (2**11)
+            8.095e-320,  # mantissa 16384 (2**14)
+        ],
+    )
+    def test_every_measured_low_popcount_mantissa_raises(self, value: float) -> None:
+        # Every one of these was directly confirmed against real spark to mismatch
+        # (task-9-report.md); each has mantissa popcount <= 3.
+        df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
+        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
+            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+
+    def test_subnormal_with_ordinary_mantissa_matches_gene_burden(self) -> None:
+        # The concrete regression this guard exists for: real gene_burden.resourceScore values in
+        # the staged evidence input are subnormal (mantissa popcount 8 for both) and DID raise
+        # UnsupportedIdentifierField before fix round 1, blocking the whole datasource. Both
+        # values are pinned here as measured-exact against real spark (task-9-report.md).
+        values = [1.66880539388046e-308, 5.498e-320]
+        expected = ['1.66880539388046E-308', '5.498E-320']
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
+        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == expected
 
 
 class TestSparkCastToStringListOfStruct:
@@ -648,6 +683,35 @@ class TestSparkParityForCastToString:
         got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
         assert got == expected
 
+    def test_subnormal_popcount_boundary_matches_spark(self, spark) -> None:
+        # Fix round 1, Critical: unlike the large-magnitude case, the subnormal guard's boundary
+        # is a mantissa popcount (>3 raises, >=4 doesn't), not a magnitude -- measured mismatches
+        # recur at scattered points (all popcount <= 3) up to nearly sys.float_info.min, so a
+        # magnitude cutoff cannot separate them from ordinary subnormals like gene_burden's real
+        # values. A dense fuzz run (20,000+ samples per popcount, random magnitudes across the
+        # whole subnormal range, task-9-report.md) found popcount 3 still mismatches (147/20,000,
+        # 0.7%) while popcount 4, 5 and 6 each showed 0 mismatches in 20,000+ samples -- this is
+        # the spark-oracle version, run on every test run, concentrated right at that boundary
+        # (popcount exactly 4) so a future narrowing without re-measuring has a real chance of
+        # being caught.
+        rng = random.Random(20260814)
+
+        def _random_popcount_4_subnormal() -> float:
+            bit_length = rng.randint(4, 52)
+            positions = set(rng.sample(range(bit_length - 1), min(3, bit_length - 1)))
+            mantissa = 1 << (bit_length - 1)
+            for p in positions:
+                mantissa |= 1 << p
+            mantissa = max(1, min(2**52 - 1, mantissa))
+            return struct.unpack('<d', struct.pack('<Q', mantissa))[0]
+
+        values = [_random_popcount_4_subnormal() for _ in range(300)]
+        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
+        expected = [r['s'] for r in rows.collect()]
+        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
+        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
+        assert got == expected
+
     def test_int64_matches_spark(self, spark) -> None:
         values = [5, -5, 0, None]
         rows = spark.createDataFrame([(v,) for v in values], 'v LONG').selectExpr('CAST(v AS STRING) as s')
@@ -736,9 +800,27 @@ class TestValidateUniqueness:
         flagged = [EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]]
         assert sum(flagged) == 1
 
-    def test_the_same_row_is_picked_every_run(self) -> None:
+    def test_survivor_matches_an_independently_computed_content_hash(self) -> None:
+        # Fix round 1: a purely positional over('id') (or any implementation that doesn't
+        # actually rank by content) would pass a self-comparison test like "rerun and check the
+        # same row wins" without ever computing a real hash. This instead computes the expected
+        # winner independently via hashlib.sha256 over the exact content string this method
+        # builds -- schema-ordered columns, '' separator, id included -- and asserts the actual
+        # survivor matches that computation, not just itself.
+        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
+        out = Evidence(lf).validate_uniqueness().lf.collect()
+        contents = {row['v']: f'{row["id"]}{row["v"]}' for row in out.to_dicts()}
+        digests = {v: hashlib.sha256(content.encode()).hexdigest() for v, content in contents.items()}
+        expected_survivor = min(digests, key=lambda v: digests[v])
+        flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
+        assert flagged[expected_survivor] is False
+        assert all(flagged[v] for v in flagged if v != expected_survivor)
+
+    def test_rerunning_picks_the_same_survivor(self) -> None:
         # The content hash has to be a pure function of the row's own content, not of row
-        # position/partition order -- rerunning must always flag the same row.
+        # position/partition order -- rerunning must always flag the same row. Kept alongside
+        # test_survivor_matches_an_independently_computed_content_hash, which is the one that
+        # actually pins WHICH row wins; this one just pins run-to-run stability.
         lf = pl.LazyFrame({'id': ['a', 'a', 'a'], 'v': ['1', '2', '3']})
         first = Evidence(lf).validate_uniqueness().lf.collect().sort('v')[QC_COLUMN].to_list()
         second = Evidence(lf).validate_uniqueness().lf.collect().sort('v')[QC_COLUMN].to_list()
@@ -760,13 +842,34 @@ class TestValidateUniqueness:
         out = Evidence(lf).validate_uniqueness().lf.collect()
         assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
 
-    def test_id_column_itself_is_excluded_from_the_content_hash(self) -> None:
-        # id is constant within the id-partitioned window being ranked, so hashing it in would
-        # add nothing but noise to which row wins -- this pins that it is genuinely excluded, by
-        # checking two ids whose sole non-id content is identical still produce a stable pick.
-        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['same', 'same']})
+    def test_id_column_itself_is_included_in_the_content_hash(self) -> None:
+        # Fix round 1, Critical 2(a): id constant within the id-partitioned window being ranked
+        # does NOT mean including it is a no-op -- sha256 ordering is not preserved under a
+        # constant infix (measured: excluding id changed the survivor in 48.1% of 2,000 sampled
+        # partitions). id='a', v='1'/'2' is a concrete case where the two schemes disagree: hashing
+        # 'a1'/'a2' (id included) picks '2' as the lower hash, hashing '1'/'2' alone (id excluded,
+        # the old behaviour) picks '1' -- so this fails if id were ever dropped from the hash again.
+        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
         out = Evidence(lf).validate_uniqueness().lf.collect()
-        assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
+        flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
+        assert flagged == {'1': True, '2': False}
+
+    def test_missing_id_raises_clearly(self) -> None:
+        # Fix round 1, minor: pyspark's @required_columns(['id']) was never ported; without an
+        # explicit check a missing id leaks a raw ColumnNotFoundError from deep inside
+        # .over('id', ...) instead of naming the actual problem.
+        lf = pl.LazyFrame({'v': ['1']})
+        with pytest.raises(ValueError, match="'id'"):
+            Evidence(lf).validate_uniqueness()
+
+    def test_content_hash_matches_spark_sha2_256(self, spark) -> None:
+        # Confirms the piece the survivor-parity argument in the docstring depends on: spark's
+        # sha2(col, 256) and polars-hash's chash.sha2_256() produce the identical hex digest for
+        # the identical input string -- not just "both call themselves SHA-256".
+        value = 'aid_and_some_content_1'
+        row = spark.createDataFrame([(value,)], 'v STRING').selectExpr('sha2(v, 256) as h').collect()[0]
+        got = pl.DataFrame({'v': [value]}).select(plh.col('v').chash.sha2_256().alias('h'))['h'][0]
+        assert got == row['h']
 
 
 class TestResolvePublicationDate:
@@ -807,6 +910,13 @@ class TestResolvePublicationDate:
         out = Evidence(lf).resolve_publication_date(lut).lf.collect()
         assert out['publicationDate'].to_list() == [None]
 
+    def test_missing_id_raises_clearly(self) -> None:
+        # Fix round 1, minor: pyspark's @required_columns(['id']) was never ported here either.
+        lf = pl.LazyFrame({'literature': [['P1']]})
+        lut = pl.DataFrame({'publicationId': ['P1'], 'publicationDate': ['2020-01-01']})
+        with pytest.raises(ValueError, match="'id'"):
+            Evidence(lf).resolve_publication_date(lut)
+
 
 class TestResolveEvidenceDate:
     def test_earliest_of_the_present_date_columns_wins(self) -> None:
@@ -842,10 +952,14 @@ class TestCalculateEvidenceScore:
         assert out['score'].to_list() == [0.5, 5.0]
         assert [EvidenceFlags.NO_VALID_SCORE in qc for qc in out[QC_COLUMN]] == [False, True]
 
-    def test_none_expression_is_a_no_op(self) -> None:
+    def test_none_expression_raises_rather_than_silently_skipping(self) -> None:
+        # Fix round 1, minor: unlike assign_direction_on_trait/assign_direction_on_target (where
+        # None is genuinely optional), every evidence_postprocess_* step in config.yaml carries a
+        # score_expression -- a None here is a caller bug, and spark's f.expr(...) would itself
+        # fail loudly rather than skip scoring.
         lf = pl.LazyFrame({'resourceScore': [0.5]})
-        out = Evidence(lf).calculate_evidence_score(None).lf.collect()
-        assert 'score' not in out.columns
+        with pytest.raises(ValueError, match='score_expression'):
+            Evidence(lf).calculate_evidence_score(None)
 
     def test_negative_score_is_flagged(self) -> None:
         lf = pl.LazyFrame({'resourceScore': [-0.1]})
@@ -954,6 +1068,15 @@ class TestHashLongVariantIdentifiers:
 
     def test_hash_length_constant_matches_pyspark(self) -> None:
         assert VARIANT_HASH_LENGTH == 300
+
+    def test_md5_digest_matches_spark(self, spark) -> None:
+        # Fix round 1, minor: previous coverage only pinned the 'OTVAR_' prefix, not the digest
+        # content itself -- confirms polars-hash's nchash.md5() and spark's md5() agree byte for
+        # byte on the same input, not just that both call themselves md5.
+        variant_id = '1_12345_' + 'A' * 200 + '_' + 'T' * 200
+        row = spark.createDataFrame([(variant_id,)], 'v STRING').selectExpr('md5(v) as h').collect()[0]
+        got = pl.DataFrame({'v': [variant_id]}).select(plh.col('v').nchash.md5().alias('h'))['h'][0]
+        assert got == row['h']
 
 
 class TestValidAndInvalid:
