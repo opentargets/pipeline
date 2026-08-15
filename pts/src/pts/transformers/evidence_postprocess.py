@@ -66,7 +66,7 @@ def _json_schema(source: str) -> dict[str, Any]:
 
     Args:
         source: one json evidence part's path (plain or gzip -- polars decompresses gzip
-            natively from a path, which is also what keeps the read lazy, see `_scan_json_part`).
+            natively from a path, which is also what keeps the read lazy, see `_read_evidence`).
 
     Returns:
         `{column: dtype}` for exactly the columns `source` carries, in ALPHABETICAL order (see the
@@ -75,7 +75,7 @@ def _json_schema(source: str) -> dict[str, Any]:
     inferred = pl.scan_ndjson(source, infer_schema_length=None).collect_schema()
     target_schema = evidence_schema
     # Sorted by name, not `inferred`'s own order: passing this dict as `pl.scan_ndjson(schema=...)`
-    # (`_scan_json_part`) also fixes the resulting frame's COLUMN ORDER, not just its dtypes -- and
+    # (`_read_evidence`) also fixes the resulting frame's COLUMN ORDER, not just its dtypes -- and
     # that order must be alphabetical to match spark. Spark's json reader sorts inferred columns
     # alphabetically; polars' keeps the order columns first appear in the file. Measured on a
     # one-line `{"zebra":..,"alpha":..,"mango":..}` fixture: spark yields
@@ -88,25 +88,6 @@ def _json_schema(source: str) -> dict[str, Any]:
         name: target_schema.get(name, inferred[name] if inferred[name] != pl.Null else pl.String)
         for name in sorted(inferred)
     }
-
-
-def _scan_json_part(path: str) -> pl.LazyFrame:
-    """Lazily scan the json evidence source, its own schema discovered and pinned.
-
-    Passes `path` straight to `pl.scan_ndjson` rather than an opened file object: doing so
-    lets polars' Rust engine own the read (gzip decompressed natively, streamed rather than
-    materialised) instead of going through `pl.read_ndjson` on a Python file handle, which is
-    eager regardless of a trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the
-    largest json evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here,
-    same row count.
-
-    Args:
-        path: location of the json evidence source; a single file, see `_read_evidence`.
-
-    Returns:
-        LazyFrame of the raw evidence, in its source columns/dtypes.
-    """
-    return pl.scan_ndjson(path, schema=_json_schema(path))
 
 
 def _parquet_parts(path: str) -> str | list[str]:
@@ -167,7 +148,12 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
         if StorageHandle(path).stat().is_dir:
             msg = f'json evidence must be a single file, got a directory: {path!r}'
             raise ValueError(msg)
-        return _scan_json_part(path)
+        # `path` goes straight to `pl.scan_ndjson`, not an opened file object: that lets polars'
+        # Rust engine own the read (gzip decompressed natively, streamed rather than materialised)
+        # instead of `pl.read_ndjson` on a python file handle, which is eager regardless of a
+        # trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the largest json
+        # evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here.
+        return pl.scan_ndjson(path, schema=_json_schema(path))
     msg = f'unrecognised evidence_format {evidence_format!r} for {path!r}, expected "parquet" or "json"'
     raise ValueError(msg)
 
