@@ -42,33 +42,6 @@ from pts.transformers.utils.validation_lut import build_disease_lut, build_publi
 _TARGET_BYTES_PER_FILE = 2_450_000_000
 
 
-def _json_parts(path: str) -> list[str]:
-    """The ndjson file(s) making up one evidence source, whatever shape `path` is.
-
-    Extends `validation_lut._parts` to also accept a single file: config.yaml's json
-    evidence sources (`input/evidence/*.json.gz`/`.bz2`) are always one file, but
-    `StorageHandle(path).open()` raises `IsADirectoryError` on the parquet sources'
-    shape (`intermediate/evidence/*.parquet`, a directory of parts), so this checks
-    rather than assumes which one `path` is.
-
-    Args:
-        path: location of the json evidence source.
-
-    Returns:
-        `[path]` when it is a single file, otherwise its sorted part locations.
-
-    Raises:
-        ValueError: if `path` is a directory with no `*.json*` part.
-    """
-    handle = StorageHandle(path)
-    if not handle.stat().is_dir:
-        return [path]
-    parts = sorted(handle.glob('*.json*'))
-    if not parts:
-        raise ValueError(f'no json files found in {path}')
-    return parts
-
-
 def _decompress_bz2(path: str) -> bytes:
     """The fully decompressed bytes of one bzip2 json evidence part.
 
@@ -141,26 +114,26 @@ def _json_schema(source: str | bytes) -> dict[str, Any]:
     }
 
 
-def _scan_json_part(part: str) -> pl.LazyFrame:
-    """Lazily scan one json evidence part, its own schema discovered and pinned.
+def _scan_json_part(path: str) -> pl.LazyFrame:
+    """Lazily scan the json evidence source, its own schema discovered and pinned.
 
-    Passes `part`'s path straight to `pl.scan_ndjson` rather than an opened file object: doing so
+    Passes `path` straight to `pl.scan_ndjson` rather than an opened file object: doing so
     lets polars' Rust engine own the read (gzip decompressed natively, streamed rather than
     materialised) instead of going through `pl.read_ndjson` on a Python file handle, which is
     eager regardless of a trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the
     largest json evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here,
-    same row count. bzip2 has no such native support (`_decompress_bz2`), so a `.bz2` part is
+    same row count. bzip2 has no such native support (`_decompress_bz2`), so a `.bz2` source is
     decompressed once and that same in-memory buffer is reused for both the schema pass and the
     actual scan -- not re-opened/re-decompressed per call, which would double bzip2's CPU cost for
     no benefit.
 
     Args:
-        part: location of one json evidence part; see `_json_parts`.
+        path: location of the json evidence source; a single file, see `_read_evidence`.
 
     Returns:
-        LazyFrame of `part`'s raw evidence, in its source columns/dtypes.
+        LazyFrame of the raw evidence, in its source columns/dtypes.
     """
-    source = _decompress_bz2(part) if part.endswith('.bz2') else part
+    source = _decompress_bz2(path) if path.endswith('.bz2') else path
     return pl.scan_ndjson(source, schema=_json_schema(source))
 
 
@@ -184,8 +157,8 @@ def _parquet_parts(path: str) -> str | list[str]:
         ValueError: if `path` is a directory with no non-`_`-prefixed `*.parquet` part. Left
             unguarded, `pl.scan_parquet([])` (`_read_evidence`) raises its own
             `ComputeError: empty input: paths: []` -- legible enough once you know to look here,
-            but `_json_parts` already raises a clear `ValueError` for the equivalent json case, so
-            this matches it rather than leaving the two readers inconsistent.
+            but `_read_evidence` already raises a clear `ValueError` when a json source is a
+            directory at all, so this matches it rather than leaving the two readers inconsistent.
     """
     handle = StorageHandle(path)
     if not handle.stat().is_dir:
@@ -200,8 +173,8 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
     """Read one datasource's raw evidence, before harmonisation to the evidence.json schema.
 
     Args:
-        path: location of the evidence -- a directory of parquet parts or a single
-            (possibly gzip/bz2-compressed) ndjson file; see `_json_parts`/`_parquet_parts`.
+        path: location of the evidence -- a directory of parquet parts (see `_parquet_parts`) or
+            a single (possibly gzip/bz2-compressed) ndjson file.
         evidence_format: `settings['evidence_format']`, `'parquet'` or `'json'`.
 
     Returns:
@@ -210,19 +183,19 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
     Raises:
         ValueError: if `evidence_format` is neither `'parquet'` nor `'json'` -- only those two
             occur in config.yaml today, so an unrecognised value is a config error, not a case
-            to fall through to the json reader silently.
+            to fall through to the json reader silently. Also raised if `evidence_format` is
+            `'json'` and `path` is a directory: every json evidence source in config.yaml
+            (`input/evidence/*.json.gz`/`.bz2`) is a single file, unlike the parquet sources'
+            directory-of-parts shape, so a directory here is a config error too, refused rather
+            than silently globbed or left to fail inside polars with a confusing error.
     """
     if evidence_format == 'parquet':
         return pl.scan_parquet(_parquet_parts(path))
     if evidence_format == 'json':
-        # how='diagonal': spark's json reader unions differing per-part schemas rather than
-        # demanding they match. Every evidence_postprocess step today points at a single json
-        # file (`_json_parts` returns one part, so this never actually unions), but the default
-        # how='vertical' raises the moment a step's source is a multi-part directory with any
-        # schema drift between parts -- InvalidOperationError on a differing column set, ShapeError
-        # on a differing column order -- so 'diagonal' is set now rather than left to be found the
-        # hard way once a multi-part json step is wired.
-        return pl.concat([_scan_json_part(part) for part in _json_parts(path)], how='diagonal')
+        if StorageHandle(path).stat().is_dir:
+            msg = f'json evidence must be a single file, got a directory: {path!r}'
+            raise ValueError(msg)
+        return _scan_json_part(path)
     msg = f'unrecognised evidence_format {evidence_format!r} for {path!r}, expected "parquet" or "json"'
     raise ValueError(msg)
 

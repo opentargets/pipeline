@@ -3,8 +3,8 @@
 `Evidence` and the LUT builders it wires together are already covered end to end in
 `test_evidence_polars.py`; what is new here is the reader -- file-vs-directory handling for both
 formats, the `_`-prefix skip and unrecognised-format rejection, the json schema pin, and the
-multi-part diagonal union -- and the registry lookup failure, the behaviours this module adds on
-top of the pieces it assembles.
+directory rejection for json sources -- and the registry lookup failure, the behaviours this
+module adds on top of the pieces it assembles.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence_postprocess import _json_parts, _json_schema, _read_evidence, evidence_postprocess
+from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, evidence_postprocess
 from pts.transformers.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
 from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
@@ -82,12 +82,13 @@ def test_read_evidence_parquet_preserves_the_file_column_order(tmp_path: Path) -
 
 
 def test_read_evidence_parquet_raises_on_a_directory_of_only_underscore_prefixed_files(tmp_path: Path) -> None:
-    """Consistent with `_json_parts`'s legible `ValueError` for the equivalent empty-source case.
+    """Consistent with the legible `ValueError` `_read_evidence` raises when a json source is a
+    directory at all.
 
     Left unguarded, `pl.scan_parquet([])` (`_read_evidence`, fed `_parquet_parts`'s now-filtered
     empty list) raises its own `ComputeError: empty input: paths: []` instead -- correct, but a
     less legible failure for the same underlying "no data files found" situation.
-    """
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
     directory = tmp_path / 'evidence'
     directory.mkdir()
     pl.DataFrame({'targetFromSourceId': ['hidden']}).write_parquet(directory / '_hidden.parquet')
@@ -99,9 +100,10 @@ def test_read_evidence_parquet_raises_on_a_directory_of_only_underscore_prefixed
 def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
     """`intermediate/evidence/*.parquet` is always a directory in config.yaml, but the reader
     checks rather than assumes: `StorageHandle(path).open()` raises `IsADirectoryError` on that
-    other shape, elsewhere in this module (`_json_parts`), which is why `_parquet_parts` checks
-    too -- a bare `pl.scan_parquet(path)` on a directory does not actually fail (measured), it
-    just returns every part unfiltered, skipping the `_`-prefix skip covered separately above.
+    other shape, elsewhere in this module (`_read_evidence`'s json branch), which is why
+    `_parquet_parts` checks too -- a bare `pl.scan_parquet(path)` on a directory does not actually
+    fail (measured), it just returns every part unfiltered, skipping the `_`-prefix skip covered
+    separately above.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     file_path = tmp_path / 'evidence.parquet'
     pl.DataFrame({'targetFromSourceId': ['t1']}).write_parquet(file_path)
@@ -110,30 +112,6 @@ def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- json reading
-
-
-def test_json_parts_of_a_single_file_is_the_file_itself(tmp_path: Path) -> None:
-    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'targetFromSourceId': 't1'}])
-
-    assert _json_parts(path) == [path]
-
-
-def test_json_parts_of_a_directory_lists_every_part_sorted(tmp_path: Path) -> None:
-    directory = tmp_path / 'evidence'
-    _write_json_gz(directory / 'part-00001.json.gz', [{'targetFromSourceId': 't2'}])
-    _write_json_gz(directory / 'part-00000.json.gz', [{'targetFromSourceId': 't1'}])
-
-    parts = _json_parts(str(directory))
-
-    assert [Path(p).name for p in parts] == ['part-00000.json.gz', 'part-00001.json.gz']
-
-
-def test_json_parts_raises_on_an_empty_directory(tmp_path: Path) -> None:
-    directory = tmp_path / 'empty'
-    directory.mkdir()
-
-    with pytest.raises(ValueError, match='no json files found'):
-        _json_parts(str(directory))
 
 
 def test_read_evidence_json_from_a_single_file(tmp_path: Path) -> None:
@@ -198,22 +176,17 @@ def test_read_evidence_json_column_order_changes_the_uniqueness_survivor(tmp_pat
     assert pre_fix_flagged == {'a': True, 'c': False}
 
 
-def test_read_evidence_json_from_a_directory_reads_every_part(tmp_path: Path) -> None:
-    """Parts carry DIFFERING column sets, pinning the union (`how='diagonal'`) behaviour: spark's
-    json reader unions differing per-part schemas rather than demanding they match, and the
-    default `pl.concat` (`how='vertical'`) raises the moment two parts' column sets differ, so a
-    same-column fixture would pass for a narrower reason than this test's name claims.
+def test_read_evidence_json_rejects_a_directory(tmp_path: Path) -> None:
+    """No configured `evidence_format: json` step points at a directory -- every one
+    (`input/evidence/*.json.gz`, plus `atlas.json.bz2`) is a single file, unlike the parquet
+    sources' directory-of-parts shape -- so this shape must fail loudly with a clear message
+    rather than being silently globbed or left to fail inside polars with a confusing error.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     directory = tmp_path / 'evidence'
     _write_json_gz(directory / 'part-00000.json.gz', [{'targetFromSourceId': 't1'}])
-    _write_json_gz(directory / 'part-00001.json.gz', [{'targetFromSourceId': 't2', 'resourceScore': 0.5}])
 
-    frame = _read_evidence(str(directory), 'json').collect()
-
-    assert set(frame.columns) == {'targetFromSourceId', 'resourceScore'}
-    assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
-    by_target = frame.sort('targetFromSourceId')
-    assert by_target['resourceScore'].to_list() == [None, 0.5]
+    with pytest.raises(ValueError, match='json evidence must be a single file'):
+        _read_evidence(str(directory), 'json')
 
 
 def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
