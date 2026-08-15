@@ -17,7 +17,6 @@ config.yaml for every datasource at once.
 
 from __future__ import annotations
 
-import bz2
 from pathlib import Path
 from typing import Any
 
@@ -42,29 +41,7 @@ from pts.transformers.utils.validation_lut import build_disease_lut, build_publi
 _TARGET_BYTES_PER_FILE = 2_450_000_000
 
 
-def _decompress_bz2(path: str) -> bytes:
-    """The fully decompressed bytes of one bzip2 json evidence part.
-
-    polars' ndjson reader decompresses gzip transparently -- relied on for every other json
-    source via a plain path string, see `_scan_json_part` -- but not bzip2: fed a `.bz2` source,
-    it does not refuse, it silently reads the still-compressed bytes as if they were plain content
-    and raises `ComputeError: stream did not contain valid UTF-8`. `expression_atlas`'s evidence
-    source (`input/evidence/atlas.json.bz2`) is bzip2, so this decompresses explicitly, keyed off
-    the actual suffix rather than assuming atlas is the only `.bz2` source there will ever be.
-
-    Returns plain `bytes`, not a stream: `pl.scan_ndjson` accepts a `bytes` source directly and
-    reuses it across two separate calls with no reset/seek bookkeeping (unlike a file-like
-    object, which a first read would leave exhausted), so `_scan_json_part` can pin a schema and
-    then scan the same bytes without decompressing bzip2's CPU-heavy stream twice.
-    """
-    handle = StorageHandle(path).open('rb')
-    try:
-        return bz2.decompress(handle.read())
-    finally:
-        handle.close()
-
-
-def _json_schema(source: str | bytes) -> dict[str, Any]:
+def _json_schema(source: str) -> dict[str, Any]:
     """The schema to pin for one json evidence part: every column it actually carries, typed.
 
     A full `schema=load_spark_schema_as_polars('evidence.json')` pin does not just constrain
@@ -89,8 +66,7 @@ def _json_schema(source: str | bytes) -> dict[str, Any]:
 
     Args:
         source: one json evidence part's path (plain or gzip -- polars decompresses gzip
-            natively from a path, which is also what keeps the read lazy, see `_scan_json_part`),
-            or the already-decompressed bytes of a bzip2 part.
+            natively from a path, which is also what keeps the read lazy, see `_scan_json_part`).
 
     Returns:
         `{column: dtype}` for exactly the columns `source` carries, in ALPHABETICAL order (see the
@@ -122,10 +98,7 @@ def _scan_json_part(path: str) -> pl.LazyFrame:
     materialised) instead of going through `pl.read_ndjson` on a Python file handle, which is
     eager regardless of a trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the
     largest json evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here,
-    same row count. bzip2 has no such native support (`_decompress_bz2`), so a `.bz2` source is
-    decompressed once and that same in-memory buffer is reused for both the schema pass and the
-    actual scan -- not re-opened/re-decompressed per call, which would double bzip2's CPU cost for
-    no benefit.
+    same row count.
 
     Args:
         path: location of the json evidence source; a single file, see `_read_evidence`.
@@ -133,8 +106,7 @@ def _scan_json_part(path: str) -> pl.LazyFrame:
     Returns:
         LazyFrame of the raw evidence, in its source columns/dtypes.
     """
-    source = _decompress_bz2(path) if path.endswith('.bz2') else path
-    return pl.scan_ndjson(source, schema=_json_schema(source))
+    return pl.scan_ndjson(path, schema=_json_schema(path))
 
 
 def _parquet_parts(path: str) -> str | list[str]:
@@ -174,7 +146,7 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
 
     Args:
         path: location of the evidence -- a directory of parquet parts (see `_parquet_parts`) or
-            a single (possibly gzip/bz2-compressed) ndjson file.
+            a single (possibly gzip-compressed) ndjson file.
         evidence_format: `settings['evidence_format']`, `'parquet'` or `'json'`.
 
     Returns:
@@ -185,7 +157,7 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
             occur in config.yaml today, so an unrecognised value is a config error, not a case
             to fall through to the json reader silently. Also raised if `evidence_format` is
             `'json'` and `path` is a directory: every json evidence source in config.yaml
-            (`input/evidence/*.json.gz`/`.bz2`) is a single file, unlike the parquet sources'
+            (`input/evidence/*.json.gz`) is a single file, unlike the parquet sources'
             directory-of-parts shape, so a directory here is a config error too, refused rather
             than silently globbed or left to fail inside polars with a confusing error.
     """

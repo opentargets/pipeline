@@ -9,7 +9,6 @@ module adds on top of the pieces it assembles.
 
 from __future__ import annotations
 
-import bz2
 import gzip
 import json
 from pathlib import Path
@@ -34,14 +33,6 @@ def _write_json_gz(path: Path, rows: list[dict]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = '\n'.join(json.dumps(row) for row in rows).encode()
     path.write_bytes(gzip.compress(payload))
-    return str(path)
-
-
-def _write_json_bz2(path: Path, rows: list[dict]) -> str:
-    """Write one bzip2-compressed newline delimited json file, the shape `atlas.json.bz2` is."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = '\n'.join(json.dumps(row) for row in rows).encode()
-    path.write_bytes(bz2.compress(payload))
     return str(path)
 
 
@@ -178,8 +169,8 @@ def test_read_evidence_json_column_order_changes_the_uniqueness_survivor(tmp_pat
 
 def test_read_evidence_json_rejects_a_directory(tmp_path: Path) -> None:
     """No configured `evidence_format: json` step points at a directory -- every one
-    (`input/evidence/*.json.gz`, plus `atlas.json.bz2`) is a single file, unlike the parquet
-    sources' directory-of-parts shape -- so this shape must fail loudly with a clear message
+    (`input/evidence/*.json.gz`) is a single file, unlike the parquet sources'
+    directory-of-parts shape -- so this shape must fail loudly with a clear message
     rather than being silently globbed or left to fail inside polars with a confusing error.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     directory = tmp_path / 'evidence'
@@ -239,17 +230,6 @@ def test_read_evidence_json_finds_a_column_absent_from_a_bounded_sample(tmp_path
     frame = _read_evidence(path, 'json').collect()
 
     assert frame.filter(pl.col('targetFromSourceId') == 't200')['resourceScore'].item() == 0.5
-
-
-def test_read_evidence_json_reads_a_bzip2_source(tmp_path: Path) -> None:
-    """`expression_atlas`'s evidence source is bzip2; polars' ndjson reader has no native support
-    for it and misreads the compressed bytes as invalid UTF-8 unless decompressed first.
-    """  # noqa: D205 -- explanatory continuation, not a second summary line
-    path = _write_json_bz2(tmp_path / 'evidence.json.bz2', [{'targetFromSourceId': 't1'}, {'targetFromSourceId': 't2'}])
-
-    frame = _read_evidence(path, 'json').collect()
-
-    assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
 
 
 def test_read_evidence_rejects_an_unrecognised_evidence_format(tmp_path: Path) -> None:

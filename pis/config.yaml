@@ -323,7 +323,7 @@ steps:
       requires:
         - find_latest atlas
       source: ${latest_atlas}
-      destination: input/evidence/atlas.json.bz2
+      destination: input/evidence/atlas.parquet
   ##################################################################################################
 
   #: EVIDENCE_CANCER_BIOMARKERS STEP :##############################################################
