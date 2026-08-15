@@ -200,6 +200,48 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
     raise ValueError(msg)
 
 
+def _write_partitioned(lf: pl.LazyFrame, path: str) -> None:
+    """Sink `lf` into `path` as a directory of size-capped parquet parts, first clearing it.
+
+    `pl.PartitionBy` writes a directory of size-capped parts rather than one file -- a single
+    9.03 GiB europepmc file is not an acceptable release artifact. It is marked UNSTABLE in
+    polars 1.41.2; checked empirically that it raises no runtime warning at either construction
+    or sink time on this version, so nothing is suppressed here -- if a future polars upgrade
+    starts emitting one, handle it deliberately rather than silencing it. A datasource under
+    `_TARGET_BYTES_PER_FILE` in memory still gets exactly one part; nothing extra is needed for
+    that, it falls out of `approximate_bytes_per_file` sizing (see its calibration comment).
+
+    `pl.PartitionBy` itself never clears `path` -- it only ever adds numbered parts to whatever
+    is already there. The pyspark implementation this replaced used `.write.mode('overwrite')`,
+    which does clear the destination; that overwrite semantics is reproduced by hand here because
+    nothing else in the stack provides it. `otter`'s `check_destination(path, delete=True)`
+    (`otter/util/fs.py`) does NOT cover this case: it only unlinks `path` when `path.is_file()`,
+    and silently does nothing for a directory -- which `path` always is here. Left unhandled, a
+    stale part survives untouched alongside the new ones (a leftover from an earlier, differently
+    sized run, or -- before the switch to `pl.PartitionBy` -- the old single-file layout), and
+    every consumer globbing `*.parquet` under `path` (release metrics, croissant, spark) silently
+    reads and counts it as current data.
+
+    Args:
+        lf: the frame to write.
+        path: destination directory -- `destination['evidence']` or `destination['failed_evidence']`,
+            used as given, never a parent or a derived path.
+
+    Raises:
+        ValueError: if `path` already exists and is not a directory. Every configured destination
+            is a directory; a file there means the layout is not what this expects, so it refuses
+            rather than deleting something it does not understand.
+    """
+    directory = Path(path)
+    if directory.exists():
+        if not directory.is_dir():
+            msg = f'expected evidence destination {path!r} to be a directory (or not exist yet), found a file'
+            raise ValueError(msg)
+        for part in directory.glob('*.parquet'):
+            part.unlink()
+    lf.sink_parquet(pl.PartitionBy(path, approximate_bytes_per_file=_TARGET_BYTES_PER_FILE))
+
+
 def evidence_postprocess(
     source: dict[str, str],
     destination: dict[str, str],
@@ -253,19 +295,7 @@ def evidence_postprocess(
     # largest published output (europepmc) is 9.03 GiB. This recomputes the upstream chain (LUT
     # joins, hashing, scoring, direction-of-effect) twice; an accepted trade for bounded memory,
     # to revisit if europepmc proves slow in practice.
-    #
-    # `pl.PartitionBy` writes a directory of size-capped parts rather than one file -- a single
-    # 9.03 GiB europepmc file is not an acceptable release artifact. It is marked UNSTABLE in
-    # polars 1.41.2; checked empirically that it raises no runtime warning at either construction
-    # or sink time on this version, so nothing is suppressed here -- if a future polars upgrade
-    # starts emitting one, handle it deliberately rather than silencing it. A datasource under
-    # `_TARGET_BYTES_PER_FILE` in memory still gets exactly one part; nothing extra is needed for
-    # that, it falls out of `approximate_bytes_per_file` sizing (see its calibration comment).
     logger.info(f'writing valid evidence to {destination["evidence"]}')
-    processed.valid().sink_parquet(
-        pl.PartitionBy(destination['evidence'], approximate_bytes_per_file=_TARGET_BYTES_PER_FILE)
-    )
+    _write_partitioned(processed.valid(), destination['evidence'])
     logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    processed.invalid().sink_parquet(
-        pl.PartitionBy(destination['failed_evidence'], approximate_bytes_per_file=_TARGET_BYTES_PER_FILE)
-    )
+    _write_partitioned(processed.invalid(), destination['failed_evidence'])

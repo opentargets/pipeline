@@ -17,7 +17,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, evidence_postprocess
+from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, _write_partitioned, evidence_postprocess
 from pts.transformers.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
 from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
@@ -282,3 +282,55 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
 
     with pytest.raises(KeyError, match='no score/direction expressions registered for datasource'):
         evidence_postprocess(source, {}, settings, None)
+
+
+# --------------------------------------------------------------------------- partitioned writing
+
+
+def test_write_partitioned_clears_a_stale_file_from_a_previous_layout(tmp_path: Path) -> None:
+    """`pl.PartitionBy` never clears its destination, only ever adds numbered parts to it -- so a
+    stale file left over from an earlier run (here: the single-file layout `evidence_postprocess`
+    wrote before the switch to `pl.PartitionBy`) survives untouched alongside the new parts.
+    Every consumer globs `*.parquet` in the destination directory, so the stale file is silently
+    read and counted as current data. `otter`'s `check_destination(path, delete=True)` does not
+    catch this: it only unlinks a `path.is_file()`, and does nothing for a directory.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    destination = tmp_path / 'evidence_gene_burden'
+    destination.mkdir()
+    stale = destination / 'evidence_gene_burden.parquet'
+    pl.DataFrame({'targetFromSourceId': ['stale']}).write_parquet(stale)
+
+    _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['t1', 't2']}), str(destination))
+
+    remaining = sorted(p.name for p in destination.glob('*.parquet'))
+    assert stale.name not in remaining
+    frame = pl.read_parquet(destination / '*.parquet')
+    assert sorted(frame['targetFromSourceId']) == ['t1', 't2']
+
+
+def test_write_partitioned_removes_orphaned_parts_from_a_larger_previous_run(tmp_path: Path) -> None:
+    """Not only a stale-layout problem: if a re-run produces FEWER parts than the previous run
+    (less data, or a different partition size), the extra old numbered parts must not remain
+    either -- simulated here by planting parts a real earlier `pl.PartitionBy` run would have
+    left, shaped exactly like its own output naming.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    destination = tmp_path / 'evidence_intogen'
+    destination.mkdir()
+    pl.DataFrame({'targetFromSourceId': ['old1']}).write_parquet(destination / '00000000.parquet')
+    pl.DataFrame({'targetFromSourceId': ['old2']}).write_parquet(destination / '00000001.parquet')
+
+    _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['new1']}), str(destination))
+
+    frame = pl.read_parquet(destination / '*.parquet')
+    assert frame['targetFromSourceId'].to_list() == ['new1']
+
+
+def test_write_partitioned_raises_if_the_destination_is_a_file(tmp_path: Path) -> None:
+    """The configured destination is always a directory in config.yaml; a file there means the
+    layout is not what this code expects, so it must refuse rather than silently delete it.
+    """  # noqa: D205 -- explanatory continuation, not a second summary line
+    destination = tmp_path / 'evidence_intogen'
+    destination.write_text('not a directory')
+
+    with pytest.raises(ValueError, match='directory'):
+        _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['t1']}), str(destination))
