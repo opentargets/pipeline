@@ -743,7 +743,7 @@ steps:
       transformer: drug_molecule
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: output/chemical_probes
+        chemical_probes: intermediate/chemical_probes_evidence.parquet
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
@@ -801,7 +801,7 @@ steps:
     - name: transform clinical_target
       source:
         clinical_report: output/clinical_report
-        drug_mechanism_of_action: output/drug_mechanism_of_action/*.parquet
+        drug_mechanism_of_action: output/drug_mechanism_of_action
       destination:
         output: output/clinical_target
         excluded: excluded/clinical_target_failed_report/clinical_target_failed_report.parquet
