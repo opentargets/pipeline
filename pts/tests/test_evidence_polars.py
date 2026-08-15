@@ -25,7 +25,7 @@ from pts.transformers.utils.evidence import (
     Evidence,
     EvidenceFlags,
     UnsupportedIdentifierField,
-    spark_cast_to_string,
+    render_for_hash,
 )
 from pts.transformers.utils.validation_lut import (
     build_disease_lut,
@@ -296,25 +296,25 @@ def test_builders_fail_loudly_on_an_empty_dataset(tmp_path: Path, builder, patte
 # --------------------------------------------------------------------------- evidence
 
 
-class TestSparkCastToStringStringAndList:
+class TestRenderForHashStringAndList:
     def test_string_is_identity(self) -> None:
         df = pl.DataFrame({'v': ['a', '', None]})
-        assert df.select(spark_cast_to_string('v', pl.String).alias('o'))['o'].to_list() == ['a', '', None]
+        assert df.select(render_for_hash('v', pl.String).alias('o'))['o'].to_list() == ['a', '', None]
 
     def test_list_string_renders_like_spark(self) -> None:
         df = pl.DataFrame({'lit': [['1', '2'], [], None]}, schema={'lit': pl.List(pl.String)})
-        got = df.select(spark_cast_to_string('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
         assert got == ['[1, 2]', '[]', None]
 
     def test_list_string_null_element_keeps_literal_null_token(self) -> None:
         # Measured against spark (precheck-parity.md Q1): a null element renders as the bare
         # token `null`, not as a dropped element -- `list.join` alone silently drops it.
         df = pl.DataFrame({'lit': [['a', None]]}, schema={'lit': pl.List(pl.String)})
-        got = df.select(spark_cast_to_string('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('lit', pl.List(pl.String)).alias('v'))['v'].to_list()
         assert got == ['[a, null]']
 
 
-class TestSparkCastToStringFloat:
+class TestRenderForHashFloat:
     """Float64 is the one leaf type this module deliberately does NOT render like spark.
 
     Spark uses java's `Double.toString`, which switches to scientific notation outside
@@ -343,7 +343,7 @@ class TestSparkCastToStringFloat:
         # unchanged from the measured spark values (task-8-report.md). 89% of real float values in
         # the staged evidence outputs fall in this range.
         df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
-        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [expected]
+        assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == [expected]
 
     @pytest.mark.parametrize(
         ('value', 'spark_renders', 'we_render'),
@@ -363,14 +363,14 @@ class TestSparkCastToStringFloat:
         # again, that is a signal the slow UDF has crept back in.
         df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
 
-        rendered = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'][0]
+        rendered = df.select(render_for_hash('v', pl.Float64).alias('o'))['o'][0]
 
         assert rendered == we_render
         assert rendered != spark_renders
 
     def test_null_stays_null(self) -> None:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
-        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [None]
+        assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == [None]
 
     @pytest.mark.parametrize(
         'value',
@@ -393,7 +393,7 @@ class TestSparkCastToStringFloat:
         # THE contract now. Includes the two real gene_burden subnormals and the extremes that
         # used to raise UnsupportedIdentifierField and block a whole datasource.
         rendered = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64}).select(
-            spark_cast_to_string('v', pl.Float64).alias('o')
+            render_for_hash('v', pl.Float64).alias('o')
         )['o'][0]
 
         assert float(rendered) == value
@@ -404,12 +404,12 @@ class TestSparkCastToStringFloat:
         values = [1.0, 1.0000000000000002, 0.1, 0.30000000000000004, 5e-324, 1e-323, 1e15, 1e16]
         df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
 
-        rendered = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list()
+        rendered = df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list()
 
         assert len(set(rendered)) == len(values)
 
 
-class TestSparkCastToStringListOfStruct:
+class TestRenderForHashListOfStruct:
     CELL_TYPE = pl.List(pl.Struct({'id': pl.String, 'name': pl.String, 'tissue': pl.String, 'tissueId': pl.String}))
 
     def test_matches_measured_spark_rendering(self) -> None:
@@ -432,7 +432,7 @@ class TestSparkCastToStringListOfStruct:
             },
             schema={'cells': self.CELL_TYPE},
         )
-        got = df.select(spark_cast_to_string('cells', self.CELL_TYPE).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('cells', self.CELL_TYPE).alias('v'))['v'].to_list()
         assert got == [
             '[{CL_1, HeLa, cervix, UBERON_1}]',
             '[{CL_1, HeLa, cervix, UBERON_1}, {CL_2, HEK293, null, UBERON_2}]',
@@ -448,23 +448,23 @@ class TestSparkCastToStringListOfStruct:
         dtype = pl.List(pl.Struct({'id': pl.String, 'count': pl.Date}))
         df = pl.DataFrame({'v': [[{'id': 'a', 'count': date(2020, 1, 1)}]]}, schema={'v': dtype})
         with pytest.raises(UnsupportedIdentifierField, match='count'):
-            df.select(spark_cast_to_string('v', dtype).alias('o'))
+            df.select(render_for_hash('v', dtype).alias('o'))
 
 
-class TestSparkCastToStringUnsupported:
+class TestRenderForHashUnsupported:
     def test_unsupported_dtype_raises(self) -> None:
         # Boolean is now measured and supported (task-9-report.md) -- Date stands in as a
         # genuinely unmeasured top-level scalar dtype instead.
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Date})
         with pytest.raises(UnsupportedIdentifierField, match='Date'):
-            df.select(spark_cast_to_string('v', pl.Date).alias('o'))
+            df.select(render_for_hash('v', pl.Date).alias('o'))
 
     def test_unsupported_list_element_dtype_raises(self) -> None:
         # Int64 list elements are now measured and supported (task-9-report.md) -- Date stands in
         # as a genuinely unmeasured list-element dtype instead.
         df = pl.DataFrame({'v': [[None]]}, schema={'v': pl.List(pl.Date)})
         with pytest.raises(UnsupportedIdentifierField, match='Date'):
-            df.select(spark_cast_to_string('v', pl.List(pl.Date)).alias('o'))
+            df.select(render_for_hash('v', pl.List(pl.Date)).alias('o'))
 
 
 class TestFlagNullQualityControls:
@@ -641,10 +641,14 @@ class TestHarmonisation:
 
 
 class TestSparkParityForCastToString:
-    """Direct spark-vs-polars checks for `spark_cast_to_string`.
+    """Direct spark-vs-polars checks for `render_for_hash`, for the dtypes that still match.
 
     Runs both engines against the same data and diffs the output, rather than pinning a
     hand-copied expected string that could quietly drift from real spark.
+
+    `Float64` is absent on purpose: it is rendered with polars' native cast now and diverges from
+    spark outside `0.001 <= |x| < 1e7`. That divergence is pinned as intended in
+    `TestRenderForHashFloat` instead.
     """
 
     def test_list_string_matches_spark(self, spark) -> None:
@@ -652,7 +656,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], 'v ARRAY<STRING>').selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': pl.List(pl.String)})
-        got = df.select(spark_cast_to_string('v', pl.List(pl.String)).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', pl.List(pl.String)).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_list_struct_matches_spark(self, spark) -> None:
@@ -671,7 +675,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
-        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', dtype).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_int64_matches_spark(self, spark) -> None:
@@ -679,7 +683,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], 'v LONG').selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': pl.Int64})
-        got = df.select(spark_cast_to_string('v', pl.Int64).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', pl.Int64).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_boolean_matches_spark(self, spark) -> None:
@@ -687,7 +691,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], 'v BOOLEAN').selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': pl.Boolean})
-        got = df.select(spark_cast_to_string('v', pl.Boolean).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', pl.Boolean).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_list_struct_with_int_boolean_leaves_matches_spark(self, spark) -> None:
@@ -704,7 +708,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
-        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', dtype).alias('v'))['v'].to_list()
         assert got == expected
 
         dtype2 = pl.List(pl.Struct({'d': pl.String, 'e': pl.Boolean, 'f': pl.String}))
@@ -716,7 +720,7 @@ class TestSparkParityForCastToString:
         rows2 = spark.createDataFrame([(v,) for v in values2], spark_schema2).selectExpr('CAST(v AS STRING) as s')
         expected2 = [r['s'] for r in rows2.collect()]
         df2 = pl.DataFrame({'v': values2}, schema={'v': dtype2})
-        got2 = df2.select(spark_cast_to_string('v', dtype2).alias('v'))['v'].to_list()
+        got2 = df2.select(render_for_hash('v', dtype2).alias('v'))['v'].to_list()
         assert got2 == expected2
 
     def test_bare_struct_matches_spark(self, spark) -> None:
@@ -729,7 +733,7 @@ class TestSparkParityForCastToString:
         ).selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
-        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', dtype).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_struct_of_list_struct_matches_spark(self, spark) -> None:
@@ -751,7 +755,7 @@ class TestSparkParityForCastToString:
         rows = spark.createDataFrame([(v,) for v in values], spark_schema).selectExpr('CAST(v AS STRING) as s')
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
-        got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
+        got = df.select(render_for_hash('v', dtype).alias('v'))['v'].to_list()
         assert got == expected
 
 
@@ -769,7 +773,7 @@ class TestValidateUniqueness:
         # winner independently via hashlib.sha256 over the exact content string this method
         # builds, and asserts the actual survivor matches that computation, not just itself.
         #
-        # Fix round 2, minor: the content string is built via spark_cast_to_string over the real
+        # Fix round 2, minor: the content string is built via render_for_hash over the real
         # `collect_schema()`, the same way validate_uniqueness itself builds it -- not a
         # hand-written approximation. An earlier version hand-wrote 'a1'/'a2' as the content,
         # silently omitting `qualityControls` (the real content is 'a1[]'/'a2[]'); both happened
@@ -780,7 +784,7 @@ class TestValidateUniqueness:
         lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
         ev = Evidence(lf)
         schema = ev.lf.collect_schema()
-        parts = [spark_cast_to_string(name, schema[name]).fill_null('null') for name in schema.names()]
+        parts = [render_for_hash(name, schema[name]).fill_null('null') for name in schema.names()]
         contents = ev.lf.select(pl.concat_str(parts).alias('_content'), 'v').collect()
         digests = {row['v']: hashlib.sha256(row['_content'].encode()).hexdigest() for row in contents.to_dicts()}
         expected_survivor = min(digests, key=lambda v: digests[v])
@@ -806,7 +810,7 @@ class TestValidateUniqueness:
         assert all(EvidenceFlags.DUPLICATED not in qc for qc in out[QC_COLUMN])
 
     def test_int64_and_boolean_columns_no_longer_abort_the_plan(self) -> None:
-        # Correction E: before extending spark_cast_to_string, a bare Int64/Boolean column
+        # Correction E: before extending render_for_hash, a bare Int64/Boolean column
         # (e.g. publicationYear, primaryProjectHit) raised UnsupportedIdentifierField at plan
         # build time -- validate_uniqueness could never run on a real evidence frame at all.
         lf = pl.LazyFrame(

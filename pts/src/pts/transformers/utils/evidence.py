@@ -46,7 +46,7 @@ class EvidenceFlags(StrEnum):
 
 
 class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condition, not an error type
-    """A dtype `spark_cast_to_string` has no rendering for.
+    """A dtype `render_for_hash` has no rendering for.
 
     Raising beats guessing: an unrenderable dtype means the frame carries something none of the
     measured shapes cover, and inventing a rendering for it would silently feed the de-duplication
@@ -63,7 +63,7 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     """Render a String/Int64/Boolean/Float64 leaf as a string, for hashing.
 
     Nulls are preserved (not substituted) here -- the caller decides whether a null means "the
-    whole column is null" (real `None`, `spark_cast_to_string`'s job) or "a nested element/field
+    whole column is null" (real `None`, `render_for_hash`'s job) or "a nested element/field
     is null" (the literal token `'null'`, `_render_nested`'s job).
 
     String, Int64 and Boolean render identically to spark (measured, task-9-report.md): spark's
@@ -96,7 +96,7 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     """
     if dtype in (pl.String, pl.Int64, pl.Boolean, pl.Float64):
         return expr.cast(pl.String)
-    msg = f'spark_cast_to_string: unsupported scalar dtype {dtype!r} for column {name!r}'
+    msg = f'render_for_hash: unsupported scalar dtype {dtype!r} for column {name!r}'
     raise UnsupportedIdentifierField(msg)
 
 
@@ -141,11 +141,22 @@ def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     return _cast_scalar_to_string(expr, dtype, name).fill_null('null')
 
 
-def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
-    """Reproduce spark's `cast(x AS STRING)` for the `unique_fields` types `evidence_schema` carries.
+def render_for_hash(name: str, dtype: pl.DataType) -> pl.Expr:
+    """Render a column as a string, for the sha1 evidence `id` and the de-duplication hash.
 
-    Every case except `Float64` is measured against real spark (task-8-report.md /
-    task-9-report.md), not assumed:
+    Not `.cast(pl.String)`: polars refuses to cast a `List` at all
+    (`InvalidOperationError: cannot cast List type`), and evidence is full of them
+    (`literature`, `urls`, `qualityControls`, ...). `validate_uniqueness` hashes EVERY column, so
+    some hand-written rendering of the nested shapes is unavoidable.
+
+    The contract is FAITHFUL and DETERMINISTIC, not spark-identical -- matching the release's
+    evidence ids is not a requirement. Distinct values must keep distinct renderings, or the
+    de-duplication hash stops ranking rows meaningfully and the surviving row among a set of
+    duplicates becomes arbitrary.
+
+    Most shapes DO still render exactly as spark's `CAST(x AS STRING)` does, measured against real
+    spark (task-8-report.md / task-9-report.md) rather than assumed -- the renderings were written
+    for parity and kept because they are as good as any other stable choice:
 
     * String: identity cast.
     * `Int64`, `Boolean`: identical rendering in both engines -- see `_cast_scalar_to_string`.
@@ -169,7 +180,7 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
         dtype: the column's polars dtype.
 
     Returns:
-        An expression yielding spark's string rendering of the column.
+        An expression yielding the column's string rendering.
 
     Raises:
         UnsupportedIdentifierField: for a dtype this function has not been measured against.
@@ -363,7 +374,7 @@ class Evidence:
         """
         schema = self.lf.collect_schema()
         present = [f for f in unique_fields if f in schema.names()]
-        parts = [spark_cast_to_string(f, schema[f]).fill_null('null') for f in present]
+        parts = [render_for_hash(f, schema[f]).fill_null('null') for f in present]
         # `pl.concat_str([])` raises ComputeError on an empty list of expressions; spark's
         # `concat_ws('')` over zero columns is well-defined and yields `''`. Unreachable with
         # today's config.yaml (every unique_fields list names at least one column that is
@@ -378,8 +389,7 @@ class Evidence:
     def validate_uniqueness(self) -> Evidence:
         """Flag every row but one within each `id`, ordered by a content hash.
 
-        Reproduces spark's own survivor pick, not merely a self-consistent one (task-9-report.md,
-        reversing an earlier design choice after measurement showed it was unsafe):
+        The hash input follows spark's, though it no longer produces spark's digest -- see below:
 
         * `id` is included in the hash. Spark iterates `self.df.columns`, which by this point
           already includes `id` (added by `assign_evidence_identifier`); an earlier version of
@@ -387,16 +397,20 @@ class Evidence:
           partition being ranked and so could not affect which row wins. That reasoning is FALSE
           -- measured over 2,000 two-row same-`id` partitions, excluding `id` changed the
           survivor in 962 of them (48.1%, a coin flip): sha256 ordering is not preserved under a
-          constant infix.
+          constant infix. So the rule is: whatever goes into the hash, keep it stable.
         * Column ORDER matches spark's `self.df.columns` at the equivalent point.
           `validate_diseases`/`validate_target` restore spark's `on=<str>` join-key-to-front
-          ordering (`_join_matching_spark_order`) specifically so `schema.names()` below iterates
-          in the same order spark would.
+          ordering (`_join_matching_spark_order`) so `schema.names()` below iterates in that same
+          order. That ordering also reaches the published parquet, so it is now load-bearing for
+          the output's column order regardless of its spark provenance.
 
-        With the rendering (`spark_cast_to_string`, measured exact per dtype), the column order,
-        and the hash input (`id` included) all matching, the two engines' sha2-256 digests are
-        byte-identical for equivalent row content, so the ranking -- and hence the survivor --
-        matches spark's.
+        The digests are NOT byte-identical to spark's any more: `render_for_hash` renders
+        `Float64` with polars' native cast rather than java's `Double.toString`, so any row
+        carrying a double outside `0.001 <= |x| < 1e7` hashes differently than spark would. That
+        is deliberate -- matching the release's ids is not a requirement, and the UDF it replaced
+        was 56x slower. What the ranking still needs, and has, is DETERMINISM: the same content
+        always yields the same digest, and distinct content yields distinct digests, so the
+        survivor is stable across runs.
 
         Returns:
             Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within
@@ -407,7 +421,7 @@ class Evidence:
         """
         schema = self.lf.collect_schema()
         _require_id_column(schema.names(), 'validate_uniqueness')
-        parts = [spark_cast_to_string(c, schema[c]).fill_null('null') for c in schema.names()]
+        parts = [render_for_hash(c, schema[c]).fill_null('null') for c in schema.names()]
         # `pl.concat_str`'s default separator is '', deliberately matching spark's ACTUAL
         # `concat_ws('', ...)` call -- not an oversight. Spark's own comment above that call
         # claims the separator is ASCII SOH (U+0001) "so distinct field values can never
