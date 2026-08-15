@@ -86,6 +86,19 @@ def test_schema_pins_dtypes_and_column_order(tmp_path: Path) -> None:
     assert frame.dtypes == [pl.String, pl.String]
 
 
+def test_schema_with_parquet_raises_rather_than_being_ignored(tmp_path: Path) -> None:
+    """Silently ignoring a passed schema is the trap this guards.
+
+    Polars would return the file's own dtypes with no error, so a caller pinning a schema
+    would never learn it did nothing.
+    """
+    path = tmp_path / 'x.parquet'
+    pl.DataFrame({'a': [1]}).write_parquet(path)
+
+    with pytest.raises(ValueError, match='only applied to ndjson'):
+        read_dataset(str(path), schema={'a': pl.String})
+
+
 def test_unrecognised_format_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='unrecognised format'):
-        read_dataset(str(tmp_path), format='csv')  # type: ignore[arg-type]
+        read_dataset(str(tmp_path), format='csv')

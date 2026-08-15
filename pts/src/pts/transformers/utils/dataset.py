@@ -90,10 +90,15 @@ def read_dataset(
         LazyFrame of the dataset in its source columns and dtypes.
 
     Raises:
-        ValueError: for an unrecognised `format`, or a directory with no readable parts.
+        ValueError: for an unrecognised `format`, a directory with no readable parts, or a schema
+            passed with parquet format.
     """
     if format not in _GLOB_FOR_FORMAT:
         msg = f'unrecognised format {format!r} for {path!r}, expected "parquet" or "ndjson"'
+        raise ValueError(msg)
+
+    if schema is not None and format == 'parquet':
+        msg = f'schema is only applied to ndjson, but format is parquet for {path!r}'
         raise ValueError(msg)
 
     parts = _parts(path, format)
