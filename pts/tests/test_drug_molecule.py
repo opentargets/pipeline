@@ -1,16 +1,11 @@
-"""Tests for the drug_molecule module."""
+"""Tests for the drug_molecule transformer."""
 
+import polars as pl
 import pytest
-from pyspark.sql import Row
-from pyspark.sql import functions as f
-from pyspark.sql.types import (
-    ArrayType,
-    StringType,
-    StructField,
-    StructType,
-)
 
-from pts.pyspark.drug_molecule import (
+from pts.schemas.disease import schema as disease_index_schema
+from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
+from pts.transformers.drug_molecule import (
     _compute_max_phase_per_drug,
     _generate_description,
     _join_semantic,
@@ -20,365 +15,281 @@ from pts.pyspark.drug_molecule import (
 
 # --- Schemas used to build test DataFrames ---
 
-CLINICAL_REPORT_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('clinicalStage', StringType()),
-    StructField(
-        'drugs',
-        ArrayType(
-            StructType([
-                StructField('drugFromSource', StringType()),
-                StructField('drugId', StringType()),
-            ])
-        ),
-    ),
-    StructField(
-        'diseases',
-        ArrayType(
-            StructType([
-                StructField('diseaseFromSource', StringType()),
-                StructField('diseaseId', StringType()),
-            ])
-        ),
-    ),
-    StructField('qualityControls', ArrayType(StringType())),
-])
+# the two datasets that declare a schema are taken from it, so a column renamed upstream
+# breaks these tests rather than leaving them asserting against a stale shape
+MOLECULE_SCHEMA = molecule_schema
 
-MOLECULE_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('name', StringType()),
-    StructField('drugType', StringType()),
-    StructField('canonicalSmiles', StringType()),
-    StructField('inchiKey', StringType()),
-    StructField('molblock', StringType()),
-    StructField('parentId', StringType()),
-    StructField(
-        'tradeNames',
-        ArrayType(
-            StructType([
-                StructField('label', StringType()),
-                StructField('source', StringType()),
-            ])
-        ),
-    ),
-    StructField(
-        'synonyms',
-        ArrayType(
-            StructType([
-                StructField('label', StringType()),
-                StructField('source', StringType()),
-            ])
-        ),
-    ),
-    StructField(
-        'crossReferences',
-        ArrayType(
-            StructType([
-                StructField('source', StringType()),
-                StructField('ids', ArrayType(StringType())),
-            ])
-        ),
-    ),
-    StructField('childChemblIds', ArrayType(StringType())),
-    StructField('description', StringType()),
-])
+DISEASE_SCHEMA = {name: disease_index_schema[name] for name in ('id', 'name')}
 
-DISEASE_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('name', StringType()),
-])
+# clinical_report, chemical_probes and drug_mechanism_of_action declare no schema, so
+# these are hand written and hold only the columns this step reads
+DRUG_LIST = pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String}))
+DISEASE_LIST = pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))
 
-CHEMICAL_PROBES_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('drugFromSourceId', StringType()),
-    StructField('drugId', StringType()),
-])
+CLINICAL_REPORT_SCHEMA = {
+    'id': pl.String,
+    'clinicalStage': pl.String,
+    'drugs': DRUG_LIST,
+    'diseases': DISEASE_LIST,
+    'qualityControls': pl.List(pl.String),
+}
 
-MECHANISM_SCHEMA = StructType([
-    StructField('chemblIds', ArrayType(StringType())),
-    StructField('actionType', StringType()),
-])
+CHEMICAL_PROBES_SCHEMA = {'id': pl.String, 'drugFromSourceId': pl.String, 'drugId': pl.String}
+
+MECHANISM_SCHEMA = {'chemblIds': pl.List(pl.String), 'actionType': pl.String}
+
+
+def _report(report_id, stage, drugs, diseases, quality_controls=None):
+    return {
+        'id': report_id,
+        'clinicalStage': stage,
+        'drugs': [{'drugFromSource': label, 'drugId': drug_id} for label, drug_id in drugs],
+        'diseases': (
+            None
+            if diseases is None
+            else [{'diseaseFromSource': label, 'diseaseId': disease_id} for label, disease_id in diseases]
+        ),
+        'qualityControls': quality_controls or [],
+    }
+
+
+def _molecule(molecule_id, **overrides):
+    row = {
+        'id': molecule_id,
+        'canonicalSmiles': None,
+        'inchiKey': None,
+        'molblock': None,
+        'drugType': 'Small molecule',
+        'name': molecule_id,
+        'parentId': molecule_id,
+        'synonyms': None,
+        'tradeNames': None,
+        'crossReferences': None,
+        'childChemblIds': [],
+    }
+    row.update(overrides)
+    return row
 
 
 # --- Fixtures ---
 
 
-@pytest.fixture(scope='module')
-def clinical_report_df(spark):
+@pytest.fixture
+def clinical_report_df():
     """A clinical report with multiple drugs, diseases, and stages."""
-    data = [
-        Row(
-            id='report1',
-            clinicalStage='APPROVAL',
-            drugs=[
-                Row(drugFromSource='Drug A', drugId='CHEMBL1'),
-            ],
-            diseases=[
-                Row(diseaseFromSource='Disease X', diseaseId='EFO_0001'),
-            ],
-            qualityControls=[],
-        ),
-        Row(
-            id='report2',
-            clinicalStage='PHASE_3',
-            drugs=[
-                Row(drugFromSource='Drug A', drugId='CHEMBL1'),
-                Row(drugFromSource='Drug B', drugId='CHEMBL2'),
-            ],
-            diseases=[
-                Row(diseaseFromSource='Disease Y', diseaseId='EFO_0002'),
-            ],
-            qualityControls=[],
-        ),
-        Row(
-            id='report3',
-            clinicalStage='PHASE_1',
-            drugs=[
-                Row(drugFromSource='Drug C', drugId='CHEMBL3'),
-            ],
-            diseases=[
-                Row(diseaseFromSource='Disease X', diseaseId='EFO_0001'),
-            ],
-            qualityControls=[],
-        ),
-        # Report with null drugId should be filtered out
-        Row(
-            id='report4',
-            clinicalStage='PHASE_2',
-            drugs=[
-                Row(drugFromSource='Unknown Drug', drugId=None),
-            ],
-            diseases=[
-                Row(diseaseFromSource='Disease Z', diseaseId='EFO_0003'),
-            ],
-            qualityControls=[],
-        ),
-    ]
-    return spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
+    return pl.DataFrame(
+        [
+            _report('report1', 'APPROVAL', [('Drug A', 'CHEMBL1')], [('Disease X', 'EFO_0001')]),
+            _report(
+                'report2',
+                'PHASE_3',
+                [('Drug A', 'CHEMBL1'), ('Drug B', 'CHEMBL2')],
+                [('Disease Y', 'EFO_0002')],
+            ),
+            _report('report3', 'PHASE_1', [('Drug C', 'CHEMBL3')], [('Disease X', 'EFO_0001')]),
+            # a null drugId should be filtered out
+            _report('report4', 'PHASE_2', [('Unknown Drug', None)], [('Disease Z', 'EFO_0003')]),
+        ],
+        schema=CLINICAL_REPORT_SCHEMA,
+        orient='row',
+    )
 
 
-@pytest.fixture(scope='module')
-def disease_df(spark):
+@pytest.fixture
+def disease_df():
     """Disease reference data."""
-    data = [
-        Row(id='EFO_0001', name='Disease X'),
-        Row(id='EFO_0002', name='Disease Y'),
-        Row(id='EFO_0003', name='Disease Z'),
-    ]
-    return spark.createDataFrame(data, schema=DISEASE_SCHEMA)
+    return pl.DataFrame(
+        [
+            {'id': 'EFO_0001', 'name': 'Disease X'},
+            {'id': 'EFO_0002', 'name': 'Disease Y'},
+            {'id': 'EFO_0003', 'name': 'Disease Z'},
+        ],
+        schema=DISEASE_SCHEMA,
+        orient='row',
+    )
 
 
-@pytest.fixture(scope='module')
-def molecule_df(spark):
+@pytest.fixture
+def molecule_df():
     """Molecule data with various cross-references."""
-    data = [
-        Row(
-            id='CHEMBL1',
-            name='Drug A',
-            drugType='Small molecule',
-            canonicalSmiles='C',
-            inchiKey='INCHI1',
-            molblock='MOLBLOCK_CHEMBL1',
-            parentId='CHEMBL1',
-            tradeNames=[Row(label='TradeA', source='ChEMBL')],
-            synonyms=[Row(label='SynA', source='ChEMBL')],
-            crossReferences=[Row(source='drugbank', ids=['DB001'])],
-            childChemblIds=[],
-            description=None,
-        ),
-        Row(
-            id='CHEMBL2',
-            name='Drug B',
-            drugType='Antibody',
-            canonicalSmiles=None,
-            inchiKey=None,
-            molblock=None,
-            parentId='CHEMBL2',
-            tradeNames=None,
-            synonyms=None,
-            crossReferences=[],
-            childChemblIds=[],
-            description=None,
-        ),
-        Row(
-            id='CHEMBL3',
-            name='Drug C',
-            drugType='Small molecule',
-            canonicalSmiles='CC',
-            inchiKey='INCHI3',
-            molblock='MOLBLOCK_CHEMBL3',
-            parentId='CHEMBL3',
-            tradeNames=None,
-            synonyms=None,
-            crossReferences=[],
-            childChemblIds=[],
-            description=None,
-        ),
-        # A molecule with drugbank xref but no clinical reports (should get
-        # UNKNOWN phase)
-        Row(
-            id='CHEMBL888',
-            name='Drug D',
-            drugType='Small molecule',
-            canonicalSmiles='CCCC',
-            inchiKey='INCHI888',
-            molblock=None,
-            parentId='CHEMBL888',
-            tradeNames=None,
-            synonyms=None,
-            crossReferences=[Row(source='drugbank', ids=['DB888'])],
-            childChemblIds=[],
-            description=None,
-        ),
-        # A molecule that is NOT a drug (no drugbank, no clinical reports, no
-        # mechanism, no probe)
-        Row(
-            id='CHEMBL999',
-            name='Not A Drug',
-            drugType='Small molecule',
-            canonicalSmiles='CCC',
-            inchiKey='INCHI999',
-            molblock=None,
-            parentId='CHEMBL999',
-            tradeNames=None,
-            synonyms=None,
-            crossReferences=[],
-            childChemblIds=[],
-            description=None,
-        ),
-    ]
-    return spark.createDataFrame(data, schema=MOLECULE_SCHEMA)
+    return pl.DataFrame(
+        [
+            _molecule(
+                'CHEMBL1',
+                canonicalSmiles='C',
+                inchiKey='INCHI1',
+                molblock='MOLBLOCK_CHEMBL1',
+                tradeNames=[{'label': 'TradeA', 'source': 'ChEMBL'}],
+                synonyms=[{'label': 'SynA', 'source': 'ChEMBL'}],
+                crossReferences=[{'source': 'drugbank', 'ids': ['DB001']}],
+            ),
+            _molecule('CHEMBL2', drugType='Antibody', crossReferences=[]),
+            _molecule('CHEMBL3', canonicalSmiles='CC', inchiKey='INCHI3', molblock='MOLBLOCK_CHEMBL3'),
+            # drugbank xref but no clinical report, so it should get the UNKNOWN stage
+            _molecule('CHEMBL888', crossReferences=[{'source': 'drugbank', 'ids': ['DB888']}]),
+            # no drugbank, no clinical report, no mechanism, no probe: not a drug
+            _molecule('CHEMBL999', name='Not A Drug'),
+        ],
+        schema=MOLECULE_SCHEMA,
+        orient='row',
+    )
 
 
-@pytest.fixture(scope='module')
-def chemical_probes_df(spark):
+@pytest.fixture
+def chemical_probes_df():
     """Chemical probes data."""
-    data = [
-        Row(id='A-1155463', drugFromSourceId='PD001', drugId='CHEMBL3'),
-        Row(id='Some Compound', drugFromSourceId='PD002', drugId=None),  # null drugId
-    ]
-    return spark.createDataFrame(data, schema=CHEMICAL_PROBES_SCHEMA)
+    return pl.DataFrame(
+        [
+            {'id': 'A-1155463', 'drugFromSourceId': 'PD001', 'drugId': 'CHEMBL3'},
+            {'id': 'Some Compound', 'drugFromSourceId': 'PD002', 'drugId': None},
+        ],
+        schema=CHEMICAL_PROBES_SCHEMA,
+        orient='row',
+    )
 
 
-@pytest.fixture(scope='module')
-def mechanism_df(spark):
+@pytest.fixture
+def mechanism_df():
     """Mechanism of action data."""
-    data = [
-        Row(chemblIds=['CHEMBL1', 'CHEMBL2'], actionType='INHIBITOR'),
-    ]
-    return spark.createDataFrame(data, schema=MECHANISM_SCHEMA)
+    return pl.DataFrame(
+        [{'chemblIds': ['CHEMBL1', 'CHEMBL2'], 'actionType': 'INHIBITOR'}],
+        schema=MECHANISM_SCHEMA,
+        orient='row',
+    )
+
+
+@pytest.fixture
+def drug_index_result(molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df):
+    """The drug index shared across the TestProcessDrugIndex cases."""
+    return process_drug_index(
+        molecule_df.lazy(), chemical_probes_df, mechanism_df, clinical_report_df, disease_df
+    )
+
+
+def _by_id(frame: pl.DataFrame, column: str) -> dict:
+    return dict(zip(frame['id'].to_list(), frame[column].to_list(), strict=True))
 
 
 # --- Tests for _compute_max_phase_per_drug ---
 
 
 class TestComputeMaxPhasePerDrug:
-    @pytest.mark.slow
-    def test_basic_max_phase(self, spark, clinical_report_df):
-        """CHEMBL1 has APPROVAL and PHASE_3 -> max should be 'APPROVAL'."""
+    def test_basic_max_phase(self, clinical_report_df):
+        """CHEMBL1 has APPROVAL and PHASE_3, so the max is APPROVAL."""
+        stages = _by_id(_compute_max_phase_per_drug(clinical_report_df), 'maximumClinicalStage')
+        assert stages['CHEMBL1'] == 'APPROVAL'
+        assert stages['CHEMBL2'] == 'PHASE_3'
+        assert stages['CHEMBL3'] == 'PHASE_1'
+
+    def test_null_drug_ids_are_excluded(self, clinical_report_df):
+        """Drugs with a null drugId should not appear in the results."""
         result = _compute_max_phase_per_drug(clinical_report_df)
-        rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
+        assert result['id'].null_count() == 0
+        assert 'CHEMBL_MISSING' not in result['id'].to_list()
 
-        assert rows['CHEMBL1'] == 'APPROVAL'
-        assert rows['CHEMBL2'] == 'PHASE_3'
-        assert rows['CHEMBL3'] == 'PHASE_1'
+    @pytest.mark.parametrize('stage', ['WITHDRAWAL', 'PHASE_4'])
+    def test_stage_folds_into_approval(self, stage):
+        """WITHDRAWAL and PHASE_4 are both treated as APPROVAL for the max computation."""
+        report = pl.DataFrame(
+            [_report('r', stage, [('Drug W', 'CHEMBL_W')], [('Disease', 'EFO_0001')])],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        assert stages['CHEMBL_W'] == 'APPROVAL'
 
-    @pytest.mark.slow
-    def test_null_drug_ids_are_excluded(self, spark, clinical_report_df):
-        """Drugs with null drugId should not appear in results."""
-        result = _compute_max_phase_per_drug(clinical_report_df)
-        ids = [r['id'] for r in result.collect()]
-        assert all(drug_id is not None for drug_id in ids)
-
-    @pytest.mark.slow
-    def test_withdrawal_maps_to_approval(self, spark):
-        """WITHDRAWAL stage should be treated as APPROVAL for max computation."""
-        data = [
-            Row(
-                id='report_w',
-                clinicalStage='WITHDRAWAL',
-                drugs=[Row(drugFromSource='Drug W', drugId='CHEMBL_W')],
-                diseases=[Row(diseaseFromSource='Disease', diseaseId='EFO_0001')],
-                qualityControls=[],
-            ),
-        ]
-        cr = spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
-        result = _compute_max_phase_per_drug(cr)
-        rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
-        assert rows['CHEMBL_W'] == 'APPROVAL'
-
-    def test_phase_4_maps_to_approval(self, spark):
-        """PHASE_4 stage should be treated as APPROVAL for max computation."""
-        data = [
-            Row(
-                id='report_p4',
-                clinicalStage='PHASE_4',
-                drugs=[Row(drugFromSource='Drug P4', drugId='CHEMBL_P4')],
-                diseases=[Row(diseaseFromSource='Disease', diseaseId='EFO_0001')],
-                qualityControls=[],
-            ),
-        ]
-        cr = spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
-        result = _compute_max_phase_per_drug(cr)
-        rows = {r['id']: r['maximumClinicalStage'] for r in result.collect()}
-        assert rows['CHEMBL_P4'] == 'APPROVAL'
+    def test_unrecognised_stage_falls_back_to_unknown(self):
+        """A stage that is not in the rank table ranks as UNKNOWN rather than failing."""
+        report = pl.DataFrame(
+            [_report('r', 'NOT_A_STAGE', [('Drug', 'CHEMBL_U')], [('Disease', 'EFO_0001')])],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        assert stages['CHEMBL_U'] == 'UNKNOWN'
 
 
 # --- Tests for _process_clinical_report_indications ---
 
 
 class TestProcessClinicalReportIndications:
-    @pytest.mark.slow
-    def test_basic_indications(self, spark, clinical_report_df, disease_df):
-        """Check correct indications are generated per drug."""
-        result = _process_clinical_report_indications(clinical_report_df, disease_df)
-        rows = {r['id']: r['indications'] for r in result.collect()}
+    def test_basic_indications(self, clinical_report_df, disease_df):
+        """Each drug gets one indication struct per disease, at its best stage."""
+        rows = _by_id(_process_clinical_report_indications(clinical_report_df, disease_df), 'indications')
 
-        # CHEMBL1 should have indications for EFO_0001 (approved) and EFO_0002
-        # (phase III)
-        chembl1_indications = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL1']}
-        assert ('EFO_0001', 'APPROVAL') in chembl1_indications
-        assert ('EFO_0002', 'PHASE_3') in chembl1_indications
+        chembl1 = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL1']}
+        assert chembl1 == {('EFO_0001', 'APPROVAL'), ('EFO_0002', 'PHASE_3')}
 
-        # CHEMBL3 should have one indication for EFO_0001 (phase I)
-        chembl3_indications = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL3']}
-        assert ('EFO_0001', 'PHASE_1') in chembl3_indications
+        chembl3 = {(i['disease'], i['maxClinicalStage']) for i in rows['CHEMBL3']}
+        assert chembl3 == {('EFO_0001', 'PHASE_1')}
 
-    def test_null_drug_or_disease_excluded(self, spark):
+    def test_null_drug_or_disease_excluded(self):
         """Rows where drugId or diseaseId is null should be excluded."""
-        data = [
-            Row(
-                id='report_null',
-                clinicalStage='PHASE_2',
-                drugs=[Row(drugFromSource='Drug', drugId=None)],
-                diseases=[Row(diseaseFromSource='Disease', diseaseId='EFO_0001')],
-                qualityControls=[],
-            ),
-            Row(
-                id='report_null2',
-                clinicalStage='PHASE_2',
-                drugs=[Row(drugFromSource='Drug', drugId='CHEMBL_X')],
-                diseases=[Row(diseaseFromSource='Disease', diseaseId=None)],
-                qualityControls=[],
-            ),
-        ]
-        cr = spark.createDataFrame(data, schema=CLINICAL_REPORT_SCHEMA)
-        disease = spark.createDataFrame(
-            [Row(id='EFO_0001', name='Disease')],
-            schema=DISEASE_SCHEMA,
+        reports = pl.DataFrame(
+            [
+                _report('r1', 'PHASE_2', [('Drug', None)], [('Disease', 'EFO_0001')]),
+                _report('r2', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease', None)]),
+            ],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
         )
-        result = _process_clinical_report_indications(cr, disease)
-        assert result.count() == 0
+        disease = pl.DataFrame([{'id': 'EFO_0001', 'name': 'Disease'}], schema=DISEASE_SCHEMA, orient='row')
+        assert _process_clinical_report_indications(reports, disease).height == 0
 
-    @pytest.mark.slow
-    def test_efo_name_is_lowercase_trimmed(self, spark, clinical_report_df, disease_df):
-        """EfoName should be lowercase and trimmed."""
-        result = _process_clinical_report_indications(clinical_report_df, disease_df)
-        rows = {r['id']: r['indications'] for r in result.collect()}
-        for indications in rows.values():
-            for ind in indications:
-                if ind['efoName'] is not None:
-                    assert ind['efoName'] == ind['efoName'].strip().lower()
+    def test_null_diseases_array_is_dropped(self):
+        """A report with a null diseases array contributes no indication.
+
+        Exploding a null array yields a null row, which the diseaseId filter removes.
+        """
+        reports = pl.DataFrame(
+            [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], None)],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        disease = pl.DataFrame([{'id': 'EFO_0001', 'name': 'Disease'}], schema=DISEASE_SCHEMA, orient='row')
+        assert _process_clinical_report_indications(reports, disease).height == 0
+
+    def test_efo_name_is_lowercased_and_space_trimmed(self):
+        """Names are lowercased and stripped of leading and trailing spaces."""
+        reports = pl.DataFrame(
+            [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease', 'EFO_0001')])],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        disease = pl.DataFrame([{'id': 'EFO_0001', 'name': '  Disease X  '}], schema=DISEASE_SCHEMA, orient='row')
+        rows = _by_id(_process_clinical_report_indications(reports, disease), 'indications')
+        assert rows['CHEMBL_X'][0]['efoName'] == 'disease x'
+
+    def test_non_space_whitespace_is_kept(self):
+        """Only the space character is stripped, so other whitespace survives the trim.
+
+        A bare `strip_chars()` would take these too, changing the name rather than
+        trimming it.
+        """
+        reports = pl.DataFrame(
+            [_report('r', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease', 'EFO_0001')])],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        disease = pl.DataFrame(
+            [{'id': 'EFO_0001', 'name': '\xa0Disease X\xa0'}], schema=DISEASE_SCHEMA, orient='row'
+        )
+        rows = _by_id(_process_clinical_report_indications(reports, disease), 'indications')
+        assert rows['CHEMBL_X'][0]['efoName'] == '\xa0disease x\xa0'
+
+    def test_indications_are_sorted_by_disease_id(self, disease_df):
+        """The indication list is ordered by disease id regardless of the input order."""
+        reports = pl.DataFrame(
+            [
+                _report('r1', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease Z', 'EFO_0003')]),
+                _report('r2', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease X', 'EFO_0001')]),
+                _report('r3', 'PHASE_2', [('Drug', 'CHEMBL_X')], [('Disease Y', 'EFO_0002')]),
+            ],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        rows = _by_id(_process_clinical_report_indications(reports, disease_df), 'indications')
+        assert [i['disease'] for i in rows['CHEMBL_X']] == ['EFO_0001', 'EFO_0002', 'EFO_0003']
 
 
 # --- Tests for _generate_description ---
@@ -386,31 +297,19 @@ class TestProcessClinicalReportIndications:
 
 class TestGenerateDescription:
     def test_approved_drug_single_indication(self):
-        """Drug with approved stage and one approved indication."""
-        result = _generate_description(
-            'Small molecule',
-            'APPROVAL',
-            ['APPROVAL'],
-            ['rheumatoid arthritis'],
+        result = _generate_description('Small molecule', 'APPROVAL', ['APPROVAL'], ['rheumatoid arthritis'])
+        assert result == (
+            'Small molecule drug with a maximum clinical stage of Approval, '
+            'with an approval for rheumatoid arthritis.'
         )
-        assert 'Small molecule drug' in result
-        assert 'Approval' in result
-        assert 'approval for rheumatoid arthritis' in result
 
     def test_phase_3_drug(self):
-        """Drug in phase III with one investigational indication."""
-        result = _generate_description(
-            'Antibody',
-            'PHASE_3',
-            ['PHASE_3'],
-            ['breast cancer'],
+        result = _generate_description('Antibody', 'PHASE_3', ['PHASE_3'], ['breast cancer'])
+        assert result == (
+            'Antibody drug with a maximum clinical stage of Phase 3, with 1 investigational indication.'
         )
-        assert 'Antibody drug' in result
-        assert 'Phase 3' in result
-        assert '1 investigational indication' in result
 
     def test_multiple_approved_indications(self):
-        """Drug with many approved indications shows count."""
         result = _generate_description(
             'Small molecule',
             'APPROVAL',
@@ -419,56 +318,45 @@ class TestGenerateDescription:
         )
         assert 'approval for 3 indications' in result
 
-    def test_two_approved_indications_listed(self):
-        """Drug with exactly two approved indications lists them."""
+    def test_two_approved_indications_are_listed_alphabetically(self):
+        """Named labels are sorted, so the sentence does not depend on the input order."""
         result = _generate_description(
-            'Small molecule',
-            'APPROVAL',
-            ['APPROVAL', 'APPROVAL'],
-            ['disease a', 'disease b'],
+            'Small molecule', 'APPROVAL', ['APPROVAL', 'APPROVAL'], ['zebra disease', 'aardvark disease']
         )
-        assert 'disease a' in result
-        assert 'disease b' in result
+        assert 'approval for aardvark disease and zebra disease' in result
 
     def test_mixed_approved_and_investigational(self):
-        """Drug with both approved and investigational indications."""
         result = _generate_description(
-            'Small molecule',
-            'APPROVAL',
-            ['APPROVAL', 'PHASE_2'],
-            ['disease a', 'disease b'],
+            'Small molecule', 'APPROVAL', ['APPROVAL', 'PHASE_2'], ['disease a', 'disease b']
         )
         assert 'approval for disease a' in result
         assert '1 investigational indication' in result
 
+    def test_duplicate_indications_are_counted_once(self):
+        """Repeated (stage, label) pairs count once."""
+        result = _generate_description(
+            'Small molecule', 'PHASE_2', ['PHASE_2', 'PHASE_2'], ['disease a', 'disease a']
+        )
+        assert 'with 1 investigational indication.' in result
+
     def test_none_drug_type(self):
-        """None drug type defaults to 'Unknown'."""
-        result = _generate_description(None, 'PHASE_1', [], [])
-        assert result.startswith('Unknown drug')
+        assert _generate_description(None, 'PHASE_1', [], []).startswith('Unknown drug')
 
     def test_no_phase_no_indications(self):
-        """Drug with no clinical data."""
-        result = _generate_description('Small molecule', None, [], [])
-        assert result == 'Small molecule drug.'
+        assert _generate_description('Small molecule', None, [], []) == 'Small molecule drug.'
 
     def test_multi_indication_phrase(self):
-        """Drug with multiple indications includes 'across all indications'."""
         result = _generate_description(
-            'Small molecule',
-            'APPROVAL',
-            ['APPROVAL', 'PHASE_3'],
-            ['disease a', 'disease b'],
+            'Small molecule', 'APPROVAL', ['APPROVAL', 'PHASE_3'], ['disease a', 'disease b']
         )
         assert 'across all indications' in result
 
+    def test_single_indication_has_no_multi_phrase(self):
+        result = _generate_description('Small molecule', 'APPROVAL', ['APPROVAL'], ['disease a'])
+        assert 'across all indications' not in result
+
     def test_no_withdrawal_or_blackbox_in_description(self):
-        """Description should not contain withdrawal or black box references."""
-        result = _generate_description(
-            'Small molecule',
-            'APPROVAL',
-            ['APPROVAL'],
-            ['some disease'],
-        )
+        result = _generate_description('Small molecule', 'APPROVAL', ['APPROVAL'], ['some disease'])
         assert 'withdrawal' not in result.lower()
         assert 'black box' not in result.lower()
 
@@ -490,102 +378,63 @@ class TestJoinSemantic:
         assert _join_semantic(['a', 'b', 'c']) == 'a, b and c'
 
 
-# --- Shared fixture for process_drug_index ---
-
-
-@pytest.fixture(scope='module')
-def drug_index_result(spark, molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df):
-    """Pre-computed drug index result shared across all TestProcessDrugIndex tests."""
-    result = process_drug_index(molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df)
-    result.cache()
-    result.count()  # materialize the cache
-    return result
-
-
 # --- Tests for process_drug_index ---
 
 
 class TestProcessDrugIndex:
-    @pytest.mark.slow
-    def test_non_drug_molecules_excluded(self, drug_index_result):
-        """CHEMBL999 has no drugbank ref, no clinical reports, no mechanism, no probe -> excluded."""
-        ids = [r['id'] for r in drug_index_result.collect()]
-        assert 'CHEMBL999' not in ids
+    def test_only_drugs_are_kept(self, drug_index_result):
+        """Drugbank xref, clinical report, mechanism or probe qualifies; nothing else does."""
+        assert sorted(drug_index_result['id'].to_list()) == ['CHEMBL1', 'CHEMBL2', 'CHEMBL3', 'CHEMBL888']
 
-    @pytest.mark.slow
-    def test_drug_with_drugbank_included(self, drug_index_result):
-        """CHEMBL1 has a drugbank cross-reference -> included."""
-        ids = [r['id'] for r in drug_index_result.collect()]
-        assert 'CHEMBL1' in ids
-
-    @pytest.mark.slow
-    def test_drug_in_clinical_reports_included(self, drug_index_result):
-        """CHEMBL2 appears in clinical reports -> included."""
-        ids = [r['id'] for r in drug_index_result.collect()]
-        assert 'CHEMBL2' in ids
-
-    @pytest.mark.slow
-    def test_chemical_probe_included(self, drug_index_result):
-        """CHEMBL3 is a chemical probe -> included."""
-        ids = [r['id'] for r in drug_index_result.collect()]
-        assert 'CHEMBL3' in ids
-
-    @pytest.mark.slow
     def test_chemical_probe_gets_probes_drugs_xref(self, drug_index_result):
-        """CHEMBL3 is a chemical probe -> should have probes&drugs cross-reference with probe ID."""
-        chembl3 = drug_index_result.filter(f.col('id') == 'CHEMBL3').collect()[0]
-        xrefs = {xref['source']: xref['ids'] for xref in chembl3['crossReferences']}
-        assert 'Probes&Drugs' in xrefs
+        """CHEMBL3 is a probe with no existing cross-references, so one is created."""
+        xrefs = _by_id(drug_index_result, 'crossReferences')['CHEMBL3']
+        assert xrefs == [{'source': 'Probes&Drugs', 'ids': ['PD001']}]
 
-    @pytest.mark.slow
-    def test_non_probe_has_no_probes_drugs_xref(self, drug_index_result):
-        """CHEMBL1 is not a chemical probe -> should not have probes&drugs cross-reference."""
-        chembl1 = drug_index_result.filter(f.col('id') == 'CHEMBL1').collect()[0]
-        xref_sources = [xref['source'] for xref in chembl1['crossReferences']]
-        assert 'probes&drugs' not in xref_sources
+    def test_probes_drugs_xref_is_appended_to_existing(self, molecule_df, mechanism_df, clinical_report_df, disease_df):
+        """A probe that already has cross-references keeps them and gains Probes&Drugs."""
+        probes = pl.DataFrame(
+            [{'id': 'p', 'drugFromSourceId': 'PD009', 'drugId': 'CHEMBL1'}],
+            schema=CHEMICAL_PROBES_SCHEMA,
+            orient='row',
+        )
+        result = process_drug_index(molecule_df.lazy(), probes, mechanism_df, clinical_report_df, disease_df)
+        assert _by_id(result, 'crossReferences')['CHEMBL1'] == [
+            {'source': 'drugbank', 'ids': ['DB001']},
+            {'source': 'Probes&Drugs', 'ids': ['PD009']},
+        ]
 
-    def test_max_phase_is_string(self, drug_index_result):
-        """MaximumClinicalTrialPhase should be a string, not a double."""
-        phase_field = drug_index_result.schema['maximumClinicalStage']
-        assert phase_field.dataType == StringType()
+    def test_non_probe_keeps_its_cross_references(self, drug_index_result):
+        xrefs = _by_id(drug_index_result, 'crossReferences')
+        assert xrefs['CHEMBL1'] == [{'source': 'drugbank', 'ids': ['DB001']}]
+        assert xrefs['CHEMBL2'] == []
 
-    @pytest.mark.slow
-    def test_drugs_without_clinical_reports_get_unknown_phase(self, drug_index_result):
-        """Drugs not in clinical reports should have maximumClinicalStage='UNKNOWN'."""
-        null_phases = drug_index_result.filter(f.col('maximumClinicalStage').isNull()).count()
-        assert null_phases == 0
-        chembl888 = drug_index_result.filter(f.col('id') == 'CHEMBL888').collect()[0]
-        assert chembl888['maximumClinicalStage'] == 'UNKNOWN'
+    def test_drugs_without_clinical_reports_get_unknown_stage(self, drug_index_result):
+        stages = _by_id(drug_index_result, 'maximumClinicalStage')
+        assert stages['CHEMBL888'] == 'UNKNOWN'
+        assert drug_index_result['maximumClinicalStage'].null_count() == 0
 
-    def test_no_blackbox_or_withdrawal_columns(self, drug_index_result):
-        """Output should not contain blackBoxWarning or hasBeenWithdrawn columns."""
-        assert 'blackBoxWarning' not in drug_index_result.columns
-        assert 'hasBeenWithdrawn' not in drug_index_result.columns
+    def test_output_matches_the_declared_schema(self, drug_index_result):
+        assert dict(drug_index_result.schema) == drug_molecule_schema
 
-    def test_no_intermediate_columns(self, drug_index_result):
-        """Intermediate columns should be dropped from final output."""
-        assert 'chemicalProbeDrugId' not in drug_index_result.columns
-        assert 'hasMechanismOfAction' not in drug_index_result.columns
-        assert 'indications' not in drug_index_result.columns
+    def test_intermediate_columns_are_dropped(self, drug_index_result):
+        for column in ('_isChemicalProbe', '_hasMechanismOfAction', '_probeIds', 'indications'):
+            assert column not in drug_index_result.columns
 
-    @pytest.mark.slow
     def test_description_is_populated(self, drug_index_result):
-        """All drugs in the output should have a non-null description."""
-        null_descriptions = drug_index_result.filter(f.col('description').isNull()).count()
-        assert null_descriptions == 0
+        assert drug_index_result['description'].null_count() == 0
 
-    @pytest.mark.slow
+    def test_description_uses_the_undefaulted_stage(self, drug_index_result):
+        """CHEMBL888 has no clinical report, so it gets no phase clause despite the UNKNOWN default."""
+        assert _by_id(drug_index_result, 'description')['CHEMBL888'] == 'Small molecule drug.'
+
     def test_no_duplicate_ids(self, drug_index_result):
-        """Output should have no duplicate drug IDs."""
-        total = drug_index_result.count()
-        distinct = drug_index_result.select('id').distinct().count()
-        assert total == distinct
+        assert drug_index_result['id'].n_unique() == drug_index_result.height
 
-    @pytest.mark.slow
+    def test_rows_are_sorted_by_id(self, drug_index_result):
+        assert drug_index_result['id'].to_list() == sorted(drug_index_result['id'].to_list())
+
     def test_molblock_passed_through(self, drug_index_result):
-        """molblock from the molecule input survives into the drug index."""  # noqa: D403
-        assert 'molblock' in drug_index_result.columns
-        chembl1 = drug_index_result.filter(f.col('id') == 'CHEMBL1').collect()[0]
-        assert chembl1['molblock'] == 'MOLBLOCK_CHEMBL1'
-        chembl2 = drug_index_result.filter(f.col('id') == 'CHEMBL2').collect()[0]
-        assert chembl2['molblock'] is None
+        molblocks = _by_id(drug_index_result, 'molblock')
+        assert molblocks['CHEMBL1'] == 'MOLBLOCK_CHEMBL1'
+        assert molblocks['CHEMBL2'] is None

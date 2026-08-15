@@ -688,19 +688,17 @@ steps:
 
   #: DRUG_MOLECULE STEP :##########################################################################
   drug_molecule:
-    - name: pyspark drug_molecule
-      pyspark: drug_molecule
-      settings:
-        partition_count: 1
+    - name: transform drug_molecule
+      transformer: drug_molecule
       source:
-        molecule: intermediate/chembl_molecule
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
-        mechanism_of_action: output/drug_mechanism_of_action
-        clinical_report: output/clinical_report
-        disease: output/disease
+        molecule: intermediate/chembl_molecule/*.parquet
+        chemical_probes: intermediate/chemical_probes_evidence.parquet/*.parquet
+        mechanism_of_action: output/drug_mechanism_of_action/*.parquet
+        clinical_report: output/clinical_report/*.parquet
+        disease: output/disease/disease.parquet
       destination:
-        output: output/drug_molecule
-        excluded: excluded/drug_molecule_failed_report
+        output: output/drug_molecule/drug_molecule.parquet
+        excluded: excluded/drug_molecule_failed_report/drug_molecule_failed_report.parquet
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
