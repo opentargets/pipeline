@@ -10,8 +10,6 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-import random
-import struct
 from datetime import date
 from pathlib import Path
 
@@ -317,95 +315,98 @@ class TestSparkCastToStringStringAndList:
 
 
 class TestSparkCastToStringFloat:
-    # Every value here (and its expected rendering) was measured against real spark; see
-    # task-8-report.md. Spark's `CAST(DOUBLE AS STRING)` matches Java's `Double.toString`:
-    # plain decimal for 0.001 <= |x| < 1e7, scientific `d.dddEn` outside that range.
+    """Float64 is the one leaf type this module deliberately does NOT render like spark.
+
+    Spark uses java's `Double.toString`, which switches to scientific notation outside
+    `0.001 <= |x| < 1e7`; polars' cast does not. Reproducing java cost a per-element python UDF,
+    measured 56x slower than the native cast, for a guarantee only the evidence `id` consumed --
+    and matching the release's ids is not a requirement. So the contract here is no longer
+    "matches spark" but FAITHFUL and DETERMINISTIC: every finite double round-trips, so distinct
+    values keep distinct renderings and the de-duplication hash still ranks rows meaningfully.
+    """
+
     @pytest.mark.parametrize(
         ('value', 'expected'),
         [
             (1.0, '1.0'),
             (0.5, '0.5'),
-            (1e-10, '1.0E-10'),
-            (123456789.123, '1.23456789123E8'),
             (-0.0, '-0.0'),
             (0.0, '0.0'),
             (100.0, '100.0'),
             (999999.9, '999999.9'),
-            (10000000.0, '1.0E7'),
             (0.001, '0.001'),
-            (0.0001, '1.0E-4'),
             (-5.5, '-5.5'),
         ],
     )
-    def test_matches_measured_spark_rendering(self, value: float, expected: str) -> None:
+    def test_renders_the_common_range_exactly_as_spark_does(self, value: float, expected: str) -> None:
+        # Inside 0.001 <= |x| < 1e7 the native cast and java agree, so these renderings are
+        # unchanged from the measured spark values (task-8-report.md). 89% of real float values in
+        # the staged evidence outputs fall in this range.
         df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
         assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [expected]
+
+    @pytest.mark.parametrize(
+        ('value', 'spark_renders', 'we_render'),
+        [
+            (1e-10, '1.0E-10', '1e-10'),
+            (0.0001, '1.0E-4', '0.0001'),
+            (10000000.0, '1.0E7', '10000000.0'),
+            (123456789.123, '1.23456789123E8', '123456789.123'),
+            (1e15, '1.0E15', '1000000000000000.0'),
+        ],
+    )
+    def test_diverges_from_spark_outside_the_common_range(
+        self, value: float, spark_renders: str, we_render: str
+    ) -> None:
+        # Pinned as an intended divergence rather than left implicit -- the spark renderings are
+        # the measured ones this used to produce. If a future change makes these match spark
+        # again, that is a signal the slow UDF has crept back in.
+        df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
+
+        rendered = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'][0]
+
+        assert rendered == we_render
+        assert rendered != spark_renders
 
     def test_null_stays_null(self) -> None:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
         assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == [None]
 
-    def test_boundary_values_still_render_exactly(self) -> None:
-        # Regression pin for the reviewer's finding against an earlier, over-conservative
-        # `1e15` cutoff: these values render exactly and must not be pushed into a raise (or a
-        # non-exact fallback) by too wide a guard.
-        values = [1e15, 1.5e16, 1.6999e16]
-        expected = ['1.0E15', '1.5E16', '1.6999E16']
-        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == expected
-
-    @pytest.mark.parametrize('value', [1.7e16, 1.5e20, 1.7976931348623157e308])
-    def test_large_magnitude_renders_rather_than_killing_the_datasource(self, value: float) -> None:
-        # These used to raise UnsupportedIdentifierField. Measured (task-8-report.md), spark's own
-        # rendering above ~1.7e16 is not always shortest-round-trip -- e.g. it emits
-        # '1.8029536657783832E16' where the shortest round-trip is '1.802953665778383E16' -- so
-        # this function cannot promise a digit-identical match up here. It no longer needs to:
-        # matching the release's evidence `id` is not a requirement, which makes killing a whole
-        # datasource over one identifier digit the strictly worse outcome.
-        #
-        # What must still hold is that the rendering is FAITHFUL -- it round-trips to the same
-        # double, so distinct values keep distinct renderings and the de-duplication hash stays
-        # meaningful.
-        rendered = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64}).select(
-            spark_cast_to_string('v', pl.Float64).alias('o')
-        )['o'][0]
-
-        assert float(rendered) == value
-
     @pytest.mark.parametrize(
         'value',
         [
-            5e-324,  # mantissa 1 (Double.MIN_VALUE)
-            5e-323,  # mantissa 10
-            6e-323,  # mantissa 12
-            8e-323,  # mantissa 16 (2**4)
-            1.6e-322,  # mantissa 32 (2**5)
-            6.3e-322,  # mantissa 128 (2**7)
-            1.012e-320,  # mantissa 2048 (2**11)
+            1.0,
+            0.5,
+            1e-10,
+            123456789.123,
+            1e15,
+            1.7e16,
+            1.5e20,
+            1.7976931348623157e308,  # DBL_MAX
+            5e-324,  # Double.MIN_VALUE, mantissa popcount 1
             8.095e-320,  # mantissa 16384 (2**14)
+            1.66880539388046e-308,  # a real gene_burden.resourceScore, subnormal
+            5.498e-320,  # a real gene_burden.resourceScore, subnormal
         ],
     )
-    def test_low_popcount_subnormal_renders_rather_than_raising(self, value: float) -> None:
-        # Each of these was confirmed against real spark to render one digit differently from this
-        # function (task-9-report.md) -- java's legacy algorithm is not shortest-round-trip for a
-        # subnormal whose mantissa has very few bits set, e.g. Double.MIN_VALUE is '4.9E-324' in
-        # java against python's '5.0E-324'. They used to raise, which is what once blocked the
-        # whole gene_burden datasource; same reasoning as the large-magnitude case above.
+    def test_every_finite_double_round_trips(self, value: float) -> None:
+        # THE contract now. Includes the two real gene_burden subnormals and the extremes that
+        # used to raise UnsupportedIdentifierField and block a whole datasource.
         rendered = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64}).select(
             spark_cast_to_string('v', pl.Float64).alias('o')
         )['o'][0]
 
         assert float(rendered) == value
 
-    def test_subnormal_with_ordinary_mantissa_matches_gene_burden(self) -> None:
-        # The concrete regression this guard exists for: real gene_burden.resourceScore values in
-        # the staged evidence input are subnormal (mantissa popcount 8 for both) and DID raise
-        # UnsupportedIdentifierField before fix round 1, blocking the whole datasource. Both
-        # values are pinned here as measured-exact against real spark (task-9-report.md).
-        values = [1.66880539388046e-308, 5.498e-320]
-        expected = ['1.66880539388046E-308', '5.498E-320']
+    def test_distinct_values_keep_distinct_renderings(self) -> None:
+        # What the de-duplication hash actually depends on: if two different doubles rendered
+        # identically, they would rank as equal content and the survivor pick would be arbitrary.
+        values = [1.0, 1.0000000000000002, 0.1, 0.30000000000000004, 5e-324, 1e-323, 1e15, 1e16]
         df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == expected
+
+        rendered = df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list()
+
+        assert len(set(rendered)) == len(values)
 
 
 class TestSparkCastToStringListOfStruct:
@@ -646,14 +647,6 @@ class TestSparkParityForCastToString:
     hand-copied expected string that could quietly drift from real spark.
     """
 
-    def test_double_matches_spark(self, spark) -> None:
-        values = [1.0, 0.5, 1e-10, 123456789.123, -0.0, 0.0, 100.0, 999999.9, 10000000.0, 0.001, 0.0001, -5.5, None]
-        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
-        expected = [r['s'] for r in rows.collect()]
-        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
-        assert got == expected
-
     def test_list_string_matches_spark(self, spark) -> None:
         values = [['1', '2'], [], None, ['a', None]]
         rows = spark.createDataFrame([(v,) for v in values], 'v ARRAY<STRING>').selectExpr('CAST(v AS STRING) as s')
@@ -679,50 +672,6 @@ class TestSparkParityForCastToString:
         expected = [r['s'] for r in rows.collect()]
         df = pl.DataFrame({'v': values}, schema={'v': dtype})
         got = df.select(spark_cast_to_string('v', dtype).alias('v'))['v'].to_list()
-        assert got == expected
-
-    def test_double_is_exact_immediately_below_the_1_7e16_cutoff(self, spark) -> None:
-        # 1.7e16 was where this function used to REFUSE to render; it now renders everywhere, so
-        # what remains worth pinning is that the rendering is still digit-exact against real spark
-        # right below where spark's own algorithm starts diverging (smallest measured mismatch:
-        # 1.801526131658083e16, task-8-report.md). A dense 300-value sample seeded for
-        # determinism: exactness here is a real property of the shared range, and this is the
-        # cheapest place to notice if a rewrite of the digit formatting ever breaks it.
-        rng = random.Random(20260814)
-        values = [rng.uniform(1.6, 1.699999) * 1e16 for _ in range(300)]
-        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
-        expected = [r['s'] for r in rows.collect()]
-        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
-        assert got == expected
-
-    def test_subnormal_popcount_boundary_matches_spark(self, spark) -> None:
-        # Fix round 1, Critical: unlike the large-magnitude case, the subnormal guard's boundary
-        # is a mantissa popcount (>3 raises, >=4 doesn't), not a magnitude -- measured mismatches
-        # recur at scattered points (all popcount <= 3) up to nearly sys.float_info.min, so a
-        # magnitude cutoff cannot separate them from ordinary subnormals like gene_burden's real
-        # values. A dense fuzz run (20,000+ samples per popcount, random magnitudes across the
-        # whole subnormal range, task-9-report.md) found popcount 3 still mismatches (147/20,000,
-        # 0.7%) while popcount 4, 5 and 6 each showed 0 mismatches in 20,000+ samples -- this is
-        # the spark-oracle version, run on every test run, concentrated right at that boundary
-        # (popcount exactly 4) so a future narrowing without re-measuring has a real chance of
-        # being caught.
-        rng = random.Random(20260814)
-
-        def _random_popcount_4_subnormal() -> float:
-            bit_length = rng.randint(4, 52)
-            positions = set(rng.sample(range(bit_length - 1), min(3, bit_length - 1)))
-            mantissa = 1 << (bit_length - 1)
-            for p in positions:
-                mantissa |= 1 << p
-            mantissa = max(1, min(2**52 - 1, mantissa))
-            return struct.unpack('<d', struct.pack('<Q', mantissa))[0]
-
-        values = [_random_popcount_4_subnormal() for _ in range(300)]
-        rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
-        expected = [r['s'] for r in rows.collect()]
-        df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
-        got = df.select(spark_cast_to_string('v', pl.Float64).alias('v'))['v'].to_list()
         assert got == expected
 
     def test_int64_matches_spark(self, spark) -> None:

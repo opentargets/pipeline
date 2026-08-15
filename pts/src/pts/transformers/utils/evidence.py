@@ -17,9 +17,7 @@ polars `pl.Expr` per `datasourceId` for the caller to look up and pass straight 
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -61,100 +59,28 @@ class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condit
     """
 
 
-def _java_double_to_string(x: float | None) -> str | None:
-    """Render a double exactly as spark's `CAST(DOUBLE AS STRING)` does.
-
-    Measured against real spark (task-8-report.md): the rendering matches Java's
-    `Double.toString` -- plain decimal for `0.001 <= |x| < 1e7`, scientific `d.dddEn` (no `+`
-    sign, always at least one fractional digit) outside that range. Reproduced here by taking
-    python's `repr`, which is guaranteed to be the shortest decimal that round-trips to the same
-    double -- the same guarantee `Double.toString` makes for ordinary doubles -- and reformatting
-    those digits under spark's plain/scientific threshold instead of python's own.
-
-    That guarantee has two measured exceptions, where java's legacy algorithm is NOT
-    shortest-round-trip and this function's output therefore differs from spark's by a digit:
-
-    * Magnitudes at or above roughly `1.7e16`: a dense fuzz run of 200,000+ random doubles against
-      real spark found spark emitting extra, non-shortest digits starting at `1.801526131658083e16`
-      (e.g. `1.802953665778383e16` renders `'1.8029536657783832E16'` in spark, one digit longer
-      than the shortest round-trip `'1.802953665778383E16'`). The onset is not a clean step --
-      only a fraction of values above it diverge.
-    * Subnormals (`0 < |x| < sys.float_info.min`) whose 52-bit mantissa has popcount <= 3 -- e.g.
-      `Double.MIN_VALUE` renders `'4.9E-324'` in java against python's shortest round-trip
-      `'5.0E-324'`. Popcount predicts this, not magnitude: mismatches recur sparsely at every
-      subnormal magnitude, interleaved with same-magnitude values that render exactly
-      (`gene_burden.resourceScore`'s two real subnormals both have popcount 8 and are exact).
-
-    Both cases used to RAISE `UnsupportedIdentifierField`, on the reasoning that a silently wrong
-    evidence `id` was worse than an unrunnable datasource. That trade no longer holds: matching the
-    release's ids is not a requirement, so a datasource killed by an exotic double is now the
-    strictly worse outcome. Both now render normally -- the output is a valid shortest-round-trip
-    rendering, just not always digit-identical to java's.
-
-    Args:
-        x: the double value to render, or None.
-
-    Returns:
-        The spark-equivalent string rendering, or None for a null input.
-    """
-    if x is None:
-        return None
-    if math.isnan(x):
-        return 'NaN'
-    if math.isinf(x):
-        return 'Infinity' if x > 0 else '-Infinity'
-    if x == 0.0:
-        return '-0.0' if math.copysign(1.0, x) < 0 else '0.0'
-
-    negative = x < 0
-    ax = -x if negative else x
-    digits, point_pos = _shortest_round_trip_digits(ax)
-    exponent = point_pos - 1
-    body = _plain_decimal(digits, point_pos) if 1e-3 <= ax < 1e7 else _scientific_notation(digits, exponent)
-    return ('-' if negative else '') + body
-
-
-def _shortest_round_trip_digits(ax: float) -> tuple[str, int]:
-    """The shortest round-tripping decimal digits of a positive float, and where its point sits.
-
-    `repr` already picked the shortest digit sequence; `Decimal` just recovers it as digits plus
-    a decimal-point position instead of a formatted string.
-    """
-    _, digit_tuple, exp = Decimal(repr(ax)).as_tuple()
-    # `exp` is typed as `int | Literal['n', 'N', 'F']` because Decimal.as_tuple() also covers
-    # NaN/Infinity, which never reach here -- `ax` is a finite, non-zero, non-nan float already
-    # filtered by `_java_double_to_string` before this is called.
-    assert isinstance(exp, int)
-    digit_str = ''.join(map(str, digit_tuple))
-    return digit_str, len(digit_str) + exp
-
-
-def _plain_decimal(digits: str, point_pos: int) -> str:
-    """Format digits as plain decimal notation with the point at `point_pos`."""
-    if point_pos <= 0:
-        return '0.' + '0' * (-point_pos) + digits
-    if point_pos >= len(digits):
-        return digits + '0' * (point_pos - len(digits)) + '.0'
-    return digits[:point_pos] + '.' + digits[point_pos:]
-
-
-def _scientific_notation(digits: str, exponent: int) -> str:
-    """Format digits as `d.dddEn`. Trailing zeros are `_plain_decimal` padding, not significant."""
-    fraction = digits[1:].rstrip('0') or '0'
-    return f'{digits[0]}.{fraction}E{exponent}'
-
-
 def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
-    """Render a String/Int64/Boolean/Float64 leaf as spark's `CAST(x AS STRING)` would.
+    """Render a String/Int64/Boolean/Float64 leaf as a string, for hashing.
 
     Nulls are preserved (not substituted) here -- the caller decides whether a null means "the
     whole column is null" (real `None`, `spark_cast_to_string`'s job) or "a nested element/field
     is null" (the literal token `'null'`, `_render_nested`'s job).
 
-    Int64 and Boolean cast identically in both engines (measured, task-9-report.md): spark's
+    String, Int64 and Boolean render identically to spark (measured, task-9-report.md): spark's
     long-to-string and boolean-to-string agree digit-for-digit and `true`/`false`-for-`true`/
-    `false` with `.cast(pl.String)`, no formatting quirk to reproduce -- unlike Float64's Java
-    `Double.toString` behaviour (`_java_double_to_string`).
+    `false` with `.cast(pl.String)`.
+
+    FLOAT64 DOES NOT MATCH SPARK, deliberately. Spark renders a double with java's
+    `Double.toString`, which switches to scientific notation outside `0.001 <= |x| < 1e7` --
+    polars' cast does not, so e.g. `1e-5` is `'1.0E-5'` in spark and `'0.00001'` here. That was
+    reproduced by a per-element python UDF until matching the release's evidence `id` stopped
+    being a requirement; the UDF measured 56x slower than the native cast (8.64s against 0.16s
+    per 4M doubles) and 11% of real float values in the staged outputs fall outside the range
+    where the two agree, so it was doing real work on real data for a guarantee nothing consumes.
+
+    What the rendering must still be is FAITHFUL and DETERMINISTIC: it round-trips to the same
+    double (`float(rendered) == value` for every finite value, including subnormals), so distinct
+    values keep distinct renderings and the de-duplication hash still ranks rows meaningfully.
 
     Args:
         expr: the leaf expression to render.
@@ -168,12 +94,8 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     Raises:
         UnsupportedIdentifierField: for a dtype this function has not been measured against.
     """
-    if dtype == pl.String:
+    if dtype in (pl.String, pl.Int64, pl.Boolean, pl.Float64):
         return expr.cast(pl.String)
-    if dtype in (pl.Int64, pl.Boolean):
-        return expr.cast(pl.String)
-    if dtype == pl.Float64:
-        return expr.map_elements(_java_double_to_string, return_dtype=pl.String)
     msg = f'spark_cast_to_string: unsupported scalar dtype {dtype!r} for column {name!r}'
     raise UnsupportedIdentifierField(msg)
 
@@ -222,11 +144,12 @@ def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
 def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
     """Reproduce spark's `cast(x AS STRING)` for the `unique_fields` types `evidence_schema` carries.
 
-    Every case is measured against real spark (task-8-report.md / task-9-report.md), not assumed:
+    Every case except `Float64` is measured against real spark (task-8-report.md /
+    task-9-report.md), not assumed:
 
     * String: identity cast.
     * `Int64`, `Boolean`: identical rendering in both engines -- see `_cast_scalar_to_string`.
-    * `Float64`: see `_java_double_to_string`.
+    * `Float64`: deliberately NOT spark's rendering -- see `_cast_scalar_to_string`.
     * `List(...)`: spark renders `['1','2']` as `'[1, 2]'`, `[]` as `'[]'`, a null list as null,
       and a null *element* -- of any supported element type, not just String -- as the literal
       token `null`.
@@ -238,9 +161,8 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
       `Struct` of `List(Struct)`); `_render_nested` recurses to cover that.
 
     Anything else -- an unmeasured leaf dtype anywhere in the (possibly nested) shape -- raises
-    rather than guess at a rendering that could silently change an evidence id. This module never
-    trades exactness for keeping a datasource runnable; see `_java_double_to_string` for why that
-    trade is unnecessary in practice.
+    rather than guess at a rendering, since an invented one would feed the de-duplication hash and
+    silently decide which of a set of duplicate rows gets published.
 
     Args:
         name: column to render.
