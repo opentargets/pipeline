@@ -104,6 +104,17 @@ def test_unrecognised_format_raises(tmp_path: Path) -> None:
         read_dataset(str(tmp_path), format='csv')
 
 
+def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
+    """A glob raises loudly rather than silently stripping to the containing directory.
+
+    Stripping would work for `*.parquet` but silently WIDEN a selective pattern like
+    `part-0*.parquet` to the whole directory -- a silent wrong-data bug, worse than a loud
+    failure.
+    """
+    with pytest.raises(ValueError, match='looks like a glob'):
+        read_dataset(str(tmp_path / '*.parquet'))
+
+
 def _codecs(path: Path) -> set[str]:
     """The compression codecs actually recorded in a parquet file's metadata."""
     import pyarrow.parquet as pq

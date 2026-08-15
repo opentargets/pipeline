@@ -90,11 +90,18 @@ def read_dataset(
         LazyFrame of the dataset in its source columns and dtypes.
 
     Raises:
-        ValueError: for an unrecognised `format`, a directory with no readable parts, or a schema
-            passed with parquet format.
+        ValueError: for an unrecognised `format`, a glob passed as `path`, a directory with no
+            readable parts, or a schema passed with parquet format.
     """
     if format not in _GLOB_FOR_FORMAT:
         msg = f'unrecognised format {format!r} for {path!r}, expected "parquet" or "ndjson"'
+        raise ValueError(msg)
+
+    if any(char in path for char in '*?['):
+        msg = (
+            f'{path!r} looks like a glob; pass the containing directory instead. '
+            'read_dataset lists a directory itself and applies the _-prefix skip.'
+        )
         raise ValueError(msg)
 
     if schema is not None and format == 'parquet':
