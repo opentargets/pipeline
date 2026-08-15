@@ -15,6 +15,7 @@ entry is actually usable.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import polars as pl
@@ -22,6 +23,8 @@ import pytest
 import yaml
 
 from pts.transformers.utils.evidence_expressions import EXPRESSIONS
+
+nan = float('nan')
 
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
 
@@ -193,3 +196,266 @@ def test_direction_when_disease_present_is_null_safe() -> None:
     df = pl.DataFrame({'diseaseId': ['MONDO:1', None]})
     got = df.with_columns(direction_on_trait.alias('d'))['d'].to_list()
     assert got == ['risk', None]
+
+
+# ------------------------------------------------------------------------------------------------
+# Exhaustive one-case-per-field table -- all 41 registry fields (23 `score`, 9
+# `direction_on_trait`, 9 `direction_on_target`). Each `expected` was derived by running the
+# ORIGINAL SQL (git `834f1db7` `pts/config.yaml`, the last commit before the registry replaced it)
+# against real spark, not by hand-computing it or reading it off this module -- that would just
+# make the test a mirror of the code it exists to pin. `score` fields were run through
+# `CAST(... AS DOUBLE)` and, for `crispr`'s `linear_rescale` UDF specifically, with the UDF
+# registered exactly as production did (no explicit `returnType`, which pyspark 3.5.7 defaults to
+# StringType rather than inferring `DoubleType` from the function's `-> float` hint) -- both match
+# `calculate_evidence_score`'s `.withColumn('score', f.expr(score_expression).cast(DoubleType()))`
+# (`evidence.py:240`, before the pyspark module was deleted). `direction_on_trait` /
+# `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
+# `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
+# was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
+# on all 41.
+# ------------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ExpressionCase:
+    """One registry field, a small input frame, and its spark-derived expected output."""
+
+    datasource_id: str
+    field: str
+    data: dict[str, list]
+    expected: list
+
+
+CASES = [
+    _ExpressionCase('gwas_credible_sets', 'score', {'resourceScore': [0.5, 0.0, None]}, [0.5, 0.0, None]),
+    _ExpressionCase(
+        'expression_atlas',
+        'score',
+        {
+            'resourceScore': [0.001, None, nan, 0.0],
+            'log2FoldChangeValue': [-4.0, 2.0, 2.0, 1.0],
+            'log2FoldChangePercentileRank': [80.0, 50.0, 50.0, 1.0],
+        },
+        [0.096, 1.0, 1.0, 0.001],
+    ),
+    _ExpressionCase(
+        'eva',
+        'score',
+        {
+            'clinicalSignificances': [
+                ['pathogenic'], [None], ['unknown_value'], None, ['likely pathogenic', 'pathogenic']
+            ],
+            'confidence': [
+                'practice guideline',
+                'criteria provided, single submitter',
+                'unknown_conf',
+                None,
+                'criteria provided, single submitter',
+            ],
+        },
+        [1.0, 0.02, 0.0, 0.0, 0.92],
+    ),
+    _ExpressionCase(
+        'eva_somatic',
+        'score',
+        {
+            'clinicalSignificances': [
+                ['pathogenic'], [None], ['unknown_value'], None, ['likely pathogenic', 'pathogenic']
+            ],
+            'confidence': [
+                'practice guideline',
+                'criteria provided, single submitter',
+                'unknown_conf',
+                None,
+                'criteria provided, single submitter',
+            ],
+        },
+        [1.0, 0.02, 0.0, 0.0, 0.92],
+    ),
+    _ExpressionCase(
+        'eva',
+        'direction_on_trait',
+        {
+            'clinicalSignificances': [
+                ['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']
+            ]
+        },
+        ['risk', 'protect', None, None, 'risk'],
+    ),
+    _ExpressionCase(
+        'eva_somatic',
+        'direction_on_trait',
+        {
+            'clinicalSignificances': [
+                ['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']
+            ]
+        },
+        ['risk', 'protect', None, None, 'risk'],
+    ),
+    _ExpressionCase(
+        'eva',
+        'direction_on_target',
+        {'variantFunctionalConsequenceId': ['SO_0001589', 'SO_0001893', 'SO_9999999', None]},
+        ['LoF', 'LoF', None, None],
+    ),
+    _ExpressionCase(
+        'eva_somatic',
+        'direction_on_target',
+        {'variantFunctionalConsequenceId': ['SO_0001589', 'SO_0001893', 'SO_9999999', None]},
+        ['LoF', 'LoF', None, None],
+    ),
+    _ExpressionCase(
+        'uniprot_variants', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]
+    ),
+    _ExpressionCase(
+        'uniprot_literature', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]
+    ),
+    _ExpressionCase(
+        'clingen', 'score', {'confidence': ['Moderate', 'Strong', 'Unknown', None]}, [0.5, 1.0, None, None]
+    ),
+    _ExpressionCase('cancer_biomarkers', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
+    _ExpressionCase('reactome', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
+    _ExpressionCase('ot_crispr', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
+    _ExpressionCase(
+        'clinical_precedence',
+        'score',
+        {
+            'clinicalStage': ['PHASE_2_3', 'PRECLINICAL', 'PHASE_1', 'PHASE_2_3'],
+            'trialStopReasonCategories': [['Success', 'Negative'], [], ['unknown_reason'], None],
+        },
+        [0.25, None, None, 0.5],
+    ),
+    _ExpressionCase(
+        'clinical_precedence', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['protect', None]
+    ),
+    _ExpressionCase(
+        'clinical_precedence',
+        'direction_on_target',
+        {'actionType': ['INHIBITOR', 'AGONIST', 'UNKNOWN', None]},
+        ['LoF', 'GoF', None, None],
+    ),
+    _ExpressionCase('impc', 'score', {'resourceScore': [50.0, 0.0, None]}, [0.5, 0.0, None]),
+    _ExpressionCase('impc', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
+    _ExpressionCase('impc', 'direction_on_target', {'diseaseId': ['MONDO:1', None]}, ['LoF', None]),
+    _ExpressionCase(
+        'orphanet', 'score', {'confidence': ['Assessed', 'Not yet assessed', 'Unknown', None]}, [1.0, 0.5, None, None]
+    ),
+    _ExpressionCase('orphanet', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
+    _ExpressionCase(
+        'orphanet',
+        'direction_on_target',
+        {'variantFunctionalConsequenceId': ['SO_0002053', 'SO_0002054', 'SO_XXXX', None]},
+        ['GoF', 'LoF', None, None],
+    ),
+    _ExpressionCase(
+        'gene2phenotype',
+        'score',
+        {'confidence': ['definitive', 'moderate', 'limited', 'unknown', None]},
+        [1.0, 0.5, 0.01, None, None],
+    ),
+    _ExpressionCase('gene2phenotype', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
+    _ExpressionCase(
+        'gene2phenotype',
+        'direction_on_target',
+        {'variantFunctionalConsequenceId': ['SO_0002315', 'SO_0002317', 'SO_XXXX', None]},
+        ['GoF', 'LoF', None, None],
+    ),
+    _ExpressionCase(
+        'intogen', 'score', {'resourceScore': [0.1, 1e-10, 0.0, None, nan]}, [0.25, 1.0, 1.0, None, None]
+    ),
+    _ExpressionCase('intogen', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
+    _ExpressionCase(
+        'intogen',
+        'direction_on_target',
+        {
+            'mutatedSamples': [
+                [{'functionalConsequenceId': 'SO_0002054'}],
+                [{'functionalConsequenceId': 'SO_0002053'}],
+                [{'functionalConsequenceId': None}],
+                None,
+                [],
+            ]
+        },
+        ['LoF', 'GoF', None, None, None],
+    ),
+    _ExpressionCase(
+        'gene_burden', 'score', {'resourceScore': [1e-7, 1e-17, 0.0, None, nan]}, [0.25, 1.0, 1.0, None, None]
+    ),
+    _ExpressionCase(
+        'gene_burden',
+        'direction_on_trait',
+        {
+            'oddsRatio': [2.0, 0.5, None, None, None, 1.0],
+            'beta': [None, None, 1.0, -1.0, None, None],
+        },
+        ['risk', 'protect', 'risk', 'protect', None, None],
+    ),
+    _ExpressionCase('gene_burden', 'direction_on_target', {'dummy': ['x', None]}, ['LoF', 'LoF']),
+    _ExpressionCase(
+        'crispr_screen',
+        'score',
+        {'resourceScore': [0.5, 0.005, 0.0, -1.0, None, nan]},
+        [0.0, 1.0, 1.0, 1.0, None, None],
+    ),
+    _ExpressionCase(
+        'europepmc', 'score', {'resourceScore': [50.0, 150.0, 0.0, None, nan]}, [0.5, 1.0, 0.0, 1.0, 1.0]
+    ),
+    _ExpressionCase(
+        'genomics_england', 'score', {'confidence': ['amber', 'green', 'red', None]}, [0.5, 1.0, None, None]
+    ),
+    _ExpressionCase('crispr', 'score', {'resourceScore': [0.0, 41.5, 100.0, 150.0]}, [0.415, 0.415, 1.0, 1.0]),
+    _ExpressionCase('cancer_gene_census', 'score', {'resourceScore': [0.5, None]}, [0.5, None]),
+    _ExpressionCase('cancer_gene_census', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
+    _ExpressionCase(
+        'cancer_gene_census',
+        'direction_on_target',
+        {'TSorOncogene': ['oncogene', 'tsg', 'bivalent', None]},
+        ['GoF', 'LoF', None, None],
+    ),
+    _ExpressionCase(
+        'encore',
+        'score',
+        {'geneticInteractionPValue': [1.0, 0.01, 0.0, None, nan]},
+        [0.0, 1.0, 1.0, None, None],
+    ),
+    _ExpressionCase('ot_crispr_validation', 'score', {'resourceScore': [0.3, None]}, [0.3, None]),
+]
+
+
+def _assert_matches(got: list, expected: list) -> None:
+    """Element-wise compare, tolerating float rounding and null."""
+    assert len(got) == len(expected)
+    for value, exp in zip(got, expected, strict=True):
+        if exp is None:
+            assert value is None
+        elif isinstance(exp, float):
+            assert value == pytest.approx(exp)
+        else:
+            assert value == exp
+
+
+@pytest.mark.parametrize('case', CASES, ids=lambda c: f'{c.datasource_id}.{c.field}')
+def test_registry_expression_matches_spark(case: _ExpressionCase) -> None:
+    entry = EXPRESSIONS[case.datasource_id]
+    expr = getattr(entry, case.field)
+    assert expr is not None
+    df = pl.DataFrame(case.data)
+    got = df.with_columns(expr.alias('out'))['out'].to_list()
+    _assert_matches(got, case.expected)
+
+
+def test_case_table_covers_every_registry_field() -> None:
+    """The table above is exhaustive, not just large.
+
+    Every `(datasource_id, field)` in the registry has exactly one case, and there is nothing in
+    the table that isn't in the registry.
+    """
+    registry_fields = {
+        (datasource_id, field)
+        for datasource_id, entry in EXPRESSIONS.items()
+        for field in ('score', 'direction_on_trait', 'direction_on_target')
+        if getattr(entry, field) is not None
+    }
+    table_fields = {(case.datasource_id, case.field) for case in CASES}
+    assert len(CASES) == len(table_fields), 'duplicate (datasource_id, field) in CASES'
+    assert table_fields == registry_fields
