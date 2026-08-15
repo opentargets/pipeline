@@ -19,6 +19,7 @@ import polars as pl
 import polars_hash as plh
 import pytest
 
+from pts.schemas.evidence import evidence_schema
 from pts.transformers.utils.evidence import (
     DATE_COLUMNS,
     QC_COLUMN,
@@ -28,7 +29,6 @@ from pts.transformers.utils.evidence import (
     UnsupportedIdentifierField,
     spark_cast_to_string,
 )
-from pts.transformers.utils.schemas import load_spark_schema_as_polars
 from pts.transformers.utils.validation_lut import (
     build_disease_lut,
     build_publication_lut,
@@ -43,7 +43,7 @@ TARGET_SCHEMA = {
     'hallmarks': pl.Struct({'attributes': pl.List(pl.Struct({'description': pl.String}))}),
 }
 
-EVIDENCE_SCHEMA = load_spark_schema_as_polars('evidence.json')
+EVIDENCE_SCHEMA = evidence_schema
 
 
 def _write_parquet(directory: Path, frame: pl.DataFrame) -> str:

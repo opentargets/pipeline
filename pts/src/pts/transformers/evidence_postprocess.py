@@ -25,9 +25,9 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.evidence import evidence_schema
 from pts.transformers.utils.evidence import Evidence
 from pts.transformers.utils.evidence_expressions import EXPRESSIONS
-from pts.transformers.utils.schemas import load_spark_schema_as_polars
 from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
 
 # `pl.PartitionBy.approximate_bytes_per_file` sizes to the estimated IN-MEMORY frame, not the
@@ -44,7 +44,7 @@ _TARGET_BYTES_PER_FILE = 2_450_000_000
 def _json_schema(source: str) -> dict[str, Any]:
     """The schema to pin for one json evidence part: every column it actually carries, typed.
 
-    A full `schema=load_spark_schema_as_polars('evidence.json')` pin does not just constrain
+    A full `schema=evidence_schema` pin does not just constrain
     dtypes, it MATERIALISES every one of the schema's 109 fields whether or not the source
     carries it -- measured: `reactome.json.gz`'s 12 real columns became 109 that way, filled with
     ~97 spurious all-null columns spark never produced (the published `evidence_reactome` output
@@ -59,10 +59,10 @@ def _json_schema(source: str) -> dict[str, Any]:
     (`infer_schema_length=None`), not a bounded sample: a bounded 5,000-row sample measurably
     missed one of `cosmic.json.gz`'s real 9 columns in a real run here, the same class of defect
     `validation_lut.LITERATURE_SCHEMA` exists to avoid. Each discovered column is then typed with
-    evidence.json's dtype where the column is one of its fields -- so casting downstream still
-    lands on evidence.json's type, and the leading-rows dtype bug can't recur for any column this
+    `evidence_schema`'s dtype where the column is one of its fields -- so casting downstream still
+    lands on that type, and the leading-rows dtype bug can't recur for any column this
     measurement covers -- or the inferred dtype otherwise, mapping an inferred Null (an all-null
-    column with no evidence.json field to borrow a type from) to String.
+    column with no `evidence_schema` field to borrow a type from) to String.
 
     Args:
         source: one json evidence part's path (plain or gzip -- polars decompresses gzip
@@ -73,7 +73,7 @@ def _json_schema(source: str) -> dict[str, Any]:
         sort below for why).
     """
     inferred = pl.scan_ndjson(source, infer_schema_length=None).collect_schema()
-    target_schema = load_spark_schema_as_polars('evidence.json')
+    target_schema = evidence_schema
     # Sorted by name, not `inferred`'s own order: passing this dict as `pl.scan_ndjson(schema=...)`
     # (`_scan_json_part`) also fixes the resulting frame's COLUMN ORDER, not just its dtypes -- and
     # that order must be alphabetical to match spark. Spark's json reader sorts inferred columns
@@ -142,7 +142,7 @@ def _parquet_parts(path: str) -> str | list[str]:
 
 
 def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
-    """Read one datasource's raw evidence, before harmonisation to the evidence.json schema.
+    """Read one datasource's raw evidence, before harmonisation to `evidence_schema`.
 
     Args:
         path: location of the evidence -- a directory of parquet parts (see `_parquet_parts`) or

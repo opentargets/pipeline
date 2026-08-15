@@ -28,7 +28,7 @@ from typing import Any, Literal
 import polars as pl
 import polars_hash as plh
 
-from pts.transformers.utils.schemas import load_spark_schema_as_polars
+from pts.schemas.evidence import evidence_schema
 
 QC_COLUMN = 'qualityControls'
 
@@ -232,7 +232,7 @@ def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     """Render a struct field or list element the way spark's nested `CAST(... AS STRING)` does.
 
     Recurses through `Struct` and `List` the same way `_harmonise_expr` recurses through the
-    target schema -- evidence.json's `biomarkers` is a `Struct` of `List(Struct)`, so a struct
+    target schema -- `evidence_schema`'s `biomarkers` is a `Struct` of `List(Struct)`, so a struct
     renderer that only handles one level deep cannot cover it. Measured against real spark
     (task-9-report.md), including that exact struct-of-list-of-struct shape: a null value at ANY
     nesting level -- a null leaf, a null nested list, or a null nested struct -- renders as the
@@ -244,7 +244,7 @@ def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     brackets, each leaf type's own rendering, and the null-anywhere-becomes-`'null'` rule); an
     arbitrary composition of them (e.g. a `List(Struct)` nested inside a `Struct` nested inside a
     `List`) is not separately re-measured for every possible shape, only verified for the one
-    real evidence.json needs (`biomarkers`) -- see the module's `_render_nested` spark-parity
+    real schema needs (`biomarkers`) -- see the module's `_render_nested` spark-parity
     test.
 
     Args:
@@ -270,7 +270,7 @@ def _render_nested(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
 
 
 def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
-    """Reproduce spark's `cast(x AS STRING)` for the `unique_fields` types evidence.json carries.
+    """Reproduce spark's `cast(x AS STRING)` for the `unique_fields` types `evidence_schema` carries.
 
     Every case is measured against real spark (task-8-report.md / task-9-report.md), not assumed:
 
@@ -284,7 +284,7 @@ def spark_cast_to_string(name: str, dtype: pl.DataType) -> pl.Expr:
       field as the literal token `null`, a null struct column as null.
     * `List(Struct(...))`: the two shapes above composed -- a struct element renders `{...}`
       nested inside the list's `[...]`.
-    * A `Struct`/`List` field can itself be a `List`/`Struct` (evidence.json's `biomarkers` is a
+    * A `Struct`/`List` field can itself be a `List`/`Struct` (`evidence_schema`'s `biomarkers` is a
       `Struct` of `List(Struct)`); `_render_nested` recurses to cover that.
 
     Anything else -- an unmeasured leaf dtype anywhere in the (possibly nested) shape -- raises
@@ -417,14 +417,14 @@ def _require_id_column(schema_names: list[str], method_name: str) -> None:
 
 @dataclass
 class Evidence:
-    """A lazy evidence frame carrying a quality-control column, harmonised to `evidence.json`."""
+    """A lazy evidence frame carrying a quality-control column, harmonised to `evidence_schema`."""
 
     lf: pl.LazyFrame
 
     def __post_init__(self) -> None:
         if QC_COLUMN not in self.lf.collect_schema().names():
             self.lf = self.lf.with_columns(pl.lit([], dtype=pl.List(pl.String)).alias(QC_COLUMN))
-        self.lf = _harmonise_to_schema(self.lf, load_spark_schema_as_polars('evidence.json'))
+        self.lf = _harmonise_to_schema(self.lf, evidence_schema)
 
     def validate_diseases(self, disease_lut: pl.DataFrame) -> Evidence:
         """Resolve `diseaseFromSourceMappedId` to `diseaseId`, flagging unmapped rows.

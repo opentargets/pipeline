@@ -14,7 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.utils import load_spark_schema_as_polars
+from pts.schemas.evidence import evidence_schema
 
 ASSOCIATION_MINIMAL_SCHEMA: dict[str, Any] = {
     'diseaseId': pl.String,
@@ -627,7 +627,6 @@ def _compute_metrics(
 
     scope_globs = list(settings.get('metric_scopes', ['/output/*', '/excluded/evidence/*']))
     rich_patterns = list(settings.get('rich_dataset_whitelist', []))
-    evidence_schema = load_spark_schema_as_polars('evidence.json')
 
     discovered = _discover_dataset_paths(data_root_uri, scope_globs, config)
     rich_dataset_list, minimal_dataset_list = _resolve_metric_lists(discovered, rich_patterns)

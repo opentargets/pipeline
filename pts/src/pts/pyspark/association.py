@@ -8,7 +8,8 @@ from pyspark.storagelevel import StorageLevel
 from pts.pyspark.associations_utils.association import Association
 from pts.pyspark.associations_utils.evidence import Evidence
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import parse_spark_schema
+from pts.pyspark.common.utils import polars_schema_to_spark
+from pts.schemas.evidence import evidence_schema
 
 
 def association(
@@ -34,7 +35,7 @@ def association(
     session = Session(app_name='timeseries', properties=properties)
 
     # Reading evidence data:
-    raw_evidence = session.load_data(source['evidence'], schema=parse_spark_schema('evidence.json'))
+    raw_evidence = session.load_data(source['evidence'], schema=polars_schema_to_spark(evidence_schema))
 
     # Reading disease data to generate indirect evidence:
     disease_df = session.load_data(source['disease'])

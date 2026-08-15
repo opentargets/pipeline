@@ -16,9 +16,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, _write_partitioned, evidence_postprocess
 from pts.transformers.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
-from pts.transformers.utils.schemas import load_spark_schema_as_polars
 
 
 def _write_parquet_dir(directory: Path, frame: pl.DataFrame) -> str:
@@ -183,9 +183,9 @@ def test_read_evidence_json_rejects_a_directory(tmp_path: Path) -> None:
 def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
     """The pinned schema must match the SOURCE's columns, not evidence.json's full 109 fields.
 
-    A full `schema=load_spark_schema_as_polars('evidence.json')` pin materialises every field
-    the schema knows about, whether or not the source carries it -- measured on real data,
-    `reactome.json.gz`'s 12 real columns became 109 that way. Two columns in, two columns out.
+    A full `schema=evidence_schema` pin materialises every field the schema knows about, whether
+    or not the source carries it -- measured on real data, `reactome.json.gz`'s 12 real columns
+    became 109 that way. Two columns in, two columns out.
     """
     rows = [{'targetFromSourceId': 't1', 'resourceScore': 0.5}]
     path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
@@ -193,8 +193,7 @@ def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
     schema = _json_schema(path)
 
     assert set(schema) == {'targetFromSourceId', 'resourceScore'}
-    full_schema_field_count = len(load_spark_schema_as_polars('evidence.json'))
-    assert len(schema) < full_schema_field_count
+    assert len(schema) < len(evidence_schema)
 
 
 def test_json_schema_prefers_the_evidence_json_dtype_for_a_known_column(tmp_path: Path) -> None:
@@ -203,7 +202,7 @@ def test_json_schema_prefers_the_evidence_json_dtype_for_a_known_column(tmp_path
 
     schema = _json_schema(path)
 
-    assert schema['resourceScore'] == load_spark_schema_as_polars('evidence.json')['resourceScore']
+    assert schema['resourceScore'] == evidence_schema['resourceScore']
     assert schema['resourceScore'] != pl.Int64
 
 
