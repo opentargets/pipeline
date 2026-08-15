@@ -913,8 +913,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gwas_credible_sets/gwas_credible_sets.parquet
-        evidence: output/evidence_gwas_credible_sets/evidence_gwas_credible_sets.parquet
+        failed_evidence: excluded/evidence/gwas_credible_sets
+        evidence: output/evidence_gwas_credible_sets
       settings:
         evidence_format: parquet
         datasource_id: gwas_credible_sets
@@ -934,8 +934,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/expression_atlas/expression_atlas.parquet
-        evidence: output/evidence_expression_atlas/evidence_expression_atlas.parquet
+        failed_evidence: excluded/evidence/expression_atlas
+        evidence: output/evidence_expression_atlas
       settings:
         evidence_format: json
         datasource_id: expression_atlas
@@ -975,8 +975,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/eva/eva.parquet
-        evidence: output/evidence_eva/evidence_eva.parquet
+        failed_evidence: excluded/evidence/eva
+        evidence: output/evidence_eva
       settings:
         evidence_format: json
         datasource_id: eva
@@ -997,8 +997,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/eva_somatic/eva_somatic.parquet
-        evidence: output/evidence_eva_somatic/evidence_eva_somatic.parquet
+        failed_evidence: excluded/evidence/eva_somatic
+        evidence: output/evidence_eva_somatic
       settings:
         evidence_format: json
         datasource_id: eva_somatic
@@ -1019,8 +1019,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/uniprot_variants/uniprot_variants.parquet
-        evidence: output/evidence_uniprot_variants/evidence_uniprot_variants.parquet
+        failed_evidence: excluded/evidence/uniprot_variants
+        evidence: output/evidence_uniprot_variants
       settings:
         evidence_format: json
         datasource_id: uniprot_variants
@@ -1043,8 +1043,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/uniprot_literature/uniprot_literature.parquet
-        evidence: output/evidence_uniprot_literature/evidence_uniprot_literature.parquet
+        failed_evidence: excluded/evidence/uniprot_literature
+        evidence: output/evidence_uniprot_literature
       settings:
         evidence_format: json
         datasource_id: uniprot_literature
@@ -1064,8 +1064,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/clingen/clingen.parquet
-        evidence: output/evidence_clingen/evidence_clingen.parquet
+        failed_evidence: excluded/evidence/clingen
+        evidence: output/evidence_clingen
       settings:
         datasource_id: clingen
         evidence_format: parquet
@@ -1087,8 +1087,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/cancer_biomarkers/cancer_biomarkers.parquet
-        evidence: output/evidence_cancer_biomarkers/evidence_cancer_biomarkers.parquet
+        failed_evidence: excluded/evidence/cancer_biomarkers
+        evidence: output/evidence_cancer_biomarkers
       settings:
         evidence_format: parquet
         datasource_id: cancer_biomarkers
@@ -1112,8 +1112,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/clinical_precedence/clinical_precedence.parquet
-        evidence: output/evidence_clinical_precedence/evidence_clinical_precedence.parquet
+        failed_evidence: excluded/evidence/clinical_precedence
+        evidence: output/evidence_clinical_precedence
       properties:
         spark.driver.memory: 8g
         spark.executor.memory: 8g
@@ -1138,8 +1138,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/reactome/reactome.parquet
-        evidence: output/evidence_reactome/evidence_reactome.parquet
+        failed_evidence: excluded/evidence/reactome
+        evidence: output/evidence_reactome
       settings:
         evidence_format: json
         datasource_id: reactome
@@ -1161,8 +1161,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/impc/impc.parquet
-        evidence: output/evidence_impc/evidence_impc.parquet
+        failed_evidence: excluded/evidence/impc
+        evidence: output/evidence_impc
       settings:
         evidence_format: parquet
         datasource_id: impc
@@ -1185,8 +1185,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/orphanet/orphanet.parquet
-        evidence: output/evidence_orphanet/evidence_orphanet.parquet
+        failed_evidence: excluded/evidence/orphanet
+        evidence: output/evidence_orphanet
       settings:
         evidence_format: parquet
         datasource_id: orphanet
@@ -1206,8 +1206,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gene2phenotype/gene2phenotype.parquet
-        evidence: output/evidence_gene2phenotype/evidence_gene2phenotype.parquet
+        failed_evidence: excluded/evidence/gene2phenotype
+        evidence: output/evidence_gene2phenotype
       settings:
         evidence_format: parquet
         datasource_id: gene2phenotype
@@ -1229,8 +1229,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/intogen/intogen.parquet
-        evidence: output/evidence_intogen/evidence_intogen.parquet
+        failed_evidence: excluded/evidence/intogen
+        evidence: output/evidence_intogen
       settings:
         evidence_format: parquet
         datasource_id: intogen
@@ -1250,8 +1250,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gene_burden/gene_burden.parquet
-        evidence: output/evidence_gene_burden/evidence_gene_burden.parquet
+        failed_evidence: excluded/evidence/gene_burden
+        evidence: output/evidence_gene_burden
       settings:
         evidence_format: parquet
         datasource_id: gene_burden
@@ -1274,8 +1274,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/crispr_screen/crispr_screen.parquet
-        evidence: output/evidence_crispr_screen/evidence_crispr_screen.parquet
+        failed_evidence: excluded/evidence/crispr_screen
+        evidence: output/evidence_crispr_screen
       settings:
         evidence_format: parquet
         datasource_id: crispr_screen
@@ -1295,8 +1295,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/europepmc/europepmc.parquet
-        evidence: output/evidence_europepmc/evidence_europepmc.parquet
+        failed_evidence: excluded/evidence/europepmc
+        evidence: output/evidence_europepmc
       settings:
         evidence_format: parquet
         datasource_id: europepmc
@@ -1316,8 +1316,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/panel_app/panel_app.parquet
-        evidence: output/evidence_genomics_england/evidence_genomics_england.parquet
+        failed_evidence: excluded/evidence/panel_app
+        evidence: output/evidence_genomics_england
       settings:
         evidence_format: parquet
         datasource_id: genomics_england
@@ -1338,8 +1338,8 @@ steps:
         disease_path: output/disease/
         publication_date_lut: input/literature/literature_export/
       destination:
-        failed_evidence: excluded/evidence/crispr/crispr.parquet
-        evidence: output/evidence_crispr/evidence_crispr.parquet
+        failed_evidence: excluded/evidence/crispr
+        evidence: output/evidence_crispr
       settings:
         evidence_format: parquet
         datasource_id: crispr
@@ -1358,8 +1358,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/cancer_gene_census/cancer_gene_census.parquet
-        evidence: output/evidence_cancer_gene_census/evidence_cancer_gene_census.parquet
+        failed_evidence: excluded/evidence/cancer_gene_census
+        evidence: output/evidence_cancer_gene_census
       settings:
         evidence_format: json
         datasource_id: cancer_gene_census
@@ -1378,8 +1378,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/ot_crispr/ot_crispr.parquet
-        evidence: output/evidence_ot_crispr/evidence_ot_crispr.parquet
+        failed_evidence: excluded/evidence/ot_crispr
+        evidence: output/evidence_ot_crispr
       settings:
         evidence_format: parquet
         datasource_id: ot_crispr
@@ -1403,8 +1403,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/encore/encore.parquet
-        evidence: output/evidence_encore/evidence_encore.parquet
+        failed_evidence: excluded/evidence/encore
+        evidence: output/evidence_encore
       settings:
         evidence_format: json
         datasource_id: encore
@@ -1427,8 +1427,8 @@ steps:
         disease_path: output/disease
         publication_date_lut: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/ot_crispr_validation/ot_crispr_validation.parquet
-        evidence: output/evidence_ot_crispr_validation/evidence_ot_crispr_validation.parquet
+        failed_evidence: excluded/evidence/ot_crispr_validation
+        evidence: output/evidence_ot_crispr_validation
       settings:
         evidence_format: json
         datasource_id: ot_crispr_validation

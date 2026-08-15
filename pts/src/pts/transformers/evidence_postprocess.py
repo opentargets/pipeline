@@ -31,6 +31,16 @@ from pts.transformers.utils.evidence_expressions import EXPRESSIONS
 from pts.transformers.utils.schemas import load_spark_schema_as_polars
 from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
 
+# `pl.PartitionBy.approximate_bytes_per_file` sizes to the estimated IN-MEMORY frame, not the
+# compressed on-disk parquet -- the two differ by roughly 8x for evidence. Calibrated on
+# `evidence_eva` (3,998,459 rows, the largest staged local output): its single-file parquet is
+# 254.8 MB on disk against a 2,085.8 MB `DataFrame.estimated_size()`, a 0.122 on-disk/in-memory
+# ratio. Confirmed by replicating that frame 5x and sinking through `pl.PartitionBy` at this
+# setting: the resulting parts land at 294-301 MB on disk (bar the final, smaller remainder part),
+# matching the 300 MB target. Revisit this constant if evidence's column mix (and so its
+# compression ratio) changes materially.
+_TARGET_BYTES_PER_FILE = 2_450_000_000
+
 
 def _json_parts(path: str) -> list[str]:
     """The ndjson file(s) making up one evidence source, whatever shape `path` is.
@@ -266,12 +276,23 @@ def evidence_postprocess(
     )
 
     # Two independent sink_parquet calls, not a persist-then-split like the pyspark
-    # implementation: polars 1.41.2 has no partitioned sink (`sink_parquet` takes one path),
-    # so every dataset is one file, and the largest published output (europepmc) is 9.03 GiB --
-    # too big to `.collect()` before splitting valid from invalid. This recomputes the upstream
-    # chain (LUT joins, hashing, scoring, direction-of-effect) twice; an accepted trade for
-    # bounded memory, to revisit if europepmc proves slow in practice.
+    # implementation: `.collect()`-ing once and splitting in memory doesn't bound memory, and the
+    # largest published output (europepmc) is 9.03 GiB. This recomputes the upstream chain (LUT
+    # joins, hashing, scoring, direction-of-effect) twice; an accepted trade for bounded memory,
+    # to revisit if europepmc proves slow in practice.
+    #
+    # `pl.PartitionBy` writes a directory of size-capped parts rather than one file -- a single
+    # 9.03 GiB europepmc file is not an acceptable release artifact. It is marked UNSTABLE in
+    # polars 1.41.2; checked empirically that it raises no runtime warning at either construction
+    # or sink time on this version, so nothing is suppressed here -- if a future polars upgrade
+    # starts emitting one, handle it deliberately rather than silencing it. A datasource under
+    # `_TARGET_BYTES_PER_FILE` in memory still gets exactly one part; nothing extra is needed for
+    # that, it falls out of `approximate_bytes_per_file` sizing (see its calibration comment).
     logger.info(f'writing valid evidence to {destination["evidence"]}')
-    processed.valid().sink_parquet(destination['evidence'])
+    processed.valid().sink_parquet(
+        pl.PartitionBy(destination['evidence'], approximate_bytes_per_file=_TARGET_BYTES_PER_FILE)
+    )
     logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    processed.invalid().sink_parquet(destination['failed_evidence'])
+    processed.invalid().sink_parquet(
+        pl.PartitionBy(destination['failed_evidence'], approximate_bytes_per_file=_TARGET_BYTES_PER_FILE)
+    )
