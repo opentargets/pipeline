@@ -105,3 +105,50 @@ def read_dataset(
     if format == 'parquet':
         return pl.scan_parquet(parts)
     return pl.scan_ndjson(parts, schema=schema)
+
+
+def write_dataset(
+    frame: pl.LazyFrame | pl.DataFrame,
+    path: str,
+    *,
+    approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
+) -> None:
+    """Write one dataset as a directory of size-capped zstd parquet parts.
+
+    Always a directory, never a single named file, so no dataset can outgrow its layout -- a
+    single 9.03 GiB output is not an acceptable release artifact, and before this only the
+    evidence step was protected from producing one.
+
+    `pl.PartitionBy` never clears `path`; it only ever ADDS numbered parts to whatever is already
+    there. So the destination is cleared first. Otter offers no delete for remote storage (there
+    is no `delete`/`remove`/`unlink` anywhere in its storage layer), so this clearing is
+    LOCAL-ONLY, which is sound because `release_uri` is per-release
+    (`gs://open-targets-pre-data-releases/<release_name>`) and a production destination is
+    therefore empty by construction. The case that actually recurs is a local re-run, which this
+    covers. Re-running a release into an ALREADY-POPULATED remote URI would leave stale parts;
+    that is a known limitation, stated here rather than silently relied upon.
+
+    Args:
+        frame: the data to write; a `DataFrame` is made lazy so there is one code path.
+        path: destination directory, used as given -- never a parent or a derived path.
+        approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
+            `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
+
+    Raises:
+        ValueError: if `path` exists and is not a directory. Every configured destination is a
+            directory; a file there means the layout is not what this expects, so it refuses
+            rather than deleting something it does not understand.
+    """
+    directory = Path(path)
+    if directory.exists():
+        if not directory.is_dir():
+            msg = f'expected destination {path!r} to be a directory (or not exist yet), found a file'
+            raise ValueError(msg)
+        for part in directory.glob('*.parquet'):
+            part.unlink()
+
+    lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    lf.sink_parquet(
+        pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),
+        compression='zstd',
+    )
