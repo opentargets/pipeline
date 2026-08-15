@@ -19,7 +19,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import read_dataset, write_dataset
 
 APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
 
@@ -98,7 +98,7 @@ def drug_molecule(
         excluded = clinical_report.clear()
 
     logger.info(f'Writing {excluded.height} excluded clinical reports to {destination["excluded"]}')
-    excluded.write_parquet(destination['excluded'], mkdir=True)
+    write_dataset(excluded, str(destination['excluded']))
 
     molecule = read_dataset(source['molecule'])
     chemical_probes = read_dataset(source['chemical_probes']).collect()
@@ -110,7 +110,7 @@ def drug_molecule(
     logger.info(f'Drug index has {output.height} molecules')
 
     logger.info(f'Writing drug index to {destination["output"]}')
-    output.write_parquet(destination['output'], mkdir=True)
+    write_dataset(output, str(destination['output']))
 
 
 def process_drug_index(

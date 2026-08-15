@@ -14,7 +14,7 @@ from clinical_mining.dataset.clinical_indication import (
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import read_dataset, write_dataset
 
 
 def clinical_target(
@@ -52,7 +52,7 @@ def clinical_target(
         excluded = reports.filter(pl.lit(False))
 
     logger.info(f'Writing excluded clinical reports to {destination["excluded"]}')
-    excluded.write_parquet(destination['excluded'], mkdir=True)
+    write_dataset(excluded, str(destination['excluded']))
 
     drug_max_stage = (
         # TODO: bring this from drug molecule AND treat phase iv/withdrawal as approval
@@ -107,4 +107,4 @@ def clinical_target(
         .join(drug_max_stage, 'drugId')
     )
     logger.info(f'Destination path: {destination["output"]}')
-    clinical_target.write_parquet(destination['output'], mkdir=True)
+    write_dataset(clinical_target, str(destination['output']))

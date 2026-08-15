@@ -5,6 +5,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.transformers.utils.dataset import write_dataset
+
 
 def expression_tissue(
     source: str,
@@ -27,5 +29,5 @@ def expression_tissue(
     output = pl.concat(tissue_list)
 
     # write the result locally
-    output.write_parquet(destination, compression='gzip')
+    write_dataset(output, destination)
     logger.info('transformation complete')
