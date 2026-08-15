@@ -18,8 +18,6 @@ polars `pl.Expr` per `datasourceId` for the caller to look up and pass straight 
 from __future__ import annotations
 
 import math
-import struct
-import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -50,25 +48,17 @@ class EvidenceFlags(StrEnum):
 
 
 class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condition, not an error type
-    """A `unique_fields` dtype (or value) without a verified spark string-cast rendering.
+    """A dtype `spark_cast_to_string` has no rendering for.
 
-    `spark_cast_to_string` feeds the sha1 that becomes the evidence `id`, a user-visible
-    identifier, so a wrong rendering silently changes ids. Raising here is deliberate: a loud
-    failure at config-load/run time is an acceptable outcome for an unmeasured type or value; a
-    wrong id is not. This is a VALUE-level check where it matters (`_java_double_to_string`'s
-    magnitude/subnormal guard) rather than a dtype-level one, so it costs the real datasources
-    nothing -- see that function's docstring for the measurements behind it.
+    Raising beats guessing: an unrenderable dtype means the frame carries something none of the
+    measured shapes cover, and inventing a rendering for it would silently feed the de-duplication
+    hash -- deciding which of a set of duplicate rows gets published.
+
+    Dtype-level only. The VALUE-level guards this class also used to serve (doubles too large to
+    render exactly like java, and low-popcount subnormals) were removed once matching the release's
+    evidence `id` stopped being a requirement: they killed whole datasources over a digit in an
+    identifier nobody diffs.
     """
-
-
-def _subnormal_mantissa_popcount(ax: float) -> int:
-    """The number of set bits in a positive subnormal double's mantissa.
-
-    A subnormal has biased exponent 0 and sign 0 (the input is already the absolute value), so
-    its raw IEEE-754 bit pattern *is* the mantissa -- no masking needed.
-    """
-    bits = struct.unpack('<Q', struct.pack('<d', ax))[0]
-    return bits.bit_count()
 
 
 def _java_double_to_string(x: float | None) -> str | None:
@@ -81,58 +71,31 @@ def _java_double_to_string(x: float | None) -> str | None:
     double -- the same guarantee `Double.toString` makes for ordinary doubles -- and reformatting
     those digits under spark's plain/scientific threshold instead of python's own.
 
-    That guarantee has two measured exceptions, both refused rather than guessed at -- a wrong
-    rendering here silently changes a published evidence id, and that is worse than an
-    unrunnable datasource:
+    That guarantee has two measured exceptions, where java's legacy algorithm is NOT
+    shortest-round-trip and this function's output therefore differs from spark's by a digit:
 
-    * Magnitudes at or above `1.7e16`: a dense fuzz run of 200,000+ random doubles against real
-      spark in `[1e15, 2e16)` found the same algorithm emitting extra, non-shortest digits
-      starting at `1.801526131658083e16` (e.g. spark's `1.802953665778383e16` renders
-      `'1.8029536657783832E16'`, one digit longer than the shortest round-trip
-      `'1.802953665778383E16'`). The onset is NOT a clean step function -- only a fraction of
-      values above it mismatch, most below it match -- so `1.7e16` is not "the boundary", it is
-      a cutoff with a full `1e15` of measured headroom below the smallest mismatch found: 0
-      mismatches in 85,297 actual samples `< 1.7e16` from that run, plus a dedicated 150,000-
-      sample dense re-check strictly inside `[1.6e16, 1.7e16)` (0 mismatches). An earlier version
-      of this guard used `1e15` -- conservative enough to also reject values like `1e15` and
-      `1.5e16` that render exactly; `1.7e16` keeps those exact while still refusing the range
-      that measurably diverges.
-    * Subnormal doubles (`0 < |x| < sys.float_info.min`) with a LOW-POPCOUNT mantissa: java's
-      legacy `Double.toString` algorithm is not shortest-round-trip for a subnormal whose 52-bit
-      mantissa has very few bits set -- e.g. `Double.MIN_VALUE` (mantissa `1`, `4.9e-324`) renders
-      `'4.9E-324'` in java but python's shortest round-trip repr is `'5.0E-324'`.
+    * Magnitudes at or above roughly `1.7e16`: a dense fuzz run of 200,000+ random doubles against
+      real spark found spark emitting extra, non-shortest digits starting at `1.801526131658083e16`
+      (e.g. `1.802953665778383e16` renders `'1.8029536657783832E16'` in spark, one digit longer
+      than the shortest round-trip `'1.802953665778383E16'`). The onset is not a clean step --
+      only a fraction of values above it diverge.
+    * Subnormals (`0 < |x| < sys.float_info.min`) whose 52-bit mantissa has popcount <= 3 -- e.g.
+      `Double.MIN_VALUE` renders `'4.9E-324'` in java against python's shortest round-trip
+      `'5.0E-324'`. Popcount predicts this, not magnitude: mismatches recur sparsely at every
+      subnormal magnitude, interleaved with same-magnitude values that render exactly
+      (`gene_burden.resourceScore`'s two real subnormals both have popcount 8 and are exact).
 
-      This is NOT a magnitude boundary the way the large-value guard is -- it was measured to
-      recur, sparsely, at every magnitude up to nearly `sys.float_info.min` (e.g. mantissa
-      `2**49`, value `2.781342323134e-309`, still mismatches), interleaved with values at the SAME
-      magnitude that render exactly (`gene_burden.resourceScore` carries two real subnormals,
-      `1.66880539388046e-308` and `5.498e-320`, both exact). A magnitude cutoff cannot separate
-      them: gene_burden's `5.498e-320` sits between two confirmed-mismatching mantissas
-      (`2**11=2048 -> 1.012e-320` and `2**14=16384 -> 8.095e-320`) at the same order of magnitude,
-      so any threshold that excludes those two also excludes gene_burden's real, correctly-
-      rendering value.
-
-      What actually predicts a mismatch is the mantissa's Hamming weight (popcount), not its
-      magnitude: every mismatch found across dense sequential sampling (mantissas 1..20,000),
-      targeted probing of every power of two up to `2**51`, and 2,000-sample-per-popcount random
-      fuzzing had mantissa popcount <= 3. A dedicated recheck at the boundary (20,000 random
-      samples each, random magnitudes) found popcount 3 still mismatches (147/20,000, 0.7%);
-      popcount 4, 5 and 6 each showed 0/20,000 (0/22,000 including the earlier pass). Both of
-      gene_burden's real values have popcount 8. A real biological score's mantissa is
-      effectively a random 52-bit pattern (popcount concentrated around 26); the probability of
-      one having popcount <= 3 by chance is on the order of 1e-11, so this guard, like the large-
-      magnitude one, costs nothing in practice for genuine data -- it exists for the deliberately
-      round test values (and any future ones) that hit it.
+    Both cases used to RAISE `UnsupportedIdentifierField`, on the reasoning that a silently wrong
+    evidence `id` was worse than an unrunnable datasource. That trade no longer holds: matching the
+    release's ids is not a requirement, so a datasource killed by an exotic double is now the
+    strictly worse outcome. Both now render normally -- the output is a valid shortest-round-trip
+    rendering, just not always digit-identical to java's.
 
     Args:
         x: the double value to render, or None.
 
     Returns:
         The spark-equivalent string rendering, or None for a null input.
-
-    Raises:
-        UnsupportedIdentifierField: if `|x| >= 1.7e16`, or `x` is a subnormal with mantissa
-            popcount <= 3.
     """
     if x is None:
         return None
@@ -145,19 +108,6 @@ def _java_double_to_string(x: float | None) -> str | None:
 
     negative = x < 0
     ax = -x if negative else x
-    if ax >= 1.7e16:
-        msg = (
-            f'spark_cast_to_string: double {x!r} has magnitude >= 1.7e16, outside the range '
-            'verified against spark -- see _java_double_to_string docstring'
-        )
-        raise UnsupportedIdentifierField(msg)
-    if ax < sys.float_info.min and _subnormal_mantissa_popcount(ax) <= 3:
-        msg = (
-            f'spark_cast_to_string: double {x!r} is a subnormal with a low-popcount mantissa, '
-            'outside the range verified against spark -- see _java_double_to_string docstring'
-        )
-        raise UnsupportedIdentifierField(msg)
-
     digits, point_pos = _shortest_round_trip_digits(ax)
     exponent = point_pos - 1
     body = _plain_decimal(digits, point_pos) if 1e-3 <= ax < 1e7 else _scientific_notation(digits, exponent)

@@ -354,31 +354,23 @@ class TestSparkCastToStringFloat:
         df = pl.DataFrame({'v': values}, schema={'v': pl.Float64})
         assert df.select(spark_cast_to_string('v', pl.Float64).alias('o'))['o'].to_list() == expected
 
-    def test_large_magnitude_raises_rather_than_guess(self) -> None:
-        # Measured (task-8-report.md): a 200,000-sample dense fuzz run against real spark in
-        # [1e15, 2e16) found the java rendering algorithm's first non-shortest-digit mismatch at
-        # 1.801526131658083e16 (spark '1.8029536657783832E16' vs shortest round-trip
-        # '1.802953665778383E16' for a nearby value) -- and the onset is not a clean cutoff, only
-        # some values past it mismatch. `1.7e16` is a cutoff with measured headroom (0 mismatches
-        # in 85,297 + 150,000 dense samples below it), not the literal boundary. No real
-        # resourceScore is ever this large, so raising here costs nothing in practice, and a
-        # wrong-but-plausible id is worse than an unrunnable datasource that never actually needs
-        # this path.
-        df = pl.DataFrame({'v': [1.7e16, 1.5e20, 1.7976931348623157e308]}, schema={'v': pl.Float64})
-        with pytest.raises(UnsupportedIdentifierField, match=r'1\.7e16'):
-            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+    @pytest.mark.parametrize('value', [1.7e16, 1.5e20, 1.7976931348623157e308])
+    def test_large_magnitude_renders_rather_than_killing_the_datasource(self, value: float) -> None:
+        # These used to raise UnsupportedIdentifierField. Measured (task-8-report.md), spark's own
+        # rendering above ~1.7e16 is not always shortest-round-trip -- e.g. it emits
+        # '1.8029536657783832E16' where the shortest round-trip is '1.802953665778383E16' -- so
+        # this function cannot promise a digit-identical match up here. It no longer needs to:
+        # matching the release's evidence `id` is not a requirement, which makes killing a whole
+        # datasource over one identifier digit the strictly worse outcome.
+        #
+        # What must still hold is that the rendering is FAITHFUL -- it round-trips to the same
+        # double, so distinct values keep distinct renderings and the de-duplication hash stays
+        # meaningful.
+        rendered = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64}).select(
+            spark_cast_to_string('v', pl.Float64).alias('o')
+        )['o'][0]
 
-    def test_subnormal_with_low_popcount_mantissa_raises_rather_than_guess(self) -> None:
-        # Measured (task-9-report.md, fix round 1): java's legacy Double.toString algorithm is
-        # not truly shortest-round-trip for a subnormal whose mantissa has very few bits set
-        # (e.g. Double.MIN_VALUE, mantissa 1, renders '4.9E-324' in java, but python's shortest
-        # round-trip repr is '5.0E-324'). Unlike the large-magnitude case, this is NOT a magnitude
-        # boundary -- real gene_burden.resourceScore values ARE subnormal and DO render exactly
-        # (see test_subnormal_with_ordinary_mantissa_matches_gene_burden below); only a mantissa
-        # with popcount <= 3 is refused.
-        df = pl.DataFrame({'v': [5e-324]}, schema={'v': pl.Float64})
-        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
-            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+        assert float(rendered) == value
 
     @pytest.mark.parametrize(
         'value',
@@ -393,12 +385,17 @@ class TestSparkCastToStringFloat:
             8.095e-320,  # mantissa 16384 (2**14)
         ],
     )
-    def test_every_measured_low_popcount_mantissa_raises(self, value: float) -> None:
-        # Every one of these was directly confirmed against real spark to mismatch
-        # (task-9-report.md); each has mantissa popcount <= 3.
-        df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
-        with pytest.raises(UnsupportedIdentifierField, match='subnormal'):
-            df.select(spark_cast_to_string('v', pl.Float64).alias('o'))
+    def test_low_popcount_subnormal_renders_rather_than_raising(self, value: float) -> None:
+        # Each of these was confirmed against real spark to render one digit differently from this
+        # function (task-9-report.md) -- java's legacy algorithm is not shortest-round-trip for a
+        # subnormal whose mantissa has very few bits set, e.g. Double.MIN_VALUE is '4.9E-324' in
+        # java against python's '5.0E-324'. They used to raise, which is what once blocked the
+        # whole gene_burden datasource; same reasoning as the large-magnitude case above.
+        rendered = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64}).select(
+            spark_cast_to_string('v', pl.Float64).alias('o')
+        )['o'][0]
+
+        assert float(rendered) == value
 
     def test_subnormal_with_ordinary_mantissa_matches_gene_burden(self) -> None:
         # The concrete regression this guard exists for: real gene_burden.resourceScore values in
@@ -685,16 +682,12 @@ class TestSparkParityForCastToString:
         assert got == expected
 
     def test_double_is_exact_immediately_below_the_1_7e16_cutoff(self, spark) -> None:
-        # Guards the measured cutoff itself: _java_double_to_string raises at |x| >= 1.7e16, a
-        # value chosen with a full 1e15 of headroom below the smallest real mismatch found
-        # (1.801526131658083e16, task-8-report.md). A dense 300-value sample seeded for
-        # determinism, concentrated right below the cutoff -- if the cutoff is ever NARROWED
-        # without re-measuring, a sample this dense just inside [1.6e16, 1.7e16) is likely to
-        # catch a real divergence (these values would start raising) rather than let it slip
-        # through untested. A WIDENED cutoff is caught by a different test:
-        # test_large_magnitude_raises_rather_than_guess pins that 1.7e16 itself still raises, so
-        # widening the threshold past it fails that test instead -- this fuzz test only samples
-        # values already below the cutoff, so it cannot observe a widening.
+        # 1.7e16 was where this function used to REFUSE to render; it now renders everywhere, so
+        # what remains worth pinning is that the rendering is still digit-exact against real spark
+        # right below where spark's own algorithm starts diverging (smallest measured mismatch:
+        # 1.801526131658083e16, task-8-report.md). A dense 300-value sample seeded for
+        # determinism: exactness here is a real property of the shared range, and this is the
+        # cheapest place to notice if a rewrite of the digit formatting ever breaks it.
         rng = random.Random(20260814)
         values = [rng.uniform(1.6, 1.699999) * 1e16 for _ in range(300)]
         rows = spark.createDataFrame([(v,) for v in values], 'v DOUBLE').selectExpr('CAST(v AS STRING) as s')
