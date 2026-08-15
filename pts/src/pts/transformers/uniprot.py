@@ -9,6 +9,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.transformers.utils.dataset import write_dataset
+
 _UNIPROT_SCHEMA = pl.Schema({
     'id': pl.String,
     'accessions': pl.List(pl.String),
@@ -227,4 +229,4 @@ def uniprot(
     df = pl.DataFrame(rows, schema=_UNIPROT_SCHEMA)
 
     logger.info(f'writing uniprot parquet to {destination}')
-    df.write_parquet(destination)
+    write_dataset(df, destination)

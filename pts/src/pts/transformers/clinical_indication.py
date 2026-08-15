@@ -8,7 +8,7 @@ from clinical_mining.dataset import ClinicalIndication
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import read_dataset, write_dataset
 
 
 def clinical_indication(
@@ -43,7 +43,7 @@ def clinical_indication(
         excluded = reports.filter(pl.lit(False))
 
     logger.info(f'Writing excluded clinical reports to {destination["excluded"]}')
-    excluded.write_parquet(destination['excluded'], mkdir=True)
+    write_dataset(excluded, str(destination['excluded']))
 
     indications = (
         ClinicalIndication
@@ -53,4 +53,4 @@ def clinical_indication(
     )
 
     logger.info(f'Destination path: {destination["output"]}')
-    indications.write_parquet(destination['output'], mkdir=True)
+    write_dataset(indications, str(destination['output']))

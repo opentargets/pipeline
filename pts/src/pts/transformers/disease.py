@@ -6,6 +6,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.transformers.utils.dataset import write_dataset
 
 _IAO_REPLACED_BY = 'http://purl.obolibrary.org/obo/IAO_0100001'
 _BPV_DTYPE = pl.List(pl.Struct({'pred': pl.String(), 'val': pl.String()}))
@@ -540,5 +541,5 @@ def disease(
     )
 
     # write the result
-    disease_index.write_parquet(destination, compression='gzip')
+    write_dataset(disease_index, destination)
     logger.info('transformation complete')

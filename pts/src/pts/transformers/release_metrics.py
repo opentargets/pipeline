@@ -757,6 +757,11 @@ def release_metrics(
     metrics = _compute_metrics(settings, config, run_id)
 
     logger.info(f'Writing metrics parquet to {destination["parquet"]}')
+    # Deliberately NOT write_dataset: this is a single release-root report artifact, not a
+    # dataset under output/ -- nothing globs it and nothing reads it back (the optional HF
+    # upload below serialises `metrics` straight to CSV, never from this file). write_dataset
+    # always produces a directory of NNNNNNNN.parquet parts, which here would turn
+    # metrics.parquet into a directory carrying a misleading .parquet-suffixed name.
     metrics.write_parquet(destination['parquet'], mkdir=True)
 
     if settings.get('upload_to_hf_hub'):

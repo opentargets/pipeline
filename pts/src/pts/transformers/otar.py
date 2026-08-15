@@ -15,7 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.otar import otar_schema
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import read_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
 
@@ -115,4 +115,4 @@ def otar(
     logger.info(f'Generated otar info for {result.height} diseases')
 
     logger.info(f'Writing otar output to {destination}')
-    result.write_parquet(destination)
+    write_dataset(result, destination)
