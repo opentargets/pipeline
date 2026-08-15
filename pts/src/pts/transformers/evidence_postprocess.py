@@ -58,7 +58,7 @@ def _json_schema(source: str) -> dict[str, Any]:
     The fix discovers the columns actually present with a FULL-file scan
     (`infer_schema_length=None`), not a bounded sample: a bounded 5,000-row sample measurably
     missed one of `cosmic.json.gz`'s real 9 columns in a real run here, the same class of defect
-    `validation_lut.LITERATURE_SCHEMA` exists to avoid. Each discovered column is then typed with
+    `pts.schemas.literature` exists to avoid. Each discovered column is then typed with
     `evidence_schema`'s dtype where the column is one of its fields -- so casting downstream still
     lands on that type, and the leading-rows dtype bug can't recur for any column this
     measurement covers -- or the inferred dtype otherwise, mapping an inferred Null (an all-null

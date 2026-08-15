@@ -219,7 +219,7 @@ def test_json_schema_keeps_a_column_outside_evidence_json(tmp_path: Path) -> Non
 def test_read_evidence_json_finds_a_column_absent_from_a_bounded_sample(tmp_path: Path) -> None:
     """A column that only appears past a bounded sample must not be inferred Null and dropped.
 
-    Same defect class `validation_lut.LITERATURE_SCHEMA` exists to avoid, here guarded by a
+    Same defect class `pts.schemas.literature` exists to avoid, here guarded by a
     full-file scan (`infer_schema_length=None`) rather than a named-column pin.
     """
     rows = [{'targetFromSourceId': f't{i}'} for i in range(200)]

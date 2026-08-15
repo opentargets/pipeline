@@ -28,21 +28,9 @@ from __future__ import annotations
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-LITERATURE_SOURCES = ['MED', 'PPR', 'AGR']
+from pts.schemas.literature import literature_schema
 
-# Polars infers a newline delimited json column's dtype from a sample of the leading
-# rows. `pmid` and `pmcid` are absent from the first rows of some parts of the real
-# literature export, which infers them as Null and then either fails the read or, under
-# `ignore_errors`, silently discards every value in the column — 386,627 pmids in one of
-# the 26.06 export's 56 parts. Pinning the columns the table needs makes the read
-# independent of where the nulls happen to fall, and lets the parts be read separately.
-LITERATURE_SCHEMA = {
-    'source': pl.String,
-    'pmid': pl.String,
-    'id': pl.String,
-    'pmcid': pl.String,
-    'firstPublicationDate': pl.String,
-}
+LITERATURE_SOURCES = ['MED', 'PPR', 'AGR']
 
 
 def _parts(path: str, pattern: str) -> list[str]:
@@ -164,7 +152,7 @@ def _publication_part(part: str) -> pl.DataFrame:
         # non-null value ('2005 Oct'), which raised ComputeError on a column this table never
         # even selects. `schema=` restricts parsing to exactly the five columns named, so no
         # other column's shape can break the read.
-        pl.read_ndjson(StorageHandle(part).open(), schema=LITERATURE_SCHEMA)
+        pl.read_ndjson(StorageHandle(part).open(), schema=literature_schema)
         .filter(pl.col('source').is_in(LITERATURE_SOURCES))
         .select(
             pl.col('firstPublicationDate').alias('publicationDate'),
