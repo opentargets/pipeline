@@ -228,5 +228,5 @@ def uniprot(
     logger.info('creating dataframe from parsed uniprot data')
     df = pl.DataFrame(rows, schema=_UNIPROT_SCHEMA)
 
-    logger.info(f'writing uniprot parquet to {destination}')
+    logger.info(f'writing uniprot dataset to {destination}')
     write_dataset(df, destination)
