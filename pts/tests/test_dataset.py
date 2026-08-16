@@ -9,7 +9,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.utils.dataset import read_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -24,13 +24,13 @@ def test_read_parquet_from_a_single_file(tmp_path: Path) -> None:
     path = tmp_path / 'one.parquet'
     pl.DataFrame({'a': [1, 2]}).write_parquet(path)
 
-    assert read_dataset(str(path)).collect().height == 2
+    assert scan_dataset(str(path)).collect().height == 2
 
 
 def test_read_parquet_from_a_directory_of_parts(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', pl.DataFrame({'a': [1]}), pl.DataFrame({'a': [2]}))
 
-    assert sorted(read_dataset(path).collect()['a'].to_list()) == [1, 2]
+    assert sorted(scan_dataset(path).collect()['a'].to_list()) == [1, 2]
 
 
 def test_read_parquet_skips_underscore_prefixed_files(tmp_path: Path) -> None:
@@ -42,7 +42,7 @@ def test_read_parquet_skips_underscore_prefixed_files(tmp_path: Path) -> None:
     path = _write_parts(directory, pl.DataFrame({'a': [1]}))
     pl.DataFrame({'a': [999]}).write_parquet(directory / '_hidden.parquet')
 
-    assert read_dataset(path).collect()['a'].to_list() == [1]
+    assert scan_dataset(path).collect()['a'].to_list() == [1]
 
 
 def test_read_parquet_raises_when_a_directory_has_no_parts(tmp_path: Path) -> None:
@@ -51,14 +51,14 @@ def test_read_parquet_raises_when_a_directory_has_no_parts(tmp_path: Path) -> No
     pl.DataFrame({'a': [1]}).write_parquet(directory / '_only_hidden.parquet')
 
     with pytest.raises(ValueError, match=r'no .* files found'):
-        read_dataset(str(directory))
+        scan_dataset(str(directory))
 
 
 def test_read_ndjson_from_a_gzipped_file(tmp_path: Path) -> None:
     path = tmp_path / 'x.json.gz'
     path.write_bytes(gzip.compress(json.dumps({'a': 'v'}).encode()))
 
-    frame = read_dataset(str(path), format='ndjson').collect()
+    frame = scan_dataset(str(path), format='ndjson').collect()
 
     assert frame['a'].to_list() == ['v']
 
@@ -69,7 +69,7 @@ def test_read_ndjson_from_a_directory_of_parts(tmp_path: Path) -> None:
     for index, value in enumerate(['a', 'b']):
         (directory / f'part-{index}.json.gz').write_bytes(gzip.compress(json.dumps({'v': value}).encode()))
 
-    frame = read_dataset(str(directory), format='ndjson').collect()
+    frame = scan_dataset(str(directory), format='ndjson').collect()
 
     assert sorted(frame['v'].to_list()) == ['a', 'b']
 
@@ -80,7 +80,7 @@ def test_schema_pins_dtypes_and_column_order(tmp_path: Path) -> None:
     path.write_bytes(gzip.compress(json.dumps({'z': 1, 'a': 2}).encode()))
 
     schema = {'a': pl.String, 'z': pl.String}
-    frame = read_dataset(str(path), format='ndjson', schema=schema).collect()
+    frame = scan_dataset(str(path), format='ndjson', schema=schema).collect()
 
     assert frame.columns == ['a', 'z']
     assert frame.dtypes == [pl.String, pl.String]
@@ -96,12 +96,12 @@ def test_schema_with_parquet_raises_rather_than_being_ignored(tmp_path: Path) ->
     pl.DataFrame({'a': [1]}).write_parquet(path)
 
     with pytest.raises(ValueError, match='only applied to ndjson'):
-        read_dataset(str(path), schema={'a': pl.String})
+        scan_dataset(str(path), schema={'a': pl.String})
 
 
 def test_unrecognised_format_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='unrecognised format'):
-        read_dataset(str(tmp_path), format='csv')
+        scan_dataset(str(tmp_path), format='csv')
 
 
 def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
@@ -112,7 +112,7 @@ def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
     failure.
     """
     with pytest.raises(ValueError, match='looks like a glob'):
-        read_dataset(str(tmp_path / '*.parquet'))
+        scan_dataset(str(tmp_path / '*.parquet'))
 
 
 def _codecs(path: Path) -> set[str]:
@@ -189,4 +189,4 @@ def test_round_trip(tmp_path: Path) -> None:
 
     write_dataset(frame, path)
 
-    assert read_dataset(path).collect().sort('a').equals(frame.sort('a'))
+    assert scan_dataset(path).collect().sort('a').equals(frame.sort('a'))

@@ -8,7 +8,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
-from pts.transformers.utils.dataset import read_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
 def disease_phenotype(
@@ -28,7 +28,7 @@ def disease_phenotype(
 
     # load the sources
     logger.debug('loading disease dataset')
-    df_disease = read_dataset(source['disease_path']).collect()
+    df_disease = scan_dataset(source['disease_path']).collect()
     logger.debug('loading phenotype dataset')
     df_phenotype = pl.read_csv(
         source['phenotype_path'],

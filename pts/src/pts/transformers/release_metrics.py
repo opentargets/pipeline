@@ -15,7 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.utils import load_spark_schema_as_polars
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import scan_dataset
 
 ASSOCIATION_MINIMAL_SCHEMA: dict[str, Any] = {
     'diseaseId': pl.String,
@@ -430,7 +430,7 @@ def _read_evidence_with_canonical_schema_from_paths(
 ) -> pl.DataFrame:
     """Read multiple evidence parquet path globs using the canonical evidence schema.
 
-    Deliberately not `read_dataset`: evidence files from different datasources vary in which
+    Deliberately not `scan_dataset`: evidence files from different datasources vary in which
     columns they carry, so this needs polars' `missing_columns='insert'` / `extra_columns='ignore'`
     reconciliation against `schema` to union them. The shared reader does not expose that -- its
     `schema` argument only pins ndjson inference and it refuses schema+parquet outright, precisely
@@ -451,7 +451,7 @@ def _read_evidence_with_canonical_schema_from_paths(
 def _read_associations_minimal(path: str) -> pl.DataFrame:
     """Read only lightweight association columns needed for metrics.
 
-    Deliberately not `read_dataset`, for the same reason as `_read_evidence_with_canonical_schema_
+    Deliberately not `scan_dataset`, for the same reason as `_read_evidence_with_canonical_schema_
     from_paths` above: this needs `missing_columns='insert'` / `extra_columns='ignore'` to reconcile
     `ASSOCIATION_MINIMAL_SCHEMA` against files that may not carry every column, which the shared
     reader's parquet path does not support.
@@ -467,12 +467,12 @@ def _read_associations_minimal(path: str) -> pl.DataFrame:
 
 def _load_parquet_dataset(path: str) -> pl.DataFrame:
     """Read a dataset parquet path (or directory) eagerly into a dataframe."""
-    return read_dataset(path).collect()
+    return scan_dataset(path).collect()
 
 
 def _count_parquet_rows(path: str) -> int:
     """Count rows from a parquet dataset lazily without loading full data."""
-    return int(read_dataset(path).select(pl.len()).collect().item())
+    return int(scan_dataset(path).select(pl.len()).collect().item())
 
 
 def _single_discovered_path(

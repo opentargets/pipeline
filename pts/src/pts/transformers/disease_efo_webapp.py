@@ -4,7 +4,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import scan_dataset
 
 
 def disease_efo_webapp(
@@ -15,7 +15,7 @@ def disease_efo_webapp(
 ) -> None:
     # load the ontology
     logger.debug('loading efo')
-    initial = read_dataset(source).collect()
+    initial = scan_dataset(source).collect()
 
     logger.debug('starting transformation')
 

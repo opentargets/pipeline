@@ -15,7 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.otar import otar_schema
-from pts.transformers.utils.dataset import read_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
 
@@ -106,7 +106,7 @@ def otar(
 ) -> None:
     """Generate OTAR projects dataset."""
     logger.info('Reading otar inputs')
-    disease = read_dataset(source['diseases']).collect()
+    disease = scan_dataset(source['diseases']).collect()
     meta = _read_csv(source['otar_meta'])
     lookup = _read_csv(source['otar_project_to_efo'])
     logger.info(f'{meta.height} projects, {lookup.height} project to efo mappings, {disease.height} diseases')
