@@ -84,7 +84,7 @@ def ensembl(
         tmp_contents.write(jq.stdout)
     logger.debug(f'transformed data written into {t.absolute}')
 
-    logger.debug(f'transforming ndjson into parquet at {destination}')
+    logger.debug(f'writing dataset to {destination}')
     frame = (
         pl
         .read_ndjson(t.absolute, schema=schema_ndjson)
