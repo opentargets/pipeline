@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
+from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 
 #: Target size per written part, measured against the IN-MEMORY frame rather than the compressed
@@ -69,7 +70,7 @@ def _parts(path: str, format: Literal['parquet', 'ndjson']) -> str | list[str]:
     return parts
 
 
-def read_dataset(
+def scan_dataset(
     path: str,
     *,
     format: Literal['parquet', 'ndjson'] = 'parquet',
@@ -100,7 +101,7 @@ def read_dataset(
     if any(char in path for char in '*?['):
         msg = (
             f'{path!r} looks like a glob; pass the containing directory instead. '
-            'read_dataset lists a directory itself and applies the _-prefix skip.'
+            'scan_dataset lists a directory itself and applies the _-prefix skip.'
         )
         raise ValueError(msg)
 
@@ -146,6 +147,12 @@ def write_dataset(
             directory; a file there means the layout is not what this expects, so it refuses
             rather than deleting something it does not understand.
     """
+    if '://' in path:
+        logger.warning(
+            f'{path} is remote; stale parts cannot be cleared (otter has no remote delete). '
+            'A retry into a populated destination can leave parts from the previous attempt.'
+        )
+
     directory = Path(path)
     if directory.exists():
         if not directory.is_dir():

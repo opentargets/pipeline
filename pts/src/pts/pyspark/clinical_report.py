@@ -27,6 +27,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from pts.transformers.utils import update_quality_flag
+from pts.transformers.utils.dataset import write_dataset
 
 
 class ClinicalReportFlags(StrEnum):
@@ -179,7 +180,7 @@ def clinical_report(
     )
 
     logger.info(f'destination paths: {destination}')
-    output.df.write_parquet(destination['output'], mkdir=True)
+    write_dataset(output.df, destination['output'])
 
 
 def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:

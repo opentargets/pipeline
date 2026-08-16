@@ -6,7 +6,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.utils.dataset import read_dataset
+from pts.transformers.utils.dataset import scan_dataset
 
 
 def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
@@ -160,10 +160,10 @@ def vep_view(
             compatibility).
     """
     logger.info('Loading input data')
-    credible_set = process_credible_set(read_dataset(source['credible_set']))
-    study = process_study(read_dataset(source['study_table']))
-    l2g = process_l2g(read_dataset(source['l2g_table']))
-    biosample = process_biosample(read_dataset(source['biosample']))
+    credible_set = process_credible_set(scan_dataset(source['credible_set']))
+    study = process_study(scan_dataset(source['study_table']))
+    l2g = process_l2g(scan_dataset(source['l2g_table']))
+    biosample = process_biosample(scan_dataset(source['biosample']))
 
     logger.info('Joining and processing data')
     result = (
