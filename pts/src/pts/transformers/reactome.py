@@ -14,10 +14,9 @@ import networkx as nx
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.reactome import reactome_schema
-from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HUMAN = 'Homo sapiens'
 
@@ -29,15 +28,14 @@ def _read_tsv(path: str | Path, columns: list[str]) -> pl.DataFrame:
     free text and a double quote in one would be a literal character, not a
     delimiter. `quote_char=None` keeps it that way.
     """
-    h = StorageHandle(path)
-    return pl.read_csv(
-        h.open(),
-        separator='\t',
+    return scan_dataset(
+        str(path),
+        format='tsv',
         has_header=False,
         quote_char=None,
         new_columns=columns,
         schema_overrides=dict.fromkeys(columns, pl.String),
-    )
+    ).collect()
 
 
 def _clean_pathways(df: pl.DataFrame) -> pl.DataFrame:
