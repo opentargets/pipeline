@@ -66,7 +66,9 @@ def evidence_postprocess(
     postprocessor = EvidencePostprocessor(
         datasource_id=datasource_id,
         unique_fields=settings['unique_fields'],
-        expressions=expressions,
+        score=expressions.score,
+        direction_on_trait=expressions.direction_on_trait,
+        direction_on_target=expressions.direction_on_target,
         excluded_biotypes=settings.get('excluded_biotypes'),
     )
 

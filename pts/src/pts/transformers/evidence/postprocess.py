@@ -8,8 +8,9 @@ It reads nothing and writes nothing: `run` takes a `LazyFrame` and returns `Lazy
 that can produce a frame can use it, whether the evidence came off storage or was generated in
 memory.
 
-It also does not import `EXPRESSIONS`. Expressions arrive as a parameter, so whoever constructs the
-postprocessor decides where they come from -- a central registry or a datasource's own definition.
+It also imports nothing from `expressions`. Each expression arrives as its own parameter, so
+whoever constructs the postprocessor decides where they come from -- a central registry or a
+datasource's own definition -- and the recipe depends on neither.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from dataclasses import dataclass
 import polars as pl
 
 from pts.transformers.evidence.core import Evidence
-from pts.transformers.evidence.expressions import DatasourceExpressions
 
 
 @dataclass(frozen=True)
@@ -55,13 +55,19 @@ class EvidencePostprocessor:
         datasource_id: the `datasourceId` to keep. Rows carrying any other value are DROPPED, not
             flagged, so they appear in neither output.
         unique_fields: the fields whose contents identify an evidence row, used to derive `id`.
-        expressions: the score and direction-of-effect expressions for this datasource.
+        score: expression producing the evidence score.
+        direction_on_trait: expression producing the direction of effect on the trait, or `None`
+            to leave it unset.
+        direction_on_target: expression producing the direction of effect on the target, or `None`
+            to leave it unset.
         excluded_biotypes: target biotypes to flag as invalid, for datasources that restrict them.
     """
 
     datasource_id: str
     unique_fields: list[str]
-    expressions: DatasourceExpressions
+    score: pl.Expr
+    direction_on_trait: pl.Expr | None = None
+    direction_on_target: pl.Expr | None = None
     excluded_biotypes: list[str] | None = None
 
     def run(self, lf: pl.LazyFrame, luts: ValidationLuts) -> PostprocessedEvidence:
@@ -88,9 +94,9 @@ class EvidencePostprocessor:
             .validate_uniqueness()
             .resolve_publication_date(luts.publication)
             .resolve_evidence_date()
-            .calculate_evidence_score(self.expressions.score)
-            .assign_direction_on_trait(self.expressions.direction_on_trait)
-            .assign_direction_on_target(self.expressions.direction_on_target, luts.target)
+            .calculate_evidence_score(self.score)
+            .assign_direction_on_trait(self.direction_on_trait)
+            .assign_direction_on_target(self.direction_on_target, luts.target)
             .hash_long_variant_identifiers()
         )
         return PostprocessedEvidence(valid=processed.valid(), invalid=processed.invalid())

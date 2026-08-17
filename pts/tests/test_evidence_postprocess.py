@@ -18,7 +18,6 @@ import polars as pl
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.core import QC_COLUMN, Evidence, EvidenceFlags
-from pts.transformers.evidence.expressions import DatasourceExpressions
 from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -59,7 +58,7 @@ def _postprocessor(**overrides: object) -> EvidencePostprocessor:
     defaults: dict[str, object] = {
         'datasource_id': 'eva',
         'unique_fields': ['targetFromSourceId', 'diseaseFromSourceMappedId'],
-        'expressions': DatasourceExpressions(score=pl.col('resourceScore')),
+        'score': pl.col('resourceScore'),
     }
     return EvidencePostprocessor(**(defaults | overrides))  # type: ignore[arg-type]
 
@@ -105,14 +104,14 @@ def test_an_unresolvable_target_is_split_into_the_invalid_half() -> None:
 
 
 def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
-    """Two postprocessors differing ONLY in their expressions produce different scores.
+    """Two postprocessors differing ONLY in their score expression produce different scores.
 
     Pins that the recipe never consults `EXPRESSIONS`, so a caller can supply its own.
     """
     luts, raw = _luts(), _raw()
 
     from_column = _postprocessor().run(raw, luts).valid.collect()
-    constant = _postprocessor(expressions=DatasourceExpressions(score=pl.lit(0.25))).run(raw, luts).valid.collect()
+    constant = _postprocessor(score=pl.lit(0.25)).run(raw, luts).valid.collect()
 
     assert from_column['score'].to_list() == [0.5]
     assert constant['score'].to_list() == [0.25]
