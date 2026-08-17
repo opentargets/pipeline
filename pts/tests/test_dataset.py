@@ -33,14 +33,27 @@ def test_read_parquet_from_a_directory_of_parts(tmp_path: Path) -> None:
     assert sorted(scan_dataset(path).collect()['a'].to_list()) == [1, 2]
 
 
-def test_read_parquet_skips_underscore_prefixed_files(tmp_path: Path) -> None:
-    """Spark treats `_`-prefixed files as metadata and skips them; a bare glob does not.
+def test_read_parquet_does_not_skip_underscore_prefixed_files(tmp_path: Path) -> None:
+    """Deliberate: `_`-prefixed files are NOT excluded, and this pins that.
 
-    Measured: planting a `_hidden.parquet` in a real directory made it contribute rows.
+    Spark's own markers (`_SUCCESS`, `_common_metadata`) carry no data extension, so the
+    per-format glob already misses them, and we control how these datasets are produced. A
+    `_`-prefixed parquet would therefore have to be put there on purpose. If someone reintroduces
+    filtering, this test fails and they have to justify it rather than add it quietly.
     """
     directory = tmp_path / 'ds'
     path = _write_parts(directory, pl.DataFrame({'a': [1]}))
     pl.DataFrame({'a': [999]}).write_parquet(directory / '_hidden.parquet')
+
+    assert sorted(scan_dataset(path).collect()['a'].to_list()) == [1, 999]
+
+
+def test_read_parquet_ignores_files_of_another_format(tmp_path: Path) -> None:
+    """A spark `_SUCCESS` marker, and anything else without the format's extension, is skipped."""
+    directory = tmp_path / 'ds'
+    path = _write_parts(directory, pl.DataFrame({'a': [1]}))
+    (directory / '_SUCCESS').touch()
+    (directory / 'notes.txt').write_text('ignore me')
 
     assert scan_dataset(path).collect()['a'].to_list() == [1]
 
@@ -48,7 +61,7 @@ def test_read_parquet_skips_underscore_prefixed_files(tmp_path: Path) -> None:
 def test_read_parquet_raises_when_a_directory_has_no_parts(tmp_path: Path) -> None:
     directory = tmp_path / 'ds'
     directory.mkdir()
-    pl.DataFrame({'a': [1]}).write_parquet(directory / '_only_hidden.parquet')
+    (directory / '_SUCCESS').touch()
 
     with pytest.raises(ValueError, match=r'no .* files found'):
         scan_dataset(str(directory))
@@ -101,7 +114,38 @@ def test_schema_with_parquet_raises_rather_than_being_ignored(tmp_path: Path) ->
 
 def test_unrecognised_format_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='unrecognised format'):
-        scan_dataset(str(tmp_path), format='csv')
+        scan_dataset(str(tmp_path), format='avro')
+
+
+def test_read_csv_and_tsv_differ_only_in_separator(tmp_path: Path) -> None:
+    csv = tmp_path / 'x.csv'
+    csv.write_text('a,b\n1,2\n')
+    tsv = tmp_path / 'y.tsv'
+    tsv.write_text('a\tb\n1\t2\n')
+
+    assert scan_dataset(str(csv), format='csv').collect().to_dicts() == [{'a': 1, 'b': 2}]
+    assert scan_dataset(str(tsv), format='tsv').collect().to_dicts() == [{'a': 1, 'b': 2}]
+
+
+def test_read_csv_forwards_options(tmp_path: Path) -> None:
+    """Delimited sources vary in ways parquet does not, so parsing options belong to the caller."""
+    path = tmp_path / 'x.tsv'
+    path.write_text('# a comment\n1\t2\n')
+
+    frame = scan_dataset(
+        str(path), format='tsv', has_header=False, comment_prefix='#', new_columns=['a', 'b']
+    ).collect()
+
+    assert frame.to_dicts() == [{'a': 1, 'b': 2}]
+
+
+def test_read_options_rejected_for_formats_that_cannot_use_them(tmp_path: Path) -> None:
+    """Silently dropping them would leave a caller believing an option took effect."""
+    path = tmp_path / 'x.parquet'
+    pl.DataFrame({'a': [1]}).write_parquet(path)
+
+    with pytest.raises(ValueError, match='only forwarded for csv/tsv'):
+        scan_dataset(str(path), has_header=False)
 
 
 def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
@@ -159,27 +203,39 @@ def test_write_splits_when_over_the_threshold(tmp_path: Path) -> None:
     assert len(list(Path(path).glob('*.parquet'))) > 1
 
 
-def test_write_clears_stale_parts_first(tmp_path: Path) -> None:
-    """PartitionBy only ADDS numbered parts; it never clears the destination.
+def test_write_refuses_an_occupied_destination(tmp_path: Path) -> None:
+    """`PartitionBy` only ADDS numbered parts; it never clears.
 
-    This is the migration hazard: moving a dataset from `X/X.parquet` to `X/00000000.parquet`
-    would otherwise leave the old file in place, and every consumer globbing `*.parquet` would
-    read both and double-count.
+    Writing into a populated directory would leave the previous run's files in place, and every
+    consumer globbing `*.parquet` would read both and double-count. Refusing is chosen over
+    clearing because otter has no remote delete, so a clear could only work locally and would be
+    a silent no-op on the cloud destinations that matter.
     """
     directory = tmp_path / 'ds'
     directory.mkdir()
     pl.DataFrame({'a': [999]}).write_parquet(directory / 'stale.parquet')
 
-    write_dataset(pl.DataFrame({'a': [1]}), str(directory))
+    with pytest.raises(ValueError, match='already exists'):
+        write_dataset(pl.DataFrame({'a': [1]}), str(directory))
 
-    assert pl.read_parquet(sorted(directory.glob('*.parquet')))['a'].to_list() == [1]
+    # the existing data is untouched -- refusing must not be destructive
+    assert pl.read_parquet(sorted(directory.glob('*.parquet')))['a'].to_list() == [999]
+
+
+def test_write_refuses_an_empty_but_existing_directory(tmp_path: Path) -> None:
+    """Existence is the test, not emptiness: a bare directory may still be a live destination."""
+    directory = tmp_path / 'ds'
+    directory.mkdir()
+
+    with pytest.raises(ValueError, match='already exists'):
+        write_dataset(pl.DataFrame({'a': [1]}), str(directory))
 
 
 def test_write_refuses_when_the_destination_is_a_file(tmp_path: Path) -> None:
     path = tmp_path / 'ds'
     path.write_text('not a directory')
 
-    with pytest.raises(ValueError, match='found a file'):
+    with pytest.raises(ValueError, match='already exists'):
         write_dataset(pl.DataFrame({'a': [1]}), str(path))
 
 

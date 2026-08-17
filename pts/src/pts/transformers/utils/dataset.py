@@ -3,33 +3,33 @@
 One place that knows how a dataset is laid out on storage: which files make up a dataset, which
 compression it is written with, and how large a part may get.
 
-`StorageHandle` is used inconsistently here, on purpose, and the rule is worth stating because
-the same module globs through it but unlinks around it:
+`StorageHandle` is used for some things here and deliberately not others, which is worth stating
+because the mix looks arbitrary otherwise:
 
-* **Listing and stat go through it.** Deciding whether a location is one file or a directory of
-  parts, and enumerating those parts, needs to work on every backend. That is what otter's
-  abstraction is for.
+* **Listing and existence go through it.** Deciding whether a location is one file or a directory
+  of parts, enumerating those parts, and checking whether a destination is already occupied all
+  have to work on every backend. That is what otter's abstraction is for.
 * **Reads deliberately do not.** Polars receives URI STRINGS, never opened file objects. It reads
   cloud storage natively and pushes projections down to the file; handed a file object it can only
   materialise the whole thing, which on remote storage downloads every byte before a single column
   is read. Routing reads through the abstraction would cost more than it buys.
-* **Deleting cannot.** otter exposes no remote delete, so clearing a destination falls back to
-  `pathlib`, which silently does nothing on a remote path. That is a gap in the abstraction rather
-  than a choice, and it is why `write_dataset` warns instead of pretending to have cleared.
+* **Deleting is not attempted at all**, because otter exposes no remote delete. Anything built on
+  `pathlib` would work locally and be a silent no-op on the cloud destinations that matter, so
+  `write_dataset` refuses to write into an occupied destination rather than clearing it. That
+  behaves identically on every backend, which a clear could not.
 
-So: use it where it adds reach, avoid it where it removes capability, and note where it simply
-cannot help.
+So: use it where it adds reach, avoid it where it removes capability, and design around what it
+cannot do rather than half-doing it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
-from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
 
 #: Target size per written part. `pl.PartitionBy` sizes against the IN-MEMORY frame, not the
 #: compressed output, so the resulting file size depends on how well a dataset compresses.
@@ -38,86 +38,93 @@ from otter.storage.synchronous.handle import StorageHandle
 #: which makes this a cap on typical data, not a guarantee. Aim is roughly 250 MB per file.
 _DEFAULT_TARGET_BYTES = 1_400_000_000
 
-_GLOB_FOR_FORMAT: dict[str, str] = {
+Format = Literal['parquet', 'ndjson', 'csv', 'tsv']
+
+#: Glob used to enumerate a directory for each format.
+_GLOBS: dict[str, str] = {
     'parquet': '*.parquet',
     # covers .json, .json.gz and .jsonl
     'ndjson': '*.json*',
+    'csv': '*.csv*',
+    'tsv': '*.tsv*',
 }
 
-
-def _parts(path: str, format: Literal['parquet', 'ndjson']) -> str | list[str]:
-    """The file(s) making up one dataset, spark's `_`-prefix skip applied.
-
-    Spark's readers silently skip files whose name starts with `_`, treating them as metadata
-    (`_SUCCESS`, `_common_metadata`); a bare glob does not, so a metadata-shaped file would
-    contribute rows. This lists and filters explicitly rather than expressing the exclusion as a
-    glob: polars accepts `[^_]*.parquet` but not the shell-conventional `[!_]*.parquet`, and a
-    correctness guard resting on glob-dialect trivia breaks quietly.
-
-    Args:
-        path: the dataset location -- a single file or a directory of parts. Already absolute;
-            `Transform.run` calls `make_absolute` before invoking a transformer.
-        format: which glob to list a directory with.
-
-    Returns:
-        `path` unchanged when it is a single file, otherwise its sorted, non-`_`-prefixed parts.
-
-    Raises:
-        ValueError: if `path` is a directory containing no matching, non-`_`-prefixed file.
-    """
-    handle = StorageHandle(path)
-    if not handle.stat().is_dir:
-        return path
-    pattern = _GLOB_FOR_FORMAT[format]
-    parts = sorted(part for part in handle.glob(pattern) if not Path(part).name.startswith('_'))
-    if not parts:
-        raise ValueError(f'no {pattern} files found in {path}')
-    return parts
+#: The delimited formats, which differ only in separator and accept caller parsing options.
+_SEPARATORS: dict[str, str] = {'csv': ',', 'tsv': '\t'}
 
 
 def scan_dataset(
     path: str,
     *,
-    format: Literal['parquet', 'ndjson'] = 'parquet',
+    format: Format = 'parquet',
     schema: Mapping[str, Any] | None = None,
+    **options: Any,
 ) -> pl.LazyFrame:
     """Lazily read one dataset, whether it is a single file or a directory of parts.
 
     Always lazy: callers add `.collect()` where they need a `DataFrame`, so there is no second
     eager function to keep in sync.
 
+    A directory is enumerated through `StorageHandle` rather than handed to polars as a glob
+    string, so the part list is explicit and sorted and does not depend on a glob dialect. Files
+    whose name starts with `_` are NOT excluded: spark writes `_SUCCESS` and `_common_metadata`
+    without a data extension, so the per-format globs already miss them, and we control how these
+    datasets are produced.
+
+    `csv` and `tsv` differ only in separator. Both forward `**options` to `pl.scan_csv`, because
+    delimited sources vary in ways parquet does not -- headers, quoting, comment prefixes,
+    explicit column names -- and those belong to the caller, not here.
+
     Args:
         path: the dataset location, already absolute.
-        format: `'parquet'` or `'ndjson'`.
+        format: `'parquet'`, `'ndjson'`, `'csv'` or `'tsv'`.
         schema: when given, pins dtypes AND column order. This function never invents a schema --
-            a caller that needs one discovered from the data computes it and passes it in.
+            a caller that needs one discovered from the data computes it and passes it in. Not
+            supported for parquet, which carries its own.
+        **options: forwarded to `pl.scan_csv` for the delimited formats. Rejected for the others,
+            where they would silently do nothing.
 
     Returns:
         LazyFrame of the dataset in its source columns and dtypes.
 
     Raises:
         ValueError: for an unrecognised `format`, a glob passed as `path`, a directory with no
-            readable parts, or a schema passed with parquet format.
+            readable parts, a schema passed with parquet, or options passed to a format that
+            cannot use them.
     """
-    if format not in _GLOB_FOR_FORMAT:
-        msg = f'unrecognised format {format!r} for {path!r}, expected "parquet" or "ndjson"'
+    if format not in _GLOBS:
+        msg = f'unrecognised format {format!r} for {path!r}, expected one of {sorted(_GLOBS)}'
         raise ValueError(msg)
 
     if any(char in path for char in '*?['):
         msg = (
             f'{path!r} looks like a glob; pass the containing directory instead. '
-            'scan_dataset lists a directory itself and applies the _-prefix skip.'
+            'scan_dataset enumerates a directory itself.'
         )
         raise ValueError(msg)
 
     if schema is not None and format == 'parquet':
-        msg = f'schema is only applied to ndjson, but format is parquet for {path!r}'
+        msg = f'schema is only applied to ndjson, csv and tsv, but format is parquet for {path!r}'
         raise ValueError(msg)
 
-    parts = _parts(path, format)
+    if options and format not in _SEPARATORS:
+        msg = f'options {sorted(options)} are only forwarded for csv/tsv, but format is {format!r}'
+        raise ValueError(msg)
+
+    pattern = _GLOBS[format]
+    handle = StorageHandle(path)
+    if handle.stat().is_dir:
+        parts: str | list[str] = sorted(handle.glob(pattern))
+        if not parts:
+            raise ValueError(f'no {pattern} files found in {path}')
+    else:
+        parts = path
+
     if format == 'parquet':
         return pl.scan_parquet(parts)
-    return pl.scan_ndjson(parts, schema=schema)
+    if format == 'ndjson':
+        return pl.scan_ndjson(parts, schema=schema)
+    return pl.scan_csv(parts, separator=_SEPARATORS[format], schema=schema, **options)
 
 
 def write_dataset(
@@ -131,15 +138,21 @@ def write_dataset(
     Always a directory, never a single named file, so no dataset can outgrow its layout as it
     grows.
 
-    `pl.PartitionBy` never clears `path`; it only ever ADDS numbered parts to whatever is already
-    there, so the destination is cleared first. Without that, a re-run producing fewer or
-    differently-sized parts leaves the previous run's files behind, and every consumer globbing
-    `*.parquet` reads them as current data.
+    REFUSES to write into anything that already exists. `pl.PartitionBy` never clears a
+    destination -- it only ever ADDS numbered parts -- so writing into a populated directory
+    leaves the previous run's files in place, and every consumer globbing `*.parquet` reads them
+    as current data. A re-run producing fewer or differently-sized parts silently duplicates rows
+    that way, which is worse than not running at all.
 
-    That clearing is LOCAL-ONLY: otter exposes no delete for remote storage. It is sound in
-    production because each release writes to its own URI, so the destination starts empty -- but
-    a retry into an already-populated remote destination can leave parts from the previous
-    attempt. Hence the warning below, rather than a silent no-op.
+    Clearing instead of refusing was considered and rejected: otter exposes no delete for remote
+    storage, so a clear could only ever work locally and would be a silent no-op on the cloud
+    destinations that matter. Refusing behaves identically everywhere. There is no overwrite mode
+    yet; clear the destination deliberately, or write somewhere new.
+
+    Note what this costs locally: re-running a step twice in a row now fails on the second run
+    until its destination is removed. In production each release writes to its own URI, so this
+    fires only on a genuine retry into a populated destination -- exactly the case that used to
+    corrupt quietly.
 
     Args:
         frame: the data to write; a `DataFrame` is made lazy so there is one code path.
@@ -148,23 +161,18 @@ def write_dataset(
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
 
     Raises:
-        ValueError: if `path` exists and is not a directory. Every configured destination is a
-            directory; a file there means the layout is not what this expects, so it refuses
-            rather than deleting something it does not understand.
+        ValueError: if anything already exists at `path`, file or directory.
     """
-    if '://' in path:
-        logger.warning(
-            f'{path} is remote; stale parts cannot be cleared (otter has no remote delete). '
-            'A retry into a populated destination can leave parts from the previous attempt.'
+    try:
+        StorageHandle(path).stat()
+    except NotFoundError:
+        pass
+    else:
+        msg = (
+            f'{path!r} already exists; write_dataset never overwrites. `pl.PartitionBy` only adds '
+            'parts, so writing here would leave the previous run behind. Remove it first.'
         )
-
-    directory = Path(path)
-    if directory.exists():
-        if not directory.is_dir():
-            msg = f'expected destination {path!r} to be a directory (or not exist yet), found a file'
-            raise ValueError(msg)
-        for part in directory.glob('*.parquet'):
-            part.unlink()
+        raise ValueError(msg)
 
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     lf.sink_parquet(
