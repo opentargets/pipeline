@@ -148,19 +148,15 @@ def test_read_options_rejected_for_formats_that_cannot_use_them(tmp_path: Path) 
         scan_dataset(str(path), has_header=False)
 
 
-def test_read_fails_loudly_on_a_glob_path(tmp_path: Path) -> None:
-    """A glob is not a dataset location, and must not be quietly tolerated.
+def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
+    """A glob raises loudly rather than silently stripping to the containing directory.
 
-    There is no dedicated guard: a glob simply does not exist as a path, so the backend raises.
-    What this pins is that the failure stays LOUD. Silently stripping a glob to its containing
-    directory would work for `*.parquet` but would WIDEN a selective pattern like
-    `part-0*.parquet` to the whole directory -- reading data the caller did not ask for.
+    Stripping would work for `*.parquet` but silently WIDEN a selective pattern like
+    `part-0*.parquet` to the whole directory -- a silent wrong-data bug, worse than a loud
+    failure.
     """
-    directory = tmp_path / 'ds'
-    _write_parts(directory, pl.DataFrame({'a': [1]}))
-
-    with pytest.raises(Exception, match='not found'):
-        scan_dataset(str(directory / '*.parquet'))
+    with pytest.raises(ValueError, match='looks like a glob'):
+        scan_dataset(str(tmp_path / '*.parquet'))
 
 
 def _codecs(path: Path) -> set[str]:
