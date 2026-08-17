@@ -15,6 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.evidence import evidence_schema
+from pts.transformers.utils.dataset import scan_dataset
 
 ASSOCIATION_MINIMAL_SCHEMA: dict[str, Any] = {
     'diseaseId': pl.String,
@@ -423,25 +424,18 @@ def _resolve_metric_lists(
     return rich, minimal
 
 
-def _read_evidence_with_canonical_schema(
-    path: str,
-    schema: dict[str, Any],
-) -> pl.DataFrame:
-    """Read evidence parquet files using a canonical schema for cross-source unioning."""
-    return pl.scan_parquet(
-        path,
-        glob=True,
-        schema=schema,
-        missing_columns='insert',
-        extra_columns='ignore',
-    ).collect()
-
-
 def _read_evidence_with_canonical_schema_from_paths(
     paths: list[str],
     schema: dict[str, Any],
 ) -> pl.DataFrame:
-    """Read multiple evidence parquet path globs using the canonical evidence schema."""
+    """Read multiple evidence parquet path globs using the canonical evidence schema.
+
+    Deliberately not `scan_dataset`: evidence files from different datasources vary in which
+    columns they carry, so this needs polars' `missing_columns='insert'` / `extra_columns='ignore'`
+    reconciliation against `schema` to union them. The shared reader does not expose that -- its
+    `schema` argument only pins ndjson inference and it refuses schema+parquet outright, precisely
+    so this reconciliation could not be silently dropped by a reads-only migration.
+    """
     if not paths:
         return pl.DataFrame(schema=schema)
 
@@ -455,7 +449,13 @@ def _read_evidence_with_canonical_schema_from_paths(
 
 
 def _read_associations_minimal(path: str) -> pl.DataFrame:
-    """Read only lightweight association columns needed for metrics."""
+    """Read only lightweight association columns needed for metrics.
+
+    Deliberately not `scan_dataset`, for the same reason as `_read_evidence_with_canonical_schema_
+    from_paths` above: this needs `missing_columns='insert'` / `extra_columns='ignore'` to reconcile
+    `ASSOCIATION_MINIMAL_SCHEMA` against files that may not carry every column, which the shared
+    reader's parquet path does not support.
+    """
     return pl.scan_parquet(
         path,
         glob=True,
@@ -467,12 +467,12 @@ def _read_associations_minimal(path: str) -> pl.DataFrame:
 
 def _load_parquet_dataset(path: str) -> pl.DataFrame:
     """Read a dataset parquet path (or directory) eagerly into a dataframe."""
-    return pl.read_parquet(_to_parquet_glob(path))
+    return scan_dataset(path).collect()
 
 
 def _count_parquet_rows(path: str) -> int:
     """Count rows from a parquet dataset lazily without loading full data."""
-    return int(pl.scan_parquet(_to_parquet_glob(path), glob=True).select(pl.len()).collect().item())
+    return int(scan_dataset(path).select(pl.len()).collect().item())
 
 
 def _single_discovered_path(
@@ -756,6 +756,11 @@ def release_metrics(
     metrics = _compute_metrics(settings, config, run_id)
 
     logger.info(f'Writing metrics parquet to {destination["parquet"]}')
+    # Deliberately NOT write_dataset: this is a single release-root report artifact, not a
+    # dataset under output/ -- nothing globs it and nothing reads it back (the optional HF
+    # upload below serialises `metrics` straight to CSV, never from this file). write_dataset
+    # always produces a directory of NNNNNNNN.parquet parts, which here would turn
+    # metrics.parquet into a directory carrying a misleading .parquet-suffixed name.
     metrics.write_parquet(destination['parquet'], mkdir=True)
 
     if settings.get('upload_to_hf_hub'):

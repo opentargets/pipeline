@@ -17,6 +17,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.reactome import reactome_schema
+from pts.transformers.utils.dataset import write_dataset
 
 HUMAN = 'Homo sapiens'
 
@@ -128,4 +129,4 @@ def reactome(
     result = _build_graph_documents(clean, relations)
 
     logger.info(f'Writing Reactome output to {destination}')
-    result.write_parquet(destination)
+    write_dataset(result, destination)
