@@ -1,11 +1,11 @@
 """Tests for the parametrised post-processing recipe (`pts.transformers.evidence.postprocess`).
 
-The `Evidence` chain's own semantics are covered end to end in `test_evidence_polars.py`. What is
-new here is the recipe as a REUSABLE UNIT: that it is configured by parameters rather than by a
-step's settings, that it neither reads nor writes, and that it splits valid from invalid.
+The `Evidence` chain's own semantics are covered in `test_evidence_polars.py`. What is covered here
+is the recipe as a reusable unit: that it is configured by parameters, that it neither reads nor
+writes, and how it splits valid from invalid.
 
-These properties are what let the same recipe run inside today's `evidence_postprocess_*` step and,
-later, inside a per-datasource module that generates its own evidence.
+The json reading tests at the end cover the reader options the step passes, and the consequences
+they carry into the chain.
 """
 
 from __future__ import annotations
@@ -26,9 +26,8 @@ from pts.transformers.utils.dataset import scan_dataset
 def _read_json_evidence(path: str) -> pl.LazyFrame:
     """Read json evidence exactly as `evidence_postprocess` does.
 
-    The step reads inline -- two `scan_dataset` calls picked by `evidence_format` -- so there is no
-    function to call here. This mirrors its json branch, `infer_schema_length` included, which is
-    the part with consequences worth pinning.
+    The step reads inline, so there is no function to call. This mirrors its json branch,
+    `infer_schema_length` included: keep the two in step.
     """
     return scan_dataset(path, format='ndjson', infer_schema_length=None)
 
@@ -45,8 +44,7 @@ def _luts() -> ValidationLuts:
     """Minimal lookup tables resolving one target and one disease, built in memory.
 
     Constructed directly rather than through the `build_*_lut` readers: the recipe takes LUTs as
-    values, so a test of the recipe needs no storage at all -- which is itself the property under
-    test here.
+    values, so testing it needs no storage.
     """
     return ValidationLuts(
         disease=pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']}),
@@ -77,10 +75,9 @@ def _raw(**overrides: object) -> pl.LazyFrame:
 
 
 def test_run_returns_lazy_frames_and_touches_no_storage() -> None:
-    """The recipe is pure frame-to-frame: no paths in, no paths out.
+    """The recipe is frame-to-frame: no paths in, no paths out, nothing collected.
 
-    This is the property that lets a future per-datasource module run the same recipe on evidence
-    it generated in memory, never having written an intermediate file.
+    This is what lets a caller run it on evidence held in memory, with no intermediate file.
     """
     result = _postprocessor().run(_raw(), _luts())
 
@@ -110,8 +107,7 @@ def test_an_unresolvable_target_is_split_into_the_invalid_half() -> None:
 def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
     """Two postprocessors differing ONLY in their expressions produce different scores.
 
-    Pins the boundary the whole design rests on: this module never consults `EXPRESSIONS`, so a
-    per-datasource module can supply its own expressions once the registry dissolves.
+    Pins that the recipe never consults `EXPRESSIONS`, so a caller can supply its own.
     """
     luts, raw = _luts(), _raw()
 
@@ -137,11 +133,10 @@ def test_excluded_biotypes_are_applied_when_given() -> None:
 def test_a_mismatched_datasource_is_dropped_entirely_not_flagged() -> None:
     """`datasource_id` FILTERS; it does not flag.
 
-    Worth pinning explicitly because it is the one parameter that behaves differently from its
-    neighbours: an unresolvable target or an excluded biotype lands in the invalid half and is
-    still published as failed evidence, whereas a row whose `datasourceId` disagrees disappears
-    from BOTH halves. A future per-datasource module passing the wrong id would silently emit
-    nothing at all rather than a pile of failures.
+    It behaves differently from its neighbours: an unresolvable target or an excluded biotype lands
+    in the invalid half and is still published as failed evidence, whereas a row whose
+    `datasourceId` disagrees appears in neither half. A caller passing the wrong id therefore emits
+    nothing at all, rather than a pile of failures.
     """
     result = _postprocessor(datasource_id='not_eva').run(_raw(), _luts())
 
@@ -153,12 +148,11 @@ def test_a_mismatched_datasource_is_dropped_entirely_not_flagged() -> None:
 
 
 def test_json_evidence_reads_only_the_columns_the_source_carries(tmp_path: Path) -> None:
-    """The frame must carry the SOURCE's columns, not evidence.json's full field set.
+    """The frame carries the SOURCE's columns, not `evidence_schema`'s full field set.
 
-    Pinning `schema=evidence_schema` would MATERIALISE every field the schema knows about whether
-    or not the source has it -- measured on real data, `reactome.json.gz`'s 12 real columns became
-    109 that way, filled with spurious all-null columns spark never produced. Inference cannot do
-    that, and this guards against a later change reintroducing a wholesale pin.
+    Pinning `schema=evidence_schema` at read time would materialise every field the schema knows
+    about whether or not the source has it, filling the frame with all-null columns. Guards against
+    a later change reintroducing such a pin.
     """
     path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'targetFromSourceId': 't1', 'resourceScore': 0.5}])
 
@@ -171,10 +165,9 @@ def test_json_evidence_reads_only_the_columns_the_source_carries(tmp_path: Path)
 def test_json_evidence_leaves_known_dtypes_to_harmonisation(tmp_path: Path) -> None:
     """The read infers dtypes; `Evidence` casts the ones `evidence_schema` knows.
 
-    `resourceScore: 1` infers as Int64 and is deliberately NOT corrected at read time -- doing so
-    would duplicate what harmonisation already does for every schema column, which is why the read
-    no longer builds a schema at all. Pins both ends: inferred on the way in, schema dtype once the
-    chain has seen it.
+    `resourceScore: 1` infers as Int64 and is not corrected at read time, because harmonisation
+    already covers every schema column. Pins both ends: inferred on the way in, schema dtype once
+    the chain has seen it.
     """
     path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'resourceScore': 1}])
 
@@ -183,11 +176,10 @@ def test_json_evidence_leaves_known_dtypes_to_harmonisation(tmp_path: Path) -> N
 
 
 def test_json_evidence_finds_a_column_absent_from_a_bounded_sample(tmp_path: Path) -> None:
-    """A column first appearing past polars' default 100-row inference window must not be dropped.
+    """A column first appearing past polars' default inference window must not be dropped.
 
     Covered generically in `test_dataset.py`; repeated here because it is the reason the step
-    passes `infer_schema_length=None` at all, and a real source (`cosmic.json.gz`) measurably hit
-    it.
+    passes `infer_schema_length=None` at all.
     """
     rows = [{'targetFromSourceId': f't{i}'} for i in range(200)]
     rows.append({'targetFromSourceId': 't200', 'resourceScore': 0.5})
@@ -199,23 +191,18 @@ def test_json_evidence_finds_a_column_absent_from_a_bounded_sample(tmp_path: Pat
 
 
 def test_json_column_order_decides_the_uniqueness_survivor(tmp_path: Path) -> None:
-    """Columns come out in FILE order, not spark's alphabetical -- and that picks a different row.
+    """Column order selects which of two duplicate rows is published.
 
-    Spark's json reader sorts inferred columns alphabetically; polars keeps file order. The read
-    used to build a schema purely to force spark's order back; that was dropped deliberately, since
-    matching the release byte for byte is not a requirement.
+    Harmonisation preserves column order, so the order columns arrive in reaches
+    `validate_uniqueness`, whose content hash picks the surviving row among duplicates. Reading
+    yields file order; sorting the same frame alphabetically picks the OTHER row.
 
-    This pins what the divergence costs. Two rows share an `id` (same `keyField`) and differ only
-    in `zCol`; `aCol` is constant so it cannot decide the ranking. Harmonisation is
-    order-preserving, so column order reaches `validate_uniqueness`, whose content hash decides
-    which duplicate survives. In file order `zCol='c'` survives; in alphabetical order `zCol='a'`
-    does. Same content, same id, DIFFERENT published row -- arbitrary either way (spark's is a hash
-    order too), which is why it is an accepted trade rather than a defect, but a content difference
-    and not a cosmetic one.
+    Both orderings are equally arbitrary, so neither is more correct -- but the choice is a
+    content difference, not a cosmetic one, and it is pinned here so that a change to reader column
+    order is visible rather than silent.
 
-    The fixture was not hand-picked to "look plausible": a brute-force search over `zCol`/`aCol`
-    values, run through the real `Evidence` pipeline, found the first pair whose survivor actually
-    flips between the two orderings.
+    Two rows share an `id` (same `keyField`) and differ only in `zCol`; `aCol` is constant so it
+    cannot decide the ranking on its own.
     """
     rows = [
         {'keyField': 'same', 'zCol': 'a', 'aCol': 'a'},
