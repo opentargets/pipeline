@@ -3,10 +3,22 @@
 One place that knows how a dataset is laid out on storage: which files make up a dataset, which
 compression it is written with, and how large a part may get.
 
-`StorageHandle` resolves and lists; polars always receives URI STRINGS, never opened file
-objects. That distinction is not stylistic. Polars reads cloud storage natively and pushes
-projections down to the file, but handed a file object it can only materialise the whole thing --
-on remote storage that downloads every byte before a single column is read.
+`StorageHandle` is used inconsistently here, on purpose, and the rule is worth stating because
+the same module globs through it but unlinks around it:
+
+* **Listing and stat go through it.** Deciding whether a location is one file or a directory of
+  parts, and enumerating those parts, needs to work on every backend. That is what otter's
+  abstraction is for.
+* **Reads deliberately do not.** Polars receives URI STRINGS, never opened file objects. It reads
+  cloud storage natively and pushes projections down to the file; handed a file object it can only
+  materialise the whole thing, which on remote storage downloads every byte before a single column
+  is read. Routing reads through the abstraction would cost more than it buys.
+* **Deleting cannot.** otter exposes no remote delete, so clearing a destination falls back to
+  `pathlib`, which silently does nothing on a remote path. That is a gap in the abstraction rather
+  than a choice, and it is why `write_dataset` warns instead of pretending to have cleared.
+
+So: use it where it adds reach, avoid it where it removes capability, and note where it simply
+cannot help.
 """
 
 from __future__ import annotations
