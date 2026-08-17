@@ -4,6 +4,11 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  # the raw CTTI archive the aact_trial_extraction DAG downloads and extracts.
+  # that DAG overrides this with its own pin, so it can run ahead of a release
+  aact_version: '2026-08-01'
+  # the aact_data snapshot a release reads
+  aact_data_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.88.0'
   ensembl_version: '115'
@@ -133,14 +138,108 @@ steps:
       destination: input/biosample/efo.json
   ##################################################################################################
 
+  #: AACT_TABLES STEP :#############################################################################
+  # Restores the monthly AACT archive and exports the tables as parquet.
+  #
+  # This step is not part of a release. It is run by the `aact_trial_extraction`
+  # DAG, which publishes the result to `gs://aact_data/${aact_version}/tables`
+  # for the release to pick up — see the `clinical_report` step below
+  aact_tables:
+    - name: copy aact dump
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/aact_${aact_version}.zip
+
+    - name: postgres_export aact tables
+      requires:
+        - copy aact dump
+      source: input/aact_${aact_version}.zip
+      schema_name: ctgov
+      tables:
+        # these column lists reproduce what clinical_mining used to select.
+        # changing them changes the row counts downstream
+        - table: studies
+          destination: tables/studies.parquet
+          columns:
+            - nct_id
+            - overall_status
+            - phase
+            - study_type
+            - start_date
+            - why_stopped
+            - number_of_arms
+            - official_title
+        - table: interventions
+          destination: tables/interventions.parquet
+          columns: [nct_id, intervention_type, name]
+        - table: conditions
+          destination: tables/conditions.parquet
+          columns: [nct_id, downcase_name]
+        - table: study_references
+          destination: tables/study_references.parquet
+          columns: [nct_id, pmid, reference_type]
+        - table: designs
+          destination: tables/designs.parquet
+          columns: [nct_id, primary_purpose]
+        - table: brief_summaries
+          destination: tables/brief_summaries.parquet
+          columns: [nct_id, description]
+        # only the extraction prompt reads this one, but it is exported here so
+        # that one restore serves both consumers
+        - table: detailed_descriptions
+          destination: tables/detailed_descriptions.parquet
+          columns: [nct_id, description]
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
+    # AACT comes from the aact_trial_extraction DAG
+    - name: copy_many aact tables
+      sources: gs://aact_data/${aact_data_version}/tables/*.parquet
+      destination: input/clinical_report/aact
+
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/drug/chembl_${chembl_version}.tar.gz
+
+    - name: postgres_export chembl tables
+      requires:
+        - copy chembl dump
+      source: input/drug/chembl_${chembl_version}.tar.gz
+      tables:
+        # note the two `refs` tables are named differently in chembl and in the
+        # release, because that is what pts already reads
+        - table: drug_indication
+          destination: input/clinical_report/chembl/drug_indication.parquet
+          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
+        - table: indication_refs
+          destination: input/clinical_report/chembl/drug_indication_refs.parquet
+          columns: [drugind_id, ref_type, ref_id, ref_url]
+        - table: drug_warning
+          destination: input/clinical_report/chembl/drug_warning.parquet
+          columns:
+            - warning_id
+            - molregno
+            - warning_type
+            - warning_year
+            - warning_country
+            - warning_class
+            - efo_id
+            - efo_term
+            - efo_id_for_warning_class
+        - table: warning_refs
+          destination: input/clinical_report/chembl/drug_warning_refs.parquet
+          columns: [warning_id, ref_type, ref_id, ref_url]
+        - table: molecule_dictionary
+          destination: input/clinical_report/chembl/molecule_dictionary.parquet
+          columns: [molregno, chembl_id, pref_name]
+
+    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -173,12 +272,15 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
 
-    # AACT clinical-trial batch extraction — a standalone source consumed by
+    # AACT clinical-trial LLM extraction — a standalone source consumed by
     # chembl_molecule (and clinical_report). Downloaded in the drug step so
     # chembl_molecule's existing pis_drug dependency covers it.
-    - name: copy_many aact extraction batch results
-      sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
-      destination: input/clinical_report/aact_extraction_batch_results
+    #
+    # Produced by the `aact_trial_extraction` DAG. It is one typed parquet now,
+    # not raw OpenAI batch envelopes, so neither consumer parses json any more.
+    - name: copy_many aact trial extraction
+      sources: gs://aact_data/${aact_data_version}/extraction/*.parquet
+      destination: input/clinical_report/aact_trial_extraction
 
     - name: elasticsearch chembl drug warning
       url: https://www.ebi.ac.uk/chembl/elk/es

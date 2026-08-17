@@ -60,6 +60,8 @@ class UnifiedPipelineConfig:
         self.pis.config['work_path'] = '/mnt/disks/work'
         self.pis.config['log_level'] = 'INFO'
         self.pis.config['pool_size'] = 16
+        # ingested dataset versions are pinned by the release, not by the tool
+        self.pis.config['scratchpad']['aact_data_version'] = up.get('aact_data_version')
 
         if self.is_ppp:
             self.pis = self.pis.overwrite(config_path / 'ppp' / 'pis.override.yaml')
