@@ -749,7 +749,7 @@ steps:
         disease: output/disease
       destination:
         output: output/drug_molecule
-        excluded: excluded/drug_molecule_failed_report/drug_molecule_failed_report.parquet
+        excluded: excluded/drug_molecule_failed_report
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
@@ -788,7 +788,7 @@ steps:
       source: output/clinical_report
       destination:
         output: output/clinical_indication
-        excluded: excluded/clinical_indication_failed_report/clinical_indication_failed_report.parquet
+        excluded: excluded/clinical_indication_failed_report
       transformer: clinical_indication
       settings:
         invalid_clinical_report_qc:
@@ -804,7 +804,7 @@ steps:
         drug_mechanism_of_action: output/drug_mechanism_of_action
       destination:
         output: output/clinical_target
-        excluded: excluded/clinical_target_failed_report/clinical_target_failed_report.parquet
+        excluded: excluded/clinical_target_failed_report
       transformer: clinical_target
       settings:
         invalid_clinical_report_qc:
