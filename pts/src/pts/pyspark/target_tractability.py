@@ -75,7 +75,7 @@ def _build_tractability(df: DataFrame, target_ids: DataFrame) -> DataFrame:
             col_name,
             f.struct(
                 f.lit(parts[0]).alias('modality'),
-                f.lit(parts[-1]).alias('id'),
+                f.lit(parts[-1]).alias('category'),
                 f.when(f.col(f'`{col_name}`') == 1, True).otherwise(False).alias('value'),
             ),
         )
@@ -89,5 +89,5 @@ def _build_tractability(df: DataFrame, target_ids: DataFrame) -> DataFrame:
         .join(target_ids, f.col('targetId') == f.col('id'), 'inner')
         .drop('id')
         .select('targetId', f.explode('tractability').alias('assessment'))
-        .select('targetId', 'assessment.modality', 'assessment.id', 'assessment.value')
+        .select('targetId', 'assessment.modality', 'assessment.category', 'assessment.value')
     )

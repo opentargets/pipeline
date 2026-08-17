@@ -1,6 +1,6 @@
 [
   {
-    "id": "id",
+    "id": "category",
     "description": "Identifier of the tractability bucket assessed (e.g. clinical phase, structural evidence source)"
   },
   {

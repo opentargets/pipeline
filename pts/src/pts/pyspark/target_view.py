@@ -130,7 +130,7 @@ def _build_tractability(df: DataFrame) -> DataFrame:
     """
     return (
         df
-        .select('targetId', f.struct('modality', 'id', 'value').alias('assessment'))
+        .select('targetId', f.struct('modality', f.col('category').alias('id'), 'value').alias('assessment'))
         .groupBy('targetId')
         .agg(f.collect_list('assessment').alias('tractability'))
         .withColumnRenamed('targetId', 'id')

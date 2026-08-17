@@ -37,11 +37,11 @@ def _tract_row(ensg_id, sm_b1='0', ab_b1='0'):
 
 
 def test_build_tractability_output_columns(spark):
-    """Output has exactly targetId, modality, id, and value columns."""
+    """Output has exactly targetId, modality, category, and value columns."""
     rows = [_tract_row('ENSG00000001')]
     targets = spark.createDataFrame([_target('ENSG00000001')], TARGET_SCHEMA)
     result = _build_tractability(spark.createDataFrame(rows, TRACT_SCHEMA), targets)
-    assert set(result.columns) == {'targetId', 'modality', 'id', 'value'}
+    assert set(result.columns) == {'targetId', 'modality', 'category', 'value'}
 
 
 def test_build_tractability_one_row_per_assessment(spark):
@@ -101,5 +101,5 @@ def test_build_tractability_bucket_id_extracted_from_column_name(spark):
     rows = [_tract_row('ENSG00000001')]
     targets = spark.createDataFrame([_target('ENSG00000001')], TARGET_SCHEMA)
     result = _build_tractability(spark.createDataFrame(rows, TRACT_SCHEMA), targets)
-    ids = {r.id for r in result.collect()}
+    ids = {r.category for r in result.collect()}
     assert 'bucket' in ids

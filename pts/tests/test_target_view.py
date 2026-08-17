@@ -138,7 +138,7 @@ def test_build_homologues_absent_target_gets_no_row(spark):
 TRACTABILITY_SCHEMA = StructType([
     StructField('targetId', StringType()),
     StructField('modality', StringType()),
-    StructField('id', StringType()),
+    StructField('category', StringType()),
     StructField('value', BooleanType()),
 ])
 
