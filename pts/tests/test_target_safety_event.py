@@ -236,7 +236,7 @@ def test_build_target_safety_events_output_columns(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert set(result.columns) == {
         'targetId', 'event', 'eventId', 'effects', 'biosamples',
         'datasource', 'literature', 'url', 'studies',
@@ -256,7 +256,7 @@ def test_build_target_safety_events_one_row_per_liability(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 2
     assert result.filter('targetId = "ENSG00000001"').count() == 2
 
@@ -273,7 +273,7 @@ def test_build_target_safety_events_resolves_symbol_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 1
     row = result.first()
     assert row is not None
@@ -292,7 +292,7 @@ def test_build_target_safety_events_resolves_protein_id_to_ensg(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 1
     row = result.first()
     assert row is not None
@@ -316,7 +316,7 @@ def test_build_target_safety_events_resolves_symbol_for_non_coding_gene(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 1
     row = result.first()
     assert row is not None
@@ -335,7 +335,7 @@ def test_build_target_safety_events_drops_unresolvable_rows(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 0
 
 
@@ -352,7 +352,7 @@ def test_build_target_safety_events_drops_ids_not_in_target(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 1
     row = result.first()
     assert row is not None
@@ -371,7 +371,7 @@ def test_build_target_safety_events_remaps_obsolete_efo(spark):
         Row(id='EFO_CURRENT', obsoleteTerms=['EFO_OBSOLETE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
@@ -389,7 +389,7 @@ def test_build_target_safety_events_keeps_current_efo_unchanged(spark):
         Row(id='EFO_OTHER', obsoleteTerms=['EFO_SOMETHINGELSE']),
     ], DISEASE_SCHEMA)
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     row = result.first()
     assert row is not None
     assert row.eventId == 'EFO_CURRENT'
@@ -409,5 +409,5 @@ def test_build_target_safety_events_multiple_targets(spark):
         [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
     )
     ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases, target)
+    result = _build_target_safety_events(safety, ensg_lut, diseases)
     assert result.count() == 2

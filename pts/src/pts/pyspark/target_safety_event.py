@@ -68,7 +68,7 @@ def target_safety_event(
     ])
 
     ensg_lookup = _build_ensg_lookup(target_raw)
-    result = _build_target_safety_events(safety_raw, ensg_lookup, diseases_raw, target_raw)
+    result = _build_target_safety_events(safety_raw, ensg_lookup, diseases_raw)
 
     partition_count = (settings or {}).get('partition_count', 2)
     logger.info(f'writing target safety events to {destination} ({partition_count} partitions)')
@@ -524,7 +524,6 @@ def _build_target_safety_events(
     safety_df: DataFrame,
     ensg_lookup: DataFrame,
     diseases_df: DataFrame,
-    target_df: DataFrame,
 ) -> DataFrame:
     """Build the target safety event output from harmonized safety evidence.
 
@@ -534,10 +533,12 @@ def _build_target_safety_events(
 
     Args:
         safety_df: Harmonized safety evidence from :func:`_harmonize_safety_evidence`.
-        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
+        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`. Its
+            ``ensgId`` column is a 1:1 projection of ``output/target``'s
+            ``id`` column, so it also serves as the authoritative reference
+            for target-ID validity -- no separate read of ``output/target``
+            is needed here.
         diseases_df: Disease index parquet from ``output/disease``.
-        target_df: Target parquet from ``output/target``, used as the
-            authoritative reference for target-ID validity.
 
     Returns:
         DataFrame with one row per target safety event record and columns
@@ -570,11 +571,10 @@ def _build_target_safety_events(
     )
 
     # Keep only records whose id is a real, current target. A left-semi join
-    # against output/target itself (not the derived ensg_lookup) drops both
-    # unresolved (null) ids and any id that doesn't exist in output/target
-    # (e.g. a stale/deprecated Ensembl ID supplied directly by a source),
-    # which a plain null check would miss.
-    valid_targets = target_df.select('id')
+    # against the target ID set drops both unresolved (null) ids and any id
+    # that doesn't exist in output/target (e.g. a stale/deprecated Ensembl ID
+    # supplied directly by a source), which a plain null check would miss.
+    valid_targets = ensg_lookup.select(f.col('ensgId').alias('id'))
 
     return (
         remapped
