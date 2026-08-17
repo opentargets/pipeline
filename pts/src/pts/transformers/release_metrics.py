@@ -451,10 +451,9 @@ def _read_evidence_with_canonical_schema_from_paths(
 def _read_associations_minimal(path: str) -> pl.DataFrame:
     """Read only lightweight association columns needed for metrics.
 
-    Deliberately not `scan_dataset`, for the same reason as `_read_evidence_with_canonical_schema_
-    from_paths` above: this needs `missing_columns='insert'` / `extra_columns='ignore'` to reconcile
-    `ASSOCIATION_MINIMAL_SCHEMA` against files that may not carry every column, which the shared
-    reader's parquet path does not support.
+    Deliberately not `scan_dataset`, for the same reason as the evidence reader above: this needs
+    `missing_columns='insert'` / `extra_columns='ignore'` to reconcile `ASSOCIATION_MINIMAL_SCHEMA`
+    against files that may not carry every column, which the shared reader does not support.
     """
     return pl.scan_parquet(
         path,

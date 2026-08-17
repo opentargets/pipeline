@@ -30,12 +30,12 @@ def disease_phenotype(
     logger.debug('loading disease dataset')
     df_disease = scan_dataset(source['disease_path']).collect()
     logger.debug('loading phenotype dataset')
-    df_phenotype = pl.read_csv(
+    df_phenotype = scan_dataset(
         source['phenotype_path'],
-        separator='\t',
+        format='tsv',
         has_header=True,
         comment_prefix='#',
-    )
+    ).collect()
     logger.debug('loading mondo dataset')
     h = StorageHandle(source['mondo_path'])
     f = h.open()

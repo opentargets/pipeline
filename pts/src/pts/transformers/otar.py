@@ -12,7 +12,6 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.otar import otar_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -33,8 +32,7 @@ def _read_csv(path: str) -> pl.DataFrame:
     Matches `spark.read.option('header', 'true').csv(...)` without `inferSchema`,
     which also yields all strings.
     """
-    h = StorageHandle(path)
-    return pl.read_csv(h.open(), has_header=True, infer_schema=False)
+    return scan_dataset(path, format='csv', has_header=True, infer_schema=False).collect()
 
 
 def _spark_string_to_boolean(column: pl.Expr) -> pl.Expr:
