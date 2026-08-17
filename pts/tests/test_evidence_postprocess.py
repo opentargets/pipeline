@@ -10,11 +10,35 @@ later, inside a per-datasource module that generates its own evidence.
 
 from __future__ import annotations
 
+import gzip
+import json
+from pathlib import Path
+
 import polars as pl
 
-from pts.transformers.evidence.core import QC_COLUMN, EvidenceFlags
+from pts.schemas.evidence import evidence_schema
+from pts.transformers.evidence.core import QC_COLUMN, Evidence, EvidenceFlags
 from pts.transformers.evidence.expressions import DatasourceExpressions
 from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
+from pts.transformers.utils.dataset import scan_dataset
+
+
+def _read_json_evidence(path: str) -> pl.LazyFrame:
+    """Read json evidence exactly as `evidence_postprocess` does.
+
+    The step reads inline -- two `scan_dataset` calls picked by `evidence_format` -- so there is no
+    function to call here. This mirrors its json branch, `infer_schema_length` included, which is
+    the part with consequences worth pinning.
+    """
+    return scan_dataset(path, format='ndjson', infer_schema_length=None)
+
+
+def _write_json_gz(path: Path, rows: list[dict]) -> str:
+    """Write one gzipped newline delimited json file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = '\n'.join(json.dumps(row) for row in rows).encode()
+    path.write_bytes(gzip.compress(payload))
+    return str(path)
 
 
 def _luts() -> ValidationLuts:
@@ -123,3 +147,89 @@ def test_a_mismatched_datasource_is_dropped_entirely_not_flagged() -> None:
 
     assert result.valid.collect().height == 0
     assert result.invalid.collect().height == 0
+
+
+# --------------------------------------------------------------- reading json evidence
+
+
+def test_json_evidence_reads_only_the_columns_the_source_carries(tmp_path: Path) -> None:
+    """The frame must carry the SOURCE's columns, not evidence.json's full field set.
+
+    Pinning `schema=evidence_schema` would MATERIALISE every field the schema knows about whether
+    or not the source has it -- measured on real data, `reactome.json.gz`'s 12 real columns became
+    109 that way, filled with spurious all-null columns spark never produced. Inference cannot do
+    that, and this guards against a later change reintroducing a wholesale pin.
+    """
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'targetFromSourceId': 't1', 'resourceScore': 0.5}])
+
+    frame = _read_json_evidence(path).collect()
+
+    assert set(frame.columns) == {'targetFromSourceId', 'resourceScore'}
+    assert len(frame.columns) < len(evidence_schema)
+
+
+def test_json_evidence_leaves_known_dtypes_to_harmonisation(tmp_path: Path) -> None:
+    """The read infers dtypes; `Evidence` casts the ones `evidence_schema` knows.
+
+    `resourceScore: 1` infers as Int64 and is deliberately NOT corrected at read time -- doing so
+    would duplicate what harmonisation already does for every schema column, which is why the read
+    no longer builds a schema at all. Pins both ends: inferred on the way in, schema dtype once the
+    chain has seen it.
+    """
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'resourceScore': 1}])
+
+    assert _read_json_evidence(path).collect().schema['resourceScore'] == pl.Int64
+    assert Evidence(_read_json_evidence(path)).lf.collect().schema['resourceScore'] == evidence_schema['resourceScore']
+
+
+def test_json_evidence_finds_a_column_absent_from_a_bounded_sample(tmp_path: Path) -> None:
+    """A column first appearing past polars' default 100-row inference window must not be dropped.
+
+    Covered generically in `test_dataset.py`; repeated here because it is the reason the step
+    passes `infer_schema_length=None` at all, and a real source (`cosmic.json.gz`) measurably hit
+    it.
+    """
+    rows = [{'targetFromSourceId': f't{i}'} for i in range(200)]
+    rows.append({'targetFromSourceId': 't200', 'resourceScore': 0.5})
+    path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
+
+    frame = _read_json_evidence(path).collect()
+
+    assert frame.filter(pl.col('targetFromSourceId') == 't200')['resourceScore'].item() == 0.5
+
+
+def test_json_column_order_decides_the_uniqueness_survivor(tmp_path: Path) -> None:
+    """Columns come out in FILE order, not spark's alphabetical -- and that picks a different row.
+
+    Spark's json reader sorts inferred columns alphabetically; polars keeps file order. The read
+    used to build a schema purely to force spark's order back; that was dropped deliberately, since
+    matching the release byte for byte is not a requirement.
+
+    This pins what the divergence costs. Two rows share an `id` (same `keyField`) and differ only
+    in `zCol`; `aCol` is constant so it cannot decide the ranking. Harmonisation is
+    order-preserving, so column order reaches `validate_uniqueness`, whose content hash decides
+    which duplicate survives. In file order `zCol='c'` survives; in alphabetical order `zCol='a'`
+    does. Same content, same id, DIFFERENT published row -- arbitrary either way (spark's is a hash
+    order too), which is why it is an accepted trade rather than a defect, but a content difference
+    and not a cosmetic one.
+
+    The fixture was not hand-picked to "look plausible": a brute-force search over `zCol`/`aCol`
+    values, run through the real `Evidence` pipeline, found the first pair whose survivor actually
+    flips between the two orderings.
+    """
+    rows = [
+        {'keyField': 'same', 'zCol': 'a', 'aCol': 'a'},
+        {'keyField': 'same', 'zCol': 'c', 'aCol': 'a'},
+    ]
+    lf = _read_json_evidence(_write_json_gz(tmp_path / 'evidence.json.gz', rows))
+    assert lf.collect_schema().names() == ['keyField', 'zCol', 'aCol']
+
+    survivor = Evidence(lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
+    flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in survivor.to_dicts()}
+    assert flagged == {'a': True, 'c': False}  # 'c' survives in file order
+
+    # Sorted into spark's alphabetical order, the SAME two rows pick the OTHER survivor.
+    spark_order_lf = lf.select(sorted(lf.collect_schema().names()))
+    spark_order = Evidence(spark_order_lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
+    spark_flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in spark_order.to_dicts()}
+    assert spark_flagged == {'a': False, 'c': True}
