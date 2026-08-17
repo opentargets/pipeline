@@ -11,7 +11,7 @@ as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class.
 `calculate_evidence_score`, `assign_direction_on_trait` and `assign_direction_on_target` take a
 `pl.Expr | None` rather than a spark SQL string: the SQL compiler that used to back these
 (`pts.transformers.utils.spark_sql.compile_expression`) has been deleted, and
-`pts.transformers.utils.evidence_expressions.EXPRESSIONS` now carries a pre-translated, native
+`pts.transformers.evidence.expressions.EXPRESSIONS` now carries a pre-translated, native
 polars `pl.Expr` per `datasourceId` for the caller to look up and pass straight in.
 """
 
@@ -508,7 +508,7 @@ class Evidence:
 
         Args:
             score_expression: the datasource's score expression from
-                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`.
+                `pts.transformers.evidence.expressions.EXPRESSIONS`.
 
         Returns:
             Evidence with a new `score` column, and `EvidenceFlags.NO_VALID_SCORE` set where it
@@ -536,7 +536,7 @@ class Evidence:
 
         Args:
             direction_expression: the datasource's `direction_on_trait` expression from
-                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
+                `pts.transformers.evidence.expressions.EXPRESSIONS`, or `None` to leave
                 evidence unchanged.
 
         Returns:
@@ -553,7 +553,7 @@ class Evidence:
 
         Args:
             direction_expression: the datasource's `direction_on_target` expression from
-                `pts.transformers.utils.evidence_expressions.EXPRESSIONS`, or `None` to leave
+                `pts.transformers.evidence.expressions.EXPRESSIONS`, or `None` to leave
                 evidence unchanged.
             target_lut: when given, joined in on `targetId` to provide `TSorOncogene` for
                 expressions that need it (e.g. `cancer_gene_census`).

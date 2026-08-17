@@ -18,7 +18,7 @@ import polars_hash as plh
 import pytest
 
 from pts.schemas.evidence import evidence_schema
-from pts.transformers.utils.evidence import (
+from pts.transformers.evidence.core import (
     DATE_COLUMNS,
     QC_COLUMN,
     VARIANT_HASH_LENGTH,

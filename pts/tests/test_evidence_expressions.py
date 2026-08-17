@@ -22,7 +22,7 @@ import polars as pl
 import pytest
 import yaml
 
-from pts.transformers.utils.evidence_expressions import EXPRESSIONS
+from pts.transformers.evidence.expressions import EXPRESSIONS
 
 nan = float('nan')
 
