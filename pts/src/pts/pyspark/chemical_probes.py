@@ -213,7 +213,7 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
         )
         .select(
             'pdid',
-            f.col('compound_name').alias('id'),
+            f.col('compound_name').alias('drugFromSource'),
             clean_origin_col().alias('origin'),
             # Flag the high-quality probes and remove this from the list of datasources
             extract_hq_flag().alias('isHighQuality'),
@@ -325,7 +325,7 @@ def generate_chemical_probes_evidence(
     """
     grouping_cols = [
         'targetFromSourceId',
-        'id',
+        'drugFromSource',
         'pdid',
         'drugId',
         'mechanismOfAction',

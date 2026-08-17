@@ -13,7 +13,7 @@
     "foreign_key": "drug_molecule/id"
   },
   {
-    "id": "id",
+    "id": "drugFromSource",
     "description": "Compound name of the chemical probe"
   },
   {

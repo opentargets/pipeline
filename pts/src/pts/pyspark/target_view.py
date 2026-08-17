@@ -186,7 +186,7 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
             'targetId',
             f.struct(
                 'targetFromSourceId',
-                'id',
+                f.col('drugFromSource').alias('id'),
                 'drugFromSourceId',
                 'drugId',
                 'mechanismOfAction',

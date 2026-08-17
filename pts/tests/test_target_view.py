@@ -223,7 +223,7 @@ URL_TYPE = StructType([
 
 CHEMICAL_PROBES_SCHEMA = StructType([
     StructField('targetFromSourceId', StringType()),
-    StructField('id', StringType()),
+    StructField('drugFromSource', StringType()),
     StructField('drugFromSourceId', StringType()),
     StructField('drugId', StringType()),
     StructField('mechanismOfAction', ArrayType(StringType())),
@@ -243,7 +243,7 @@ def test_build_chemical_probes_groups_by_target(spark):
     data = [
         Row(
             targetFromSourceId='TP53',
-            id='probe-1',
+            drugFrommSource='probe-1',
             drugFromSourceId=None,
             drugId=None,
             mechanismOfAction=[],
