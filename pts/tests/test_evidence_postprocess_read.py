@@ -1,7 +1,8 @@
-"""Tests for reading raw evidence (`pts.transformers.evidence.read`).
+"""Tests for the evidence reading in `pts.transformers.evidence_postprocess`.
 
-Covers what this module adds on top of the shared reader: format dispatch, the json schema pin and
-its column ordering, and the single-file requirement for json sources.
+Covers what the step adds on top of the shared reader: `evidence_format` dispatch, the json schema
+pin and its column ordering, and the single-file requirement for json sources. Split into its own
+file purely for size -- the step's other behaviour is in `test_transformers_evidence_postprocess.py`.
 
 Directory-of-parts enumeration itself belongs to `scan_dataset` and is covered in
 `test_dataset.py` -- including the deliberate decision NOT to skip `_`-prefixed files, which this
@@ -19,7 +20,7 @@ import pytest
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.core import QC_COLUMN, Evidence, EvidenceFlags
-from pts.transformers.evidence.read import _json_schema, read_evidence
+from pts.transformers.evidence_postprocess import _json_schema, _read_evidence
 
 
 def _write_parquet_dir(directory: Path, frame: pl.DataFrame) -> str:
@@ -43,7 +44,7 @@ def _write_json_gz(path: Path, rows: list[dict]) -> str:
 def test_read_evidence_parquet_from_a_directory_of_parts(tmp_path: Path) -> None:
     path = _write_parquet_dir(tmp_path / 'evidence', pl.DataFrame({'targetFromSourceId': ['t1', 't2']}))
 
-    assert read_evidence(path, 'parquet').collect().height == 2
+    assert _read_evidence(path, 'parquet').collect().height == 2
 
 
 def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
@@ -55,7 +56,7 @@ def test_read_evidence_parquet_from_a_single_file(tmp_path: Path) -> None:
     file_path = tmp_path / 'evidence.parquet'
     pl.DataFrame({'targetFromSourceId': ['t1']}).write_parquet(file_path)
 
-    assert read_evidence(str(file_path), 'parquet').collect().height == 1
+    assert _read_evidence(str(file_path), 'parquet').collect().height == 1
 
 
 def test_read_evidence_parquet_preserves_the_file_column_order(tmp_path: Path) -> None:
@@ -66,7 +67,7 @@ def test_read_evidence_parquet_preserves_the_file_column_order(tmp_path: Path) -
     """
     path = _write_parquet_dir(tmp_path / 'evidence', pl.DataFrame({'zebra': [1], 'alpha': [2], 'mango': [3]}))
 
-    frame = read_evidence(path, 'parquet').collect()
+    frame = _read_evidence(path, 'parquet').collect()
 
     assert frame.columns == ['zebra', 'alpha', 'mango']
 
@@ -77,7 +78,7 @@ def test_read_evidence_parquet_preserves_the_file_column_order(tmp_path: Path) -
 def test_read_evidence_json_from_a_single_file(tmp_path: Path) -> None:
     path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'targetFromSourceId': 't1'}])
 
-    frame = read_evidence(path, 'json').collect()
+    frame = _read_evidence(path, 'json').collect()
 
     assert frame.height == 1
     assert frame['targetFromSourceId'].to_list() == ['t1']
@@ -95,7 +96,7 @@ def test_read_evidence_json_orders_columns_alphabetically_like_spark(tmp_path: P
     """
     path = _write_json_gz(tmp_path / 'evidence.json.gz', [{'zebra': 1, 'alpha': 2, 'mango': 3}])
 
-    frame = read_evidence(path, 'json').collect()
+    frame = _read_evidence(path, 'json').collect()
 
     assert frame.columns == ['alpha', 'mango', 'zebra']
 
@@ -118,7 +119,7 @@ def test_read_evidence_json_column_order_changes_the_uniqueness_survivor(tmp_pat
         {'keyField': 'same', 'zCol': 'c', 'aCol': 'a'},
     ]
     path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
-    lf = read_evidence(path, 'json')
+    lf = _read_evidence(path, 'json')
     assert lf.collect_schema().names() == ['aCol', 'keyField', 'zCol']
 
     survivor = Evidence(lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
@@ -142,7 +143,7 @@ def test_read_evidence_json_rejects_a_directory(tmp_path: Path) -> None:
     _write_json_gz(directory / 'part-00000.json.gz', [{'targetFromSourceId': 't1'}])
 
     with pytest.raises(ValueError, match='json evidence must be a single file'):
-        read_evidence(str(directory), 'json')
+        _read_evidence(str(directory), 'json')
 
 
 def test_json_schema_does_not_inflate_the_column_set(tmp_path: Path) -> None:
@@ -191,7 +192,7 @@ def test_read_evidence_json_finds_a_column_absent_from_a_bounded_sample(tmp_path
     rows.append({'targetFromSourceId': 't200', 'resourceScore': 0.5})
     path = _write_json_gz(tmp_path / 'evidence.json.gz', rows)
 
-    frame = read_evidence(path, 'json').collect()
+    frame = _read_evidence(path, 'json').collect()
 
     assert frame.filter(pl.col('targetFromSourceId') == 't200')['resourceScore'].item() == 0.5
 
@@ -201,4 +202,4 @@ def test_read_evidence_rejects_an_unrecognised_evidence_format(tmp_path: Path) -
     silently falling through to the json reader.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     with pytest.raises(ValueError, match="unrecognised evidence_format 'csv'"):
-        read_evidence(str(tmp_path), 'csv')
+        _read_evidence(str(tmp_path), 'csv')
