@@ -88,19 +88,12 @@ def scan_dataset(
         LazyFrame of the dataset in its source columns and dtypes.
 
     Raises:
-        ValueError: for an unrecognised `format`, a glob passed as `path`, a directory with no
+        ValueError: for an unrecognised `format`, a directory with no
             readable parts, a schema passed with parquet, or options passed to a format that
             cannot use them.
     """
     if format not in _GLOBS:
         msg = f'unrecognised format {format!r} for {path!r}, expected one of {sorted(_GLOBS)}'
-        raise ValueError(msg)
-
-    if any(char in path for char in '*?['):
-        msg = (
-            f'{path!r} looks like a glob; pass the containing directory instead. '
-            'scan_dataset enumerates a directory itself.'
-        )
         raise ValueError(msg)
 
     if schema is not None and format == 'parquet':
