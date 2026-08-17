@@ -29,6 +29,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.literature import literature_schema
+from pts.transformers.utils.dataset import scan_dataset
 
 LITERATURE_SOURCES = ['MED', 'PPR', 'AGR']
 
@@ -54,8 +55,17 @@ def _parts(path: str, pattern: str) -> list[str]:
 
 
 def _read_parquet(path: str) -> pl.DataFrame:
-    """Read a parquet dataset directory through the storage backend."""
-    return pl.concat([pl.read_parquet(StorageHandle(part).open()) for part in _parts(path, '*.parquet')])
+    """Read a parquet dataset directory eagerly.
+
+    Delegates to the shared `scan_dataset`, which also applies spark's `_`-prefix skip this module
+    never had. It previously read each part from `StorageHandle(part).open()` -- a file OBJECT,
+    which forces polars to materialise the whole thing and defeats projection pushdown; on GCS that
+    downloads every byte before a single column is read.
+
+    `_parts` stays for `build_publication_lut`, which reads the literature export part BY part on
+    purpose (53.7M rows, projected down to two columns before concatenation).
+    """
+    return scan_dataset(path).collect()
 
 
 def _cancer_gene_assessment() -> pl.Expr:

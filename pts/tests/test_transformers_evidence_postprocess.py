@@ -17,7 +17,8 @@ import polars as pl
 import pytest
 
 from pts.schemas.evidence import evidence_schema
-from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, _write_partitioned, evidence_postprocess
+from pts.transformers.evidence_postprocess import _json_schema, _read_evidence, evidence_postprocess
+from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
 
 
@@ -76,15 +77,16 @@ def test_read_evidence_parquet_raises_on_a_directory_of_only_underscore_prefixed
     """Consistent with the legible `ValueError` `_read_evidence` raises when a json source is a
     directory at all.
 
-    Left unguarded, `pl.scan_parquet([])` (`_read_evidence`, fed `_parquet_parts`'s now-filtered
-    empty list) raises its own `ComputeError: empty input: paths: []` instead -- correct, but a
-    less legible failure for the same underlying "no data files found" situation.
+    Left unguarded, `pl.scan_parquet([])` (fed a now-filtered empty list) raises its own
+    `ComputeError: empty input: paths: []` instead -- correct, but a less legible failure for the
+    same underlying "no data files found" situation. The guard lives in `scan_dataset` now, so the
+    message names the glob it looked for rather than just the format.
     """  # noqa: D205 -- explanatory continuation, not a second summary line
     directory = tmp_path / 'evidence'
     directory.mkdir()
     pl.DataFrame({'targetFromSourceId': ['hidden']}).write_parquet(directory / '_hidden.parquet')
 
-    with pytest.raises(ValueError, match='no parquet files found'):
+    with pytest.raises(ValueError, match=r'no \*\.parquet files found'):
         _read_evidence(str(directory), 'parquet')
 
 
@@ -279,7 +281,7 @@ def test_write_partitioned_clears_a_stale_file_from_a_previous_layout(tmp_path: 
     stale = destination / 'evidence_gene_burden.parquet'
     pl.DataFrame({'targetFromSourceId': ['stale']}).write_parquet(stale)
 
-    _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['t1', 't2']}), str(destination))
+    write_dataset(pl.LazyFrame({'targetFromSourceId': ['t1', 't2']}), str(destination))
 
     remaining = sorted(p.name for p in destination.glob('*.parquet'))
     assert stale.name not in remaining
@@ -298,7 +300,7 @@ def test_write_partitioned_removes_orphaned_parts_from_a_larger_previous_run(tmp
     pl.DataFrame({'targetFromSourceId': ['old1']}).write_parquet(destination / '00000000.parquet')
     pl.DataFrame({'targetFromSourceId': ['old2']}).write_parquet(destination / '00000001.parquet')
 
-    _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['new1']}), str(destination))
+    write_dataset(pl.LazyFrame({'targetFromSourceId': ['new1']}), str(destination))
 
     frame = pl.read_parquet(destination / '*.parquet')
     assert frame['targetFromSourceId'].to_list() == ['new1']
@@ -312,4 +314,4 @@ def test_write_partitioned_raises_if_the_destination_is_a_file(tmp_path: Path) -
     destination.write_text('not a directory')
 
     with pytest.raises(ValueError, match='directory'):
-        _write_partitioned(pl.LazyFrame({'targetFromSourceId': ['t1']}), str(destination))
+        write_dataset(pl.LazyFrame({'targetFromSourceId': ['t1']}), str(destination))

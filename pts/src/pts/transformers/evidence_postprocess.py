@@ -17,7 +17,6 @@ config.yaml for every datasource at once.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -26,19 +25,10 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.evidence import evidence_schema
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.evidence import Evidence
 from pts.transformers.utils.evidence_expressions import EXPRESSIONS
 from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
-
-# `pl.PartitionBy.approximate_bytes_per_file` sizes to the estimated IN-MEMORY frame, not the
-# compressed on-disk parquet -- the two differ by roughly 8x for evidence. Calibrated on
-# `evidence_eva` (3,998,459 rows, the largest staged local output): its single-file parquet is
-# 254.8 MB on disk against a 2,085.8 MB `DataFrame.estimated_size()`, a 0.122 on-disk/in-memory
-# ratio. Confirmed by replicating that frame 5x and sinking through `pl.PartitionBy` at this
-# setting: the resulting parts land at 294-301 MB on disk (bar the final, smaller remainder part),
-# matching the 300 MB target. Revisit this constant if evidence's column mix (and so its
-# compression ratio) changes materially.
-_TARGET_BYTES_PER_FILE = 2_450_000_000
 
 
 def _json_schema(source: str) -> dict[str, Any]:
@@ -90,44 +80,17 @@ def _json_schema(source: str) -> dict[str, Any]:
     }
 
 
-def _parquet_parts(path: str) -> str | list[str]:
-    """The parquet part(s) making up one evidence source, spark's `_`-prefix skip applied.
-
-    Spark's parquet reader silently skips files whose name starts with `_` -- it treats them as
-    metadata (`_SUCCESS`, `_common_metadata`), not data. A bare `f'{path}/*.parquet'` glob does
-    not: measured, planting a `_hidden.parquet` in a real directory makes it contribute rows to a
-    `pl.scan_parquet` read here, a real divergence from spark. This lists and filters explicitly
-    so a stray metadata-shaped file can't silently join the evidence.
-
-    Args:
-        path: location of the evidence -- a single parquet file or a directory of parts.
-
-    Returns:
-        `path` unchanged when it is a single file, otherwise its sorted non-`_`-prefixed part
-        locations.
-
-    Raises:
-        ValueError: if `path` is a directory with no non-`_`-prefixed `*.parquet` part. Left
-            unguarded, `pl.scan_parquet([])` (`_read_evidence`) raises its own
-            `ComputeError: empty input: paths: []` -- legible enough once you know to look here,
-            but `_read_evidence` already raises a clear `ValueError` when a json source is a
-            directory at all, so this matches it rather than leaving the two readers inconsistent.
-    """
-    handle = StorageHandle(path)
-    if not handle.stat().is_dir:
-        return path
-    parts = sorted(part for part in handle.glob('*.parquet') if not Path(part).name.startswith('_'))
-    if not parts:
-        raise ValueError(f'no parquet files found in {path}')
-    return parts
-
-
 def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
     """Read one datasource's raw evidence, before harmonisation to `evidence_schema`.
 
+    The listing, the `_`-prefix skip and the empty-directory guard all live in `scan_dataset`
+    now. What stays here is the evidence-specific policy that the shared reader deliberately does
+    not own: config.yaml spells the ndjson format `'json'`, and a json evidence source must be a
+    single file.
+
     Args:
-        path: location of the evidence -- a directory of parquet parts (see `_parquet_parts`) or
-            a single (possibly gzip-compressed) ndjson file.
+        path: location of the evidence -- a directory of parquet parts or a single (possibly
+            gzip-compressed) ndjson file.
         evidence_format: `settings['evidence_format']`, `'parquet'` or `'json'`.
 
     Returns:
@@ -140,64 +103,19 @@ def _read_evidence(path: str, evidence_format: str) -> pl.LazyFrame:
             `'json'` and `path` is a directory: every json evidence source in config.yaml
             (`input/evidence/*.json.gz`) is a single file, unlike the parquet sources'
             directory-of-parts shape, so a directory here is a config error too, refused rather
-            than silently globbed or left to fail inside polars with a confusing error.
+            than silently globbed. `scan_dataset` would happily read such a directory, so this
+            check has to stay here -- and `_json_schema` scans a single path, so without it the
+            failure would surface further in and less legibly.
     """
     if evidence_format == 'parquet':
-        return pl.scan_parquet(_parquet_parts(path))
+        return scan_dataset(path)
     if evidence_format == 'json':
         if StorageHandle(path).stat().is_dir:
             msg = f'json evidence must be a single file, got a directory: {path!r}'
             raise ValueError(msg)
-        # `path` goes straight to `pl.scan_ndjson`, not an opened file object: that lets polars'
-        # Rust engine own the read (gzip decompressed natively, streamed rather than materialised)
-        # instead of `pl.read_ndjson` on a python file handle, which is eager regardless of a
-        # trailing `.lazy()` -- measured on `eva.json.gz` (4,126,114 rows, the largest json
-        # evidence source), the eager path costs 3.49 GiB peak RSS against 1.37 GiB here.
-        return pl.scan_ndjson(path, schema=_json_schema(path))
+        return scan_dataset(path, format='ndjson', schema=_json_schema(path))
     msg = f'unrecognised evidence_format {evidence_format!r} for {path!r}, expected "parquet" or "json"'
     raise ValueError(msg)
-
-
-def _write_partitioned(lf: pl.LazyFrame, path: str) -> None:
-    """Sink `lf` into `path` as a directory of size-capped parquet parts, first clearing it.
-
-    `pl.PartitionBy` writes a directory of size-capped parts rather than one file -- a single
-    9.03 GiB europepmc file is not an acceptable release artifact. It is marked UNSTABLE in
-    polars 1.41.2; checked empirically that it raises no runtime warning at either construction
-    or sink time on this version, so nothing is suppressed here -- if a future polars upgrade
-    starts emitting one, handle it deliberately rather than silencing it. A datasource under
-    `_TARGET_BYTES_PER_FILE` in memory still gets exactly one part; nothing extra is needed for
-    that, it falls out of `approximate_bytes_per_file` sizing (see its calibration comment).
-
-    `pl.PartitionBy` itself never clears `path` -- it only ever adds numbered parts to whatever
-    is already there. The pyspark implementation this replaced used `.write.mode('overwrite')`,
-    which does clear the destination; that overwrite semantics is reproduced by hand here because
-    nothing else in the stack provides it. `otter`'s `check_destination(path, delete=True)`
-    (`otter/util/fs.py`) does NOT cover this case: it only unlinks `path` when `path.is_file()`,
-    and silently does nothing for a directory -- which `path` always is here. Left unhandled, a
-    stale part survives untouched alongside the new ones (a leftover from an earlier, differently
-    sized run, or -- before the switch to `pl.PartitionBy` -- the old single-file layout), and
-    every consumer globbing `*.parquet` under `path` (release metrics, croissant, spark) silently
-    reads and counts it as current data.
-
-    Args:
-        lf: the frame to write.
-        path: destination directory -- `destination['evidence']` or `destination['failed_evidence']`,
-            used as given, never a parent or a derived path.
-
-    Raises:
-        ValueError: if `path` already exists and is not a directory. Every configured destination
-            is a directory; a file there means the layout is not what this expects, so it refuses
-            rather than deleting something it does not understand.
-    """
-    directory = Path(path)
-    if directory.exists():
-        if not directory.is_dir():
-            msg = f'expected evidence destination {path!r} to be a directory (or not exist yet), found a file'
-            raise ValueError(msg)
-        for part in directory.glob('*.parquet'):
-            part.unlink()
-    lf.sink_parquet(pl.PartitionBy(path, approximate_bytes_per_file=_TARGET_BYTES_PER_FILE))
 
 
 def evidence_postprocess(
@@ -254,6 +172,6 @@ def evidence_postprocess(
     # joins, hashing, scoring, direction-of-effect) twice; an accepted trade for bounded memory,
     # to revisit if europepmc proves slow in practice.
     logger.info(f'writing valid evidence to {destination["evidence"]}')
-    _write_partitioned(processed.valid(), destination['evidence'])
+    write_dataset(processed.valid(), destination['evidence'])
     logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    _write_partitioned(processed.invalid(), destination['failed_evidence'])
+    write_dataset(processed.invalid(), destination['failed_evidence'])
