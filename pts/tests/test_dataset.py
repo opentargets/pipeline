@@ -151,11 +151,10 @@ def test_read_options_rejected_for_parquet(tmp_path: Path) -> None:
 def test_read_ndjson_forwards_options(tmp_path: Path) -> None:
     """`infer_schema_length` is the reason ndjson takes options at all.
 
-    Polars infers an ndjson schema from the first 100 rows by default, so a column that first
-    appears after that is dropped SILENTLY -- no error, just a missing column. Real sources do this:
-    a bounded sample measurably missed a real column of `cosmic.json.gz`. This pins both halves --
-    that the default loses the column, and that the option recovers it -- because a test asserting
-    only the fix would still pass if the default were harmless.
+    Polars infers an ndjson schema from a bounded sample of leading rows by default, so a column
+    that first appears after it is dropped SILENTLY -- no error, just a missing column. This pins
+    both halves -- that the default loses the column, and that the option recovers it -- because a
+    test asserting only the fix would still pass if the default were harmless.
     """
     path = tmp_path / 'x.json'
     rows = [{'a': i} for i in range(200)]
