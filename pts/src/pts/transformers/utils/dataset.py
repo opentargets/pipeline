@@ -73,7 +73,12 @@ def scan_dataset(
 
     `csv` and `tsv` differ only in separator. Both forward `**options` to `pl.scan_csv`, because
     delimited sources vary in ways parquet does not -- headers, quoting, comment prefixes,
-    explicit column names -- and those belong to the caller, not here.
+    explicit column names -- and those belong to the caller, not here. `ndjson` forwards them to
+    `pl.scan_ndjson` for the same reason; `infer_schema_length` in particular matters, since its
+    default of 100 rows silently drops a column that first appears later in the file.
+
+    Parquet takes no options: it carries its own schema, so there is nothing for a caller to
+    describe.
 
     Args:
         path: the dataset location, already absolute.
@@ -81,8 +86,8 @@ def scan_dataset(
         schema: when given, pins dtypes AND column order. This function never invents a schema --
             a caller that needs one discovered from the data computes it and passes it in. Not
             supported for parquet, which carries its own.
-        **options: forwarded to `pl.scan_csv` for the delimited formats. Rejected for the others,
-            where they would silently do nothing.
+        **options: forwarded to the underlying polars reader for `ndjson`, `csv` and `tsv`.
+            Rejected for parquet, where they would silently do nothing.
 
     Returns:
         LazyFrame of the dataset in its source columns and dtypes.
@@ -107,8 +112,8 @@ def scan_dataset(
         msg = f'schema is only applied to ndjson, csv and tsv, but format is parquet for {path!r}'
         raise ValueError(msg)
 
-    if options and format not in _SEPARATORS:
-        msg = f'options {sorted(options)} are only forwarded for csv/tsv, but format is {format!r}'
+    if options and format == 'parquet':
+        msg = f'options {sorted(options)} are not forwarded for parquet, which carries its own schema'
         raise ValueError(msg)
 
     pattern = _GLOBS[format]
@@ -123,7 +128,7 @@ def scan_dataset(
     if format == 'parquet':
         return pl.scan_parquet(parts)
     if format == 'ndjson':
-        return pl.scan_ndjson(parts, schema=schema)
+        return pl.scan_ndjson(parts, schema=schema, **options)
     return pl.scan_csv(parts, separator=_SEPARATORS[format], schema=schema, **options)
 
 

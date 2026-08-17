@@ -139,13 +139,31 @@ def test_read_csv_forwards_options(tmp_path: Path) -> None:
     assert frame.to_dicts() == [{'a': 1, 'b': 2}]
 
 
-def test_read_options_rejected_for_formats_that_cannot_use_them(tmp_path: Path) -> None:
+def test_read_options_rejected_for_parquet(tmp_path: Path) -> None:
     """Silently dropping them would leave a caller believing an option took effect."""
     path = tmp_path / 'x.parquet'
     pl.DataFrame({'a': [1]}).write_parquet(path)
 
-    with pytest.raises(ValueError, match='only forwarded for csv/tsv'):
+    with pytest.raises(ValueError, match='not forwarded for parquet'):
         scan_dataset(str(path), has_header=False)
+
+
+def test_read_ndjson_forwards_options(tmp_path: Path) -> None:
+    """`infer_schema_length` is the reason ndjson takes options at all.
+
+    Polars infers an ndjson schema from the first 100 rows by default, so a column that first
+    appears after that is dropped SILENTLY -- no error, just a missing column. Real sources do this:
+    a bounded sample measurably missed a real column of `cosmic.json.gz`. This pins both halves --
+    that the default loses the column, and that the option recovers it -- because a test asserting
+    only the fix would still pass if the default were harmless.
+    """
+    path = tmp_path / 'x.json'
+    rows = [{'a': i} for i in range(200)]
+    rows.append({'a': 200, 'late': 1})
+    path.write_text('\n'.join(json.dumps(row) for row in rows))
+
+    assert 'late' not in scan_dataset(str(path), format='ndjson').collect().columns
+    assert 'late' in scan_dataset(str(path), format='ndjson', infer_schema_length=None).collect().columns
 
 
 def test_read_rejects_a_glob_path(tmp_path: Path) -> None:
