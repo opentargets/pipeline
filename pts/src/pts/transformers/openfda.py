@@ -7,6 +7,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.openfda import schema
+from pts.transformers.utils.dataset import write_dataset
 
 
 def openfda(
@@ -25,5 +26,5 @@ def openfda(
             df = pl.read_json(file_content, schema=schema)
             output = df.select('results').explode('results').unnest('results')
 
-            output.write_parquet(destination, compression='gzip')
+            write_dataset(output, destination)
             logger.info('transformation complete')

@@ -12,9 +12,9 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.otar import otar_schema
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
 
@@ -32,8 +32,7 @@ def _read_csv(path: str) -> pl.DataFrame:
     Matches `spark.read.option('header', 'true').csv(...)` without `inferSchema`,
     which also yields all strings.
     """
-    h = StorageHandle(path)
-    return pl.read_csv(h.open(), has_header=True, infer_schema=False)
+    return scan_dataset(path, format='csv', has_header=True, infer_schema=False).collect()
 
 
 def _spark_string_to_boolean(column: pl.Expr) -> pl.Expr:
@@ -105,7 +104,7 @@ def otar(
 ) -> None:
     """Generate OTAR projects dataset."""
     logger.info('Reading otar inputs')
-    disease = pl.read_parquet(StorageHandle(source['diseases']).open())
+    disease = scan_dataset(source['diseases']).collect()
     meta = _read_csv(source['otar_meta'])
     lookup = _read_csv(source['otar_project_to_efo'])
     logger.info(f'{meta.height} projects, {lookup.height} project to efo mappings, {disease.height} diseases')
@@ -114,4 +113,4 @@ def otar(
     logger.info(f'Generated otar info for {result.height} diseases')
 
     logger.info(f'Writing otar output to {destination}')
-    result.write_parquet(destination)
+    write_dataset(result, destination)

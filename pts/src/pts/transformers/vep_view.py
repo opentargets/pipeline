@@ -6,6 +6,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.transformers.utils.dataset import scan_dataset
+
 
 def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
     """Select and rename biosample identifier and display name for QTL joins.
@@ -158,10 +160,10 @@ def vep_view(
             compatibility).
     """
     logger.info('Loading input data')
-    credible_set = process_credible_set(pl.scan_parquet(f'{source["credible_set"]}/*.parquet'))
-    study = process_study(pl.scan_parquet(f'{source["study_table"]}/*.parquet'))
-    l2g = process_l2g(pl.scan_parquet(f'{source["l2g_table"]}/*.parquet'))
-    biosample = process_biosample(pl.scan_parquet(f'{source["biosample"]}/*.parquet'))
+    credible_set = process_credible_set(scan_dataset(source['credible_set']))
+    study = process_study(scan_dataset(source['study_table']))
+    l2g = process_l2g(scan_dataset(source['l2g_table']))
+    biosample = process_biosample(scan_dataset(source['biosample']))
 
     logger.info('Joining and processing data')
     result = (

@@ -11,22 +11,22 @@ steps:
   disease:
     - name: transform disease_efo
       source: input/disease/efo_otar_slim.json
-      destination: output/disease/disease.parquet
+      destination: output/disease
       transformer: disease
 
     - name: transform disease_hpo
       source: input/disease/hp-full.json
-      destination: output/disease_hpo/disease_hpo.parquet
+      destination: output/disease_hpo
       transformer: disease_hpo
 
     - name: transform disease_phenotype
       requires:
         - transform disease_efo
       source:
-        disease_path: output/disease/disease.parquet
+        disease_path: output/disease
         phenotype_path: input/disease/phenotype.hpoa
         mondo_path: input/disease/mondo.json
-      destination: output/disease_phenotype/disease_phenotype.parquet
+      destination: output/disease_phenotype
       transformer: disease_phenotype
   ##################################################################################################
 
@@ -35,7 +35,7 @@ steps:
     - name: transform go
       transformer: go
       source: input/go/go.obo
-      destination: output/go/go.parquet
+      destination: output/go
   ##################################################################################################
 
   #: OTAR STEP :####################################################################################
@@ -43,10 +43,10 @@ steps:
     - name: transform otar
       transformer: otar
       source:
-        diseases: output/disease/disease.parquet
+        diseases: output/disease
         otar_meta: input/otar/otar_meta.csv
         otar_project_to_efo: input/otar/otar_project_to_efo.csv
-      destination: output/otar/otar.parquet
+      destination: output/otar
   ##################################################################################################
 
   #: REACTOME STEP :################################################################################
@@ -56,7 +56,7 @@ steps:
       source:
         pathways: input/reactome/ReactomePathways.txt
         relations: input/reactome/ReactomePathwaysRelation.txt
-      destination: output/reactome/reactome.parquet
+      destination: output/reactome
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
@@ -330,7 +330,7 @@ steps:
   so:
     - name: transform so
       source: input/so/so.json
-      destination: output/so/so.parquet
+      destination: output/so
       transformer: so
   ##################################################################################################
 
@@ -682,7 +682,7 @@ steps:
     - name: pyspark ontoma generate lookup tables
       pyspark: ontoma_lut_generation
       source:
-        disease_index: output/disease/disease.parquet
+        disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
         eva_clinvar: input/ontoma/eva_clinvar.txt
         clinvar_xrefs: input/ontoma/clinvar_xrefs.txt
@@ -697,7 +697,7 @@ steps:
     - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
       source:
-        disease_index: output/disease/disease.parquet
+        disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
         eva_clinvar: input/ontoma/eva_clinvar.txt
         clinvar_xrefs: input/ontoma/clinvar_xrefs.txt
@@ -743,13 +743,13 @@ steps:
       transformer: drug_molecule
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: output/chemical_probes
+        chemical_probes: intermediate/chemical_probes_evidence.parquet
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
       destination:
-        output: output/drug_molecule/drug_molecule.parquet
-        excluded: excluded/drug_molecule_failed_report/drug_molecule_failed_report.parquet
+        output: output/drug_molecule
+        excluded: excluded/drug_molecule_failed_report
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
@@ -757,7 +757,7 @@ steps:
     - name: pyspark clinical_report
       source:
         chembl_molecule: intermediate/chembl_molecule/*.parquet
-        disease: output/disease/disease.parquet
+        disease: output/disease
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
         ema: input/clinical_report/ema_medicines.xlsx
@@ -776,7 +776,7 @@ steps:
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
-        output: output/clinical_report/clinical_report.parquet
+        output: output/clinical_report
       settings:
         ner_batch_size: 256
       pyspark: clinical_report
@@ -785,10 +785,10 @@ steps:
   #: CLINICAL_INDICATION STEP :####################################################################
   clinical_indication:
     - name: transform clinical_indication
-      source: output/clinical_report/clinical_report.parquet
+      source: output/clinical_report
       destination:
-        output: output/clinical_indication/clinical_indication.parquet
-        excluded: excluded/clinical_indication_failed_report/clinical_indication_failed_report.parquet
+        output: output/clinical_indication
+        excluded: excluded/clinical_indication_failed_report
       transformer: clinical_indication
       settings:
         invalid_clinical_report_qc:
@@ -800,11 +800,11 @@ steps:
   clinical_target:
     - name: transform clinical_target
       source:
-        clinical_report: output/clinical_report/clinical_report.parquet
-        drug_mechanism_of_action: output/drug_mechanism_of_action/*.parquet
+        clinical_report: output/clinical_report
+        drug_mechanism_of_action: output/drug_mechanism_of_action
       destination:
-        output: output/clinical_target/clinical_target.parquet
-        excluded: excluded/clinical_target_failed_report/clinical_target_failed_report.parquet
+        output: output/clinical_target
+        excluded: excluded/clinical_target_failed_report
       transformer: clinical_target
       settings:
         invalid_clinical_report_qc:

@@ -63,6 +63,7 @@ class Session:
                 'spark.hadoop.fs.gs.auth.type': 'APPLICATION_DEFAULT',
                 'spark.hadoop.fs.gs.impl': 'com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem',
                 'spark.hadoop.fs.AbstractFileSystem.gs.impl': 'com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS',
+                'spark.sql.parquet.compression.codec': 'zstd',
             }
 
         effective_properties = {**base_properties, **properties}
