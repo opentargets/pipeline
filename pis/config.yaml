@@ -1004,6 +1004,19 @@ steps:
           source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/${each}/Compara.${ensembl_version}.ncrna_default.homologies.tsv.gz
           destination: input/target/homologue/homologies/ncrna-${each}.tsv.gz
 
+    # homo_sapiens stays out of the foreach above: its gene dictionary now comes from the
+    # ensembl core tables via the ensembl transformer, and running it through the loop would
+    # have the gene-dictionary task collide with that transformer's destination. The two
+    # human Compara homology downloads below have no such replacement, so they are kept as
+    # standalone tasks rather than folded back into the loop.
+    - name: copy homo_sapiens protein homology
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/homo_sapiens/Compara.${ensembl_version}.protein_default.homologies.tsv.gz
+      destination: input/target/homologue/homologies/protein-homo_sapiens.tsv.gz
+
+    - name: copy homo_sapiens ncrna homology
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/homo_sapiens/Compara.${ensembl_version}.ncrna_default.homologies.tsv.gz
+      destination: input/target/homologue/homologies/ncrna-homo_sapiens.tsv.gz
+
     - name: copy homology ensembl vertebrates
       source: https://ftp.ensembl.org/pub/release-${ensembl_version}/species_EnsemblVertebrates.txt
       destination: input/target/homologue/species_EnsemblVertebrates.txt
