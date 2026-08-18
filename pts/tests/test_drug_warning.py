@@ -77,7 +77,7 @@ class TestProcessDrugWarnings:
         assert w['efoIdForWarningClass'] == 'EFO_2'
 
     def test_year_is_int32(self, tables: dict) -> None:
-        """A deliberate, documented narrowing from the release's BIGINT; values identical."""
+        """`year` is int32 where the published column is int64; the values are unaffected."""
         assert process_drug_warnings(**tables).schema['year'] == pl.Int32
 
     def test_chembl_ids_has_molecule_and_parent(self, tables: dict) -> None:

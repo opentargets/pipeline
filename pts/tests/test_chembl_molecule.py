@@ -281,7 +281,7 @@ class TestSynonymStructs:
 
     def test_null_synonym_text_does_not_survive_inside_the_synonyms_list(self):
         """A molecule_synonyms row with a null label is dropped, not shipped as `None`."""
-        # pyspark's collect_set drops nulls; a bare polars list aggregation does not,
+        # a bare polars list aggregation keeps nulls,
         # so this must be exercised explicitly -- Task 7 shipped this exact defect
         # for a different aggregation and it reached a Critical.
         molecule_dictionary = pl.DataFrame(

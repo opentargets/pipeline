@@ -720,8 +720,8 @@ class TestProteinClassification:
         #
         # Components 2 and 3 carry classes but belong only to the two-component
         # target 102, so nothing they classify may reach the output.
-        # Component 4 is classified but has no accession, which is what produced
-        # the old pipeline's junk accession=NULL record.
+        # Component 4 is classified but has no accession -- the shape that must
+        # not produce an accession=NULL record.
         component_class = spark.createDataFrame(
             [(1, 1, 20), (2, 1, 6), (3, 2, 20), (4, 3, 6), (5, 1, 21), (6, 4, 20)],
             'comp_class_id int, component_id int, protein_class_id int',
@@ -780,10 +780,8 @@ class TestProteinClassification:
 
     def test_only_the_positionally_zipped_class_survives(self, chembl):
         # Component 1 carries three classes -- 20, 6 and 21 -- and contributes
-        # exactly one. The old pipeline zipped a (component_id, protein_class_id)
-        # ordered array against a length-1 accession array, so only the lowest
-        # protein_class_id kept its accession. Retained for release-equivalence;
-        # see the comment on zipped_class_per_component.
+        # exactly one, the lowest protein_class_id. That is what the published
+        # data holds; see the comment on zipped_class_per_component for why.
         ids = {c['id'] for c in self._by_accession(chembl)['P00001']}
         # 6, not 20 (the first component_class row) and not 21
         assert ids == {6}
@@ -813,15 +811,14 @@ class TestProteinClassification:
 
     def test_multi_component_target_contributes_no_accessions(self, chembl):
         # Target 102 has two components, 2 and 3, and both carry classes. The
-        # single-component restriction is retained for release-equivalence, so
-        # neither accession may appear -- see the comment on the filter.
+        # single-component restriction means neither accession may appear -- see
+        # the comment on the filter for why it is kept.
         assert set(self._by_accession(chembl)) == {'P00001'}
 
     def test_no_junk_null_accession_row_is_emitted(self, chembl):
-        # Component 4 is classified but has no accession. The old pipeline's
-        # arrays_zip padding produced an accession=NULL record for exactly this
-        # shape; it never reached output/target, and reproducing it would
-        # preserve an artefact rather than the release.
+        # Component 4 is classified but has no accession. No such record appears
+        # in the published dataset, so emitting one here would be inventing a row
+        # rather than reproducing one.
         assert None not in set(self._by_accession(chembl))
 
     def test_class_level_above_max_triggers_a_warning(self, spark):

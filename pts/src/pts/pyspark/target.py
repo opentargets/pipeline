@@ -1001,8 +1001,8 @@ def _flatten_protein_classification(protein_classification: DataFrame) -> DataFr
 
     # If a leaf's ancestor chain held two nodes at the same class_level, f.max
     # picks the lexicographically greater pref_name with no signal that a
-    # collision happened. Inherited verbatim from the SQL this replaces, so this
-    # is not a behaviour change -- just noting the tie-break exists.
+    # collision happened. The published data has no such collision; noting the
+    # tie-break exists so it is not mistaken for a deliberate rule.
     return chain.groupBy('leaf_id').agg(*[
         f.max(f.when(f.col('class_level') == i, f.col('pref_name'))).alias(f'l{i}')
         for i in range(1, _MAX_CLASS_LEVEL + 1)

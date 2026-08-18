@@ -157,7 +157,7 @@ class TestRoundTrip:
         assert df.height == ROWS
         assert df.columns == ['id', 'txt']
         # postgres `integer` must come back as Int32, not widened to Int64: steps such as
-        # drug_warning rely on this narrowing to reach the released `year` column untouched.
+        # drug_warning depends on this width reaching its `year` column unchanged.
         assert df.schema['id'] == pl.Int32
 
     def test_an_ordered_read_comes_back_ordered(self, dump: Path, tmp_path: Path) -> None:
