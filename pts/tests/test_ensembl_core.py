@@ -59,3 +59,9 @@ def test_unknown_table_raises_and_names_what_is_there(dump_dir: Path) -> None:
 def test_missing_schema_file_raises(tmp_path: Path) -> None:
     with pytest.raises(CoreDumpError, match=r'no .* schema file'):
         CoreDump(str(tmp_path)).columns('gene')
+
+
+def test_multiple_schema_files_raise(dump_dir: Path) -> None:
+    write_gz(dump_dir / 'homo_sapiens_core_116_39.sql.gz', DDL)
+    with pytest.raises(CoreDumpError, match=r'2 .* schema files'):
+        CoreDump(str(dump_dir)).columns('gene')

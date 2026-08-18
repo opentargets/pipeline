@@ -47,9 +47,21 @@ class CoreDump:
 
     @cached_property
     def _schema_path(self) -> str:
+        """Find the single schema file in the dump directory.
+
+        Raises:
+            CoreDumpError: If no ``*.sql.gz`` file is present, or more than one is. A stale FTP
+                sync or a copy started between two releases could leave a second schema file
+                behind, and picking one of them without complaint would silently parse the wrong
+                release's columns.
+        """
         matches = sorted(StorageHandle(self._source).glob(_SCHEMA_GLOB))
         if not matches:
             raise CoreDumpError(f'no {_SCHEMA_GLOB} schema file in {self._source}')
+        if len(matches) > 1:
+            raise CoreDumpError(
+                f'{len(matches)} {_SCHEMA_GLOB} schema files in {self._source}, expected 1: {matches}'
+            )
         return matches[0]
 
     @cached_property
@@ -60,14 +72,30 @@ class CoreDump:
 
     @property
     def release(self) -> str:
-        """The Ensembl release this dump is from, taken from the schema filename."""
+        """The Ensembl release this dump is from, taken from the schema filename.
+
+        Raises:
+            CoreDumpError: If the dump directory has no schema file, more than one, or the
+                schema filename does not carry a release number.
+        """
         match = _RELEASE.search(self._schema_path)
         if not match:
             raise CoreDumpError(f'cannot read a release number out of {self._schema_path}')
         return match['release']
 
     def columns(self, table: str) -> list[str]:
-        """The table's columns, in the order the dump writes them."""
+        """The table's columns, in the order the dump writes them.
+
+        Args:
+            table: Name of the table to look up.
+
+        Returns:
+            Column names in DDL order.
+
+        Raises:
+            CoreDumpError: If the dump directory has no schema file, more than one, or `table`
+                is not declared in the schema.
+        """
         if table not in self._tables:
             raise CoreDumpError(f'{table} is not in {self._schema_path}; it has {sorted(self._tables)}')
         return self._tables[table]
