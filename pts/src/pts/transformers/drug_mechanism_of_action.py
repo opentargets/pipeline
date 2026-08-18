@@ -13,6 +13,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.utils import chembl_ids as _chembl_ids
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -88,7 +89,7 @@ def drug_mechanism_of_action(
     )
 
     logger.info(f'Reading target data from {source["target"]}')
-    gene_df = pl.read_parquet(source['target'])
+    gene_df = scan_dataset(str(source['target'])).collect()
 
     logger.info('Processing mechanisms of action')
     output_df = process_mechanism_of_action(
@@ -103,7 +104,7 @@ def drug_mechanism_of_action(
     )
 
     logger.info(f'Writing mechanism of action to {destination}')
-    output_df.write_parquet(destination, mkdir=True)
+    write_dataset(output_df, str(destination))
 
 
 def process_mechanism_of_action(

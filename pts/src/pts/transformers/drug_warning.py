@@ -13,6 +13,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.utils import chembl_ids as _chembl_ids
+from pts.transformers.utils.dataset import write_dataset
 
 SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -101,7 +102,7 @@ def drug_warning(
     output_df = _deduplicate_warnings(output_df)
 
     logger.info(f'Writing drug warnings to {destination}')
-    output_df.write_parquet(destination, mkdir=True)
+    write_dataset(output_df, str(destination))
 
 
 def process_drug_warnings(

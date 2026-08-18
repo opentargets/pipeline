@@ -17,6 +17,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.transformers.utils.dataset import write_dataset
 
 SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -52,4 +53,4 @@ def chembl_target_class_dump(
 
     for name, df in tables.items():
         logger.info(f'Writing {name} to {destination[name]}')
-        df.write_parquet(destination[name], mkdir=True)
+        write_dataset(df, str(destination[name]))

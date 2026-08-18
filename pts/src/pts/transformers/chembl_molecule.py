@@ -23,6 +23,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -63,7 +64,7 @@ def chembl_molecule(
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading drugbank lookup from {source["drugbank"]}')
-    drugbank_lookup = pl.read_csv(source['drugbank'], separator='\t')
+    drugbank_lookup = scan_dataset(str(source['drugbank']), format='tsv', has_header=True).collect()
 
     aact_batch = None
     if 'aact_extraction_batch_results' in source:
@@ -81,7 +82,7 @@ def chembl_molecule(
     )
 
     logger.info(f'Writing molecules to {destination}')
-    output_df.write_parquet(destination, mkdir=True)
+    write_dataset(output_df, str(destination))
 
 
 def process_molecules(

@@ -730,7 +730,7 @@ steps:
     - name: transform drug_warning
       transformer: drug_warning
       source: input/chembl/chembl_${chembl_version}.tar.gz
-      destination: output/drug_warning/drug_warning.parquet
+      destination: output/drug_warning
   ##################################################################################################
 
   #: DRUG_MECHANISM_OF_ACTION STEP :###############################################################
@@ -740,7 +740,7 @@ steps:
       source:
         chembl: input/chembl/chembl_${chembl_version}.tar.gz
         target: intermediate/target/ensembl/homo_sapiens.parquet
-      destination: output/drug_mechanism_of_action/drug_mechanism_of_action.parquet
+      destination: output/drug_mechanism_of_action
   ##################################################################################################
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
@@ -751,7 +751,7 @@ steps:
         chembl: input/chembl/chembl_${chembl_version}.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
-      destination: intermediate/chembl_molecule/chembl_molecule.parquet
+      destination: intermediate/chembl_molecule
   ##################################################################################################
 
   #: DRUG_MOLECULE STEP :##########################################################################
@@ -773,7 +773,7 @@ steps:
   clinical_report:
     - name: pyspark clinical_report
       source:
-        chembl_molecule: intermediate/chembl_molecule/*.parquet
+        chembl_molecule: intermediate/chembl_molecule
         disease: output/disease
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
