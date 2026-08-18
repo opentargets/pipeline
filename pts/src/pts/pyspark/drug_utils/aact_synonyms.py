@@ -285,6 +285,7 @@ CONTROL_TERMS = {
     'air',
     'normal saline',
 }
+
 # v1 port of the experiment's cleanup blacklists — expected to grow with corpus coverage.
 CLASS_KEYWORDS = [
     'inhibitor',
@@ -298,9 +299,7 @@ CLASS_KEYWORDS = [
     'steroid',
     'nsaid',
     'cell',
-    'cells',
     'lymphocyte',
-    'lymphocytes',
     'mesenchymal',
     'stromal',
     'progenitor',
@@ -335,7 +334,18 @@ CLASS_KEYWORDS = [
     'diuretic',
     'analgesic',
 ]
-_CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
+
+
+def _word_or_plural(kw):
+    """Expand a keyword to also match its plural form."""
+    if kw.endswith('s'):
+        return kw
+    if kw.endswith('y'):
+        return kw[:-1] + r'(?:y|ies)'   # therapy->therapies, antibody->antibodies
+    return kw + r's?'                   # inhibitor->inhibitors
+
+
+_CLASS_PATTERN = r'\b(?:' + '|'.join(_word_or_plural(k) for k in CLASS_KEYWORDS) + r')\b'
 
 
 def _has_class_keyword(col):
