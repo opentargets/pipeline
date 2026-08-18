@@ -52,6 +52,14 @@ def test_release_comes_from_the_schema_filename(dump_dir: Path) -> None:
     assert CoreDump(str(dump_dir)).release == '115'
 
 
+def test_release_matches_the_filename_not_a_directory_component(tmp_path: Path) -> None:
+    """A misleading directory component must not win over the release in the schema filename."""
+    misleading_dir = tmp_path / 'archive_core_999_backup'
+    misleading_dir.mkdir()
+    write_gz(misleading_dir / 'homo_sapiens_core_115_38.sql.gz', DDL)
+    assert CoreDump(str(misleading_dir)).release == '115'
+
+
 def test_unknown_table_raises_and_names_what_is_there(dump_dir: Path) -> None:
     with pytest.raises(CoreDumpError, match='seq_region'):
         CoreDump(str(dump_dir)).columns('nonesuch')

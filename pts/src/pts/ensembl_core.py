@@ -17,6 +17,7 @@ import gzip
 import re
 from collections.abc import Mapping
 from functools import cached_property
+from pathlib import Path
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
@@ -44,6 +45,12 @@ def _unescape(column: str) -> pl.Expr:
     ``\n``. Resolving those in sequence is wrong -- ``\\t`` (a literal backslash, then the
     letter t) would become a tab -- so an already-unescaped backslash is parked on a sentinel
     until the other forms have been resolved.
+
+    MySQL's outfile format escapes seven characters in total; this handles only these three.
+    ``\r``, ``\0``, ``\b`` and ``\Z`` are left as literal two-character sequences rather than
+    resolved to carriage-return/NUL/backspace/Ctrl-Z. None of the ten release-115 tables read by
+    this module contain any of the four, so the gap is unexercised -- but it is a real gap, not a
+    deliberately absent one, and a future release is not guaranteed to stay that way.
     """
     return (
         pl.col(column)
@@ -101,7 +108,9 @@ class CoreDump:
             CoreDumpError: If the dump directory has no schema file, more than one, or the
                 schema filename does not carry a release number.
         """
-        match = _RELEASE.search(self._schema_path)
+        # matched on the basename only -- a directory component happening to look like
+        # `_core_<digits>_` must not win over the actual release encoded in the filename.
+        match = _RELEASE.search(Path(self._schema_path).name)
         if not match:
             raise CoreDumpError(f'cannot read a release number out of {self._schema_path}')
         return match['release']
