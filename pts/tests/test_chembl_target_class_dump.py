@@ -8,12 +8,12 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-import polars as pl
 import pytest
 from otter.config.model import Config
 from pixeltable_pgserver.postgres_server import get_server
 
 from pts.transformers.chembl_target_class_dump import TABLES, chembl_target_class_dump
+from pts.transformers.utils.dataset import scan_dataset
 
 EXPECTED_TABLES = {
     'target_dictionary',
@@ -77,7 +77,7 @@ class TestChemblTarget:
         destination = {name: tmp_path / f'{name}.parquet' for name in TABLES}
         chembl_target_class_dump(dump, destination, {}, _config(tmp_path))
 
-        written = {p.stem for p in tmp_path.glob('*.parquet')}
+        written = {p.stem for p in tmp_path.glob('*.parquet') if p.is_dir()}
         assert written == EXPECTED_TABLES
 
     def test_each_file_has_only_the_declared_columns(self, dump: Path, tmp_path: Path) -> None:
@@ -85,18 +85,18 @@ class TestChemblTarget:
         chembl_target_class_dump(dump, destination, {}, _config(tmp_path))
 
         for name, columns in TABLES.items():
-            assert pl.read_parquet(destination[name]).columns == columns
+            assert scan_dataset(str(destination[name])).collect().columns == columns
 
     def test_no_join_no_flatten_the_rows_pass_through_untouched(self, dump: Path, tmp_path: Path) -> None:
         destination = {name: tmp_path / f'{name}.parquet' for name in TABLES}
         chembl_target_class_dump(dump, destination, {}, _config(tmp_path))
 
-        target_dictionary = pl.read_parquet(destination['target_dictionary'])
+        target_dictionary = scan_dataset(str(destination['target_dictionary'])).collect()
         assert target_dictionary.to_dicts() == [
             {'tid': 20, 'chembl_id': 'CHEMBL_T20', 'pref_name': 'Target Twenty', 'target_type': 'SINGLE PROTEIN'}
         ]
 
-        protein_classification = pl.read_parquet(destination['protein_classification'])
+        protein_classification = scan_dataset(str(destination['protein_classification'])).collect()
         assert protein_classification.to_dicts() == [
             {'protein_class_id': 900, 'parent_id': None, 'pref_name': 'Enzyme', 'class_level': 0}
         ]
