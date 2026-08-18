@@ -34,7 +34,16 @@ TABLES = {
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
     'molecule_synonyms': ['molsyn_id', 'molregno', 'synonyms', 'syn_type'],
 }
-"""ChEMBL tables and columns this step needs, restored from the dump."""
+"""ChEMBL tables and columns this step needs, restored from the dump.
+
+No ``order_by`` here, unlike ``drug_warning`` and ``drug_mechanism_of_action``, and
+that is a decision rather than an omission. Every published list this step builds
+imposes its own order at the aggregation site -- ``synonyms`` and ``tradeNames``
+sort, ``childChemblIds`` and the cross-reference ``ids`` sort -- so no read order
+reaches an array. What is left is the output's row order, which follows the scan
+order of ``molecule_dictionary``. Pinning that would mean sorting the largest table
+here on every run to fix the order of rows nothing downstream reads positionally.
+"""
 
 CHEMBL_SOURCE = 'ChEMBL'
 
