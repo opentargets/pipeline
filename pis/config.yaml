@@ -914,8 +914,6 @@ steps:
       foreach:
         - analysis
         - coord_system
-        - exon
-        - exon_transcript
         - external_db
         - gene
         - object_xref
