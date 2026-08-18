@@ -272,7 +272,7 @@ def _anchor_candidates(entries, name_index, parent_child):
 CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
 
 # v1 port of the experiment's cleanup blacklists — expected to grow with corpus coverage.
-CONTROL_TERMS = {
+EXACT_MATCH_BLOCKLIST = {
     'placebo',
     'vehicle',
     'saline',
@@ -284,6 +284,25 @@ CONTROL_TERMS = {
     'water',
     'air',
     'normal saline',
+    'anti-il-20',
+    'anti-il-20 biologic',
+    'anti-il-20 mab',
+    'antibiotic eye drops',
+    'double antibiotic paste',
+    'biosimilar',
+    'calcium channel blocker',
+    'cephalosporin',
+    'second-generation cephalosporin',
+    'third generation cephalosporin',
+    'direct oral anticoagulant',
+    'new oral anticoagulant',
+    'platinum',
+    'platinum drugs',
+    'platinum-containing compound',
+    'platinum-based drug',
+    'biguanide',
+    'a biguanide',
+    'thiazide',
 }
 
 # v1 port of the experiment's cleanup blacklists — expected to grow with corpus coverage.
@@ -443,9 +462,9 @@ def _apply_cleanup_rules(cand, regimen_index, existing_per_id):
     cand = cand.filter(~f.col('candidate').rlike(r'^(u|gla)[- ]?\d{2,3}$'))
     cand = cand.filter(~f.col('candidate').contains('%'))
 
-    # #5: control noise
-    control_array = f.array([f.lit(t) for t in sorted(CONTROL_TERMS)])
-    cand = cand.filter(~f.array_contains(control_array, f.col('candidate')))
+    # #5: exact-match blocklist
+    blocklist_array = f.array([f.lit(t) for t in sorted(EXACT_MATCH_BLOCKLIST)])
+    cand = cand.filter(~f.array_contains(blocklist_array, f.col('candidate')))
 
     # #6: drug-class / cell-therapy keyword present, UNLESS the candidate is a bare
     # R&D code (descriptor phrases were already rewritten to their code upstream)
