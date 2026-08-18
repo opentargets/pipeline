@@ -360,8 +360,8 @@ def _word_or_plural(kw):
     if kw.endswith('s'):
         return kw
     if kw.endswith('y'):
-        return kw[:-1] + r'(?:y|ies)'   # therapy->therapies, antibody->antibodies
-    return kw + r's?'                   # inhibitor->inhibitors
+        return kw[:-1] + r'(?:y|ies)'  # therapy->therapies, antibody->antibodies
+    return kw + r's?'  # inhibitor->inhibitors
 
 
 _CLASS_PATTERN = r'\b(?:' + '|'.join(_word_or_plural(k) for k in CLASS_KEYWORDS) + r')\b'
