@@ -27,7 +27,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from pts.transformers.utils import update_quality_flag
-from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
 class ClinicalReportFlags(StrEnum):
@@ -55,48 +55,68 @@ def clinical_report(
 
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
-    chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
-    aact_studies = pl.read_parquet(source['aact_studies']).select(
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
+    chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
+    aact_studies = (
+        scan_dataset(source['aact_studies'])
+        .select(
+            'nct_id',
+            'overall_status',
+            'phase',
+            'study_type',
+            'start_date',
+            'why_stopped',
+            'number_of_arms',
+            'official_title',
+        )
+        .collect()
     )
-    aact_interventions = pl.read_parquet(source['aact_interventions']).select(
-        'nct_id',
-        'intervention_type',
-        'name',
+    aact_interventions = (
+        scan_dataset(source['aact_interventions'])
+        .select(
+            'nct_id',
+            'intervention_type',
+            'name',
+        )
+        .collect()
     )
-    aact_conditions = pl.read_parquet(source['aact_conditions']).select('nct_id', 'downcase_name')
-    aact_study_references = pl.read_parquet(source['aact_study_references']).select('nct_id', 'pmid', 'reference_type')
-    aact_designs = pl.read_parquet(source['aact_designs']).select('nct_id', 'primary_purpose')
-    aact_summaries = pl.read_parquet(source['aact_summaries']).select('nct_id', 'description')
-    chembl_indication = pl.read_parquet(source['chembl_indication']).select(
-        'drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'
+    aact_conditions = scan_dataset(source['aact_conditions']).select('nct_id', 'downcase_name').collect()
+    aact_study_references = (
+        scan_dataset(source['aact_study_references']).select('nct_id', 'pmid', 'reference_type').collect()
     )
-    chembl_indication_references = pl.read_parquet(source['chembl_indication_references']).select(
-        'drugind_id', 'ref_type', 'ref_id', 'ref_url'
+    aact_designs = scan_dataset(source['aact_designs']).select('nct_id', 'primary_purpose').collect()
+    aact_summaries = scan_dataset(source['aact_summaries']).select('nct_id', 'description').collect()
+    chembl_indication = (
+        scan_dataset(source['chembl_indication'])
+        .select('drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term')
+        .collect()
     )
-    chembl_molecule_dictionary = pl.read_parquet(source['chembl_molecule_dictionary']).select(
-        'molregno', 'chembl_id', 'pref_name'
+    chembl_indication_references = (
+        scan_dataset(source['chembl_indication_references'])
+        .select('drugind_id', 'ref_type', 'ref_id', 'ref_url')
+        .collect()
     )
-    chembl_drug_warning = pl.read_parquet(source['chembl_drug_warning']).select(
-        'warning_id',
-        'molregno',
-        'warning_type',
-        'warning_year',
-        'warning_country',
-        'warning_class',
-        'efo_id',
-        'efo_term',
-        'efo_id_for_warning_class',
+    chembl_molecule_dictionary = (
+        scan_dataset(source['chembl_molecule_dictionary']).select('molregno', 'chembl_id', 'pref_name').collect()
     )
-    chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
-        'warning_id', 'ref_type', 'ref_id', 'ref_url'
+    chembl_drug_warning = (
+        scan_dataset(source['chembl_drug_warning'])
+        .select(
+            'warning_id',
+            'molregno',
+            'warning_type',
+            'warning_year',
+            'warning_country',
+            'warning_class',
+            'efo_id',
+            'efo_term',
+            'efo_id_for_warning_class',
+        )
+        .collect()
+    )
+    chembl_drug_warning_references = (
+        scan_dataset(source['chembl_drug_warning_references'])
+        .select('warning_id', 'ref_type', 'ref_id', 'ref_url')
+        .collect()
     )
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
     llm_indications = llm_batch_results.select(
@@ -170,7 +190,7 @@ def clinical_report(
             ner_batch_size=int(settings['ner_batch_size']),
             ner_cache_path=source['ner_cache_path'],
         )
-        .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
+        .pipe(validate_disease, disease_index=scan_dataset(source['disease']).select('id', 'obsoleteTerms').collect())
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
@@ -188,7 +208,8 @@ def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> Cl
 
     Args:
         reports: ClinicalReport object with mapped entities
-        disease_index: Polars DataFrame with disease index
+        disease_index: disease index, projected to the only columns used here: `id` and
+            `obsoleteTerms`. The caller pushes that projection into the read.
 
     Returns:
         ClinicalReport object with validated disease entities
