@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import gzip
 import re
+from collections.abc import Mapping
 from functools import cached_property
 
+import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import OtterError
 
@@ -29,6 +31,27 @@ _CREATE_TABLE = re.compile(r'CREATE TABLE `(?P<table>\w+)` \((?P<body>.*?)\n\) E
 #: put a keyword before their backtick, so they do not match.
 _COLUMN = re.compile(r'^\s+`(?P<name>\w+)` ', re.MULTILINE)
 _RELEASE = re.compile(r'_core_(?P<release>\d+)_')
+
+#: Placeholder held by an already-unescaped backslash while the other escapes are resolved.
+#: Without it, unescaping in sequence turns a literal backslash followed by `t` into a tab.
+_SENTINEL = '\x00'
+
+
+def _unescape(column: str) -> pl.Expr:
+    r"""Undo MySQL's outfile escaping on one string column.
+
+    The outfile format writes a literal backslash as ``\\``, a tab as ``\t`` and a newline as
+    ``\n``. Resolving those in sequence is wrong -- ``\\t`` (a literal backslash, then the
+    letter t) would become a tab -- so an already-unescaped backslash is parked on a sentinel
+    until the other forms have been resolved.
+    """
+    return (
+        pl.col(column)
+        .str.replace_all('\\\\', _SENTINEL, literal=True)
+        .str.replace_all('\\t', '\t', literal=True)
+        .str.replace_all('\\n', '\n', literal=True)
+        .str.replace_all(_SENTINEL, '\\', literal=True)
+    )
 
 
 class CoreDumpError(OtterError):
@@ -99,3 +122,38 @@ class CoreDump:
         if table not in self._tables:
             raise CoreDumpError(f'{table} is not in {self._schema_path}; it has {sorted(self._tables)}')
         return self._tables[table]
+
+    def scan(self, table: str, columns: Mapping[str, pl.DataType]) -> pl.LazyFrame:
+        """Lazily read one table, projected to `columns`.
+
+        The full positional schema is built from the DDL so that polars parses the file by
+        position, and only the requested columns are then selected. Requesting a column the
+        release does not have raises rather than reading the wrong one.
+
+        Args:
+            table: Table name, without the `.txt.gz` suffix.
+            columns: Column name to the dtype to read it as. Every `pl.String` column is
+                unescaped; other dtypes cannot carry an escape.
+
+        Returns:
+            LazyFrame of the requested columns.
+
+        Raises:
+            CoreDumpError: If the table or any requested column is not in this release.
+        """
+        known = self.columns(table)
+        missing = [name for name in columns if name not in known]
+        if missing:
+            raise CoreDumpError(f'{table} in release {self.release} has no column(s) {missing}; it has {known}')
+
+        frame = pl.scan_csv(
+            f'{self._source}/{table}.txt.gz',
+            schema=pl.Schema({name: columns.get(name, pl.String) for name in known}),
+            separator='\t',
+            has_header=False,
+            null_values=[NULL_TOKEN],
+            quote_char=None,
+        ).select(columns.keys())
+
+        unescaped = [_unescape(name) for name, dtype in columns.items() if dtype == pl.String]
+        return frame.with_columns(unescaped) if unescaped else frame
