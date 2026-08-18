@@ -358,6 +358,18 @@ class TestCleanupRules:
             },
             {
                 'id': 'CHEMBL1',
+                'candidate': 'monoclonal antibodies',
+                'nct_id': 'N1',
+                'status': 'NOVEL',
+            },
+            {
+                'id': 'CHEMBL1',
+                'candidate': 'denosumab biosimilar (ct-p41)',
+                'nct_id': 'N1',
+                'status': 'NOVEL',
+            },
+            {
+                'id': 'CHEMBL1',
                 'candidate': '1% lidocaine',
                 'nct_id': 'N1',
                 'status': 'NOVEL',
@@ -380,7 +392,7 @@ class TestCleanupRules:
         ]
         out = _apply_cleanup_rules(self._df(spark, rows), regimen, existing)
         kept = {r['candidate'] for r in out.collect()}
-        assert kept == {'g-csf'}
+        assert kept == {'g-csf', 'denosumab biosimilar (ct-p41)'}
 
     def test_conflict_kept(self, spark):
         from pts.pyspark.drug_utils.aact_synonyms import _apply_cleanup_rules
