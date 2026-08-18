@@ -350,14 +350,12 @@ steps:
       destination: intermediate/target/hpa/subcellular_locations_ssl.parquet
       separator: "\t"
 
-    - name: download ensembl
-      source: input/target/ensembl/homo_sapiens.json
     - name: transform ensembl
-      requires:
-        - download ensembl
       transformer: ensembl
-      source: input/target/ensembl/homo_sapiens.json
-      destination: intermediate/target/ensembl/homo_sapiens.parquet
+      source: input/target/ensembl/core
+      destination:
+        genes: intermediate/target/ensembl/homo_sapiens.parquet
+        gene_dictionary: intermediate/target/homologue/gene_dictionary/homo_sapiens.parquet
 
     - name: explode_glob homology
       glob: input/target/homologue/gene_dictionary/*.json
@@ -381,7 +379,6 @@ steps:
         partition_count: 3
       source:
         ensembl: intermediate/target/ensembl/homo_sapiens.parquet
-        gene_code: input/target/gencode/gencode.gff3.gz
         genetic_constraints: input/target/gnomad/gnomad_constraint_metrics.tsv
         gene_ontology_human: input/target/go/goa_human.gaf.gz
         gene_ontology_rna: input/target/go/goa_human_rna.gaf.gz
