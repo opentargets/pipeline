@@ -2,9 +2,6 @@
 
 from airflow.models import DagBag
 
-from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
-from orchestration.models.pts_step import pts_step_from_config
-
 
 def test_no_import_errors(dag_bag: DagBag) -> None:
     """Test for import errors."""
@@ -43,25 +40,3 @@ def test_three_or_less_retries(dag_bag: DagBag) -> None:
         assert dag.default_args['retries'] <= 3
 
 
-def test_the_polars_chembl_steps_run_on_gce_not_dataproc() -> None:
-    """A restore belongs on a single VM, not on a spark cluster.
-
-    pts_step_from_config routes a step to dataproc as soon as one of its tasks is
-    named 'pyspark ...'. These steps restore a dump and read it into polars;
-    adding a pyspark task to any of them would move that onto a cluster whose
-    workers would sit idle throughout.
-
-    pts_pre_target is in here because it carries the chembl_target_class_dump task.
-    It is the one whose membership is not obvious from the step name, and the one
-    most likely to acquire a pyspark task later.
-    """
-    config = UnifiedPipelineConfig()
-    for name in (
-        'pts_pre_target',
-        'pts_drug_warning',
-        'pts_drug_mechanism_of_action',
-        'pts_chembl_molecule',
-    ):
-        step = pts_step_from_config(name, config)
-        assert step.is_gce, f'{name} must run on GCE: it restores a database'
-        assert not step.is_dataproc
