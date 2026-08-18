@@ -143,14 +143,13 @@ steps:
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
-    # both dumps are copied whole and left alone. pts restores the tables it
-    # needs from them, so the tables and columns are declared there, next to the
-    # code that depends on them.
+    # The dump is copied whole and left alone; pts restores the tables it needs
+    # from it, so the tables and columns are declared there, next to the code that
+    # depends on them. The version is in the filename so a release cannot silently
+    # read a dump fetched for an earlier one.
     #
-    # The chembl dump is copied by the `chembl` step above rather than here: it
-    # feeds four pts steps, not just clinical_report, and each is a separate DAG
-    # node depending on `pis_chembl`. Both destinations carry the version in the
-    # filename so a release cannot silently read last month's dump.
+    # The chembl dump has its own `chembl` step rather than living here: it feeds
+    # several pts steps, not just clinical_report, and each depends on `pis_chembl`.
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
       destination: input/clinical_report/aact_${aact_version}.zip

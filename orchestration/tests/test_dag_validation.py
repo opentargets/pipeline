@@ -38,5 +38,3 @@ def test_three_or_less_retries(dag_bag: DagBag) -> None:
     """Retries should be 3 or less."""
     for dag in dag_bag.dags.values():
         assert dag.default_args['retries'] <= 3
-
-

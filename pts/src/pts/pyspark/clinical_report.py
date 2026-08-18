@@ -52,6 +52,17 @@ CHEMBL_TABLES = {
 }
 """ChEMBL tables and columns this step needs, restored from the dump."""
 
+CHEMBL_ORDER_BY = {
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+"""Reads whose row order reaches a published list and therefore must not float.
+
+Both reference tables are collected per report into published arrays. Neither
+projection carries its table's key, so each is ordered by its whole projection --
+which the ``SELECT DISTINCT`` makes a total order. Both are small.
+"""
+
 AACT_SCHEMA_NAME = 'ctgov'
 """Schema the AACT tables live in inside the restored dump."""
 
@@ -74,6 +85,9 @@ AACT_TABLES = {
     'brief_summaries': ['nct_id', 'description'],
 }
 """AACT tables and columns this step needs, restored from the dump."""
+
+AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+"""``pmid`` is collected into the published ``literature`` array, grouped by ``nct_id``."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -109,7 +123,9 @@ def clinical_report(
     # is not handed a `Config` and where `work_path` (/mnt/disks/work) is not
     # mounted, so the default location is the right one.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
-    chembl_tables = read_dump_tables(str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME)
+    chembl_tables = read_dump_tables(
+        str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY
+    )
     chembl_indication = chembl_tables['drug_indication']
     chembl_indication_references = chembl_tables['indication_refs']
     chembl_molecule_dictionary = chembl_tables['molecule_dictionary']
@@ -118,7 +134,11 @@ def clinical_report(
 
     logger.info(f'restoring aact tables from {source["aact"]}')
     aact_tables = read_dump_tables(
-        str(source['aact']), AACT_TABLES, schema_name=AACT_SCHEMA_NAME, archive_member=AACT_ARCHIVE_MEMBER
+        str(source['aact']),
+        AACT_TABLES,
+        schema_name=AACT_SCHEMA_NAME,
+        archive_member=AACT_ARCHIVE_MEMBER,
+        order_by=AACT_ORDER_BY,
     )
     aact_studies = aact_tables['studies']
     aact_interventions = aact_tables['interventions']

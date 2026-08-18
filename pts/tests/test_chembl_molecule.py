@@ -1,5 +1,7 @@
 """Tests for chembl_molecule, which joins raw ChEMBL tables straight into polars."""
 
+import random
+
 import polars as pl
 
 from pts.transformers.chembl_molecule import _molecule_preprocess, process_molecules
@@ -362,3 +364,82 @@ class TestMergeAndTwoSource:
         t = tables()
         result = _process(t)
         assert result.height == t['molecule_dictionary'].height
+
+
+class TestOrderIsDeterministic:
+    """`childChemblIds` is published, and nothing upstream pins the order it is built in.
+
+    The rows feeding the aggregation come from a `SELECT DISTINCT` against a restored
+    dump, which promises no order, and polars' `group_by`/`unique` promise none either.
+    The aggregation therefore has to impose one itself.
+
+    Both tests need a parent with many children: with only a handful, `unique` happens
+    to return them in a stable order and the tests pass whether or not the code sorts,
+    which would make them decoration rather than a guard.
+    """
+
+    CHILDREN = 200
+
+    @classmethod
+    def _tables(cls, order: list[int]) -> dict:
+        """One parent (molregno 1) with `CHILDREN` children, rows in `order`.
+
+        `order` permutes BOTH tables. The molecule_dictionary order is the one that
+        actually reaches the aggregation -- `_molecule_preprocess` joins the hierarchy
+        onto it, so the join output follows the dictionary, not the hierarchy read.
+        Permuting only the hierarchy leaves the result stable and proves nothing.
+        """
+        molecule_dictionary = pl.DataFrame(
+            [(m, f'CHEMBL{m:04d}', f'Drug {m}', 'Small molecule') for m in [1, *order]],
+            schema=['molregno', 'chembl_id', 'pref_name', 'molecule_type'],
+            orient='row',
+        )
+        return {
+            'molecule_dictionary': molecule_dictionary,
+            'compound_structures': pl.DataFrame(
+                schema={'molregno': pl.Int64, 'canonical_smiles': pl.Utf8,
+                        'standard_inchi_key': pl.Utf8, 'molfile': pl.Utf8}
+            ),
+            'molecule_hierarchy': pl.DataFrame(
+                [(1, 1), *[(child, 1) for child in order]],
+                schema=['molregno', 'parent_molregno'],
+                orient='row',
+            ),
+            'molecule_synonyms': pl.DataFrame(
+                schema={'molsyn_id': pl.Int64, 'molregno': pl.Int64, 'synonyms': pl.Utf8, 'syn_type': pl.Utf8}
+            ),
+            'drugbank_lookup': pl.DataFrame(schema=RAW_DRUGBANK_SCHEMA),
+        }
+
+    @classmethod
+    def _permutations(cls) -> list[list[int]]:
+        children = list(range(2, cls.CHILDREN + 2))
+        rng = random.Random(0)
+        shuffled = []
+        for _ in range(3):
+            p = children[:]
+            rng.shuffle(p)
+            shuffled.append(p)
+        return [children, children[::-1], *shuffled]
+
+    def test_child_order_does_not_depend_on_row_order(self):
+        """Element order inside the published `childChemblIds` array."""
+        results = [
+            rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds']
+            for p in self._permutations()
+        ]
+        assert results[0] == sorted(results[0])
+        assert all(r == results[0] for r in results), 'childChemblIds varied with input row order'
+
+    def test_the_same_input_gives_the_same_output(self):
+        """`unique(subset=...)` keeps one row per id and may pick any of them.
+
+        Output row order deliberately follows the input's -- that is what
+        `maintain_order` preserves -- so this asserts reproducibility, not
+        independence: the same frame in must give the same frame out. Pinning the
+        input order itself is a separate matter, and this module's reads are not
+        ordered.
+        """
+        t = self._tables(list(range(2, self.CHILDREN + 2)))
+        runs = [_process(t) for _ in range(3)]
+        assert all(r.equals(runs[0]) for r in runs), 'repeated runs on one input differed'

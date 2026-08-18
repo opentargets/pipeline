@@ -175,7 +175,10 @@ def process_molecules(
                 pl.col('id'),
             )
         )
-        .unique(subset=['id'])
+        # maintain_order: `unique` on a subset keeps one row per id and is free to
+        # pick any of them, so without this both the surviving row and the output row
+        # order depend on the order the joins happened to produce.
+        .unique(subset=['id'], maintain_order=True)
         .select(
             'id',
             'canonicalSmiles',
@@ -336,7 +339,11 @@ def _process_molecule_hierarchy(preprocessed_mols: pl.DataFrame) -> pl.DataFrame
         .filter(pl.col('id') != pl.col('parentId'))
         .filter(pl.col('parentId').is_not_null())
         .group_by('parentId')
-        .agg(pl.col('id').drop_nulls().unique().alias('childChemblIds'))
+        # sorted, not left in aggregation order: `childChemblIds` is published, and
+        # the row order feeding this group_by comes from an unordered read. The set
+        # of children is what carries meaning, so any stable order will do -- this
+        # matches what `_process_molecule_synonyms` does with `.list.sort()`.
+        .agg(pl.col('id').drop_nulls().unique().sort().alias('childChemblIds'))
         .rename({'parentId': 'id'})
     )
 
@@ -381,7 +388,7 @@ def _process_singleton_cross_references(
         # collect_set drops nulls and dedups; the pre-filter above already removes
         # nulls, but drop_nulls().unique() is kept to match the site's contract
         # explicitly rather than relying on the filter alone.
-        .agg(pl.col(reference_id_column).drop_nulls().unique().alias('ids'))
+        .agg(pl.col(reference_id_column).drop_nulls().unique().sort().alias('ids'))
         .with_columns(crossReferences=pl.concat_list(pl.struct(pl.lit(source).alias('source'), pl.col('ids'))))
         .select('id', 'crossReferences')
     )
