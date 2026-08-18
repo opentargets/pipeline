@@ -3,6 +3,7 @@
 Ported from platform-etl-backend target step.
 """
 
+import pytest
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
@@ -180,15 +181,27 @@ def test_build_ensembl_takes_canonical_transcript_from_the_frame(spark):
     assert [(s.id, s.source) for s in result.signalP] == [('SignalP-noTM', 'signalP')]
 
 
-def test_build_ensembl_protein_ids_survive_a_transcript_without_a_translation(spark):
-    """A transcript's `translations` must be `[]`, not null, or a whole gene loses its ensembl_PRO ids.
+@pytest.mark.parametrize(
+    ('untranslated_translations', 'expect_ensembl_pro'),
+    [
+        pytest.param([], True, id='empty-list'),
+        pytest.param(None, False, id='null'),
+    ],
+)
+def test_build_ensembl_protein_ids_depend_on_translations_being_a_list_not_null(
+    spark, untranslated_translations, expect_ensembl_pro
+):
+    """Pins the exact Spark semantics that make `[]` mandatory and `None` a whole-gene defect.
 
-    Regression test for the polars port: `_transcripts` left-joins per-translation aggregates onto
-    every transcript, and a transcript with no translation at all used to come out of that join
-    with `translations = null` rather than `[]`. Spark's `flatten` returns null -- not just skips
-    the element -- when any element of the outer array is null, so `_refactor_ensembl_protein_ids`
-    then sees `size(translations) == -1` and drops `ensembl_PRO` for every id on the gene, not just
-    the untranslated transcript.
+    `_refactor_ensembl_protein_ids` builds `ensembl_PRO` ids from `flatten(transcripts.translations)`.
+    Spark's `flatten` returns null for the *entire* array if any one element is null -- it does not
+    just skip that element -- so a single untranslated transcript whose `translations` is `None`
+    wipes out every `ensembl_PRO` id on the gene, not only its own. An empty list element has no
+    such effect: `flatten` treats it as contributing nothing and the other transcript's id survives.
+
+    This is why the producer (`_transcripts` in `pts/transformers/ensembl.py`) must emit `[]` for an
+    untranslated transcript rather than `None` -- see the producer-side test
+    `test_a_transcript_with_no_translation_has_an_empty_translations_array` in `test_ensembl.py`.
     """
     transcript_struct = StructType([
         StructField('id', StringType()),
@@ -225,8 +238,8 @@ def test_build_ensembl_protein_ids_survive_a_transcript_without_a_translation(sp
         ('ENST00000010', '1', 100, 200, '+'),
         [
             ('ENST00000010', [], [], [], [], [('ENSP00000001',)]),
-            # a transcript with no translation at all -- must carry [], not None
-            ('ENST00000011', [], [], [], [], []),
+            # the untranslated transcript -- the parametrized shape under test
+            ('ENST00000011', [], [], [], [], untranslated_translations),
         ],
     )
     df = spark.createDataFrame([row], schema)
@@ -234,7 +247,7 @@ def test_build_ensembl_protein_ids_survive_a_transcript_without_a_translation(sp
     result = _build_ensembl(df).collect()[0]
 
     protein_ids = {(p.id, p.source) for p in result.proteinIds}
-    assert ('ENSP00000001', 'ensembl_PRO') in protein_ids
+    assert (('ENSP00000001', 'ensembl_PRO') in protein_ids) == expect_ensembl_pro
 
 
 # ---------------------------------------------------------------------------
