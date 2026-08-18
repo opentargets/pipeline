@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.ensembl_core import CoreDump
-from pts.transformers.ensembl import _build, _genes, _translation_values
+from pts.transformers.ensembl import _build, _gene_dictionary, _genes, _translation_values, ensembl
+from pts.transformers.utils.dataset import scan_dataset
 
 SCHEMA = """\
 CREATE TABLE `gene` (
@@ -164,7 +167,12 @@ def write_gz(path: Path, text: str) -> None:
 
 
 @pytest.fixture
-def dump(tmp_path: Path) -> CoreDump:
+def dump_dir(tmp_path: Path) -> Path:
+    """A dump directory carrying every table the ensembl transformer reads.
+
+    Split out from `dump` below so the `ensembl()` entrypoint test can pass the directory itself
+    as `source`, the way `pts` actually calls it, rather than a `CoreDump` object.
+    """
     write_gz(tmp_path / 'homo_sapiens_core_115_38.sql.gz', SCHEMA)
     write_gz(tmp_path / 'gene.txt.gz', '\n'.join(GENES) + '\n')
     write_gz(tmp_path / 'seq_region.txt.gz', '\n'.join(SEQ_REGIONS) + '\n')
@@ -176,7 +184,12 @@ def dump(tmp_path: Path) -> CoreDump:
     write_gz(tmp_path / 'external_db.txt.gz', '\n'.join(EXTERNAL_DBS) + '\n')
     write_gz(tmp_path / 'protein_feature.txt.gz', '\n'.join(PROTEIN_FEATURES) + '\n')
     write_gz(tmp_path / 'analysis.txt.gz', '\n'.join(ANALYSES) + '\n')
-    return CoreDump(str(tmp_path))
+    return tmp_path
+
+
+@pytest.fixture
+def dump(dump_dir: Path) -> CoreDump:
+    return CoreDump(str(dump_dir))
 
 
 def test_scaffold_genes_are_filtered_out(dump: CoreDump) -> None:
@@ -308,3 +321,34 @@ def test_no_exons_or_biotype_on_the_transcript_struct(dump: CoreDump) -> None:
     assert isinstance(inner, pl.Struct)
     fields = {f.name for f in inner.fields}
     assert fields == {'id', 'uniprot_swissprot', 'uniprot_trembl', 'uniprot_isoform', 'alphafold', 'translations'}
+
+
+def test_gene_dictionary_is_unfiltered_including_scaffolds(dump: CoreDump) -> None:
+    """Nothing here may apply `_genes`'s chromosome filter.
+
+    `_build_homologues` resolves human paralog symbols through this dictionary, and paralogs land
+    on scaffolds -- exactly what that filter excludes.
+    """
+    dictionary_ids = _gene_dictionary(dump).collect()['id'].to_list()
+    gene_ids = _genes(dump).collect()['id'].to_list()
+    assert 'ENSG03' in dictionary_ids
+    assert 'ENSG03' not in gene_ids
+
+
+def test_ensembl_entrypoint_reads_destination_keys_and_writes_both_datasets(dump_dir: Path) -> None:
+    """Pins the contract nothing else exercises.
+
+    `ensembl()` reads its two `destination` dict keys and writes both outputs as datasets
+    `scan_dataset` can read back.
+    """
+    destination = {
+        'genes': str(dump_dir / 'out' / 'genes'),
+        'gene_dictionary': str(dump_dir / 'out' / 'gene_dictionary'),
+    }
+
+    ensembl(str(dump_dir), destination, {}, cast(Config, object()))
+
+    genes = scan_dataset(destination['genes']).collect()
+    dictionary = scan_dataset(destination['gene_dictionary']).collect()
+    assert set(genes['id'].to_list()) == {'ENSG01', 'ENSG02', 'ENSG04', 'ENSG05'}
+    assert 'ENSG03' in dictionary['id'].to_list()
