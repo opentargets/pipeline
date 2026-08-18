@@ -274,7 +274,11 @@ def _build(dump: CoreDump) -> pl.LazyFrame:
                 pl.col('_canon_start').alias('start'),
                 pl.col('_canon_end').alias('end'),
                 pl.col('_canon_strand').replace_strict(_STRAND_SIGN, return_dtype=pl.String()).alias('strand'),
-            ).alias('canonicalTranscript')
+            ).alias('canonicalTranscript'),
+            # a gene with zero transcripts has no row in `per_gene` to join onto, so this join
+            # leaves `transcripts` null -- same asymmetry as `translations` above, one level up.
+            # No such gene exists in release 115, but the JSON route always produced `[]` here too.
+            pl.col('transcripts').fill_null([]),
         )
         .select(
             'id', 'biotype', 'description', 'chromosome', 'start', 'end', 'strand', 'approvedSymbol',

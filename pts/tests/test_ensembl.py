@@ -89,6 +89,8 @@ GENES = [
     # on a scaffold, must be filtered out
     '3\tprotein_coding\t2\t10\t20\t1\t11\ta scaffold gene\t1003\tENSG03',
     '4\tMt_tRNA\t3\t5\t60\t1\t12\ta mito gene\t1004\tENSG04',
+    # no row in TRANSCRIPTS references gene_id 5 or transcript_id 1099 at all
+    '5\tprotein_coding\t1\t700\t800\t1\t\\N\t\\N\t1099\tENSG05',
 ]
 SEQ_REGIONS = ['1\t1\t1', '2\tKI270728.1\t2', '3\tMT\t1']
 COORD_SYSTEMS = ['1\t1\tchromosome', '2\t1\tscaffold']
@@ -178,7 +180,7 @@ def dump(tmp_path: Path) -> CoreDump:
 
 
 def test_scaffold_genes_are_filtered_out(dump: CoreDump) -> None:
-    assert _genes(dump).collect()['id'].to_list() == ['ENSG01', 'ENSG02', 'ENSG04']
+    assert _genes(dump).collect()['id'].to_list() == ['ENSG01', 'ENSG02', 'ENSG04', 'ENSG05']
 
 
 def test_mitochondrial_genes_are_kept(dump: CoreDump) -> None:
@@ -289,6 +291,12 @@ def test_a_transcript_with_no_translation_has_an_empty_translations_array(dump: 
     frame = _build(dump).collect()
     transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
     assert transcripts['ENST05']['translations'] == []
+
+
+def test_a_gene_with_no_transcripts_has_an_empty_transcripts_array(dump: CoreDump) -> None:
+    """The same null-vs-[] asymmetry one level up: `ENSG05` has no row in TRANSCRIPTS at all."""
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG05')['transcripts'].item().to_list() == []
 
 
 def test_no_exons_or_biotype_on_the_transcript_struct(dump: CoreDump) -> None:
