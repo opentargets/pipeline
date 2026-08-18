@@ -84,44 +84,35 @@ def _compute_facet_therapeutic_areas(df: DataFrame, key_col: str, label_col: str
     )
 
 
-def _compute_facet_tractability(df: DataFrame) -> DataFrame:
+def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFrame) -> DataFrame:
     """Compute tractability facets by modality.
 
-    Filters the tractability array for each modality (SM, AB, PR, OC) where
-    value is true, and extracts the corresponding IDs into separate columns.
+    Aggregates the flat target_tractability dataset per target, collecting the
+    ids of assessments with value=True into one array column per modality
+    (SM, AB, PR, OC), then left-joins the result onto targets_df. The join can
+    reorder rows, so the result is re-sorted by targetId for deterministic output.
 
     Args:
-        df: DataFrame with `targetId` and `tractability` columns.
+        targets_df: DataFrame with a `targetId` column to enrich.
+        tractability_df: target_tractability dataset with columns targetId,
+            modality, id, value.
 
     Returns:
-        DataFrame: Original df enriched with facet tractability columns.
+        DataFrame: targets_df enriched with the four facetTractability* columns,
+        ordered by targetId.
     """
 
-    def facet_filter(modality: str):
-        return lambda c: (c['value'] == True) & (c['modality'] == modality)  # noqa: E712
+    def facet_ids(modality: str):
+        return f.collect_list(f.when((f.col('modality') == modality) & f.col('value'), f.col('id')))
 
-    tractability_facets_df = (
-        df
-        .select(
-            f.col('targetId'),
-            f.filter(f.col('tractability'), facet_filter('SM')).alias('sm'),
-            f.filter(f.col('tractability'), facet_filter('AB')).alias('ab'),
-            f.filter(f.col('tractability'), facet_filter('PR')).alias('pr'),
-            f.filter(f.col('tractability'), facet_filter('OC')).alias('oc'),
-            f.monotonically_increasing_id().alias('miid'),
-        )
-        .select(
-            f.col('targetId'),
-            f.col('sm.id').alias('facetTractabilitySmallmolecule'),
-            f.col('ab.id').alias('facetTractabilityAntibody'),
-            f.col('pr.id').alias('facetTractabilityProtac'),
-            f.col('oc.id').alias('facetTractabilityOthermodalities'),
-            f.col('miid'),
-        )
-        .orderBy('targetId')
+    tractability_facets_df = tractability_df.groupBy('targetId').agg(
+        facet_ids('SM').alias('facetTractabilitySmallmolecule'),
+        facet_ids('AB').alias('facetTractabilityAntibody'),
+        facet_ids('PR').alias('facetTractabilityProtac'),
+        facet_ids('OC').alias('facetTractabilityOthermodalities'),
     )
 
-    return df.join(tractability_facets_df, ['targetId'], 'left_outer').orderBy('miid').drop('miid')
+    return targets_df.join(tractability_facets_df, ['targetId'], 'left_outer').orderBy('targetId')
 
 
 def association_otf(
@@ -134,7 +125,8 @@ def association_otf(
     joins them onto evidence records.
 
     Args:
-        source: Dict with keys "diseases", "targets", "evidences" mapping to paths.
+        source: Dict with keys "diseases", "targets", "evidences", "tractability"
+            (output/target_tractability) mapping to paths.
         destination: Output parquet path.
         settings: Step-specific settings (unused, kept for interface consistency).
         properties: Spark configuration properties.
@@ -145,6 +137,7 @@ def association_otf(
     diseases_raw = spark.load_data(source['disease'])
     targets_raw = spark.load_data(source['target'])
     evidences_raw = spark.load_data(source['evidence'])
+    tractability_raw = spark.load_data(source['tractability'])
     assocation_direct = spark.load_data(source['association_direct'])
     assocation_indirect = spark.load_data(source['association_indirect'])
 
@@ -182,7 +175,6 @@ def association_otf(
             ).alias('targetData'),
             f.col('targetClass'),
             f.col('pathways').alias('reactome'),
-            f.col('tractability'),
         )
         .orderBy(f.col('targetId').asc())
         .persist()
@@ -202,9 +194,9 @@ def association_otf(
     final_targets = (
         targets
         .transform(_compute_facet_classes)
-        .transform(_compute_facet_tractability)
+        .transform(lambda df: _compute_facet_tractability(df, tractability_raw))
         .join(targets_facet_reactome, ['targetId'], 'left_outer')
-        .drop('reactome', 'tractability')
+        .drop('reactome')
     )
 
     # Process direct and indirect assocation data:

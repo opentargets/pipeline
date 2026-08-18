@@ -841,7 +841,7 @@ steps:
   #: PHARMACOGENETICS STEP :########################################################################
   pharmacogenetics:
     - name: find_latest clinpgx annotation
-      source: gs://otar012-eva/pharmacogenomics/
+      source: gs://otar012-eva/pharmacogenomics
       scratchpad_key: latest_clinpgx_annotation
     - name: copy clinpgx annotation
       requires:
@@ -1027,15 +1027,6 @@ steps:
         - find_latest aopwiki
       source: ${latest_aopwiki}
       destination: input/target/safety/aopwiki.json
-
-    - name: find_latest tep
-      source: gs://otar001-core/TEPs
-      scratchpad_key: latest_tep
-    - name: copy tep
-      requires:
-        - find_latest tep
-      source: ${latest_tep}
-      destination: input/target/tep/tep.json.gz
 
     - name: find_latest tractability
       source: gs://otar001-core/Tractability

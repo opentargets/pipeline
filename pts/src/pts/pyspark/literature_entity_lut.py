@@ -11,7 +11,7 @@ import operator
 from typing import Any
 
 from loguru import logger
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import Column, DataFrame, Row
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
@@ -70,7 +70,7 @@ def _compute_relevance(matches: DataFrame) -> DataFrame:
     """
     spark = matches.sparkSession
 
-    section_rank_table = f.broadcast(spark.createDataFrame(_SECTION_RANKS))
+    section_rank_table = f.broadcast(spark.createDataFrame(Row(**row) for row in _SECTION_RANKS))
 
     # Step 1: join with section ranks and collapse to one row per
     # (pmid, section, keywordId). Title always gets a single fixed weight;

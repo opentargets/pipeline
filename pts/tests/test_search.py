@@ -116,7 +116,7 @@ _TARGET_SCHEMA = StructType([
     StructField('synonyms', ArrayType(StructType([StructField('label', StringType())]))),
     StructField('proteinIds', ArrayType(StructType([StructField('id', StringType())]))),
     StructField(
-        'dbXRefs',
+        'dbXrefs',
         ArrayType(
             StructType([
                 StructField('source', StringType()),
@@ -184,7 +184,7 @@ def test_build_target_index_output_schema(spark):
                 biotype='protein_coding',
                 synonyms=[Row(label='BRCA1 synonym')],
                 proteinIds=[Row(id='P12345')],
-                dbXRefs=[Row(source='HGNC', id='1100')],
+                dbXrefs=[Row(source='HGNC', id='1100')],
             )
         ],
         _TARGET_SCHEMA,
@@ -214,7 +214,7 @@ def test_build_target_index_entity_is_target(spark):
                 biotype='protein_coding',
                 synonyms=[],
                 proteinIds=[],
-                dbXRefs=[],
+                dbXrefs=[],
             )
         ],
         _TARGET_SCHEMA,
@@ -240,7 +240,7 @@ def test_build_target_index_terms_include_chr_prefixed_variant(spark):
                 biotype='protein_coding',
                 synonyms=[],
                 proteinIds=[],
-                dbXRefs=[],
+                dbXrefs=[],
             )
         ],
         _TARGET_SCHEMA,
@@ -308,7 +308,7 @@ def test_build_target_index_drops_gnomad_dbxrefs_from_variant_labels(spark):
                 biotype='protein_coding',
                 synonyms=[],
                 proteinIds=[],
-                dbXRefs=[],
+                dbXrefs=[],
             )
         ],
         _TARGET_SCHEMA,

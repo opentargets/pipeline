@@ -141,7 +141,7 @@ class PlatformOutputDistribution:
         if spark_context_jvm is None or spark_context_jsc is None:
             raise RuntimeError('spark context is not available')
         fs = spark_context_jvm.org.apache.hadoop.fs.FileSystem.get(spark_context_jsc.hadoopConfiguration())
-        p = spark_context_jvm.apache.hadoop.fs.Path(path)
+        p = spark_context_jvm.org.apache.hadoop.fs.Path(path)
         statuses = fs.listStatus(p)
 
         # Find folders with '=' in their name (Hive partition folders)

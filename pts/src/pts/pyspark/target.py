@@ -1,25 +1,12 @@
 """Target dataset generation.
 
-Ported from platform-etl-backend target step. Integrates ~15 data sources to
-produce the canonical target index used by the Open Targets Platform.
-
-Scala sources ported:
-    - Target.scala (main assembly)
-    - Ensembl.scala
-    - GeneCode.scala
-    - GeneOntology.scala
-    - GeneticConstraints.scala
-    - GeneWithLocation.scala
-    - Hallmarks.scala
-    - Hgnc.scala
-    - Ncbi.scala
-    - Ortholog.scala
-    - ProteinClassification.scala
-    - Reactome.scala
-    - Safety.scala
-    - Tep.scala
-    - Tractability.scala
-    - Uniprot.scala
+Produces the canonical target index used by the Open Targets Platform,
+assembling Ensembl, HGNC, Gene Ontology, UniProt, Reactome, genetic
+constraint, and NCBI data into one dataset. TEP, gene essentiality, safety
+liabilities, tractability, chemical probes, per-transcript data, and
+homologues each live in their own standalone PTS modules (see
+gene_essentiality.py, target_safety_event.py, target_tractability.py,
+chemical_probes.py, transcript.py, homology.py).
 """
 
 from __future__ import annotations
@@ -31,8 +18,6 @@ from loguru import logger
 from pyspark.sql import DataFrame
 from pyspark.sql.types import (
     ArrayType,
-    BooleanType,
-    DoubleType,
     FloatType,
     IntegerType,
     LongType,
@@ -43,6 +28,7 @@ from pyspark.sql.types import (
 from pyspark.sql.window import Window
 
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import maybe_coalesce
 from pts.pyspark.common.utils import safe_array_union as _safe_array_union
 
 # ---------------------------------------------------------------------------
@@ -53,31 +39,21 @@ REQUIRED_OUTPUT_COLUMNS = {
     'approvedSymbol',
     'approvedName',
     'biotype',
-    'transcripts',
-    'transcriptIds',
-    'canonicalExons',
     'genomicLocation',
     'pathways',
     'go',
     'constraint',
-    'safety',
-    'tractability',
-    'homologues',
     'subcellularLocations',
     'targetClass',
     'hallmarks',
-    'chemicalProbes',
-    'tep',
     'synonyms',
     'symbolSynonyms',
     'nameSynonyms',
     'functionDescriptions',
     'proteinIds',
     'dbXrefs',
-    'alternativeGenes',
     'obsoleteSymbols',
     'obsoleteNames',
-    'canonicalTranscript',
     'tss',
 }
 
@@ -114,7 +90,7 @@ _PROTEIN_SOURCE_PRIORITY = {
 
 def target(
     source: dict[str, str],
-    destination: dict[str, str],
+    destination: str,
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
@@ -122,7 +98,7 @@ def target(
 
     Args:
         source: Mapping of logical input names to paths.
-        destination: Dict with keys 'target' and 'gene_essentiality' output paths.
+        destination: Output path for the target parquet dataset.
         settings: Step settings (hgncOrthologSpecies list, etc.).
         properties: Spark properties.
     """
@@ -140,55 +116,18 @@ def target(
     go_rna_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_rna'])
     go_rna_lookup_raw = spark.read.option('sep', '\t').csv(source['gene_ontology_rna_lookup'])
     go_eco_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_eco_lookup'])
-    tep_raw = spark.read.json(source['tep'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
     chembl_raw = spark.read.json(source['chembl'])
     genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
-    homology_dict_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['homology_dictionary'])
-    homology_coding_proteins_raw = (
-        spark.read
-        .option('recursiveFileLookup', 'true')
-        .option('sep', '\t')
-        .option('header', 'true')
-        .csv(source['homology_coding_proteins'])
-    )
-    homology_gene_dict_raw = spark.read.option('recursiveFileLookup', 'true').parquet(
-        source['homology_gene_dictionary']
-    )
     reactome_pathways_raw = spark.read.option('sep', '\t').csv(source['reactome_pathways'])
     reactome_etl_raw = spark.read.parquet(source['reactome_etl'])
-    tractability_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['tractability'])
-    safety_raw = spark.read.parquet(source['safety_evidence'])
-    diseases_raw = spark.read.parquet(source['diseases'])
-    chemical_probes_raw = spark.read.parquet(source['chemical_probes'])
-    gene_essentiality_raw = spark.read.parquet(source['gene_essentiality'])
 
     # Uniprot is a gzipped XML flat-file — we read a pre-processed parquet
     # produced by the pts_target pre-processing step (uniprot XML→parquet).
     # The pre-processing step writes a parquet with UniprotEntry fields.
     uniprot_raw = spark.read.parquet(source['uniprot'])
     uniprot_ssl_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['uniprot_ssl'])
-
-    # --- species whitelist from settings ------------------------------------
-    hgnc_ortholog_species: list[str] = settings.get(
-        'hgncOrthologSpecies',
-        [
-            '9606-human',
-            '9598-chimpanzee',
-            '9544-macaque',
-            '10090-mouse',
-            '10116-rat',
-            '9986-rabbit',
-            '10141-guineapig',
-            '9615-dog',
-            '9823-pig',
-            '8364-frog',
-            '7955-zebrafish',
-            '7227-fly',
-            '6239-worm',
-        ],
-    )
 
     # --- intermediate DataFrames --------------------------------------------
     logger.info('Building GeneCode canonical transcripts')
@@ -209,9 +148,6 @@ def target(
     logger.info('Building Gene Ontology')
     go_df = _build_gene_ontology(go_human_raw, go_rna_raw, go_rna_lookup_raw, go_eco_raw, ensembl_df)
 
-    logger.info('Building TEP')
-    tep_df = _build_tep(tep_raw)
-
     logger.info('Building HPA subcellular locations')
     hpa_df = _build_gene_with_location(hpa_raw, hpa_sl_raw)
 
@@ -221,19 +157,8 @@ def target(
     logger.info('Building GeneticConstraints')
     genetic_constraints_df = _build_genetic_constraints(genetic_constraints_raw)
 
-    logger.info('Building Homologues')
-    homology_df = _build_homologues(
-        homology_dict_raw,
-        homology_coding_proteins_raw,
-        homology_gene_dict_raw,
-        hgnc_ortholog_species,
-    )
-
     logger.info('Building Reactome')
     reactome_df = _build_reactome(reactome_pathways_raw, reactome_etl_raw)
-
-    logger.info('Building Tractability')
-    tractability_df = _build_tractability(tractability_raw)
 
     # --- Uniprot (pre-processed parquet schema mirrors UniprotEntry) --------
     logger.info('Building Uniprot')
@@ -300,39 +225,20 @@ def target(
         .persist()
     )
 
-    logger.info('Building ENSG→symbol lookup')
-    ensg_lookup = _generate_ensg_lookup(target_interim).persist()
-
     logger.info('Assembling final target DataFrame')
     targets_df = (
         target_interim
         .join(genetic_constraints_df, 'id', 'left_outer')
-        .transform(lambda df: _add_tep(df, tep_df, ensg_lookup))
         .transform(_filter_and_sort_protein_ids)
         .transform(_remove_redundant_xrefs)
-        .transform(lambda df: _add_chemical_probes(df, chemical_probes_raw, ensg_lookup))
-        .transform(lambda df: _add_orthologues(df, homology_df))
-        .transform(lambda df: _add_tractability(df, tractability_df))
         .transform(lambda df: _add_ncbi_synonyms(df, ncbi_df))
-        .transform(lambda df: _add_target_safety(df, safety_raw, ensg_lookup, diseases_raw))
         .transform(lambda df: _add_reactome(df, reactome_df))
         .transform(_remove_duplicated_synonyms)
         .transform(_add_tss)
     )
 
-    partition_count = settings.get('partition_count') or {}
-
-    logger.info(f'Writing target output to {destination["target"]}')
-    target_parts = partition_count.get('target') if isinstance(partition_count, dict) else None
-    out_targets = targets_df.coalesce(target_parts) if target_parts else targets_df
-    out_targets.write.mode('overwrite').parquet(destination['target'])
-
-    logger.info('Building gene essentiality output')
-    gene_essentiality_df = _build_gene_essentiality_output(gene_essentiality_raw, ensg_lookup)
-    logger.info(f'Writing gene essentiality output to {destination["gene_essentiality"]}')
-    essentiality_parts = partition_count.get('gene_essentiality') if isinstance(partition_count, dict) else None
-    out_essentiality = gene_essentiality_df.coalesce(essentiality_parts) if essentiality_parts else gene_essentiality_df
-    out_essentiality.write.mode('overwrite').parquet(destination['gene_essentiality'])
+    logger.info(f'Writing target output to {destination}')
+    maybe_coalesce(targets_df, settings.get('partition_count')).write.mode('overwrite').parquet(destination)
 
 
 # ===========================================================================
@@ -405,7 +311,8 @@ def _filter_ensembl(df: DataFrame) -> DataFrame:
 def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
     """Build the Ensembl gene DataFrame.
 
-    Applies canonical chromosome filter, joins canonical transcript from GeneCode,
+    Applies canonical chromosome filter, joins canonical transcript from GeneCode
+    (kept internally to derive ``tss``, dropped from the final target output),
     parses protein IDs and signalP, and deduplicates by id.
 
     Args:
@@ -429,17 +336,6 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
             f.col('strand').cast(IntegerType()).alias('strand'),
             f.col('chromosome'),
             f.col('approvedSymbol'),
-            (
-                f.col('transcripts')
-                if has_transcripts
-                else f.lit(None).cast(ArrayType(StructType([StructField('id', StringType())])))
-            ).alias('transcripts_raw'),
-            # transcriptIds: flat array of transcript IDs (Ensembl.scala line 45)
-            (f.col('transcripts.id') if has_transcripts else f.lit(None).cast(ArrayType(StringType()))).alias(
-                'transcriptIds'
-            ),
-            # exons: per-transcript exon arrays for canonicalExons computation
-            (f.col('transcripts.exons') if has_transcripts else f.lit(None)).alias('exons_raw'),
             # translations: flatten transcripts[*].translations[*] into a top-level array
             # so _refactor_ensembl_protein_ids can build ensembl_PRO protein IDs
             (f.flatten(f.col('transcripts.translations')) if has_transcripts else f.lit(None)).alias('translations'),
@@ -451,7 +347,7 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
         .dropDuplicates(['id'])
     )
 
-    # Join canonical transcript
+    # Join canonical transcript (kept internally for tss; dropped from final output)
     ensembl = ensembl.join(
         gene_code.withColumnRenamed('gene_id', 'ct_gene_id'),
         (ensembl['id'] == f.col('ct_gene_id')) & (ensembl['chromosome'] == f.col('canonicalTranscript.chromosome')),
@@ -504,57 +400,20 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
         ).cast(id_source_schema),
     )
 
-    # Build canonicalExons: flat array of (start, end) pairs for the canonical transcript
-    # Mirrors addCanonicalExons in Ensembl.scala
-    # Use expr because array_position(col, col) requires SQL expression syntax in PySpark
-    ensembl = ensembl.withColumn(
-        'exonIndex',
-        f.expr('array_position(transcriptIds, canonicalTranscript.id)'),
-    )
-    ensembl = ensembl.withColumn(
-        '_canon_exons_raw',
-        f.when(
-            f.col('exonIndex') > 0,
-            f.element_at(f.col('exons_raw'), f.col('exonIndex').cast(IntegerType())),
-        ),
-    )
-    ensembl = ensembl.withColumn(
-        'canonicalExons',
-        f.when(
-            f.col('_canon_exons_raw').isNotNull(),
-            f.flatten(
-                f.transform(
-                    f.col('_canon_exons_raw'),
-                    lambda x: f.array(x.getField('start'), x.getField('end')),
-                )
-            ),
-        ),
-    ).drop('exonIndex', 'exons_raw', '_canon_exons_raw')
-
-    # Parse transcripts into the structured format (also sets isEnsemblCanonical)
-    ensembl = _parse_ensembl_transcripts(ensembl)
-
     return ensembl.select(
         'id',
         'biotype',
         'approvedName',
-        'alternativeGenes',
         'genomicLocation',
         'approvedSymbol',
         'proteinIds',
-        'transcriptIds',
-        'canonicalExons',
-        'transcripts',
         'signalP',
         'canonicalTranscript',
     )
 
 
 def _refactor_ensembl_protein_ids(df: DataFrame) -> DataFrame:
-    """Build proteinIds from uniprot_swissprot, uniprot_trembl columns.
-
-    Also sets alternativeGenes to null (filled later).
-    """
+    """Build proteinIds from uniprot_swissprot, uniprot_trembl columns."""
     id_source_schema = ArrayType(
         StructType([
             StructField('id', StringType()),
@@ -603,72 +462,7 @@ def _refactor_ensembl_protein_ids(df: DataFrame) -> DataFrame:
         protein_ids = _safe_array_union(f.col('_swiss'), f.col('_trembl'))
         df = df.withColumn('proteinIds', protein_ids).drop('_swiss', '_trembl', 'uniprot_swissprot', 'uniprot_trembl')
 
-    return df.withColumn('alternativeGenes', f.lit(None).cast(ArrayType(StringType())))
-
-
-def _parse_ensembl_transcripts(df: DataFrame) -> DataFrame:
-    """Parse raw transcripts array into structured transcript objects."""
-    transcript_schema = ArrayType(
-        StructType([
-            StructField('transcriptId', StringType()),
-            StructField('biotype', StringType()),
-            StructField('uniprotId', StringType()),
-            StructField('isUniprotReviewed', BooleanType()),
-            StructField('translationId', StringType()),
-            StructField('alphafoldId', StringType()),
-            StructField('uniprotIsoformId', StringType()),
-            StructField('isEnsemblCanonical', BooleanType()),
-        ])
-    )
-
-    if 'transcripts_raw' not in df.columns:
-        return df.withColumn('transcripts', f.lit(None).cast(transcript_schema))
-
-    canon_id = f.col('canonicalTranscript.id')
-
-    parsed = f.when(
-        f.col('transcripts_raw').isNotNull(),
-        f.transform(
-            f.col('transcripts_raw'),
-            lambda tr: f.struct(
-                tr.getField('id').alias('transcriptId'),
-                tr.getField('biotype').alias('biotype'),
-                f
-                .when(
-                    tr.getField('uniprot_swissprot').isNotNull(),
-                    f.element_at(tr.getField('uniprot_swissprot'), 1),
-                )
-                .when(
-                    tr.getField('uniprot_trembl').isNotNull(),
-                    f.element_at(tr.getField('uniprot_trembl'), 1),
-                )
-                .alias('uniprotId'),
-                f
-                .when(tr.getField('uniprot_swissprot').isNotNull(), f.lit(True))
-                .when(tr.getField('uniprot_trembl').isNotNull(), f.lit(False))
-                .alias('isUniprotReviewed'),
-                f.when(
-                    tr.getField('translations').isNotNull(),
-                    f.element_at(tr.getField('translations'), 1).getField('id'),
-                ).alias('translationId'),
-                f.when(
-                    tr.getField('alphafold').isNotNull(),
-                    f.element_at(tr.getField('alphafold'), 1),
-                ).alias('alphafoldId'),
-                f.when(
-                    tr.getField('uniprot_isoform').isNotNull(),
-                    f.element_at(tr.getField('uniprot_isoform'), 1),
-                ).alias('uniprotIsoformId'),
-                # isEnsemblCanonical: true when this transcript is the canonical one
-                f
-                .when(canon_id.isNotNull(), tr.getField('id') == canon_id)
-                .cast(BooleanType())
-                .alias('isEnsemblCanonical'),
-            ),
-        ),
-    ).cast(transcript_schema)
-
-    return df.withColumn('transcripts', parsed).drop('transcripts_raw')
+    return df
 
 
 # ===========================================================================
@@ -1255,111 +1049,6 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
 
 
 # ===========================================================================
-# Ortholog.scala → _build_homologues
-# ===========================================================================
-
-
-def _build_homologues(
-    homology_dict: DataFrame,
-    coding_proteins: DataFrame,
-    gene_dict: DataFrame,
-    target_species: list[str],
-) -> DataFrame:
-    """Build homologue/ortholog DataFrame.
-
-    Args:
-        homology_dict: Ensembl vertebrates species dictionary.
-        coding_proteins: Ensembl compara homologies TSV (protein + ncrna).
-        gene_dict: Gene ID → gene name mapping (pre-processed parquet).
-        target_species: Whitelisted species in format "TAXID-species_name".
-
-    Returns:
-        DataFrame with homolog fields including speciesId, speciesName, homologyType, etc.
-    """
-    # Extract tax IDs from whitelist
-    tax_ids = [s.split('-')[0] for s in target_species]
-    priority_df_data = [(s.split('-')[0], i) for i, s in enumerate(target_species)]
-
-    from pyspark.sql import SparkSession
-
-    spark = SparkSession.getActiveSession()
-    if spark is None:
-        raise RuntimeError('no active spark session found')
-    priority_df = spark.createDataFrame(priority_df_data, ['speciesId', 'priority']).withColumn(
-        'priority', f.col('priority').cast('int')
-    )
-
-    homo_dict = homology_dict.select(
-        f.col('#name').alias('name'),
-        f.col('species').alias('speciesName'),
-        f.col('taxonomy_id'),
-        f.array(*[f.lit(t) for t in tax_ids]).alias('whitelist'),
-    ).filter(f.array_contains(f.col('whitelist'), f.col('taxonomy_id')))
-
-    gene_dict_mapped = gene_dict.select(
-        f.col('id').alias('homology_gene_stable_id'),
-        f
-        .when(f.col('name').isNotNull() & (f.col('name') != ''), f.col('name'))
-        .otherwise(f.col('id'))
-        .alias('targetGeneSymbol'),
-    )
-
-    reference = 'homo_sapiens'
-
-    # homo_sapiens homologies
-    homo_sapiens_h = coding_proteins.filter(f.col('species') == reference)
-
-    # paralogs and cross-species
-    other_h = (
-        coding_proteins.filter(
-            (
-                (f.col('species') == reference)
-                & ((f.col('homology_type') == 'other_paralog') | (f.col('homology_type') == 'within_species_paralog'))
-            )
-            | ((f.col('species') != reference) & (f.col('homology_species') == reference))
-        )
-        # swap homo_sapiens ↔ homology columns
-        .select(
-            f.col('homology_gene_stable_id').alias('gene_stable_id'),
-            f.col('homology_protein_stable_id').alias('protein_stable_id'),
-            f.col('homology_species').alias('species'),
-            f.col('homology_identity').alias('identity'),
-            f.col('homology_type'),
-            f.col('gene_stable_id').alias('homology_gene_stable_id'),
-            f.col('protein_stable_id').alias('homology_protein_stable_id'),
-            f.col('species').alias('homology_species'),
-            f.col('identity').alias('homology_identity'),
-            f.col('dn'),
-            f.col('ds'),
-            f.col('goc_score'),
-            f.col('wga_coverage'),
-            f.col('is_high_confidence'),
-            f.col('homology_id'),
-        )
-    )
-
-    all_homologies = homo_sapiens_h.unionByName(other_h)
-
-    return (
-        all_homologies
-        .join(homo_dict, all_homologies['homology_species'] == homo_dict['speciesName'])
-        .join(gene_dict_mapped, 'homology_gene_stable_id', 'left_outer')
-        .select(
-            f.col('gene_stable_id').alias('id'),
-            f.col('taxonomy_id').alias('speciesId'),
-            f.col('name').alias('speciesName'),
-            f.col('homology_type').alias('homologyType'),
-            f.col('homology_gene_stable_id').alias('targetGeneId'),
-            f.col('is_high_confidence').alias('isHighConfidence'),
-            f.col('targetGeneSymbol'),
-            f.col('identity').cast(DoubleType()).alias('queryPercentageIdentity'),
-            f.col('homology_identity').cast(DoubleType()).alias('targetPercentageIdentity'),
-        )
-        .join(f.broadcast(priority_df), 'speciesId', 'left_outer')
-    )
-
-
-# ===========================================================================
 # Reactome.scala → _build_reactome
 # ===========================================================================
 
@@ -1411,43 +1100,6 @@ def _build_reactome(reactome_pathways: DataFrame, reactome_etl: DataFrame) -> Da
             ).alias('pathways')
         )
         .withColumnRenamed('ensemblId', 'id')
-    )
-
-
-# ===========================================================================
-# Tractability.scala → _build_tractability
-# ===========================================================================
-
-
-def _build_tractability(df: DataFrame) -> DataFrame:
-    """Build tractability assessments.
-
-    Args:
-        df: Raw tractability TSV. Columns with pattern *_B{N}_* are tractability buckets.
-
-    Returns:
-        DataFrame with [ensemblGeneId, tractability[{modality, id, value}]].
-    """
-    import re
-
-    bucket_cols = [c for c in df.columns if re.match(r'.*_B\d+_.*', c)]
-    tractability = df.select('ensembl_gene_id', *bucket_cols)
-    data_cols = [c for c in tractability.columns if c != 'ensembl_gene_id']
-
-    for col_name in data_cols:
-        parts = col_name.split('_')
-        tractability = tractability.withColumn(
-            col_name,
-            f.struct(
-                f.lit(parts[0]).alias('modality'),
-                f.lit(parts[-1]).alias('id'),
-                f.when(f.col(f'`{col_name}`') == 1, True).otherwise(False).alias('value'),
-            ),
-        )
-
-    return tractability.select(
-        f.col('ensembl_gene_id').alias('ensemblGeneId'),
-        f.array(*data_cols).alias('tractability'),
     )
 
 
@@ -1597,99 +1249,6 @@ def _map_uniprot_locations_to_ssl(df: DataFrame, ssl_df: DataFrame) -> DataFrame
 
 
 # ===========================================================================
-# Safety.scala → _build_safety
-# ===========================================================================
-
-
-def _build_safety(
-    safety_df: DataFrame,
-    ensg_lookup: DataFrame,
-    diseases_df: DataFrame,
-) -> DataFrame:
-    """Build target safety liabilities.
-
-    Args:
-        safety_df: Pre-processed safety evidence parquet.
-        ensg_lookup: ENSG ID lookup table (ensgId, name array).
-        diseases_df: Disease index (id, obsoleteTerms).
-
-    Returns:
-        DataFrame with [id, safetyLiabilities[{event, eventId, effects, ...}]].
-    """
-    # Add missing ENSG IDs for entries that only have symbol (e.g. ToxCast)
-    enriched = (
-        safety_df
-        .join(
-            ensg_lookup,
-            f.array_contains(f.col('name'), f.col('targetFromSourceId')),
-            'left_outer',
-        )
-        .drop(*[c for c in ensg_lookup.columns if c != 'ensgId'])
-        .withColumn('temp_id', f.coalesce(f.col('id'), f.col('ensgId')))
-        .drop('id', 'ensgId')
-        .withColumnRenamed('temp_id', 'id')
-    )
-
-    # Replace obsolete EFOs
-    disease_mapping = diseases_df.select(
-        f.col('id').alias('diseaseId'),
-        f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm'),
-    )
-
-    enriched = (
-        enriched
-        .join(
-            disease_mapping,
-            enriched['eventId'] == disease_mapping['obsoleteTerm'],
-            'left_outer',
-        )
-        .withColumn('eventId', f.coalesce(f.col('diseaseId'), f.col('eventId')))
-        .drop('obsoleteTerm', 'diseaseId')
-    )
-
-    return (
-        enriched
-        .select(
-            'id',
-            f.struct(
-                'event',
-                'eventId',
-                'effects',
-                'biosamples',
-                'datasource',
-                'literature',
-                'url',
-                'studies',
-            ).alias('safety'),
-        )
-        .groupBy('id')
-        .agg(f.collect_set('safety').alias('safetyLiabilities'))
-    )
-
-
-# ===========================================================================
-# Tep.scala → _build_tep
-# ===========================================================================
-
-
-def _build_tep(df: DataFrame) -> DataFrame:
-    """Build TEP (Target Enabling Package) DataFrame.
-
-    Args:
-        df: Raw TEP JSON.
-
-    Returns:
-        DataFrame with [targetFromSourceId, description, therapeuticArea, url].
-    """
-    return df.select(
-        f.trim(f.col('targetFromSourceId')).alias('targetFromSourceId'),
-        f.trim(f.col('description')).alias('description'),
-        f.trim(f.col('therapeuticArea')).alias('therapeuticArea'),
-        f.trim(f.col('url')).alias('url'),
-    )
-
-
-# ===========================================================================
 # Assembly helpers (mirrors Target.scala private methods)
 # ===========================================================================
 
@@ -1796,102 +1355,6 @@ def _add_protein_classification_to_uniprot(
     return uniprot_df.join(pc_with_uniprot, 'uniprotId', 'left_outer')
 
 
-def _generate_ensg_lookup(df: DataFrame) -> DataFrame:
-    """Generate ENSG → symbol / uniprot / HGNC lookup table."""
-    safe_union = _safe_array_union
-
-    return (
-        df
-        .select(
-            'id',
-            f.col('proteinIds.id').alias('pid'),
-            f.array(f.col('approvedSymbol')).alias('as_arr'),
-            f.filter(f.col('synonyms'), lambda c: c.getField('source') == 'uniprot').alias('uniprot'),
-            f.filter(f.col('synonyms'), lambda c: c.getField('source') == 'HGNC').alias('HGNC_syns'),
-            f.array_distinct(
-                safe_union(
-                    f.col('proteinIds.id'),
-                    f.col('symbolSynonyms.label'),
-                    f.col('obsoleteSymbols.label') if 'obsoleteSymbols' in df.columns else f.array(),
-                    f.array(f.col('approvedSymbol')),
-                )
-            ).alias('symbols'),
-        )
-        .select(
-            'id',
-            f.flatten(f.array(f.col('pid'), f.col('as_arr'))).alias('name'),
-            f.col('uniprot.label').alias('uniprot'),
-            f.col('HGNC_syns.label').alias('HGNC'),
-            'symbols',
-        )
-        .select(
-            f.col('id').alias('ensgId'),
-            f.col('name'),
-            'uniprot',
-            'HGNC',
-            'symbols',
-        )
-    )
-
-
-def _build_gene_essentiality_output(
-    essentiality_df: DataFrame,
-    ensg_lookup: DataFrame,
-) -> DataFrame:
-    """Build gene essentiality output mapped to ENSG IDs.
-
-    Ports addGeneEssentiality from Target.scala.
-
-    Args:
-        essentiality_df: Gene essentiality intermediate with targetSymbol column.
-        ensg_lookup: ENSG→symbol lookup from _generate_ensg_lookup.
-
-    Returns:
-        DataFrame with [id, geneEssentiality] where geneEssentiality is a list
-        of essentiality structs per ENSG ID.
-    """
-    lookup = (
-        ensg_lookup
-        .select('ensgId', 'name')
-        .withColumn('approvedTarget', f.explode('name'))
-        .drop('name')
-        .orderBy('approvedTarget')
-    )
-    essentiality_cols = [c for c in essentiality_df.columns if c != 'targetSymbol']
-    essentiality_with_ensg = (
-        essentiality_df
-        .join(lookup, lookup['approvedTarget'] == essentiality_df['targetSymbol'], 'inner')
-        .drop(*[c for c in lookup.columns if c != 'ensgId'])
-        .drop('targetSymbol')
-    )
-    return (
-        essentiality_with_ensg
-        .select(
-            f.col('ensgId').alias('id'),
-            f.struct(*[f.col(c) for c in essentiality_cols]).alias('ts'),
-        )
-        .groupBy('id')
-        .agg(f.collect_list('ts').alias('geneEssentiality'))
-    )
-
-
-def _add_tep(df: DataFrame, tep_df: DataFrame, lookup: DataFrame) -> DataFrame:
-    """Join TEP data using symbol→ENSG lookup."""
-    lut = (
-        lookup.select(f.col('ensgId').alias('id'), 'symbols').withColumn('symbol', f.explode('symbols')).drop('symbols')
-    )
-
-    tep_fields = ['targetFromSourceId', 'description', 'therapeuticArea', 'url']
-    tep_with_id = (
-        tep_df
-        .join(lut, lut['symbol'] == tep_df['targetFromSourceId'])
-        .withColumn('tep', f.struct(*tep_fields))
-        .select('id', 'tep')
-    )
-
-    return df.join(tep_with_id, 'id', 'left_outer')
-
-
 def _filter_and_sort_protein_ids(df: DataFrame) -> DataFrame:
     """Deduplicate proteinIds and sort by source preference."""
 
@@ -1967,74 +1430,6 @@ def _remove_redundant_xrefs(df: DataFrame) -> DataFrame:
     return df.selectExpr(*cols)
 
 
-def _add_chemical_probes(df: DataFrame, cp_df: DataFrame, lookup: DataFrame) -> DataFrame:
-    """Join chemical probes using symbol lookup."""
-    cp_with_id = cp_df.join(lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId'))).drop(*[
-        c for c in lookup.columns if c != 'ensgId'
-    ])
-
-    cp_cols = [c for c in cp_df.columns if c != 'ensgId']
-    cp_grouped = (
-        cp_with_id
-        .select(
-            f.col('ensgId').alias('id'),
-            f.struct(*cp_cols).alias('probe'),
-        )
-        .groupBy('id')
-        .agg(f.collect_list('probe').alias('chemicalProbes'))
-    )
-
-    return df.join(f.broadcast(cp_grouped), 'id', 'left_outer')
-
-
-def _add_orthologues(df: DataFrame, orthologs: DataFrame) -> DataFrame:
-    """Add homologues to target DataFrame."""
-    gene_symbols = df.select('id', 'approvedSymbol').cache()
-
-    paralog_symbols = gene_symbols.withColumnRenamed('approvedSymbol', 'paralogGeneSymbol').withColumnRenamed(
-        'id', 'paralogId'
-    )
-
-    homo_df = (
-        orthologs
-        .join(f.broadcast(gene_symbols), 'id')
-        .join(
-            f.broadcast(paralog_symbols),
-            f.col('paralogId') == f.col('targetGeneId'),
-            'left_outer',
-        )
-        .withColumn(
-            'targetGeneSymbol',
-            f.coalesce(
-                f.col('paralogGeneSymbol'),
-                f.col('targetGeneSymbol'),
-                f.col('approvedSymbol'),
-            ),
-        )
-        .drop('approvedSymbol', 'paralogGeneSymbol', 'paralogId')
-    )
-
-    homo_cols = [c for c in homo_df.columns if c != 'id']
-    grouped = (
-        homo_df
-        .select('id', f.struct(*homo_cols).alias('homologues'))
-        .groupBy('id')
-        .agg(f.collect_list('homologues').alias('homologues'))
-        # Sort by priority (ascending = closest species first)
-        .withColumn(
-            'homologues',
-            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)'),
-        )
-    )
-
-    return df.join(grouped, 'id', 'left_outer').drop('humanGeneId')
-
-
-def _add_tractability(df: DataFrame, tractability: DataFrame) -> DataFrame:
-    """Join tractability data."""
-    return df.join(tractability, f.col('ensemblGeneId') == f.col('id'), 'left_outer').drop('ensemblGeneId')
-
-
 def _add_ncbi_synonyms(df: DataFrame, ncbi: DataFrame) -> DataFrame:
     """Add NCBI Entrez synonyms."""
     ncbi_renamed = (
@@ -2057,17 +1452,6 @@ def _add_ncbi_synonyms(df: DataFrame, ncbi: DataFrame) -> DataFrame:
     )
 
 
-def _add_target_safety(
-    df: DataFrame,
-    safety_raw: DataFrame,
-    ensg_lookup: DataFrame,
-    diseases_df: DataFrame,
-) -> DataFrame:
-    """Add target safety liabilities."""
-    safety = _build_safety(safety_raw, ensg_lookup, diseases_df)
-    return df.join(safety, 'id', 'left_outer')
-
-
 def _add_reactome(df: DataFrame, reactome: DataFrame) -> DataFrame:
     """Add Reactome pathways."""
     return df.join(reactome, 'id', 'left_outer')
@@ -2088,11 +1472,11 @@ def _remove_duplicated_synonyms(df: DataFrame) -> DataFrame:
 
 
 def _add_tss(df: DataFrame) -> DataFrame:
-    """Add transcription start site column."""
+    """Add transcription start site column and drop the now-unneeded canonicalTranscript struct."""
     return df.withColumn(
         'tss',
         f.when(
             f.col('canonicalTranscript.strand') == '+',
             f.col('canonicalTranscript.start'),
         ).when(f.col('canonicalTranscript.strand') == '-', f.col('canonicalTranscript.end')),
-    )
+    ).drop('canonicalTranscript')

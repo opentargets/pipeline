@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 from pyspark.ml.feature import Word2Vec
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, Row
 from pyspark.sql import functions as f
 from pyspark.sql.window import Window
 
@@ -58,7 +58,9 @@ def _regroup_matches(matches: DataFrame, max_sentence_length: int) -> DataFrame:
     """
     spark = matches.sparkSession
 
-    section_rank_table = f.broadcast(spark.createDataFrame(_SECTION_RANKS).orderBy(f.col('rank').asc()))
+    section_rank_table = f.broadcast(
+        spark.createDataFrame(Row(**row) for row in _SECTION_RANKS).orderBy(f.col('rank').asc())
+    )
 
     w_per_section = Window.partitionBy('pmid', 'rank')
 

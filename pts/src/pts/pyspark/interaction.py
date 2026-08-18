@@ -250,7 +250,7 @@ def _generate_mapping(
     Human Mapping, RNACentral mappings, and gene-name derived mappings.
 
     Args:
-        target_df: Target DataFrame with columns id, proteinIds, dbXRefs.
+        target_df: Target DataFrame with columns id, proteinIds, dbXrefs.
         rnacentral_df: Raw RNACentral TSV DataFrame.
         human_mapping_df: Raw Human Mapping TSV DataFrame.
 
@@ -265,7 +265,7 @@ def _generate_mapping(
         target_df
         .select(
             f.col('id'),
-            f.filter(f.col('dbXRefs'), lambda c: c.getField('source') == 'HGNC').alias('h'),
+            f.filter(f.col('dbXrefs'), lambda c: c.getField('source') == 'HGNC').alias('h'),
         )
         .withColumn('mapped_id', f.explode(f.col('h.id')))
         .select(
