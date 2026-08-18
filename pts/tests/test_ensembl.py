@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 
 from pts.ensembl_core import CoreDump
-from pts.transformers.ensembl import _genes, _translation_values
+from pts.transformers.ensembl import _build, _genes, _translation_values
 
 SCHEMA = """\
 CREATE TABLE `gene` (
@@ -44,6 +44,15 @@ CREATE TABLE `xref` (
   `display_label` varchar(512) NOT NULL,
   `info_type` varchar(40) NOT NULL,
   PRIMARY KEY (`xref_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `transcript` (
+  `transcript_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `gene_id` int(10) unsigned DEFAULT NULL,
+  `seq_region_start` int(10) unsigned NOT NULL,
+  `seq_region_end` int(10) unsigned NOT NULL,
+  `seq_region_strand` tinyint(2) NOT NULL,
+  `stable_id` varchar(128) DEFAULT NULL,
+  PRIMARY KEY (`transcript_id`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 CREATE TABLE `translation` (
   `translation_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
@@ -97,6 +106,17 @@ XREFS = [
     '104\t2000\tA0A001\tA0A001\tSEQUENCE_MATCH',
 ]
 
+# transcript_id, gene_id, seq_region_start, seq_region_end, seq_region_strand, stable_id
+TRANSCRIPTS = [
+    '1001\t1\t100\t200\t1\tENST01',
+    # a second transcript on the same gene, with no translation at all
+    '1005\t1\t150\t180\t1\tENST05',
+    '1002\t2\t300\t400\t-1\tENST02',
+    # on the scaffold gene, which _genes filters out entirely
+    '1003\t3\t10\t20\t1\tENST03',
+    '1004\t4\t5\t60\t1\tENST04',
+]
+
 # translation_id, transcript_id, stable_id
 TRANSLATIONS = [
     '2001\t1001\tENSP01',
@@ -135,6 +155,7 @@ def dump(tmp_path: Path) -> CoreDump:
     write_gz(tmp_path / 'seq_region.txt.gz', '\n'.join(SEQ_REGIONS) + '\n')
     write_gz(tmp_path / 'coord_system.txt.gz', '\n'.join(COORD_SYSTEMS) + '\n')
     write_gz(tmp_path / 'xref.txt.gz', '\n'.join(XREFS) + '\n')
+    write_gz(tmp_path / 'transcript.txt.gz', '\n'.join(TRANSCRIPTS) + '\n')
     write_gz(tmp_path / 'translation.txt.gz', '\n'.join(TRANSLATIONS) + '\n')
     write_gz(tmp_path / 'object_xref.txt.gz', '\n'.join(OBJECT_XREFS) + '\n')
     write_gz(tmp_path / 'external_db.txt.gz', '\n'.join(EXTERNAL_DBS) + '\n')
@@ -193,3 +214,55 @@ def test_a_translation_with_no_xrefs_has_null_arrays(dump: CoreDump) -> None:
     frame = _translation_values(dump).collect()
     row = frame.filter(pl.col('translationId') == 'ENSP03')
     assert row['uniprot_swissprot'].item() is None
+
+
+def test_canonical_transcript_strand_uses_the_published_plus_minus(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['canonicalTranscript'].struct.field('strand').item() == '+'
+    assert frame.filter(pl.col('id') == 'ENSG02')['canonicalTranscript'].struct.field('strand').item() == '-'
+
+
+def test_canonical_transcript_id_comes_from_the_gene_table(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['canonicalTranscript'].struct.field('id').item() == 'ENST01'
+
+
+def test_transcripts_are_sorted_by_stable_id(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    ids = [t['id'] for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()]
+    assert ids == sorted(ids)
+
+
+def test_transcript_keeps_the_full_accession_array(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert sorted(transcripts['ENST01']['uniprot_swissprot']) == ['P00001', 'P00002']
+
+
+def test_translations_carry_the_stable_id(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert [t['id'] for t in transcripts['ENST01']['translations']] == ['ENSP01']
+
+
+def test_gene_level_arrays_are_deduplicated_and_sorted(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['uniprot_swissprot'].item().to_list() == ['P00001', 'P00002']
+
+
+def test_a_field_with_no_values_is_null_not_an_empty_array(dump: CoreDump) -> None:
+    """Aggregating an all-null group yields [], and the JSON route produced null."""
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert transcripts['ENST01']['uniprot_isoform'] is None
+
+
+def test_no_exons_or_biotype_on_the_transcript_struct(dump: CoreDump) -> None:
+    """Both are dead on main: canonicalExons and biotype come from output/transcript."""
+    frame = _build(dump).collect()
+    transcripts_dtype = frame.schema['transcripts']
+    assert isinstance(transcripts_dtype, pl.List)
+    inner = transcripts_dtype.inner
+    assert isinstance(inner, pl.Struct)
+    fields = {f.name for f in inner.fields}
+    assert fields == {'id', 'uniprot_swissprot', 'uniprot_trembl', 'uniprot_isoform', 'alphafold', 'translations'}

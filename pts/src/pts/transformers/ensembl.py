@@ -159,6 +159,121 @@ def _translation_values(dump: CoreDump) -> pl.LazyFrame:
     )
 
 
+#: The release spells gene strand as 1/-1 but canonicalTranscript.strand as +/-, and `tss` is
+#: derived from the latter (`target.py::_add_tss`). Preserved rather than normalised so the
+#: published column does not move.
+_STRAND_SIGN = {1: '+', -1: '-'}
+
+#: Which per-transcript arrays roll up to the gene, and what the gene-level column is called.
+#: `uniprot_isoform` and `alphafold` do NOT roll up -- nothing reads them at gene level.
+_GENE_LEVEL = (
+    ('uniprot_swissprot', 'uniprot_swissprot'),
+    ('uniprot_trembl', 'uniprot_trembl'),
+    ('signalp', 'SignalP'),
+)
+
+
+def _gather(field: str) -> pl.Expr:
+    """Flatten a group's per-row arrays into one sorted, deduplicated array."""
+    return (
+        pl.col(field)
+        .list.explode(keep_nulls=False, empty_as_null=False)
+        .drop_nulls()
+        .unique(maintain_order=True)
+        .alias(field)
+    )
+
+
+def _empty_to_null(field: str) -> pl.Expr:
+    """Turn an empty array back into a null.
+
+    Aggregating a group whose every row was null yields `[]`, not null. The JSON route produced
+    null there, and `output/transcript` publishes these arrays verbatim, so an empty list would be
+    a visible divergence from the release in a column nothing else changes.
+    """
+    return pl.when(pl.col(field).list.len() > 0).then(pl.col(field)).alias(field)
+
+
+def _transcripts(dump: CoreDump) -> pl.LazyFrame:
+    """One row per transcript, carrying its translation's arrays.
+
+    Exons and transcript-level biotype are deliberately absent: `target_view.py` builds
+    `canonicalExons` from `output/transcript`, and `transcript.py` takes biotype from the GENCODE
+    GFF3, so neither is read out of this dataset by anything.
+    """
+    transcript = dump.scan('transcript', {
+        'transcript_id': pl.Int64(),
+        'gene_id': pl.Int64(),
+        'seq_region_start': pl.Int64(),
+        'seq_region_end': pl.Int64(),
+        'seq_region_strand': pl.Int32(),
+        'stable_id': pl.String(),
+    })
+    translations = (
+        _translation_values(dump)
+        .sort('transcript_id', 'translationId')
+        .group_by('transcript_id', maintain_order=True)
+        .agg(
+            pl.struct(pl.col('translationId').alias('id')).alias('translations'),
+            *[_gather(field) for field in _ARRAY_FIELDS],
+        )
+        .with_columns([_empty_to_null(field) for field in _ARRAY_FIELDS])
+    )
+    return transcript.join(translations, on='transcript_id', how='left')
+
+
+def _build(dump: CoreDump) -> pl.LazyFrame:
+    """The finished gene frame."""
+    genes = _genes(dump)
+    transcripts = _transcripts(dump)
+
+    per_gene = (
+        transcripts
+        .sort('gene_id', 'stable_id')
+        .group_by('gene_id', maintain_order=True)
+        .agg(
+            pl.struct(
+                pl.col('stable_id').alias('id'),
+                'uniprot_swissprot',
+                'uniprot_trembl',
+                'uniprot_isoform',
+                'alphafold',
+                'translations',
+            ).alias('transcripts'),
+            *[_gather(field).alias(alias) for field, alias in _GENE_LEVEL],
+        )
+        .with_columns([_empty_to_null(alias) for _, alias in _GENE_LEVEL])
+    )
+
+    canonical = transcripts.select(
+        pl.col('transcript_id').alias('canonical_transcript_id'),
+        pl.col('stable_id').alias('_canon_id'),
+        pl.col('seq_region_start').alias('_canon_start'),
+        pl.col('seq_region_end').alias('_canon_end'),
+        pl.col('seq_region_strand').alias('_canon_strand'),
+    )
+
+    return (
+        genes
+        .join(per_gene, on='gene_id', how='left')
+        .join(canonical, on='canonical_transcript_id', how='left')
+        .with_columns(
+            pl.struct(
+                pl.col('_canon_id').alias('id'),
+                'chromosome',
+                pl.col('_canon_start').alias('start'),
+                pl.col('_canon_end').alias('end'),
+                pl.col('_canon_strand').replace_strict(_STRAND_SIGN, return_dtype=pl.String()).alias('strand'),
+            ).alias('canonicalTranscript')
+        )
+        .select(
+            'id', 'biotype', 'description', 'chromosome', 'start', 'end', 'strand', 'approvedSymbol',
+            'SignalP', 'uniprot_swissprot', 'uniprot_trembl', 'canonicalTranscript', 'transcripts',
+        )
+        .sort('id')
+    )
+
+
 def _gene_dictionary(dump: CoreDump) -> pl.LazyFrame:
     """Every gene's stable id and symbol, for the homology lookup.
 
@@ -194,7 +309,7 @@ def ensembl(
     dump = CoreDump(source)
     logger.info(f'transforming ensembl release {dump.release} from {source}')
 
-    genes = _genes(dump).drop('gene_id', 'canonical_transcript_id').collect()
+    genes = _build(dump).collect()
     logger.info(f'built {genes.height} genes')
     write_dataset(genes, destination['genes'])
 
