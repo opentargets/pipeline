@@ -1,0 +1,172 @@
+"""Tests for the ephemeral postgres helper.
+
+Deliberately small. Each test here pins something that, if it broke, would
+either change the data a step reads or leave a server and tens of gigabytes
+behind. Argument shapes and happy paths that the round trip already exercises
+are not repeated.
+"""
+
+import subprocess
+import tarfile
+import zipfile
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+import polars as pl
+import pytest
+from pixeltable_pgserver.postgres_server import get_server
+
+from pts.postgres import (
+    DUMP_MAGIC,
+    MAX_ARCHIVE_VERSION,
+    PostgresError,
+    _build_restore_args,
+    _build_select_sql,
+    _check_archive_version,
+    _resolve_archive_member,
+    read_dump_tables,
+    restored_dump,
+)
+
+ROWS = 1000
+"""Rows in the demo table the round trip builds."""
+
+DISTINCT_TXT = 7
+"""Distinct values of ``txt`` across those rows."""
+
+
+def test_reads_are_always_distinct() -> None:
+    """Every row count downstream of here was measured with duplicates removed."""
+    assert _build_select_sql('studies', 'ctgov', ['nct_id', 'phase']) == (
+        'SELECT DISTINCT "nct_id", "phase" FROM "ctgov"."studies"'
+    )
+
+
+def test_restores_only_the_requested_tables_and_skips_the_indexes() -> None:
+    """The two-pass restore is the reason this is minutes rather than hours.
+
+    Pass one takes the whole schema, because filtering it would drop the
+    ``CREATE SCHEMA`` entry and any type the tables need. Pass two takes the data
+    of the requested tables only. Neither touches ``post-data``, which is where
+    indexes and constraints live.
+    """
+    pre_data, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('/d.dmp'), ['studies', 'designs'], 8)
+
+    assert '--section=pre-data' in pre_data
+    assert '--table' not in pre_data
+
+    assert '--section=data' in data
+    assert [data[i + 1] for i, arg in enumerate(data) if arg == '--table'] == ['studies', 'designs']
+
+    for p in (pre_data, data):
+        assert not any('post-data' in arg for arg in p)
+        # someone else's dump names owners and roles that do not exist here
+        assert '--no-owner' in p
+        assert '--no-privileges' in p
+
+
+def test_an_ambiguous_archive_member_is_an_error() -> None:
+    """Picking one of several dumps silently would restore the wrong data."""
+    with pytest.raises(PostgresError, match='matched 2 members'):
+        _resolve_archive_member(['a.dmp', 'b.dmp'], '*.dmp')
+
+
+@pytest.mark.parametrize(
+    ('minor', 'readable'),
+    [(13, True), (14, True), (MAX_ARCHIVE_VERSION[1], True), (MAX_ARCHIVE_VERSION[1] + 1, False)],
+    ids=['chembl', 'aact', 'bundled', 'too_new'],
+)
+def test_the_archive_version_guard(minor: int, readable: bool, tmp_path: Path) -> None:
+    """A source on a newer postgres must say so, not fail somewhere in the restore."""
+    dump = tmp_path / 'd.dmp'
+    dump.write_bytes(DUMP_MAGIC + bytes([1, minor, 0]) + b'\x00' * 32)
+
+    if readable:
+        _check_archive_version(dump)
+    else:
+        with pytest.raises(PostgresError, match='bundled postgres needs upgrading'):
+            _check_archive_version(dump)
+
+
+def _as_zip(dump: Path, tmp_path: Path) -> Path:
+    archive = tmp_path / 'demo.zip'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.write(dump, 'nested/postgres.dmp')
+    return archive
+
+
+def _as_tar_gz(dump: Path, tmp_path: Path) -> Path:
+    archive = tmp_path / 'demo.tar.gz'
+    with tarfile.open(archive, 'w:gz') as t:
+        t.add(dump, 'chembl/chembl_postgresql.dmp')
+    return archive
+
+
+@pytest.mark.pgserver
+class TestRoundTrip:
+    """Restore a real dump into a real server and read it, with nothing mocked.
+
+    This is what catches an embedded-postgres API change, an incompatible dump,
+    or polars failing to reach postgres over its unix socket — the server listens
+    on nothing else, so every read in the pipeline depends on that working.
+    """
+
+    @pytest.fixture(scope='class')
+    def dump(self, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+        path = tmp_path_factory.mktemp('source')
+        server = get_server(path / 'pgdata', cleanup_mode='delete')
+        try:
+            rows = f"SELECT i, 'x' || (i % {DISTINCT_TXT}) FROM generate_series(1, {ROWS}) i"  # noqa: S608 fixture
+            server.psql(
+                'CREATE SCHEMA demo;'
+                'CREATE TABLE demo.t (id int, txt text);'
+                f'INSERT INTO demo.t {rows};'
+            )
+            dump = path / 'demo.dmp'
+            subprocess.run([str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()], check=True)
+            yield dump
+        finally:
+            server.cleanup()
+
+    def _read(self, source: Path, scratch_root: Path, columns: list[str]) -> pl.DataFrame:
+        return read_dump_tables(str(source), {'t': columns}, schema_name='demo', scratch_root=scratch_root)['t']
+
+    def test_reads_a_restored_table_with_polars(self, dump: Path, tmp_path: Path) -> None:
+        df = self._read(dump, tmp_path, ['id', 'txt'])
+        assert df.height == ROWS
+        assert df.columns == ['id', 'txt']
+
+    def test_reads_are_distinct_end_to_end(self, dump: Path, tmp_path: Path) -> None:
+        """Projecting to ``txt`` alone collapses the rows, as it does for the real sources."""
+        assert self._read(dump, tmp_path, ['txt']).height == DISTINCT_TXT
+
+    @pytest.mark.parametrize('pack', [_as_zip, _as_tar_gz], ids=['aact_ships_a_zip', 'chembl_ships_a_tar_gz'])
+    def test_reads_a_dump_wrapped_in_an_archive(
+        self, pack: Callable[[Path, Path], Path], dump: Path, tmp_path: Path
+    ) -> None:
+        assert self._read(pack(dump, tmp_path), tmp_path, ['id', 'txt']).height == ROWS
+
+    def test_an_empty_table_is_an_error(self, tmp_path: Path) -> None:
+        """A restore that loads nothing is silent: pg_restore is happy and the query works."""
+        source = tmp_path / 'source'
+        source.mkdir()
+        server = get_server(source / 'pgdata', cleanup_mode='delete')
+        try:
+            server.psql('CREATE SCHEMA demo; CREATE TABLE demo.empty (id int);')
+            dump = tmp_path / 'empty.dmp'
+            subprocess.run([str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()], check=True)
+        finally:
+            server.cleanup()
+
+        with pytest.raises(PostgresError, match='came back empty'):
+            read_dump_tables(str(dump), {'empty': ['id']}, schema_name='demo', scratch_root=tmp_path)
+
+    def test_everything_is_cleaned_up_when_the_body_raises(self, dump: Path, tmp_path: Path) -> None:
+        """Otherwise a failed read leaves a postgres running and the dump on disk."""
+        scratch_root = tmp_path / 'scratch'
+        scratch_root.mkdir()
+
+        with pytest.raises(ZeroDivisionError), restored_dump(str(dump), tables=['t'], scratch_root=scratch_root):
+            1 / 0  # noqa: B018 the point is to leave the block by raising
+
+        assert not list(scratch_root.iterdir())

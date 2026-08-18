@@ -4,6 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  aact_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.88.0'
   ensembl_version: '115'
@@ -135,12 +136,24 @@ steps:
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
+    # the two dumps are copied whole and left as they are. pts restores the
+    # tables it needs from them, so the tables and columns are declared there,
+    # next to the code that depends on them
+    - name: copy aact dump
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/clinical_report/aact.zip
+
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/drug/chembl.tar.gz
+
+    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
