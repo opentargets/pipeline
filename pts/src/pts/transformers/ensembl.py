@@ -179,7 +179,8 @@ def _gather(field: str) -> pl.Expr:
         pl.col(field)
         .list.explode(keep_nulls=False, empty_as_null=False)
         .drop_nulls()
-        .unique(maintain_order=True)
+        .unique()
+        .sort()
         .alias(field)
     )
 

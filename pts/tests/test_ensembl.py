@@ -104,6 +104,11 @@ XREFS = [
     # translation 2002's two trembl accessions
     '103\t2000\tA0A002\tA0A002\tDIRECT',
     '104\t2000\tA0A001\tA0A001\tSEQUENCE_MATCH',
+    # translations 2004/2005's swissprot accessions -- deliberately out of accession order when
+    # read in transcript-stable-id order (ENST06 then ENST07), to catch a gene-level rollup that
+    # forgets to sort
+    '105\t2200\tP00009\tP00009\tDIRECT',
+    '106\t2200\tP00003\tP00003\tDIRECT',
 ]
 
 # transcript_id, gene_id, seq_region_start, seq_region_end, seq_region_strand, stable_id
@@ -112,6 +117,10 @@ TRANSCRIPTS = [
     # a second transcript on the same gene, with no translation at all
     '1005\t1\t150\t180\t1\tENST05',
     '1002\t2\t300\t400\t-1\tENST02',
+    # two more transcripts on gene 2, whose translations carry swissprot accessions out of
+    # accession order -- see XREFS above
+    '1006\t2\t410\t420\t-1\tENST06',
+    '1007\t2\t430\t440\t-1\tENST07',
     # on the scaffold gene, which _genes filters out entirely
     '1003\t3\t10\t20\t1\tENST03',
     '1004\t4\t5\t60\t1\tENST04',
@@ -123,6 +132,8 @@ TRANSLATIONS = [
     '2002\t1002\tENSP02',
     # no xrefs and no protein features: every array column must come out null
     '2003\t1003\tENSP03',
+    '2004\t1006\tENSP06',
+    '2005\t1007\tENSP07',
 ]
 
 # ensembl_id, ensembl_object_type, xref_id
@@ -131,6 +142,8 @@ OBJECT_XREFS = [
     '2001\tTranslation\t102',
     '2002\tTranslation\t103',
     '2002\tTranslation\t104',
+    '2004\tTranslation\t105',
+    '2005\tTranslation\t106',
 ]
 
 # external_db_id, db_name
@@ -248,6 +261,15 @@ def test_translations_carry_the_stable_id(dump: CoreDump) -> None:
 def test_gene_level_arrays_are_deduplicated_and_sorted(dump: CoreDump) -> None:
     frame = _build(dump).collect()
     assert frame.filter(pl.col('id') == 'ENSG01')['uniprot_swissprot'].item().to_list() == ['P00001', 'P00002']
+
+
+def test_gene_level_arrays_are_sorted_by_accession_not_by_transcript_order(dump: CoreDump) -> None:
+    """ENSG02's transcripts, in stable-id order, contribute P00009 then P00003.
+
+    A rollup that only dedupes without sorting would emit them in that (wrong) order.
+    """
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG02')['uniprot_swissprot'].item().to_list() == ['P00003', 'P00009']
 
 
 def test_a_field_with_no_values_is_null_not_an_empty_array(dump: CoreDump) -> None:
