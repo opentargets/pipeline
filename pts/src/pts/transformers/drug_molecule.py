@@ -19,6 +19,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
 
@@ -84,7 +85,7 @@ def drug_molecule(
         config: Config object (not used in this transformer).
     """
     logger.info(f'Loading data from {source}')
-    clinical_report = pl.read_parquet(source['clinical_report'])
+    clinical_report = scan_dataset(source['clinical_report']).collect()
 
     invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
     if invalid_qc_reasons and 'qualityControls' in clinical_report.columns:
@@ -97,19 +98,19 @@ def drug_molecule(
         excluded = clinical_report.clear()
 
     logger.info(f'Writing {excluded.height} excluded clinical reports to {destination["excluded"]}')
-    excluded.write_parquet(destination['excluded'], mkdir=True)
+    write_dataset(excluded, str(destination['excluded']))
 
-    molecule = pl.scan_parquet(source['molecule'])
-    chemical_probes = pl.read_parquet(source['chemical_probes'])
-    mechanism_of_action = pl.read_parquet(source['mechanism_of_action'])
-    disease = pl.read_parquet(source['disease'])
+    molecule = scan_dataset(source['molecule'])
+    chemical_probes = scan_dataset(source['chemical_probes']).collect()
+    mechanism_of_action = scan_dataset(source['mechanism_of_action']).collect()
+    disease = scan_dataset(source['disease']).collect()
 
     logger.info('Processing drug index')
     output = process_drug_index(molecule, chemical_probes, mechanism_of_action, clinical_report, disease)
     logger.info(f'Drug index has {output.height} molecules')
 
     logger.info(f'Writing drug index to {destination["output"]}')
-    output.write_parquet(destination['output'], mkdir=True)
+    write_dataset(output, str(destination['output']))
 
 
 def process_drug_index(

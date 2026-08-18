@@ -28,6 +28,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreT
 
 from pts.postgres import read_dump_tables
 from pts.transformers.utils import update_quality_flag
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 CHEMBL_SCHEMA_NAME = 'public'
 """Schema the ChEMBL tables live in inside the restored dump."""
@@ -96,7 +97,7 @@ def clinical_report(
         properties: Dictionary containing Spark properties
     """
     logger.info(f'source paths: {source}')
-    chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
+    chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
     # The two restores below take minutes each and use no spark at all, so the
     # session is not started until they are done -- otherwise the driver, and the
@@ -130,7 +131,6 @@ def clinical_report(
     spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
-
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
     llm_indications = llm_batch_results.select(
         'id',
@@ -203,7 +203,7 @@ def clinical_report(
             ner_batch_size=int(settings['ner_batch_size']),
             ner_cache_path=source['ner_cache_path'],
         )
-        .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
+        .pipe(validate_disease, disease_index=scan_dataset(source['disease']).select('id', 'obsoleteTerms').collect())
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
@@ -213,7 +213,7 @@ def clinical_report(
     )
 
     logger.info(f'destination paths: {destination}')
-    output.df.write_parquet(destination['output'], mkdir=True)
+    write_dataset(output.df, destination['output'])
 
 
 def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:
@@ -221,7 +221,8 @@ def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> Cl
 
     Args:
         reports: ClinicalReport object with mapped entities
-        disease_index: Polars DataFrame with disease index
+        disease_index: disease index, projected to the only columns used here: `id` and
+            `obsoleteTerms`. The caller pushes that projection into the read.
 
     Returns:
         ClinicalReport object with validated disease entities
