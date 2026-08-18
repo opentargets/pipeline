@@ -145,17 +145,23 @@ steps:
   clinical_report:
     # both dumps are copied whole and left alone. pts restores the tables it
     # needs from them, so the tables and columns are declared there, next to the
-    # code that depends on them
+    # code that depends on them.
+    #
+    # The chembl dump is copied by the `chembl` step above rather than here: it
+    # feeds four pts steps, not just clinical_report, and each is a separate DAG
+    # node depending on `pis_chembl`. Both destinations carry the version in the
+    # filename so a release cannot silently read last month's dump.
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
       destination: input/clinical_report/aact_${aact_version}.zip
 
+    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

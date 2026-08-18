@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.9.0rc7"
+version = "26.9.0rc9"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -24,6 +24,7 @@ dependencies = [
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
   "pdfplumber>=0.11.9",
+  "pixeltable-pgserver>=0.6,<0.7",
   "clinical-mining",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
