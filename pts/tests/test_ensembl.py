@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 
 from pts.ensembl_core import CoreDump
-from pts.transformers.ensembl import _genes
+from pts.transformers.ensembl import _genes, _translation_values
 
 SCHEMA = """\
 CREATE TABLE `gene` (
@@ -45,6 +45,32 @@ CREATE TABLE `xref` (
   `info_type` varchar(40) NOT NULL,
   PRIMARY KEY (`xref_id`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `translation` (
+  `translation_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `transcript_id` int(10) unsigned NOT NULL,
+  `stable_id` varchar(128) DEFAULT NULL,
+  PRIMARY KEY (`translation_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `object_xref` (
+  `ensembl_id` int(10) unsigned NOT NULL,
+  `ensembl_object_type` varchar(30) NOT NULL,
+  `xref_id` int(10) unsigned NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `external_db` (
+  `external_db_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `db_name` varchar(100) NOT NULL,
+  PRIMARY KEY (`external_db_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `protein_feature` (
+  `translation_id` int(10) unsigned NOT NULL,
+  `hit_name` varchar(40) NOT NULL,
+  `analysis_id` smallint(5) unsigned NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `analysis` (
+  `analysis_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
+  `logic_name` varchar(128) NOT NULL,
+  PRIMARY KEY (`analysis_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 """
 
 # gene_id, biotype, seq_region_id, start, end, strand, display_xref_id, description, canonical, stable_id
@@ -57,7 +83,44 @@ GENES = [
 ]
 SEQ_REGIONS = ['1\t1\t1', '2\tKI270728.1\t2', '3\tMT\t1']
 COORD_SYSTEMS = ['1\t1\tchromosome', '2\t1\tscaffold']
-XREFS = ['10\t1\tHGNC:1\tGENEA\tDIRECT', '11\t1\tHGNC:3\tGENEC\tDIRECT', '12\t1\tHGNC:4\tMTGENE\tDIRECT']
+
+# xref_id, external_db_id, dbprimary_acc, display_label, info_type
+XREFS = [
+    '10\t1\tHGNC:1\tGENEA\tDIRECT',
+    '11\t1\tHGNC:3\tGENEC\tDIRECT',
+    '12\t1\tHGNC:4\tMTGENE\tDIRECT',
+    # translation 2001's two swissprot accessions
+    '101\t2200\tP00002\tP00002\tDIRECT',
+    '102\t2200\tP00001\tP00001\tSEQUENCE_MATCH',
+    # translation 2002's two trembl accessions
+    '103\t2000\tA0A002\tA0A002\tDIRECT',
+    '104\t2000\tA0A001\tA0A001\tSEQUENCE_MATCH',
+]
+
+# translation_id, transcript_id, stable_id
+TRANSLATIONS = [
+    '2001\t1001\tENSP01',
+    '2002\t1002\tENSP02',
+    # no xrefs and no protein features: every array column must come out null
+    '2003\t1003\tENSP03',
+]
+
+# ensembl_id, ensembl_object_type, xref_id
+OBJECT_XREFS = [
+    '2001\tTranslation\t101',
+    '2001\tTranslation\t102',
+    '2002\tTranslation\t103',
+    '2002\tTranslation\t104',
+]
+
+# external_db_id, db_name
+EXTERNAL_DBS = ['2200\tUniprot/SWISSPROT', '2000\tUniprot/SPTREMBL']
+
+# translation_id, hit_name, analysis_id
+PROTEIN_FEATURES = ['2001\tSignalP-noTM\t300']
+
+# analysis_id, logic_name
+ANALYSES = ['300\tsignalp']
 
 
 def write_gz(path: Path, text: str) -> None:
@@ -72,6 +135,11 @@ def dump(tmp_path: Path) -> CoreDump:
     write_gz(tmp_path / 'seq_region.txt.gz', '\n'.join(SEQ_REGIONS) + '\n')
     write_gz(tmp_path / 'coord_system.txt.gz', '\n'.join(COORD_SYSTEMS) + '\n')
     write_gz(tmp_path / 'xref.txt.gz', '\n'.join(XREFS) + '\n')
+    write_gz(tmp_path / 'translation.txt.gz', '\n'.join(TRANSLATIONS) + '\n')
+    write_gz(tmp_path / 'object_xref.txt.gz', '\n'.join(OBJECT_XREFS) + '\n')
+    write_gz(tmp_path / 'external_db.txt.gz', '\n'.join(EXTERNAL_DBS) + '\n')
+    write_gz(tmp_path / 'protein_feature.txt.gz', '\n'.join(PROTEIN_FEATURES) + '\n')
+    write_gz(tmp_path / 'analysis.txt.gz', '\n'.join(ANALYSES) + '\n')
     return CoreDump(str(tmp_path))
 
 
@@ -100,3 +168,28 @@ def test_coordinates_are_integers_and_strand_is_signed(dump: CoreDump) -> None:
     assert row['start'].item() == 300
     assert row['end'].item() == 400
     assert row['strand'].item() == -1
+
+
+def test_all_accessions_are_kept_not_just_the_first(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    row = frame.filter(pl.col('translationId') == 'ENSP01')
+    assert sorted(row['uniprot_swissprot'].item().to_list()) == ['P00001', 'P00002']
+
+
+def test_accession_arrays_are_sorted(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    assert frame.filter(pl.col('translationId') == 'ENSP02')['uniprot_trembl'].item().to_list() == [
+        'A0A001',
+        'A0A002',
+    ]
+
+
+def test_signalp_comes_from_the_protein_feature_not_an_xref(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    assert frame.filter(pl.col('translationId') == 'ENSP01')['signalp'].item().to_list() == ['SignalP-noTM']
+
+
+def test_a_translation_with_no_xrefs_has_null_arrays(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    row = frame.filter(pl.col('translationId') == 'ENSP03')
+    assert row['uniprot_swissprot'].item() is None
