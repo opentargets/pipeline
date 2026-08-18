@@ -220,7 +220,16 @@ def _transcripts(dump: CoreDump) -> pl.LazyFrame:
         )
         .with_columns([_empty_to_null(field) for field in _ARRAY_FIELDS])
     )
-    return transcript.join(translations, on='transcript_id', how='left')
+    return (
+        transcript
+        .join(translations, on='transcript_id', how='left')
+        # a transcript with no translation at all has no row in `translations` to join onto, so
+        # the join leaves `translations` null here -- the JSON route this replaces always produced
+        # `[]` (`(.translations // [])[]`), and `target.py::_build_ensembl` reads null differently
+        # from `[]` (`flatten` of an array containing a null element is itself null), so this must
+        # stay an empty list, unlike the five accession arrays that stay null on purpose.
+        .with_columns(pl.col('translations').fill_null([]))
+    )
 
 
 def _build(dump: CoreDump) -> pl.LazyFrame:

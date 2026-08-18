@@ -279,6 +279,18 @@ def test_a_field_with_no_values_is_null_not_an_empty_array(dump: CoreDump) -> No
     assert transcripts['ENST01']['uniprot_isoform'] is None
 
 
+def test_a_transcript_with_no_translation_has_an_empty_translations_array(dump: CoreDump) -> None:
+    """The JSON route this replaces always produced [], never null, for `.translations`.
+
+    `target.py::_build_ensembl` flattens `transcripts.translations` with spark's `flatten`, which
+    returns null -- not just skips -- when any element of the outer array is null. A null here
+    would silently empty out every ensembl_PRO id for the whole gene.
+    """
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert transcripts['ENST05']['translations'] == []
+
+
 def test_no_exons_or_biotype_on_the_transcript_struct(dump: CoreDump) -> None:
     """Both are dead on main: canonicalExons and biotype come from output/transcript."""
     frame = _build(dump).collect()

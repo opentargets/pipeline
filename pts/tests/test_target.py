@@ -180,6 +180,63 @@ def test_build_ensembl_takes_canonical_transcript_from_the_frame(spark):
     assert [(s.id, s.source) for s in result.signalP] == [('SignalP-noTM', 'signalP')]
 
 
+def test_build_ensembl_protein_ids_survive_a_transcript_without_a_translation(spark):
+    """A transcript's `translations` must be `[]`, not null, or a whole gene loses its ensembl_PRO ids.
+
+    Regression test for the polars port: `_transcripts` left-joins per-translation aggregates onto
+    every transcript, and a transcript with no translation at all used to come out of that join
+    with `translations = null` rather than `[]`. Spark's `flatten` returns null -- not just skips
+    the element -- when any element of the outer array is null, so `_refactor_ensembl_protein_ids`
+    then sees `size(translations) == -1` and drops `ensembl_PRO` for every id on the gene, not just
+    the untranslated transcript.
+    """
+    transcript_struct = StructType([
+        StructField('id', StringType()),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('uniprot_isoform', ArrayType(StringType())),
+        StructField('alphafold', ArrayType(StringType())),
+        StructField('translations', ArrayType(StructType([StructField('id', StringType())]))),
+    ])
+    schema = StructType([
+        StructField('id', StringType()),
+        StructField('biotype', StringType()),
+        StructField('description', StringType()),
+        StructField('chromosome', StringType()),
+        StructField('start', LongType()),
+        StructField('end', LongType()),
+        StructField('strand', IntegerType()),
+        StructField('approvedSymbol', StringType()),
+        StructField('SignalP', ArrayType(StringType())),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('canonicalTranscript', StructType([
+            StructField('id', StringType()),
+            StructField('chromosome', StringType()),
+            StructField('start', LongType()),
+            StructField('end', LongType()),
+            StructField('strand', StringType()),
+        ])),
+        StructField('transcripts', ArrayType(transcript_struct)),
+    ])
+    row = (
+        'ENSG00000002', 'protein_coding', 'a gene [Source:HGNC Symbol]', '1', 100, 200, 1, 'GENEB',
+        None, [], [],
+        ('ENST00000010', '1', 100, 200, '+'),
+        [
+            ('ENST00000010', [], [], [], [], [('ENSP00000001',)]),
+            # a transcript with no translation at all -- must carry [], not None
+            ('ENST00000011', [], [], [], [], []),
+        ],
+    )
+    df = spark.createDataFrame([row], schema)
+
+    result = _build_ensembl(df).collect()[0]
+
+    protein_ids = {(p.id, p.source) for p in result.proteinIds}
+    assert ('ENSP00000001', 'ensembl_PRO') in protein_ids
+
+
 # ---------------------------------------------------------------------------
 # 2. HGNC symbol mapping
 # ---------------------------------------------------------------------------
