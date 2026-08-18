@@ -267,7 +267,8 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
             reports.df
             .with_columns(
                 drugs_count=pl.col('drugs').list.len(),
-                diseases_count=pl.col('diseases').list.len(),
+                # when diseases list is null, it is replaced with empty list
+                diseases_count=pl.col('diseases').fill_null([]).list.len(),
             )
             .with_columns(
                 # Building blocks for the report description
@@ -279,6 +280,8 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 .then(pl.col('drugs').list.first().struct.field('drugFromSource').str.to_titlecase())
                 .otherwise(pl.concat_str(pl.col('drugs_count').cast(pl.String), pl.lit(' molecules'))),
                 _disease_part=pl
+                .when(pl.col('diseases_count') == 0)
+                .then(pl.lit(None, dtype=pl.String))
                 .when(pl.col('diseases_count') == 1)
                 .then(pl.col('diseases').list.first().struct.field('diseaseFromSource').str.to_titlecase())
                 .otherwise(pl.concat_str(pl.col('diseases_count').cast(pl.String), pl.lit(' diseases'))),
@@ -287,6 +290,15 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 title=pl
                 .when(pl.col('trialOfficialTitle').is_not_null())
                 .then(pl.col('trialOfficialTitle'))
+                .when(pl.col('diseases_count') == 0)
+                .then(
+                    pl.concat_str(
+                        pl.lit('Report in '),
+                        pl.col('_stage'),
+                        pl.lit(' stage for '),
+                        pl.col('_drug_part'),
+                    )
+                )
                 .otherwise(
                     pl.concat_str(
                         pl.lit('Report in '),
@@ -295,7 +307,6 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                         pl.col('_drug_part'),
                         pl.lit(' and '),
                         pl.col('_disease_part'),
-                        ignore_nulls=True,
                     )
                 )
             )
