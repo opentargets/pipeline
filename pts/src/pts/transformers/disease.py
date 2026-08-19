@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any
 
 import polars as pl
@@ -132,6 +133,84 @@ def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
+    """Point every replacement pointer at a term that survives ``n_clean``.
+
+    An IAO_0100001 entry may name a node that is itself deprecated, either
+    because the source ontology obsoleted a term into another obsolete term or
+    because ``annotate_name_duplicates`` superseded the target afterwards.
+    ``remap_edges`` and ``obsolete_ids`` both resolve a single hop, so the far
+    end of such a chain is lost: the intermediate node is dropped by
+    ``n_clean``, taking with it the mapping from the original term, and
+    evidence carrying that term no longer reaches the surviving one.
+
+    Each pointer is followed to the first node that is not deprecated.  A hop
+    is only taken when it is unambiguous -- a deprecated node naming two
+    replacements is a curation decision to leave alone, as are cycles and
+    self-references, which name no live term and would only rotate the pointer.
+
+    Args:
+        n: Node DataFrame whose IAO_0100001 entries may form chains.
+
+    Returns:
+        DataFrame with the same shape and schema as ``n``.
+    """
+    pointers = (
+        n
+        .unnest('meta')
+        .explode('basicPropertyValues')
+        .unnest('basicPropertyValues')
+        .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
+        .select('id', 'val')
+    )
+    if pointers.is_empty():
+        return n
+
+    targets: dict[str, list[str]] = defaultdict(list)
+    for source, target in pointers.iter_rows():
+        targets[source].append(target)
+    # Only an unambiguous pointer can be followed through.
+    onward = {source: found[0] for source, found in targets.items() if len(found) == 1}
+
+    resolved: dict[str, str] = {}
+    for start in sorted({target for found in targets.values() for target in found}):
+        seen = {start}
+        current = start
+        cycled = False
+        while current in onward:
+            nxt = onward[current]
+            if nxt in seen:
+                # A cycle or self-reference names no live term, so following it
+                # would only rotate the pointer.  Leave it as it stands.
+                cycled = True
+                break
+            seen.add(nxt)
+            current = nxt
+        if not cycled and current != start:
+            resolved[start] = current
+
+    if not resolved:
+        return n
+
+    logger.debug(f'resolved {len(resolved)} replacement pointers through a chain')
+    return n.with_columns(
+        meta=pl.col('meta').struct.with_fields(
+            basicPropertyValues=pl
+            .col('meta')
+            .struct.field('basicPropertyValues')
+            .list.eval(
+                pl.struct(
+                    pred=pl.element().struct.field('pred'),
+                    val=pl
+                    .when(pl.element().struct.field('pred') == _IAO_REPLACED_BY)
+                    .then(pl.element().struct.field('val').replace(resolved))
+                    .otherwise(pl.element().struct.field('val')),
+                )
+            ),
+        )
+    )
+
+
 def remap_edges(e: pl.DataFrame, n: pl.DataFrame) -> pl.DataFrame:
     """Replace deprecated node URLs in edges with their canonical replacements.
 
@@ -208,9 +287,10 @@ def disease(
         initial['graphs'][0][0]['edges'],
     )
 
-    # annotate name-collision nodes as deprecated before any filtering,
-    # then rewrite edges so they reference only retained identifiers
-    n = annotate_name_duplicates(n)
+    # annotate name-collision nodes as deprecated before any filtering, resolve
+    # any replacement pointer that names a node which is itself deprecated, then
+    # rewrite edges so they reference only retained identifiers
+    n = resolve_replacement_chains(annotate_name_duplicates(n))
     e = remap_edges(e, n)
 
     # clean the nodes
