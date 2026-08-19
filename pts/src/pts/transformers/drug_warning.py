@@ -12,11 +12,10 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.transformers.utils import chembl_ids as _chembl_ids
+from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import write_dataset
 
 SCHEMA_NAME = 'public'
-"""Schema the ChEMBL tables live in inside the restored dump."""
 
 TABLES = {
     'drug_warning': [
@@ -35,38 +34,12 @@ TABLES = {
     'molecule_dictionary': ['molregno', 'chembl_id'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
 }
-"""ChEMBL tables and columns this step needs, restored from the dump."""
 
 ORDER_BY = {
     'drug_warning': ['warning_id'],
     'warning_refs': ['warnref_id'],
 }
-"""Reads whose row order reaches the output and therefore must not float.
-
-``_references`` collects ``warning_refs`` into the published ``references`` array
-in scan order, so an unordered read leaves that array in whatever order the query
-plan produced -- the same references, shuffled, on a large share of rows. Ordering
-by ``warnref_id``, the table's key and already in the projection, pins it. This
-matters beyond cosmetics: ``references`` is part of ``_deduplicate_warnings``'
-grouping key, so an unstable order can decide which rows merge.
-
-``drug_warning`` is ordered for the same reason one step further out:
-``_deduplicate_warnings`` groups with ``maintain_order=True`` and unions
-``chemblIds`` in first-appearance order, so both the output row order and the
-contents of a merged ``chemblIds`` follow this table's scan order.
-
-``molecule_dictionary`` and ``molecule_hierarchy`` are deliberately absent. They
-are only ever joined row-wise on ``molregno`` inside ``chembl_ids``, whose joins
-keep the left frame's order, so their scan order reaches nothing -- and they are
-the two large tables here, so ordering them would buy a sort of millions of rows
-for nothing.
-
-Ordering the reads is only half of it: polars makes no promise about row order out
-of a join or a ``group_by`` unless asked, so this module also pins
-``maintain_order`` everywhere the order can reach the output. With both halves the
-step reproduces itself exactly -- whole frame, row order included -- across four
-different scan orders of the same dump.
-"""
+"""Reads collected into published arrays, which must not come back in plan order."""
 
 
 def drug_warning(
@@ -122,8 +95,8 @@ def process_drug_warnings(
     Returns:
         One row per warning_id, in the Open Targets output format.
     """
-    ids = _chembl_ids(warnings, molecules, hierarchy, key='warning_id')
-    references = _references(refs)
+    ids = add_parent_chembl_ids(warnings, molecules, hierarchy, key='warning_id')
+    references = _aggregate_references(refs)
 
     # `warning_year` is postgres `integer`, so `year` comes out int32 where the published
     # column is int64. Left uncast deliberately: a year needs nothing wider, and the
@@ -151,7 +124,7 @@ def process_drug_warnings(
     )
 
 
-def _references(refs: pl.DataFrame) -> pl.DataFrame:
+def _aggregate_references(refs: pl.DataFrame) -> pl.DataFrame:
     """Aggregate warning references into a struct array per warning.
 
     Args:

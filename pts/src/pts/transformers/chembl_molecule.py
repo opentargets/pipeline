@@ -1,16 +1,8 @@
 """ChEMBL Molecule processing.
 
-Processes raw ChEMBL molecule tables into the Open Targets molecule format,
-including synonyms, DrugBank cross-references, and molecule hierarchy. ChEMBL's
-own cross-reference table is deliberately not joined here (see
-:func:`_process_molecule_cross_references`).
-
-Clinical-trial (AACT) synonym mining is this step's only consumer, but it lives in
-:mod:`pts.transformers.utils.aact_synonyms` rather than here: it is a self-contained
-pipeline reached through three functions, and it is large enough to obscure the molecule
-transform it sits next to. This module reads the OpenAI batch output
-(``parse_batch_results``, from ``clinical_mining``, also used by ``clinical_report``) and
-hands it over.
+Builds the Open Targets molecule format from the raw ChEMBL tables. Synonyms and trade
+names come from ``molecule_synonyms``, cross-references from DrugBank, and clinical-trial
+synonyms from :mod:`pts.transformers.utils.aact_synonyms`.
 """
 
 from pathlib import Path
@@ -26,7 +18,6 @@ from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SCHEMA_NAME = 'public'
-"""Schema the ChEMBL tables live in inside the restored dump."""
 
 TABLES = {
     'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name', 'molecule_type'],
@@ -34,16 +25,7 @@ TABLES = {
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
     'molecule_synonyms': ['molsyn_id', 'molregno', 'synonyms', 'syn_type'],
 }
-"""ChEMBL tables and columns this step needs, restored from the dump.
-
-No ``order_by`` here, unlike ``drug_warning`` and ``drug_mechanism_of_action``, and
-that is a decision rather than an omission. Every published list this step builds
-imposes its own order at the aggregation site -- ``synonyms`` and ``tradeNames``
-sort, ``childChemblIds`` and the cross-reference ``ids`` sort -- so no read order
-reaches an array. What is left is the output's row order, which follows the scan
-order of ``molecule_dictionary``. Pinning that would mean sorting the largest table
-here on every run to fix the order of rows nothing downstream reads positionally.
-"""
+"""No ``order_by``: every published list sorts at its aggregation site instead."""
 
 CHEMBL_SOURCE = 'ChEMBL'
 
@@ -68,8 +50,6 @@ def chembl_molecule(
         config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
-    # scratch_root: `compound_structures` makes this much the largest of the ChEMBL
-    # restores, and `work_path` is the work disk. See the note in drug_warning.
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading drugbank lookup from {source["drugbank"]}')
@@ -163,10 +143,7 @@ def process_molecules(
         aact_df = mine_aact_synonyms(mol_for_index, entries)
         mol_combined = merge_aact_synonyms(mol_combined, aact_df)
 
-    # Final processing -- ensure name is populated and deduplicate. Only synonyms and
-    # tradeNames are coalesced to []; childChemblIds is deliberately left null for a
-    # molecule with no children, which is how the column is published. Most molecules
-    # have no children, so filling it would rewrite nearly every row.
+    # Final processing -- ensure name is populated and deduplicate
     return (
         mol_combined
         .with_columns(
@@ -184,9 +161,6 @@ def process_molecules(
                 pl.col('id'),
             )
         )
-        # maintain_order: `unique` on a subset keeps one row per id and is free to
-        # pick any of them, so without this both the surviving row and the output row
-        # order depend on the order the joins happened to produce.
         .unique(subset=['id'], maintain_order=True)
         .select(
             'id',
@@ -233,9 +207,6 @@ def _molecule_preprocess(
     ).select('molregno', 'parentId')
 
     # One struct array per molecule. The ordering is determinism-in-principle only
-    # and does not reach the output: `syns` is dropped in `process_molecules` above,
-    # and its only consumer, `_process_molecule_synonyms`, explodes it into two set
-    # aggregations where order cannot survive.
     synonyms = molecule_synonyms.group_by('molregno').agg(pl.struct('molsyn_id', 'synonyms', 'syn_type').alias('syns'))
 
     return (
@@ -348,10 +319,6 @@ def _process_molecule_hierarchy(preprocessed_mols: pl.DataFrame) -> pl.DataFrame
         .filter(pl.col('id') != pl.col('parentId'))
         .filter(pl.col('parentId').is_not_null())
         .group_by('parentId')
-        # sorted, not left in aggregation order: `childChemblIds` is published, and
-        # the row order feeding this group_by comes from an unordered read. The set
-        # of children is what carries meaning, so any stable order will do -- this
-        # matches what `_process_molecule_synonyms` does with `.list.sort()`.
         .agg(pl.col('id').drop_nulls().unique().sort().alias('childChemblIds'))
         .rename({'parentId': 'id'})
     )

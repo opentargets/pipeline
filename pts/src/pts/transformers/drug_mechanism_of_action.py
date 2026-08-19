@@ -12,17 +12,14 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.transformers.utils import chembl_ids as _chembl_ids
+from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SCHEMA_NAME = 'public'
-"""Schema the ChEMBL tables live in inside the restored dump."""
 
 TABLES = {
     'drug_mechanism': ['mec_id', 'record_id', 'molregno', 'mechanism_of_action', 'tid', 'action_type'],
-    # mecref_id is the table's key and is otherwise unused: it is here only so the
-    # read can be ordered by it, see ORDER_BY. The key is unique, so including it
-    # cannot change what the SELECT DISTINCT returns.
+    # mecref_id is only used to order the input data
     'mechanism_refs': ['mecref_id', 'mec_id', 'ref_type', 'ref_id', 'ref_url'],
     'molecule_dictionary': ['molregno', 'chembl_id'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
@@ -30,7 +27,6 @@ TABLES = {
     'target_components': ['tid', 'component_id'],
     'component_sequences': ['component_id', 'accession'],
 }
-"""ChEMBL tables and columns this step needs, restored from the dump."""
 
 ORDER_BY = {
     'drug_mechanism': ['mec_id'],
@@ -39,30 +35,7 @@ ORDER_BY = {
     'target_components': ['tid', 'component_id'],
     'component_sequences': ['component_id', 'accession'],
 }
-"""Reads whose row order reaches the output and therefore must not float.
-
-``_chembl_mechanism_references`` collects ``mechanism_refs`` into the published
-``references`` array in scan order, and ``_chembl_target`` collects ``targets``
-the same way, so an unordered read leaves that array order at the mercy of the
-query plan and the physical layout of the restored dump. ``drug_mechanism`` is in
-here too because it drives the row order the references are grouped in, and
-because ``_consolidate_duplicate_references`` groups with ``maintain_order=True``.
-
-Where the table's key is in the projection (``mecref_id``, ``mec_id``, ``tid``)
-that is what it is ordered by; the other two are ordered by their whole
-projection, which the ``SELECT DISTINCT`` makes a total order. Every one of these
-is a small table, so the sort is free.
-
-Ordering the reads is only half of it. Polars makes no promise about row order out
-of a join, a ``group_by`` or a ``unique`` unless asked, so ``maintain_order`` is
-pinned everywhere the order can reach the output. Without both halves the step does
-not reproduce its own output on byte-identical inputs, and a step that cannot
-reproduce itself cannot be diffed at all.
-
-``molecule_dictionary`` and ``molecule_hierarchy`` are deliberately absent: they
-are joined row-wise on ``molregno`` by joins that keep the left frame's order, so
-their scan order reaches nothing, and they are the large tables here.
-"""
+"""Reads collected into published arrays, which must not come back in plan order."""
 
 
 def drug_mechanism_of_action(
@@ -132,7 +105,7 @@ def process_mechanism_of_action(
     Returns:
         Processed mechanism of action DataFrame, one row per surviving `mec_id`.
     """
-    ids = _chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy, key='mec_id')
+    ids = add_parent_chembl_ids(drug_mechanism, molecule_dictionary, molecule_hierarchy, key='mec_id')
     mechanism_refs_agg = mechanism_refs.group_by('mec_id', maintain_order=True).agg(
         pl.struct(
             pl.col('ref_type'),

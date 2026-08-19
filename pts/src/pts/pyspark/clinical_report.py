@@ -31,7 +31,6 @@ from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 CHEMBL_SCHEMA_NAME = 'public'
-"""Schema the ChEMBL tables live in inside the restored dump."""
 
 CHEMBL_TABLES = {
     'drug_indication': ['drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'],
@@ -50,28 +49,16 @@ CHEMBL_TABLES = {
     ],
     'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
 }
-"""ChEMBL tables and columns this step needs, restored from the dump."""
 
 CHEMBL_ORDER_BY = {
     'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
     'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
 }
-"""Reads whose row order reaches a published list and therefore must not float.
-
-Both reference tables are collected per report into published arrays. Neither
-projection carries its table's key, so each is ordered by its whole projection --
-which the ``SELECT DISTINCT`` makes a total order. Both are small.
-"""
+"""Reads collected into published arrays, ordered by their whole projection."""
 
 AACT_SCHEMA_NAME = 'ctgov'
-"""Schema the AACT tables live in inside the restored dump."""
 
 AACT_ARCHIVE_MEMBER = 'postgres.dmp'
-"""The AACT zip's only dump member -- checked directly against a live monthly export, which
-carries it alongside ``nlm_protocol_definitions.html``, ``nlm_results_definitions.html``,
-``schema.png`` and ``data_dictionary.csv``. The default ``*.dmp`` glob already matches it
-uniquely, but it is spelled out here rather than relied on implicitly.
-"""
 
 AACT_TABLES = {
     'studies': [
@@ -84,10 +71,9 @@ AACT_TABLES = {
     'designs': ['nct_id', 'primary_purpose'],
     'brief_summaries': ['nct_id', 'description'],
 }
-"""AACT tables and columns this step needs, restored from the dump."""
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
-"""``pmid`` is collected into the published ``literature`` array, grouped by ``nct_id``."""
+"""``pmid`` is collected into the published ``literature`` array."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -113,15 +99,9 @@ def clinical_report(
     logger.info(f'source paths: {source}')
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
-    # The restores below use no Spark, so the session is not started until they
-    # are done -- otherwise the driver and the cluster's autoscaled workers sit
-    # idle waiting for a database to come up.
-    #
-    # No `scratch_root` here, unlike the transformers that restore a dump. Those
-    # run on a VM whose container filesystem is too small for the scratch, so they
-    # point it at `config.work_path`. This step runs on the Dataproc master, which
-    # is not handed a `Config` and where `work_path` (/mnt/disks/work) is not
-    # mounted, so the default location is the right one.
+    # The restores use no Spark, so the session starts after them rather than
+    # sitting idle. No `scratch_root`: a pyspark step gets no `Config`, and
+    # /mnt/disks/work is not mounted on the Dataproc master.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
         str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY

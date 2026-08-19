@@ -9,7 +9,9 @@ identical join and dedup logic. Kept here once so the two cannot drift apart:
 import polars as pl
 
 
-def chembl_ids(records: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.DataFrame, key: str) -> pl.DataFrame:
+def add_parent_chembl_ids(
+    rows: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.DataFrame, key: str
+) -> pl.DataFrame:
     """Resolve the deduplicated {molecule, parent molecule} ChEMBL id pair per record.
 
     A record states one molregno; the published `chemblIds` carries that molecule and
@@ -17,10 +19,10 @@ def chembl_ids(records: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.Dat
     parent drug. A molecule that is its own parent yields a single id.
 
     Args:
-        records: Raw ChEMBL table with `key` and `molregno` columns.
+        rows: Raw ChEMBL table with `key` and `molregno` columns.
         molecules: Raw ChEMBL molecule_dictionary table.
         hierarchy: Raw ChEMBL molecule_hierarchy table.
-        key: Name of the id column in `records` to key the result by
+        key: Name of the id column in `rows` to key the result by
             (e.g. `warning_id` or `mec_id`).
 
     Returns:
@@ -37,7 +39,7 @@ def chembl_ids(records: pl.DataFrame, molecules: pl.DataFrame, hierarchy: pl.Dat
         maintain_order='left',
     ).select('molregno', 'parent_chembl_id')
     return (
-        records
+        rows
         .select(key, 'molregno')
         .join(molecules, on='molregno', how='left', maintain_order='left')
         .join(parent, on='molregno', how='left', maintain_order='left')

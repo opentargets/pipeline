@@ -9,10 +9,6 @@ Pipeline: parsed batch output (from ``clinical_mining``'s ``parse_batch_results`
 normalized drug member sets -> anchor against a ChEMBL name index (with an ambiguity cap)
 -> eleven cleanup rules -> keep candidates seen in ``MIN_TRIALS`` distinct trials -> merge
 into the molecule synonyms.
-
-The mining is heuristic throughout: it reads free-text trial arm descriptions, so the
-cleanup rules and the two thresholds below are calibrated against the corpus rather than
-derived from anything, and are expected to need revisiting as coverage grows.
 """
 
 import polars as pl
@@ -25,7 +21,7 @@ AACT_SOURCE = ClinicalSource.AACT.value
 AMBIGUITY_CAP = 10
 MIN_TRIALS = 2
 
-CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
+DRUG_CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
 
 CONTROL_TERMS = {
     'placebo',
@@ -298,7 +294,7 @@ def _rewrite_and_reclassify_codes(
         DataFrame[id, candidate, nct_id, status] with rewritten, reclassified candidates.
     """
     # rule #8: descriptor-wrapped code -> bare code (phrase has a class word AND a code)
-    code = pl.col('candidate').str.extract(CODE_REGEX, 0)
+    code = pl.col('candidate').str.extract(DRUG_CODE_REGEX, 0)
     cand = cand.with_columns(
         candidate=pl
         .when(code.is_not_null() & _has_class_keyword(pl.col('candidate')))
@@ -368,7 +364,7 @@ def _apply_cleanup_rules(
 
     # #6: drug-class / cell-therapy keyword present, UNLESS the candidate is a bare
     # R&D code (descriptor phrases were already rewritten to their code upstream)
-    cand = cand.filter(~_has_class_keyword(pl.col('candidate')) | pl.col('candidate').str.contains(CODE_REGEX))
+    cand = cand.filter(~_has_class_keyword(pl.col('candidate')) | pl.col('candidate').str.contains(DRUG_CODE_REGEX))
 
     # #7: regimen suppression (candidate equals a known regimen token)
     regimen_keys = regimen_index.select(pl.col('regimen_norm').alias('candidate')).unique()
