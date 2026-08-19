@@ -98,11 +98,6 @@ def process_drug_warnings(
     ids = add_parent_chembl_ids(warnings, molecules, hierarchy, key='warning_id')
     references = _aggregate_references(refs)
 
-    # `warning_year` is postgres `integer`, so `year` comes out int32 where the published
-    # column is int64. Left uncast deliberately: a year needs nothing wider, and the
-    # values are unaffected. The `protein_class_id` cast in target.py's
-    # `_build_protein_classification` is the same situation resolved the other way,
-    # because that column's width is part of a nested struct consumers read.
     return (
         warnings
         .join(ids, on='warning_id', how='left', maintain_order='left')
