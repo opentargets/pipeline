@@ -90,9 +90,50 @@ class TestChainResolution:
         result = resolve_replacement_chains(df)
         assert _pointers(result, 'A') == [_url('B')]
 
+    def test_chain_running_into_a_dead_end_is_not_rewritten(self) -> None:
+        """A -> B -> C with C obsolete and going nowhere.
+
+        Rewriting A to C would swap one term n_clean drops for another, so the
+        pointer is left alone rather than moved between two dead nodes.
+        """
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['C']),
+            _make_node('C', deprecated=True),
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
+    def test_chain_running_into_an_ambiguous_term_is_not_rewritten(self) -> None:
+        """C names two successors, so the chain stops before it, not on it."""
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['C']),
+            _make_node('C', deprecated=True, replaced_by=['D', 'E']),
+            _make_node('D'),
+            _make_node('E'),
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
 
 class TestAmbiguityAndCycles:
     """Hops that are not clearly correct are left alone."""
+
+    def test_a_repeated_identical_pointer_is_not_ambiguity(self) -> None:
+        """B names one successor, written twice.
+
+        14 terms in the 26.06 source ontology carry the same replacement twice.
+        Counting entries rather than distinct targets treats them as ambiguous
+        and strands every chain running through them.
+        """
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['C', 'C']),
+            _make_node('C'),
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('C')]
 
     def test_ambiguous_target_is_not_followed(self) -> None:
         """B names two replacements, so picking one would be a guess."""

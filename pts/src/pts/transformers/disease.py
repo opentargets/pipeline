@@ -144,10 +144,17 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     ``n_clean``, taking with it the mapping from the original term, and
     evidence carrying that term no longer reaches the surviving one.
 
-    Each pointer is followed to the first node that is not deprecated.  A hop
-    is only taken when it is unambiguous -- a deprecated node naming two
+    Each pointer is followed to the first node that is not deprecated, and is
+    rewritten only when such a node is actually reached.  A hop is only taken
+    when it is unambiguous -- a deprecated node naming two *different*
     replacements is a curation decision to leave alone, as are cycles and
     self-references, which name no live term and would only rotate the pointer.
+
+    A chain that runs into a node the source ontology obsoleted without naming
+    a successor is left as it stands: every node on it is dropped by
+    ``n_clean``, so moving the pointer from one of them to another would change
+    nothing.  Those dead ends are a property of the source data, not something
+    this can repair.
 
     Args:
         n: Node DataFrame whose IAO_0100001 entries may form chains.
@@ -166,11 +173,15 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     if pointers.is_empty():
         return n
 
-    targets: dict[str, list[str]] = defaultdict(list)
+    deprecated = set(n.filter(pl.col('meta').struct['deprecated']).get_column('id').to_list())
+
+    targets: dict[str, set[str]] = defaultdict(set)
     for source, target in pointers.iter_rows():
-        targets[source].append(target)
-    # Only an unambiguous pointer can be followed through.
-    onward = {source: found[0] for source, found in targets.items() if len(found) == 1}
+        targets[source].add(target)
+    # Only an unambiguous pointer can be followed through.  Ambiguity means two
+    # *different* replacements: a term repeating the same pointer names one
+    # successor, and 14 terms in the 26.06 ontology do exactly that.
+    onward = {source: next(iter(found)) for source, found in targets.items() if len(found) == 1}
 
     resolved: dict[str, str] = {}
     for start in sorted({target for found in targets.values() for target in found}):
@@ -186,7 +197,7 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
                 break
             seen.add(nxt)
             current = nxt
-        if not cycled and current != start:
+        if not cycled and current != start and current not in deprecated:
             resolved[start] = current
 
     if not resolved:
