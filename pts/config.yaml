@@ -376,7 +376,7 @@ steps:
 
     - name: transform chembl_target_class_dump
       transformer: chembl_target_class_dump
-      source: input/chembl/chembl_${chembl_version}.tar.gz
+      source: input/chembl/chembl.tar.gz
       destination:
         target_dictionary: intermediate/chembl/target_dictionary.parquet
         target_components: intermediate/chembl/target_components.parquet
@@ -727,7 +727,7 @@ steps:
   drug_warning:
     - name: transform drug_warning
       transformer: drug_warning
-      source: input/chembl/chembl_${chembl_version}.tar.gz
+      source: input/chembl/chembl.tar.gz
       destination: output/drug_warning
   ##################################################################################################
 
@@ -736,7 +736,7 @@ steps:
     - name: transform drug_mechanism_of_action
       transformer: drug_mechanism_of_action
       source:
-        chembl: input/chembl/chembl_${chembl_version}.tar.gz
+        chembl: input/chembl/chembl.tar.gz
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
@@ -746,7 +746,7 @@ steps:
     - name: transform chembl_molecule
       transformer: chembl_molecule
       source:
-        chembl: input/chembl/chembl_${chembl_version}.tar.gz
+        chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
@@ -776,8 +776,8 @@ steps:
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
         ema: input/clinical_report/ema_medicines.xlsx
-        chembl: input/chembl/chembl_${chembl_version}.tar.gz
-        aact: input/clinical_report/aact_${aact_version}.zip
+        chembl: input/chembl/chembl.tar.gz
+        aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet

@@ -138,21 +138,16 @@ steps:
   chembl:
     - name: copy chembl dump
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
-      destination: input/chembl/chembl_${chembl_version}.tar.gz
+      destination: input/chembl/chembl.tar.gz
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
-    # The dump is copied whole and left alone; pts restores the tables it needs
-    # from it, so the tables and columns are declared there, next to the code that
-    # depends on them. The version is in the filename so a release cannot silently
-    # read a dump fetched for an earlier one.
-    #
     # The chembl dump has its own `chembl` step rather than living here: it feeds
     # several pts steps, not just clinical_report, and each depends on `pis_chembl`.
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
-      destination: input/clinical_report/aact_${aact_version}.zip
+      destination: input/clinical_report/aact.zip
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
