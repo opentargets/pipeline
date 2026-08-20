@@ -1142,15 +1142,27 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
     """
     filtered = df.filter((f.col('canonical') == 'true') & (f.col('transcript_type') != 'NA'))
 
-    # Compute sextile bin for lof
+    # Bin the lof genes by LOEUF rank, over the ranked genes only. Genes with no
+    # rank have no place in that ordering: inside the window they sort first and
+    # take slots from the lowest bins, leaving bin 0 short of the genes that
+    # belong there. They keep a null bin either way.
+    #
+    # The decile is computed here rather than read from gnomAD's own
+    # `lof.oe_ci.upper_bin_decile`, which is binned against a wider gene set than
+    # the file ships: in 4.1.1 its bin width implies ~24,990 genes while only
+    # 18,256 carry a rank, so the column never reaches 9. Computing it locally
+    # keeps upperRank, upperBin and upperBin6 on one denominator.
     w = Window.orderBy(f.col('`lof.oe_ci.upper_rank`').cast(IntegerType()))
-    filtered = filtered.withColumn(
-        'lof_upper_bin6',
-        f.when(
-            f.col('`lof.oe_ci.upper_rank`') != 'NA',
-            f.ntile(6).over(w) - 1,
-        ).otherwise(None),
+    lof_bins = (
+        filtered
+        .filter(f.col('`lof.oe_ci.upper_rank`') != 'NA')
+        .select(
+            'gene_id',
+            (f.ntile(10).over(w) - 1).alias('lof_upper_bin'),
+            (f.ntile(6).over(w) - 1).alias('lof_upper_bin6'),
+        )
     )
+    filtered = filtered.join(lof_bins, 'gene_id', 'left_outer')
 
     return filtered.select(
         f.col('gene_id').cast(StringType()).alias('id'),
@@ -1188,7 +1200,7 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
                 f.col('`lof.oe_ci.lower`').cast(FloatType()).alias('oeLower'),
                 f.col('`lof.oe_ci.upper`').cast(FloatType()).alias('oeUpper'),
                 f.col('`lof.oe_ci.upper_rank`').cast(IntegerType()).alias('upperRank'),
-                f.col('`lof.oe_ci.upper_bin_decile`').cast(IntegerType()).alias('upperBin'),
+                f.col('lof_upper_bin').cast(IntegerType()).alias('upperBin'),
                 f.col('lof_upper_bin6').cast(IntegerType()).alias('upperBin6'),
             ),
         ).alias('constraint'),
