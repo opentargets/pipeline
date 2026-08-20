@@ -14,6 +14,13 @@ from google.cloud.storage.bucket import Bucket
 from orchestration.utils import GCSPath
 from orchestration.utils.common import GCP_PROJECT_PLATFORM
 
+# Ask for the bytes themselves: a transfer-encoded response would make
+# Content-Length describe something other than what gets written to disk.
+_IDENTITY = {'Accept-Encoding': 'identity'}
+
+# Blob metadata key holding the size this operator checked against the source.
+_VERIFIED_BYTES = 'staged_verified_bytes'
+
 
 class UploadFileOperator(BaseOperator):
     """Custom operator that uploads a file to GCS.
@@ -95,14 +102,35 @@ class UploadRemoteFileOperator(BaseOperator):
 
         self.bucket_name, self.path = self.dst_uri.split()
 
-    def _source_size(self) -> int | None:
-        """Content-Length the source advertises, or None when unavailable."""
+    @staticmethod
+    def _declared_size(headers) -> int | None:
+        """Content-Length, but only when it describes the bytes we will compare.
+
+        ``iter_content`` transparently decodes the response, so under a non-identity
+        ``Content-Encoding`` the header counts encoded bytes and the comparison
+        would fail on every attempt. Requests ask for ``identity``; this is the
+        guard for a server that ignores that.
+        """
+        encoding = (headers.get('Content-Encoding') or 'identity').strip().lower()
+        if encoding != 'identity':
+            return None
+        size = headers.get('Content-Length')
+        if size is None:
+            return None
         try:
-            r = requests.head(self.src_url, timeout=self.timeout, allow_redirects=True)
+            return int(size)
+        except ValueError:
+            return None
+
+    def _source_size(self) -> int | None:
+        """Size the source advertises, or None when it cannot be established."""
+        try:
+            r = requests.head(
+                self.src_url, timeout=self.timeout, allow_redirects=True, headers=_IDENTITY
+            )
             r.raise_for_status()
-            size = r.headers.get('Content-Length')
-            return int(size) if size is not None else None
-        except (requests.RequestException, ValueError) as err:
+            return self._declared_size(r.headers)
+        except requests.RequestException as err:
             self.log.warning('could not determine the size of %s: %s', self.src_url, err)
             return None
 
@@ -111,10 +139,14 @@ class UploadRemoteFileOperator(BaseOperator):
 
         A version-pinned artifact staged by an earlier run is the common case, but
         an object can also be short (an interrupted stream) or simply the wrong
-        file staged by hand under the right name. Both would otherwise be trusted
-        forever, so the existing object is accepted only when its size matches the
-        source. When the source size cannot be read the existing object is kept —
-        an unreachable source is no reason to discard a good local copy.
+        file staged by hand under the right name. Neither may be trusted just
+        because the name matches, so the existing object is accepted only when its
+        size matches the source.
+
+        When the source size cannot be established, the object is kept only if this
+        operator recorded a verified size for it that still matches — an object we
+        never verified is re-staged instead, which also recovers the case where a
+        HEAD fails but a GET would succeed.
         """
         if not (self.skip_if_exists and bucket.exists()):
             return False
@@ -125,8 +157,17 @@ class UploadRemoteFileOperator(BaseOperator):
 
         expected = self._source_size()
         if expected is None:
-            self.log.info('destination %s exists, source size unknown, keeping it', self.dst_uri)
-            return True
+            recorded = (blob.metadata or {}).get(_VERIFIED_BYTES)
+            if recorded is not None and str(blob.size) == str(recorded):
+                self.log.info(
+                    'source size unknown, keeping %s (verified at %s bytes)', self.dst_uri, recorded
+                )
+                return True
+            self.log.warning(
+                'source size unknown and %s carries no matching verified size, re-staging',
+                self.dst_uri,
+            )
+            return False
         if blob.size == expected:
             self.log.info('destination %s already holds %s bytes, skipping', self.dst_uri, expected)
             return True
@@ -150,9 +191,11 @@ class UploadRemoteFileOperator(BaseOperator):
             temp_file = Path(tmp_file.name)
 
         try:
-            with requests.get(self.src_url, stream=True, timeout=self.timeout) as r:
+            with requests.get(
+                self.src_url, stream=True, timeout=self.timeout, headers=_IDENTITY
+            ) as r:
                 r.raise_for_status()
-                expected = r.headers.get('Content-Length')
+                expected = self._declared_size(r.headers)
                 with open(temp_file, 'wb') as f:
                     f.writelines(r.iter_content(chunk_size=8192))
 
@@ -160,7 +203,7 @@ class UploadRemoteFileOperator(BaseOperator):
             # uploading it would publish a corrupt artifact that skip_if_exists
             # then has to catch on every later run. Refuse it here instead.
             downloaded = temp_file.stat().st_size
-            if expected is not None and downloaded != int(expected):
+            if expected is not None and downloaded != expected:
                 raise ValueError(
                     f'{self.src_url} returned {downloaded} bytes, expected {expected}; '
                     'refusing to upload a truncated file.'
@@ -170,6 +213,11 @@ class UploadRemoteFileOperator(BaseOperator):
                 b.create()
 
             blob = b.blob(self.path)
+            # Record the size only when it was actually checked against the source,
+            # so a later run with an unreachable source can tell an object this
+            # operator verified from one it merely found sitting there.
+            if expected is not None:
+                blob.metadata = {**(blob.metadata or {}), _VERIFIED_BYTES: str(downloaded)}
             blob.upload_from_filename(temp_file)
             self.log.info(
                 'uploaded %s bytes from %s to: %s', downloaded, self.src_url, self.dst_uri

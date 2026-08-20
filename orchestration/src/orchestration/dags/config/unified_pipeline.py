@@ -151,10 +151,10 @@ class UnifiedPipelineConfig:
         # bucket before cluster creation (idempotent), and the clusters read it
         # from there.
         self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
-        """GCS prefix under which orchestration stages Spark jars for the clusters.
+        """GCS prefix under which orchestration stages Spark jars for PTS clusters.
 
-            Any jar a cluster references under this prefix (via spark.jars) must
-            have a registered upstream source in `staged_jars`, or the DAG fails.
+            Any GCS jar a PTS cluster references (via spark.jars) must have a
+            registered upstream source in `staged_jars`, or the DAG fails.
         """
         spark_nlp_jar = f'spark-nlp-assembly-{spark_nlp_version}.jar'
         self.staged_jars: dict[str, str] = {
@@ -164,8 +164,11 @@ class UnifiedPipelineConfig:
         }
         """Registry of jars orchestration stages: staged destination URI -> source URL.
 
-            Add an entry here to have a new jar staged automatically for any
-            cluster that references it under `staged_jar_prefix` in spark.jars.
+            Add an entry here to have a new jar staged automatically for any PTS
+            cluster that references it in spark.jars. Only the PTS stage resolves
+            spark.jars against this registry; GENTROPY builds its clusters without
+            consulting it, so a GCS jar on a gentropy cluster is neither staged nor
+            rejected.
         """
 
         # GENTROPY-specific settings.

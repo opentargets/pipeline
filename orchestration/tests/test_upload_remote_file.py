@@ -50,24 +50,37 @@ def _operator(**kwargs) -> UploadRemoteFileOperator:
     return UploadRemoteFileOperator(task_id='stage_jar', src_url=SRC, dst_uri=DST, **kwargs)
 
 
-def _staged(bucket: MagicMock, size: int) -> None:
-    """Put an object of ``size`` bytes at the destination."""
+def _staged(bucket: MagicMock, size: int, *, verified: int | None = None) -> None:
+    """Put an object of ``size`` bytes at the destination.
+
+    ``verified`` records a size this operator checked against the source, as a
+    real staged object would carry in its metadata.
+    """
     existing = MagicMock()
     existing.size = size
+    existing.metadata = None if verified is None else {'staged_verified_bytes': str(verified)}
     bucket.get_blob.return_value = existing
 
 
-def _download(http: MagicMock, body: bytes, content_length: int | None) -> None:
+def _download(
+    http: MagicMock, body: bytes, content_length: int | None, encoding: str | None = None
+) -> None:
     r = MagicMock()
     r.__enter__.return_value = r
-    r.headers = {} if content_length is None else {'Content-Length': str(content_length)}
+    headers = {} if content_length is None else {'Content-Length': str(content_length)}
+    if encoding is not None:
+        headers['Content-Encoding'] = encoding
+    r.headers = headers
     r.iter_content.return_value = [body]
     http.get.return_value = r
 
 
-def _head(http: MagicMock, content_length: int) -> None:
+def _head(http: MagicMock, content_length: int, encoding: str | None = None) -> None:
     r = MagicMock()
-    r.headers = {'Content-Length': str(content_length)}
+    headers = {'Content-Length': str(content_length)}
+    if encoding is not None:
+        headers['Content-Encoding'] = encoding
+    r.headers = headers
     http.head.return_value = r
 
 
@@ -106,15 +119,95 @@ def test_restages_when_existing_object_is_the_wrong_size(gcs, http):
     gcs.blob.return_value.upload_from_filename.assert_called_once()
 
 
-def test_keeps_existing_object_when_source_size_is_unknown(gcs, http):
-    """An unreachable source is no reason to discard a good staged copy."""
-    _staged(gcs, len(PAYLOAD))
+def test_keeps_verified_object_when_source_size_is_unknown(gcs, http):
+    """An unreachable source is no reason to discard a copy we already verified."""
+    _staged(gcs, len(PAYLOAD), verified=len(PAYLOAD))
     http.head.side_effect = requests.RequestException('network down')
 
     _operator(skip_if_exists=True).execute({})
 
     http.get.assert_not_called()
     gcs.blob.return_value.upload_from_filename.assert_not_called()
+
+
+def test_restages_unverified_object_when_source_size_is_unknown(gcs, http):
+    """An object this operator never checked must not be trusted on a failed HEAD.
+
+    It also recovers the case where HEAD fails but GET works.
+    """
+    _staged(gcs, len(PAYLOAD))  # no recorded verification
+    http.head.side_effect = requests.RequestException('network down')
+    _download(http, PAYLOAD, len(PAYLOAD))
+
+    _operator(skip_if_exists=True).execute({})
+
+    gcs.blob.return_value.upload_from_filename.assert_called_once()
+
+
+def test_restages_when_verified_size_no_longer_matches(gcs, http):
+    """Recorded metadata that disagrees with the object's size proves nothing."""
+    _staged(gcs, 4242, verified=len(PAYLOAD))
+    http.head.side_effect = requests.RequestException('network down')
+    _download(http, PAYLOAD, len(PAYLOAD))
+
+    _operator(skip_if_exists=True).execute({})
+
+    gcs.blob.return_value.upload_from_filename.assert_called_once()
+
+
+def test_verified_size_is_recorded_on_the_object(gcs, http):
+    """The checked size is stored so a later run can tell verified from found."""
+    _download(http, PAYLOAD, len(PAYLOAD))
+
+    _operator(skip_if_exists=True).execute({})
+
+    assert gcs.blob.return_value.metadata == {'staged_verified_bytes': str(len(PAYLOAD))}
+
+
+def test_unverified_download_is_not_marked_as_verified(gcs, http):
+    """No Content-Length means nothing was checked; do not claim otherwise."""
+    _download(http, PAYLOAD, None)
+
+    _operator(skip_if_exists=True).execute({})
+
+    blob = gcs.blob.return_value
+    blob.upload_from_filename.assert_called_once()
+    assert 'staged_verified_bytes' not in (blob.metadata or {})
+
+
+def test_encoded_response_is_not_compared_against_decoded_bytes(gcs, http):
+    """Content-Length counts encoded bytes; iter_content yields decoded ones.
+
+    Comparing the two would reject every attempt and block staging entirely.
+    """
+    _download(http, PAYLOAD, 12345, encoding='gzip')
+
+    _operator(skip_if_exists=True).execute({})
+
+    gcs.blob.return_value.upload_from_filename.assert_called_once()
+
+
+def test_encoded_head_does_not_trigger_a_pointless_restage(gcs, http):
+    """The same guard applies to the size the skip check reads."""
+    _staged(gcs, len(PAYLOAD), verified=len(PAYLOAD))
+    _head(http, 12345, encoding='gzip')
+
+    _operator(skip_if_exists=True).execute({})
+
+    http.get.assert_not_called()
+    gcs.blob.return_value.upload_from_filename.assert_not_called()
+
+
+def test_requests_ask_for_identity_encoding(gcs, http):
+    """Prefer not to receive an encoded body in the first place."""
+    _download(http, PAYLOAD, len(PAYLOAD))
+    _head(http, len(PAYLOAD))
+    _staged(gcs, 1)
+
+    _operator(skip_if_exists=True).execute({})
+
+    assert http.head.call_args.kwargs['headers'] == {'Accept-Encoding': 'identity'}
+    assert http.get.call_args.kwargs['headers'] == {'Accept-Encoding': 'identity'}
 
 
 def test_skip_if_exists_disabled_always_downloads(gcs, http):
