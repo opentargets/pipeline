@@ -104,6 +104,30 @@ class TestChainResolution:
         result = resolve_replacement_chains(df)
         assert _pointers(result, 'A') == [_url('B')]
 
+    def test_chain_running_into_an_absent_term_is_not_rewritten(self) -> None:
+        """C is named but carried by no node at all.
+
+        Some source entries name a CURIE where every node id is a URL, so they
+        match nothing. Treating one as the end of a chain would rewrite A onto
+        a term the index will not hold.
+        """
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['GONE']),
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
+    def test_chain_running_into_a_non_class_term_is_not_rewritten(self) -> None:
+        """n_clean keeps CLASS rows only, so a property is no better than a dead end."""
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['PROP']),
+            {**_make_node('PROP'), 'type': 'PROPERTY'},
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
     def test_chain_running_into_an_ambiguous_term_is_not_rewritten(self) -> None:
         """C names two successors, so the chain stops before it, not on it."""
         df = _make_df(
@@ -123,9 +147,8 @@ class TestAmbiguityAndCycles:
     def test_a_repeated_identical_pointer_is_not_ambiguity(self) -> None:
         """B names one successor, written twice.
 
-        14 terms in the 26.06 source ontology carry the same replacement twice.
-        Counting entries rather than distinct targets treats them as ambiguous
-        and strands every chain running through them.
+        Counting entries rather than distinct targets would read this as
+        ambiguous and strand every chain running through it.
         """
         df = _make_df(
             _make_node('A', deprecated=True, replaced_by=['B']),
@@ -165,7 +188,7 @@ class TestAmbiguityAndCycles:
         assert _pointers(result, 'B') == [_url('A')]
 
     def test_self_reference_is_left_as_it_stands(self) -> None:
-        """Two terms do this in the 26.06 source ontology."""
+        """A term naming itself resolves nowhere, so the pointer stands."""
         df = _make_df(_make_node('A', deprecated=True, replaced_by=['A']))
         result = resolve_replacement_chains(df)
         assert _pointers(result, 'A') == [_url('A')]
