@@ -331,7 +331,9 @@ def _process_gnh_additive(st9_df: DataFrame) -> DataFrame:
     return st9_df.select(
         f.col('Gene ID').alias('targetFromSourceId'),
         f.col('Phenotype').alias('diseaseFromSource'),
-        f.col('EFO ID').alias('diseaseFromSourceMappedId'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
         f.pow(f.lit(10), -f.col('LOG10P').cast('double')).alias('pValue'),
         f.col('BETA').cast('double').alias('effect'),
         f.col('SE').cast('double').alias('standardError'),
@@ -359,7 +361,9 @@ def _process_gnh_meta(st13_df: DataFrame) -> DataFrame:
     return st13_df.select(
         f.col('Gene ID').alias('targetFromSourceId'),
         f.col('Phenotype').alias('diseaseFromSource'),
-        f.col('EFO ID').alias('diseaseFromSourceMappedId'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
         f.pow(f.lit(10), -f.col('LOG10P').cast('double')).alias('pValue'),
         f.col('BETA').cast('double').alias('effect'),
         f.col('SE').cast('double').alias('standardError'),
@@ -392,7 +396,9 @@ def _process_gnh_recessive(st15_df: DataFrame) -> DataFrame:
     ).select(
         f.col('Gene ID').alias('targetFromSourceId'),
         f.col('Phenotype').alias('diseaseFromSource'),
-        f.col('EFO ID').alias('diseaseFromSourceMappedId'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
         f.col('Recessive p-value').cast('double').alias('pValue'),
         f.col('Recessive log(OR)').cast('double').alias('effect'),
         f.lit(None).cast('double').alias('standardError'),
@@ -421,8 +427,9 @@ def process_genes_and_health_gene_burden(
     Combines the three gene-based analyses reported in the supplementary tables (additive ExWAS ST9,
     meta-analysis with UK Biobank ST13, and recessive burden ST15) into the gene burden evidence schema.
 
-    Gene IDs and EFO IDs are already provided by the study. Phenotypes without an EFO mapping keep
-    ``diseaseFromSource`` so that the downstream OnToma step can still attempt to map them.
+    Gene IDs and EFO IDs are already provided by the study. The study-provided EFO ID is carried in
+    ``curatedDiseaseFromSourceMappedId`` (mirroring the gene burden curation) so it is not overwritten by the
+    OnToma ``diseaseFromSourceMappedId`` column; the pipeline coalesces both downstream.
     """
     gh_pub = '41896352'
 
@@ -454,7 +461,8 @@ def process_genes_and_health_gene_burden(
         f.array(f.lit(gh_pub)).alias('literature'),
         'targetFromSourceId',
         'diseaseFromSource',
-        'diseaseFromSourceMappedId',
+        'diseaseFromSourceId',
+        'curatedDiseaseFromSourceMappedId',
         f.col('pValue').alias('resourceScore'),
         p_exponent.alias('pValueExponent'),
         f.round(f.col('pValue') / f.pow(f.lit(10), p_exponent), 3).alias('pValueMantissa'),
