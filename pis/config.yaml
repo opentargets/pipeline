@@ -14,7 +14,7 @@ scratchpad:
   mondo_version: '2026-05-05'
   ot_curation: '26.05'
   probes_drugs_version: '02_2025'
-  gnomad_version: '4.1'
+  gnomad_version: '4.1.1'
   gtex_version: '11'
 
 steps:
@@ -934,8 +934,8 @@ steps:
       destination: input/target/genenames/hgnc_complete_set.json
 
     - name: copy gnomad
-      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv
-      destination: input/target/gnomad/gnomad_constraint_metrics.tsv
+      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv.bgz
+      destination: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
 
     - name: copy go annotation human eco gpa
       source: https://ftp.ebi.ac.uk/pub/databases/GO/goa/HUMAN/goa_human.gpa.gz
