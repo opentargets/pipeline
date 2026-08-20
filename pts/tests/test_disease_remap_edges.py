@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.ontology import node
-from pts.transformers.disease import (
+from pts.transformers.disease.coalescing import (
     _IAO_REPLACED_BY,
     annotate_name_duplicates,
     remap_edges,
