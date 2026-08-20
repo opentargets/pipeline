@@ -207,6 +207,10 @@ class TestCleanupRules:
         rows = [
             {'id': 'CHEMBL1', 'candidate': 'placebo', 'nct_id': 'N1', 'status': 'NOVEL'},
             {'id': 'CHEMBL1', 'candidate': 'dpp4 inhibitor', 'nct_id': 'N1', 'status': 'NOVEL'},
+            # plural of a class keyword -- dropped only because the pattern expands them
+            {'id': 'CHEMBL1', 'candidate': 'monoclonal antibodies', 'nct_id': 'N1', 'status': 'NOVEL'},
+            # 'biosimilar' is on the exact-match blocklist, so a phrase containing it survives
+            {'id': 'CHEMBL1', 'candidate': 'denosumab biosimilar (ct-p41)', 'nct_id': 'N1', 'status': 'NOVEL'},
             {'id': 'CHEMBL1', 'candidate': '1% lidocaine', 'nct_id': 'N1', 'status': 'NOVEL'},
             {'id': 'CHEMBL1', 'candidate': 'r', 'nct_id': 'N1', 'status': 'NOVEL'},
             {'id': 'CHEMBL1', 'candidate': 'folfox', 'nct_id': 'N1', 'status': 'NOVEL'},
@@ -215,7 +219,7 @@ class TestCleanupRules:
             {'id': 'CHEMBL1', 'candidate': 'g-csf', 'nct_id': 'N1', 'status': 'NOVEL'},
         ]
         out = _apply_cleanup_rules(_cand(rows), regimen, existing)
-        assert set(out['candidate']) == {'g-csf'}
+        assert set(out['candidate']) == {'g-csf', 'denosumab biosimilar (ct-p41)'}
 
     def test_conflict_kept(self):
         regimen = _index([]).rename({'name_norm': 'regimen_norm'})

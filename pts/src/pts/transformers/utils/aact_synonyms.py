@@ -23,7 +23,7 @@ MIN_TRIALS = 2
 
 DRUG_CODE_REGEX = r'\b[a-z]{1,6}-?\d{3,}[a-z0-9]*\b'
 
-CONTROL_TERMS = {
+EXACT_MATCH_BLOCKLIST = {
     'placebo',
     'vehicle',
     'saline',
@@ -35,7 +35,27 @@ CONTROL_TERMS = {
     'water',
     'air',
     'normal saline',
+    'anti-il-20',
+    'anti-il-20 biologic',
+    'anti-il-20 mab',
+    'antibiotic eye drops',
+    'double antibiotic paste',
+    'biosimilar',
+    'calcium channel blocker',
+    'cephalosporin',
+    'second-generation cephalosporin',
+    'third generation cephalosporin',
+    'direct oral anticoagulant',
+    'new oral anticoagulant',
+    'platinum',
+    'platinum drugs',
+    'platinum-containing compound',
+    'platinum-based drug',
+    'biguanide',
+    'a biguanide',
+    'thiazide',
 }
+
 CLASS_KEYWORDS = [
     'inhibitor',
     'agonist',
@@ -48,15 +68,53 @@ CLASS_KEYWORDS = [
     'steroid',
     'nsaid',
     'cell',
-    'cells',
     'lymphocyte',
-    'lymphocytes',
     'mesenchymal',
     'stromal',
     'progenitor',
     'fibroblast',
+    'chemotherapy',
+    'chemotherapeutic',
+    'immunotherapy',
+    'radiotherapy',
+    'biologic',
+    'antiviral',
+    'antifungal',
+    'antibacterial',
+    'antihypertensive',
+    'antidepressant',
+    'antipsychotic',
+    'antiplatelet',
+    'antineoplastic',
+    'cytotoxic',
+    'immunosuppressant',
+    'immunomodulator',
+    'opioid',
+    'opiate',
+    'benzodiazepine',
+    'narcotic',
+    'sedative',
+    'taxane',
+    'anthracycline',
+    'antimetabolite',
+    'sulfonylurea',
+    'fluoroquinolone',
+    'macrolide',
+    'diuretic',
+    'analgesic',
 ]
-_CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
+
+
+def _word_or_plural(keyword: str) -> str:
+    """Expand a keyword so it also matches its plural."""
+    if keyword.endswith('s'):
+        return keyword
+    if keyword.endswith('y'):
+        return keyword[:-1] + r'(?:y|ies)'  # therapy -> therapies, antibody -> antibodies
+    return keyword + r's?'  # inhibitor -> inhibitors
+
+
+_CLASS_PATTERN = r'\b(?:' + '|'.join(_word_or_plural(k) for k in CLASS_KEYWORDS) + r')\b'
 
 
 def _normalize_name(expr: pl.Expr) -> pl.Expr:
@@ -349,8 +407,8 @@ def _apply_cleanup_rules(
     cand = cand.filter(~pl.col('candidate').str.contains(r'^(u|gla)[- ]?\d{2,3}$'))
     cand = cand.filter(~pl.col('candidate').str.contains('%', literal=True))
 
-    # #5: control noise
-    cand = cand.filter(~pl.col('candidate').is_in(sorted(CONTROL_TERMS)))
+    # #5: exact-match blocklist
+    cand = cand.filter(~pl.col('candidate').is_in(sorted(EXACT_MATCH_BLOCKLIST)))
 
     # #6: drug-class / cell-therapy keyword present, UNLESS the candidate is a bare
     # R&D code (descriptor phrases were already rewritten to their code upstream)
