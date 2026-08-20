@@ -118,7 +118,11 @@ def target(
     go_eco_raw = spark.read.option('sep', '\t').option('comment', '!').csv(source['gene_ontology_eco_lookup'])
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
-    chembl_raw = spark.read.json(source['chembl'])
+    target_dictionary_raw = spark.read.parquet(source['target_dictionary'])
+    target_components_raw = spark.read.parquet(source['target_components'])
+    component_sequences_raw = spark.read.parquet(source['component_sequences'])
+    component_class_raw = spark.read.parquet(source['component_class'])
+    protein_classification_raw = spark.read.parquet(source['protein_classification'])
     genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
     reactome_pathways_raw = spark.read.option('sep', '\t').csv(source['reactome_pathways'])
     reactome_etl_raw = spark.read.parquet(source['reactome_etl'])
@@ -152,7 +156,13 @@ def target(
     hpa_df = _build_gene_with_location(hpa_raw, hpa_sl_raw)
 
     logger.info('Building ProteinClassification')
-    protein_class_df = _build_protein_classification(chembl_raw)
+    protein_class_df = _build_protein_classification(
+        target_dictionary_raw,
+        target_components_raw,
+        component_sequences_raw,
+        component_class_raw,
+        protein_classification_raw,
+    )
 
     logger.info('Building GeneticConstraints')
     genetic_constraints_df = _build_genetic_constraints(genetic_constraints_raw)
@@ -924,56 +934,191 @@ def _build_gene_with_location(df: DataFrame, sl_df: DataFrame) -> DataFrame:
 # ===========================================================================
 
 
-def _build_protein_classification(df: DataFrame) -> DataFrame:
-    """Build protein target classification from ChEMBL.
+_MAX_CLASS_LEVEL = 6
+
+
+def _flatten_protein_classification(protein_classification: DataFrame) -> DataFrame:
+    """Flatten each protein class to its ancestor chain, one column per level.
+
+    Spark has no recursive CTE, so walk up `parent_id` a bounded six times. The
+    walk terminates by construction — it is a fixed `range(_MAX_CLASS_LEVEL)`
+    loop, not a while-loop following `parent_id` until some condition holds — so
+    no cycle guard is needed regardless of the data; a `parent_id` cycle would
+    not hang it, it would just contribute duplicate ancestor rows that the
+    `f.max` in the final aggregation absorbs. That the tree is no deeper than
+    `_MAX_CLASS_LEVEL` is a separate matter: it is what makes six iterations
+    enough to reach every ancestor, and it is asserted below rather than assumed,
+    so a deeper tree fails loudly instead of silently losing levels.
+
+    Each ancestor's `pref_name` is placed at its OWN `class_level`, not at its
+    distance from the leaf, so a level-3 leaf fills l1, l2 and l3 and leaves
+    l4-l6 null. The tree's root sits at `class_level` 0 and therefore falls out.
 
     Args:
-        df: Raw ChEMBL target JSONL.
+        protein_classification: Raw ChEMBL protein_classification table.
+
+    Returns:
+        DataFrame with [leaf_id, l1, l2, l3, l4, l5, l6].
+    """
+    max_level_row = protein_classification.agg(f.max('class_level')).first()
+    max_observed_level = max_level_row[0] if max_level_row is not None else None
+    if max_observed_level is not None and max_observed_level > _MAX_CLASS_LEVEL:
+        logger.warning(
+            f'protein_classification has class_level up to {max_observed_level}, above the '
+            f'_MAX_CLASS_LEVEL={_MAX_CLASS_LEVEL} this function walks to. Labels at levels beyond '
+            f'{_MAX_CLASS_LEVEL} will be silently dropped from targetClass.'
+        )
+
+    # Distinct column names on the right-hand side keep the repeated self-join
+    # unambiguous.
+    parents = protein_classification.select(
+        f.col('protein_class_id').alias('node_id'),
+        f.col('parent_id').alias('node_parent_id'),
+        f.col('pref_name').alias('node_pref_name'),
+        f.col('class_level').alias('node_class_level'),
+    )
+
+    frontier = protein_classification.select(
+        f.col('protein_class_id').alias('leaf_id'),
+        'parent_id',
+        'pref_name',
+        'class_level',
+    )
+    chain = frontier
+    for _ in range(_MAX_CLASS_LEVEL):
+        frontier = (
+            frontier
+            .select('leaf_id', f.col('parent_id').alias('node_id'))
+            .join(parents, 'node_id', 'inner')
+            .select(
+                'leaf_id',
+                f.col('node_parent_id').alias('parent_id'),
+                f.col('node_pref_name').alias('pref_name'),
+                f.col('node_class_level').alias('class_level'),
+            )
+        )
+        chain = chain.unionByName(frontier)
+
+    # If a leaf's ancestor chain held two nodes at the same class_level, f.max
+    # picks the lexicographically greater pref_name with no signal that a
+    # collision happened. The published data has no such collision; noting the
+    # tie-break exists so it is not mistaken for a deliberate rule.
+    return chain.groupBy('leaf_id').agg(*[
+        f.max(f.when(f.col('class_level') == i, f.col('pref_name'))).alias(f'l{i}')
+        for i in range(1, _MAX_CLASS_LEVEL + 1)
+    ])
+
+
+def _build_protein_classification(
+    target_dictionary: DataFrame,
+    target_components: DataFrame,
+    component_sequences: DataFrame,
+    component_class: DataFrame,
+    protein_classification: DataFrame,
+) -> DataFrame:
+    """Build protein target classification from the raw ChEMBL tables.
+
+    Two steps here narrow the result more than the tables require, so that the
+    output matches the published dataset — see the comments on
+    `single_component_tids` and `zipped_class_per_component` below. Both should go
+    when their follow-up issues are taken.
+
+    Args:
+        target_dictionary: Raw ChEMBL target_dictionary table.
+        target_components: Raw ChEMBL target_components table.
+        component_sequences: Raw ChEMBL component_sequences table.
+        component_class: Raw ChEMBL component_class table.
+        protein_classification: Raw ChEMBL protein_classification table.
 
     Returns:
         DataFrame with [accession, targetClass[{id, label, level}]].
     """
-    # Restrict to single-component ChEMBL targets. Multi-component records
-    # (complexes, PPIs) carry classifications that are not positionally aligned
-    # with `target_components`, so zipping them misattributes classes across
-    # subunits.
-    single = df.filter(f.size(f.col('target_components')) == 1)
+    levels = _flatten_protein_classification(protein_classification)
 
-    accession_pc = single.select(
-        f.explode(
-            f.arrays_zip(
-                f.col('_metadata.protein_classification'),
-                f.col('target_components.accession'),
-            )
-        ).alias('s')
-    ).select(
-        f.col('s.accession').alias('accession'),
-        f.col('s.protein_classification.*'),
+    # Restrict to single-component ChEMBL targets.
+    #
+    # DO NOT DELETE THIS AS REDUNDANT. Nothing in this function needs it: an
+    # accession is mapped to its classes directly, so a multi-subunit complex
+    # could be handled correctly here. It is retained because `output/target` is
+    # published and does not carry protein classes for the accessions this filter
+    # excludes. Dropping it would add classes to thousands of accessions --
+    # plausibly an improvement, but one to raise on its own merits rather than
+    # make silently.
+    single_component_tids = (
+        target_components
+        .groupBy('tid')
+        .agg(f.count('*').alias('component_count'))
+        .filter(f.col('component_count') == 1)
+        .select('tid')
     )
 
-    levels = [f'l{i}' for i in range(1, 7)]
+    # Keep only the lowest protein_class_id per component, DISCARDING THE REST.
+    #
+    # THIS DROPS REAL CLASSIFICATIONS AND IS DELIBERATE. A component may carry
+    # several component_class rows and this keeps exactly one. It is not a
+    # de-duplication and it carries no biological meaning: the published dataset
+    # holds a single class per component, and this is what reproduces that.
+    #
+    # Grouping by ONE key — component_id — rather than the pair
+    # (component_id, protein_class_id) is safe because no predicate UPSTREAM OF
+    # THIS AGGREGATION is a function of `protein_class_id` or `comp_class_id`.
+    # Every such predicate (`tid` in target_dictionary, `tid` in
+    # single_component_tids, the join on component_id, accession IS NOT NULL) is
+    # constant within a component_id group, so scoping can only delete whole
+    # groups, never a proper subset of one. `min` over a surviving group is
+    # therefore identical before or after scoping, and the inner join below
+    # discards exactly the groups scoping would remove. Do not add a predicate
+    # that discriminates within a component_id group (e.g. `class_level >= 2`)
+    # without re-deriving this.
+    #
+    # Deliberately NOT grouped per accession. That agrees today only because no
+    # accession spans two component_ids, which is a property of the current data
+    # rather than an invariant; grouping per component holds either way.
+    #
+    # Keeping every row instead is what the raw tables support and is arguably
+    # the correct behaviour, but it adds classes to accessions the published
+    # dataset does not have them for. That correction gets its own issue rather
+    # than riding along inside a refactor. REMOVE THIS when the issue is taken;
+    # the rest of the function already handles the many-to-many correctly.
+    zipped_class_per_component = component_class.groupBy('component_id').agg(
+        f.min('protein_class_id').alias('protein_class_id')
+    )
 
-    def _to_struct(level):
-        return f.struct(
-            f.col('protein_class_id').alias('id'),
-            f.col(level).alias('label'),
-            f.lit(level).alias('level'),
+    # Components are reached through their target rather than read directly, so a
+    # component hanging off a tid absent from target_dictionary contributes
+    # nothing -- classes are published per ChEMBL target, not per bare component.
+    accession_class = (
+        target_components
+        .select('tid', 'component_id')
+        .join(target_dictionary.select('tid'), 'tid', 'inner')
+        .join(single_component_tids, 'tid', 'inner')
+        .join(component_sequences.select('component_id', 'accession'), 'component_id', 'inner')
+        .join(zipped_class_per_component, 'component_id', 'inner')
+        .filter(f.col('accession').isNotNull())
+        .select('accession', 'protein_class_id')
+        .join(levels, f.col('protein_class_id') == levels['leaf_id'], 'left_outer')
+    )
+
+    class_per_level = f.array(*[
+        f.struct(
+            # `targetClass.id` is published as a long. `protein_class_id` is postgres
+            # `integer` and parquet carries that through as int32, so the cast is what
+            # holds the published type. It is not compensating for `min()`, which
+            # returns its input type rather than a widened one.
+            f.col('protein_class_id').cast(LongType()).alias('id'),
+            f.col(f'l{i}').alias('label'),
+            f.lit(f'l{i}').alias('level'),
         )
-
-    expanded = accession_pc
-    for lvl in levels:
-        expanded = expanded.withColumn(lvl, _to_struct(lvl))
+        for i in range(1, _MAX_CLASS_LEVEL + 1)
+    ])
 
     return (
-        expanded
-        .select('accession', f.array(*levels).alias('levels'))
+        accession_class
+        .select('accession', f.explode(class_per_level).alias('pc'))
+        .filter(f.col('pc.label').isNotNull())
         .groupBy('accession')
-        .agg(f.flatten(f.collect_set('levels')).alias('levels'))
-        .select('accession', f.explode('levels').alias('l'))
-        .select('accession', f.col('l.*'))
-        .filter(f.col('label').isNotNull())
-        .select('accession', f.struct('id', 'label', 'level').alias('pc'))
-        .groupBy('accession')
+        # An accession reached through several targets sees the same classes
+        # each time; collect_set drops the repeats.
         .agg(f.collect_set('pc').alias('targetClass'))
     )
 

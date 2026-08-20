@@ -7,10 +7,12 @@ usually wants. :func:`restored_dump` underneath it spins up a throwaway server
 yields a connection URI, and deletes the server again.
 
 .. note:: The archive, the dump and the database are all large, and all of them
-    go in a temporary directory that is removed again on the way out. That
-    directory is created wherever :py:mod:`tempfile` puts things, so ``TMPDIR``
-    is the knob if the default lands somewhere too small for the source in
-    question — a full ChEMBL restore wants tens of gigabytes.
+    go in a temporary directory that is removed again on the way out. A caller
+    running on the pipeline VM **must** pass ``scratch_root=config.work_path``:
+    that is the dedicated work disk, while the container root filesystem and
+    ``/tmp``, where :py:mod:`tempfile` would otherwise put this, are on a much
+    smaller boot disk that a single restore would fill. ``TMPDIR`` is the same
+    knob from outside the process. A full ChEMBL restore wants tens of gigabytes.
 """
 
 from __future__ import annotations
@@ -113,7 +115,9 @@ def _check_archive_version(dump: Path) -> None:
     logger.debug(f'dump is a version {version[0]}.{version[1]} archive')
 
 
-def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: Sequence[str], jobs: int) -> list[list[str]]:
+def _build_restore_args(
+    bin_path: Path, uri: str, dump: Path, tables: Sequence[str], schema_name: str, jobs: int
+) -> list[list[str]]:
     """Build the ``pg_restore`` invocations that load the requested tables.
 
     The restore runs in two passes. The first restores the schema of the whole
@@ -128,7 +132,10 @@ def _build_restore_args(bin_path: Path, uri: str, dump: Path, tables: Sequence[s
 
     pre_data = [*common, '--section=pre-data', str(dump)]
 
-    data = [*common, '--section=data', '--jobs', str(jobs)]
+    # --strict-names: without it, a --table matching nothing in the archive exits
+    # 0 and restores silently nothing.
+    # --schema on the data pass ONLY
+    data = [*common, '--section=data', '--strict-names', '--schema', schema_name, '--jobs', str(jobs)]
     for table in tables:
         data += ['--table', table]
     data.append(str(dump))
@@ -278,10 +285,12 @@ def _run(args: list[str], scratch: Path, *, strict: bool) -> None:
         logger.warning(message)
 
 
-def _restore(bin_path: Path, uri: str, dump: Path, tables: Sequence[str], scratch: Path, jobs: int) -> None:
+def _restore(
+    bin_path: Path, uri: str, dump: Path, tables: Sequence[str], schema_name: str, scratch: Path, jobs: int
+) -> None:
     logger.info(f'restoring {len(tables)} tables into the ephemeral database')
 
-    pre_data, data = _build_restore_args(bin_path, uri, dump, tables, jobs)
+    pre_data, data = _build_restore_args(bin_path, uri, dump, tables, schema_name, jobs)
 
     # restoring someone else's schema reliably reports errors we do not care
     # about, such as roles that do not exist here, or comments on objects the
@@ -297,6 +306,7 @@ def restored_dump(
     source: str,
     tables: Sequence[str],
     *,
+    schema_name: str,
     archive_member: str = '*.dmp',
     jobs: int = 8,
     scratch_root: str | Path | None = None,
@@ -314,6 +324,7 @@ def restored_dump(
         tables: Names of the tables to restore, without their schema. Only these
             are loaded — a full restore of AACT or ChEMBL would take far longer
             than any step that needs a handful of their tables can justify.
+        schema_name: The schema the tables live in.
         archive_member: Name or glob of the dump inside ``source``, when
             ``source`` is a zip or a tar. Must match exactly one member.
         jobs: How many tables ``pg_restore`` loads concurrently.
@@ -334,7 +345,7 @@ def restored_dump(
         server = _start_server(scratch)
         uri = server.get_uri(database=DATABASE)
         _tune(server.bin_path, uri)
-        _restore(server.bin_path, uri, dump, tables, scratch, jobs)
+        _restore(server.bin_path, uri, dump, tables, schema_name, scratch, jobs)
 
         yield _client_uri(server)
     finally:
@@ -345,17 +356,35 @@ def restored_dump(
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _build_select_sql(table: str, schema_name: str, columns: Sequence[str] | None = None) -> str:
-    """Build the statement that reads one table.
-
-    ``DISTINCT`` is not an optimisation. These dumps carry rows that become
-    duplicates once the columns a step cares about are projected out of them, and
-    every row count downstream of here was measured with those removed. It is
-    part of the contract, which is why it is spelled out here and pinned by a
-    test rather than left to whatever a query helper does by default.
-    """
+def _build_select_sql(
+    table: str, schema_name: str, columns: Sequence[str] | None = None, order_by: Sequence[str] | None = None
+) -> str:
+    """Build the statement that reads one table."""
     selected = ', '.join(f'"{c}"' for c in columns) if columns else '*'
-    return f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
+    sql = f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
+    if order_by:
+        sql += ' ORDER BY ' + ', '.join(f'"{c}"' for c in order_by)
+    return sql
+
+
+def _check_order_by(tables: Mapping[str, Sequence[str] | None], order_by: Mapping[str, Sequence[str]]) -> None:
+    """Reject an ordering that names a table or a column that is not being read.
+
+    ``SELECT DISTINCT`` can only order by expressions in the select list, so a
+    column outside the projection is a postgres error in the middle of the read.
+    Catching it here says which table and column, before anything is restored.
+    """
+    for table, columns in order_by.items():
+        if table not in tables:
+            raise PostgresError(f'order_by names {table}, which is not one of the tables being read: {list(tables)}')
+        projection = tables[table]
+        if projection is None:
+            continue
+        if missing := [c for c in columns if c not in projection]:
+            raise PostgresError(
+                f'order_by names {missing} for {table}, which is not in its projection: {list(projection)}. '
+                f'A SELECT DISTINCT can only be ordered by columns it selects.'
+            )
 
 
 def read_dump_tables(
@@ -364,6 +393,7 @@ def read_dump_tables(
     *,
     schema_name: str,
     archive_member: str = '*.dmp',
+    order_by: Mapping[str, Sequence[str]] | None = None,
     scratch_root: str | Path | None = None,
 ) -> dict[str, pl.DataFrame]:
     """Restore tables from a ``pg_dump`` archive and read each one into polars.
@@ -375,6 +405,9 @@ def read_dump_tables(
         schema_name: The schema the tables live in.
         archive_member: Name or glob of the dump inside ``source``, when
             ``source`` is a zip or a tar.
+        order_by: Table name to the columns to order that table's read by. Needed
+            for any table whose row order can reach the output; opt-in, since a
+            sort is wasted on reads that do not.
         scratch_root: See :func:`restored_dump`.
 
     Returns:
@@ -385,12 +418,16 @@ def read_dump_tables(
             is otherwise silent — ``pg_restore`` is happy, the query works, and
             the step carries on with no rows — so it is checked here. A caller
             that genuinely expects an empty table wants :func:`restored_dump`.
+            Also if ``order_by`` names a table or a column that is not being read.
     """
+    order_by = order_by or {}
+    _check_order_by(tables, order_by)
+
     with restored_dump(
-        source, tables=list(tables), archive_member=archive_member, scratch_root=scratch_root
+        source, tables=list(tables), schema_name=schema_name, archive_member=archive_member, scratch_root=scratch_root
     ) as uri:
         frames = {
-            name: pl.read_database_uri(_build_select_sql(name, schema_name, columns), uri)
+            name: pl.read_database_uri(_build_select_sql(name, schema_name, columns, order_by.get(name)), uri)
             for name, columns in tables.items()
         }
 

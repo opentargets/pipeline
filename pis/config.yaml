@@ -134,18 +134,20 @@ steps:
       destination: input/biosample/efo.json
   ##################################################################################################
 
+  #: CHEMBL STEP :##################################################################################
+  chembl:
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/chembl/chembl.tar.gz
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
-    # the two dumps are copied whole and left as they are. pts restores the
-    # tables it needs from them, so the tables and columns are declared there,
-    # next to the code that depends on them
+    # The chembl dump has its own `chembl` step rather than living here: it feeds
+    # several pts steps, not just clinical_report, and each depends on `pis_chembl`.
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
       destination: input/clinical_report/aact.zip
-
-    - name: copy chembl dump
-      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
-      destination: input/drug/chembl.tar.gz
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
@@ -192,64 +194,6 @@ steps:
     - name: copy_many aact extraction batch results
       sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
       destination: input/clinical_report/aact_extraction_batch_results
-
-    - name: elasticsearch chembl drug warning
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_drug_warning.jsonl
-      index: chembl_${chembl_version}_drug_warning
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - parent_molecule_chembl_id
-        - efo_id
-        - efo_term
-        - efo_id_for_warning_class
-        - warning_class
-        - warning_country
-        - warning_description
-        - warning_id
-        - warning_refs
-        - warning_type
-        - warning_year
-    - name: elasticsearch chembl mechanism of action
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_mechanism.jsonl
-      index: chembl_${chembl_version}_mechanism
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - target_chembl_id
-        - action_type
-        - mechanism_of_action
-        - mechanism_refs
-        - record_id
-        - parent_molecule_chembl_id
-    - name: elasticsearch chembl molecule
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_molecule.jsonl
-      index: chembl_${chembl_version}_molecule
-      fields:
-        - molecule_chembl_id
-        - molecule_hierarchy
-        - molecule_type
-        - pref_name
-        - first_approval
-        - max_phase
-        - withdrawn_flag
-        - black_box_warning
-        - molecule_synonyms
-        - cross_references
-        - molecule_structures
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
@@ -887,17 +831,6 @@ steps:
 
   #: TARGET STEP :##################################################################################
   target:
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/target/chembl/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
-
     - name: copy chemical probes
       source: https://www.probes-drugs.org/media/download/probes/pd_export_${probes_drugs_version}_probes_standardized.xlsx
       destination: input/target/chemicalprobes/probes.xlsx

@@ -371,6 +371,16 @@ steps:
       transformer: uniprot
       source: input/target/uniprot/uniprot.txt.gz
       destination: intermediate/target/uniprot/uniprot.parquet
+
+    - name: transform chembl_target_class_dump
+      transformer: chembl_target_class_dump
+      source: input/chembl/chembl.tar.gz
+      destination:
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
   ##################################################################################################
 
   #: TARGET STEP (pyspark) :#######################################################################
@@ -396,7 +406,11 @@ steps:
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        chembl: input/target/chembl/chembl_target.jsonl
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
       destination: output/target
   ##################################################################################################
 
@@ -709,29 +723,28 @@ steps:
 
   #: DRUG_WARNING STEP :############################################################################
   drug_warning:
-    - name: pyspark drug_warning
-      pyspark: drug_warning
-      source: input/drug/chembl_drug_warning.jsonl
+    - name: transform drug_warning
+      transformer: drug_warning
+      source: input/chembl/chembl.tar.gz
       destination: output/drug_warning
   ##################################################################################################
 
   #: DRUG_MECHANISM_OF_ACTION STEP :###############################################################
   drug_mechanism_of_action:
-    - name: pyspark drug_mechanism_of_action
-      pyspark: drug_mechanism_of_action
+    - name: transform drug_mechanism_of_action
+      transformer: drug_mechanism_of_action
       source:
-        chembl_mechanism: input/drug/chembl_mechanism.jsonl
-        chembl_target: input/drug/chembl_target.jsonl
+        chembl: input/chembl/chembl.tar.gz
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
   chembl_molecule:
-    - name: pyspark chembl_molecule
-      pyspark: chembl_molecule
+    - name: transform chembl_molecule
+      transformer: chembl_molecule
       source:
-        chembl_molecule: input/drug/chembl_molecule.jsonl
+        chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
@@ -756,22 +769,13 @@ steps:
   clinical_report:
     - name: pyspark clinical_report
       source:
-        chembl_molecule: intermediate/chembl_molecule/*.parquet
+        chembl_molecule: intermediate/chembl_molecule
         disease: output/disease
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
         ema: input/clinical_report/ema_medicines.xlsx
-        aact_studies: input/clinical_report/aact/studies.parquet
-        aact_interventions: input/clinical_report/aact/interventions.parquet
-        aact_conditions: input/clinical_report/aact/conditions.parquet
-        aact_study_references: input/clinical_report/aact/study_references.parquet
-        aact_designs: input/clinical_report/aact/designs.parquet
-        aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: input/clinical_report/chembl/drug_indication.parquet
-        chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
-        chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
-        chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
-        chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
+        chembl: input/chembl/chembl.tar.gz
+        aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet

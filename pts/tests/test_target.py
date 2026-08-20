@@ -3,6 +3,7 @@
 Ported from platform-etl-backend target step.
 """
 
+import pytest
 from pyspark.sql import Row
 from pyspark.sql.types import (
     ArrayType,
@@ -19,8 +20,10 @@ from pts.pyspark.target import (
     _build_genetic_constraints,
     _build_hallmarks,
     _build_hgnc,
+    _build_protein_classification,
     _build_reactome,
     _filter_ensembl,
+    _flatten_protein_classification,
     _map_uniprot_locations_to_ssl,
     _merge_hgnc_ensembl,
 )
@@ -684,3 +687,170 @@ def test_subcellular_location_struct_schema_alignment(spark):
         f'UniProt-only fields: {set(uniprot_fields) - set(hpa_fields)}\n'
         f'Type mismatches:     {type_mismatches}'
     )
+
+
+# ---------------------------------------------------------------------------
+# 12. Protein classification (raw ChEMBL tables)
+# ---------------------------------------------------------------------------
+
+
+class TestProteinClassification:
+    @pytest.fixture
+    def chembl(self, spark):
+        # a full six-level chain, plus a second level-1 class on the same
+        # component: multi-class components are a small minority of the table, so
+        # the case is easy to miss by sampling and is pinned explicitly here
+        classes = spark.createDataFrame(
+            [
+                (1, None, 'Enzyme', 1),
+                (2, 1, 'Kinase', 2),
+                (3, 2, 'Protein Kinase', 3),
+                (4, 3, 'TK', 4),
+                (5, 4, 'TK group', 5),
+                (6, 5, 'TK family', 6),
+                (20, None, 'Transporter', 1),
+                (21, None, 'Ion channel', 1),
+            ],
+            'protein_class_id int, parent_id int, pref_name string, class_level int',
+        )
+        # Component 1 carries three classes. They are listed so that the lowest
+        # protein_class_id (6) is NOT the first row by comp_class_id (20), so a
+        # test pinning "the lowest id survives" cannot also pass for an
+        # implementation that just takes whichever row comes first.
+        #
+        # Components 2 and 3 carry classes but belong only to the two-component
+        # target 102, so nothing they classify may reach the output.
+        # Component 4 is classified but has no accession -- the shape that must
+        # not produce an accession=NULL record.
+        component_class = spark.createDataFrame(
+            [(1, 1, 20), (2, 1, 6), (3, 2, 20), (4, 3, 6), (5, 1, 21), (6, 4, 20)],
+            'comp_class_id int, component_id int, protein_class_id int',
+        )
+        sequences = spark.createDataFrame(
+            [(1, 'P00001'), (2, 'P00002'), (3, 'P00003'), (4, None)],
+            'component_id int, accession string',
+        )
+        # component 1 sits under two single-component targets, so its accession
+        # must be deduplicated; target 102 has two components and is skipped
+        components = spark.createDataFrame(
+            [(1, 100, 1), (2, 101, 1), (3, 102, 2), (4, 102, 3), (5, 103, 4)],
+            'targcomp_id int, tid int, component_id int',
+        )
+        targets = spark.createDataFrame(
+            [
+                (100, 'CHEMBL_T1', 'A', 'SINGLE PROTEIN'),
+                (101, 'CHEMBL_T2', 'B', 'SINGLE PROTEIN'),
+                (102, 'CHEMBL_T3', 'C', 'PROTEIN COMPLEX'),
+                (103, 'CHEMBL_T4', 'D', 'SINGLE PROTEIN'),
+            ],
+            'tid int, chembl_id string, pref_name string, target_type string',
+        )
+        return {
+            'target_dictionary': targets,
+            'target_components': components,
+            'component_sequences': sequences,
+            'component_class': component_class,
+            'protein_classification': classes,
+        }
+
+    @staticmethod
+    def _flat(chembl):
+        flat = _flatten_protein_classification(chembl['protein_classification'])
+        return {r['leaf_id']: r.asDict() for r in flat.collect()}
+
+    @staticmethod
+    def _by_accession(chembl):
+        return {r['accession']: r['targetClass'] for r in _build_protein_classification(**chembl).collect()}
+
+    def test_full_six_level_chain_is_flattened(self, chembl):
+        deep = self._flat(chembl)[6]
+        assert deep['l1'] == 'Enzyme'
+        assert deep['l2'] == 'Kinase'
+        assert deep['l3'] == 'Protein Kinase'
+        assert deep['l4'] == 'TK'
+        assert deep['l5'] == 'TK group'
+        assert deep['l6'] == 'TK family'
+
+    def test_labels_land_at_their_own_level_not_their_depth(self, chembl):
+        # class 20 is level 1 with no parent: only l1 is filled
+        flat = self._flat(chembl)
+        assert flat[20]['l1'] == 'Transporter'
+        assert flat[20]['l2'] is None
+        assert flat[20]['l6'] is None
+
+    def test_only_the_positionally_zipped_class_survives(self, chembl):
+        # Component 1 carries three classes -- 20, 6 and 21 -- and contributes
+        # exactly one, the lowest protein_class_id. That is what the published
+        # data holds; see the comment on zipped_class_per_component for why.
+        ids = {c['id'] for c in self._by_accession(chembl)['P00001']}
+        # 6, not 20 (the first component_class row) and not 21
+        assert ids == {6}
+
+    def test_every_ancestor_becomes_its_own_class_entry(self, chembl):
+        by_accession = self._by_accession(chembl)
+        chain = {c['level']: c['label'] for c in by_accession['P00001'] if c['id'] == 6}
+        assert chain == {
+            'l1': 'Enzyme',
+            'l2': 'Kinase',
+            'l3': 'Protein Kinase',
+            'l4': 'TK',
+            'l5': 'TK group',
+            'l6': 'TK family',
+        }
+
+    def test_accession_under_two_targets_is_not_duplicated(self, chembl):
+        rows = _build_protein_classification(**chembl).collect()
+        accessions = [r['accession'] for r in rows]
+        assert len(accessions) == len(set(accessions))
+        # P00001 is reached through tid 100 and tid 101, both single-component;
+        # the surviving class is the same either way, so the six levels of
+        # class 6 stay six entries rather than twelve
+        classes = {r['accession']: r['targetClass'] for r in rows}['P00001']
+        assert len(classes) == 6
+        assert len({(c['id'], c['label'], c['level']) for c in classes}) == 6
+
+    def test_multi_component_target_contributes_no_accessions(self, chembl):
+        # Target 102 has two components, 2 and 3, and both carry classes. The
+        # single-component restriction means neither accession may appear -- see
+        # the comment on the filter for why it is kept.
+        assert set(self._by_accession(chembl)) == {'P00001'}
+
+    def test_no_junk_null_accession_row_is_emitted(self, chembl):
+        # Component 4 is classified but has no accession. No such record appears
+        # in the published dataset, so emitting one here would be inventing a row
+        # rather than reproducing one.
+        assert None not in set(self._by_accession(chembl))
+
+    def test_class_level_above_max_triggers_a_warning(self, spark):
+        # If ChEMBL ever adds a class_level 7 tier, a level-7 leaf still gets
+        # l1..l6 from its ancestors -- only its own, most specific label
+        # silently vanishes. Nothing else catches this, so it must warn.
+        from loguru import logger
+
+        classes = spark.createDataFrame(
+            [
+                (1, None, 'Enzyme', 1),
+                (2, 1, 'Kinase', 7),
+            ],
+            'protein_class_id int, parent_id int, pref_name string, class_level int',
+        )
+        messages = []
+        sink_id = logger.add(messages.append, level='WARNING')
+        try:
+            _flatten_protein_classification(classes)
+        finally:
+            logger.remove(sink_id)
+
+        assert any('7' in message for message in messages)
+
+    def test_class_level_at_max_does_not_warn(self, chembl):
+        from loguru import logger
+
+        messages = []
+        sink_id = logger.add(messages.append, level='WARNING')
+        try:
+            _flatten_protein_classification(chembl['protein_classification'])
+        finally:
+            logger.remove(sink_id)
+
+        assert messages == []

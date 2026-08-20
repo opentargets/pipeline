@@ -11,10 +11,13 @@ import tarfile
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 from pixeltable_pgserver.postgres_server import get_server
+from pytest_mock import MockerFixture
 
 from pts.postgres import (
     DUMP_MAGIC,
@@ -23,6 +26,7 @@ from pts.postgres import (
     _build_restore_args,
     _build_select_sql,
     _check_archive_version,
+    _check_order_by,
     _resolve_archive_member,
     read_dump_tables,
     restored_dump,
@@ -42,6 +46,25 @@ def test_reads_are_always_distinct() -> None:
     )
 
 
+def test_an_ordered_read_says_so_in_the_sql() -> None:
+    """Without ORDER BY the row order is the plan's business, and it reaches published arrays."""
+    assert _build_select_sql('warning_refs', 'public', ['warnref_id', 'ref_id'], ['warnref_id']) == (
+        'SELECT DISTINCT "warnref_id", "ref_id" FROM "public"."warning_refs" ORDER BY "warnref_id"'
+    )
+
+
+def test_ordering_by_a_column_outside_the_projection_is_caught_before_the_restore() -> None:
+    """A SELECT DISTINCT can only order by what it selects, and a restore takes minutes."""
+    with pytest.raises(PostgresError, match='not in its projection'):
+        _check_order_by({'warning_refs': ['warning_id']}, {'warning_refs': ['warnref_id']})
+
+
+def test_ordering_a_table_that_is_not_being_read_is_caught() -> None:
+    """Almost always a typo, and silently ignoring it would leave the read unordered."""
+    with pytest.raises(PostgresError, match='not one of the tables being read'):
+        _check_order_by({'warning_refs': None}, {'warning_ref': ['warnref_id']})
+
+
 def test_restores_only_the_requested_tables_and_skips_the_indexes() -> None:
     """The two-pass restore is the reason this is minutes rather than hours.
 
@@ -50,7 +73,9 @@ def test_restores_only_the_requested_tables_and_skips_the_indexes() -> None:
     of the requested tables only. Neither touches ``post-data``, which is where
     indexes and constraints live.
     """
-    pre_data, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('/d.dmp'), ['studies', 'designs'], 8)
+    pre_data, data = _build_restore_args(
+        Path('/bin'), 'postgresql://x', Path('/d.dmp'), ['studies', 'designs'], 'ctgov', 8
+    )
 
     assert '--section=pre-data' in pre_data
     assert '--table' not in pre_data
@@ -117,11 +142,7 @@ class TestRoundTrip:
         server = get_server(path / 'pgdata', cleanup_mode='delete')
         try:
             rows = f"SELECT i, 'x' || (i % {DISTINCT_TXT}) FROM generate_series(1, {ROWS}) i"  # noqa: S608 fixture
-            server.psql(
-                'CREATE SCHEMA demo;'
-                'CREATE TABLE demo.t (id int, txt text);'
-                f'INSERT INTO demo.t {rows};'
-            )
+            server.psql(f'CREATE SCHEMA demo;CREATE TABLE demo.t (id int, txt text);INSERT INTO demo.t {rows};')
             dump = path / 'demo.dmp'
             subprocess.run([str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()], check=True)
             yield dump
@@ -135,6 +156,20 @@ class TestRoundTrip:
         df = self._read(dump, tmp_path, ['id', 'txt'])
         assert df.height == ROWS
         assert df.columns == ['id', 'txt']
+        # postgres `integer` must come back as Int32, not widened to Int64: steps such as
+        # drug_warning depends on this width reaching its `year` column unchanged.
+        assert df.schema['id'] == pl.Int32
+
+    def test_an_ordered_read_comes_back_ordered(self, dump: Path, tmp_path: Path) -> None:
+        """The rows arrive in the asked-for order, not the plan's."""
+        df = read_dump_tables(
+            str(dump),
+            {'t': ['id', 'txt']},
+            schema_name='demo',
+            order_by={'t': ['id']},
+            scratch_root=tmp_path,
+        )['t']
+        assert df.get_column('id').to_list() == sorted(df.get_column('id').to_list())
 
     def test_reads_are_distinct_end_to_end(self, dump: Path, tmp_path: Path) -> None:
         """Projecting to ``txt`` alone collapses the rows, as it does for the real sources."""
@@ -166,7 +201,80 @@ class TestRoundTrip:
         scratch_root = tmp_path / 'scratch'
         scratch_root.mkdir()
 
-        with pytest.raises(ZeroDivisionError), restored_dump(str(dump), tables=['t'], scratch_root=scratch_root):
+        with (
+            pytest.raises(ZeroDivisionError),
+            restored_dump(str(dump), tables=['t'], schema_name='demo', scratch_root=scratch_root),
+        ):
             1 / 0  # noqa: B018 the point is to leave the block by raising
 
         assert not list(scratch_root.iterdir())
+
+
+class TestRestoreArgsImprovements:
+    def test_the_data_pass_uses_strict_names(self) -> None:
+        """A --table matching nothing exits 0 and restores silently nothing."""
+        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
+        assert '--strict-names' in data
+
+    def test_the_data_pass_is_schema_qualified(self) -> None:
+        """pg_restore's --table matches the bare name across every schema in the archive."""
+        _, data = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
+        assert '--schema' in data
+        assert data[data.index('--schema') + 1] == 'ctgov'
+
+    def test_the_pre_data_pass_is_not_schema_qualified(self) -> None:
+        """Filtering pre-data would skip CREATE SCHEMA and any types the tables need."""
+        pre_data, _ = _build_restore_args(Path('/bin'), 'postgresql://x', Path('d.dmp'), ['studies'], 'ctgov', 8)
+        assert '--schema' not in pre_data
+
+
+class _CapturedError(Exception):
+    """Raised by the stub once it has the kwargs, to stop the transformer there."""
+
+
+WORK_PATH = Path('/mnt/disks/work')
+"""What `work_path` is on the pipeline VM, where the work disk is mounted."""
+
+CALL_SITES = {
+    'chembl_target_class_dump': ('pts.transformers.chembl_target_class_dump', Path('chembl.tar.gz'), {}),
+    'drug_warning': ('pts.transformers.drug_warning', Path('chembl.tar.gz'), Path('out.parquet')),
+    'drug_mechanism_of_action': (
+        'pts.transformers.drug_mechanism_of_action',
+        {'chembl': Path('chembl.tar.gz'), 'target': Path('genes.parquet')},
+        Path('out.parquet'),
+    ),
+    'chembl_molecule': (
+        'pts.transformers.chembl_molecule',
+        {'chembl': Path('chembl.tar.gz'), 'drugbank': Path('drugbank.csv.gz')},
+        Path('out.parquet'),
+    ),
+}
+"""The four transformers that restore a dump, with the arguments they take."""
+
+
+@pytest.mark.parametrize('transformer', list(CALL_SITES), ids=list(CALL_SITES))
+def test_the_restore_scratch_goes_on_the_work_disk(transformer: str, mocker: MockerFixture) -> None:
+    """A restore that defaults to /tmp fills the VM's boot disk and dies mid-restore.
+
+    On the pipeline VM the large work disk is mounted at `work_path`, while the
+    container root filesystem -- `/tmp` included -- is on a boot disk an order of
+    magnitude smaller. The archive, the extracted dump and the whole pgdata
+    directory all land in the scratch, so every one of these transformers has to
+    point it at `work_path` rather than take `tempfile`'s default.
+    """
+    module_name, source, destination = CALL_SITES[transformer]
+    module = __import__(module_name, fromlist=['read_dump_tables'])
+
+    captured: dict[str, Any] = {}
+
+    def stub(*args: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        raise _CapturedError
+
+    mocker.patch.object(module, 'read_dump_tables', stub)
+    config = Config(step=transformer, steps=[transformer], work_path=WORK_PATH)
+
+    with pytest.raises(_CapturedError):
+        getattr(module, transformer)(source, destination, {}, config)
+
+    assert captured.get('scratch_root') == WORK_PATH

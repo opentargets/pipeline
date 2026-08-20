@@ -26,8 +26,54 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
+from pts.postgres import read_dump_tables
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+
+CHEMBL_SCHEMA_NAME = 'public'
+
+CHEMBL_TABLES = {
+    'drug_indication': ['drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'],
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name'],
+    'drug_warning': [
+        'warning_id',
+        'molregno',
+        'warning_type',
+        'warning_year',
+        'warning_country',
+        'warning_class',
+        'efo_id',
+        'efo_term',
+        'efo_id_for_warning_class',
+    ],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+
+CHEMBL_ORDER_BY = {
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+"""Reads collected into published arrays, ordered by their whole projection."""
+
+AACT_SCHEMA_NAME = 'ctgov'
+
+AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+
+AACT_TABLES = {
+    'studies': [
+        'nct_id', 'overall_status', 'phase', 'study_type', 'start_date', 'why_stopped', 'number_of_arms',
+        'official_title',
+    ],
+    'interventions': ['nct_id', 'intervention_type', 'name'],
+    'conditions': ['nct_id', 'downcase_name'],
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'designs': ['nct_id', 'primary_purpose'],
+    'brief_summaries': ['nct_id', 'description'],
+}
+
+AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+"""``pmid`` is collected into the published ``literature`` array."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -51,73 +97,39 @@ def clinical_report(
         properties: Dictionary containing Spark properties
     """
     logger.info(f'source paths: {source}')
-    spark = spark_session()
+    chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
+    # The restores use no Spark, so the session starts after them rather than
+    # sitting idle. No `scratch_root`: a pyspark step gets no `Config`, and
+    # /mnt/disks/work is not mounted on the Dataproc master.
+    logger.info(f'restoring chembl tables from {source["chembl"]}')
+    chembl_tables = read_dump_tables(
+        str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY
+    )
+    chembl_indication = chembl_tables['drug_indication']
+    chembl_indication_references = chembl_tables['indication_refs']
+    chembl_molecule_dictionary = chembl_tables['molecule_dictionary']
+    chembl_drug_warning = chembl_tables['drug_warning']
+    chembl_drug_warning_references = chembl_tables['warning_refs']
+
+    logger.info(f'restoring aact tables from {source["aact"]}')
+    aact_tables = read_dump_tables(
+        str(source['aact']),
+        AACT_TABLES,
+        schema_name=AACT_SCHEMA_NAME,
+        archive_member=AACT_ARCHIVE_MEMBER,
+        order_by=AACT_ORDER_BY,
+    )
+    aact_studies = aact_tables['studies']
+    aact_interventions = aact_tables['interventions']
+    aact_conditions = aact_tables['conditions']
+    aact_study_references = aact_tables['study_references']
+    aact_designs = aact_tables['designs']
+    aact_summaries = aact_tables['brief_summaries']
+
+    spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
-    chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
-    aact_studies = (
-        scan_dataset(source['aact_studies'])
-        .select(
-            'nct_id',
-            'overall_status',
-            'phase',
-            'study_type',
-            'start_date',
-            'why_stopped',
-            'number_of_arms',
-            'official_title',
-        )
-        .collect()
-    )
-    aact_interventions = (
-        scan_dataset(source['aact_interventions'])
-        .select(
-            'nct_id',
-            'intervention_type',
-            'name',
-        )
-        .collect()
-    )
-    aact_conditions = scan_dataset(source['aact_conditions']).select('nct_id', 'downcase_name').collect()
-    aact_study_references = (
-        scan_dataset(source['aact_study_references']).select('nct_id', 'pmid', 'reference_type').collect()
-    )
-    aact_designs = scan_dataset(source['aact_designs']).select('nct_id', 'primary_purpose').collect()
-    aact_summaries = scan_dataset(source['aact_summaries']).select('nct_id', 'description').collect()
-    chembl_indication = (
-        scan_dataset(source['chembl_indication'])
-        .select('drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term')
-        .collect()
-    )
-    chembl_indication_references = (
-        scan_dataset(source['chembl_indication_references'])
-        .select('drugind_id', 'ref_type', 'ref_id', 'ref_url')
-        .collect()
-    )
-    chembl_molecule_dictionary = (
-        scan_dataset(source['chembl_molecule_dictionary']).select('molregno', 'chembl_id', 'pref_name').collect()
-    )
-    chembl_drug_warning = (
-        scan_dataset(source['chembl_drug_warning'])
-        .select(
-            'warning_id',
-            'molregno',
-            'warning_type',
-            'warning_year',
-            'warning_country',
-            'warning_class',
-            'efo_id',
-            'efo_term',
-            'efo_id_for_warning_class',
-        )
-        .collect()
-    )
-    chembl_drug_warning_references = (
-        scan_dataset(source['chembl_drug_warning_references'])
-        .select('warning_id', 'ref_type', 'ref_id', 'ref_url')
-        .collect()
-    )
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
     llm_indications = llm_batch_results.select(
         'id',
