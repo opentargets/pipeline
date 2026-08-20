@@ -4,8 +4,6 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-08-01'
-  chembl_version: '37'
   string_version: '12.0'
 
 steps:
