@@ -11,9 +11,10 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
       # Spark NLP fat jar (required by OnToma steps). Loaded via spark.jars from
       # the version-pinned jar orchestration pre-stages in the pipelines bucket,
       # instead of spark.jars.packages which re-runs Ivy resolution against Maven
@@ -35,6 +36,7 @@ clusters:
     properties:
       'spark:spark.shuffle.service.enabled': 'true'
       'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
       'core:fs.gs.requester.pays.mode': 'AUTO'
       'core:fs.gs.requester.pays.project.id': '{{requester_pays_project_id}}'
     init_actions_uris:
@@ -76,6 +78,7 @@ clusters:
       'spark:spark.stage.maxConsecutiveAttempts': '10'
       'spark:spark.sql.adaptive.enabled': 'true'
       'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
       # 8000 (not 4000): the fused agg + parquet-write stage is the residual exit-143
       # OOM source -- 4 tasks/executor each holding multi-GB on-heap agg + off-heap
       # fetch/write buffers occasionally overran the container. Halving per-task data
@@ -99,7 +102,9 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
+    properties:
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
     init_actions_uris:
       - 'gs://opentargets-pipelines/up/pts/install_dependencies_on_cluster.sh'
 
@@ -114,8 +119,9 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
       'spark:spark.sql.shuffle.partitions': '2000'
       'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '64MB'
     init_actions_uris:
@@ -138,12 +144,13 @@ clusters:
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:
-      PTS_REF: 'v{{pts_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       # Cluster-wide knobs (apply to all 6 pts_literature_* steps).
       # Sized for the autoscaled 4xn1-highmem-16 + up to 50 non-preemptible
       # secondary cluster (~864 vCPU peak), validated on PTS runs 014-016.
       'spark:spark.sql.autoBroadcastJoinThreshold': '134217728'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
       'spark:spark.shuffle.io.maxRetries': '10'
       'spark:spark.shuffle.io.retryWait': '15s'
       'spark:spark.network.timeout': '300s'

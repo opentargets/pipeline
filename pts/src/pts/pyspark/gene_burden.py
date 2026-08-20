@@ -39,6 +39,16 @@ CURATION_SCHEMA = t.StructType([
 ])
 
 
+def _excel_sheet_to_spark(spark: Session, path: str, sheet: str) -> DataFrame:
+    """Read an Excel sheet into Spark.
+
+    Every cell is read as a string and empty cells become null, so all typing happens downstream
+    """
+    pdf = pd.read_excel(path, sheet_name=sheet, dtype=str).where(lambda x: x.notnull(), None)
+    schema = t.StructType([t.StructField(column, t.StringType(), True) for column in pdf.columns])
+    return spark.spark.createDataFrame(pdf, schema=schema)
+
+
 def gene_burden(
     source: dict[str, str],
     destination: str,
@@ -75,6 +85,9 @@ def gene_burden(
         header=[0, 1],
         skipfooter=1,
     )
+    gnh_gene_based_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST9')
+    gnh_meta_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST13')
+    gnh_recessive_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST15')
     burden_curation = spark.load_data(
         source['curated_studies'], header=True, sep='\t', format='csv', schema=CURATION_SCHEMA
     )
@@ -85,6 +98,7 @@ def gene_burden(
         process_genebass_gene_burden(genebass_df),
         process_finngen_gene_burden(finngen_df, finngen_manifest_df, finngen_version),
         process_cvdi_gene_burden(spark, cvdi_associations_df, cvdi_p_value_cutoff_df),
+        process_genes_and_health_gene_burden(st9_df=gnh_gene_based_df, st13_df=gnh_meta_df, st15_df=gnh_recessive_df),
     ]
     union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
     evd_df = reduce(union_by_diff_schema, burden_evidence_sets).distinct()
@@ -264,6 +278,211 @@ def apply_bonferroni_correction(n_tests: int) -> float:
         float: new statistical significance level
     """
     return 0.05 / n_tests
+
+
+GNH_VARIANT_MASK_DESC = {
+    # As defined in ST21.
+    'A': 'high-confidence LoF variants',
+    'B': 'deleterious missense variants',
+    'C': 'missense variants',
+    'D': 'synonymous variants',
+}
+GNH_TEST_DESC = {
+    # regenie test to collapsing analysis type (additive ExWAS only, ST9).
+    'ADD': 'Burden',
+    'ADD-SKAT': 'SKAT',
+    'ADD-SKATO': 'SKAT-O',
+}
+GNH_MAF_DESC = {
+    '0.01': 'with a MAF smaller than 1%',
+    '0.001': 'with a MAF smaller than 0.1%',
+    '0.0001': 'with a MAF smaller than 0.01%',
+    'singleton': 'restricted to singletons',
+}
+
+
+def _gnh_map(mapping: dict[str, str]) -> Any:
+    """Build a Spark map literal from a python dict for column-value lookups."""
+    return f.create_map([f.lit(x) for pair in mapping.items() for x in pair])
+
+
+def _gnh_is_quantitative(qt_col: Any) -> Any:
+    """Flag quantitative traits. QT is read inconsistently across sheets (float 1.0 or boolean True).
+
+    Coalesced to a non-null boolean so its negation (used for binary traits) never evaluates to null.
+    """
+    return f.coalesce(f.lower(qt_col.cast('string')).isin('true', '1', '1.0'), f.lit(False))
+
+
+def _gnh_method_overview(collapsing: Any, variant_mask_col: Any, freq_col: Any, suffix: str) -> Any:
+    """Compose 'collapsing test carried out with <variants> <MAF clause><suffix>'."""
+    return f.concat(
+        collapsing,
+        f.lit(' test carried out with '),
+        _gnh_map(GNH_VARIANT_MASK_DESC)[variant_mask_col],
+        f.lit(' '),
+        _gnh_map(GNH_MAF_DESC)[f.lower(freq_col.cast('string'))],
+        f.lit(suffix),
+    )
+
+
+def _process_gnh_additive(st9_df: DataFrame) -> DataFrame:
+    """Normalise ST9 additive ExWAS gene-based tests (Genes & Health only, South Asian)."""
+    return st9_df.select(
+        f.col('Gene ID').alias('targetFromSourceId'),
+        f.col('Phenotype').alias('diseaseFromSource'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
+        f.pow(f.lit(10), -f.col('LOG10P').cast('double')).alias('pValue'),
+        f.col('BETA').cast('double').alias('effect'),
+        f.col('SE').cast('double').alias('standardError'),
+        _gnh_is_quantitative(f.col('QT')).alias('isQuantitative'),
+        f.col('N').cast('int').alias('studySampleSize'),
+        f.lit(None).cast('int').alias('studyCases'),
+        f.lit(None).cast('int').alias('studyCasesWithQualifyingVariants'),
+        f.lit('Pakistani and Bangladeshi').alias('ancestry'),
+        f.lit('HANCESTRO_0006').alias('ancestryId'),
+        f.lit('dominant').alias('allelicRequirements'),
+        f.lit('Genes & Health').alias('cohortId'),
+        f.concat_ws('_', f.col('TEST'), f.col('Mask')).alias('statisticalMethod'),
+        _gnh_method_overview(_gnh_map(GNH_TEST_DESC)[f.col('TEST')], f.col('Variant Mask'), f.col('Freq'), '.').alias(
+            'statisticalMethodOverview'
+        ),
+    )
+
+
+def _process_gnh_meta(st13_df: DataFrame) -> DataFrame:
+    """Normalise ST13 meta-analysis gene-based tests (Genes & Health + UK Biobank, burden only).
+
+    Ancestry is left null as this is a mixed-ancestry meta-analysis. Some LOG10P underflow to inf
+    (p==0); those are corrected with the minimum-p replacement in the shared formatter.
+    """
+    return st13_df.select(
+        f.col('Gene ID').alias('targetFromSourceId'),
+        f.col('Phenotype').alias('diseaseFromSource'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
+        f.pow(f.lit(10), -f.col('LOG10P').cast('double')).alias('pValue'),
+        f.col('BETA').cast('double').alias('effect'),
+        f.col('SE').cast('double').alias('standardError'),
+        _gnh_is_quantitative(f.col('QT')).alias('isQuantitative'),
+        (f.col('N UKB').cast('int') + f.col('N G&H').cast('int')).alias('studySampleSize'),
+        f.lit(None).cast('int').alias('studyCases'),
+        f.lit(None).cast('int').alias('studyCasesWithQualifyingVariants'),
+        f.lit(None).cast('string').alias('ancestry'),
+        f.lit(None).cast('string').alias('ancestryId'),
+        f.lit('dominant').alias('allelicRequirements'),
+        f.lit('Genes & Health + UK Biobank').alias('cohortId'),
+        f.concat(f.lit('META.'), f.col('Mask')).alias('statisticalMethod'),
+        _gnh_method_overview(
+            f.lit('Burden'),
+            f.col('Variant Mask'),
+            f.col('Freq'),
+            ' meta-analysed between Genes & Health and UK Biobank.',
+        ).alias('statisticalMethodOverview'),
+    )
+
+
+def _process_gnh_recessive(st15_df: DataFrame) -> DataFrame:
+    """Normalise ST15 recessive burden tests, keeping only significant biallelic pLoF/pDM associations.
+
+    Drops the synonymous control mask and the suggestive tier. No standard error is reported, so no
+    confidence intervals can be derived. Case counts read as 'na' for quantitative traits cast to null.
+    """
+    return st15_df.filter(
+        (f.col('Significant REC P-value') == 'Significant') & (f.col('Variant consequence') == 'pLoF_pDM')
+    ).select(
+        f.col('Gene ID').alias('targetFromSourceId'),
+        f.col('Phenotype').alias('diseaseFromSource'),
+        f.col('EFO ID').alias('diseaseFromSourceId'),
+        # Rename curated disease ID to avoid column name conflict with EFO mapping
+        f.col('EFO ID').alias('curatedDiseaseFromSourceMappedId'),
+        f.col('Recessive p-value').cast('double').alias('pValue'),
+        f.col('Recessive log(OR)').cast('double').alias('effect'),
+        f.lit(None).cast('double').alias('standardError'),
+        _gnh_is_quantitative(f.col('QT')).alias('isQuantitative'),
+        f.col('Number for ExWAS').cast('int').alias('studySampleSize'),
+        f.col('Number of Cases').cast('int').alias('studyCases'),
+        f.col('Biallelic Carriers').cast('int').alias('studyCasesWithQualifyingVariants'),
+        f.lit('Pakistani and Bangladeshi').alias('ancestry'),
+        f.lit('HANCESTRO_0006').alias('ancestryId'),
+        f.lit('recessive').alias('allelicRequirements'),
+        f.lit('Genes & Health').alias('cohortId'),
+        f.lit('REC.pLoF_pDM').alias('statisticalMethod'),
+        f.lit('Recessive burden test carried out with biallelic pLoF and deleterious missense genotypes.').alias(
+            'statisticalMethodOverview'
+        ),
+    )
+
+
+def process_genes_and_health_gene_burden(
+    st9_df: DataFrame,
+    st13_df: DataFrame,
+    st15_df: DataFrame,
+) -> DataFrame:
+    """Process gene-based burden evidence from the Genes & Health study (PMID 41896352).
+
+    Combines the three gene-based analyses reported in the supplementary tables (additive ExWAS ST9,
+    meta-analysis with UK Biobank ST13, and recessive burden ST15) into the gene burden evidence schema.
+
+    Gene IDs and EFO IDs are already provided by the study. The study-provided EFO ID is carried in
+    ``curatedDiseaseFromSourceMappedId`` (mirroring the gene burden curation) so it is not overwritten by the
+    OnToma ``diseaseFromSourceMappedId`` column; the pipeline coalesces both downstream.
+    """
+    gh_pub = '41896352'
+
+    gh_df = reduce(
+        DataFrame.unionByName,
+        [_process_gnh_additive(st9_df), _process_gnh_meta(st13_df), _process_gnh_recessive(st15_df)],
+    )
+
+    # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Mirror the AZ/Genebass fix and
+    # substitute the minimum non-zero p-value so they pass validation instead of being dropped.
+    zero_p = gh_df.filter(f.col('pValue') == 0.0).count()
+    if zero_p:
+        logger.warning(f'There are {zero_p} Genes & Health evidence with a p-value of 0.0.')
+        minimum_pvalue = gh_df.filter(f.col('pValue') > 0.0).agg({'pValue': 'min'}).collect()[0]['min(pValue)']
+        gh_df = gh_df.withColumn(
+            'pValue', f.when(f.col('pValue') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('pValue'))
+        )
+
+    # Local column expressions reused below (p-value exponent, and the effect ± standard error interval).
+    p_exponent = f.log10(f.col('pValue')).cast('int') - f.lit(1)
+    quantitative = f.col('isQuantitative')
+    ci_lower = f.col('effect') - f.col('standardError')
+    ci_upper = f.col('effect') + f.col('standardError')
+
+    return gh_df.select(
+        f.lit('gene_burden').alias('datasourceId'),
+        f.lit('genetic_association').alias('datatypeId'),
+        f.lit('Genes & Health').alias('projectId'),
+        f.array(f.lit(gh_pub)).alias('literature'),
+        'targetFromSourceId',
+        'diseaseFromSource',
+        'diseaseFromSourceId',
+        'curatedDiseaseFromSourceMappedId',
+        f.col('pValue').alias('resourceScore'),
+        p_exponent.alias('pValueExponent'),
+        f.round(f.col('pValue') / f.pow(f.lit(10), p_exponent), 3).alias('pValueMantissa'),
+        # Quantitative traits report a beta; binary traits report a log(OR) -> odds ratio = exp(log(OR)).
+        f.when(quantitative, f.col('effect')).cast('double').alias('beta'),
+        f.when(quantitative, ci_lower).cast('double').alias('betaConfidenceIntervalLower'),
+        f.when(quantitative, ci_upper).cast('double').alias('betaConfidenceIntervalUpper'),
+        f.when(~quantitative, f.exp(f.col('effect'))).cast('double').alias('oddsRatio'),
+        f.when(~quantitative, f.exp(ci_lower)).cast('double').alias('oddsRatioConfidenceIntervalLower'),
+        f.when(~quantitative, f.exp(ci_upper)).cast('double').alias('oddsRatioConfidenceIntervalUpper'),
+        'ancestry',
+        'ancestryId',
+        f.array(f.col('allelicRequirements')).alias('allelicRequirements'),
+        'cohortId',
+        'studySampleSize',
+        'studyCases',
+        'studyCasesWithQualifyingVariants',
+        'statisticalMethod',
+        'statisticalMethodOverview',
+    ).distinct()
 
 
 def process_finngen_gene_burden(

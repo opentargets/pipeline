@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# every path below is relative to the orchestration package, so run from there no matter
+# where the caller invoked us from
+cd "$(dirname "$0")/.."
+
 cecho() {
   echo -e "\n\033[92m✨ ${1}\033[0m\n"
 }
@@ -27,12 +31,6 @@ PROJECT_ID="open-targets-eu-dev"
 if ! command -v terraform &> /dev/null || ! command -v gcloud &> /dev/null || ! command -v code &> /dev/null;
 then
     echo "This script requires terraform, gcloud, and visual studio code to be installed."
-    exit 1
-fi
-
-# ensure the script is run from the root of the repository
-if [ ! -d ".git" ]; then
-    echo "This script must be run from the root of the repository."
     exit 1
 fi
 

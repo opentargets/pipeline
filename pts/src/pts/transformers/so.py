@@ -6,6 +6,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.transformers.utils.dataset import write_dataset
 
 
 def so(
@@ -39,5 +40,5 @@ def so(
     )
 
     # write the result locally
-    output.write_parquet(destination, compression='gzip')
+    write_dataset(output, destination)
     logger.info('transformation complete')

@@ -8,7 +8,7 @@ set -x
 
 PTS_REF=$(/usr/share/google/get_metadata_value attributes/PTS_REF)
 readonly PTS_REF
-readonly REPO_URI="https://github.com/opentargets/pts"
+readonly REPO_URI="https://github.com/opentargets/pipeline"
 DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
 readonly DATAPROC_CLUSTER_NAME
 echo "export DATAPROC_CLUSTER_NAME=${DATAPROC_CLUSTER_NAME}" >> /etc/profile.d/custom_env_vars.sh
@@ -59,7 +59,7 @@ function main() {
     echo "Install package..."
     # install spark-nlp dependencies
     run_with_retry uv pip install pandas scipy numpy pyarrow --system --no-break-system-packages --upgrade
-    run_with_retry uv pip install --no-break-system-packages --system "pts @ git+${REPO_URI}.git@${PTS_REF}"
+    run_with_retry uv pip install --no-break-system-packages --system "pts @ git+${REPO_URI}.git@${PTS_REF}#subdirectory=pts"
     echo "Get openai token secret..."
     # add openai token secret
     mkdir -p /var/run/secrets
