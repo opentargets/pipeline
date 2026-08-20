@@ -119,7 +119,9 @@ def target(
     hpa_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hpa'])
     hpa_sl_raw = spark.read.parquet(source['hpa_sl'])
     chembl_raw = spark.read.json(source['chembl'])
-    genetic_constraints_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['genetic_constraints'])
+    # gnomAD constraint metrics: converted from the bgzipped TSV to an all-string
+    # parquet by the pre_target step. Every column is text, as read from the file.
+    genetic_constraints_raw = spark.read.parquet(source['genetic_constraints'])
     reactome_pathways_raw = spark.read.option('sep', '\t').csv(source['reactome_pathways'])
     reactome_etl_raw = spark.read.parquet(source['reactome_etl'])
 
