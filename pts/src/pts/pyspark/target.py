@@ -997,15 +997,17 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
     """
     filtered = df.filter((f.col('canonical') == 'true') & (f.col('transcript_type') != 'NA'))
 
-    # Compute sextile bin for lof
+    # Compute sextile bin for lof, over the ranked genes only. Genes with no LOEUF
+    # rank have no place in that ordering: inside the window they sort first and
+    # take slots from the lowest bins, leaving bin 0 short of the genes that
+    # belong there. They keep a null bin either way.
     w = Window.orderBy(f.col('`lof.oe_ci.upper_rank`').cast(IntegerType()))
-    filtered = filtered.withColumn(
-        'lof_upper_bin6',
-        f.when(
-            f.col('`lof.oe_ci.upper_rank`') != 'NA',
-            f.ntile(6).over(w) - 1,
-        ).otherwise(None),
+    lof_upper_bin6 = (
+        filtered
+        .filter(f.col('`lof.oe_ci.upper_rank`') != 'NA')
+        .select('gene_id', (f.ntile(6).over(w) - 1).alias('lof_upper_bin6'))
     )
+    filtered = filtered.join(lof_upper_bin6, 'gene_id', 'left_outer')
 
     return filtered.select(
         f.col('gene_id').cast(StringType()).alias('id'),

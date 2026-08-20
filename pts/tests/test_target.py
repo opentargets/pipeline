@@ -362,6 +362,57 @@ def test_genetic_constraints_structure(spark):
     assert constraint_types == {'syn', 'mis', 'lof'}
 
 
+def test_genetic_constraints_sextiles_ignore_unranked_genes(spark):
+    """Genes without a LOEUF rank do not consume sextile slots.
+
+    `upperBin6` splits the ranked genes into six equal groups. Genes whose
+    `lof.oe_ci.upper_rank` is 'NA' have no place in that ordering — if they sit
+    inside the window they sort first, take slots from the lowest bins, and leave
+    bin 0 short of the genes that belong there.
+    """
+    metrics = [
+        f'{kind}.{field}'
+        for kind in ('syn', 'mis')
+        for field in ('z_score', 'exp', 'obs', 'oe', 'oe_ci.lower', 'oe_ci.upper')
+    ] + [
+        'lof.pLI', 'lof.exp', 'lof.obs', 'lof.oe', 'lof.oe_ci.lower', 'lof.oe_ci.upper',
+        'lof.oe_ci.upper_bin_decile',
+    ]
+    schema = StructType(
+        [
+            StructField('gene_id', StringType()),
+            StructField('canonical', StringType()),
+            StructField('transcript_type', StringType()),
+            StructField('lof.oe_ci.upper_rank', StringType()),
+        ]
+        + [StructField(m, StringType()) for m in metrics]
+    )
+
+    def make_row(gene_id: str, rank: str) -> dict:
+        return {
+            'gene_id': gene_id,
+            'canonical': 'true',
+            'transcript_type': 'protein_coding',
+            'lof.oe_ci.upper_rank': rank,
+            **dict.fromkeys(metrics, '1'),
+        }
+
+    ranked = [make_row(f'ENSG{i:011d}', str(i)) for i in range(1, 13)]
+    unranked = [make_row(f'ENSGNA{i:09d}', 'NA') for i in range(6)]
+
+    result = _build_genetic_constraints(spark.createDataFrame(ranked + unranked, schema))
+
+    bins = {}
+    for row in result.collect():
+        lof = next(c for c in row.constraint if c.constraintType == 'lof')
+        bins[row.id] = lof.upperBin6
+
+    ranked_bins = sorted(bins[g['gene_id']] for g in ranked)
+    assert ranked_bins == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
+
+    assert all(bins[g['gene_id']] is None for g in unranked)
+
+
 # ---------------------------------------------------------------------------
 # 6. Hallmarks
 # ---------------------------------------------------------------------------
