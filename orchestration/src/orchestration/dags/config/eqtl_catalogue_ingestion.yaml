@@ -15,11 +15,13 @@ dataproc:
     project_id: open-targets-genetics-dev
     autoscaling_policy: eqtl-preprocess
     metadata:
-      GENTROPY_REF: v3.3.0
+      GENTROPY_REF: v3.4.0-dev.3
     init_actions_uris:
       - "gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh"
     num_workers: 4
-    worker_machine_type: n1-highmem-8
+    worker_machine_type: n2d-highmem-8
+    # Delete after 2h in seconds
+    auto_delete_ttl: 7200
 
 nodes:
   - id: eqtl_catalogue
@@ -29,11 +31,11 @@ nodes:
       step: eqtl_catalogue
       step.eqtl_catalogue_dataset_metadata_path: "{metadata_uri}"
       step.credible_set_input_glob: "{credible_set_glob}"
-      step.lbf_input_glob: "{lbf_glob}"
+      step.lbf_variable_input_glob: "{lbf_glob}"
       step.study_index_output_path: "{study_index_output_path}"
       step.credible_set_output_path: "{credible_set_output_path}"
       step.lead_pvalue_threshold: 1.0e-3
       step.session.write_mode: overwrite
-      step.session.output_partitions: 20
+      step.session.output_partitions: 40
       step.mqtl_quantification_methods_blacklist: []
-      +step.session.extended_spark_conf: "{spark.sql.shuffle.partitions: '1536'}"
+      +step.session.extended_spark_conf: "{spark.sql.shuffle.partitions: '2000'}"

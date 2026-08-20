@@ -6,12 +6,17 @@ from pathlib import Path
 
 from airflow.sdk import DAG
 
-from orchestration.utils import chain_dependencies, read_yaml_config
+from orchestration.types import Environment, EnvironmentSpec
+from orchestration.utils import chain_dependencies, find_environment_vars, read_yaml_config
 from orchestration.utils.common import shared_dag_args, shared_dag_kwargs
 from orchestration.utils.dataproc import generate_dataproc_task_chain, submit_gentropy_step
 
 CONFIG_PATH = Path(__file__).parent / 'config' / 'eqtl_catalogue_ingestion.yaml'
 config = read_yaml_config(CONFIG_PATH)
+env_spec: list[EnvironmentSpec] = config['environment_specs']
+env: Environment = config['env']
+sentinels = find_environment_vars(env_spec, env)
+config = read_yaml_config(CONFIG_PATH, sentinels)
 
 with DAG(
     dag_id=Path(__file__).stem,
