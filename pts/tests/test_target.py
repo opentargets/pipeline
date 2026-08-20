@@ -362,6 +362,52 @@ def test_genetic_constraints_structure(spark):
     assert constraint_types == {'syn', 'mis', 'lof'}
 
 
+CONSTRAINT_METRICS = [
+    f'{kind}.{field}'
+    for kind in ('syn', 'mis')
+    for field in ('z_score', 'exp', 'obs', 'oe', 'oe_ci.lower', 'oe_ci.upper')
+] + [
+    'lof.pLI', 'lof.exp', 'lof.obs', 'lof.oe', 'lof.oe_ci.lower', 'lof.oe_ci.upper',
+    'lof.oe_ci.upper_bin_decile',
+]
+
+CONSTRAINT_BIN_SCHEMA = StructType(
+    [
+        StructField('gene_id', StringType()),
+        StructField('canonical', StringType()),
+        StructField('transcript_type', StringType()),
+        StructField('lof.oe_ci.upper_rank', StringType()),
+    ]
+    + [StructField(m, StringType()) for m in CONSTRAINT_METRICS]
+)
+
+
+def _constraint_row(gene_id: str, rank: str) -> dict:
+    return {
+        'gene_id': gene_id,
+        'canonical': 'true',
+        'transcript_type': 'protein_coding',
+        'lof.oe_ci.upper_rank': rank,
+        **dict.fromkeys(CONSTRAINT_METRICS, '1'),
+    }
+
+
+def _lof_bins(spark, ranked_count: int, unranked_count: int):
+    """Build a frame of ranked + unranked genes and return their lof bins by id."""
+    ranked = [_constraint_row(f'ENSG{i:011d}', str(i)) for i in range(1, ranked_count + 1)]
+    unranked = [_constraint_row(f'ENSGNA{i:09d}', 'NA') for i in range(unranked_count)]
+
+    result = _build_genetic_constraints(
+        spark.createDataFrame(ranked + unranked, CONSTRAINT_BIN_SCHEMA)
+    )
+
+    bins = {}
+    for row in result.collect():
+        lof = next(c for c in row.constraint if c.constraintType == 'lof')
+        bins[row.id] = lof
+    return ranked, unranked, bins
+
+
 def test_genetic_constraints_sextiles_ignore_unranked_genes(spark):
     """Genes without a LOEUF rank do not consume sextile slots.
 
@@ -370,47 +416,27 @@ def test_genetic_constraints_sextiles_ignore_unranked_genes(spark):
     inside the window they sort first, take slots from the lowest bins, and leave
     bin 0 short of the genes that belong there.
     """
-    metrics = [
-        f'{kind}.{field}'
-        for kind in ('syn', 'mis')
-        for field in ('z_score', 'exp', 'obs', 'oe', 'oe_ci.lower', 'oe_ci.upper')
-    ] + [
-        'lof.pLI', 'lof.exp', 'lof.obs', 'lof.oe', 'lof.oe_ci.lower', 'lof.oe_ci.upper',
-        'lof.oe_ci.upper_bin_decile',
-    ]
-    schema = StructType(
-        [
-            StructField('gene_id', StringType()),
-            StructField('canonical', StringType()),
-            StructField('transcript_type', StringType()),
-            StructField('lof.oe_ci.upper_rank', StringType()),
-        ]
-        + [StructField(m, StringType()) for m in metrics]
-    )
+    ranked, unranked, bins = _lof_bins(spark, ranked_count=12, unranked_count=6)
 
-    def make_row(gene_id: str, rank: str) -> dict:
-        return {
-            'gene_id': gene_id,
-            'canonical': 'true',
-            'transcript_type': 'protein_coding',
-            'lof.oe_ci.upper_rank': rank,
-            **dict.fromkeys(metrics, '1'),
-        }
-
-    ranked = [make_row(f'ENSG{i:011d}', str(i)) for i in range(1, 13)]
-    unranked = [make_row(f'ENSGNA{i:09d}', 'NA') for i in range(6)]
-
-    result = _build_genetic_constraints(spark.createDataFrame(ranked + unranked, schema))
-
-    bins = {}
-    for row in result.collect():
-        lof = next(c for c in row.constraint if c.constraintType == 'lof')
-        bins[row.id] = lof.upperBin6
-
-    ranked_bins = sorted(bins[g['gene_id']] for g in ranked)
+    ranked_bins = sorted(bins[g['gene_id']].upperBin6 for g in ranked)
     assert ranked_bins == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
 
-    assert all(bins[g['gene_id']] is None for g in unranked)
+    assert all(bins[g['gene_id']].upperBin6 is None for g in unranked)
+
+
+def test_genetic_constraints_deciles_are_computed_locally(spark):
+    """`upperBin` splits the same ranked genes into ten equal groups.
+
+    gnomAD's own `lof.oe_ci.upper_bin_decile` is binned against a wider gene set
+    than the one it ships — in 4.1.1 it never reaches 9 — so the decile is
+    computed here, over the genes we actually rank, exactly like the sextile.
+    """
+    ranked, unranked, bins = _lof_bins(spark, ranked_count=20, unranked_count=6)
+
+    ranked_bins = sorted(bins[g['gene_id']].upperBin for g in ranked)
+    assert ranked_bins == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9]
+
+    assert all(bins[g['gene_id']].upperBin is None for g in unranked)
 
 
 # ---------------------------------------------------------------------------
