@@ -1617,7 +1617,16 @@ def _remove_duplicated_synonyms(df: DataFrame) -> DataFrame:
 
 
 def _add_tss(df: DataFrame) -> DataFrame:
-    """Add transcription start site column and drop the now-unneeded canonicalTranscript struct."""
+    """Add transcription start site column and drop the now-unneeded canonicalTranscript struct.
+
+    WARNING -- this reads ``canonicalTranscript.strand`` as GFF3's ``+``/``-``, which is
+    what ``_build_gene_code`` produces and nothing else in the release still uses: the
+    ``transcript`` dataset and ``target.genomicLocation`` both carry Ensembl's signed
+    integer (1/-1). The two branches below have no ``otherwise``, so repointing this at
+    an integer strand does not fail loudly -- both comparisons simply go false and every
+    gene silently gets ``tss = null``. Nothing here is covered by a test. Convert this
+    function in the same change that changes its input.
+    """
     return df.withColumn(
         'tss',
         f.when(
