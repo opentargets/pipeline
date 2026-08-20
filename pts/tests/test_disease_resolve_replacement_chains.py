@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.ontology import node
-from pts.transformers.disease import _IAO_REPLACED_BY, resolve_replacement_chains
+from pts.transformers.disease.coalescing import _IAO_REPLACED_BY, resolve_replacement_chains
 
 OBO = 'http://purl.obolibrary.org/obo/'
 OTHER_PRED = 'http://www.geneontology.org/formats/oboInOwl#consider'
