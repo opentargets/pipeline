@@ -67,6 +67,11 @@ class UploadRemoteFileOperator(BaseOperator):
         project_id: The GCP project ID. Defaults to the platform project.
         src_url: Source file URL.
         dst_uri: The destination URI in GCS.
+        skip_if_exists: Skip the transfer when the destination already holds the
+            source's bytes. The object name alone is not taken as proof: the size
+            is checked against the source, so a truncated or hand-staged object
+            under the expected name is re-staged rather than trusted.
+        timeout: Per-read/connect timeout, in seconds, for the source request.
     """
 
     template_fields: Sequence[str] = ('src_url', 'dst_uri')
@@ -90,33 +95,89 @@ class UploadRemoteFileOperator(BaseOperator):
 
         self.bucket_name, self.path = self.dst_uri.split()
 
+    def _source_size(self) -> int | None:
+        """Content-Length the source advertises, or None when unavailable."""
+        try:
+            r = requests.head(self.src_url, timeout=self.timeout, allow_redirects=True)
+            r.raise_for_status()
+            size = r.headers.get('Content-Length')
+            return int(size) if size is not None else None
+        except (requests.RequestException, ValueError) as err:
+            self.log.warning('could not determine the size of %s: %s', self.src_url, err)
+            return None
+
+    def _can_skip(self, bucket: Bucket) -> bool:
+        """Whether the destination already holds the source's bytes.
+
+        A version-pinned artifact staged by an earlier run is the common case, but
+        an object can also be short (an interrupted stream) or simply the wrong
+        file staged by hand under the right name. Both would otherwise be trusted
+        forever, so the existing object is accepted only when its size matches the
+        source. When the source size cannot be read the existing object is kept —
+        an unreachable source is no reason to discard a good local copy.
+        """
+        if not (self.skip_if_exists and bucket.exists()):
+            return False
+
+        blob = bucket.get_blob(self.path)
+        if blob is None:
+            return False
+
+        expected = self._source_size()
+        if expected is None:
+            self.log.info('destination %s exists, source size unknown, keeping it', self.dst_uri)
+            return True
+        if blob.size == expected:
+            self.log.info('destination %s already holds %s bytes, skipping', self.dst_uri, expected)
+            return True
+
+        self.log.warning(
+            'destination %s is %s bytes but the source is %s bytes, re-staging',
+            self.dst_uri,
+            blob.size,
+            expected,
+        )
+        return False
+
     def execute(self, context) -> None:
         c = Client(project=self.project_id)
         b = Bucket(client=c, name=self.bucket_name)
 
-        # Idempotent staging: if the destination already exists (e.g. a
-        # version-pinned artifact staged by a previous run), skip the download
-        # entirely. Callers encode the version in the object name so 'exists'
-        # means 'the right version is already there'.
-        if self.skip_if_exists and b.exists() and b.blob(self.path).exists():
-            self.log.info('destination %s already exists, skipping download', self.dst_uri)
+        if self._can_skip(b):
             return
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
             temp_file = Path(tmp_file.name)
 
-        with requests.get(self.src_url, stream=True, timeout=self.timeout) as r:
-            r.raise_for_status()
-            with open(temp_file, 'wb') as f:
-                f.writelines(r.iter_content(chunk_size=8192))
+        try:
+            with requests.get(self.src_url, stream=True, timeout=self.timeout) as r:
+                r.raise_for_status()
+                expected = r.headers.get('Content-Length')
+                with open(temp_file, 'wb') as f:
+                    f.writelines(r.iter_content(chunk_size=8192))
 
-        if not b.exists():
-            b.create()
+            # A stream that ends early can still look like a clean download, and
+            # uploading it would publish a corrupt artifact that skip_if_exists
+            # then has to catch on every later run. Refuse it here instead.
+            downloaded = temp_file.stat().st_size
+            if expected is not None and downloaded != int(expected):
+                raise ValueError(
+                    f'{self.src_url} returned {downloaded} bytes, expected {expected}; '
+                    'refusing to upload a truncated file.'
+                )
 
-        blob = b.blob(self.path)
-        blob.upload_from_filename(temp_file)
-        temp_file.unlink()
-        self.log.info('uploaded file from %s to: %s', self.src_url, self.dst_uri)
+            if not b.exists():
+                b.create()
+
+            blob = b.blob(self.path)
+            blob.upload_from_filename(temp_file)
+            self.log.info(
+                'uploaded %s bytes from %s to: %s', downloaded, self.src_url, self.dst_uri
+            )
+        finally:
+            # A ~629 MB artifact left behind on every failed attempt fills the
+            # worker's disk across retries.
+            temp_file.unlink(missing_ok=True)
 
 
 class UploadStringOperator(BaseOperator):

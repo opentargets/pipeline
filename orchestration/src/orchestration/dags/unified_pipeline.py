@@ -143,6 +143,7 @@ with DAG(
     # ==============================================================================================
     def pts_stage() -> None:
         pts_clusters = {}  # map of cluster_name to a list of step_names
+        pts_cluster_spark_jars = {}  # map of cluster_name to its rendered spark.jars
         for step_name in config.steps('pts_'):
 
             @task_group(group_id=step_name)
@@ -226,31 +227,15 @@ with DAG(
                     steps_in_cluster = pts_clusters.get(cluster_name, [])
                     pts_clusters[cluster_name] = [*steps_in_cluster, step_name]
 
-                    # Jars a cluster references under the managed staging prefix
-                    # (via spark.jars) are staged into the pipelines bucket before
-                    # the cluster is created (skipped when already there), then read
-                    # via spark.jars. Resolved from the rendered spark.jars value
-                    # against the `staged_jars` registry, so every such jar on every
-                    # cluster (currently the Spark-NLP fat jar on `pts` and
-                    # `pts_literature`) is covered automatically; a jar under the
-                    # prefix with no registered source fails the DAG at parse time.
+                    # The jar a cluster needs is staged once for the whole cluster,
+                    # not once per step — see the staging loop after this one. The
+                    # step only records the tasks that loop wires itself between.
                     cluster_props = s.cluster_definition.config.get('properties', {})
-                    spark_jars = str(cluster_props.get('spark:spark.jars', ''))
-                    stage_ops = [
-                        UploadRemoteFileOperator(
-                            task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}_{step_name}',
-                            src_url=src_url,
-                            dst_uri=dst_uri,
-                            skip_if_exists=True,
-                        )
-                        for src_url, dst_uri in resolve_jar_staging(
-                            spark_jars, config.staged_jars, config.staged_jar_prefix
-                        )
-                    ]
-                    if stage_ops:
-                        chain(u, Label('dataproc pts step'), u2, stage_ops, c, r)
-                    else:
-                        chain(u, Label('dataproc pts step'), u2, c, r)
+                    pts_cluster_spark_jars[cluster_name] = str(
+                        cluster_props.get('spark:spark.jars', '')
+                    )
+
+                    chain(u, Label('dataproc pts step'), u2, c, r)
 
                 e = EmptyOperator(
                     task_id=f'end_{step_name}',
@@ -263,8 +248,44 @@ with DAG(
                     chain(r, e)
                 chain(d, Label('no differences found, skip step'), e)
                 steps[step_name] = {'start': d, 'end': e}
+                if s.is_dataproc:
+                    steps[step_name]['create_cluster'] = c
 
             pts_step(step_name)
+
+        # stage a cluster's jars once, before that cluster is created
+        #
+        # Jars a cluster references via spark.jars are staged into the pipelines
+        # bucket (skipped when already there), then read from GCS at submit time
+        # instead of being resolved from Maven Central on every spark-submit.
+        # Resolved from the rendered spark.jars value against the `staged_jars`
+        # registry, so every such jar on every cluster (currently the Spark-NLP
+        # fat jar on `pts` and `pts_literature`) is covered automatically; a GCS
+        # jar with no registered source fails the DAG at parse time.
+        #
+        # One task per cluster, not per step: a cluster's steps all share the one
+        # object, and staging per step meant ~60 tasks racing to download the same
+        # ~629 MB artifact onto the same worker the first time a version lands.
+        for cluster_name, steps_in_cluster in pts_clusters.items():
+            dataproc_steps = [s_n for s_n in steps_in_cluster if 'create_cluster' in steps[s_n]]
+            for src_url, dst_uri in resolve_jar_staging(
+                pts_cluster_spark_jars.get(cluster_name, ''),
+                config.staged_jars,
+                config.staged_jar_prefix,
+            ):
+                # A root task, deliberately: the cluster's steps depend on each
+                # other, so hanging one shared task off every step's upload would
+                # close a cycle (step B's upload -> stage -> step A's cluster ->
+                # ... -> step B's upload). Staging has no inputs anyway, and after
+                # the first run it is an existence check.
+                stage = UploadRemoteFileOperator(
+                    task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}_{cluster_name}',
+                    src_url=src_url,
+                    dst_uri=dst_uri,
+                    skip_if_exists=True,
+                )
+                for step_name in dataproc_steps:
+                    stage.set_downstream(steps[step_name]['create_cluster'])
 
         # delete a cluster after its steps have run
         for cluster_name, steps_in_cluster in pts_clusters.items():

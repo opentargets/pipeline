@@ -97,6 +97,18 @@ class UnifiedPipelineConfig:
             self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
         """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
 
+        # Without this the sentinel substitution fails with a bare
+        # `TypeError: replace() argument 2 must be str, not None` that breaks the
+        # import of the whole DAG — PIS and GENTROPY stages included — while
+        # `staged_jars` quietly registers a `spark-nlp-assembly-None.jar`.
+        spark_nlp_version = up.get('spark_nlp_version')
+        if not spark_nlp_version:
+            raise ValueError(
+                'spark_nlp_version is missing from unified_pipeline.yaml; the pts and '
+                'pts_literature clusters need it to resolve the Spark-NLP jar they '
+                'load via spark.jars.'
+            )
+
         self.clusters = AppConfig.from_file(
             file_path=config_path / 'clusters.yaml',
             template_context={
@@ -105,7 +117,7 @@ class UnifiedPipelineConfig:
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
                 # Lets the pts / pts_literature clusters point spark.jars at the
                 # version-pinned Spark-NLP fat jar in the pipelines bucket.
-                'spark_nlp_version': up.get('spark_nlp_version'),
+                'spark_nlp_version': spark_nlp_version,
             },
         )
         """The cluster definitions."""
@@ -144,7 +156,7 @@ class UnifiedPipelineConfig:
             Any jar a cluster references under this prefix (via spark.jars) must
             have a registered upstream source in `staged_jars`, or the DAG fails.
         """
-        spark_nlp_jar = f'spark-nlp-assembly-{up.get("spark_nlp_version")}.jar'
+        spark_nlp_jar = f'spark-nlp-assembly-{spark_nlp_version}.jar'
         self.staged_jars: dict[str, str] = {
             f'{self.staged_jar_prefix}{spark_nlp_jar}': (
                 f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_jar}'

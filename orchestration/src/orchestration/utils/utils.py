@@ -58,9 +58,15 @@ def resolve_jar_staging(
     ``spark.jars`` is Spark's comma-separated list of jar URIs. Each jar that
     orchestration stages into the pipelines bucket lives under ``managed_prefix``
     and must have a registered upstream source in ``registry`` (keyed by the
-    staged destination URI). A jar under the managed prefix with no registered
-    source is a misconfiguration and raises. Jars outside the managed prefix are
-    assumed to be provided elsewhere and are ignored.
+    staged destination URI).
+
+    Any GCS jar with no registered source is a misconfiguration and raises,
+    whether or not it sits under ``managed_prefix``. Keying the check on the
+    prefix alone would let a mistyped path (``…/pts/jar/`` for ``…/pts/jars/``,
+    or the wrong bucket) fall through unstaged, and the cluster would then be
+    created pointing at an object that does not exist — every job on it failing
+    at submit with nothing in the DAG to explain why. Non-GCS jars (a path baked
+    into the image, say) are provided elsewhere and are ignored.
 
     Args:
         spark_jars (str): Rendered ``spark.jars`` value (comma-separated URIs).
@@ -71,18 +77,24 @@ def resolve_jar_staging(
         list[tuple[str, str]]: ``(src_url, dst_uri)`` pairs to stage, in order.
 
     Raises:
-        ValueError: When a jar under ``managed_prefix`` has no registered source.
+        ValueError: When a GCS jar has no registered source in ``registry``.
     """
     pairs: list[tuple[str, str]] = []
     for uri in (j.strip() for j in spark_jars.split(',') if j.strip()):
         if uri in registry:
             pairs.append((registry[uri], uri))
-        elif uri.startswith(managed_prefix):
-            raise ValueError(
-                f'{uri} is under the managed jar prefix {managed_prefix!r} but has '
-                'no registered source in staged_jars; add its upstream URL.'
+        elif uri.startswith('gs://'):
+            hint = (
+                f'expected it under the managed jar prefix {managed_prefix!r}'
+                if not uri.startswith(managed_prefix)
+                else 'add its upstream URL'
             )
-        # else: jar outside the managed prefix, provided elsewhere — leave it.
+            raise ValueError(
+                f'{uri} has no registered source in staged_jars ({hint}); '
+                'orchestration cannot stage it and the cluster would be created '
+                'pointing at a jar that may not exist.'
+            )
+        # else: not a GCS jar (e.g. a path baked into the image) — leave it.
     return pairs
 
 
