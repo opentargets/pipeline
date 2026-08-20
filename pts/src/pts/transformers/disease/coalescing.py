@@ -186,11 +186,21 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     # Only an unambiguous pointer can be followed through.  Ambiguity means two
     # *different* replacements: a term repeating the same pointer names one
     # successor, and 14 terms in the 26.06 ontology do exactly that.
-    onward = {source: next(iter(found)) for source, found in targets.items() if len(found) == 1}
+    ambiguous = {source: found for source, found in targets.items() if len(found) > 1}
+    onward = {source: next(iter(found)) for source, found in targets.items() if source not in ambiguous}
+
+    # Terms naming several replacements stop any chain that reaches them, so say
+    # which ones rather than leaving the shortfall to be inferred from a count.
+    if ambiguous:
+        logger.info(f'{len(ambiguous)} obsolete terms name more than one replacement, so chains through them stop')
+        for source, found in sorted(ambiguous.items()):
+            logger.debug(f'ambiguous replacement: {source} -> {", ".join(sorted(found))}')
 
     resolved: dict[str, str] = {}
+    cycles: list[str] = []
     for start in sorted({target for found in targets.values() for target in found}):
         seen = {start}
+        path = [start]
         current = start
         cycled = False
         while current in onward:
@@ -199,11 +209,32 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
                 # A cycle or self-reference names no live term, so following it
                 # would only rotate the pointer.  Leave it as it stands.
                 cycled = True
+                cycles.append(' -> '.join([*path, nxt]))
                 break
             seen.add(nxt)
+            path.append(nxt)
             current = nxt
         if not cycled and current != start and current not in deprecated:
             resolved[start] = current
+
+    # A cycle is a curation error upstream, so it is worth naming rather than
+    # leaving as an unexplained gap between the pointers seen and those fixed.
+    if cycles:
+        logger.info(f'{len(cycles)} replacement chains close a cycle and are left as they stand')
+        for cycle in cycles:
+            logger.debug(f'cyclic replacement: {cycle}')
+
+    # What is left over matters as much as what was fixed: these terms are still
+    # dropped by n_clean with nothing downstream to carry their mapping.  A term
+    # naming itself is counted with the cycles rather than here.
+    dangling = sum(
+        1
+        for source, found in targets.items()
+        for target in found
+        if target != source and resolved.get(target, target) in deprecated
+    )
+    if dangling:
+        logger.info(f'{dangling} replacement pointers still name a term that will be dropped')
 
     if not resolved:
         return n
