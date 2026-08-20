@@ -1,7 +1,7 @@
 """Tests for the transcript PySpark module."""
 
 from pyspark.sql import Row
-from pyspark.sql.types import ArrayType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, IntegerType, StringType, StructField, StructType
 
 from pts.pyspark.transcript import (
     _build_flags,
@@ -120,6 +120,44 @@ def test_parse_gff3_filters_noncanonical_chromosomes(spark):
     row = result.first()
     assert row is not None
     assert row.chromosome == '1'
+
+
+# ---------------------------------------------------------------------------
+# strand encoding
+#
+# Ensembl's core database stores strand as ``seq_region_strand`` -- a signed
+# integer, 1 or -1 -- on gene, transcript and exon alike. GFF3 spells the same
+# fact as ``+``/``-`` in column 7. The release follows Ensembl, so the GFF3
+# convention is translated at the parse boundary and never reaches the output.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_gff3_strand_is_signed_integer(spark):
+    """GFF3 +/- becomes Ensembl's 1/-1, typed as an integer rather than a string."""
+    rows = [
+        _gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS),
+        _gff('chr1', 'transcript', 450740, 451678, '-', _NC_ATTRS),
+    ]
+    result = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA))
+    assert result.schema['strand'].dataType == IntegerType()
+    strands = {r.transcriptId: r.strand for r in result.collect()}
+    assert strands == {'ENST00000641515': 1, 'ENST00000832824': -1}
+
+
+def test_parse_gff3_unstranded_feature_is_null_not_zero(spark):
+    """An unstranded GFF3 feature ('.') yields null -- 0 would read as a real strand."""
+    rows = [_gff('chr1', 'transcript', 65419, 71585, '.', _TX_ATTRS)]
+    row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.strand is None
+
+
+def test_parse_exons_strand_is_signed_integer(spark):
+    """Exon strand follows the same 1/-1 encoding as the transcript that holds it."""
+    rows = [_gff('chr1', 'exon', 450740, 451678, '-', _EXON_ATTRS_A)]
+    row = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.exons[0].strand == -1
 
 
 def test_parse_gff3_tss_positive_strand(spark):
@@ -257,7 +295,7 @@ def test_parse_exons_exon_struct_fields(spark):
     assert exon.chromosome == '1'
     assert exon.start == 65419
     assert exon.end == 65433
-    assert exon.strand == '+'
+    assert exon.strand == 1
 
 
 # ---------------------------------------------------------------------------

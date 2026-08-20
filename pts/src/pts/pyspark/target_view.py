@@ -219,6 +219,8 @@ def _build_transcripts(df: DataFrame) -> DataFrame:
         biotype, uniprotId, isUniprotReviewed, translationId, alphafoldId,
         uniprotIsoformId, isEnsemblCanonical}], canonicalTranscript{id,
         chromosome, start, end, strand}, canonicalExons[String]].
+        ``canonicalTranscript.strand`` carries output/transcript's encoding --
+        Ensembl's signed integer, 1 or -1 -- matching genomicLocation.strand.
     """
     per_transcript = (
         df
