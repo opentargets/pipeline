@@ -2711,7 +2711,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.9.0rc9"
+version = "26.9.0rc10"
 source = { editable = "." }
 dependencies = [
     { name = "clinical-mining" },
