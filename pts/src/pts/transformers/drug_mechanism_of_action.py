@@ -237,13 +237,9 @@ def _chembl_target(
         )
     )
 
-    # ChEMBL spells a target either as a uniprot accession or as an Ensembl gene id, so
-    # resolution needs two lookups: one keyed by accession, one keyed by the gene id
-    # itself. `genes_by_id` is deliberately built from the whole of `gene_df` rather than
-    # from the rows that survive the explode below -- the explode drops genes whose
-    # accession lists are both empty, and those genes must still be resolvable by id.
-    # Most genes have no uniprot accession at all, so restricting the id lookup to
-    # exploded rows would silently drop every mechanism ChEMBL states as a gene id.
+    # ChEMBL spells a target as a uniprot accession or an Ensembl gene id, so resolution
+    # needs both lookups. `genes_by_id` covers the whole of `gene_df`, not just the rows
+    # surviving the explode, which drops genes with no accession.
     genes_by_uniprot = (
         gene_df
         .select(

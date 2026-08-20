@@ -62,18 +62,8 @@ _CLASS_PATTERN = r'\b(' + '|'.join(CLASS_KEYWORDS) + r')\b'
 def _normalize_name(expr: pl.Expr) -> pl.Expr:
     r"""Lowercase, strip trademark symbols, trim, collapse internal whitespace.
 
-    The ``\s+`` collapse is Unicode-aware: Rust's ``regex`` crate matches the full
-    ``White_Space`` property, so U+00A0 (NBSP), U+2000-200A and U+3000 fold to a plain
-    space along with the ASCII ones. That is wanted here. Trial free text is copy-pasted
-    from all sorts of places, and two arms spelling a dose as ``'drug 20\xa0mg'`` and
-    ``'drug 20 mg'`` are naming the same thing -- keeping them apart would split the
-    trial evidence for one label across two candidates, and each half could then fall
-    below ``MIN_TRIALS``.
-
-    Note this is deliberately wider than the ``strip_chars(' ')`` in
-    :func:`pts.transformers.chembl_molecule._molecule_preprocess`, which is pinned to the
-    ASCII space because it is undoing padding on a published column rather than
-    normalizing free text. The two are not inconsistent; they are doing different jobs.
+    The ``\s+`` collapse is Unicode-aware, so a non-breaking space folds like a plain
+    one -- two arms spelling the same dose differently must not become two candidates.
     """
     stripped = expr.str.replace_all(r'[®™©℠]', '')
     collapsed = stripped.str.strip_chars().str.replace_all(r'\s+', ' ')

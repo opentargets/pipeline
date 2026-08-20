@@ -134,10 +134,7 @@ def _build_restore_args(
 
     # --strict-names: without it, a --table matching nothing in the archive exits
     # 0 and restores silently nothing.
-    # --schema on the data pass ONLY: pg_restore's --table matches the bare name
-    # across every schema in the archive, so an unqualified restore loads every
-    # same-named table from every other schema and never reads them. The pre-data
-    # pass stays unqualified on purpose -- see the docstring above.
+    # --schema on the data pass ONLY
     data = [*common, '--section=data', '--strict-names', '--schema', schema_name, '--jobs', str(jobs)]
     for table in tables:
         data += ['--table', table]
@@ -362,20 +359,7 @@ def restored_dump(
 def _build_select_sql(
     table: str, schema_name: str, columns: Sequence[str] | None = None, order_by: Sequence[str] | None = None
 ) -> str:
-    """Build the statement that reads one table.
-
-    ``DISTINCT`` is not an optimisation. These dumps carry rows that become
-    duplicates once the columns a step cares about are projected out of them, and
-    every row count downstream of here was measured with those removed. It is
-    part of the contract, which is why it is spelled out here and pinned by a
-    test rather than left to whatever a query helper does by default.
-
-    ``ORDER BY`` is not one either. Without it the row order is whatever the plan
-    happens to produce -- a hash aggregate over the physical order of a restored
-    dump -- and a caller that collects a column into a list hands that
-    nondeterminism straight to a published artefact. See ``order_by`` in
-    :func:`read_dump_tables` for when to ask for it.
-    """
+    """Build the statement that reads one table."""
     selected = ', '.join(f'"{c}"' for c in columns) if columns else '*'
     sql = f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
     if order_by:
@@ -421,18 +405,9 @@ def read_dump_tables(
         schema_name: The schema the tables live in.
         archive_member: Name or glob of the dump inside ``source``, when
             ``source`` is a zip or a tar.
-        order_by: Table name to the columns to order that table's read by. Rows
-            come back in whatever order the plan produced otherwise, which is a
-            function of the postgres version and of the physical order of the
-            dump, and is not stable across releases of either.
-
-            **Every table whose row order can reach the output needs an entry
-            here** — anything a caller aggregates into a list without sorting it
-            afterwards. Pick columns that are unique together, usually the
-            table's own key, so the ordering is total and the read is
-            reproducible. It is opt-in rather than the default because ordering
-            a large projection (``compound_structures`` is several gigabytes)
-            costs a sort that most reads have no use for.
+        order_by: Table name to the columns to order that table's read by. Needed
+            for any table whose row order can reach the output; opt-in, since a
+            sort is wasted on reads that do not.
         scratch_root: See :func:`restored_dump`.
 
     Returns:

@@ -206,7 +206,6 @@ def _molecule_preprocess(
         how='left',
     ).select('molregno', 'parentId')
 
-    # One struct array per molecule. The ordering is determinism-in-principle only
     synonyms = molecule_synonyms.group_by('molregno').agg(pl.struct('molsyn_id', 'synonyms', 'syn_type').alias('syns'))
 
     return (
@@ -276,8 +275,6 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
         synonyms
         .filter(pl.col('syn_type') == 'TRADE_NAME')
         .group_by('id')
-        # drop_nulls before unique: a molecule_synonyms row with no label would
-        # otherwise contribute a `None` element to the published array.
         .agg(pl.col('synonym').drop_nulls().unique().alias('_trade'))
     )
 
@@ -327,11 +324,6 @@ def _process_molecule_hierarchy(preprocessed_mols: pl.DataFrame) -> pl.DataFrame
 def _process_molecule_cross_references(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
     """Group DrugBank cross references for each molecule id.
 
-    ChEMBL's own cross-reference table is not joined here. Rebuilding it from the
-    raw relational dump is unreliable (the best measured rule reaches 44% precision),
-    so it was dropped rather than fabricated. DrugBank is unaffected, since it comes
-    from a separate input.
-
     Args:
         preprocessed_mols: Preprocessed molecule DataFrame.
 
@@ -361,9 +353,6 @@ def _process_singleton_cross_references(
         .filter(pl.col(reference_id_column).is_not_null())
         .select('id', pl.col(reference_id_column).cast(pl.Utf8))
         .group_by('id')
-        # collect_set drops nulls and dedups; the pre-filter above already removes
-        # nulls, but drop_nulls().unique() is kept to match the site's contract
-        # explicitly rather than relying on the filter alone.
         .agg(pl.col(reference_id_column).drop_nulls().unique().sort().alias('ids'))
         .with_columns(crossReferences=pl.concat_list(pl.struct(pl.lit(source).alias('source'), pl.col('ids'))))
         .select('id', 'crossReferences')
