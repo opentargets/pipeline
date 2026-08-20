@@ -104,6 +104,30 @@ class TestChainResolution:
         result = resolve_replacement_chains(df)
         assert _pointers(result, 'A') == [_url('B')]
 
+    def test_chain_running_into_an_absent_term_is_not_rewritten(self) -> None:
+        """C is named but carried by no node at all.
+
+        1,162 pointers in the 26.06 ontology name a CURIE such as HP:0000005
+        where every node id is a URL. Those match nothing, and treating one as
+        the end of a chain rewrites A onto a term the index will not hold.
+        """
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['GONE']),
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
+    def test_chain_running_into_a_non_class_term_is_not_rewritten(self) -> None:
+        """n_clean keeps CLASS rows only, so a property is no better than a dead end."""
+        df = _make_df(
+            _make_node('A', deprecated=True, replaced_by=['B']),
+            _make_node('B', deprecated=True, replaced_by=['PROP']),
+            {**_make_node('PROP'), 'type': 'PROPERTY'},
+        )
+        result = resolve_replacement_chains(df)
+        assert _pointers(result, 'A') == [_url('B')]
+
     def test_chain_running_into_an_ambiguous_term_is_not_rewritten(self) -> None:
         """C names two successors, so the chain stops before it, not on it."""
         df = _make_df(

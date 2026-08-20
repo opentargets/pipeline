@@ -21,8 +21,6 @@ _ONTOLOGY_WEIGHTS = pl.DataFrame(
 )
 
 
-
-
 def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
     """Annotate name-collision nodes in the raw ontology node table.
 
@@ -149,17 +147,19 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     ``n_clean``, taking with it the mapping from the original term, and
     evidence carrying that term no longer reaches the surviving one.
 
-    Each pointer is followed to the first node that is not deprecated, and is
-    rewritten only when such a node is actually reached.  A hop is only taken
-    when it is unambiguous -- a deprecated node naming two *different*
-    replacements is a curation decision to leave alone, as are cycles and
-    self-references, which name no live term and would only rotate the pointer.
+    Each pointer is followed to the first term that survives ``n_clean`` -- a
+    CLASS row that is not deprecated -- and is rewritten only when such a term
+    is actually reached.  A hop is only taken when it is unambiguous: a
+    deprecated node naming two *different* replacements is a curation decision
+    to leave alone, as are cycles and self-references, which name no live term
+    and would only rotate the pointer.
 
-    A chain that runs into a node the source ontology obsoleted without naming
-    a successor is left as it stands: every node on it is dropped by
-    ``n_clean``, so moving the pointer from one of them to another would change
-    nothing.  Those dead ends are a property of the source data, not something
-    this can repair.
+    Two other endings are left as they stand, because neither leads anywhere
+    ``n_clean`` keeps.  A chain can run into a term the source ontology
+    obsoleted without naming a successor, and it can run into an id the graph
+    does not carry at all -- in 26.06, 1,162 pointers name a CURIE such as
+    ``HP:0000005`` where every node id is a URL.  Both are properties of the
+    source data rather than something this can repair.
 
     Args:
         n: Node DataFrame whose IAO_0100001 entries may form chains.
@@ -178,7 +178,21 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     if pointers.is_empty():
         return n
 
-    deprecated = set(n.filter(pl.col('meta').struct['deprecated']).get_column('id').to_list())
+    # A chain has only landed somewhere useful if the term it reaches survives
+    # n_clean, which keeps CLASS rows that are not deprecated.  Testing merely
+    # for "not deprecated" would also accept a target the graph does not carry
+    # at all -- 1,162 pointers in the 26.06 ontology name a CURIE such as
+    # HP:0000005 where every node id is a URL, and those match nothing.
+    live = set(
+        n
+        .filter(
+            pl.col('type') == 'CLASS',
+            ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
+        )
+        .get_column('id')
+        .to_list()
+    )
+    known = set(n.get_column('id').to_list())
 
     targets: dict[str, set[str]] = defaultdict(set)
     for source, target in pointers.iter_rows():
@@ -197,7 +211,7 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
             logger.debug(f'ambiguous replacement: {source} -> {", ".join(sorted(found))}')
 
     resolved: dict[str, str] = {}
-    cycles: list[str] = []
+    cycles: dict[frozenset[str], str] = {}
     for start in sorted({target for found in targets.values() for target in found}):
         seen = {start}
         path = [start]
@@ -209,32 +223,39 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
                 # A cycle or self-reference names no live term, so following it
                 # would only rotate the pointer.  Leave it as it stands.
                 cycled = True
-                cycles.append(' -> '.join([*path, nxt]))
+                loop = path[path.index(nxt):]
+                cycles.setdefault(frozenset(loop), ' -> '.join([*loop, nxt]))
                 break
             seen.add(nxt)
             path.append(nxt)
             current = nxt
-        if not cycled and current != start and current not in deprecated:
+        if not cycled and current != start and current in live:
             resolved[start] = current
 
     # A cycle is a curation error upstream, so it is worth naming rather than
     # leaving as an unexplained gap between the pointers seen and those fixed.
+    # One cycle is reached from every term on it, so report each only once.
     if cycles:
         logger.info(f'{len(cycles)} replacement chains close a cycle and are left as they stand')
-        for cycle in cycles:
+        for cycle in sorted(cycles.values()):
             logger.debug(f'cyclic replacement: {cycle}')
 
-    # What is left over matters as much as what was fixed: these terms are still
-    # dropped by n_clean with nothing downstream to carry their mapping.  A term
-    # naming itself is counted with the cycles rather than here.
-    dangling = sum(
-        1
+    # What is left over matters as much as what was fixed, and the two ways a
+    # pointer fails are worth separating: one names a term the graph carries but
+    # n_clean drops, the other names an id the graph does not carry at all.  A
+    # term naming itself is counted with the cycles rather than here.
+    landing = [
+        resolved.get(target, target)
         for source, found in targets.items()
         for target in found
-        if target != source and resolved.get(target, target) in deprecated
-    )
+        if target != source
+    ]
+    dangling = sum(1 for target in landing if target in known and target not in live)
+    unknown = sum(1 for target in landing if target not in known)
     if dangling:
         logger.info(f'{dangling} replacement pointers still name a term that will be dropped')
+    if unknown:
+        logger.info(f'{unknown} replacement pointers name an id the ontology does not carry')
 
     if not resolved:
         return n
