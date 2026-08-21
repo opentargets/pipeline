@@ -77,15 +77,6 @@ class TestLiveExport:
         assert usages, 'an empty result satisfies the subset check vacuously'
         assert {u.tool for u in usages} <= {'pis', 'pts', 'gentropy'}
 
-    def test_every_span_is_a_whole_number_of_hours(self, export: BillingExport) -> None:
-        """Documents the export's hourly bucketing.
-
-        If this ever fails, the quantisation caveat in usage.py needs revisiting.
-        """
-        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
-        assert usages, 'an empty result satisfies the all() check vacuously'
-        assert all(u.span_hours == int(u.span_hours) for u in usages)
-
     def test_the_run_is_one_product(self, export: BillingExport) -> None:
         """A platform run and a PPP run of the same DAG must never be summed together."""
         usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))

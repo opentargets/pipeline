@@ -42,13 +42,12 @@ class TestStepUsage:
             product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
-            span_hours=2.0,
             net_cost=1.5,
             currency='GBP',
             shared_cluster=False,
         )
         assert u.step == 'pts_target'
-        assert u.span_hours == 2.0
+        assert u.product == 'platform'
 
     def test_tool_must_be_a_pipeline_tool(self) -> None:
         with pytest.raises(ValidationError):
@@ -59,7 +58,6 @@ class TestStepUsage:
                 'product': 'platform',
                 'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
                 'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
-                'span_hours': 1.0,
                 'net_cost': 0.1,
                 'currency': 'GBP',
                 'shared_cluster': False,
@@ -74,7 +72,6 @@ class TestStepUsage:
             'product': None,
             'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
-            'span_hours': 1.0,
             'net_cost': 0.1,
             'currency': 'GBP',
             'shared_cluster': False,
@@ -90,7 +87,6 @@ class TestStepUsage:
             product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
-            span_hours=1.0,
             net_cost=-0.02,
             currency='GBP',
             shared_cluster=False,
@@ -256,16 +252,15 @@ class TestLabelExtraction:
 
 class TestAggregate:
     def test_started_is_the_earliest_start_and_ended_the_latest_end(self) -> None:
-        """Transposed, these invert the window and make every span negative."""
+        """The only guard on these two columns, and both are load-bearing.
+
+        `started` orders the rows and, with `ended`, bounds the window `window_coverage`
+        measures. Transposed, the query still runs and still returns numbers: the window
+        inverts, and the coverage denominator silently covers a period no run occupied.
+        """
         expressions = _aggregate_expressions(_AGGREGATE)
         assert expressions['started'] == 'MIN(usage_start_time)'
         assert expressions['ended'] == 'MAX(usage_end_time)'
-
-    def test_span_runs_from_the_earliest_start_to_the_latest_end(self) -> None:
-        expressions = _aggregate_expressions(_AGGREGATE)
-        assert expressions['span_hours'] == (
-            'TIMESTAMP_DIFF(MAX(usage_end_time), MIN(usage_start_time), SECOND) / 3600'
-        )
 
     def test_the_expression_parser_reads_both_forms(self) -> None:
         """Guard the guard: bare columns and aliased expressions must both be seen."""
@@ -571,7 +566,6 @@ def _row(**kw: object) -> SimpleNamespace:
         'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
-        'span_hours': 2.0,
         'net_cost': 1.5,
         'currency': 'GBP',
         'shared_cluster': False,
