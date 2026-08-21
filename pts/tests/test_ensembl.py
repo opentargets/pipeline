@@ -1,0 +1,354 @@
+"""Tests for the ensembl transformer."""
+
+from __future__ import annotations
+
+import gzip
+from pathlib import Path
+from typing import cast
+
+import polars as pl
+import pytest
+from otter.config.model import Config
+
+from pts.ensembl_core import CoreDump
+from pts.transformers.ensembl import _build, _gene_dictionary, _genes, _translation_values, ensembl
+from pts.transformers.utils.dataset import scan_dataset
+
+SCHEMA = """\
+CREATE TABLE `gene` (
+  `gene_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `biotype` varchar(40) NOT NULL,
+  `seq_region_id` int(10) unsigned NOT NULL,
+  `seq_region_start` int(10) unsigned NOT NULL,
+  `seq_region_end` int(10) unsigned NOT NULL,
+  `seq_region_strand` tinyint(2) NOT NULL,
+  `display_xref_id` int(10) unsigned DEFAULT NULL,
+  `description` text,
+  `canonical_transcript_id` int(10) unsigned NOT NULL,
+  `stable_id` varchar(128) DEFAULT NULL,
+  PRIMARY KEY (`gene_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `seq_region` (
+  `seq_region_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `coord_system_id` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`seq_region_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `coord_system` (
+  `coord_system_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `species_id` int(10) unsigned NOT NULL,
+  `name` varchar(40) NOT NULL,
+  PRIMARY KEY (`coord_system_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `xref` (
+  `xref_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `external_db_id` int(10) unsigned NOT NULL,
+  `dbprimary_acc` varchar(512) NOT NULL,
+  `display_label` varchar(512) NOT NULL,
+  `info_type` varchar(40) NOT NULL,
+  PRIMARY KEY (`xref_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `transcript` (
+  `transcript_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `gene_id` int(10) unsigned DEFAULT NULL,
+  `seq_region_start` int(10) unsigned NOT NULL,
+  `seq_region_end` int(10) unsigned NOT NULL,
+  `seq_region_strand` tinyint(2) NOT NULL,
+  `stable_id` varchar(128) DEFAULT NULL,
+  PRIMARY KEY (`transcript_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `translation` (
+  `translation_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `transcript_id` int(10) unsigned NOT NULL,
+  `stable_id` varchar(128) DEFAULT NULL,
+  PRIMARY KEY (`translation_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `object_xref` (
+  `ensembl_id` int(10) unsigned NOT NULL,
+  `ensembl_object_type` varchar(30) NOT NULL,
+  `xref_id` int(10) unsigned NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `external_db` (
+  `external_db_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `db_name` varchar(100) NOT NULL,
+  PRIMARY KEY (`external_db_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `protein_feature` (
+  `translation_id` int(10) unsigned NOT NULL,
+  `hit_name` varchar(40) NOT NULL,
+  `analysis_id` smallint(5) unsigned NOT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE `analysis` (
+  `analysis_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
+  `logic_name` varchar(128) NOT NULL,
+  PRIMARY KEY (`analysis_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+"""
+
+# gene_id, biotype, seq_region_id, start, end, strand, display_xref_id, description, canonical, stable_id
+GENES = [
+    '1\tprotein_coding\t1\t100\t200\t1\t10\ta gene\t1001\tENSG01',
+    '2\tlncRNA\t1\t300\t400\t-1\t\\N\t\\N\t1002\tENSG02',
+    # on a scaffold, must be filtered out
+    '3\tprotein_coding\t2\t10\t20\t1\t11\ta scaffold gene\t1003\tENSG03',
+    '4\tMt_tRNA\t3\t5\t60\t1\t12\ta mito gene\t1004\tENSG04',
+    # no row in TRANSCRIPTS references gene_id 5 or transcript_id 1099 at all
+    '5\tprotein_coding\t1\t700\t800\t1\t\\N\t\\N\t1099\tENSG05',
+]
+SEQ_REGIONS = ['1\t1\t1', '2\tKI270728.1\t2', '3\tMT\t1']
+COORD_SYSTEMS = ['1\t1\tchromosome', '2\t1\tscaffold']
+
+# xref_id, external_db_id, dbprimary_acc, display_label, info_type
+XREFS = [
+    '10\t1\tHGNC:1\tGENEA\tDIRECT',
+    '11\t1\tHGNC:3\tGENEC\tDIRECT',
+    '12\t1\tHGNC:4\tMTGENE\tDIRECT',
+    # translation 2001's two swissprot accessions
+    '101\t2200\tP00002\tP00002\tDIRECT',
+    '102\t2200\tP00001\tP00001\tSEQUENCE_MATCH',
+    # translation 2002's two trembl accessions
+    '103\t2000\tA0A002\tA0A002\tDIRECT',
+    '104\t2000\tA0A001\tA0A001\tSEQUENCE_MATCH',
+    # translations 2004/2005's swissprot accessions -- deliberately out of accession order when
+    # read in transcript-stable-id order (ENST06 then ENST07), to catch a gene-level rollup that
+    # forgets to sort
+    '105\t2200\tP00009\tP00009\tDIRECT',
+    '106\t2200\tP00003\tP00003\tDIRECT',
+]
+
+# transcript_id, gene_id, seq_region_start, seq_region_end, seq_region_strand, stable_id
+TRANSCRIPTS = [
+    '1001\t1\t100\t200\t1\tENST01',
+    # a second transcript on the same gene, with no translation at all
+    '1005\t1\t150\t180\t1\tENST05',
+    '1002\t2\t300\t400\t-1\tENST02',
+    # two more transcripts on gene 2, whose translations carry swissprot accessions out of
+    # accession order -- see XREFS above
+    '1006\t2\t410\t420\t-1\tENST06',
+    '1007\t2\t430\t440\t-1\tENST07',
+    # on the scaffold gene, which _genes filters out entirely
+    '1003\t3\t10\t20\t1\tENST03',
+    '1004\t4\t5\t60\t1\tENST04',
+]
+
+# translation_id, transcript_id, stable_id
+TRANSLATIONS = [
+    '2001\t1001\tENSP01',
+    '2002\t1002\tENSP02',
+    # no xrefs and no protein features: every array column must come out null
+    '2003\t1003\tENSP03',
+    '2004\t1006\tENSP06',
+    '2005\t1007\tENSP07',
+]
+
+# ensembl_id, ensembl_object_type, xref_id
+OBJECT_XREFS = [
+    '2001\tTranslation\t101',
+    '2001\tTranslation\t102',
+    '2002\tTranslation\t103',
+    '2002\tTranslation\t104',
+    '2004\tTranslation\t105',
+    '2005\tTranslation\t106',
+]
+
+# external_db_id, db_name
+EXTERNAL_DBS = ['2200\tUniprot/SWISSPROT', '2000\tUniprot/SPTREMBL']
+
+# translation_id, hit_name, analysis_id
+PROTEIN_FEATURES = ['2001\tSignalP-noTM\t300']
+
+# analysis_id, logic_name
+ANALYSES = ['300\tsignalp']
+
+
+def write_gz(path: Path, text: str) -> None:
+    with gzip.open(path, 'wt', encoding='utf8') as handle:
+        handle.write(text)
+
+
+@pytest.fixture
+def dump_dir(tmp_path: Path) -> Path:
+    """A dump directory carrying every table the ensembl transformer reads.
+
+    Split out from `dump` below so the `ensembl()` entrypoint test can pass the directory itself
+    as `source`, the way `pts` actually calls it, rather than a `CoreDump` object.
+    """
+    write_gz(tmp_path / 'homo_sapiens_core_115_38.sql.gz', SCHEMA)
+    write_gz(tmp_path / 'gene.txt.gz', '\n'.join(GENES) + '\n')
+    write_gz(tmp_path / 'seq_region.txt.gz', '\n'.join(SEQ_REGIONS) + '\n')
+    write_gz(tmp_path / 'coord_system.txt.gz', '\n'.join(COORD_SYSTEMS) + '\n')
+    write_gz(tmp_path / 'xref.txt.gz', '\n'.join(XREFS) + '\n')
+    write_gz(tmp_path / 'transcript.txt.gz', '\n'.join(TRANSCRIPTS) + '\n')
+    write_gz(tmp_path / 'translation.txt.gz', '\n'.join(TRANSLATIONS) + '\n')
+    write_gz(tmp_path / 'object_xref.txt.gz', '\n'.join(OBJECT_XREFS) + '\n')
+    write_gz(tmp_path / 'external_db.txt.gz', '\n'.join(EXTERNAL_DBS) + '\n')
+    write_gz(tmp_path / 'protein_feature.txt.gz', '\n'.join(PROTEIN_FEATURES) + '\n')
+    write_gz(tmp_path / 'analysis.txt.gz', '\n'.join(ANALYSES) + '\n')
+    return tmp_path
+
+
+@pytest.fixture
+def dump(dump_dir: Path) -> CoreDump:
+    return CoreDump(str(dump_dir))
+
+
+def test_scaffold_genes_are_filtered_out(dump: CoreDump) -> None:
+    assert _genes(dump).collect()['id'].to_list() == ['ENSG01', 'ENSG02', 'ENSG04', 'ENSG05']
+
+
+def test_mitochondrial_genes_are_kept(dump: CoreDump) -> None:
+    frame = _genes(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG04')['chromosome'].item() == 'MT'
+
+
+def test_approved_symbol_comes_from_the_display_xref(dump: CoreDump) -> None:
+    frame = _genes(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['approvedSymbol'].item() == 'GENEA'
+
+
+def test_a_gene_without_a_display_xref_has_a_null_symbol(dump: CoreDump) -> None:
+    frame = _genes(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG02')['approvedSymbol'].item() is None
+
+
+def test_coordinates_are_integers_and_strand_is_signed(dump: CoreDump) -> None:
+    frame = _genes(dump).collect()
+    row = frame.filter(pl.col('id') == 'ENSG02')
+    assert row['start'].item() == 300
+    assert row['end'].item() == 400
+    assert row['strand'].item() == -1
+
+
+def test_all_accessions_are_kept_not_just_the_first(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    row = frame.filter(pl.col('translationId') == 'ENSP01')
+    assert sorted(row['uniprot_swissprot'].item().to_list()) == ['P00001', 'P00002']
+
+
+def test_accession_arrays_are_sorted(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    assert frame.filter(pl.col('translationId') == 'ENSP02')['uniprot_trembl'].item().to_list() == [
+        'A0A001',
+        'A0A002',
+    ]
+
+
+def test_signalp_comes_from_the_protein_feature_not_an_xref(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    assert frame.filter(pl.col('translationId') == 'ENSP01')['signalp'].item().to_list() == ['SignalP-noTM']
+
+
+def test_a_translation_with_no_xrefs_has_null_arrays(dump: CoreDump) -> None:
+    frame = _translation_values(dump).collect()
+    row = frame.filter(pl.col('translationId') == 'ENSP03')
+    assert row['uniprot_swissprot'].item() is None
+
+
+def test_canonical_transcript_strand_uses_the_published_plus_minus(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['canonicalTranscript'].struct.field('strand').item() == '+'
+    assert frame.filter(pl.col('id') == 'ENSG02')['canonicalTranscript'].struct.field('strand').item() == '-'
+
+
+def test_canonical_transcript_id_comes_from_the_gene_table(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['canonicalTranscript'].struct.field('id').item() == 'ENST01'
+
+
+def test_transcripts_are_sorted_by_stable_id(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    ids = [t['id'] for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()]
+    assert ids == sorted(ids)
+
+
+def test_transcript_keeps_the_full_accession_array(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert sorted(transcripts['ENST01']['uniprot_swissprot']) == ['P00001', 'P00002']
+
+
+def test_translations_carry_the_stable_id(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert [t['id'] for t in transcripts['ENST01']['translations']] == ['ENSP01']
+
+
+def test_gene_level_arrays_are_deduplicated_and_sorted(dump: CoreDump) -> None:
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG01')['uniprot_swissprot'].item().to_list() == ['P00001', 'P00002']
+
+
+def test_gene_level_arrays_are_sorted_by_accession_not_by_transcript_order(dump: CoreDump) -> None:
+    """ENSG02's transcripts, in stable-id order, contribute P00009 then P00003.
+
+    A rollup that only dedupes without sorting would emit them in that (wrong) order.
+    """
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG02')['uniprot_swissprot'].item().to_list() == ['P00003', 'P00009']
+
+
+def test_a_field_with_no_values_is_null_not_an_empty_array(dump: CoreDump) -> None:
+    """Aggregating an all-null group yields [], and the JSON route produced null."""
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert transcripts['ENST01']['uniprot_isoform'] is None
+
+
+def test_a_transcript_with_no_translation_has_an_empty_translations_array(dump: CoreDump) -> None:
+    """The JSON route this replaces always produced [], never null, for `.translations`.
+
+    `target.py::_build_ensembl` flattens `transcripts.translations` with spark's `flatten`, which
+    returns null -- not just skips -- when any element of the outer array is null. A null here
+    would silently empty out every ensembl_PRO id for the whole gene.
+    """
+    frame = _build(dump).collect()
+    transcripts = {t['id']: t for t in frame.filter(pl.col('id') == 'ENSG01')['transcripts'].item()}
+    assert transcripts['ENST05']['translations'] == []
+
+
+def test_a_gene_with_no_transcripts_has_an_empty_transcripts_array(dump: CoreDump) -> None:
+    """The same null-vs-[] asymmetry one level up: `ENSG05` has no row in TRANSCRIPTS at all."""
+    frame = _build(dump).collect()
+    assert frame.filter(pl.col('id') == 'ENSG05')['transcripts'].item().to_list() == []
+
+
+def test_no_exons_or_biotype_on_the_transcript_struct(dump: CoreDump) -> None:
+    """Both are dead on main: canonicalExons and biotype come from output/transcript."""
+    frame = _build(dump).collect()
+    transcripts_dtype = frame.schema['transcripts']
+    assert isinstance(transcripts_dtype, pl.List)
+    inner = transcripts_dtype.inner
+    assert isinstance(inner, pl.Struct)
+    fields = {f.name for f in inner.fields}
+    assert fields == {'id', 'uniprot_swissprot', 'uniprot_trembl', 'uniprot_isoform', 'alphafold', 'translations'}
+
+
+def test_gene_dictionary_is_unfiltered_including_scaffolds(dump: CoreDump) -> None:
+    """Nothing here may apply `_genes`'s chromosome filter.
+
+    `_build_homologues` resolves human paralog symbols through this dictionary, and paralogs land
+    on scaffolds -- exactly what that filter excludes.
+    """
+    dictionary_ids = _gene_dictionary(dump).collect()['id'].to_list()
+    gene_ids = _genes(dump).collect()['id'].to_list()
+    assert 'ENSG03' in dictionary_ids
+    assert 'ENSG03' not in gene_ids
+
+
+def test_ensembl_entrypoint_reads_destination_keys_and_writes_both_datasets(dump_dir: Path) -> None:
+    """Pins the contract nothing else exercises.
+
+    `ensembl()` reads its two `destination` dict keys and writes both outputs as datasets
+    `scan_dataset` can read back.
+    """
+    destination = {
+        'genes': str(dump_dir / 'out' / 'genes'),
+        'gene_dictionary': str(dump_dir / 'out' / 'gene_dictionary'),
+    }
+
+    ensembl(str(dump_dir), destination, {}, cast(Config, object()))
+
+    genes = scan_dataset(destination['genes']).collect()
+    dictionary = scan_dataset(destination['gene_dictionary']).collect()
+    assert set(genes['id'].to_list()) == {'ENSG01', 'ENSG02', 'ENSG04', 'ENSG05'}
+    assert 'ENSG03' in dictionary['id'].to_list()

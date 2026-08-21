@@ -108,7 +108,6 @@ def target(
 
     # --- read inputs --------------------------------------------------------
     ensembl_raw = spark.read.parquet(source['ensembl'])
-    gene_code_raw = spark.read.option('sep', '\t').option('comment', '#').csv(source['gene_code'])
     hgnc_raw = spark.read.option('multiline', 'true').json(source['hgnc'])
     hallmarks_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['hallmarks'])
     ncbi_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['ncbi'])
@@ -134,11 +133,8 @@ def target(
     uniprot_ssl_raw = spark.read.option('sep', '\t').option('header', 'true').csv(source['uniprot_ssl'])
 
     # --- intermediate DataFrames --------------------------------------------
-    logger.info('Building GeneCode canonical transcripts')
-    gene_code = _build_gene_code(gene_code_raw)
-
     logger.info('Building Ensembl genes')
-    ensembl_df = _build_ensembl(ensembl_raw, gene_code)
+    ensembl_df = _build_ensembl(ensembl_raw)
 
     logger.info('Building HGNC')
     hgnc_df = _build_hgnc(hgnc_raw)
@@ -252,54 +248,6 @@ def target(
 
 
 # ===========================================================================
-# GeneCode.scala → _build_gene_code
-# ===========================================================================
-
-
-def _build_gene_code(df: DataFrame) -> DataFrame:
-    """Extract canonical transcripts from GFF3 gene-code file.
-
-    Args:
-        df: Raw GFF3 DataFrame (tab-separated, no header, no comment lines).
-
-    Returns:
-        DataFrame with [id, canonicalTranscript{id, chromosome, start, end, strand}].
-    """
-    return (
-        df
-        .filter((f.col('_c2') == 'transcript') & f.col('_c8').contains('Ensembl_canonical'))
-        .select(
-            f.regexp_extract(f.col('_c8'), r'gene_id=(.*?);', 1).alias('gene_id_raw'),
-            f.regexp_extract(f.col('_c8'), r'transcript_id=(.*?);', 1).alias('transcript_id_raw'),
-            f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)', 1).alias('chromosome_raw'),
-            f.col('_c3').cast(LongType()).alias('start'),
-            f.col('_c4').cast(LongType()).alias('end'),
-            f.col('_c6').alias('strand'),
-        )
-        .select(
-            f.regexp_extract(f.col('gene_id_raw'), r'(.*?)\.', 1).alias('id'),
-            f.regexp_extract(f.col('transcript_id_raw'), r'(.*?)\.', 1).alias('ct_id'),
-            f.when(f.col('chromosome_raw') == 'M', 'MT').otherwise(f.col('chromosome_raw')).alias('chromosome'),
-            'start',
-            'end',
-            'strand',
-        )
-        .distinct()
-        .select(
-            'id',
-            f.struct(
-                f.col('ct_id').alias('id'),
-                f.col('chromosome'),
-                f.col('start'),
-                f.col('end'),
-                f.col('strand'),
-            ).alias('canonicalTranscript'),
-        )
-        .withColumnRenamed('id', 'gene_id')
-    )
-
-
-# ===========================================================================
 # Ensembl.scala → _filter_ensembl / _build_ensembl
 # ===========================================================================
 
@@ -318,16 +266,16 @@ def _filter_ensembl(df: DataFrame) -> DataFrame:
     )
 
 
-def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
+def _build_ensembl(df: DataFrame) -> DataFrame:
     """Build the Ensembl gene DataFrame.
 
-    Applies canonical chromosome filter, joins canonical transcript from GeneCode
-    (kept internally to derive ``tss``, dropped from the final target output),
-    parses protein IDs and signalP, and deduplicates by id.
+    Applies canonical chromosome filter, carries the canonical transcript struct
+    through from the input parquet (kept internally to derive ``tss``, dropped
+    from the final target output), parses protein IDs and signalP, and
+    deduplicates by id.
 
     Args:
         df: Raw Ensembl parquet (from intermediate/target/ensembl/homo_sapiens.parquet).
-        gene_code: Canonical transcript lookup from _build_gene_code.
 
     Returns:
         Ensembl DataFrame with structured fields.
@@ -346,6 +294,7 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
             f.col('strand').cast(IntegerType()).alias('strand'),
             f.col('chromosome'),
             f.col('approvedSymbol'),
+            f.col('canonicalTranscript'),
             # translations: flatten transcripts[*].translations[*] into a top-level array
             # so _refactor_ensembl_protein_ids can build ensembl_PRO protein IDs
             (f.flatten(f.col('transcripts.translations')) if has_transcripts else f.lit(None)).alias('translations'),
@@ -356,13 +305,6 @@ def _build_ensembl(df: DataFrame, gene_code: DataFrame) -> DataFrame:
         .orderBy('id')
         .dropDuplicates(['id'])
     )
-
-    # Join canonical transcript (kept internally for tss; dropped from final output)
-    ensembl = ensembl.join(
-        gene_code.withColumnRenamed('gene_id', 'ct_gene_id'),
-        (ensembl['id'] == f.col('ct_gene_id')) & (ensembl['chromosome'] == f.col('canonicalTranscript.chromosome')),
-        'left_outer',
-    ).drop('ct_gene_id')
 
     # Build genomicLocation struct
     ensembl = ensembl.withColumn(

@@ -843,9 +843,26 @@ steps:
       source: https://www.probes-drugs.org/media/download/id_mapping/pd_export_${probes_drugs_version}_links_standardized.csv
       destination: input/target/chemicalprobes/probes_links.csv
 
-    - name: copy ensembl
-      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/homo_sapiens/homo_sapiens.json
-      destination: input/target/ensembl/homo_sapiens.json
+    - name: copy ensembl core schema
+      source: https://ftp.ebi.ac.uk/pub/ensembl/release-${ensembl_version}/mysql/homo_sapiens_core_${ensembl_version}_38/homo_sapiens_core_${ensembl_version}_38.sql.gz
+      destination: input/target/ensembl/core/homo_sapiens_core_${ensembl_version}_38.sql.gz
+
+    - name: copy ensembl core tables
+      foreach:
+        - analysis
+        - coord_system
+        - external_db
+        - gene
+        - object_xref
+        - protein_feature
+        - seq_region
+        - transcript
+        - translation
+        - xref
+      do:
+        - name: copy ensembl core ${each}
+          source: https://ftp.ebi.ac.uk/pub/ensembl/release-${ensembl_version}/mysql/homo_sapiens_core_${ensembl_version}_38/${each}.txt.gz
+          destination: input/target/ensembl/core/${each}.txt.gz
 
     - name: copy gencode
       source: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_${gencode_version}/gencode.v${gencode_version}.annotation.gff3.gz
@@ -913,7 +930,6 @@ steps:
         - rattus_norvegicus
         - sus_scrofa
         - xenopus_tropicalis
-        - homo_sapiens
       do:
         - name: copy ${each} gene dictionary
           source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/${each}/${each}.json
@@ -924,6 +940,19 @@ steps:
         - name: copy ${each} ncrna homology
           source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/${each}/Compara.${ensembl_version}.ncrna_default.homologies.tsv.gz
           destination: input/target/homologue/homologies/ncrna-${each}.tsv.gz
+
+    # homo_sapiens stays out of the foreach above: its gene dictionary now comes from the
+    # ensembl core tables via the ensembl transformer, and running it through the loop would
+    # have the gene-dictionary task collide with that transformer's destination. The two
+    # human Compara homology downloads below have no such replacement, so they are kept as
+    # standalone tasks rather than folded back into the loop.
+    - name: copy homo_sapiens protein homology
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/homo_sapiens/Compara.${ensembl_version}.protein_default.homologies.tsv.gz
+      destination: input/target/homologue/homologies/protein-homo_sapiens.tsv.gz
+
+    - name: copy homo_sapiens ncrna homology
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/homo_sapiens/Compara.${ensembl_version}.ncrna_default.homologies.tsv.gz
+      destination: input/target/homologue/homologies/ncrna-homo_sapiens.tsv.gz
 
     - name: copy homology ensembl vertebrates
       source: https://ftp.ensembl.org/pub/release-${ensembl_version}/species_EnsemblVertebrates.txt

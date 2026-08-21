@@ -15,6 +15,7 @@ from pyspark.sql.types import (
 )
 
 from pts.pyspark.target import (
+    _build_ensembl,
     _build_gene_ontology,
     _build_gene_with_location,
     _build_genetic_constraints,
@@ -125,6 +126,130 @@ def test_ensembl_filters_non_ensg(spark):
     ids = {row.id for row in result.collect()}
     assert 'ENSG00000006' in ids
     assert 'LRG_71' not in ids
+
+
+def test_build_ensembl_takes_canonical_transcript_from_the_frame(spark):
+    """The canonicalTranscript struct arrives in the parquet; there is no GENCODE join any more."""
+    transcript_struct = StructType([
+        StructField('id', StringType()),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('uniprot_isoform', ArrayType(StringType())),
+        StructField('alphafold', ArrayType(StringType())),
+        StructField('translations', ArrayType(StructType([StructField('id', StringType())]))),
+    ])
+    schema = StructType([
+        StructField('id', StringType()),
+        StructField('biotype', StringType()),
+        StructField('description', StringType()),
+        StructField('chromosome', StringType()),
+        StructField('start', LongType()),
+        StructField('end', LongType()),
+        StructField('strand', IntegerType()),
+        StructField('approvedSymbol', StringType()),
+        StructField('SignalP', ArrayType(StringType())),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('canonicalTranscript', StructType([
+            StructField('id', StringType()),
+            StructField('chromosome', StringType()),
+            StructField('start', LongType()),
+            StructField('end', LongType()),
+            StructField('strand', StringType()),
+        ])),
+        StructField('transcripts', ArrayType(transcript_struct)),
+    ])
+    row = (
+        'ENSG00000001', 'protein_coding', 'a gene [Source:HGNC Symbol]', '1', 100, 200, 1, 'GENEA',
+        ['SignalP-noTM'], ['P00001'], [],
+        ('ENST00000001', '1', 100, 200, '+'),
+        [('ENST00000001', ['P00001'], [], [], ['AF-P00001-F1'], [('ENSP00000001',)])],
+    )
+    df = spark.createDataFrame([row], schema)
+
+    result = _build_ensembl(df).collect()[0]
+
+    # canonicalTranscript passes straight through from the parquet, +/- spelling intact
+    assert result.canonicalTranscript.id == 'ENST00000001'
+    assert result.canonicalTranscript.strand == '+'
+    # genomicLocation is still assembled from the gene-level coordinates
+    assert result.genomicLocation.chromosome == '1'
+    assert result.genomicLocation.start == 100
+    # proteinIds still come from the uniprot arrays plus the flattened translations
+    protein_ids = {(p.id, p.source) for p in result.proteinIds}
+    assert ('P00001', 'uniprot_swissprot') in protein_ids
+    assert ('ENSP00000001', 'ensembl_PRO') in protein_ids
+    # signalP is still mapped to {id, source} structs
+    assert [(s.id, s.source) for s in result.signalP] == [('SignalP-noTM', 'signalP')]
+
+
+@pytest.mark.parametrize(
+    ('untranslated_translations', 'expect_ensembl_pro'),
+    [
+        pytest.param([], True, id='empty-list'),
+        pytest.param(None, False, id='null'),
+    ],
+)
+def test_build_ensembl_protein_ids_depend_on_translations_being_a_list_not_null(
+    spark, untranslated_translations, expect_ensembl_pro
+):
+    """Pins the exact Spark semantics that make `[]` mandatory and `None` a whole-gene defect.
+
+    `_refactor_ensembl_protein_ids` builds `ensembl_PRO` ids from `flatten(transcripts.translations)`.
+    Spark's `flatten` returns null for the *entire* array if any one element is null -- it does not
+    just skip that element -- so a single untranslated transcript whose `translations` is `None`
+    wipes out every `ensembl_PRO` id on the gene, not only its own. An empty list element has no
+    such effect: `flatten` treats it as contributing nothing and the other transcript's id survives.
+
+    This is why the producer (`_transcripts` in `pts/transformers/ensembl.py`) must emit `[]` for an
+    untranslated transcript rather than `None` -- see the producer-side test
+    `test_a_transcript_with_no_translation_has_an_empty_translations_array` in `test_ensembl.py`.
+    """
+    transcript_struct = StructType([
+        StructField('id', StringType()),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('uniprot_isoform', ArrayType(StringType())),
+        StructField('alphafold', ArrayType(StringType())),
+        StructField('translations', ArrayType(StructType([StructField('id', StringType())]))),
+    ])
+    schema = StructType([
+        StructField('id', StringType()),
+        StructField('biotype', StringType()),
+        StructField('description', StringType()),
+        StructField('chromosome', StringType()),
+        StructField('start', LongType()),
+        StructField('end', LongType()),
+        StructField('strand', IntegerType()),
+        StructField('approvedSymbol', StringType()),
+        StructField('SignalP', ArrayType(StringType())),
+        StructField('uniprot_swissprot', ArrayType(StringType())),
+        StructField('uniprot_trembl', ArrayType(StringType())),
+        StructField('canonicalTranscript', StructType([
+            StructField('id', StringType()),
+            StructField('chromosome', StringType()),
+            StructField('start', LongType()),
+            StructField('end', LongType()),
+            StructField('strand', StringType()),
+        ])),
+        StructField('transcripts', ArrayType(transcript_struct)),
+    ])
+    row = (
+        'ENSG00000002', 'protein_coding', 'a gene [Source:HGNC Symbol]', '1', 100, 200, 1, 'GENEB',
+        None, [], [],
+        ('ENST00000010', '1', 100, 200, '+'),
+        [
+            ('ENST00000010', [], [], [], [], [('ENSP00000001',)]),
+            # the untranslated transcript -- the parametrized shape under test
+            ('ENST00000011', [], [], [], [], untranslated_translations),
+        ],
+    )
+    df = spark.createDataFrame([row], schema)
+
+    result = _build_ensembl(df).collect()[0]
+
+    protein_ids = {(p.id, p.source) for p in result.proteinIds}
+    assert (('ENSP00000001', 'ensembl_PRO') in protein_ids) == expect_ensembl_pro
 
 
 # ---------------------------------------------------------------------------
