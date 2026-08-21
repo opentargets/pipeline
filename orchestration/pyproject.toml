@@ -19,6 +19,7 @@ dependencies = [
   "deepdiff>=9.1.0",
   "deepmerge>=2.1.0",
   "pydantic>=2.13.4",
+  "google-cloud-bigquery>=3.42.1",
 ]
 
 
