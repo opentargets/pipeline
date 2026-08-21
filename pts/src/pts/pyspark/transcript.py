@@ -14,41 +14,9 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import IntegerType, LongType
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.common.utils import gff3_strand, maybe_coalesce
 
 INCLUDE_CHROMOSOMES = [str(i) for i in range(1, 23)] + ['X', 'Y', 'MT']
-
-
-def _strand(col: Column) -> Column:
-    """Translate a GFF3 strand character into Ensembl's signed integer encoding.
-
-    Ensembl's core database stores strand as ``seq_region_strand`` -- 1 or -1 --
-    on gene, transcript and exon alike, and the release follows the database.
-    GFF3 spells the same fact as ``+``/``-`` in column 7, so the convention is
-    translated here, at this module's parse boundary, and no ``+``/``-`` reaches
-    anything this module publishes.
-
-    That is a statement about this module, not the repo: ``target.py`` parses the
-    same GFF3 independently (``_build_gene_code``) and keeps the string form for
-    its own internal ``canonicalTranscript``, which it drops before writing.
-
-    Mapped explicitly rather than cast: a GFF3 feature may also be unstranded
-    (``.``) or of unknown strand (``?``), and those must become null. Casting
-    ``.`` yields 0 in non-ANSI Spark -- a third, non-existent strand -- while
-    ``?`` yields null, so a cast is wrong in one case and accidental in the other.
-
-    Args:
-        col: GFF3 column 7.
-
-    Returns:
-        IntegerType column holding 1, -1, or null. Only exact ``+`` and ``-``
-        map; whitespace-padded or otherwise unexpected input becomes null.
-    """
-    return (
-        f.when(col == '+', f.lit(1))
-        .when(col == '-', f.lit(-1))
-        .cast(IntegerType())
-    )
 
 
 def transcript(
@@ -118,7 +86,7 @@ def _parse_gff3(df: DataFrame) -> DataFrame:
             f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)$', 1).alias('_chrom_raw'),
             f.col('_c3').cast(LongType()).alias('start'),
             f.col('_c4').cast(LongType()).alias('end'),
-            _strand(f.col('_c6')).alias('strand'),
+            gff3_strand(f.col('_c6')).alias('strand'),
             f.coalesce(f.array_contains(tags, 'Ensembl_canonical'), f.lit(False)).alias('isEnsemblCanonical'),
             tags.alias('_tags'),
         )
@@ -212,7 +180,7 @@ def _parse_exons(df: DataFrame) -> DataFrame:
             f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)$', 1).alias('_chrom_raw'),
             f.col('_c3').cast(LongType()).alias('start'),
             f.col('_c4').cast(LongType()).alias('end'),
-            _strand(f.col('_c6')).alias('strand'),
+            gff3_strand(f.col('_c6')).alias('strand'),
         )
         .withColumn('chromosome',
             f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw'))

@@ -15,6 +15,8 @@ from pyspark.sql.types import (
 )
 
 from pts.pyspark.target import (
+    _add_tss,
+    _build_gene_code,
     _build_gene_ontology,
     _build_gene_with_location,
     _build_genetic_constraints,
@@ -854,3 +856,125 @@ class TestProteinClassification:
             logger.remove(sink_id)
 
         assert messages == []
+
+
+# ---------------------------------------------------------------------------
+# _build_gene_code / _add_tss
+#
+# Both were entirely uncovered until the strand encoding was unified. They are
+# coupled: `_build_gene_code` decides how strand is spelled and `_add_tss` reads
+# that spelling, with no `otherwise` to fall back on. A disagreement between them
+# does not raise -- it empties `tss` for every gene -- so the coupling itself is
+# what these tests pin, not just the two functions separately.
+# ---------------------------------------------------------------------------
+
+GENE_CODE_GFF3_SCHEMA = StructType([
+    StructField(f'_c{i}', StringType()) for i in range(9)
+])
+
+_CT_ATTRS = 'gene_id=ENSG00000141510.16;transcript_id=ENST00000269305.9;tag=Ensembl_canonical'
+
+
+def _gene_code_row(chrom='chr17', start=7661779, end=7687538, strand='-', attrs=_CT_ATTRS):
+    return Row(
+        _c0=chrom, _c1='HAVANA', _c2='transcript',
+        _c3=str(start), _c4=str(end), _c5='.', _c6=strand, _c7='.', _c8=attrs,
+    )
+
+
+def test_build_gene_code_strand_is_signed_integer(spark):
+    """GENCODE's +/- is translated to Ensembl's 1/-1 on the way in."""
+    rows = [
+        _gene_code_row(strand='-'),
+        _gene_code_row(strand='+', attrs=_CT_ATTRS.replace('ENSG00000141510', 'ENSG00000000001')),
+    ]
+    result = _build_gene_code(spark.createDataFrame(rows, GENE_CODE_GFF3_SCHEMA))
+
+    ct_type = result.schema['canonicalTranscript'].dataType
+    assert isinstance(ct_type, StructType)
+    assert ct_type['strand'].dataType == IntegerType()
+
+    strands = {r.gene_id: r.canonicalTranscript.strand for r in result.collect()}
+    assert strands == {'ENSG00000141510': -1, 'ENSG00000000001': 1}
+
+
+def test_build_gene_code_unstranded_feature_is_null(spark):
+    """An unstranded GENCODE feature yields null rather than a third strand value."""
+    rows = [_gene_code_row(strand='.')]
+    row = _build_gene_code(spark.createDataFrame(rows, GENE_CODE_GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.canonicalTranscript.strand is None
+
+
+def _with_canonical_transcript(spark, strand, start=100, end=200):
+    """One gene row carrying a canonicalTranscript struct, or null when strand is None."""
+    schema = StructType([
+        StructField('id', StringType()),
+        StructField('canonicalTranscript', StructType([
+            StructField('id', StringType()),
+            StructField('chromosome', StringType()),
+            StructField('start', LongType()),
+            StructField('end', LongType()),
+            StructField('strand', IntegerType()),
+        ])),
+    ])
+    ct = None if strand == 'MISSING' else Row(
+        id='ENST1', chromosome='17', start=start, end=end, strand=strand,
+    )
+    return spark.createDataFrame([Row(id='ENSG1', canonicalTranscript=ct)], schema)
+
+
+def test_add_tss_forward_strand_uses_start(spark):
+    """A forward-strand gene starts transcribing at `start`."""
+    row = _add_tss(_with_canonical_transcript(spark, 1)).first()
+    assert row is not None
+    assert row.tss == 100
+
+
+def test_add_tss_reverse_strand_uses_end(spark):
+    """A reverse-strand gene starts transcribing at `end`."""
+    row = _add_tss(_with_canonical_transcript(spark, -1)).first()
+    assert row is not None
+    assert row.tss == 200
+
+
+def test_add_tss_null_strand_yields_null(spark):
+    """No `otherwise`: an unstranded gene gets no TSS rather than an invented one."""
+    row = _add_tss(_with_canonical_transcript(spark, None)).first()
+    assert row is not None
+    assert row.tss is None
+
+
+def test_add_tss_missing_canonical_transcript_yields_null(spark):
+    """A gene the GENCODE join missed carries no TSS."""
+    row = _add_tss(_with_canonical_transcript(spark, 'MISSING')).first()
+    assert row is not None
+    assert row.tss is None
+
+
+def test_add_tss_drops_canonical_transcript(spark):
+    """The internal canonicalTranscript struct must not reach the output."""
+    result = _add_tss(_with_canonical_transcript(spark, 1))
+    assert 'canonicalTranscript' not in result.columns
+
+
+def test_gene_code_and_tss_agree_on_the_strand_encoding(spark):
+    """The two halves must speak the same encoding end to end.
+
+    This is the test that would have caught the failure the old code was one
+    edit away from: `_add_tss` comparing against a spelling `_build_gene_code`
+    no longer produces yields null for every gene, with no error anywhere.
+    """
+    rows = [
+        _gene_code_row(strand='+', start=7661779, end=7687538),
+        _gene_code_row(
+            strand='-', start=1000, end=2000,
+            attrs=_CT_ATTRS.replace('ENSG00000141510', 'ENSG00000000001'),
+        ),
+    ]
+    gene_code = _build_gene_code(spark.createDataFrame(rows, GENE_CODE_GFF3_SCHEMA))
+    result = _add_tss(gene_code.withColumnRenamed('gene_id', 'id'))
+
+    tss = {r.id: r.tss for r in result.collect()}
+    assert tss == {'ENSG00000141510': 7661779, 'ENSG00000000001': 2000}
+    assert all(v is not None for v in tss.values())
