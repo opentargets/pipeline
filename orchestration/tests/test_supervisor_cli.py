@@ -26,6 +26,7 @@ def _usage(
     run: str = 'r',
     currency: str = 'GBP',
     product: str | None = 'platform',
+    shared: bool = False,
 ) -> StepUsage:
     return StepUsage(
         run=run,
@@ -37,6 +38,7 @@ def _usage(
         span_hours=2.0,
         net_cost=net_cost,
         currency=currency,
+        shared_cluster=shared,
     )
 
 
@@ -130,6 +132,16 @@ class TestOptionalColumns:
         """An unlabelled row next to a labelled one is exactly the ambiguity to surface."""
         assert optional_columns([_usage(), _usage(product=None)]) == ['product']
 
+    def test_shared_appears_as_soon_as_one_row_is_flagged(self) -> None:
+        assert optional_columns([_usage(), _usage(shared=True)]) == ['shared']
+
+    def test_shared_still_appears_when_every_row_is_flagged(self) -> None:
+        """All rows shared is the worst case, not a uniform one to be hidden as noise."""
+        assert optional_columns([_usage(shared=True), _usage(shared=True)]) == ['shared']
+
+    def test_shared_stays_hidden_when_nothing_is_flagged(self) -> None:
+        assert optional_columns([_usage(), _usage()]) == []
+
 
 class TestIncomparableRowsAreLabelled:
     def test_rows_in_different_currencies_carry_their_currency(self) -> None:
@@ -154,6 +166,21 @@ class TestIncomparableRowsAreLabelled:
         out = render_table([_usage(product='ppp'), _usage(currency='USD')])
         header, rule, row = out.splitlines()[:3]
         assert len(row) == len(header) == len(rule)
+
+    def test_a_shared_cluster_row_is_marked_and_explained(self) -> None:
+        """The number on a shared row is the cluster's cost, not the step's."""
+        out = render_table([_usage(step='pts_reactome'), _usage(step='pts_ontoma', shared=True)])
+        rows = {line.split()[0]: line.split()[2] for line in out.splitlines() if line.startswith('pts_')}
+        assert rows == {'pts_reactome': '-', 'pts_ontoma': 'yes'}
+        assert 'shared' in out.splitlines()[0]
+        assert "not that step's own" in out
+        assert 'Dataproc Jobs API' in out
+
+    def test_an_unshared_table_is_unchanged(self) -> None:
+        """The common case must not grow a column of dashes."""
+        out = render_table([_usage(net_cost=1.5), _usage(net_cost=2.5)])
+        assert 'shared' not in out
+        assert out.splitlines()[0] == f'{"step":<20} {"tool":<9} {"span (h)":>9} {"net cost":>10}'
 
     def test_no_currency_column_when_they_all_match(self) -> None:
         out = render_table([_usage(net_cost=1.5), _usage(net_cost=2.5)])
@@ -284,6 +311,7 @@ def _usage_row(**kw: Any) -> SimpleNamespace:
         'span_hours': 12.0,
         'net_cost': 21.60,
         'currency': 'GBP',
+        'shared_cluster': False,
     }
     base.update(kw)
     return SimpleNamespace(**base)
@@ -370,6 +398,7 @@ class TestJsonOutput:
         payload = json.loads(_usage().model_dump_json())
         assert payload['step'] == 'pts_target'
         assert payload['net_cost'] == 1.5
+        assert payload['shared_cluster'] is False
 
     def test_json_does_not_pay_for_the_coverage_query(
         self, client: MagicMock, capsys: pytest.CaptureFixture[str]

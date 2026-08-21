@@ -40,6 +40,7 @@ class TestStepUsage:
             span_hours=2.0,
             net_cost=1.5,
             currency='GBP',
+            shared_cluster=False,
         )
         assert u.step == 'pts_target'
         assert u.span_hours == 2.0
@@ -56,6 +57,7 @@ class TestStepUsage:
                 'span_hours': 1.0,
                 'net_cost': 0.1,
                 'currency': 'GBP',
+                'shared_cluster': False,
             })
 
     def test_product_may_be_missing(self) -> None:
@@ -70,6 +72,7 @@ class TestStepUsage:
             'span_hours': 1.0,
             'net_cost': 0.1,
             'currency': 'GBP',
+            'shared_cluster': False,
         })
         assert u.product is None
 
@@ -85,6 +88,7 @@ class TestStepUsage:
             span_hours=1.0,
             net_cost=-0.02,
             currency='GBP',
+            shared_cluster=False,
         )
         assert u.net_cost < 0
 
@@ -146,7 +150,8 @@ def _aggregate_expressions(sql: str) -> dict[str, str]:
     """Map each column the aggregate SELECT produces to the expression behind it.
 
     A bare column maps to itself, so `currency` selected directly and `currency`
-    collapsed with `ANY_VALUE` are distinguishable.
+    collapsed with `ANY_VALUE` are distinguishable. Takes the aggregate on its own, not
+    a full query: the CTEs select `FROM labelled` too.
     """
     select_block = sql.split('FROM labelled', maxsplit=1)[0]
     expressions = {}
@@ -163,10 +168,14 @@ def _aggregate_expressions(sql: str) -> dict[str, str]:
 
 
 def _group_by_columns(sql: str) -> set[str]:
-    """The columns the aggregate groups by."""
-    clause = re.search(r'^GROUP BY (.+)$', sql, flags=re.MULTILINE)
-    assert clause is not None, 'the aggregate must have a GROUP BY'
-    return {column.strip() for column in clause.group(1).split(',')}
+    """The columns the aggregate groups by.
+
+    The last `GROUP BY` in the text, because `cluster_steps` has one of its own and it
+    comes first.
+    """
+    clauses = re.findall(r'^GROUP BY (.+)$', sql, flags=re.MULTILINE)
+    assert clauses, 'the aggregate must have a GROUP BY'
+    return {column.strip() for column in clauses[-1].split(',')}
 
 
 def _selected_columns(sql: str) -> set[str]:
@@ -188,6 +197,7 @@ class TestLabelExtraction:
             'step': 'step',
             'tool': 'tool',
             'product': 'product',
+            'cluster': 'goog-dataproc-cluster-name',
         }
 
     def test_the_extractor_actually_finds_the_keys(self) -> None:
@@ -223,6 +233,15 @@ class TestAggregate:
         parsed = _aggregate_expressions('SELECT\n  a,\n  MIN(x) AS b\nFROM labelled')
         assert parsed == {'a': 'a', 'b': 'MIN(x)'}
 
+    def test_the_ordering_is_total(self) -> None:
+        """`started` alone ties constantly: the export buckets by the hour.
+
+        Steps that began in the same hour then come back in whatever order the plan
+        happened to produce, so the same run rendered twice comes out in two different
+        orders. The tie-break is what makes two runs of the report diffable.
+        """
+        assert 'ORDER BY started, run, step' in _AGGREGATE
+
     def test_currency_is_grouped_rather_than_collapsed(self) -> None:
         """`ANY_VALUE(currency)` over a mixed group stamps one currency on a mixed sum."""
         assert _aggregate_expressions(_AGGREGATE)['currency'] == 'currency'
@@ -239,6 +258,67 @@ class TestAggregate:
             if column == expression
         }
         assert bare == _group_by_columns(_AGGREGATE)
+
+
+def _cluster_steps_cte(sql: str) -> str:
+    """The body of the `cluster_steps` CTE, which counts the steps sharing a cluster."""
+    block = re.search(r'cluster_steps AS \((.*?)\n\)', sql, flags=re.DOTALL)
+    assert block is not None, 'the sharing count must live in its own CTE'
+    return block.group(1)
+
+
+class TestClusterSharing:
+    """Dataproc clusters are created with `use_if_exists=True` and never relabelled.
+
+    A cluster serving several steps bills all its hours to whichever step created it, so
+    those rows are not the step's own cost. Detected and flagged, never re-apportioned.
+    """
+
+    def test_the_cluster_name_label_is_read(self) -> None:
+        assert _label_aliases(_LABELLED_CTE)['cluster'] == 'goog-dataproc-cluster-name'
+
+    def test_the_count_is_taken_before_the_predicate_is_applied(self) -> None:
+        """This is the whole feature.
+
+        Counting a cluster's steps after `step = @step` would see exactly one step every
+        time, so no history would ever report a shared cluster and the flag would be
+        uniformly false with nothing to show it had failed.
+        """
+        for sql, _ in (
+            run_usage_query(TABLE, run='r', since=date(2026, 5, 1)),
+            step_history_query(TABLE, step='pts_target', since=date(2026, 5, 1)),
+        ):
+            cte = _cluster_steps_cte(sql)
+            assert '@run' not in cte
+            assert '@step' not in cte
+            assert 'COUNT(DISTINCT step)' in cte
+            assert 'GROUP BY run, cluster' in cte
+
+    def test_both_queries_count_sharing_identically(self) -> None:
+        """A history and a run report of the same rows must not disagree on the flag."""
+        usage_sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        history_sql, _ = step_history_query(TABLE, step='s', since=date(2026, 5, 1))
+        assert _cluster_steps_cte(usage_sql) == _cluster_steps_cte(history_sql)
+
+    def test_the_flag_needs_more_than_one_step(self) -> None:
+        """Without the `> 1`, every step on any cluster is flagged and the mark is noise."""
+        assert _aggregate_expressions(_AGGREGATE)['shared_cluster'] == (
+            'IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE)'
+        )
+
+    def test_the_count_is_joined_on_the_run_and_the_cluster(self) -> None:
+        """Joining on the cluster alone would flag a run for another run's sharing."""
+        assert 'LEFT JOIN cluster_steps ON run = cluster_run AND cluster = cluster_name' in _AGGREGATE
+
+    def test_a_step_on_no_cluster_is_not_flagged(self) -> None:
+        """GCE steps join to nothing, and a null must read as unshared rather than unknown."""
+        assert 'IFNULL' in _aggregate_expressions(_AGGREGATE)['shared_cluster']
+        assert 'LEFT JOIN' in _AGGREGATE
+
+    def test_the_cte_extractor_actually_finds_the_block(self) -> None:
+        """Guard the guard: a parser that matched nothing would assert nothing."""
+        sample = 'WITH a AS (\n  SELECT 1\n),\ncluster_steps AS (\n  SELECT 2\n)\n'
+        assert _cluster_steps_cte(sample).strip() == 'SELECT 2'
 
 
 class TestSelectMatchesTheModel:
@@ -347,6 +427,7 @@ def _row(**kw: object) -> SimpleNamespace:
         'span_hours': 2.0,
         'net_cost': 1.5,
         'currency': 'GBP',
+        'shared_cluster': False,
     }
     base.update(kw)
     return SimpleNamespace(**base)

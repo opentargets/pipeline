@@ -16,6 +16,13 @@ Not every pound the pipeline spends carries a `step` label, either. Google Batch
 unlabelled and some Dataproc disk and licensing rows fall outside the step's labels, so
 the per-step figures are a subset of pipeline spend, never all of it. `window_coverage`
 measures that subset against everything the pipeline billed over the same period.
+
+Nor is every labelled pound the labelled step's own. A Dataproc cluster is created with
+`use_if_exists=True` and never relabelled, so when several steps share one, its hours are
+billed against whichever step created it. `shared_cluster` marks the rows where that has
+happened rather than guessing at a split, which would need the Dataproc Jobs API. Measured
+over the export on 2026-08-21: 94 cluster-runs served exactly one step and 13 served
+between two and six.
 """
 
 from __future__ import annotations
@@ -90,6 +97,12 @@ class StepUsage(BaseModel):
             so this subtracts them. Ignoring credits overstates cost by roughly 7%.
         currency: Currency code from the export. `GBP` for this billing account. Part of
             the grouping key, so an amount here is never a mix of currencies.
+        shared_cluster: True when a Dataproc cluster this step billed on also served other
+            steps of the same run. Dataproc clusters are created with `use_if_exists=True`
+            and are never relabelled, so a shared cluster's hours are billed against
+            whichever step created it. `net_cost` on such a row is that cluster's cost,
+            not this step's own. Detected, never re-apportioned: dividing it up needs the
+            Dataproc Jobs API.
     """
 
     run: str
@@ -101,6 +114,7 @@ class StepUsage(BaseModel):
     span_hours: float
     net_cost: float
     currency: str
+    shared_cluster: bool
 
 
 class WindowCoverage(BaseModel):
@@ -133,6 +147,7 @@ WITH labelled AS (
     (SELECT value FROM UNNEST(labels) WHERE key = 'step') AS step,
     (SELECT value FROM UNNEST(labels) WHERE key = 'tool') AS tool,
     (SELECT value FROM UNNEST(labels) WHERE key = 'product') AS product,
+    (SELECT value FROM UNNEST(labels) WHERE key = 'goog-dataproc-cluster-name') AS cluster,
     usage_start_time,
     usage_end_time,
     cost,
@@ -141,6 +156,16 @@ WITH labelled AS (
   FROM `{table}`
   WHERE DATE(_PARTITIONTIME) >= @since
     AND cost_type = 'regular'
+),
+cluster_steps AS (
+  SELECT
+    run AS cluster_run,
+    cluster AS cluster_name,
+    COUNT(DISTINCT step) AS steps_on_cluster
+  FROM labelled
+  WHERE cluster IS NOT NULL
+    AND step IS NOT NULL
+  GROUP BY run, cluster
 )
 """
 
@@ -154,13 +179,15 @@ SELECT
   MAX(usage_end_time) AS ended,
   TIMESTAMP_DIFF(MAX(usage_end_time), MIN(usage_start_time), SECOND) / 3600 AS span_hours,
   SUM(cost) + SUM(credit) AS net_cost,
-  currency
+  currency,
+  IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster
 FROM labelled
+LEFT JOIN cluster_steps ON run = cluster_run AND cluster = cluster_name
 WHERE step IS NOT NULL
   AND tool IN ({tools})
   AND {predicate}
 GROUP BY run, step, tool, product, currency
-ORDER BY started
+ORDER BY started, run, step
 """
 
 _COVERAGE = """
@@ -192,7 +219,13 @@ def _query(
     predicate: str,
     params: list[bigquery.ScalarQueryParameter],
 ) -> tuple[str, list[bigquery.ScalarQueryParameter]]:
-    """Assemble the labelled CTE and the aggregate for a given row predicate."""
+    """Assemble the labelled CTEs and the aggregate for a given row predicate.
+
+    The predicate belongs to the aggregate and never to the CTEs. `cluster_steps` has to
+    count a cluster's steps across the whole run, so filtering it to one step or one run
+    first would make every history report its own step as the only one on its cluster,
+    and nothing would ever be flagged as shared.
+    """
     aggregate = _AGGREGATE.format(predicate=predicate, tools=_PIPELINE_TOOLS_SQL)
     return _LABELLED_CTE.format(table=table) + aggregate, params
 
@@ -302,6 +335,7 @@ class BillingExport:
                 span_hours=row.span_hours,
                 net_cost=row.net_cost,
                 currency=row.currency,
+                shared_cluster=row.shared_cluster,
             )
             for row in self._run_query(sql, params)
         ]

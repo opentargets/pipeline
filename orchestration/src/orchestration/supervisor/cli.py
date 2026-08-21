@@ -37,15 +37,16 @@ from orchestration.utils.common import BILLING_EXPORT_START, GCP_PROJECT_PLATFOR
 RowKey = Literal['run', 'step']
 """Which label identifies a row of the rendered table."""
 
-OptionalColumn = Literal['product', 'currency']
-"""Columns rendered only when the rows disagree on them.
+OptionalColumn = Literal['product', 'currency', 'shared']
+"""Columns rendered only when they have something to say about this particular result.
 
-Each one is a value the rows must never be read across: a `platform` figure and a `ppp`
-figure are different pipelines, and a GBP figure and a USD figure are different money.
-When every row shares one value the column is noise, so it is left out.
+Each marks a way the rows are less comparable than they look: a `platform` figure and a
+`ppp` figure are different pipelines, a GBP figure and a USD figure are different money,
+and a shared-cluster figure is not the row's own cost at all. When a column would say the
+same thing about every row it is noise, so it is left out.
 """
 
-_OPTIONAL_COLUMNS: tuple[OptionalColumn, ...] = ('product', 'currency')
+_OPTIONAL_COLUMNS: tuple[OptionalColumn, ...] = ('product', 'currency', 'shared')
 
 _MIN_KEY_WIDTH = 20
 """Floor for the identity column, so a short-labelled table is not cramped."""
@@ -81,6 +82,13 @@ _PRODUCT_FOOTER = [
     'the same DAG and can share a run label. Their rows are never added together.',
 ]
 
+_SHARED_FOOTER = [
+    'shared marks a step whose Dataproc cluster also served other steps of the same run.',
+    'A cluster keeps the labels of the step that created it, so a marked row is charged',
+    "the whole cluster's hours, including the other steps' — it is not that step's own",
+    'cost. Splitting it up needs the Dataproc Jobs API and is not attempted here.',
+]
+
 _COVERAGE_FOOTER = [
     'the remainder is real pipeline spend that no step above accounts for: Google Batch',
     'jobs carry no step labels, and some Dataproc disk and licensing rows fall outside',
@@ -106,7 +114,22 @@ def _totals_by_currency(usages: list[StepUsage]) -> dict[str, float]:
 
 def _cell(usage: StepUsage, column: OptionalColumn) -> str:
     """The rendered value of an optional column for one row."""
+    if column == 'shared':
+        return 'yes' if usage.shared_cluster else _MISSING
     return getattr(usage, column) or _MISSING
+
+
+def _is_worth_showing(column: OptionalColumn, usages: list[StepUsage]) -> bool:
+    """Whether a column tells the reader something about this particular result.
+
+    `product` and `currency` matter when the rows disagree: one value everywhere is the
+    normal case and naming it is noise. `shared` is not symmetric — a table where every
+    row is shared is the worst case, not a uniform one — so it shows whenever any row is
+    flagged and disappears only when none is.
+    """
+    if column == 'shared':
+        return any(u.shared_cluster for u in usages)
+    return len({_cell(u, column) for u in usages}) > 1
 
 
 def optional_columns(usages: list[StepUsage]) -> list[OptionalColumn]:
@@ -116,11 +139,11 @@ def optional_columns(usages: list[StepUsage]) -> list[OptionalColumn]:
         usages: The usages to be rendered.
 
     Returns:
-        The columns whose values differ between rows, in table order. A column every row
-        agrees on tells the reader nothing, but one they disagree on is the difference
-        between comparable numbers and incomparable ones.
+        The columns that have something to say about this result, in table order. A column
+        that would say the same thing about every row tells the reader nothing; one that
+        would not is the difference between comparable numbers and incomparable ones.
     """
-    return [column for column in _OPTIONAL_COLUMNS if len({_cell(u, column) for u in usages}) > 1]
+    return [column for column in _OPTIONAL_COLUMNS if _is_worth_showing(column, usages)]
 
 
 def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
@@ -160,13 +183,15 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
         f'{"total":<{width}} {"":<9}{blanks} {"":>9} {amount:>10.2f} {currency}'
         for currency, amount in totals.items()
     )
-    lines.append('')
+    blocks = []
     if len(totals) > 1:
-        lines.extend(_CURRENCY_FOOTER)
+        blocks.append(_CURRENCY_FOOTER)
     if 'product' in columns:
-        lines.extend(_PRODUCT_FOOTER)
-    lines.extend(_SPAN_FOOTER)
-    return '\n'.join(lines)
+        blocks.append(_PRODUCT_FOOTER)
+    if 'shared' in columns:
+        blocks.append(_SHARED_FOOTER)
+    blocks.append(_SPAN_FOOTER)
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 
 def _stamp(moment: datetime) -> str:

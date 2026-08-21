@@ -40,6 +40,16 @@ the net figure, because that is what `total_cost` returns. Do not "fix" a failur
 here by making the code report gross — netting credits is the whole point.
 """
 
+SHARED_STEP = 'pts_literature_ontoma'
+"""A step verified on 2026-08-21 to share a Dataproc cluster in some runs and not others.
+
+It had `up-pts-literature-f5014` to itself in KNOWN_RUN, and shared
+`up-pts-literature-38bc6` with `pts_literature_embedding` in `2026-06-19_ppp_up` and
+`up-pts-literature-5df4f` with `pts_literature_publication_match` in `up-20260527-1458`.
+Both halves matter: one pins that sharing is detected across a history, the other that the
+flag is not simply stuck on.
+"""
+
 FULL_SCAN_CEILING = 4 * 1024**3
 """Upper bound on the bytes a full-retention query may process, in bytes (4 GiB).
 
@@ -81,6 +91,41 @@ class TestLiveExport:
         usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
         assert usages
         assert {u.product for u in usages} == {'platform'}
+
+    def test_the_known_run_shares_no_cluster(self, export: BillingExport) -> None:
+        """Verified 2026-08-21: its three Dataproc steps each had a cluster to themselves.
+
+        So this run's per-step costs really are per-step, which is what makes it usable
+        as the fixed cost baseline above.
+        """
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert usages
+        assert not any(u.shared_cluster for u in usages)
+
+
+class TestLiveClusterSharing:
+    """Sharing has to be counted over the whole run, before the query's own filter.
+
+    Counted after it, a history sees one step per cluster and reports nothing as shared —
+    a failure that looks exactly like "no cluster was ever shared".
+    """
+
+    def test_a_history_still_sees_the_other_steps_on_the_cluster(self, export: BillingExport) -> None:
+        usages = export.step_history(step=SHARED_STEP, since=date(2026, 5, 1))
+        assert usages
+        assert any(u.shared_cluster for u in usages), (
+            f'{SHARED_STEP} shares a cluster in at least one run, so the flag cannot be '
+            'uniformly false unless the count is being taken after the step filter'
+        )
+
+    def test_the_same_step_is_unflagged_in_a_run_where_it_had_the_cluster_alone(
+        self, export: BillingExport
+    ) -> None:
+        """Guards the opposite failure: a flag stuck on true says nothing either."""
+        usages = export.step_history(step=SHARED_STEP, since=date(2026, 5, 1))
+        assert usages
+        assert not all(u.shared_cluster for u in usages)
+        assert not any(u.shared_cluster for u in usages if u.run == KNOWN_RUN)
 
 
 class TestLiveCoverage:
