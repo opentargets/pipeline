@@ -319,7 +319,7 @@ GNH_MAF_DESC = {
 }
 
 
-def _gnh_map(mapping: dict[str, str]) -> Any:
+def _map_col(mapping: dict[str, str]) -> Any:
     """Build a Spark map literal from a python dict for column-value lookups."""
     return f.create_map([f.lit(x) for pair in mapping.items() for x in pair])
 
@@ -337,9 +337,9 @@ def _gnh_method_overview(collapsing: Any, variant_mask_col: Any, freq_col: Any, 
     return f.concat(
         collapsing,
         f.lit(' test carried out with '),
-        _gnh_map(GNH_VARIANT_MASK_DESC)[variant_mask_col],
+        _map_col(GNH_VARIANT_MASK_DESC)[variant_mask_col],
         f.lit(' '),
-        _gnh_map(GNH_MAF_DESC)[f.lower(freq_col.cast('string'))],
+        _map_col(GNH_MAF_DESC)[f.lower(freq_col.cast('string'))],
         f.lit(suffix),
     )
 
@@ -362,7 +362,7 @@ def _process_gnh_additive(st9_df: DataFrame) -> DataFrame:
         f.lit('dominant').alias('allelicRequirements'),
         f.lit('Genes & Health').alias('cohortId'),
         f.concat_ws('_', f.col('TEST'), f.col('Mask')).alias('statisticalMethod'),
-        _gnh_method_overview(_gnh_map(GNH_TEST_DESC)[f.col('TEST')], f.col('Variant Mask'), f.col('Freq'), '.').alias(
+        _gnh_method_overview(_map_col(GNH_TEST_DESC)[f.col('TEST')], f.col('Variant Mask'), f.col('Freq'), '.').alias(
             'statisticalMethodOverview'
         ),
     )
@@ -449,15 +449,9 @@ def process_genes_and_health_gene_burden(
         [_process_gnh_additive(st9_df), _process_gnh_meta(st13_df), _process_gnh_recessive(st15_df)],
     )
 
-    # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Mirror the AZ/Genebass fix and
-    # substitute the minimum non-zero p-value so they pass validation instead of being dropped.
-    zero_p = gh_df.filter(f.col('pValue') == 0.0).count()
-    if zero_p:
-        logger.warning(f'There are {zero_p} Genes & Health evidence with a p-value of 0.0.')
-        minimum_pvalue = gh_df.filter(f.col('pValue') > 0.0).agg({'pValue': 'min'}).collect()[0]['min(pValue)']
-        gh_df = gh_df.withColumn(
-            'pValue', f.when(f.col('pValue') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('pValue'))
-        )
+    # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Substitute the minimum non-zero
+    # p-value so they pass validation instead of being dropped.
+    gh_df = _substitute_zero_pvalues(gh_df, 'pValue', 'Genes & Health')
 
     # Local column expressions reused below (p-value exponent, and the effect ± standard error interval).
     p_exponent = f.log10(f.col('pValue')).cast('int') - f.lit(1)
@@ -641,12 +635,7 @@ def process_az_gene_burden(
     # This is a bug we still have to ellucidate and it might be due to a float overflow.
     # These evidence need to be manually corrected in order not to lose them and for them to pass validation
     # As an interim solution, their p value will equal to the minimum in the evidence set.
-    logger.warning(f'There are {az_phewas_df.filter(f.col("pValue") == 0.0).count()} evidence with a p-value of 0.0.')
-    minimum_pvalue = az_phewas_df.filter(f.col('pValue') > 0.0).agg({'pValue': 'min'}).collect()[0]['min(pValue)']
-    az_phewas_df = az_phewas_df.withColumn(
-        'pValue',
-        f.when(f.col('pValue') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('pValue')),
-    )
+    az_phewas_df = _substitute_zero_pvalues(az_phewas_df, 'pValue', 'AZ')
 
     # Transform data according to original logic
     return (
@@ -761,19 +750,7 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
     # This is a bug we still have to ellucidate and it might be due to a float overflow.
     # These evidence need to be manually corrected in order not to lose them and for them to pass validation
     # As an interim solution, their p value will equal to the minimum in the evidence set.
-    logger.warning(
-        f'There are {genebass_df.filter(f.col("Pvalue_Burden") == 0.0).count()} evidence with a p-value of 0.0.'
-    )
-    minimum_pvalue = (
-        genebass_df
-        .filter(f.col('Pvalue_Burden') > 0.0)
-        .agg({'Pvalue_Burden': 'min'})
-        .collect()[0]['min(Pvalue_Burden)']
-    )
-    genebass_df = genebass_df.withColumn(
-        'Pvalue_Burden',
-        f.when(f.col('Pvalue_Burden') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('Pvalue_Burden')),
-    )
+    genebass_df = _substitute_zero_pvalues(genebass_df, 'Pvalue_Burden', 'Genebass')
 
     return (
         genebass_df
@@ -903,10 +880,6 @@ def process_brava_gene_burden(
         'AMR': 'HANCESTRO_0014',
         # SAS maps to two ids, so it is not specified
     }
-
-    def _map_col(mapping: dict[str, str]) -> Any:
-        """Build a Spark map literal from a python dict for column-value lookups."""
-        return f.create_map([f.lit(x) for pair in mapping.items() for x in pair])
 
     def _brava_sample_size_lookup(
         s4_df: DataFrame, s5_df: DataFrame, s6_df: DataFrame, s7_df: DataFrame
