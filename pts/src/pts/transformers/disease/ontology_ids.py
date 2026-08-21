@@ -9,7 +9,10 @@ knowledge live here, apart from the rules that use them.
 
 import polars as pl
 
-# Namespaces that appear in dbXRefs but do not assert identity at all.
+# Namespaces that appear in dbXRefs but do not assert identity at all.  The
+# merge arms select by allow-list, so this is belt-and-braces for any other
+# caller of normalised_xrefs -- but it takes precedence, so a namespace named
+# here can never be re-admitted by adding it to an allow-list below.
 _EXCLUDED_NAMESPACES = frozenset({
     'PMID', 'UNIPROT', 'HTTP', 'HTTPS', 'WIKIPEDIA', 'HGNC', 'HMDB',
     'KEGG', 'KEGG COMPOUND', 'METACYC', 'REACTOME', 'GTR', 'CSP',
@@ -103,7 +106,7 @@ def name_bags(active: pl.DataFrame) -> dict[str, set[str]]:
         pl
         .concat([active.select('short_id', pl.col('lbl').alias('val')), exact_synonyms])
         .filter(pl.col('val').is_not_null())
-        .with_columns(val=pl.col('val').str.to_lowercase().str.strip_chars())
+        .with_columns(val=pl.col('val').str.replace_all('\n', '').str.to_lowercase().str.strip_chars())
         .group_by('short_id')
         .agg(pl.col('val').unique().alias('names'))
     )

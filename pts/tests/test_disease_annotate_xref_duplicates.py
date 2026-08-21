@@ -186,7 +186,12 @@ class TestSharedXrefArm:
         assert not _any_deprecated(result, 'MONDO_100', 'HP_100')
 
     def test_no_merge_on_coarse_xref(self) -> None:
-        """ICD codes are many-to-one; sharing one is not equivalence."""
+        """ICD codes are many-to-one, so sharing one is not equivalence.
+
+        Held by the allow-list rather than the coarse deny-list, since the arm
+        only ever considers fine-grained namespaces. See the ontology_ids tests
+        for the deny-list itself.
+        """
         df = _make_df(
             _make_node('MONDO_100', 'obesity', xrefs=['ICD10:E66'], synonyms=['obesity']),
             _make_node('HP_100', 'Obesity', xrefs=['ICD10:E66'], synonyms=['obesity']),
@@ -195,7 +200,10 @@ class TestSharedXrefArm:
         assert not _any_deprecated(result, 'MONDO_100', 'HP_100')
 
     def test_no_merge_on_excluded_namespace(self) -> None:
-        """A shared publication is not a shared identity."""
+        """A shared publication is not a shared identity.
+
+        As above, the allow-list is what stops this here.
+        """
         df = _make_df(
             _make_node('MONDO_100', 'obesity', xrefs=['PMID:12345678'], synonyms=['obesity']),
             _make_node('HP_100', 'Obesity', xrefs=['PMID:12345678'], synonyms=['obesity']),
@@ -211,6 +219,21 @@ class TestSharedXrefArm:
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
         assert _merged(result, 'HP_100', 'MONDO_100')
+
+    def test_merges_a_direct_xref_even_across_a_hierarchy(self) -> None:
+        """Arm 1 has no hierarchy guard, and that is deliberate.
+
+        A direct cross-reference is a curator asserting the two terms are the
+        same thing, which outranks an is_a edge between them. Ontologies do file
+        an eponym under the disease it names, and merging those is right.
+        """
+        df = _make_df(
+            _make_node('MONDO_010', 'a disease', xrefs=['HP:010']),
+            _make_node('HP_010', 'the same disease by another name'),
+        )
+        edges = _make_edges(('HP_010', 'MONDO_010'))
+        result = annotate_xref_duplicates(df, edges)
+        assert _merged(result, 'HP_010', 'MONDO_010')
 
     def test_no_merge_between_ancestor_and_descendant(self) -> None:
         """Hierarchy collapse: the pair shares everything but one is a parent."""

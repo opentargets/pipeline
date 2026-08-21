@@ -439,6 +439,14 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
     - they share a fine-grained cross-reference *and* an exact name, and
       neither is an is_a ancestor of the other.
 
+    Only the second arm carries the hierarchy guard, deliberately.  A direct
+    cross-reference is a curator asserting that two terms are the same thing,
+    which outranks an is_a edge between them -- where the two disagree it is
+    usually the edge that is wrong, as when an ontology files an eponym under
+    the disease it names.  A shared third-party code asserts nothing of the
+    kind, and is exactly where granularity mismatches put a parent and child
+    on the same code, so there the guard is needed.
+
     Each guardrail exists because dropping it costs precision: publication and
     protein references are not identity; coarse classification codes are
     many-to-one; a cross-reference carried by more than ``_MAX_XREF_FANOUT``
@@ -532,10 +540,12 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
     # --- gate the groups and choose each survivor ---------------------------
     ranks = dict(_ONTOLOGY_WEIGHTS.iter_rows())
     superseded: list[dict[str, str]] = []
+    bridging: list[list[str]] = []
     for members in _merge_groups(candidates):
         prefixes = [prefix_of[term] for term in members]
         if len(set(prefixes)) != len(prefixes):
             # Two terms of one ontology: the group bridges rather than equates.
+            bridging.append(members)
             continue
         canonical = min(members, key=lambda term: (ranks.get(prefix_of[term], 99), term))
         superseded += [
@@ -543,6 +553,14 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
             for term in members
             if term != canonical
         ]
+
+    # A group is dropped whole, so one term joining it withdraws the merges of
+    # everything already in it.  That can happen from an upstream edit alone, so
+    # name the groups rather than letting merges disappear between releases.
+    if bridging:
+        logger.info(f'{len(bridging)} candidate groups bridge two terms of one ontology and are dropped')
+        for members in bridging:
+            logger.debug(f'bridging group: {", ".join(members)}')
 
     logger.debug(f'cross-reference coalescing supersedes {len(superseded)} terms')
     superseded_map = pl.DataFrame(
