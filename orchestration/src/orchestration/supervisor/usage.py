@@ -9,11 +9,14 @@ use Airflow task instances instead.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime
 from typing import Literal
 
 from google.cloud import bigquery
 from pydantic import BaseModel
+
+from orchestration.utils.common import GCP_BILLING_EXPORT_TABLE
 
 PipelineTool = Literal['pis', 'pts', 'gentropy']
 """The `tool` label values that belong to the unified pipeline.
@@ -140,3 +143,71 @@ def step_history_query(
             bigquery.ScalarQueryParameter('since', 'DATE', since),
         ],
     )
+
+
+class BillingExport:
+    """Reads per-step billed usage from the GCP billing export.
+
+    Args:
+        client: An authenticated BigQuery client. Injected so that tests never
+            need credentials or network access.
+        table: Fully-qualified export table. Defaults to the platform's export.
+    """
+
+    def __init__(self, client: bigquery.Client, table: str = GCP_BILLING_EXPORT_TABLE) -> None:
+        self.client = client
+        self.table = table
+
+    def _fetch(self, sql: str, params: list[bigquery.ScalarQueryParameter]) -> list[StepUsage]:
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        rows = self.client.query(sql, job_config=job_config).result()
+        return [
+            StepUsage(
+                run=row.run,
+                step=row.step,
+                tool=row.tool,
+                started=row.started,
+                ended=row.ended,
+                span_hours=row.span_hours,
+                net_cost=row.net_cost,
+                currency=row.currency,
+            )
+            for row in rows
+        ]
+
+    def run_usage(self, run: str, since: date) -> list[StepUsage]:
+        """Billed usage for every step in one run, ordered by start time.
+
+        Args:
+            run: The `run` label to filter on.
+            since: Earliest partition date to scan. The export holds nothing
+                before 2026-05-01.
+
+        Returns:
+            One `StepUsage` per (step, tool). Empty if the run has not billed yet.
+        """
+        return self._fetch(*run_usage_query(self.table, run, since))
+
+    def step_history(self, step: str, since: date) -> list[StepUsage]:
+        """Billed usage for one step across every run that produced it.
+
+        Args:
+            step: The `step` label to filter on.
+            since: Earliest partition date to scan.
+
+        Returns:
+            One `StepUsage` per run, ordered by start time.
+        """
+        return self._fetch(*step_history_query(self.table, step, since))
+
+
+def total_cost(usages: Iterable[StepUsage]) -> float:
+    """Sum net cost across usages.
+
+    Args:
+        usages: The usages to total.
+
+    Returns:
+        Total net cost. Zero for an empty input.
+    """
+    return sum(u.net_cost for u in usages)
