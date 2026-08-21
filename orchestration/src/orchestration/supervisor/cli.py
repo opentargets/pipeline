@@ -3,6 +3,10 @@
 Currently exposes billed cost for a run and for one step's history. Both read the
 GCP billing export, which is hourly-bucketed, so the reported span is an upper
 bound on wall-clock time rather than a measurement of it.
+
+`--run` and `--step` are matched against GCP labels, which are normalised, so both
+are passed through `clean_label` first. A run ID copied straight out of the Airflow
+UI therefore works.
 """
 
 from __future__ import annotations
@@ -12,12 +16,17 @@ import json
 import sys
 from datetime import date
 
+from google.api_core.exceptions import GoogleAPICallError
 from google.cloud import bigquery
 
 from orchestration.supervisor.usage import BillingExport, StepUsage, total_cost
+from orchestration.utils.common import BILLING_EXPORT_START, GCP_PROJECT_PLATFORM, clean_label
 
-EXPORT_START = date(2026, 5, 1)
-"""Oldest partition in the billing export. Scanning earlier is wasted work."""
+_EMPTY = """No billed usage found. It may not have billed yet, or the label may not match.
+Labels are lowercased with everything outside [a-z0-9-_] replaced by '-', and
+--run/--step are normalised the same way, so check the normalised form: an Airflow
+run ID like manual__2026-07-21T15:07:47.545737+00:00 is stored as the label
+manual__2026-07-21t15-07-47-545737-00-00."""
 
 
 def render_table(usages: list[StepUsage]) -> str:
@@ -30,7 +39,7 @@ def render_table(usages: list[StepUsage]) -> str:
         The rendered table, or a message when there is nothing to show.
     """
     if not usages:
-        return 'No billed usage found. The run may not have billed yet, or the label may be wrong.'
+        return _EMPTY
 
     header = f'{"step":<45} {"tool":<9} {"span (h)":>9} {"net cost":>10}'
     lines = [header, '-' * len(header)]
@@ -57,12 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     usage = sub.add_parser('usage', help='billed usage for every step in one run')
     usage.add_argument('--run', required=True, help='the run label to report on')
-    usage.add_argument('--since', type=date.fromisoformat, default=EXPORT_START)
+    usage.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START)
     usage.add_argument('--json', action='store_true', help='emit JSON instead of a table')
 
     history = sub.add_parser('history', help="one step's billed usage across runs")
     history.add_argument('--step', required=True, help='the step label to report on')
-    history.add_argument('--since', type=date.fromisoformat, default=EXPORT_START)
+    history.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START)
     history.add_argument('--json', action='store_true', help='emit JSON instead of a table')
 
     return parser
@@ -78,12 +87,18 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code.
     """
     args = build_parser().parse_args(argv)
-    export = BillingExport(client=bigquery.Client())
+    export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
 
-    if args.command == 'usage':
-        usages = export.run_usage(run=args.run, since=args.since)
-    else:
-        usages = export.step_history(step=args.step, since=args.since)
+    try:
+        if args.command == 'usage':
+            usages = export.run_usage(run=clean_label(args.run), since=args.since)
+        elif args.command == 'history':
+            usages = export.step_history(step=clean_label(args.step), since=args.since)
+        else:
+            raise ValueError(f'unknown subcommand: {args.command}')
+    except GoogleAPICallError as exc:
+        sys.stderr.write(f'billing export query failed: {" ".join(str(exc).split())}\n')
+        return 1
 
     if args.json:
         sys.stdout.write(json.dumps([u.model_dump(mode='json') for u in usages], indent=2) + '\n')
