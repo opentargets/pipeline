@@ -1,0 +1,328 @@
+"""Command line entry point for the pipeline supervisor.
+
+Currently exposes billed cost for a run and for one step's history. Both read the
+GCP billing export, which is hourly-bucketed, so the reported span is an upper
+bound on wall-clock time rather than a measurement of it.
+
+`--run` and `--step` are matched against GCP labels, which are normalised, so both
+are passed through `clean_label` first. A run ID copied straight out of the Airflow
+UI therefore works.
+
+Every figure here covers only the resources the pipeline labelled per step, which is
+not everything it spends. The `usage` report says so with a coverage line rather than
+leaving its total to be read as the cost of the run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import date, datetime
+from typing import Literal
+
+from google.api_core.exceptions import GoogleAPICallError
+from google.auth.exceptions import DefaultCredentialsError
+from google.cloud import bigquery
+
+from orchestration.supervisor.usage import (
+    BillingExport,
+    StepUsage,
+    WindowCoverage,
+    total_cost,
+    usage_window,
+)
+from orchestration.utils.common import BILLING_EXPORT_START, GCP_PROJECT_PLATFORM, clean_label
+
+RowKey = Literal['run', 'step']
+"""Which label identifies a row of the rendered table."""
+
+OptionalColumn = Literal['product', 'currency', 'shared']
+"""Columns rendered only when they have something to say about this particular result.
+
+Each marks a way the rows are less comparable than they look: a `platform` figure and a
+`ppp` figure are different pipelines, a GBP figure and a USD figure are different money,
+and a shared-cluster figure is not the row's own cost at all. When a column would say the
+same thing about every row it is noise, so it is left out.
+"""
+
+_OPTIONAL_COLUMNS: tuple[OptionalColumn, ...] = ('product', 'currency', 'shared')
+
+_TOTAL_KEYS: tuple[OptionalColumn, ...] = ('product', 'currency')
+"""Columns a total may never be summed across, whether or not they are displayed.
+
+Their values make two amounts incomparable: GBP plus USD is not an amount of money, and
+platform plus ppp is not one pipeline's cost. `shared` is not among them — a flagged row
+and an unflagged one in the same product and currency are the same money, mis-attributed
+between steps, so their sum is still what the run spent.
+
+Keyed on the values rather than on what is displayed, so the totals cannot disagree with
+the rows above them if the display rule ever changes. When every row agrees this yields
+exactly one group, which is the common case and looks like it always did.
+"""
+
+_MIN_KEY_WIDTH = 20
+"""Floor for the identity column, so a short-labelled table is not cramped."""
+
+_MISSING = '-'
+"""Shown for a row that carries no value for an optional column."""
+
+_SINCE_HELP = """earliest partition date to scan, as YYYY-MM-DD. This is the date the
+rows were ingested into the export, not the date of the usage they describe, so it
+prunes the scan rather than selecting a period of pipeline activity"""
+
+_EMPTY = """No billed usage found. It may not have billed yet, or the label may not match.
+Labels are lowercased with everything outside [a-z0-9-_] replaced by '-', and
+--run/--step are normalised the same way, so check the normalised form: an Airflow
+run ID like manual__2026-07-21T15:07:47.545737+00:00 is stored as the label
+manual__2026-07-21t15-07-47-545737-00-00."""
+
+_SPAN_FOOTER = [
+    "span is the envelope of a step's billed rows: from the start of its first billed",
+    'hour to the end of its last, gaps included. It is not billed hours and not a',
+    'duration. One step labels several billed resources at once (a GCE step labels its',
+    'instance and both disks, a Dataproc step every node), so the hours actually billed',
+    'are a multiple of this.',
+]
+
+_CURRENCY_FOOTER = [
+    'these rows are billed in more than one currency, so they are totalled',
+    'separately. The per-currency totals must not be added together.',
+]
+
+_PRODUCT_FOOTER = [
+    'product separates the platform pipeline from the partner preview one, which runs',
+    'the same DAG and can share a run label. Their rows are never added together.',
+]
+
+_SHARED_FOOTER = [
+    'shared marks a row where more than one step of this run billed against a single',
+    'Dataproc cluster instance, which keeps the labels it was created with — so the row',
+    "is charged that instance's whole cost rather than the step's own. No row in the",
+    'export has ever been marked: this guards a code path (use_if_exists=True) that does',
+    'not currently manifest. Repeated use of one cluster *name* is not this, and is fine.',
+]
+
+_COVERAGE_FOOTER = [
+    'the denominator is everything the pipeline billed in that window, including any',
+    'other run that overlapped it. The remainder is real pipeline spend the steps above',
+    'do not account for: Google Batch jobs carry no step labels, and some Dataproc disk',
+    'and licensing rows fall outside the labels of the step that caused them.',
+]
+
+_IMPOSSIBLE_SHARE_FOOTER = [
+    'a share above 100% is not good coverage, it is a broken measurement: the rows above',
+    'were counted in the numerator but not in the denominator, which means something the',
+    'report shows is not labelled as created by the pipeline. Treat the figure as wrong.',
+]
+
+
+def totals_by_group(usages: list[StepUsage]) -> dict[tuple[str, ...], float]:
+    """Total net cost per group of rows that may legitimately be added together.
+
+    Args:
+        usages: The usages to total.
+
+    Returns:
+        Net cost keyed by the `_TOTAL_KEYS` values of the group, in `_TOTAL_KEYS` order,
+        sorted. Two currencies are not one amount of money, and two products are not one
+        pipeline, so a single total across either is a number describing nothing.
+    """
+    groups = sorted({tuple(_cell(u, c) for c in _TOTAL_KEYS) for u in usages})
+    return {
+        group: total_cost(u for u in usages if tuple(_cell(u, c) for c in _TOTAL_KEYS) == group)
+        for group in groups
+    }
+
+
+def _cell(usage: StepUsage, column: OptionalColumn) -> str:
+    """The rendered value of an optional column for one row."""
+    if column == 'shared':
+        return 'yes' if usage.shared_cluster else _MISSING
+    return getattr(usage, column) or _MISSING
+
+
+def _is_worth_showing(column: OptionalColumn, usages: list[StepUsage]) -> bool:
+    """Whether a column tells the reader something about this particular result.
+
+    `product` and `currency` matter when the rows disagree: one value everywhere is the
+    normal case and naming it is noise. `shared` is not symmetric — a table where every
+    row is shared is the worst case, not a uniform one — so it shows whenever any row is
+    flagged and disappears only when none is.
+    """
+    if column == 'shared':
+        return any(u.shared_cluster for u in usages)
+    return len({_cell(u, column) for u in usages}) > 1
+
+
+def optional_columns(usages: list[StepUsage]) -> list[OptionalColumn]:
+    """Which optional columns this result has to show.
+
+    Args:
+        usages: The usages to be rendered.
+
+    Returns:
+        The columns that have something to say about this result, in table order. A column
+        that would say the same thing about every row tells the reader nothing; one that
+        would not is the difference between comparable numbers and incomparable ones.
+    """
+    return [column for column in _OPTIONAL_COLUMNS if _is_worth_showing(column, usages)]
+
+
+def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
+    """Render usages as a fixed-width table.
+
+    Args:
+        usages: The usages to render.
+        key: Which label identifies a row, and so gets the first column. `step` for
+            the steps of one run; `run` for one step's history, where every row
+            shares the step the user asked for and only the run tells them apart.
+
+    Returns:
+        The rendered table, or a message when there is nothing to show.
+    """
+    if not usages:
+        return _EMPTY
+
+    keys = [getattr(u, key) for u in usages]
+    width = max(_MIN_KEY_WIDTH, len(key), *(len(k) for k in keys))
+    columns = optional_columns(usages)
+    widths = {c: max(len(c), *(len(_cell(u, c)) for u in usages)) for c in columns}
+    extra_header = ''.join(f' {c:<{widths[c]}}' for c in columns)
+
+    header = f'{key:<{width}} {"tool":<9}{extra_header} {"span (h)":>9} {"net cost":>10}'
+    lines = [header, '-' * len(header)]
+    lines.extend(
+        f'{k:<{width}} {u.tool:<9}'
+        + ''.join(f' {_cell(u, c):<{widths[c]}}' for c in columns)
+        + f' {u.span_hours:>9.2f} {u.net_cost:>10.2f}'
+        for k, u in zip(keys, usages, strict=True)
+    )
+    lines.append('-' * len(header))
+
+    totals = totals_by_group(usages)
+    for group, amount in totals.items():
+        values = dict(zip(_TOTAL_KEYS, group, strict=True))
+        cells = ''.join(f' {values.get(c, ""):<{widths[c]}}' for c in columns)
+        currency = values['currency']
+        lines.append(f'{"total":<{width}} {"":<9}{cells} {"":>9} {amount:>10.2f} {currency}')
+
+    blocks = []
+    if len({u.currency for u in usages}) > 1:
+        blocks.append(_CURRENCY_FOOTER)
+    if 'product' in columns:
+        blocks.append(_PRODUCT_FOOTER)
+    if 'shared' in columns:
+        blocks.append(_SHARED_FOOTER)
+    blocks.append(_SPAN_FOOTER)
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
+
+
+def _stamp(moment: datetime) -> str:
+    """Render a window boundary to the minute, in the export's own UTC."""
+    return moment.strftime('%Y-%m-%d %H:%M')
+
+
+def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[WindowCoverage]) -> str:
+    """Render how much of the pipeline's spend the table above accounts for.
+
+    Args:
+        window: The period measured, or `None` when the run billed nothing and there is
+            therefore no window.
+        coverage: One entry per currency, as returned by `BillingExport.window_coverage`.
+
+    Returns:
+        The rendered coverage note. Never a percentage the data does not support: an
+        unknown window and an empty window each say so instead.
+    """
+    if window is None:
+        return (
+            'coverage: unknown. This run has billed nothing yet, so there is no window\n'
+            'over which to compare its labelled cost against total pipeline spend.'
+        )
+    period = f'{_stamp(window[0])} to {_stamp(window[1])} UTC'
+    if not coverage:
+        return f'coverage: no pipeline spend found from {period}, which should not happen.'
+
+    lines = [f'coverage: from {period},']
+    for entry in coverage:
+        share = 'share undefined' if entry.labelled_share is None else f'{entry.labelled_share:.1%}'
+        lines.append(
+            f'  the steps above account for {entry.labelled_cost:.2f} of the {entry.pipeline_cost:.2f} '
+            f'{entry.currency} the pipeline billed ({share})'
+        )
+    blocks = [_COVERAGE_FOOTER]
+    if any(entry.exceeds_pipeline_cost for entry in coverage):
+        blocks.append(_IMPOSSIBLE_SHARE_FOOTER)
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser.
+
+    Returns:
+        The configured parser.
+    """
+    parser = argparse.ArgumentParser(prog='pipeline-supervisor')
+    sub = parser.add_subparsers(dest='command', required=True)
+
+    since_help = ' '.join(_SINCE_HELP.split())
+
+    usage = sub.add_parser('usage', help='billed usage for every step in one run')
+    usage.add_argument('--run', required=True, help='the run label to report on')
+    usage.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
+    usage.add_argument('--json', action='store_true', help='emit JSON instead of a table')
+
+    history = sub.add_parser('history', help="one step's billed usage across runs")
+    history.add_argument('--step', required=True, help='the step label to report on')
+    history.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
+    history.add_argument('--json', action='store_true', help='emit JSON instead of a table')
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI.
+
+    Args:
+        argv: Argument vector, defaulting to `sys.argv[1:]`.
+
+    Returns:
+        Process exit code.
+    """
+    args = build_parser().parse_args(argv)
+
+    key: RowKey = 'step'
+    coverage: list[WindowCoverage] = []
+    window: tuple[datetime, datetime] | None = None
+    try:
+        export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
+        if args.command == 'usage':
+            run = clean_label(args.run)
+            usages = export.run_usage(run=run, since=args.since)
+            window = usage_window(usages)
+            if window is not None and not args.json:
+                coverage = export.window_coverage(run=run, window=window, since=args.since)
+        elif args.command == 'history':
+            key = 'run'
+            usages = export.step_history(step=clean_label(args.step), since=args.since)
+        else:
+            raise ValueError(f'unknown subcommand: {args.command}')
+    except DefaultCredentialsError as exc:
+        sys.stderr.write(
+            f'no Google Cloud credentials found: {" ".join(str(exc).split())}\n'
+            'run `gcloud auth application-default login` first\n'
+        )
+        return 1
+    except GoogleAPICallError as exc:
+        sys.stderr.write(f'billing export query failed: {" ".join(str(exc).split())}\n')
+        return 1
+
+    if args.json:
+        sys.stdout.write(json.dumps([u.model_dump(mode='json') for u in usages], indent=2) + '\n')
+    else:
+        report = render_table(usages, key)
+        if args.command == 'usage':
+            report += '\n\n' + render_coverage(window, coverage)
+        sys.stdout.write(report + '\n')
+    return 0

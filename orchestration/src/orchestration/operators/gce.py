@@ -630,11 +630,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             self.log.info(f'setting impersonation_chain from connection: {impersonation_chain}')
             self.impersonation_chain = impersonation_chain
 
-        dag_run = context.get('dag_run')
-        if dag_run:
-            default_run_label = dag_run.run_id
-        run_label = context.get('params', {}).get('run_label') or default_run_label
-        self.labels['run'] = run_label
+        self.labels.add_dag_run_id(context)
         self.start()
 
         if not self.deferrable:

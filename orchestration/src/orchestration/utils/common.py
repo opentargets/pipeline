@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import re
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,6 +15,34 @@ GCP_PROJECT_GENETICS = 'open-targets-genetics-dev'
 GCP_SERVICE_ACCOUNT = 'up-airflow-dev@open-targets-eu-dev.iam.gserviceaccount.com'
 GCP_REGION = 'europe-west1'
 GCP_ZONE = 'europe-west1-d'
+
+GCP_BILLING_EXPORT_TABLE = (
+    'open-targets-eu-dev.billing_export.gcp_billing_export_resource_v1_0001BA_599363_94C6B1'
+)
+"""Resource-level GCP billing export. Ingestion-time day-partitioned, so filter on
+`DATE(_PARTITIONTIME)`. Oldest partition is 2026-05-01."""
+
+BILLING_EXPORT_START = date(2026, 5, 1)
+"""Oldest partition in the billing export, so the widest scan it can serve."""
+
+
+def clean_label(value: str) -> str:
+    """Normalise a value the way Google Cloud requires of a label value.
+
+    Per the GCP docs, a label value may only contain lowercase letters, numeric
+    characters, underscores and dashes, and may be at most 63 characters long.
+    Anything else is replaced by a dash, which is lossy: Airflow's DAG run ID
+    `manual__2026-07-21T15:07:47.545737+00:00` is stored as the label
+    `manual__2026-07-21t15-07-47-545737-00-00`. Anything comparing against a label
+    already in Google Cloud has to normalise its input the same way first.
+
+    Args:
+        value: The raw value to normalise.
+
+    Returns:
+        The normalised label value.
+    """
+    return re.sub(r'[^a-z0-9-_]', '-', value.lower())[0:63]
 
 
 shared_dag_args: dict[str, Any] = {

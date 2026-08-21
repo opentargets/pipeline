@@ -19,6 +19,7 @@ dependencies = [
   "deepdiff>=9.1.0",
   "deepmerge>=2.1.0",
   "pydantic>=2.13.4",
+  "google-cloud-bigquery>=3.42.1",
 ]
 
 
@@ -28,6 +29,7 @@ test = ["pytest>=9.1.1", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1"]
 
 [project.scripts]
 orchestration = "orchestration:main"
+pipeline-supervisor = "orchestration.supervisor.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]
