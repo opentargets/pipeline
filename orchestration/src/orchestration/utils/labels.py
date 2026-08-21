@@ -1,12 +1,11 @@
 """Labels for resources in Google Cloud."""
 
-import re
 from collections import UserDict
 from typing import Any
 
 from airflow.sdk import Context
 
-from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_SERVICE_ACCOUNT
+from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_SERVICE_ACCOUNT, clean_label
 
 
 def default_labels(project: str, is_ppp: bool = False) -> dict[str, str]:
@@ -56,7 +55,7 @@ class Labels(UserDict[str, str]):
         characters, underscores and dashes. The value can be at most 63 characters
         long.
         """
-        return re.sub(r'[^a-z0-9-_]', '-', label.lower())[0:63]
+        return clean_label(label)
 
     def __setitem__(self, key: str, value: Any) -> None:  # ty:ignore[invalid-method-override]
         super().__setitem__(key, self.clean_label(str(value)))
