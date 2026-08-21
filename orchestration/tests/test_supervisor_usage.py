@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
 
-from orchestration.supervisor.usage import StepUsage
+from orchestration.supervisor.usage import StepUsage, run_usage_query, step_history_query
+
+TABLE = 'proj.ds.tbl'
 
 
 class TestStepUsage:
@@ -51,3 +53,46 @@ class TestStepUsage:
             currency='GBP',
         )
         assert u.net_cost < 0
+
+
+class TestRunUsageQuery:
+    def test_parameters_are_bound_not_interpolated(self) -> None:
+        sql, params = run_usage_query(TABLE, run='a-run', since=date(2026, 5, 1))
+        assert 'a-run' not in sql
+        names = {p.name: p.value for p in params}
+        assert names['run'] == 'a-run'
+        assert names['since'] == date(2026, 5, 1)
+
+    def test_table_is_backticked(self) -> None:
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        assert '`proj.ds.tbl`' in sql
+
+    def test_filters_on_partition_column(self) -> None:
+        """The export is ingestion-time partitioned.
+
+        A usage_start_time filter would scan the whole table.
+        """
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        assert 'DATE(_PARTITIONTIME) >= @since' in sql
+
+    def test_nets_credits_off_cost(self) -> None:
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        assert 'SUM(cost) + SUM(credit)' in sql
+
+    def test_excludes_unlabelled_rows(self) -> None:
+        """Unrelated workloads share this table and have no step label."""
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        assert 'step IS NOT NULL' in sql
+
+
+class TestStepHistoryQuery:
+    def test_binds_step_and_since(self) -> None:
+        sql, params = step_history_query(TABLE, step='pts_target', since=date(2026, 6, 1))
+        assert 'pts_target' not in sql
+        names = {p.name: p.value for p in params}
+        assert names['step'] == 'pts_target'
+        assert names['since'] == date(2026, 6, 1)
+
+    def test_groups_by_run(self) -> None:
+        sql, _ = step_history_query(TABLE, step='pts_target', since=date(2026, 6, 1))
+        assert 'GROUP BY run, step, tool' in sql
