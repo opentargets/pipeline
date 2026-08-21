@@ -42,7 +42,6 @@ def _usage(
         product=product,
         started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
-        span_hours=2.0,
         net_cost=net_cost,
         currency=currency,
         shared_cluster=shared,
@@ -56,22 +55,17 @@ class TestRenderTable:
         assert 'pis_disease' in out
         assert '4.00' in out
 
-    def test_column_header_says_span_not_duration(self) -> None:
-        """The export is hourly-bucketed, so heading this column 'duration' would mislead."""
-        header = render_table([_usage()]).splitlines()[0]
-        assert 'span' in header.lower()
-        assert 'duration' not in header.lower()
+    def test_no_time_column_is_offered(self) -> None:
+        """The export cannot support a per-step duration, so this module reports none.
 
-    def test_footer_does_not_call_the_span_billed_hours(self) -> None:
-        """One step labels several billed resources, so the span is a fraction of them.
-
-        Calling it billed hours invites multiplying it by a machine rate, which lands
-        well under what the step actually cost.
+        The old span column was a whole number of hours in every row of the export, and
+        an envelope including gaps, so it read 39.00 for a step that ran for an hour.
+        Duration comes from Airflow task instances in a later phase.
         """
         out = render_table([_usage()])
-        assert 'span is billed hours' not in out
-        assert 'not billed hours' in out
-        assert 'envelope' in out
+        assert 'span' not in out.lower()
+        assert 'duration' not in out.lower()
+        assert 'hour' not in out.lower()
 
     def test_empty_says_so_rather_than_printing_an_empty_table(self) -> None:
         assert 'no billed usage' in render_table([]).lower()
@@ -251,7 +245,7 @@ class TestIncomparableRowsAreLabelled:
         """The common case must not grow a column of dashes."""
         out = render_table([_usage(net_cost=1.5), _usage(net_cost=2.5)])
         assert 'shared' not in out
-        assert out.splitlines()[0] == f'{"step":<20} {"tool":<9} {"span (h)":>9} {"net cost":>10}'
+        assert out.splitlines()[0] == f'{"step":<20} {"tool":<9} {"net cost":>10}'
 
     def test_no_currency_column_when_they_all_match(self) -> None:
         out = render_table([_usage(net_cost=1.5), _usage(net_cost=2.5)])
@@ -401,7 +395,6 @@ def _usage_row(**kw: Any) -> SimpleNamespace:
         'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 22, 2, 0, tzinfo=UTC),
-        'span_hours': 12.0,
         'net_cost': 21.60,
         'currency': 'GBP',
         'shared_cluster': False,

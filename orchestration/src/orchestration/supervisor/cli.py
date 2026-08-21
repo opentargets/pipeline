@@ -1,8 +1,8 @@
 """Command line entry point for the pipeline supervisor.
 
-Currently exposes billed cost for a run and for one step's history. Both read the
-GCP billing export, which is hourly-bucketed, so the reported span is an upper
-bound on wall-clock time rather than a measurement of it.
+Currently exposes billed cost for a run and for one step's history, both read from the
+GCP billing export. Cost only: the export is hourly-bucketed and cannot support a
+per-step duration, which comes from Airflow task instances instead.
 
 `--run` and `--step` are matched against GCP labels, which are normalised, so both
 are passed through `clean_label` first. A run ID copied straight out of the Airflow
@@ -76,14 +76,6 @@ Labels are lowercased with everything outside [a-z0-9-_] replaced by '-', and
 --run/--step are normalised the same way, so check the normalised form: an Airflow
 run ID like manual__2026-07-21T15:07:47.545737+00:00 is stored as the label
 manual__2026-07-21t15-07-47-545737-00-00."""
-
-_SPAN_FOOTER = [
-    "span is the envelope of a step's billed rows: from the start of its first billed",
-    'hour to the end of its last, gaps included. It is not billed hours and not a',
-    'duration. One step labels several billed resources at once (a GCE step labels its',
-    'instance and both disks, a Dataproc step every node), so the hours actually billed',
-    'are a multiple of this.',
-]
 
 _CURRENCY_FOOTER = [
     'these rows are billed in more than one currency, so they are totalled',
@@ -190,12 +182,12 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
     widths = {c: max(len(c), *(len(_cell(u, c)) for u in usages)) for c in columns}
     extra_header = ''.join(f' {c:<{widths[c]}}' for c in columns)
 
-    header = f'{key:<{width}} {"tool":<9}{extra_header} {"span (h)":>9} {"net cost":>10}'
+    header = f'{key:<{width}} {"tool":<9}{extra_header} {"net cost":>10}'
     lines = [header, '-' * len(header)]
     lines.extend(
         f'{k:<{width}} {u.tool:<9}'
         + ''.join(f' {_cell(u, c):<{widths[c]}}' for c in columns)
-        + f' {u.span_hours:>9.2f} {u.net_cost:>10.2f}'
+        + f' {u.net_cost:>10.2f}'
         for k, u in zip(keys, usages, strict=True)
     )
     lines.append('-' * len(header))
@@ -205,7 +197,7 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
         values = dict(zip(_TOTAL_KEYS, group, strict=True))
         cells = ''.join(f' {values.get(c, ""):<{widths[c]}}' for c in columns)
         currency = values['currency']
-        lines.append(f'{"total":<{width}} {"":<9}{cells} {"":>9} {amount:>10.2f} {currency}')
+        lines.append(f'{"total":<{width}} {"":<9}{cells} {amount:>10.2f} {currency}')
 
     blocks = []
     if len({u.currency for u in usages}) > 1:
@@ -214,7 +206,8 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
         blocks.append(_PRODUCT_FOOTER)
     if 'shared' in columns:
         blocks.append(_SHARED_FOOTER)
-    blocks.append(_SPAN_FOOTER)
+    if not blocks:
+        return '\n'.join(lines)
     return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 

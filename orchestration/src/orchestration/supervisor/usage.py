@@ -1,16 +1,14 @@
-"""Per-step billed usage for a unified pipeline run, read from the GCP billing export.
+"""Per-step billed cost for a unified pipeline run, read from the GCP billing export.
 
-The export is hourly-bucketed: every usage row spans exactly 3600 seconds. Any time
-span derived from it is therefore quantised *up* to the hour, which is why this module
-exposes `span_hours` and never a "duration". A step that ran for twelve minutes and one
-that ran for fifty-five minutes are indistinguishable here. For real per-step durations,
-use Airflow task instances instead.
+This module reports money. It reports no duration, because the export cannot support one:
+every usage row covers exactly one hour, so a step that ran for twelve minutes and one
+that ran for fifty-five are indistinguishable here. Per-step durations come from Airflow
+task instances, which have the resolution for it.
 
-`span_hours` is also not a count of billed hours. It is the envelope from the start of a
-step's first billed hour to the end of its last, gaps included, and a single step labels
-several billed resources at once — a GCE step labels its instance and both of its disks,
-a Dataproc step labels every node of its cluster — so the resource-hours actually billed
-are a multiple of it.
+`started` and `ended` remain, and are hour-aligned like the rows they come from. They fix
+the row order and bound the window `window_coverage` measures. Subtracting them yields an
+envelope over a step's billed rows that includes every gap between them, which is not a
+duration and is not offered as one.
 
 Not every pound the pipeline spends carries a `step` label, either. Google Batch jobs are
 unlabelled and some Dataproc disk and licensing rows fall outside the step's labels, so
@@ -97,9 +95,6 @@ class StepUsage(BaseModel):
             `None` for rows that carry no `product` label.
         started: Earliest `usage_start_time` across the step's billed rows.
         ended: Latest `usage_end_time` across the step's billed rows.
-        span_hours: Hours from `started` to `ended`. The envelope of the step's billed
-            rows, gaps included, quantised up to the hour by the export's bucketing. It
-            is neither a wall-clock duration nor a count of billed resource-hours.
         net_cost: `SUM(cost) + SUM(credits.amount)`. Credits are negative in the export,
             so this subtracts them. Ignoring credits overstates cost by roughly 7%.
         currency: Currency code from the export. `GBP` for this billing account. Part of
@@ -120,7 +115,6 @@ class StepUsage(BaseModel):
     product: str | None
     started: datetime
     ended: datetime
-    span_hours: float
     net_cost: float
     currency: str
     shared_cluster: bool
@@ -199,7 +193,6 @@ SELECT
   product,
   MIN(usage_start_time) AS started,
   MAX(usage_end_time) AS ended,
-  TIMESTAMP_DIFF(MAX(usage_end_time), MIN(usage_start_time), SECOND) / 3600 AS span_hours,
   SUM(cost) + SUM(credit) AS net_cost,
   currency,
   IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster
@@ -365,7 +358,6 @@ class BillingExport:
                 product=row.product,
                 started=row.started,
                 ended=row.ended,
-                span_hours=row.span_hours,
                 net_cost=row.net_cost,
                 currency=row.currency,
                 shared_cluster=row.shared_cluster,
