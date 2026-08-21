@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from orchestration.supervisor.usage import (
     _LABELLED_CTE,
     MAX_BYTES_BILLED,
     BillingExport,
+    PipelineCreator,
     StepUsage,
     WindowCoverage,
     run_usage_query,
@@ -23,8 +25,11 @@ from orchestration.supervisor.usage import (
     usage_window,
     window_coverage_query,
 )
+from orchestration.utils.common import GCP_PROJECT_GENETICS, GCP_PROJECT_PLATFORM
+from orchestration.utils.labels import default_labels
 
 TABLE = 'proj.ds.tbl'
+RUN = 'manual__2026-07-21t15-07-47-545737-00-00'
 WINDOW = (datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 22, 2, 0, tzinfo=UTC))
 
 
@@ -118,9 +123,13 @@ class TestRunUsageQuery:
         assert 'SUM(cost) + SUM(credit)' in sql
 
     def test_excludes_unlabelled_rows(self) -> None:
-        """Unrelated workloads share this table and have no step label."""
-        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
-        assert 'step IS NOT NULL' in sql
+        """Unrelated workloads share this table and have no step label.
+
+        Asserted against `_AGGREGATE` rather than the assembled query: `cluster_steps`
+        contains the same string, so against the whole SQL this passes even with the
+        aggregate's own `WHERE` deleted.
+        """
+        assert 'WHERE step IS NOT NULL' in _AGGREGATE
 
     def test_filters_on_run(self) -> None:
         sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
@@ -146,18 +155,24 @@ def _label_aliases(sql: str) -> dict[str, str]:
     return {alias: key for key, alias in re.findall(pattern, sql)}
 
 
-def _aggregate_expressions(sql: str) -> dict[str, str]:
-    """Map each column the aggregate SELECT produces to the expression behind it.
+_STRUCTURAL = ('SELECT', 'FROM', 'WHERE', 'AND', 'GROUP BY', 'ORDER BY', 'WITH', 'LEFT JOIN', ')')
+"""Line starts that are SQL structure rather than a projected column."""
 
-    A bare column maps to itself, so `currency` selected directly and `currency`
-    collapsed with `ANY_VALUE` are distinguishable. Takes the aggregate on its own, not
-    a full query: the CTEs select `FROM labelled` too.
+
+def _select_expressions(sql: str, until: str) -> dict[str, str]:
+    """Map each column a SELECT projects to the expression behind it, reading up to `until`.
+
+    A bare column maps to itself, so `currency` selected directly and `currency` collapsed
+    with `ANY_VALUE` are distinguishable. `until` bounds the block, because a query has
+    several SELECTs and they project different things: it is read back from `until` to the
+    nearest unindented `SELECT`, which is the one projecting those columns. A CTE's own
+    `SELECT` is indented, so it never captures the block of an outer one.
     """
-    select_block = sql.split('FROM labelled', maxsplit=1)[0]
+    head = sql.split(until, maxsplit=1)[0]
     expressions = {}
-    for line in select_block.splitlines():
+    for line in head.rsplit('\nSELECT\n', maxsplit=1)[-1].splitlines():
         entry = line.strip().rstrip(',')
-        if not entry or entry == 'SELECT':
+        if not entry or entry.startswith(_STRUCTURAL):
             continue
         aliased = re.match(r'^(?P<expr>.+?)\s+AS\s+(?P<alias>\w+)$', entry)
         if aliased:
@@ -167,11 +182,20 @@ def _aggregate_expressions(sql: str) -> dict[str, str]:
     return expressions
 
 
+def _aggregate_expressions(sql: str) -> dict[str, str]:
+    """What the aggregate SELECT produces, column by column.
+
+    Takes the aggregate on its own, not a full query: the CTEs select `FROM labelled` too.
+    """
+    return _select_expressions(sql, 'FROM labelled')
+
+
 def _group_by_columns(sql: str) -> set[str]:
     """The columns the aggregate groups by.
 
-    The last `GROUP BY` in the text, because `cluster_steps` has one of its own and it
-    comes first.
+    The last `GROUP BY` at column zero. `cluster_steps` has a clause of its own, but it is
+    indented and `^` under `MULTILINE` does not reach it, so today the last is also the
+    only one. Taking the last rather than the first survives that indentation changing.
     """
     clauses = re.findall(r'^GROUP BY (.+)$', sql, flags=re.MULTILINE)
     assert clauses, 'the aggregate must have a GROUP BY'
@@ -181,6 +205,21 @@ def _group_by_columns(sql: str) -> set[str]:
 def _selected_columns(sql: str) -> set[str]:
     """Column names the aggregate SELECT produces, aliased or bare."""
     return set(_aggregate_expressions(sql))
+
+
+class TestPipelineCreatorTracksTheLabeller:
+    def test_every_created_by_the_pipeline_stamps_is_a_pipeline_creator(self) -> None:
+        """`PipelineCreator` duplicates strings owned by `utils/labels.default_labels`.
+
+        Hardcoding them in the test too would leave three copies and no link between any
+        of them, so a renamed label would silently empty the coverage denominator. Read
+        them from the labeller instead.
+        """
+        stamped = {
+            default_labels(project=project)['created_by']
+            for project in (GCP_PROJECT_PLATFORM, GCP_PROJECT_GENETICS)
+        }
+        assert stamped <= set(get_args(PipelineCreator))
 
 
 class TestLabelExtraction:
@@ -197,7 +236,7 @@ class TestLabelExtraction:
             'step': 'step',
             'tool': 'tool',
             'product': 'product',
-            'cluster': 'goog-dataproc-cluster-name',
+            'cluster_instance': 'goog-dataproc-cluster-uuid',
         }
 
     def test_the_extractor_actually_finds_the_keys(self) -> None:
@@ -240,7 +279,7 @@ class TestAggregate:
         happened to produce, so the same run rendered twice comes out in two different
         orders. The tie-break is what makes two runs of the report diffable.
         """
-        assert 'ORDER BY started, run, step' in _AGGREGATE
+        assert 'ORDER BY started, run, step, tool, product, currency' in _AGGREGATE
 
     def test_currency_is_grouped_rather_than_collapsed(self) -> None:
         """`ANY_VALUE(currency)` over a mixed group stamps one currency on a mixed sum."""
@@ -268,14 +307,24 @@ def _cluster_steps_cte(sql: str) -> str:
 
 
 class TestClusterSharing:
-    """Dataproc clusters are created with `use_if_exists=True` and never relabelled.
+    """A cluster instance outliving its creating step would bill under that step's labels.
 
-    A cluster serving several steps bills all its hours to whichever step created it, so
-    those rows are not the step's own cost. Detected and flagged, never re-apportioned.
+    That is what `use_if_exists=True` in `operators/dataproc.py` permits, and the flag is
+    a guard on it. The path does not manifest today. Grouping must be on
+    the instance uuid: cluster *names* are reused several times within a run, each reuse a
+    separate instance carrying its own creating step's label, so grouping on the name
+    reports correct rows as suspect.
     """
 
-    def test_the_cluster_name_label_is_read(self) -> None:
-        assert _label_aliases(_LABELLED_CTE)['cluster'] == 'goog-dataproc-cluster-name'
+    def test_the_cluster_instance_is_identified_by_uuid_not_name(self) -> None:
+        """Measured 2026-08-21: one name covered 6 steps across 12 separate instances.
+
+        By name that reads as sharing. By uuid every one of the 181 instances in the
+        export served exactly one step, which is the truth.
+        """
+        aliases = _label_aliases(_LABELLED_CTE)
+        assert aliases['cluster_instance'] == 'goog-dataproc-cluster-uuid'
+        assert 'goog-dataproc-cluster-name' not in aliases.values()
 
     def test_the_count_is_taken_before_the_predicate_is_applied(self) -> None:
         """This is the whole feature.
@@ -292,7 +341,7 @@ class TestClusterSharing:
             assert '@run' not in cte
             assert '@step' not in cte
             assert 'COUNT(DISTINCT step)' in cte
-            assert 'GROUP BY run, cluster' in cte
+            assert 'GROUP BY run, cluster_instance' in cte
 
     def test_both_queries_count_sharing_identically(self) -> None:
         """A history and a run report of the same rows must not disagree on the flag."""
@@ -308,7 +357,9 @@ class TestClusterSharing:
 
     def test_the_count_is_joined_on_the_run_and_the_cluster(self) -> None:
         """Joining on the cluster alone would flag a run for another run's sharing."""
-        assert 'LEFT JOIN cluster_steps ON run = cluster_run AND cluster = cluster_name' in _AGGREGATE
+        assert (
+            'LEFT JOIN cluster_steps ON run = cluster_run AND cluster_instance = cluster_key'
+        ) in _AGGREGATE
 
     def test_a_step_on_no_cluster_is_not_flagged(self) -> None:
         """GCE steps join to nothing, and a null must read as unshared rather than unknown."""
@@ -353,33 +404,118 @@ class TestStepHistoryQuery:
         assert 'step = @step' in sql
 
 
+def _coverage_sources(sql: str) -> dict[str, str]:
+    """What the coverage query's source CTE projects, column by column."""
+    return _select_expressions(sql, 'FROM `')
+
+
+def _coverage_outputs(sql: str) -> dict[str, str]:
+    """What the coverage query returns, column by column."""
+    return _select_expressions(sql, 'FROM windowed')
+
+
+def _window_filters(sql: str) -> list[str]:
+    """The conditions the coverage query's source CTE keeps a row on, in order."""
+    lines = [line.strip() for line in sql.split('FROM `', maxsplit=1)[1].splitlines()]
+    return [
+        entry.split(' ', maxsplit=1)[1]
+        for entry in lines
+        if entry.startswith(('WHERE ', 'AND '))
+    ]
+
+
 class TestWindowCoverageQuery:
-    def test_binds_the_window_and_the_partition_floor(self) -> None:
-        sql, params = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+    """Pinned the way `_AGGREGATE` is, and for the same reason.
+
+    Every one of these was a substring-presence check, and five semantic mutations of this
+    query survived the whole suite: netting credits the wrong way, either window
+    comparison flipped, the two output aliases transposed, and the `cost_type` filter
+    deleted. All five are silently wrong money rather than a failure.
+    """
+
+    def test_binds_the_run_the_window_and_the_partition_floor(self) -> None:
+        sql, params = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
         assert '2026-07-21' not in sql
+        assert RUN not in sql
         names = {p.name: p.value for p in params}
+        assert names['run'] == RUN
         assert names['window_start'] == WINDOW[0]
         assert names['window_end'] == WINDOW[1]
         assert names['since'] == date(2026, 5, 1)
 
-    def test_still_prunes_partitions(self) -> None:
-        """The window is on usage time, which is not the partitioning column."""
-        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
-        assert 'DATE(_PARTITIONTIME) >= @since' in sql
+    def test_the_row_filter_is_exactly_these_four_conditions(self) -> None:
+        """Pins each comparison with its operator.
 
-    def test_denominator_is_every_row_the_pipeline_created(self) -> None:
-        """Unlabelled rows are the point of the measurement, so they cannot be filtered out."""
-        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
-        assert "key = 'created_by') IN ('unified-pipeline', 'gentropy-pipelines')" in sql
-        assert 'WHERE step IS NOT NULL' not in sql
+        `usage_start_time <= @window_start` and `usage_end_time >= @window_end` are both
+        valid SQL that quietly measure a different set of rows, and dropping `cost_type`
+        folds taxes and adjustments into the denominator.
+        """
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert _window_filters(sql) == [
+            'DATE(_PARTITIONTIME) >= @since',
+            "cost_type = 'regular'",
+            'usage_start_time >= @window_start',
+            'usage_end_time <= @window_end',
+        ]
 
-    def test_numerator_matches_what_the_report_shows(self) -> None:
-        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
-        assert "IF(step IS NOT NULL AND tool IN ('pis', 'pts', 'gentropy'), net_cost, 0)" in sql
+    def test_credits_are_netted_off_not_added_on(self) -> None:
+        """Credits are negative, so `cost - SUM(amount)` inflates both figures instead."""
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert _coverage_sources(sql)['net_cost'] == (
+            'cost + (SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) c)'
+        )
+
+    def test_the_numerator_is_the_rows_the_report_shows(self) -> None:
+        """Carries the same three predicates as the aggregate.
+
+        So it is the table's total by construction, not a number that happens to be close.
+        """
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert _coverage_outputs(sql)['labelled_cost'] == (
+            "SUM(IF(run = @run AND step IS NOT NULL AND tool IN ('pis', 'pts', 'gentropy'), net_cost, 0))"
+        )
+
+    def test_the_denominator_is_all_pipeline_spend_in_the_window(self) -> None:
+        """Not filtered by run: an overlapping run's spend is real spend in the window."""
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert _coverage_outputs(sql)['pipeline_cost'] == (
+            "SUM(IF(created_by IN ('unified-pipeline', 'gentropy-pipelines'), net_cost, 0))"
+        )
+        assert '@run' not in _coverage_outputs(sql)['pipeline_cost']
+
+    def test_the_two_aliases_are_not_transposed(self) -> None:
+        """Transposed, this prints '3170.71 of the 1062.11 GBP (298.5%)'."""
+        outputs = _coverage_outputs(sql=window_coverage_query(TABLE, RUN, WINDOW, date(2026, 5, 1))[0])
+        assert 'step IS NOT NULL' in outputs['labelled_cost']
+        assert 'created_by' in outputs['pipeline_cost']
+        assert 'step IS NOT NULL' not in outputs['pipeline_cost']
+
+    def test_the_numerator_does_not_require_created_by(self) -> None:
+        """The table's rows are not filtered on it, so the numerator must not be either.
+
+        Otherwise a step-labelled row missing `created_by` appears in the table but not in
+        the figure that claims to total the table.
+        """
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert 'created_by' not in _coverage_outputs(sql)['labelled_cost']
 
     def test_totals_are_kept_per_currency(self) -> None:
-        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
-        assert 'GROUP BY currency' in sql
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert _group_by_columns(sql) == {'currency'}
+
+    def test_the_parsers_actually_read_this_query(self) -> None:
+        """Guard the guards: three parsers here, each worthless if it matches nothing."""
+        sql, _ = window_coverage_query(TABLE, RUN, WINDOW, since=date(2026, 5, 1))
+        assert set(_coverage_sources(sql)) == {
+            'run',
+            'step',
+            'tool',
+            'created_by',
+            'net_cost',
+            'currency',
+        }
+        assert set(_coverage_outputs(sql)) == {'currency', 'labelled_cost', 'pipeline_cost'}
+        assert len(_window_filters(sql)) == 4
 
 
 class TestWindowCoverage:
@@ -391,6 +527,17 @@ class TestWindowCoverage:
         """Zero over zero is not 100% coverage, and must not be rendered as one."""
         coverage = WindowCoverage(currency='GBP', labelled_cost=0.0, pipeline_cost=0.0)
         assert coverage.labelled_share is None
+
+    def test_a_numerator_above_the_denominator_is_flagged_as_impossible(self) -> None:
+        """A share above 100% is a broken measurement, not excellent coverage."""
+        coverage = WindowCoverage(currency='GBP', labelled_cost=120.0, pipeline_cost=100.0)
+        assert coverage.exceeds_pipeline_cost
+        assert coverage.labelled_share == pytest.approx(1.2)
+
+    def test_a_normal_share_is_not_flagged(self) -> None:
+        assert not WindowCoverage(
+            currency='GBP', labelled_cost=75.0, pipeline_cost=100.0
+        ).exceeds_pipeline_cost
 
 
 class TestUsageWindow:
@@ -478,7 +625,7 @@ class TestBillingExport:
     def test_window_coverage_maps_rows_to_models(self) -> None:
         rows = [SimpleNamespace(currency='GBP', labelled_cost=3170.71, pipeline_cost=4232.82)]
         export = BillingExport(client=_client(rows), table=TABLE)
-        coverage = export.window_coverage(window=WINDOW, since=date(2026, 5, 1))
+        coverage = export.window_coverage(run=RUN, window=WINDOW, since=date(2026, 5, 1))
         assert coverage == [
             WindowCoverage(currency='GBP', labelled_cost=3170.71, pipeline_cost=4232.82)
         ]
@@ -486,9 +633,10 @@ class TestBillingExport:
     def test_window_coverage_binds_the_window(self) -> None:
         client = _client([])
         export = BillingExport(client=client, table=TABLE)
-        export.window_coverage(window=WINDOW, since=date(2026, 5, 1))
+        export.window_coverage(run=RUN, window=WINDOW, since=date(2026, 5, 1))
         job_config = client.query.call_args.kwargs['job_config']
         assert {p.name for p in job_config.query_parameters} == {
+            'run',
             'window_start',
             'window_end',
             'since',

@@ -48,6 +48,19 @@ same thing about every row it is noise, so it is left out.
 
 _OPTIONAL_COLUMNS: tuple[OptionalColumn, ...] = ('product', 'currency', 'shared')
 
+_TOTAL_KEYS: tuple[OptionalColumn, ...] = ('product', 'currency')
+"""Columns a total may never be summed across, whether or not they are displayed.
+
+Their values make two amounts incomparable: GBP plus USD is not an amount of money, and
+platform plus ppp is not one pipeline's cost. `shared` is not among them — a flagged row
+and an unflagged one in the same product and currency are the same money, mis-attributed
+between steps, so their sum is still what the run spent.
+
+Keyed on the values rather than on what is displayed, so the totals cannot disagree with
+the rows above them if the display rule ever changes. When every row agrees this yields
+exactly one group, which is the common case and looks like it always did.
+"""
+
 _MIN_KEY_WIDTH = 20
 """Floor for the identity column, so a short-labelled table is not cramped."""
 
@@ -83,32 +96,42 @@ _PRODUCT_FOOTER = [
 ]
 
 _SHARED_FOOTER = [
-    'shared marks a step whose Dataproc cluster also served other steps of the same run.',
-    'A cluster keeps the labels of the step that created it, so a marked row is charged',
-    "the whole cluster's hours, including the other steps' — it is not that step's own",
-    'cost. Splitting it up needs the Dataproc Jobs API and is not attempted here.',
+    'shared marks a row where more than one step of this run billed against a single',
+    'Dataproc cluster instance, which keeps the labels it was created with — so the row',
+    "is charged that instance's whole cost rather than the step's own. No row in the",
+    'export has ever been marked: this guards a code path (use_if_exists=True) that does',
+    'not currently manifest. Repeated use of one cluster *name* is not this, and is fine.',
 ]
 
 _COVERAGE_FOOTER = [
-    'the remainder is real pipeline spend that no step above accounts for: Google Batch',
-    'jobs carry no step labels, and some Dataproc disk and licensing rows fall outside',
-    'the labels of the step that caused them.',
+    'the denominator is everything the pipeline billed in that window, including any',
+    'other run that overlapped it. The remainder is real pipeline spend the steps above',
+    'do not account for: Google Batch jobs carry no step labels, and some Dataproc disk',
+    'and licensing rows fall outside the labels of the step that caused them.',
+]
+
+_IMPOSSIBLE_SHARE_FOOTER = [
+    'a share above 100% is not good coverage, it is a broken measurement: the rows above',
+    'were counted in the numerator but not in the denominator, which means something the',
+    'report shows is not labelled as created by the pipeline. Treat the figure as wrong.',
 ]
 
 
-def _totals_by_currency(usages: list[StepUsage]) -> dict[str, float]:
-    """Total net cost per currency.
+def totals_by_group(usages: list[StepUsage]) -> dict[tuple[str, ...], float]:
+    """Total net cost per group of rows that may legitimately be added together.
 
     Args:
         usages: The usages to total.
 
     Returns:
-        Net cost keyed by currency code. Costs in different currencies are never
-        added together, because their sum is not a quantity of money.
+        Net cost keyed by the `_TOTAL_KEYS` values of the group, in `_TOTAL_KEYS` order,
+        sorted. Two currencies are not one amount of money, and two products are not one
+        pipeline, so a single total across either is a number describing nothing.
     """
+    groups = sorted({tuple(_cell(u, c) for c in _TOTAL_KEYS) for u in usages})
     return {
-        currency: total_cost(u for u in usages if u.currency == currency)
-        for currency in sorted({u.currency for u in usages})
+        group: total_cost(u for u in usages if tuple(_cell(u, c) for c in _TOTAL_KEYS) == group)
+        for group in groups
     }
 
 
@@ -166,7 +189,6 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
     columns = optional_columns(usages)
     widths = {c: max(len(c), *(len(_cell(u, c)) for u in usages)) for c in columns}
     extra_header = ''.join(f' {c:<{widths[c]}}' for c in columns)
-    blanks = ''.join(f' {"":<{widths[c]}}' for c in columns)
 
     header = f'{key:<{width}} {"tool":<9}{extra_header} {"span (h)":>9} {"net cost":>10}'
     lines = [header, '-' * len(header)]
@@ -178,13 +200,15 @@ def render_table(usages: list[StepUsage], key: RowKey = 'step') -> str:
     )
     lines.append('-' * len(header))
 
-    totals = _totals_by_currency(usages)
-    lines.extend(
-        f'{"total":<{width}} {"":<9}{blanks} {"":>9} {amount:>10.2f} {currency}'
-        for currency, amount in totals.items()
-    )
+    totals = totals_by_group(usages)
+    for group, amount in totals.items():
+        values = dict(zip(_TOTAL_KEYS, group, strict=True))
+        cells = ''.join(f' {values.get(c, ""):<{widths[c]}}' for c in columns)
+        currency = values['currency']
+        lines.append(f'{"total":<{width}} {"":<9}{cells} {"":>9} {amount:>10.2f} {currency}')
+
     blocks = []
-    if len(totals) > 1:
+    if len({u.currency for u in usages}) > 1:
         blocks.append(_CURRENCY_FOOTER)
     if 'product' in columns:
         blocks.append(_PRODUCT_FOOTER)
@@ -227,9 +251,10 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
             f'  the steps above account for {entry.labelled_cost:.2f} of the {entry.pipeline_cost:.2f} '
             f'{entry.currency} the pipeline billed ({share})'
         )
-    lines.append('')
-    lines.extend(_COVERAGE_FOOTER)
-    return '\n'.join(lines)
+    blocks = [_COVERAGE_FOOTER]
+    if any(entry.exceeds_pipeline_cost for entry in coverage):
+        blocks.append(_IMPOSSIBLE_SHARE_FOOTER)
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -273,10 +298,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
         if args.command == 'usage':
-            usages = export.run_usage(run=clean_label(args.run), since=args.since)
+            run = clean_label(args.run)
+            usages = export.run_usage(run=run, since=args.since)
             window = usage_window(usages)
             if window is not None and not args.json:
-                coverage = export.window_coverage(window=window, since=args.since)
+                coverage = export.window_coverage(run=run, window=window, since=args.since)
         elif args.command == 'history':
             key = 'run'
             usages = export.step_history(step=clean_label(args.step), since=args.since)

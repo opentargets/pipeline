@@ -11,7 +11,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from orchestration.supervisor import cli
-from orchestration.supervisor.cli import build_parser, main, optional_columns, render_coverage, render_table
+from orchestration.supervisor.cli import (
+    build_parser,
+    main,
+    optional_columns,
+    render_coverage,
+    render_table,
+    totals_by_group,
+)
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, clean_label
 
@@ -117,6 +124,61 @@ class TestRenderTable:
         assert totals[0].split()[-2:] == ['4.00', 'GBP']
 
 
+class TestTotalsNeverCrossAnIncomparableColumn:
+    """The rows were split by product and the footer promised they are never added.
+
+    A single total underneath them broke that promise in the one place a reader looks.
+    """
+
+    def test_mixed_products_are_totalled_separately(self) -> None:
+        out = render_table([_usage(net_cost=100.0), _usage(net_cost=200.0, product='ppp')])
+        totals = [line for line in out.splitlines() if line.startswith('total')]
+        assert '300.00' not in out
+        assert [line.split()[1:] for line in totals] == [
+            ['platform', '100.00', 'GBP'],
+            ['ppp', '200.00', 'GBP'],
+        ]
+
+    def test_the_total_names_the_product_it_belongs_to(self) -> None:
+        """An unlabelled total line under a split table is not attributable to either."""
+        out = render_table([_usage(net_cost=100.0), _usage(net_cost=200.0, product='ppp')])
+        totals = [line for line in out.splitlines() if line.startswith('total')]
+        assert all('platform' in totals[0] for _ in totals[:1])
+        assert 'ppp' in totals[1]
+
+    def test_product_and_currency_split_together(self) -> None:
+        out = render_table([
+            _usage(net_cost=1.0),
+            _usage(net_cost=2.0, product='ppp'),
+            _usage(net_cost=4.0, currency='USD'),
+            _usage(net_cost=8.0, product='ppp', currency='USD'),
+        ])
+        totals = [line.split()[1:] for line in out.splitlines() if line.startswith('total')]
+        assert totals == [
+            ['platform', 'GBP', '1.00', 'GBP'],
+            ['platform', 'USD', '4.00', 'USD'],
+            ['ppp', 'GBP', '2.00', 'GBP'],
+            ['ppp', 'USD', '8.00', 'USD'],
+        ]
+
+    def test_a_shared_flag_does_not_split_the_total(self) -> None:
+        """Shared rows are the same money badly attributed, so they still add up."""
+        out = render_table([_usage(net_cost=1.5), _usage(net_cost=2.5, shared=True)])
+        totals = [line for line in out.splitlines() if line.startswith('total')]
+        assert len(totals) == 1
+        assert totals[0].split()[-2:] == ['4.00', 'GBP']
+
+    def test_totals_by_group_keys_on_values_not_on_display(self) -> None:
+        """The split must not depend on the rendering rule that decides what is shown."""
+        assert totals_by_group([_usage(net_cost=1.0), _usage(net_cost=2.0, product='ppp')]) == {
+            ('platform', 'GBP'): 1.0,
+            ('ppp', 'GBP'): 2.0,
+        }
+        assert totals_by_group([_usage(net_cost=1.0), _usage(net_cost=2.0)]) == {
+            ('platform', 'GBP'): 3.0
+        }
+
+
 class TestOptionalColumns:
     def test_nothing_extra_when_the_rows_agree(self) -> None:
         """The common case is one product and one currency, and naming them is noise."""
@@ -168,13 +230,22 @@ class TestIncomparableRowsAreLabelled:
         assert len(row) == len(header) == len(rule)
 
     def test_a_shared_cluster_row_is_marked_and_explained(self) -> None:
-        """The number on a shared row is the cluster's cost, not the step's."""
+        """The number on a shared row is the cluster instance's cost, not the step's."""
         out = render_table([_usage(step='pts_reactome'), _usage(step='pts_ontoma', shared=True)])
         rows = {line.split()[0]: line.split()[2] for line in out.splitlines() if line.startswith('pts_')}
         assert rows == {'pts_reactome': '-', 'pts_ontoma': 'yes'}
         assert 'shared' in out.splitlines()[0]
-        assert "not that step's own" in out
-        assert 'Dataproc Jobs API' in out
+        assert "rather than the step's own" in out
+
+    def test_the_shared_footer_does_not_claim_this_happens(self) -> None:
+        """A footer implying this happens describes billing that does not exist.
+
+        Which invites the reader to distrust correct per-step numbers.
+        """
+        out = render_table([_usage(shared=True)])
+        assert 'has ever been marked' in out
+        assert 'not currently manifest' in out
+        assert 'name' in out
 
     def test_an_unshared_table_is_unchanged(self) -> None:
         """The common case must not grow a column of dashes."""
@@ -224,6 +295,28 @@ class TestRenderCoverage:
         )
         assert 'share undefined' in out
         assert '%' not in out
+
+    def test_an_impossible_share_reads_as_broken_not_as_excellent(self) -> None:
+        """Above 100% the numerator counted rows the denominator did not."""
+        out = render_coverage(
+            WINDOW, [WindowCoverage(currency='GBP', labelled_cost=120.0, pipeline_cost=100.0)]
+        )
+        assert '120.0%' in out
+        assert 'broken measurement' in out
+
+    def test_a_normal_share_carries_no_alarm(self) -> None:
+        out = render_coverage(
+            WINDOW, [WindowCoverage(currency='GBP', labelled_cost=75.0, pipeline_cost=100.0)]
+        )
+        assert 'broken measurement' not in out
+
+    def test_the_denominator_is_declared_run_agnostic(self) -> None:
+        """An overlapping run's spend is in the denominator, and the reader must know."""
+        out = render_coverage(
+            WINDOW, [WindowCoverage(currency='GBP', labelled_cost=1.0, pipeline_cost=2.0)]
+        )
+        assert 'including any' in out
+        assert 'other run that overlapped it' in out
 
     def test_each_currency_gets_its_own_line(self) -> None:
         out = render_coverage(
@@ -356,6 +449,16 @@ class TestMain:
         assert '21.60 of the 28.80 GBP the pipeline billed (75.0%)' in out
         assert _bound(client, call=1)['window_start'] == datetime(2026, 7, 21, 14, 0, tzinfo=UTC)
         assert _bound(client, call=1)['window_end'] == datetime(2026, 7, 22, 2, 0, tzinfo=UTC)
+        assert _bound(client, call=1)['run'] == _bound(client, call=0)['run']
+
+    def test_coverage_counts_the_run_the_table_shows(
+        self, client: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Unbound, the numerator is every run in the window and is not the table's total."""
+        coverage_row = SimpleNamespace(currency='GBP', labelled_cost=21.60, pipeline_cost=28.80)
+        client.query.side_effect = _results([_usage_row()], [coverage_row])
+        assert main(['usage', '--run', RAW_RUN_ID]) == 0
+        assert _bound(client, call=1)['run'] == CLEAN_RUN_ID
 
     def test_an_empty_run_reports_coverage_as_unknown(
         self, client: MagicMock, capsys: pytest.CaptureFixture[str]

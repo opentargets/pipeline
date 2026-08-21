@@ -17,12 +17,19 @@ unlabelled and some Dataproc disk and licensing rows fall outside the step's lab
 the per-step figures are a subset of pipeline spend, never all of it. `window_coverage`
 measures that subset against everything the pipeline billed over the same period.
 
-Nor is every labelled pound the labelled step's own. A Dataproc cluster is created with
-`use_if_exists=True` and never relabelled, so when several steps share one, its hours are
-billed against whichever step created it. `shared_cluster` marks the rows where that has
-happened rather than guessing at a split, which would need the Dataproc Jobs API. Measured
-over the export on 2026-08-21: 94 cluster-runs served exactly one step and 13 served
-between two and six.
+`shared_cluster` guards the one way a labelled pound could fail to be the labelled step's
+own. `operators/dataproc.py` passes `use_if_exists=True` and does not relabel, so a cluster
+instance outliving the step that created it would bill its hours under that step's labels.
+The flag marks any row where more than one step billed against a single cluster *instance*
+in one run. **It does not fire on today's data and is expected not to**: measured over the
+export on 2026-08-21, all 181 cluster instances served exactly one step (£2,039.82).
+
+Instance means the `goog-dataproc-cluster-uuid` label, never the name. Names are reused
+within a run — `up-pts-5df4f` in `up-20260527-1458` covers 6 steps across 12 separate
+uuids, each created, used and deleted in turn — and every one of those instances carries
+its own creating step's label, so the attribution is right. Grouping by name reports all
+of them as suspect, which is worse than not checking: it teaches the reader to distrust
+correct numbers.
 """
 
 from __future__ import annotations
@@ -97,12 +104,14 @@ class StepUsage(BaseModel):
             so this subtracts them. Ignoring credits overstates cost by roughly 7%.
         currency: Currency code from the export. `GBP` for this billing account. Part of
             the grouping key, so an amount here is never a mix of currencies.
-        shared_cluster: True when a Dataproc cluster this step billed on also served other
-            steps of the same run. Dataproc clusters are created with `use_if_exists=True`
-            and are never relabelled, so a shared cluster's hours are billed against
-            whichever step created it. `net_cost` on such a row is that cluster's cost,
-            not this step's own. Detected, never re-apportioned: dividing it up needs the
-            Dataproc Jobs API.
+        shared_cluster: True when more than one step of this run billed against a single
+            Dataproc cluster *instance* (`goog-dataproc-cluster-uuid`, not the reused
+            name). Such a row is charged the instance's whole cost rather than the step's
+            own, because the instance keeps the labels it was created with. False for
+            every row in the export as of 2026-08-21 — this is a guard on a code path
+            (`use_if_exists=True`) that does not currently manifest, not a description of
+            observed billing. Detected, never re-apportioned: splitting an instance's cost
+            between steps needs the Dataproc Jobs API.
     """
 
     run: str
@@ -122,10 +131,12 @@ class WindowCoverage(BaseModel):
 
     Args:
         currency: Currency code the two amounts are denominated in.
-        labelled_cost: Net cost of rows this module would report, i.e. rows with a `step`
-            label and a `tool` in `PipelineTool`.
+        labelled_cost: Net cost of exactly the rows the report shows: this run's rows, with
+            a `step` label and a `tool` in `PipelineTool`.
         pipeline_cost: Net cost of every row created by the pipeline in the window,
-            labelled per step or not.
+            labelled per step or not, and whichever run produced it. Deliberately not
+            filtered by run: a run that overlapped this one really did spend that money in
+            this window, and hiding it would understate what the window cost.
     """
 
     currency: str
@@ -139,6 +150,17 @@ class WindowCoverage(BaseModel):
             return None
         return self.labelled_cost / self.pipeline_cost
 
+    @property
+    def exceeds_pipeline_cost(self) -> bool:
+        """Whether the numerator is larger than the total it claims to be a share of.
+
+        Impossible if both figures measure what they say, so it means the report counted
+        rows the denominator did not: a step-labelled row without a `created_by` the
+        pipeline recognises. It is a broken measurement, not excellent coverage, and has
+        to read as one.
+        """
+        return self.labelled_cost > self.pipeline_cost
+
 
 _LABELLED_CTE = """
 WITH labelled AS (
@@ -147,7 +169,7 @@ WITH labelled AS (
     (SELECT value FROM UNNEST(labels) WHERE key = 'step') AS step,
     (SELECT value FROM UNNEST(labels) WHERE key = 'tool') AS tool,
     (SELECT value FROM UNNEST(labels) WHERE key = 'product') AS product,
-    (SELECT value FROM UNNEST(labels) WHERE key = 'goog-dataproc-cluster-name') AS cluster,
+    (SELECT value FROM UNNEST(labels) WHERE key = 'goog-dataproc-cluster-uuid') AS cluster_instance,
     usage_start_time,
     usage_end_time,
     cost,
@@ -160,12 +182,12 @@ WITH labelled AS (
 cluster_steps AS (
   SELECT
     run AS cluster_run,
-    cluster AS cluster_name,
+    cluster_instance AS cluster_key,
     COUNT(DISTINCT step) AS steps_on_cluster
   FROM labelled
-  WHERE cluster IS NOT NULL
+  WHERE cluster_instance IS NOT NULL
     AND step IS NOT NULL
-  GROUP BY run, cluster
+  GROUP BY run, cluster_instance
 )
 """
 
@@ -182,19 +204,21 @@ SELECT
   currency,
   IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster
 FROM labelled
-LEFT JOIN cluster_steps ON run = cluster_run AND cluster = cluster_name
+LEFT JOIN cluster_steps ON run = cluster_run AND cluster_instance = cluster_key
 WHERE step IS NOT NULL
   AND tool IN ({tools})
   AND {predicate}
 GROUP BY run, step, tool, product, currency
-ORDER BY started, run, step
+ORDER BY started, run, step, tool, product, currency
 """
 
 _COVERAGE = """
 WITH windowed AS (
   SELECT
+    (SELECT value FROM UNNEST(labels) WHERE key = 'run') AS run,
     (SELECT value FROM UNNEST(labels) WHERE key = 'step') AS step,
     (SELECT value FROM UNNEST(labels) WHERE key = 'tool') AS tool,
+    (SELECT value FROM UNNEST(labels) WHERE key = 'created_by') AS created_by,
     cost + (SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) c) AS net_cost,
     currency
   FROM `{table}`
@@ -202,12 +226,11 @@ WITH windowed AS (
     AND cost_type = 'regular'
     AND usage_start_time >= @window_start
     AND usage_end_time <= @window_end
-    AND (SELECT value FROM UNNEST(labels) WHERE key = 'created_by') IN ({creators})
 )
 SELECT
   currency,
-  SUM(IF(step IS NOT NULL AND tool IN ({tools}), net_cost, 0)) AS labelled_cost,
-  SUM(net_cost) AS pipeline_cost
+  SUM(IF(run = @run AND step IS NOT NULL AND tool IN ({tools}), net_cost, 0)) AS labelled_cost,
+  SUM(IF(created_by IN ({creators}), net_cost, 0)) AS pipeline_cost
 FROM windowed
 GROUP BY currency
 ORDER BY currency
@@ -277,15 +300,24 @@ def step_history_query(
 
 
 def window_coverage_query(
-    table: str, window: tuple[datetime, datetime], since: date
+    table: str, run: str, window: tuple[datetime, datetime], since: date
 ) -> tuple[str, list[bigquery.ScalarQueryParameter]]:
-    """Build the query comparing step-labelled spend with all pipeline spend in a window.
+    """Build the query comparing one run's step-labelled spend with all pipeline spend.
+
+    The numerator carries the same three predicates as the report's own rows — this run,
+    a `step` label, a `tool` in `PipelineTool` — so it is the table's total by
+    construction and not merely close to it. The denominator is every pipeline-created row
+    in the window regardless of run, because an overlapping run's spend is real spend in
+    that period.
 
     Args:
         table: Fully-qualified billing export table.
+        run: The `run` label whose rows form the numerator.
         window: Inclusive `(start, end)` of the period to measure. A row counts only if it
-            falls entirely inside it, which is exact here because both the window and the
-            rows are hour-aligned.
+            falls entirely inside it. That is exact rather than approximate: every row in
+            the denominator was measured on 2026-08-21 to span exactly 3600 seconds
+            (3,060,837 rows, one bucket size), so there are no daily-bucketed SKUs for
+            containment to drop.
         since: Earliest partition date to scan. Prunes partitions; the window itself is on
             usage time, which is not the partitioning column.
 
@@ -295,6 +327,7 @@ def window_coverage_query(
     start, end = window
     sql = _COVERAGE.format(table=table, tools=_PIPELINE_TOOLS_SQL, creators=_PIPELINE_CREATORS_SQL)
     return sql, [
+        bigquery.ScalarQueryParameter('run', 'STRING', run),
         bigquery.ScalarQueryParameter('window_start', 'TIMESTAMP', start),
         bigquery.ScalarQueryParameter('window_end', 'TIMESTAMP', end),
         bigquery.ScalarQueryParameter('since', 'DATE', since),
@@ -367,19 +400,23 @@ class BillingExport:
         """
         return self._fetch(*step_history_query(self.table, step, since))
 
-    def window_coverage(self, window: tuple[datetime, datetime], since: date) -> list[WindowCoverage]:
-        """How much of the pipeline's spend over a window this module's reports account for.
+    def window_coverage(
+        self, run: str, window: tuple[datetime, datetime], since: date
+    ) -> list[WindowCoverage]:
+        """How much of the pipeline's spend over a window one run's reported steps cover.
 
         Args:
+            run: The `run` label whose reported rows form the numerator. Must be the run
+                the window came from, or the two figures describe different things.
             window: Inclusive `(start, end)` of the period to measure, normally
-                `usage_window` of a run's usages.
+                `usage_window` of that run's usages.
             since: Earliest partition date to scan.
 
         Returns:
             One `WindowCoverage` per currency, ordered by currency code. Empty when the
             pipeline billed nothing in the window.
         """
-        sql, params = window_coverage_query(self.table, window, since)
+        sql, params = window_coverage_query(self.table, run, window, since)
         return [
             WindowCoverage(
                 currency=row.currency,
