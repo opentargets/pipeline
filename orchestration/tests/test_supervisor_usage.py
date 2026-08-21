@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from typing import get_args
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,15 +12,20 @@ from pydantic import ValidationError
 
 from orchestration.supervisor.usage import (
     _AGGREGATE,
+    _LABELLED_CTE,
+    MAX_BYTES_BILLED,
     BillingExport,
-    PipelineTool,
     StepUsage,
+    WindowCoverage,
     run_usage_query,
     step_history_query,
     total_cost,
+    usage_window,
+    window_coverage_query,
 )
 
 TABLE = 'proj.ds.tbl'
+WINDOW = (datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 22, 2, 0, tzinfo=UTC))
 
 
 class TestStepUsage:
@@ -30,6 +34,7 @@ class TestStepUsage:
             run='manual__2026-07-21t15-07-47-545737-00-00',
             step='pts_target',
             tool='pts',
+            product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
             span_hours=2.0,
@@ -45,6 +50,7 @@ class TestStepUsage:
                 'run': 'r',
                 'step': 's',
                 'tool': 'nextgen',
+                'product': 'platform',
                 'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
                 'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
                 'span_hours': 1.0,
@@ -52,12 +58,28 @@ class TestStepUsage:
                 'currency': 'GBP',
             })
 
+    def test_product_may_be_missing(self) -> None:
+        """Not every billed resource carries the label, and dropping those rows would lose cost."""
+        u = StepUsage.model_validate({
+            'run': 'r',
+            'step': 's',
+            'tool': 'pis',
+            'product': None,
+            'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
+            'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            'span_hours': 1.0,
+            'net_cost': 0.1,
+            'currency': 'GBP',
+        })
+        assert u.product is None
+
     def test_negative_cost_is_allowed(self) -> None:
         """A credit-dominated row can net negative. This must not be rejected."""
         u = StepUsage(
             run='r',
             step='s',
             tool='pis',
+            product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
             span_hours=1.0,
@@ -108,33 +130,115 @@ class TestRunUsageQuery:
         sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
         assert "tool IN ('pis', 'pts', 'gentropy')" in sql
 
-    def test_tool_filter_is_built_from_the_literal(self) -> None:
-        """The SQL filter and the model's `Literal` must not drift apart.
-
-        A tool in the filter but not the `Literal` raises at fetch time; a tool in
-        the `Literal` but not the filter is silently missing from every report.
-        """
-        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
-        expected = ', '.join(f"'{tool}'" for tool in get_args(PipelineTool))
-        assert f'tool IN ({expected})' in sql
-
     def test_excludes_non_regular_cost_rows(self) -> None:
         """Taxes, adjustments and rounding rows share the export and are not step cost."""
         sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
         assert "cost_type = 'regular'" in sql
 
 
-def _selected_columns(sql: str) -> set[str]:
-    """Column names the aggregate SELECT produces, aliased or bare."""
+def _label_aliases(sql: str) -> dict[str, str]:
+    """Map each alias the CTE defines to the `labels` key it is extracted from."""
+    pattern = r"\(SELECT value FROM UNNEST\(labels\) WHERE key = '([^']*)'\) AS (\w+)"
+    return {alias: key for key, alias in re.findall(pattern, sql)}
+
+
+def _aggregate_expressions(sql: str) -> dict[str, str]:
+    """Map each column the aggregate SELECT produces to the expression behind it.
+
+    A bare column maps to itself, so `currency` selected directly and `currency`
+    collapsed with `ANY_VALUE` are distinguishable.
+    """
     select_block = sql.split('FROM labelled', maxsplit=1)[0]
-    columns = set()
+    expressions = {}
     for line in select_block.splitlines():
         entry = line.strip().rstrip(',')
         if not entry or entry == 'SELECT':
             continue
-        alias = re.search(r'\bAS\s+(\w+)$', entry)
-        columns.add(alias.group(1) if alias else entry)
-    return columns
+        aliased = re.match(r'^(?P<expr>.+?)\s+AS\s+(?P<alias>\w+)$', entry)
+        if aliased:
+            expressions[aliased.group('alias')] = aliased.group('expr')
+        else:
+            expressions[entry] = entry
+    return expressions
+
+
+def _group_by_columns(sql: str) -> set[str]:
+    """The columns the aggregate groups by."""
+    clause = re.search(r'^GROUP BY (.+)$', sql, flags=re.MULTILINE)
+    assert clause is not None, 'the aggregate must have a GROUP BY'
+    return {column.strip() for column in clause.group(1).split(',')}
+
+
+def _selected_columns(sql: str) -> set[str]:
+    """Column names the aggregate SELECT produces, aliased or bare."""
+    return set(_aggregate_expressions(sql))
+
+
+class TestLabelExtraction:
+    """The CTE decides what every row of every report *is*.
+
+    Swapping two label keys transposes each row's identity, and mistyping one makes its
+    filter match nothing, which reads as "no billed usage" and exits 0. Neither shows up
+    in a mocked fetch, because the row fakes answer to any attribute name.
+    """
+
+    def test_each_label_is_extracted_from_the_key_of_the_same_name(self) -> None:
+        assert _label_aliases(_LABELLED_CTE) == {
+            'run': 'run',
+            'step': 'step',
+            'tool': 'tool',
+            'product': 'product',
+        }
+
+    def test_the_extractor_actually_finds_the_keys(self) -> None:
+        """Guard the guard: a parser that returned nothing would assert nothing."""
+        sample = "(SELECT value FROM UNNEST(labels) WHERE key = 'a') AS b"
+        assert _label_aliases(sample) == {'b': 'a'}
+        assert _label_aliases('SELECT 1') == {}
+
+    def test_the_product_label_is_read(self) -> None:
+        """PPP runs the same DAG and can carry the same run label.
+
+        Without this the two products' rows are summed into one, roughly doubling every
+        figure with nothing on screen to say so.
+        """
+        assert _label_aliases(_LABELLED_CTE)['product'] == 'product'
+
+
+class TestAggregate:
+    def test_started_is_the_earliest_start_and_ended_the_latest_end(self) -> None:
+        """Transposed, these invert the window and make every span negative."""
+        expressions = _aggregate_expressions(_AGGREGATE)
+        assert expressions['started'] == 'MIN(usage_start_time)'
+        assert expressions['ended'] == 'MAX(usage_end_time)'
+
+    def test_span_runs_from_the_earliest_start_to_the_latest_end(self) -> None:
+        expressions = _aggregate_expressions(_AGGREGATE)
+        assert expressions['span_hours'] == (
+            'TIMESTAMP_DIFF(MAX(usage_end_time), MIN(usage_start_time), SECOND) / 3600'
+        )
+
+    def test_the_expression_parser_reads_both_forms(self) -> None:
+        """Guard the guard: bare columns and aliased expressions must both be seen."""
+        parsed = _aggregate_expressions('SELECT\n  a,\n  MIN(x) AS b\nFROM labelled')
+        assert parsed == {'a': 'a', 'b': 'MIN(x)'}
+
+    def test_currency_is_grouped_rather_than_collapsed(self) -> None:
+        """`ANY_VALUE(currency)` over a mixed group stamps one currency on a mixed sum."""
+        assert _aggregate_expressions(_AGGREGATE)['currency'] == 'currency'
+        assert 'currency' in _group_by_columns(_AGGREGATE)
+
+    def test_product_is_grouped(self) -> None:
+        assert 'product' in _group_by_columns(_AGGREGATE)
+
+    def test_every_ungrouped_column_is_an_aggregate(self) -> None:
+        """Anything selected bare and not grouped is summed across, silently."""
+        bare = {
+            column
+            for column, expression in _aggregate_expressions(_AGGREGATE).items()
+            if column == expression
+        }
+        assert bare == _group_by_columns(_AGGREGATE)
 
 
 class TestSelectMatchesTheModel:
@@ -160,13 +264,75 @@ class TestStepHistoryQuery:
         assert names['step'] == 'pts_target'
         assert names['since'] == date(2026, 6, 1)
 
-    def test_groups_by_run(self) -> None:
+    def test_groups_by_every_identity_column(self) -> None:
         sql, _ = step_history_query(TABLE, step='pts_target', since=date(2026, 6, 1))
-        assert 'GROUP BY run, step, tool' in sql
+        assert _group_by_columns(sql) == {'run', 'step', 'tool', 'product', 'currency'}
 
     def test_filters_on_step(self) -> None:
         sql, _ = step_history_query(TABLE, step='pts_target', since=date(2026, 6, 1))
         assert 'step = @step' in sql
+
+
+class TestWindowCoverageQuery:
+    def test_binds_the_window_and_the_partition_floor(self) -> None:
+        sql, params = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+        assert '2026-07-21' not in sql
+        names = {p.name: p.value for p in params}
+        assert names['window_start'] == WINDOW[0]
+        assert names['window_end'] == WINDOW[1]
+        assert names['since'] == date(2026, 5, 1)
+
+    def test_still_prunes_partitions(self) -> None:
+        """The window is on usage time, which is not the partitioning column."""
+        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+        assert 'DATE(_PARTITIONTIME) >= @since' in sql
+
+    def test_denominator_is_every_row_the_pipeline_created(self) -> None:
+        """Unlabelled rows are the point of the measurement, so they cannot be filtered out."""
+        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+        assert "key = 'created_by') IN ('unified-pipeline', 'gentropy-pipelines')" in sql
+        assert 'WHERE step IS NOT NULL' not in sql
+
+    def test_numerator_matches_what_the_report_shows(self) -> None:
+        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+        assert "IF(step IS NOT NULL AND tool IN ('pis', 'pts', 'gentropy'), net_cost, 0)" in sql
+
+    def test_totals_are_kept_per_currency(self) -> None:
+        sql, _ = window_coverage_query(TABLE, WINDOW, since=date(2026, 5, 1))
+        assert 'GROUP BY currency' in sql
+
+
+class TestWindowCoverage:
+    def test_share_is_the_labelled_fraction(self) -> None:
+        coverage = WindowCoverage(currency='GBP', labelled_cost=75.0, pipeline_cost=100.0)
+        assert coverage.labelled_share == pytest.approx(0.75)
+
+    def test_share_is_none_when_nothing_was_billed(self) -> None:
+        """Zero over zero is not 100% coverage, and must not be rendered as one."""
+        coverage = WindowCoverage(currency='GBP', labelled_cost=0.0, pipeline_cost=0.0)
+        assert coverage.labelled_share is None
+
+
+class TestUsageWindow:
+    def test_spans_the_earliest_start_to_the_latest_end(self) -> None:
+        usages = [
+            StepUsage.model_validate(vars(_row(
+                started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
+                ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            ))),
+            StepUsage.model_validate(vars(_row(
+                started=datetime(2026, 7, 21, 18, 0, tzinfo=UTC),
+                ended=datetime(2026, 7, 21, 20, 0, tzinfo=UTC),
+            ))),
+        ]
+        assert usage_window(usages) == (
+            datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
+            datetime(2026, 7, 21, 20, 0, tzinfo=UTC),
+        )
+
+    def test_empty_has_no_window(self) -> None:
+        """A run that has billed nothing has no period to measure coverage over."""
+        assert usage_window([]) is None
 
 
 def _row(**kw: object) -> SimpleNamespace:
@@ -175,6 +341,7 @@ def _row(**kw: object) -> SimpleNamespace:
         'run': 'r',
         'step': 'pts_target',
         'tool': 'pts',
+        'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
         'span_hours': 2.0,
@@ -206,6 +373,14 @@ class TestBillingExport:
         job_config = client.query.call_args.kwargs['job_config']
         assert {p.name for p in job_config.query_parameters} == {'run', 'since'}
 
+    def test_scan_is_capped(self) -> None:
+        """Uncapped, a query that lost its partition filter bills the whole export."""
+        client = _client([])
+        export = BillingExport(client=client, table=TABLE)
+        export.run_usage(run='r', since=date(2026, 5, 1))
+        job_config = client.query.call_args.kwargs['job_config']
+        assert job_config.maximum_bytes_billed == MAX_BYTES_BILLED
+
     def test_empty_result_is_not_an_error(self) -> None:
         """A run with no billed rows yet is normal early in a pipeline run."""
         export = BillingExport(client=_client([]), table=TABLE)
@@ -218,6 +393,26 @@ class TestBillingExport:
         assert result[0].run == 'older-run'
         job_config = client.query.call_args.kwargs['job_config']
         assert {p.name for p in job_config.query_parameters} == {'step', 'since'}
+
+    def test_window_coverage_maps_rows_to_models(self) -> None:
+        rows = [SimpleNamespace(currency='GBP', labelled_cost=3170.71, pipeline_cost=4232.82)]
+        export = BillingExport(client=_client(rows), table=TABLE)
+        coverage = export.window_coverage(window=WINDOW, since=date(2026, 5, 1))
+        assert coverage == [
+            WindowCoverage(currency='GBP', labelled_cost=3170.71, pipeline_cost=4232.82)
+        ]
+
+    def test_window_coverage_binds_the_window(self) -> None:
+        client = _client([])
+        export = BillingExport(client=client, table=TABLE)
+        export.window_coverage(window=WINDOW, since=date(2026, 5, 1))
+        job_config = client.query.call_args.kwargs['job_config']
+        assert {p.name for p in job_config.query_parameters} == {
+            'window_start',
+            'window_end',
+            'since',
+        }
+        assert job_config.maximum_bytes_billed == MAX_BYTES_BILLED
 
 
 class TestTotalCost:

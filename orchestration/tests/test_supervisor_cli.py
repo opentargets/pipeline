@@ -23,11 +23,13 @@ def _usage(
     net_cost: float = 1.5,
     run: str = 'r',
     currency: str = 'GBP',
+    product: str | None = 'platform',
 ) -> StepUsage:
     return StepUsage(
         run=run,
         step=step,
         tool='pts',
+        product=product,
         started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
         span_hours=2.0,

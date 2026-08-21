@@ -13,7 +13,15 @@ from datetime import date
 import pytest
 from google.cloud import bigquery
 
-from orchestration.supervisor.usage import BillingExport, run_usage_query, step_history_query, total_cost
+from orchestration.supervisor.usage import (
+    MAX_BYTES_BILLED,
+    BillingExport,
+    run_usage_query,
+    step_history_query,
+    total_cost,
+    usage_window,
+    window_coverage_query,
+)
 from orchestration.utils.common import GCP_PROJECT_PLATFORM
 
 pytestmark = pytest.mark.skipif(
@@ -22,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 QueryBuilder = Callable[[str, str, date], tuple[str, list[bigquery.ScalarQueryParameter]]]
-"""Both query builders take (table, label, since) positionally."""
+"""Both label-filtered query builders take (table, label, since) positionally."""
 
 KNOWN_RUN = 'manual__2026-07-21t15-07-47-545737-00-00'
 """A real run verified on 2026-08-21 to carry 18 distinct steps.
@@ -30,6 +38,15 @@ KNOWN_RUN = 'manual__2026-07-21t15-07-47-545737-00-00'
 Gross cost is 24.82 GBP and net-of-credits is 21.60 GBP. The assertion below uses
 the net figure, because that is what `total_cost` returns. Do not "fix" a failure
 here by making the code report gross — netting credits is the whole point.
+"""
+
+FULL_SCAN_CEILING = 4 * 1024**3
+"""Upper bound on the bytes a full-retention query may process, in bytes (4 GiB).
+
+Tighter than `MAX_BYTES_BILLED`, which is the runtime guard rail. This is the test's
+own tripwire for partition pruning: a query that scanned the whole export unpruned
+would still be under the cap today and would sail past an `is not None` assertion,
+which is exactly what this used to do.
 """
 
 
@@ -47,6 +64,7 @@ class TestLiveExport:
 
     def test_only_pipeline_tools_are_returned(self, export: BillingExport) -> None:
         usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert usages, 'an empty result satisfies the subset check vacuously'
         assert {u.tool for u in usages} <= {'pis', 'pts', 'gentropy'}
 
     def test_every_span_is_a_whole_number_of_hours(self, export: BillingExport) -> None:
@@ -55,7 +73,30 @@ class TestLiveExport:
         If this ever fails, the quantisation caveat in usage.py needs revisiting.
         """
         usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert usages, 'an empty result satisfies the all() check vacuously'
         assert all(u.span_hours == int(u.span_hours) for u in usages)
+
+    def test_the_run_is_one_product(self, export: BillingExport) -> None:
+        """A platform run and a PPP run of the same DAG must never be summed together."""
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert usages
+        assert {u.product for u in usages} == {'platform'}
+
+
+class TestLiveCoverage:
+    def test_labelled_spend_is_a_subset_of_pipeline_spend(self, export: BillingExport) -> None:
+        """The headline total is not the cost of the run, and the report has to say so."""
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        window = usage_window(usages)
+        assert window is not None
+        coverage = export.window_coverage(window=window, since=date(2026, 5, 1))
+        assert [c.currency for c in coverage] == ['GBP']
+        entry = coverage[0]
+        assert entry.labelled_cost >= total_cost(usages) - 0.01
+        assert entry.labelled_cost < entry.pipeline_cost
+        share = entry.labelled_share
+        assert share is not None
+        assert 0 < share < 1
 
 
 class TestQueryValidatesAgainstTheRealSchema:
@@ -65,6 +106,15 @@ class TestQueryValidatesAgainstTheRealSchema:
     the export's schema does, and fail the moment a column is renamed or dropped.
     """
 
+    @staticmethod
+    def _dry_run(export: BillingExport, sql: str, params: list[bigquery.ScalarQueryParameter]) -> int:
+        job = export.client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=params, dry_run=True, use_query_cache=False),
+        )
+        assert job.total_bytes_processed is not None
+        return job.total_bytes_processed
+
     @pytest.mark.parametrize(
         'build',
         [
@@ -72,10 +122,17 @@ class TestQueryValidatesAgainstTheRealSchema:
             pytest.param(step_history_query, id='step history'),
         ],
     )
-    def test_query_is_valid(self, export: BillingExport, build: QueryBuilder) -> None:
+    def test_query_is_valid_and_prunes_partitions(self, export: BillingExport, build: QueryBuilder) -> None:
+        """The byte count is the assertion: without pruning the widest scan is unbounded."""
         sql, params = build(export.table, 'a-label', date(2026, 5, 1))
-        job = export.client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=params, dry_run=True, use_query_cache=False),
-        )
-        assert job.total_bytes_processed is not None
+        scanned = self._dry_run(export, sql, params)
+        assert 0 < scanned < FULL_SCAN_CEILING
+        assert scanned < MAX_BYTES_BILLED
+
+    def test_coverage_query_is_valid_and_prunes_partitions(self, export: BillingExport) -> None:
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        window = usage_window(usages)
+        assert window is not None
+        sql, params = window_coverage_query(export.table, window, date(2026, 5, 1))
+        scanned = self._dry_run(export, sql, params)
+        assert 0 < scanned < FULL_SCAN_CEILING
