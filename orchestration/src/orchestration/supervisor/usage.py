@@ -210,4 +210,4 @@ def total_cost(usages: Iterable[StepUsage]) -> float:
     Returns:
         Total net cost. Zero for an empty input.
     """
-    return sum(u.net_cost for u in usages)
+    return sum((u.net_cost for u in usages), 0.0)

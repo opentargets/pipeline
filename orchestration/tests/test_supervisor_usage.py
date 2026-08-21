@@ -150,7 +150,7 @@ class TestBillingExport:
         result = export.run_usage(run='r', since=date(2026, 5, 1))
         assert len(result) == 1
         assert isinstance(result[0], StepUsage)
-        assert result[0].step == 'pts_target'
+        assert result[0] == StepUsage.model_validate(vars(_row()))
 
     def test_passes_parameters_to_bigquery(self) -> None:
         client = _client([])
