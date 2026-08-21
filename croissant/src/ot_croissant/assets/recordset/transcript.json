@@ -37,7 +37,7 @@
   },
   {
     "id": "exons/strand",
-    "description": "Strand orientation of the exon"
+    "description": "Strand orientation of the exon: 1 for the forward strand, -1 for the reverse strand"
   },
   {
     "id": "flags",
@@ -65,7 +65,7 @@
   },
   {
     "id": "strand",
-    "description": "Strand orientation of the transcript"
+    "description": "Strand orientation of the transcript: 1 for the forward strand, -1 for the reverse strand"
   },
   {
     "id": "targetId",

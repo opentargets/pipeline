@@ -14,7 +14,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import IntegerType, LongType
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.common.utils import gff3_strand, maybe_coalesce
 
 INCLUDE_CHROMOSOMES = [str(i) for i in range(1, 23)] + ['X', 'Y', 'MT']
 
@@ -86,7 +86,7 @@ def _parse_gff3(df: DataFrame) -> DataFrame:
             f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)$', 1).alias('_chrom_raw'),
             f.col('_c3').cast(LongType()).alias('start'),
             f.col('_c4').cast(LongType()).alias('end'),
-            f.col('_c6').alias('strand'),
+            gff3_strand(f.col('_c6')).alias('strand'),
             f.coalesce(f.array_contains(tags, 'Ensembl_canonical'), f.lit(False)).alias('isEnsemblCanonical'),
             tags.alias('_tags'),
         )
@@ -102,7 +102,7 @@ def _parse_gff3(df: DataFrame) -> DataFrame:
             f.when(f.col('_proteinId_raw') != '', f.col('_proteinId_raw'))
         )
         .withColumn('transcriptionStartSite',
-            f.when(f.col('strand') == '+', f.col('start'))
+            f.when(f.col('strand') == 1, f.col('start'))
             .otherwise(f.col('end'))
             .cast(IntegerType())
         )
@@ -180,7 +180,7 @@ def _parse_exons(df: DataFrame) -> DataFrame:
             f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)$', 1).alias('_chrom_raw'),
             f.col('_c3').cast(LongType()).alias('start'),
             f.col('_c4').cast(LongType()).alias('end'),
-            f.col('_c6').alias('strand'),
+            gff3_strand(f.col('_c6')).alias('strand'),
         )
         .withColumn('chromosome',
             f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw'))

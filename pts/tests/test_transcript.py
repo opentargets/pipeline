@@ -1,7 +1,8 @@
 """Tests for the transcript PySpark module."""
 
+import pytest
 from pyspark.sql import Row
-from pyspark.sql.types import ArrayType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, IntegerType, StringType, StructField, StructType
 
 from pts.pyspark.transcript import (
     _build_flags,
@@ -120,6 +121,76 @@ def test_parse_gff3_filters_noncanonical_chromosomes(spark):
     row = result.first()
     assert row is not None
     assert row.chromosome == '1'
+
+
+# ---------------------------------------------------------------------------
+# strand encoding
+#
+# Ensembl's core database stores strand as ``seq_region_strand`` -- a signed
+# integer, 1 or -1 -- on gene, transcript and exon alike. GFF3 spells the same
+# fact as ``+``/``-`` in column 7. The release follows Ensembl, so the GFF3
+# convention is translated at this module's parse boundary and never reaches
+# the transcript dataset or anything derived from it.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_gff3_strand_is_signed_integer(spark):
+    """GFF3 +/- becomes Ensembl's 1/-1, typed as an integer rather than a string."""
+    rows = [
+        _gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS),
+        _gff('chr1', 'transcript', 450740, 451678, '-', _NC_ATTRS),
+    ]
+    result = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA))
+    assert result.schema['strand'].dataType == IntegerType()
+    strands = {r.transcriptId: r.strand for r in result.collect()}
+    assert strands == {'ENST00000641515': 1, 'ENST00000832824': -1}
+
+
+@pytest.mark.parametrize('raw_strand', ['.', '?'])
+def test_parse_gff3_unstranded_feature_is_null_not_zero(spark, raw_strand):
+    """A GFF3 feature with no usable strand yields null -- 0 would read as a real strand.
+
+    Both spellings GFF3 allows are covered: '.' (unstranded) and '?' (unknown).
+    '.' is the one that matters most, being the value a naive cast turns into 0.
+    """
+    rows = [_gff('chr1', 'transcript', 65419, 71585, raw_strand, _TX_ATTRS)]
+    row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.strand is None
+
+
+@pytest.mark.parametrize('raw_strand', ['.', '?'])
+def test_parse_gff3_unstranded_feature_tss_falls_back_to_end(spark, raw_strand):
+    """A null strand still yields a TSS, and it is `end`.
+
+    Deliberately pinned rather than left free. The parse refuses to invent a
+    strand, but the TSS derivation has always resolved everything that is not
+    the forward strand to `end` — so an unstranded feature is handed the reverse
+    strand's answer. That is pre-existing behaviour, identical to the +/- code
+    this replaced, and GENCODE strands every transcript so nothing reaches it
+    today. It is recorded here so that changing it has to be a decision.
+    """
+    rows = [_gff('chr1', 'transcript', 65419, 71585, raw_strand, _TX_ATTRS)]
+    row = _parse_gff3(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.strand is None
+    assert row.transcriptionStartSite == 71585
+
+
+def test_parse_exons_unstranded_feature_is_null(spark):
+    """Exons follow the same null contract as transcripts, not a 0 fallback."""
+    rows = [_gff('chr1', 'exon', 65419, 65433, '.', _EXON_ATTRS_A)]
+    row = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.exons[0].strand is None
+
+
+def test_parse_exons_strand_is_signed_integer(spark):
+    """Exon strand follows the same 1/-1 encoding as the transcript that holds it."""
+    rows = [_gff('chr1', 'exon', 450740, 451678, '-', _EXON_ATTRS_A)]
+    row = _parse_exons(spark.createDataFrame(rows, GFF3_SCHEMA)).first()
+    assert row is not None
+    assert row.exons[0].strand == -1
 
 
 def test_parse_gff3_tss_positive_strand(spark):
@@ -257,7 +328,7 @@ def test_parse_exons_exon_struct_fields(spark):
     assert exon.chromosome == '1'
     assert exon.start == 65419
     assert exon.end == 65433
-    assert exon.strand == '+'
+    assert exon.strand == 1
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +398,40 @@ def test_join_and_finalise_output_schema(spark):
 
     result = _join_and_finalise(gff, exons, uniprot)
     assert set(result.columns) == expected_cols
+
+
+def test_join_and_finalise_publishes_strand_as_integer(spark):
+    """The strand encoding survives to the PUBLISHED schema, at both levels.
+
+    The parse-level tests pin `_parse_gff3`/`_parse_exons` in isolation; without
+    this one, a re-encoding anywhere downstream of them would restore GFF3's
+    +/- strings on the actual output and leave the whole suite green.
+    """
+    gff_rows = [_gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS)]
+    gff = _parse_gff3(spark.createDataFrame(gff_rows, GFF3_SCHEMA))
+
+    exon_rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
+    exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
+
+    ensembl_data = [Row(id='ENSG00000186092', transcripts=[
+        _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
+    ])]
+    uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
+
+    result = _join_and_finalise(gff, exons, uniprot)
+
+    assert result.schema['strand'].dataType == IntegerType()
+
+    exons_type = result.schema['exons'].dataType
+    assert isinstance(exons_type, ArrayType)
+    exon_struct = exons_type.elementType
+    assert isinstance(exon_struct, StructType)
+    assert exon_struct['strand'].dataType == IntegerType()
+
+    row = result.first()
+    assert row is not None
+    assert row.strand == 1
+    assert row.exons[0].strand == 1
 
 
 def test_join_and_finalise_propagates_uniprot_ids(spark):

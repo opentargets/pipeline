@@ -275,7 +275,7 @@ EXON_TYPE = StructType([
     StructField('chromosome', StringType()),
     StructField('start', LongType()),
     StructField('end', LongType()),
-    StructField('strand', StringType()),
+    StructField('strand', IntegerType()),
 ])
 FLAG_TYPE = StructType([
     StructField('label', StringType()),
@@ -295,7 +295,7 @@ TRANSCRIPT_SCHEMA = StructType([
     StructField('chromosome', StringType()),
     StructField('start', LongType()),
     StructField('end', LongType()),
-    StructField('strand', StringType()),
+    StructField('strand', IntegerType()),
     StructField('transcriptionStartSite', IntegerType()),
     StructField('flags', ArrayType(FLAG_TYPE)),
     StructField('exons', ArrayType(EXON_TYPE)),
@@ -316,7 +316,7 @@ def _transcript_row(**kwargs):
         'chromosome': '17',
         'start': 100,
         'end': 200,
-        'strand': '+',
+        'strand': 1,
         'transcriptionStartSite': 100,
         'flags': [],
         'exons': [],
@@ -443,7 +443,7 @@ def test_build_transcripts_canonical_transcript_struct(spark):
             chromosome='7',
             start=500,
             end=900,
-            strand='-',
+            strand=-1,
         ),
     ]
     df = spark.createDataFrame(data, TRANSCRIPT_SCHEMA)
@@ -453,14 +453,14 @@ def test_build_transcripts_canonical_transcript_struct(spark):
     assert row.canonicalTranscript.chromosome == '7'
     assert row.canonicalTranscript.start == 500
     assert row.canonicalTranscript.end == 900
-    assert row.canonicalTranscript.strand == '-'
+    assert row.canonicalTranscript.strand == -1
 
 
 def test_build_transcripts_canonical_exons_flattened_ascending(spark):
     """The canonicalExons field is a flat [start, end, start, end, ...] list, ordered by start."""
     canonical_exons = [
-        Row(exonId='EXON2', chromosome='7', start=500, end=600, strand='-'),
-        Row(exonId='EXON1', chromosome='7', start=100, end=200, strand='-'),
+        Row(exonId='EXON2', chromosome='7', start=500, end=600, strand=-1),
+        Row(exonId='EXON1', chromosome='7', start=100, end=200, strand=-1),
     ]
     data = [_transcript_row(isEnsemblCanonical=True, exons=canonical_exons)]
     df = spark.createDataFrame(data, TRANSCRIPT_SCHEMA)

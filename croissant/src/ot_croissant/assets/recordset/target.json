@@ -89,7 +89,7 @@
   },
   {
     "id": "genomicLocation/strand",
-    "description": "Strand orientation of the target gene"
+    "description": "Strand orientation of the target gene: 1 for the forward strand, -1 for the reverse strand"
   },
   {
     "id": "go",

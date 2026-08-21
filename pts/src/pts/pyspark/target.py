@@ -28,7 +28,7 @@ from pyspark.sql.types import (
 from pyspark.sql.window import Window
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.common.utils import gff3_strand, maybe_coalesce
 from pts.pyspark.common.utils import safe_array_union as _safe_array_union
 
 # ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ def _build_gene_code(df: DataFrame) -> DataFrame:
             f.regexp_extract(f.col('_c0'), r'([0-9]{1,2}|X|Y|M)', 1).alias('chromosome_raw'),
             f.col('_c3').cast(LongType()).alias('start'),
             f.col('_c4').cast(LongType()).alias('end'),
-            f.col('_c6').alias('strand'),
+            gff3_strand(f.col('_c6')).alias('strand'),
         )
         .select(
             f.regexp_extract(f.col('gene_id_raw'), r'(.*?)\.', 1).alias('id'),
@@ -1617,11 +1617,27 @@ def _remove_duplicated_synonyms(df: DataFrame) -> DataFrame:
 
 
 def _add_tss(df: DataFrame) -> DataFrame:
-    """Add transcription start site column and drop the now-unneeded canonicalTranscript struct."""
+    """Add transcription start site column and drop the now-unneeded canonicalTranscript struct.
+
+    Reads ``canonicalTranscript.strand`` in Ensembl's signed integer encoding, the same
+    one ``genomicLocation.strand`` and the ``transcript`` dataset use; ``_build_gene_code``
+    translates GFF3's ``+``/``-`` on the way in via :func:`gff3_strand`.
+
+    Deliberately has no ``otherwise``: a gene whose strand is neither 1 nor -1 -- or that
+    the GENCODE join missed entirely, leaving ``canonicalTranscript`` null -- gets a null
+    ``tss`` rather than an invented coordinate. Note this differs from the ``transcript``
+    dataset, whose TSS falls back to ``end``; the two agree on every real input, since
+    GENCODE strands every feature.
+
+    The absence of an ``otherwise`` is also why the encoding must match its input exactly.
+    A comparison that never matches produces nulls, not an error, so a mismatch here would
+    empty the column silently -- hence :func:`gff3_strand` being shared with the parse
+    rather than restated, and hence the tests covering this function.
+    """
     return df.withColumn(
         'tss',
         f.when(
-            f.col('canonicalTranscript.strand') == '+',
+            f.col('canonicalTranscript.strand') == 1,
             f.col('canonicalTranscript.start'),
-        ).when(f.col('canonicalTranscript.strand') == '-', f.col('canonicalTranscript.end')),
+        ).when(f.col('canonicalTranscript.strand') == -1, f.col('canonicalTranscript.end')),
     ).drop('canonicalTranscript')
