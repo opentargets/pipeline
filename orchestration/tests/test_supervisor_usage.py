@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from orchestration.supervisor.usage import (
+    _AGGREGATE,
     BillingExport,
+    PipelineTool,
     StepUsage,
     run_usage_query,
     step_history_query,
@@ -103,6 +107,49 @@ class TestRunUsageQuery:
     def test_filters_on_pipeline_tools(self) -> None:
         sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
         assert "tool IN ('pis', 'pts', 'gentropy')" in sql
+
+    def test_tool_filter_is_built_from_the_literal(self) -> None:
+        """The SQL filter and the model's `Literal` must not drift apart.
+
+        A tool in the filter but not the `Literal` raises at fetch time; a tool in
+        the `Literal` but not the filter is silently missing from every report.
+        """
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        expected = ', '.join(f"'{tool}'" for tool in get_args(PipelineTool))
+        assert f'tool IN ({expected})' in sql
+
+    def test_excludes_non_regular_cost_rows(self) -> None:
+        """Taxes, adjustments and rounding rows share the export and are not step cost."""
+        sql, _ = run_usage_query(TABLE, run='r', since=date(2026, 5, 1))
+        assert "cost_type = 'regular'" in sql
+
+
+def _selected_columns(sql: str) -> set[str]:
+    """Column names the aggregate SELECT produces, aliased or bare."""
+    select_block = sql.split('FROM labelled', maxsplit=1)[0]
+    columns = set()
+    for line in select_block.splitlines():
+        entry = line.strip().rstrip(',')
+        if not entry or entry == 'SELECT':
+            continue
+        alias = re.search(r'\bAS\s+(\w+)$', entry)
+        columns.add(alias.group(1) if alias else entry)
+    return columns
+
+
+class TestSelectMatchesTheModel:
+    def test_every_selected_column_is_a_model_field(self) -> None:
+        """`_fetch` reads row attributes by name, and the row fakes answer to anything.
+
+        A renamed SQL alias would therefore pass every mocked test and only fail
+        against the real export, so pin the two names lists against each other here.
+        """
+        assert _selected_columns(_AGGREGATE) == set(StepUsage.model_fields)
+
+    def test_the_extractor_actually_finds_the_aliases(self) -> None:
+        """Guard the guard: a parser that returned nothing would assert nothing."""
+        assert 'net_cost' in _selected_columns(_AGGREGATE)
+        assert _selected_columns('SELECT\n  a,\n  MIN(x) AS b\nFROM labelled') == {'a', 'b'}
 
 
 class TestStepHistoryQuery:

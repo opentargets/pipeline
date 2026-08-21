@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from google.cloud import bigquery
 from pydantic import BaseModel
@@ -25,12 +25,22 @@ Other values appear in the same billing export (`nextgen`, `standalone`, `pos`,
 `orchestrator`, `genetics-output-support`) and belong to unrelated workloads.
 """
 
+_PIPELINE_TOOLS_SQL = ', '.join(f"'{tool}'" for tool in get_args(PipelineTool))
+"""The `PipelineTool` values as a SQL `IN` list, so the filter and the model cannot drift.
+
+A tool missing from `PipelineTool` would not be silently dropped from the results, it
+would raise a `ValidationError` when the row is fetched.
+"""
+
 
 class StepUsage(BaseModel):
     """Billed usage for one pipeline step within one run.
 
     Args:
-        run: The `run` label, which is the Airflow DAG run ID unless `run_label` was set.
+        run: The `run` label. That is the Airflow DAG run ID, or the `run_label` param
+            when one was set, passed through `clean_label` — so
+            `manual__2026-07-21T15:07:47.545737+00:00` is stored here as
+            `manual__2026-07-21t15-07-47-545737-00-00`.
         step: The `step` label, e.g. `pts_target`.
         tool: Which of the three pipeline tools produced the resource.
         started: Earliest `usage_start_time` across the step's billed rows.
@@ -82,7 +92,7 @@ SELECT
   ANY_VALUE(currency) AS currency
 FROM labelled
 WHERE step IS NOT NULL
-  AND tool IN ('pis', 'pts', 'gentropy')
+  AND tool IN ({tools})
   AND {predicate}
 GROUP BY run, step, tool
 ORDER BY started
@@ -95,8 +105,8 @@ def _query(
     params: list[bigquery.ScalarQueryParameter],
 ) -> tuple[str, list[bigquery.ScalarQueryParameter]]:
     """Assemble the labelled CTE and the aggregate for a given row predicate."""
-    sql = _LABELLED_CTE.format(table=table) + _AGGREGATE.format(predicate=predicate)
-    return sql, params
+    aggregate = _AGGREGATE.format(predicate=predicate, tools=_PIPELINE_TOOLS_SQL)
+    return _LABELLED_CTE.format(table=table) + aggregate, params
 
 
 def run_usage_query(
@@ -196,7 +206,8 @@ class BillingExport:
             since: Earliest partition date to scan.
 
         Returns:
-            One `StepUsage` per run, ordered by start time.
+            One `StepUsage` per (run, tool), ordered by start time. A run that billed
+            the step on more than one tool contributes one row per tool.
         """
         return self._fetch(*step_history_query(self.table, step, since))
 
