@@ -15,7 +15,7 @@ dataproc:
     project_id: open-targets-genetics-dev
     autoscaling_policy: eqtl-preprocess
     metadata:
-      GENTROPY_REF: v3.4.0-dev.3
+      GENTROPY_REF: v3.4.0-dev.4
     init_actions_uris:
       - "gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh"
     num_workers: 4
@@ -36,6 +36,6 @@ nodes:
       step.credible_set_output_path: "{credible_set_output_path}"
       step.lead_pvalue_threshold: 1.0e-3
       step.session.write_mode: overwrite
-      step.session.output_partitions: 40
+      step.session.output_partitions: 50
       step.mqtl_quantification_methods_blacklist: []
       +step.session.extended_spark_conf: "{spark.sql.shuffle.partitions: '2000'}"
