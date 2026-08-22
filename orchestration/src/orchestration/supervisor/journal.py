@@ -9,6 +9,15 @@ Each event is its own object rather than a line in one file. GCS objects are
 immutable, so appending to a single file means read-modify-write, and this journal
 has two writers — the reference-diff DAG task and the agent. A lost update would
 silently drop the record the journal exists to keep.
+
+Both writers must agree on the object prefix, and that is not settled yet. The agent
+(`snapshot.py`) keys it on the Airflow `dag_run_id`, the only run identifier it has.
+The design spec's journal path is instead keyed on `run_name` from
+`unified_pipeline.yaml` — an independent identifier for the same run. If
+`diff_vs_reference` writes to a `run_name`-keyed prefix while the agent reads and
+writes a `dag_run_id`-keyed one, the two writers will silently keep separate
+journals for what is really one run — the exact failure two writers on one journal
+is meant to avoid. See `snapshot.py`'s module docstring for the fuller account.
 """
 
 from __future__ import annotations

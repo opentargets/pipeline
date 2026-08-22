@@ -402,6 +402,34 @@ class TestSnapshotCommand:
         assert err.count('\n') == 1
         assert '404' in err
 
+    def test_missing_credentials_exit_non_zero_naming_the_variable(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The whole reason credentials are env vars is to fail closed and say which are missing."""
+        monkeypatch.delenv('AIRFLOW_USERNAME', raising=False)
+        monkeypatch.delenv('AIRFLOW_PASSWORD', raising=False)
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock())
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'AIRFLOW_USERNAME' in err
+        assert 'AIRFLOW_PASSWORD' in err
+
+    def test_an_empty_string_credential_is_treated_as_missing(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The subtler half of the fail-closed check: `''` is falsy, not a valid credential."""
+        monkeypatch.setenv('AIRFLOW_USERNAME', '')
+        monkeypatch.setenv('AIRFLOW_PASSWORD', 'p')
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock())
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'AIRFLOW_USERNAME' in err
+        assert 'AIRFLOW_PASSWORD' not in err
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:

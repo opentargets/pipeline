@@ -160,6 +160,14 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
         assert snap.stalls == []
 
+    def test_a_run_with_no_task_instances_yet_is_empty_not_broken(self) -> None:
+        """A just-triggered run has no task instances yet — a common state, not an edge case."""
+        snap = take_snapshot(_client([]), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.counts == {}
+        assert snap.running == []
+        assert snap.failed == []
+        assert snap.stalls == []
+
     def test_the_journal_cursor_is_the_event_count(self) -> None:
         snap = take_snapshot(_client([]), _journal([_completed('a', 1.0)]), 'unified_pipeline', 'r', NOW)
         assert snap.journal_events == 1
@@ -181,13 +189,37 @@ class TestRenderSnapshot:
         assert '40' in out
 
     def test_a_stall_is_not_buried_in_the_counts(self) -> None:
-        """A stall is a first-class escalation, never a line in a digest."""
+        """A stall is a first-class escalation, never a line in a digest.
+
+        Position is pinned, not just presence: a `'STALL' in out` assertion would pass
+        even if the line were the hundredth in the report.
+        """
         out = render_snapshot(self._snapshot(
             stalls=[StallVerdict(task_id='slow', elapsed=32400.0, threshold=21600.0, basis='ceiling')]
         ))
         assert 'STALL' in out.upper()
         assert 'slow' in out
+        lines = out.splitlines()
+        stall_index = next(i for i, line in enumerate(lines) if line.startswith('STALL'))
+        assert stall_index <= 3, 'a stall must sit right after the header and counts, not require scrolling'
+
+    def test_a_stall_precedes_the_failures(self) -> None:
+        """A reader scanning top-down must hit the stall before the failure list."""
+        out = render_snapshot(self._snapshot(
+            stalls=[StallVerdict(task_id='slow', elapsed=32400.0, threshold=21600.0, basis='ceiling')],
+            failed=['run_pts_target'],
+        ))
+        lines = out.splitlines()
+        stall_index = next(i for i, line in enumerate(lines) if line.startswith('STALL'))
+        failed_index = next(i for i, line in enumerate(lines) if line.startswith('failed:'))
+        assert stall_index < failed_index
 
     def test_failures_are_listed(self) -> None:
         out = render_snapshot(self._snapshot(failed=['run_pts_target']))
         assert 'run_pts_target' in out
+
+    def test_a_run_with_no_tasks_renders_cleanly(self) -> None:
+        """A just-triggered run has no task instances yet — a common state, not an edge case."""
+        out = render_snapshot(self._snapshot(counts={}, running=[], failed=[], stalls=[]))
+        assert 'unified_pipeline' in out
+        assert out.splitlines()[-1] != ''
