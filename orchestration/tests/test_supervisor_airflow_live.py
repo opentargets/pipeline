@@ -59,6 +59,16 @@ class TestLiveAirflow:
         assert tasks, 'the run has no task instances, so this test proves nothing'
         assert all(t.task_id for t in tasks)
 
+        # stall detection is computed entirely from start_date (see stall.py's module
+        # docstring): if an upstream field rename ever silently nulled it out, `stalled`
+        # would return None for every task with no error at all, going dark with no
+        # symptom. `task_id` alone cannot catch that — it asserts every field parses,
+        # not that the one field the whole stall rule depends on actually carries data.
+        assert any(t.start_date is not None for t in tasks), (
+            'no task instance has a start_date — a real run has some non-null, so this '
+            'would mean stall detection is silently blind'
+        )
+
     def test_every_task_instance_is_collected(self, client: AirflowClient) -> None:
         """Paging is the failure mode that would silently truncate a 150-step run.
 

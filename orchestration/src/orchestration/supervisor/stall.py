@@ -7,9 +7,17 @@ against its own observed maximum and a step without one against a single absolut
 ceiling. The verdict records which rule fired, because "four times its usual" and
 "past the blanket limit" are different things to tell a human.
 
-Elapsed time here is task wall time, which includes queueing. That is deliberate: a
-task stuck for hours needs attention whether it is hung or waiting for a busy
-cluster, and separating the two is the compute report's job, not the alarm's.
+Elapsed time here is measured from `start_date` — when the task began executing —
+and therefore excludes queueing. That is deliberate, not an oversight: the baseline
+this elapsed time is compared against comes from Airflow's own `duration`, which is
+also execution time only, not wall time from `queued_dttm`. Measuring elapsed from
+`queued_dttm` instead would look like the more thorough fix and would in fact be a
+bug — it would compare a queue-inclusive elapsed against a queue-exclusive baseline,
+so any step that reliably queues for a while would eventually cross its threshold on
+queueing alone and false-alarm forever. Detecting a task stuck queueing rather than
+stuck executing is a real and separate failure mode — `queued_dttm` is available on
+`TaskInstance` for it — but it needs its own rule and its own baseline, deferred to a
+later phase rather than folded in here where it would corrupt this one.
 """
 
 from __future__ import annotations
@@ -24,7 +32,11 @@ from orchestration.supervisor.journal import JournalEvent
 from orchestration.utils.common import STALL_CEILING_SECONDS, STALL_MULTIPLIER
 
 Baseline = dict[str, float]
-"""Observed maximum duration in seconds, per step."""
+"""Observed maximum duration in seconds, keyed by fully-qualified Airflow `task_id`.
+
+See `baseline_from_journal` for why the key is the qualified `task_id` and not the
+bare step name.
+"""
 
 _ACTIVE_STATES = frozenset({'running', 'deferred', 'restarting'})
 """States in which a task is holding resources and can therefore stall.
@@ -59,7 +71,8 @@ class StallVerdict(BaseModel):
 
     Args:
         task_id: The task instance's id.
-        elapsed: Seconds since it started, including any queueing.
+        elapsed: Seconds since `start_date`, i.e. execution time only, excluding
+            queueing — see the module docstring for why.
         threshold: The threshold it passed.
         basis: Which rule fired — `history` for a step with observed runs,
             `ceiling` for one without.
@@ -74,15 +87,28 @@ class StallVerdict(BaseModel):
 def baseline_from_journal(events: list[JournalEvent]) -> Baseline:
     """Build a per-step baseline from journalled completions.
 
+    `JournalEvent.step` must hold the fully-qualified Airflow `task_id` — the group
+    prefix included, e.g. `pts_target.run_pts_target` — because that is what `stalled`
+    looks up against (`task.task_id`, taken straight from the Airflow API). This is
+    deliberately not the bare step name (`pts_target`) used elsewhere for GCP billing
+    labels: every step in this pipeline runs inside a `@task_group(group_id=step_name)`
+    with `prefix_group_id` defaulting to True, so the two spellings differ for every
+    step, not just some. A journal written with the bare name would build a baseline
+    keyed in a namespace `stalled` never looks up, and every lookup would silently miss
+    forever — not raise, not warn, just fall back to the ceiling on every verdict,
+    which is also the correct, expected shape of an early run with no history. There is
+    no symptom that tells the two apart from the outside.
+
     Args:
-        events: The run journal, or several runs' journals concatenated.
+        events: The run journal, or several runs' journals concatenated. `step` on each
+            `step_completed` event must be the fully-qualified `task_id`, as above.
 
     Returns:
-        The observed maximum duration per step. Steps never seen are absent, which is
-        what makes the ceiling fallback necessary rather than optional. A completion
-        whose `duration` cannot be read as a number is skipped rather than raising, so
-        one malformed event degrades to a partial baseline instead of losing every
-        step's history.
+        The observed maximum duration per step (keyed by fully-qualified `task_id`).
+        Steps never seen are absent, which is what makes the ceiling fallback necessary
+        rather than optional. A completion whose `duration` cannot be read as a number
+        is skipped rather than raising, so one malformed event degrades to a partial
+        baseline instead of losing every step's history.
     """
     baseline: Baseline = {}
     for event in events:

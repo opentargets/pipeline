@@ -142,6 +142,18 @@ class TestAirflowClient:
         url = session.get.call_args.args[0]
         assert url == 'http://a:8080/api/v2/dags/unified_pipeline/dagRuns/my-run/taskInstances'
 
+    def test_requests_a_stable_sort_order_for_pagination(self) -> None:
+        """The endpoint's default sort is map_index, a total tie for every unmapped task.
+
+        Two offset-paginated requests sorted on a tied key are not guaranteed to see
+        rows in the same order, so a page boundary can drop a row or return it twice.
+        `order_by=id` pins a unique, immutable sort key instead.
+        """
+        session = _session(_token(), _response({'task_instances': [], 'total_entries': 0}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.task_instances('unified_pipeline', 'r')
+        assert session.get.call_args.kwargs['params']['order_by'] == 'id'
+
     def test_pages_until_every_task_instance_is_collected(self) -> None:
         """The unified pipeline has roughly 150 steps and many tasks per step.
 

@@ -182,17 +182,26 @@ class AirflowClient:
     def task_instances(self, dag_id: str, run_id: str) -> list[TaskInstance]:
         """Read every task instance in one DAG run, following pagination.
 
+        The request pins `order_by=id` explicitly. The endpoint's default sort is
+        `map_index`, which is a total tie across offset-paginated requests: every task
+        in this pipeline has `map_index=-1` except the one mapped group. Two pages are
+        two separate queries, and Postgres does not guarantee seq-scan order is stable
+        between them once concurrent writes are moving rows around a live run — a row
+        can come back on both pages while another never appears on either. `id` is the
+        task instance's uuid7 primary key, unique and immutable, which is what offset
+        pagination actually requires to be correct rather than merely usually correct.
+
         Args:
             dag_id: The DAG's id.
             run_id: The run's id.
 
         Returns:
-            Every task instance, in the order the API returned them.
+            Every task instance, ordered by id.
         """
         path = f'/api/v2/dags/{dag_id}/dagRuns/{run_id}/taskInstances'
         collected: list[TaskInstance] = []
         while True:
-            page = self._get(path, {'limit': _PAGE_SIZE, 'offset': len(collected)})
+            page = self._get(path, {'limit': _PAGE_SIZE, 'offset': len(collected), 'order_by': 'id'})
             collected.extend(TaskInstance.model_validate(t) for t in page['task_instances'])
             if len(collected) >= page['total_entries'] or not page['task_instances']:
                 return collected
