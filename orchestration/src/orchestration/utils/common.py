@@ -33,6 +33,18 @@ AIRFLOW_BASE_URL = 'http://localhost:8080'
 state even though a database driver is installed.
 """
 
+STALL_CEILING_SECONDS = 6 * 60 * 60
+"""Absolute stall threshold for a step with no observed history.
+
+Most steps have no baseline on early runs: the billing export holds at most 18 of
+roughly 150 steps, and Airflow's own history is destroyed with the VM. This is the
+fallback, not the normal rule — a step with history is judged against its own
+observed maximum instead.
+"""
+
+STALL_MULTIPLIER = 2.5
+"""How far past its observed maximum a step may run before it is called stalled."""
+
 
 def clean_label(value: str) -> str:
     """Normalise a value the way Google Cloud requires of a label value.
