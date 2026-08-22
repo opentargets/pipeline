@@ -378,6 +378,31 @@ class TestSnapshotParser:
         assert build_parser().parse_args(['snapshot', '--run', 'r', '--json']).json is True
 
 
+class TestSnapshotCommand:
+    def test_a_client_error_exits_non_zero_with_a_one_line_message(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A client-level `RuntimeError` must reach the user as a message, not a traceback.
+
+        A 404 from Airflow (e.g. a typo'd run id) surfaces as `RuntimeError` from the
+        client, not a `ValidationError`. This confirms `main`'s existing `RuntimeError`
+        handler turns that into a clean exit rather than a traceback.
+        """
+        monkeypatch.setenv('AIRFLOW_USERNAME', 'u')
+        monkeypatch.setenv('AIRFLOW_PASSWORD', 'p')
+        fake_client = MagicMock()
+        fake_client.dag_run.side_effect = RuntimeError(
+            'airflow API returned HTTP 404 for /api/v2/dags/unified_pipeline/dagRuns/typo'
+        )
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock(return_value=fake_client))
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'typo']) == 1
+        err = capsys.readouterr().err
+        assert err.count('\n') == 1
+        assert '404' in err
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch out `bigquery.Client`, exposing the constructor as `client.constructor`."""

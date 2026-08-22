@@ -141,11 +141,30 @@ class AirflowClient:
         return self._token
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Issue one GET and return its decoded body.
+
+        Args:
+            path: The API path, relative to `base_url`.
+            params: Query parameters, if any.
+
+        Returns:
+            The decoded JSON body.
+
+        Raises:
+            RuntimeError: If the response is not HTTP 200. A non-2xx body — a 404 for a
+                typo'd run id, a 403 for bad credentials, a 500 from a struggling server —
+                does not have the shape callers expect, and letting it reach
+                `DagRun.model_validate` or the paging loop below surfaces a `ValidationError`
+                about a missing field, or a `KeyError`, that points at the wrong thing
+                entirely. This mirrors the token exchange's own status check above.
+        """
         response = self.session.get(
             f'{self.base_url}{path}',
             headers={'Authorization': f'Bearer {self.token}'},
             params=params or {},
         )
+        if response.status_code != 200:
+            raise RuntimeError(f'airflow API returned HTTP {response.status_code} for {path}')
         return response.json()
 
     def dag_run(self, dag_id: str, run_id: str) -> DagRun:

@@ -165,3 +165,28 @@ class TestAirflowClient:
         client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
         with pytest.raises(RuntimeError, match='401'):
             client.task_instances('unified_pipeline', 'r')
+
+    def test_a_404_from_dag_run_raises_with_the_status_and_path_rather_than_validating(self) -> None:
+        """A typo'd run id must not surface as a ValidationError about a missing dag_run_id.
+
+        That error points the reader at the wrong thing entirely: the response never had
+        a `dag_run_id` to validate because the run does not exist.
+        """
+        session = _session(_token(), _response({'detail': 'DAG Run not found'}, status=404))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        with pytest.raises(RuntimeError, match='404'):
+            client.dag_run('unified_pipeline', 'typo')
+
+    def test_a_404_from_dag_run_names_the_path(self) -> None:
+        session = _session(_token(), _response({'detail': 'DAG Run not found'}, status=404))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        with pytest.raises(RuntimeError, match='/api/v2/dags/unified_pipeline/dagRuns/typo'):
+            client.dag_run('unified_pipeline', 'typo')
+
+    def test_a_500_mid_pagination_raises_rather_than_a_keyerror(self) -> None:
+        """A struggling server must not surface as a bare KeyError from the paging loop."""
+        page = {'task_instances': [{'task_id': f't{i}'} for i in range(100)], 'total_entries': 150}
+        session = _session(_token(), _response(page), _response({'detail': 'server error'}, status=500))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        with pytest.raises(RuntimeError, match='500'):
+            client.task_instances('unified_pipeline', 'r')
