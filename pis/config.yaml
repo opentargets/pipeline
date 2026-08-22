@@ -4,7 +4,6 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.88.0'
   ensembl_version: '115'
@@ -14,7 +13,7 @@ scratchpad:
   mondo_version: '2026-05-05'
   ot_curation: '26.05'
   probes_drugs_version: '02_2025'
-  gnomad_version: '4.1.1'
+  gnomad_version: '4.1'
   gtex_version: '11'
 
 steps:
@@ -134,28 +133,14 @@ steps:
       destination: input/biosample/efo.json
   ##################################################################################################
 
-  #: CHEMBL STEP :##################################################################################
-  chembl:
-    - name: copy chembl dump
-      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
-      destination: input/chembl/chembl.tar.gz
-  ##################################################################################################
-
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
-    # The chembl dump has its own `chembl` step rather than living here: it feeds
-    # several pts steps, not just clinical_report, and each depends on `pis_chembl`.
-    - name: copy aact dump
-      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
-      destination: input/clinical_report/aact.zip
-
-    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
+      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -194,6 +179,64 @@ steps:
     - name: copy_many aact extraction batch results
       sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
       destination: input/clinical_report/aact_extraction_batch_results
+
+    - name: elasticsearch chembl drug warning
+      url: https://www.ebi.ac.uk/chembl/elk/es
+      destination: input/drug/chembl_drug_warning.jsonl
+      index: chembl_${chembl_version}_drug_warning
+      fields:
+        - _metadata
+        - molecule_chembl_id
+        - parent_molecule_chembl_id
+        - efo_id
+        - efo_term
+        - efo_id_for_warning_class
+        - warning_class
+        - warning_country
+        - warning_description
+        - warning_id
+        - warning_refs
+        - warning_type
+        - warning_year
+    - name: elasticsearch chembl mechanism of action
+      url: https://www.ebi.ac.uk/chembl/elk/es
+      destination: input/drug/chembl_mechanism.jsonl
+      index: chembl_${chembl_version}_mechanism
+      fields:
+        - _metadata
+        - molecule_chembl_id
+        - target_chembl_id
+        - action_type
+        - mechanism_of_action
+        - mechanism_refs
+        - record_id
+        - parent_molecule_chembl_id
+    - name: elasticsearch chembl molecule
+      url: https://www.ebi.ac.uk/chembl/elk/es
+      destination: input/drug/chembl_molecule.jsonl
+      index: chembl_${chembl_version}_molecule
+      fields:
+        - molecule_chembl_id
+        - molecule_hierarchy
+        - molecule_type
+        - pref_name
+        - first_approval
+        - max_phase
+        - withdrawn_flag
+        - black_box_warning
+        - molecule_synonyms
+        - cross_references
+        - molecule_structures
+    - name: elasticsearch chembl target
+      url: https://www.ebi.ac.uk/chembl/elk/es
+      destination: input/drug/chembl_target.jsonl
+      index: chembl_${chembl_version}_target
+      fields:
+        - _metadata
+        - target_chembl_id
+        - target_components
+        - target_type
+        - pref_name
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
@@ -367,10 +410,6 @@ steps:
     - name: copy gene_burden cvdi
       source: https://static-content.springer.com/esm/art%3A10.1038%2Fs41588-024-01894-5/MediaObjects/41588_2024_1894_MOESM4_ESM.xlsx
       destination: input/evidence/gene_burden/cvdi.xlsx
-
-    - name: copy gene_burden genes_health
-      source: https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs41588-026-02553-7/MediaObjects/41588_2026_2553_MOESM4_ESM.xlsx
-      destination: input/evidence/gene_burden/genes_health.xlsx
 
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
@@ -802,7 +841,7 @@ steps:
   #: PHARMACOGENETICS STEP :########################################################################
   pharmacogenetics:
     - name: find_latest clinpgx annotation
-      source: gs://otar012-eva/pharmacogenomics
+      source: gs://otar012-eva/pharmacogenomics/
       scratchpad_key: latest_clinpgx_annotation
     - name: copy clinpgx annotation
       requires:
@@ -835,6 +874,17 @@ steps:
 
   #: TARGET STEP :##################################################################################
   target:
+    - name: elasticsearch chembl target
+      url: https://www.ebi.ac.uk/chembl/elk/es
+      destination: input/target/chembl/chembl_target.jsonl
+      index: chembl_${chembl_version}_target
+      fields:
+        - _metadata
+        - target_chembl_id
+        - target_components
+        - target_type
+        - pref_name
+
     - name: copy chemical probes
       source: https://www.probes-drugs.org/media/download/probes/pd_export_${probes_drugs_version}_probes_standardized.xlsx
       destination: input/target/chemicalprobes/probes.xlsx
@@ -871,8 +921,8 @@ steps:
       destination: input/target/genenames/hgnc_complete_set.json
 
     - name: copy gnomad
-      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv.bgz
-      destination: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
+      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv
+      destination: input/target/gnomad/gnomad_constraint_metrics.tsv
 
     - name: copy go annotation human eco gpa
       source: https://ftp.ebi.ac.uk/pub/databases/GO/goa/HUMAN/goa_human.gpa.gz
@@ -977,6 +1027,15 @@ steps:
         - find_latest aopwiki
       source: ${latest_aopwiki}
       destination: input/target/safety/aopwiki.json
+
+    - name: find_latest tep
+      source: gs://otar001-core/TEPs
+      scratchpad_key: latest_tep
+    - name: copy tep
+      requires:
+        - find_latest tep
+      source: ${latest_tep}
+      destination: input/target/tep/tep.json.gz
 
     - name: find_latest tractability
       source: gs://otar001-core/Tractability
