@@ -1,30 +1,37 @@
 """Command line entry point for the pipeline supervisor.
 
-Currently exposes billed cost for a run and for one step's history, both read from the
-GCP billing export. Cost only: the export is hourly-bucketed and cannot support a
-per-step duration, which comes from Airflow task instances instead.
+Exposes billed cost for a run and for one step's history, both read from the GCP
+billing export, and a read-only `snapshot` of a run's state read from Airflow and
+the run's journal.
 
 `--run` and `--step` are matched against GCP labels, which are normalised, so both
 are passed through `clean_label` first. A run ID copied straight out of the Airflow
 UI therefore works.
 
-Every figure here covers only the resources the pipeline labelled per step, which is
-not everything it spends. The `usage` report says so with a coverage line rather than
-leaving its total to be read as the cost of the run.
+Every figure the `usage`/`history` commands report covers only the resources the
+pipeline labelled per step, which is not everything it spends. The `usage` report
+says so with a coverage line rather than leaving its total to be read as the cost of
+the run. Cost only: the export is hourly-bucketed and cannot support a per-step
+duration, which comes from Airflow task instances instead — see `snapshot`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
+import requests
 from google.api_core.exceptions import GoogleAPICallError
 from google.auth.exceptions import DefaultCredentialsError
-from google.cloud import bigquery
+from google.cloud import bigquery, storage
 
+from orchestration.supervisor.airflow import AirflowClient
+from orchestration.supervisor.journal import Journal
+from orchestration.supervisor.snapshot import render_snapshot, take_snapshot
 from orchestration.supervisor.usage import (
     BillingExport,
     StepUsage,
@@ -32,7 +39,13 @@ from orchestration.supervisor.usage import (
     total_cost,
     usage_window,
 )
-from orchestration.utils.common import BILLING_EXPORT_START, GCP_PROJECT_PLATFORM, clean_label
+from orchestration.utils.common import (
+    AIRFLOW_BASE_URL,
+    BILLING_EXPORT_START,
+    GCP_PROJECT_PLATFORM,
+    GCS_PIPELINE_RUNS_BUCKET,
+    clean_label,
+)
 
 RowKey = Literal['run', 'step']
 """Which label identifies a row of the rendered table."""
@@ -107,6 +120,42 @@ _IMPOSSIBLE_SHARE_FOOTER = [
     'were counted in the numerator but not in the denominator, which means something the',
     'report shows is not labelled as created by the pipeline. Treat the figure as wrong.',
 ]
+
+
+def _airflow_credentials() -> tuple[str, str]:
+    """Read Airflow FAB credentials from the environment.
+
+    Passed as environment variables rather than a flag: a flag's value is visible in
+    `ps` output to every user on the machine, and would land in shell history and in
+    any cron entry that ran this command. Phase 4 moves these to GCP Secret Manager
+    per the design spec's identity section; env vars are the phase 1 answer, not the
+    final one.
+
+    Not `_AIRFLOW_WWW_USER_USERNAME` / `_AIRFLOW_WWW_USER_PASSWORD`: those are
+    compose-level variables consumed by the `airflow-init` service, with their
+    defaults supplied inline by `compose.yaml` — they are never exported into the
+    environment of a process running outside Docker, which is exactly where this
+    CLI runs.
+
+    Returns:
+        Username and password.
+
+    Raises:
+        RuntimeError: If either is unset. There is no default: the dev VM's
+            credentials happen to be `airflow`/`airflow` today, but baking a
+            known-weak default into shipped code is how it ends up somewhere it
+            matters.
+    """
+    username = os.environ.get('AIRFLOW_USERNAME')
+    password = os.environ.get('AIRFLOW_PASSWORD')
+    if username and password:
+        return username, password
+    missing = [name for name, value in (('AIRFLOW_USERNAME', username), ('AIRFLOW_PASSWORD', password)) if not value]
+    raise RuntimeError(
+        f'{" and ".join(missing)} not set. The snapshot command needs Airflow credentials; on '
+        "the dev VM these are compose.yaml's _AIRFLOW_WWW_USER_USERNAME / "
+        '_AIRFLOW_WWW_USER_PASSWORD defaults, exported into this process.'
+    )
 
 
 def totals_by_group(usages: list[StepUsage]) -> dict[tuple[str, ...], float]:
@@ -271,6 +320,12 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
     history.add_argument('--json', action='store_true', help='emit JSON instead of a table')
 
+    snapshot = sub.add_parser('snapshot', help='read-only view of a pipeline run')
+    snapshot.add_argument('--run', required=True, help='the Airflow DAG run id')
+    snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
+    snapshot.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help="the run's journal bucket")
+    snapshot.add_argument('--json', action='store_true', help='emit JSON instead of text')
+
     return parser
 
 
@@ -289,8 +344,8 @@ def main(argv: list[str] | None = None) -> int:
     coverage: list[WindowCoverage] = []
     window: tuple[datetime, datetime] | None = None
     try:
-        export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
         if args.command == 'usage':
+            export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
             run = clean_label(args.run)
             usages = export.run_usage(run=run, since=args.since)
             window = usage_window(usages)
@@ -298,7 +353,21 @@ def main(argv: list[str] | None = None) -> int:
                 coverage = export.window_coverage(run=run, window=window, since=args.since)
         elif args.command == 'history':
             key = 'run'
+            export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
             usages = export.step_history(step=clean_label(args.step), since=args.since)
+        elif args.command == 'snapshot':
+            username, password = _airflow_credentials()
+            client = AirflowClient(
+                session=requests.Session(), base_url=AIRFLOW_BASE_URL, username=username, password=password
+            )
+            bucket = storage.Client().bucket(args.journal_bucket)
+            journal = Journal(bucket=bucket, prefix=f'_agent/{args.dag}/{args.run}/journal')
+            snapshot = take_snapshot(client, journal, args.dag, args.run, datetime.now(tz=UTC))
+            if args.json:
+                sys.stdout.write(snapshot.model_dump_json(indent=2) + '\n')
+            else:
+                sys.stdout.write(render_snapshot(snapshot) + '\n')
+            return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')
     except DefaultCredentialsError as exc:
@@ -309,6 +378,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except GoogleAPICallError as exc:
         sys.stderr.write(f'billing export query failed: {" ".join(str(exc).split())}\n')
+        return 1
+    except requests.RequestException as exc:
+        sys.stderr.write(f'could not reach Airflow: {" ".join(str(exc).split())}\n')
+        return 1
+    except RuntimeError as exc:
+        sys.stderr.write(f'{" ".join(str(exc).split())}\n')
         return 1
 
     if args.json:

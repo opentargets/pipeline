@@ -366,6 +366,71 @@ class TestLabelNormalisation:
         assert clean_label(RAW_RUN_ID) == CLEAN_RUN_ID
 
 
+class TestSnapshotParser:
+    def test_snapshot_takes_a_run(self) -> None:
+        args = build_parser().parse_args(['snapshot', '--run', 'r'])
+        assert args.run == 'r'
+
+    def test_snapshot_defaults_to_the_unified_pipeline_dag(self) -> None:
+        assert build_parser().parse_args(['snapshot', '--run', 'r']).dag == 'unified_pipeline'
+
+    def test_snapshot_supports_json(self) -> None:
+        assert build_parser().parse_args(['snapshot', '--run', 'r', '--json']).json is True
+
+
+class TestSnapshotCommand:
+    def test_a_client_error_exits_non_zero_with_a_one_line_message(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A client-level `RuntimeError` must reach the user as a message, not a traceback.
+
+        A 404 from Airflow (e.g. a typo'd run id) surfaces as `RuntimeError` from the
+        client, not a `ValidationError`. This confirms `main`'s existing `RuntimeError`
+        handler turns that into a clean exit rather than a traceback.
+        """
+        monkeypatch.setenv('AIRFLOW_USERNAME', 'u')
+        monkeypatch.setenv('AIRFLOW_PASSWORD', 'p')
+        fake_client = MagicMock()
+        fake_client.dag_run.side_effect = RuntimeError(
+            'airflow API returned HTTP 404 for /api/v2/dags/unified_pipeline/dagRuns/typo'
+        )
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock(return_value=fake_client))
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'typo']) == 1
+        err = capsys.readouterr().err
+        assert err.count('\n') == 1
+        assert '404' in err
+
+    def test_missing_credentials_exit_non_zero_naming_the_variable(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The whole reason credentials are env vars is to fail closed and say which are missing."""
+        monkeypatch.delenv('AIRFLOW_USERNAME', raising=False)
+        monkeypatch.delenv('AIRFLOW_PASSWORD', raising=False)
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock())
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'AIRFLOW_USERNAME' in err
+        assert 'AIRFLOW_PASSWORD' in err
+
+    def test_an_empty_string_credential_is_treated_as_missing(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The subtler half of the fail-closed check: `''` is falsy, not a valid credential."""
+        monkeypatch.setenv('AIRFLOW_USERNAME', '')
+        monkeypatch.setenv('AIRFLOW_PASSWORD', 'p')
+        monkeypatch.setattr(cli, 'AirflowClient', MagicMock())
+        monkeypatch.setattr(cli, 'storage', MagicMock())
+
+        assert main(['snapshot', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'AIRFLOW_USERNAME' in err
+        assert 'AIRFLOW_PASSWORD' not in err
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch out `bigquery.Client`, exposing the constructor as `client.constructor`."""
