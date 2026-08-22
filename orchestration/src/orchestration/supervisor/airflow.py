@@ -12,7 +12,7 @@ Everything here is a GET. Phase 1 is observational and writes nothing.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -99,3 +99,81 @@ def token_request(base_url: str, username: str, password: str) -> tuple[str, dic
         an `access_token` field.
     """
     return f'{base_url.rstrip("/")}/auth/token', {'username': username, 'password': password}
+
+
+_PAGE_SIZE = 100
+"""Task instances per request. The unified pipeline has roughly 150 steps."""
+
+
+class AirflowClient:
+    """Reads DAG runs and task instances from the Airflow REST API.
+
+    Args:
+        session: A `requests.Session`, injected so no unit test needs a server.
+        base_url: The API server's base URL.
+        username: FAB username.
+        password: FAB password.
+    """
+
+    def __init__(self, session: Any, base_url: str, username: str, password: str) -> None:
+        self.session = session
+        self.base_url = base_url.rstrip('/')
+        self.username = username
+        self.password = password
+        self._token: str | None = None
+
+    @property
+    def token(self) -> str:
+        """The bearer token, fetched once and cached for this client's lifetime.
+
+        Returns:
+            The JWT.
+
+        Raises:
+            RuntimeError: If the token exchange does not return HTTP 201.
+        """
+        if self._token is None:
+            url, body = token_request(self.base_url, self.username, self.password)
+            response = self.session.post(url, json=body)
+            if response.status_code != 201:
+                raise RuntimeError(f'airflow token exchange failed with HTTP {response.status_code}')
+            self._token = response.json()['access_token']
+        return self._token
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = self.session.get(
+            f'{self.base_url}{path}',
+            headers={'Authorization': f'Bearer {self.token}'},
+            params=params or {},
+        )
+        return response.json()
+
+    def dag_run(self, dag_id: str, run_id: str) -> DagRun:
+        """Read one DAG run.
+
+        Args:
+            dag_id: The DAG's id.
+            run_id: The run's id.
+
+        Returns:
+            The run.
+        """
+        return DagRun.model_validate(self._get(f'/api/v2/dags/{dag_id}/dagRuns/{run_id}'))
+
+    def task_instances(self, dag_id: str, run_id: str) -> list[TaskInstance]:
+        """Read every task instance in one DAG run, following pagination.
+
+        Args:
+            dag_id: The DAG's id.
+            run_id: The run's id.
+
+        Returns:
+            Every task instance, in the order the API returned them.
+        """
+        path = f'/api/v2/dags/{dag_id}/dagRuns/{run_id}/taskInstances'
+        collected: list[TaskInstance] = []
+        while True:
+            page = self._get(path, {'limit': _PAGE_SIZE, 'offset': len(collected)})
+            collected.extend(TaskInstance.model_validate(t) for t in page['task_instances'])
+            if len(collected) >= page['total_entries'] or not page['task_instances']:
+                return collected
