@@ -366,6 +366,18 @@ class TestLabelNormalisation:
         assert clean_label(RAW_RUN_ID) == CLEAN_RUN_ID
 
 
+class TestSnapshotParser:
+    def test_snapshot_takes_a_run(self) -> None:
+        args = build_parser().parse_args(['snapshot', '--run', 'r'])
+        assert args.run == 'r'
+
+    def test_snapshot_defaults_to_the_unified_pipeline_dag(self) -> None:
+        assert build_parser().parse_args(['snapshot', '--run', 'r']).dag == 'unified_pipeline'
+
+    def test_snapshot_supports_json(self) -> None:
+        assert build_parser().parse_args(['snapshot', '--run', 'r', '--json']).json is True
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch out `bigquery.Client`, exposing the constructor as `client.constructor`."""

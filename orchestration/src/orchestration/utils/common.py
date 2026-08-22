@@ -33,6 +33,13 @@ AIRFLOW_BASE_URL = 'http://localhost:8080'
 state even though a database driver is installed.
 """
 
+GCS_PIPELINE_RUNS_BUCKET = 'open-targets-pipeline-runs'
+"""Bucket holding development pipeline runs, and therefore the agent's journal.
+
+Matches `dev_uri` in `dags/config/unified_pipeline.py`. Release runs write to
+`open-targets-pre-data-releases` instead, which phase 1 does not target.
+"""
+
 STALL_CEILING_SECONDS = 6 * 60 * 60
 """Absolute stall threshold for a step with no observed history.
 
