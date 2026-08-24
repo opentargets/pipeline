@@ -1162,6 +1162,42 @@ class TestObserveCommand:
         observe_command.github_app.comment.assert_called_once()
         assert observe_command.github_app.comment.call_args.args[0] == 5
 
+    def test_the_post_happens_before_the_journal_write(self, observe_command: SimpleNamespace) -> None:
+        """Posting must be attempted first — see `main`'s comment on why the order matters."""
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        order: list[str] = []
+        observe_command.github_app.comment.side_effect = lambda *a, **kw: order.append('comment')
+        observe_command.journal.append.side_effect = lambda *a, **kw: order.append('append')
+
+        assert main(['observe', '--issue', '5']) == 0
+        assert order == ['comment', 'append']
+
+    def test_a_failed_post_leaves_the_journal_empty_and_is_retried_next_wakeup(
+        self, observe_command: SimpleNamespace
+    ) -> None:
+        """Regression: journalling before posting would silently lose a report on a failed post.
+
+        `github_app.comment` raising must leave the journal untouched, so the next wakeup's
+        `observe()` recomputes the same observation (the journal fixture's `read()` still
+        returns `[]`, exactly as if nothing had been recorded) and tries to post it again —
+        a retry, not a silent drop.
+        """
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        observe_command.github_app.comment.side_effect = RuntimeError('comment post failed with HTTP 502: boom')
+
+        assert main(['observe', '--issue', '5']) == 1
+        observe_command.journal.append.assert_not_called()
+        assert observe_command.github_app.comment.call_count == 1
+
+        observe_command.github_app.comment.side_effect = None
+        assert main(['observe', '--issue', '5']) == 0
+        assert observe_command.github_app.comment.call_count == 2
+        observe_command.journal.append.assert_called_once()
+
     def test_a_failed_pipeline_step_exits_zero_not_one(self, observe_command: SimpleNamespace) -> None:
         """The observer's own health decides the exit code, never the pipeline's state."""
         observe_command.take_snapshot.return_value = _snapshot(

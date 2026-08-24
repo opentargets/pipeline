@@ -3,8 +3,11 @@
 Exposes billed cost for a run and for one step's history, both read from the GCP
 billing export, a read-only `snapshot` of a run's state read from Airflow and the
 run's journal, and `observe` — one wakeup of the stateless observer: discover the
-active run, snapshot it, decide what is new since the journal, journal it, and
-comment on the run's GitHub issue when there is something worth saying.
+active run, snapshot it, decide what is new since the journal, comment on the run's
+GitHub issue when there is something worth saying, and only then journal it. Posting
+before journalling is deliberate, not incidental — see the comment in `main` above
+the `observe` branch's post/journal ordering for why reversing it silently loses
+reports rather than merely duplicating one.
 
 `--run` and `--step` are matched against GCP labels, which are normalised, so both
 are passed through `clean_label` first. A run ID copied straight out of the Airflow
@@ -678,9 +681,20 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write((body if body is not None else '(nothing new to report)') + '\n')
                 return 0
 
-            for event in _observation_events(observation, now):
-                journal.append(event)
-
+            # Post BEFORE journalling, deliberately. `github_app.comment` raises RuntimeError
+            # on any failure (a 5xx, a network blip, a bad Secret Manager read), which — since
+            # nothing here catches it — unwinds straight out of this `elif` to `main`'s own
+            # `except RuntimeError` below, skipping the journal-append loop entirely. That
+            # means a failed post leaves these events unjournalled, so the next wakeup's
+            # `observe()` sees them as new again and retries the comment. The alternative
+            # (journal first) is the one bug this ordering exists to prevent: a transient
+            # failure would journal the events as reported anyway, and the next wakeup's
+            # idempotency check would then filter them out forever — the failure or stall
+            # would never reach the issue at all, silently, with no second chance. The cost
+            # of getting this right is a possible duplicate comment, on the rarer path where
+            # the post succeeds and the following `journal.append` itself then fails or the
+            # process dies before it runs — for a monitoring tool, duplicate beats silent, so
+            # that cost is accepted. Do not reorder this back to journal-then-post.
             if body is not None:
                 private_key = read_app_key(
                     secretmanager.SecretManagerServiceClient(), GCP_PROJECT_PLATFORM, _GITHUB_APP_KEY_NAME
@@ -693,6 +707,17 @@ def main(argv: list[str] | None = None) -> int:
                     repo=_GITHUB_REPO,
                 )
                 github_app.comment(args.issue, body)
+
+            # Unconditional on `body`, not nested under the `if` above: `_observation_events`
+            # journals exactly `observation`'s failed/stalled/completed/run_finished, and
+            # `render_comment` returns `None` only when `observation.is_empty` — the same
+            # fields, empty. So today, `body is None` implies this loop is journalling nothing
+            # anyway. But that is an alignment between two functions, not something this line
+            # enforces, so it is written to hold even if that ever changes: an `Observation`
+            # that somehow carried an event `render_comment` did not turn into a section must
+            # still be journalled, not silently dropped because nothing was posted for it.
+            for event in _observation_events(observation, now):
+                journal.append(event)
             return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')
