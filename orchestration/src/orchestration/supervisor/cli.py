@@ -54,15 +54,18 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Literal
 
 import requests
 from google.api_core.exceptions import GoogleAPICallError
 from google.auth.exceptions import DefaultCredentialsError
-from google.cloud import bigquery, secretmanager, storage
+from google.cloud import bigquery, dataproc_v1, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
+from orchestration.supervisor.compute import StepCompute, compute_report
+from orchestration.supervisor.dataproc import job_executions
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
@@ -82,6 +85,7 @@ from orchestration.utils.common import (
     AIRFLOW_BASE_URL,
     BILLING_EXPORT_START,
     GCP_PROJECT_PLATFORM,
+    GCP_REGION,
     GCS_PIPELINE_RUNS_BUCKET,
     GCS_PRE_RELEASES_BUCKET,
     clean_label,
@@ -242,6 +246,21 @@ _IMPOSSIBLE_SHARE_FOOTER = [
     'a share above 100% is not good coverage, it is a broken measurement: the rows above',
     'were counted in the numerator but not in the denominator, which means something the',
     'report shows is not labelled as created by the pipeline. Treat the figure as wrong.',
+]
+
+_EMPTY_COMPUTE = """No step joined any cost, execution or wall-time data for this run. It may not
+have billed yet, produced no Dataproc job, and never reached the journal -- or the run
+label may not match. Labels are lowercased with everything outside [a-z0-9-_] replaced
+by '-', and --run is normalised the same way, so check the normalised form: an Airflow
+run ID like manual__2026-07-21T15:07:47.545737+00:00 is stored as the label
+manual__2026-07-21t15-07-47-545737-00-00."""
+
+_WALL_UNAVAILABLE_FOOTER = [
+    'task wall time (queueing under cluster contention) is not shown: no step in this',
+    'report has one. That does not mean no step queued -- it means the measurement was',
+    "never taken. Wall time comes from the pipeline supervisor's journal, which only",
+    'exists for a run the observer watched; Airflow keeps no history of its own once the',
+    'VM that ran it is torn down. It arrives with the first run the observer watches.',
 ]
 
 
@@ -422,6 +441,145 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
     return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 
+def _money(value: float | None) -> str:
+    return f'{value:.2f}' if value is not None else _MISSING
+
+
+def _hours(value: int | None) -> str:
+    return f'{value}h' if value is not None else _MISSING
+
+
+def _seconds(value: float | None) -> str:
+    return f'{value:,.0f}s' if value is not None else _MISSING
+
+
+def _core_hours(value: float | None) -> str:
+    return f'{value:.1f}' if value is not None else _MISSING
+
+
+def _share(value: float | None) -> str:
+    return f'{value:.0%}' if value is not None else _MISSING
+
+
+def _families(values: list[str]) -> str:
+    return ','.join(values) if values else _MISSING
+
+
+def _compute_sort_key(step: StepCompute) -> tuple[int, float, int, float, str]:
+    """Waste first, worst to least; steps this cannot be judged on sort after, by cost.
+
+    Sorting by cost puts the run's most expensive step first, which is not always the
+    step wasting the most cluster time and is not the number a reader can act on -- see
+    `compute.py`'s module docstring. A step with no `billed_execution_gap_seconds` (no
+    Dataproc job, or no billing) cannot be placed on that axis at all, so it sorts after
+    every step that can be, rather than at either extreme of a mixed ranking that would
+    misread a `None` as either the worst or the best case.
+    """
+    gap = step.billed_execution_gap_seconds
+    cost = step.net_cost
+    return (
+        0 if gap is not None else 1,
+        -(gap if gap is not None else 0.0),
+        0 if cost is not None else 1,
+        -(cost if cost is not None else 0.0),
+        step.step,
+    )
+
+
+def _compute_table_columns(
+    steps: list[StepCompute],
+) -> list[tuple[str, Callable[[StepCompute], str]]]:
+    """Which columns this result has to show, in table order, and how to render each cell.
+
+    `cost`/`billed`/`exec`/`waste` are always shown -- they are this report's whole
+    point. `ccy`/`core-hrs`/`spot`/`machines`/`wall`/`queue-gap` are shown only when at
+    least one row carries a value for them; a column of nothing but `-` is noise, and
+    for `wall`/`queue-gap` specifically it is worse than noise -- see
+    `_WALL_UNAVAILABLE_FOOTER`, appended instead whenever this leaves them out.
+
+    Args:
+        steps: The rows to be rendered.
+
+    Returns:
+        `(header, cell)` pairs, in table order.
+    """
+    columns: list[tuple[str, Callable[[StepCompute], str]]] = [
+        ('cost', lambda s: _money(s.net_cost)),
+    ]
+    if len({s.currency for s in steps if s.currency is not None}) > 1:
+        columns.append(('ccy', lambda s: s.currency or _MISSING))
+    columns.append(('billed', lambda s: _hours(s.billed_hours)))
+    columns.append(('exec', lambda s: _seconds(s.execution_seconds)))
+    columns.append(('waste', lambda s: _seconds(s.billed_execution_gap_seconds)))
+    if any(s.core_seconds is not None for s in steps):
+        columns.append(('core-hrs', lambda s: _core_hours(s.core_hours)))
+        columns.append(('spot', lambda s: _share(s.spot_share)))
+        columns.append(('machines', lambda s: _families(s.machine_families)))
+    if any(s.wall_seconds is not None for s in steps):
+        columns.append(('wall', lambda s: _seconds(s.wall_seconds)))
+        columns.append(('queue-gap', lambda s: _seconds(s.wall_execution_gap_seconds)))
+    return columns
+
+
+def render_compute(steps: list[StepCompute]) -> str:
+    """Render a per-step compute report: cost, execution time, and the gaps between them.
+
+    Rows are sorted by `billed_execution_gap_seconds`, worst first -- see
+    `_compute_sort_key`. That is deliberately not the same as sorting by cost: the
+    run's most expensive step and its most wasteful one are not always the same step,
+    and the wasteful one is the one a reader can act on. The report does not say why
+    the gap is there -- a cluster held open across a step group, a late delete, and
+    unlabelled work on the same cluster all look identical here -- only that it is.
+
+    Args:
+        steps: One row per step, normally `compute.compute_report`'s result.
+
+    Returns:
+        The rendered report, or a message when there is nothing to show.
+    """
+    if not steps:
+        return _EMPTY_COMPUTE
+
+    ordered = sorted(steps, key=_compute_sort_key)
+    columns = _compute_table_columns(ordered)
+
+    key_width = max(_MIN_KEY_WIDTH, len('step'), *(len(s.step) for s in ordered))
+    widths = {name: max(len(name), *(len(cell(s)) for s in ordered)) for name, cell in columns}
+
+    header = f'{"step":<{key_width}}' + ''.join(f' {name:>{widths[name]}}' for name, _ in columns)
+    lines = [header, '-' * len(header)]
+    lines.extend(
+        f'{s.step:<{key_width}}' + ''.join(f' {cell(s):>{widths[name]}}' for name, cell in columns)
+        for s in ordered
+    )
+    lines.append('-' * len(header))
+
+    no_job = sum(1 for s in ordered if not s.dataproc_job_states)
+    partial_job = sum(1 for s in ordered if s.dataproc_job_states and set(s.dataproc_job_states) - {'DONE'})
+    measured = [s.billed_execution_gap_seconds for s in ordered if s.billed_execution_gap_seconds is not None]
+
+    blocks = [[
+        f'{len(ordered)} steps. {no_job} had no Dataproc job at all -- normal for a step that runs on a',
+        'plain GCE VM rather than Dataproc, not evidence of a problem.',
+    ]]
+    if measured:
+        total = sum(measured)
+        blocks.append([
+            f'billed time paid for and not computing, summed across the {len(measured)} steps this can be',
+            f'measured for: {total:,.0f}s ({total / 3600:.1f}h). This is a floor, not the total waste of the',
+            'run: steps with no Dataproc job are not counted here at all, not counted as zero waste.',
+        ])
+    if partial_job:
+        blocks.append([
+            f'{partial_job} step(s) had a Dataproc job that did not reach DONE (cancelled or errored)',
+            'alongside or instead of a successful one -- see dataproc_job_states in --json for which.',
+        ])
+    if not any(s.wall_seconds is not None for s in ordered):
+        blocks.append(_WALL_UNAVAILABLE_FOOTER)
+
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
+
+
 _UNCOUNTABLE = 'n/a'
 """Shown for a row count the dataset's format has no footer to have supplied, as
 distinct from `_MISSING`, which marks a side that is absent altogether."""
@@ -596,6 +754,13 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
     history.add_argument('--json', action='store_true', help='emit JSON instead of a table')
 
+    compute = sub.add_parser(
+        'compute', help='billed cost, Dataproc execution time and task wall time per step, joined'
+    )
+    compute.add_argument('--run', required=True, help='the run label to report on, as `usage --run`')
+    compute.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
+    compute.add_argument('--json', action='store_true', help='emit JSON instead of a table')
+
     snapshot = sub.add_parser('snapshot', help='read-only view of a pipeline run')
     snapshot.add_argument('--run', required=True, help='the Airflow DAG run id')
     snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
@@ -690,6 +855,29 @@ def main(argv: list[str] | None = None) -> int:
             key = 'run'
             export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
             usages = export.step_history(step=clean_label(args.step), since=args.since)
+        elif args.command == 'compute':
+            run = clean_label(args.run)
+            export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
+            usages = export.run_usage(run=run, since=args.since)
+            window = usage_window(usages)
+            if window is not None and not args.json:
+                coverage = export.window_coverage(run=run, window=window, since=args.since)
+            dataproc_client = dataproc_v1.JobControllerClient(
+                client_options={'api_endpoint': f'{GCP_REGION}-dataproc.googleapis.com:443'}
+            )
+            executions = job_executions(dataproc_client, project=GCP_PROJECT_PLATFORM, region=GCP_REGION, run=run)
+            bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+            # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
+            # never the cleaned billing label -- see journal.py's module docstring, and
+            # `snapshot`/`observe` below, which key it the same way.
+            journal = Journal(bucket=bucket, prefix=f'_agent/unified_pipeline/{args.run}/journal')
+            steps = compute_report(usages, executions, journal.read())
+            if args.json:
+                sys.stdout.write(json.dumps([s.model_dump(mode='json') for s in steps], indent=2) + '\n')
+            else:
+                report = render_compute(steps) + '\n\n' + render_coverage(window, coverage)
+                sys.stdout.write(report + '\n')
+            return 0
         elif args.command == 'snapshot':
             username, password = _airflow_credentials()
             client = AirflowClient(
