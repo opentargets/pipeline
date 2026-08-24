@@ -8,20 +8,20 @@ steps:
     params:
       step.study_index_path:
         # GWAS
-        - "{{release_uri}}/input/gwas/study/gcca"
-        - "{{release_uri}}/input/gwas/study/gcss_pics"
-        - "{{release_uri}}/input/gwas/study/gcss_susie"
-        - "{{release_uri}}/input/gwas/study/finngen"
+        - '{{release_uri}}/input/gwas/study/gcca'
+        - '{{release_uri}}/input/gwas/study/gcss_pics'
+        - '{{release_uri}}/input/gwas/study/gcss_susie'
+        - '{{release_uri}}/input/gwas/study/finngen'
         # molQTL
-        - "{{release_uri}}/input/molqtl/study/ukb_ppp_eur"
+        - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
         # GWAS_PPP
-        - "{{release_uri}}/input/gwas/study/finngen_ukb_mvp"
+        - '{{release_uri}}/input/gwas/study/finngen_ukb_mvp'
         # molQTL PPP
-        - "{{release_uri}}/input/molqtl/study/eqtl_catalogue/r8"
-        - "{{release_uri}}/input/molqtl/study/otar2077/microglia"
-        - "{{release_uri}}/input/molqtl/study/eQTLGen/single_cell_eqtl"
-        - "{{release_uri}}/input/molqtl/study/eQTLGen/coeqtl"
-        - "{{release_uri}}/input/molqtl/study/deCODE_proteomics"
+        - '{{release_uri}}/input/molqtl/study/eqtl_catalogue/r8'
+        - '{{release_uri}}/input/molqtl/study/otar2077/microglia'
+        - '{{release_uri}}/input/molqtl/study/eQTLGen/single_cell_eqtl'
+        - '{{release_uri}}/input/molqtl/study/eQTLGen/coeqtl'
+        - '{{release_uri}}/input/molqtl/study/deCODE_proteomics'
       step.invalid_qc_reasons:
         - UNRESOLVED_TARGET
         - UNRESOLVED_DISEASE
@@ -40,20 +40,20 @@ steps:
     params:
       step.study_locus_path:
         # GWAS
-        - "{{release_uri}}/input/gwas/credible_set/gcca"
-        - "{{release_uri}}/input/gwas/credible_set/gcss_pics"
-        - "{{release_uri}}/input/gwas/credible_set/gcss_susie"
-        - "{{release_uri}}/input/gwas/credible_set/finngen"
+        - '{{release_uri}}/input/gwas/credible_set/gcca'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_pics'
+        - '{{release_uri}}/input/gwas/credible_set/gcss_susie'
+        - '{{release_uri}}/input/gwas/credible_set/finngen'
         # molQTL
-        - "{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur"
+        - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
         # GWAS_PPP
-        - "{{release_uri}}/input/gwas/credible_set/finngen_ukb_mvp"
+        - '{{release_uri}}/input/gwas/credible_set/finngen_ukb_mvp'
         # molQTL PPP
-        - "{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue/r8"
-        - "{{release_uri}}/input/molqtl/credible_set/otar2077/microglia"
-        - "{{release_uri}}/input/molqtl/credible_set/eQTLGen/single_cell_eqtl"
-        - "{{release_uri}}/input/molqtl/credible_set/eQTLGen/coeqtl"
-        - "{{release_uri}}/input/molqtl/credible_set/deCODE_proteomics"
+        - '{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue/r8'
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/microglia'
+        - '{{release_uri}}/input/molqtl/credible_set/eQTLGen/single_cell_eqtl'
+        - '{{release_uri}}/input/molqtl/credible_set/eQTLGen/coeqtl'
+        - '{{release_uri}}/input/molqtl/credible_set/deCODE_proteomics'
   variant:
     params:
       step.variant_annotations_path:
