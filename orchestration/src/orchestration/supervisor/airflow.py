@@ -102,7 +102,7 @@ def token_request(base_url: str, username: str, password: str) -> tuple[str, dic
 
 
 _PAGE_SIZE = 100
-"""Task instances per request. The unified pipeline has roughly 150 steps."""
+"""Task instances per request. The unified pipeline has 132 steps."""
 
 
 class AirflowClient:

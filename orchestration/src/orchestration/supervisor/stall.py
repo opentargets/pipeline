@@ -1,20 +1,29 @@
 """Deciding whether a running task has stalled.
 
-Detection degrades rather than failing closed. Most steps have no observed history
-on early runs — the billing export holds at most 18 of roughly 150 steps, and
-Airflow's own history is destroyed with the VM — so a step with history is judged
-against its own observed maximum and a step without one against a single absolute
-ceiling. The verdict records which rule fired, because "four times its usual" and
-"past the blanket limit" are different things to tell a human.
+Detection degrades rather than failing closed. A step is judged against its own
+observed maximum when one is available, and against a single absolute ceiling when it
+is not. The ceiling is the rule in practice, not the fallback: `baseline_from_journal`
+can only build an observed maximum from a `step_completed` event earlier in the *same
+run's* journal, and a step that has completed leaves `_ACTIVE_STATES` and is never
+judged again — so history only ever fires for a step cleared and re-run within one run
+(see `baseline_from_journal` for that case, and for why a baseline spanning prior runs
+is deferred rather than built now). The verdict records which rule fired, because "two
+and a half times its usual" and "past the blanket limit" are different things to tell a
+human.
+
+Most steps never accumulate the observed history to benefit from the history rule: the
+billing export holds at most 18 of the pipeline's 132 steps, and Airflow's own history
+is destroyed with the VM.
 
 The baseline is only ever consulted for a step's own execution task, never for a
 sibling in its group. `step_from_task_id` collapses every task in a group onto the
 same step name (`pts_target.delete_vm_pts_target` and `pts_target.run_pts_target`
 both map to `pts_target`), so an ungated lookup would hand the run task's journalled
 duration to every sibling — a `diff_` task doing a slow GCS listing judged stalled on
-a fabricated history basis, or a `delete_vm_` task getting a run task's five-hour
-threshold instead of the ceiling, delaying a real hang report by hours. `stalled`
-gates the lookup with `is_run_task` for exactly this reason.
+a fabricated history basis, or a `delete_vm_` task whose step has a 3-hour observed
+maximum getting a 7.5-hour threshold (2.5x that maximum) instead of the 6-hour
+ceiling, delaying a real hang report by 1.5 hours. `stalled` gates the lookup with
+`is_run_task` for exactly this reason.
 
 Elapsed time here is measured from `start_date` — when the task began executing —
 and therefore excludes queueing. That is deliberate, not an oversight: the baseline
@@ -104,19 +113,27 @@ def baseline_from_journal(events: list[JournalEvent]) -> Baseline:
     `@task_group(group_id=step_name)` with `prefix_group_id` defaulting to True, so the
     two spellings differ for every step, not just some. `stalled` converts the task id
     it is handed down to the bare step name (`step_from_task_id`) before looking up the
-    baseline, so both sides of the lookup agree.
+    baseline — but only for a step's own run task, since `is_run_task` gates both the
+    conversion and the lookup (see the module docstring) — so both sides of the lookup
+    agree whenever the lookup happens at all.
 
-    The direction matters because a mismatch here fails silently and permanently: a
-    baseline keyed in a namespace `stalled` never looks up would silently miss on every
-    lookup forever — not raise, not warn, just fall back to the ceiling on every verdict,
-    which is also the correct, expected shape of an early run with no history.
-    `basis == 'ceiling'` is the only symptom, and it is indistinguishable from an honest
-    first run. That is why `tests/test_supervisor_snapshot.py` pins both directions
-    rather than relying on this docstring alone.
+    The direction matters because a mismatch here fails silently: a baseline keyed in a
+    namespace `stalled` never looks up would miss on every lookup, falling back to the
+    ceiling — not raise, not warn. That symptom alone, `basis == 'ceiling'` on every
+    verdict, discriminates nothing: it is also today's ordinary, correct behaviour,
+    since the history rule only ever fires for a step cleared and re-run within the same
+    run (see the module docstring) and most steps are never re-run. That is why
+    `tests/test_supervisor_snapshot.py` pins both directions of the key directly, rather
+    than relying on this symptom to surface a mismatch in production.
 
     Args:
-        events: The run journal, or several runs' journals concatenated. `step` on each
-            `step_completed` event must be the bare step name, as above.
+        events: One run's journal, as returned by `Journal.read()`. `step` on each
+            `step_completed` event must be the bare step name, as above. A baseline
+            spanning several runs would make the history rule the common case instead
+            of the narrow one, but building it needs to enumerate prior runs' journal
+            prefixes — and which key those prefixes use is unsettled (`dag_run_id` vs
+            `run_name`, see `journal.py`'s module docstring). Nothing in this codebase
+            does that yet; deferred until that key is settled.
 
     Returns:
         The observed maximum duration per step (keyed by the bare step name).
