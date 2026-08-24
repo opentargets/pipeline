@@ -14,10 +14,8 @@ TRIAL_OUTCOME_REFERENCE_TYPES = ('result', 'derived')
 def _result_literature(trial_literature: Column) -> Column:
     """Flatten `trialLiterature` structs to the PMIDs that report the trial's outcome.
 
-    Background citations are dropped. Two shapes in the source need care: ~3.8k AACT
-    RESULT rows carry a null `pmid`, which must not reach the published array, and
-    ~66.5k trials cite background literature only, which must yield null rather than
-    an empty array so the field stays absent for them as it is for non-trial reports.
+    Background citations are dropped, as are entries with no PMID. A report left with
+    nothing yields null rather than an empty array.
 
     Args:
         trial_literature: `array<struct<id: string, type: string>>` column, or null.

@@ -24,11 +24,7 @@ def test_result_literature_keeps_outcome_references_and_drops_background(spark) 
 
 
 def test_result_literature_is_null_when_only_background(spark) -> None:
-    """66.5k trials in the 2026-06 AACT dump cite background literature only.
-
-    They must yield null rather than an empty array, so the field stays absent for them
-    exactly as it does for reports that carry no trial literature at all.
-    """
+    """A trial citing background literature only yields null, not an empty array."""
     result = _literature(spark, [('t1', [('222', 'BACKGROUND')])])
     assert result['t1'] is None
 
@@ -40,7 +36,7 @@ def test_result_literature_is_null_when_trial_literature_is_null(spark) -> None:
 
 
 def test_result_literature_drops_null_pmids(spark) -> None:
-    """~3.8k RESULT rows in AACT carry a null pmid; a null must not reach the array."""
+    """An outcome reference with no PMID must not put a null in the array."""
     result = _literature(spark, [
         ('t1', [(None, 'RESULT'), ('111', 'RESULT')]),
         ('t2', [(None, 'RESULT')]),
@@ -50,11 +46,7 @@ def test_result_literature_drops_null_pmids(spark) -> None:
 
 
 def test_result_literature_matches_reference_type_case_insensitively(spark) -> None:
-    """AACT spells the type uppercase, but a case change upstream must not empty the column.
-
-    `clinical_mining`'s own test fixtures use the lowercase spelling, so the two cases
-    are demonstrably both in circulation.
-    """
+    """Reference types match regardless of case, so a case change upstream is not silent."""
     result = _literature(spark, [
         ('t1', [('111', 'result'), ('222', 'background'), ('333', 'derived')]),
     ])
