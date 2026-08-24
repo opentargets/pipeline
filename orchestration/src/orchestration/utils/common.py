@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -25,12 +26,20 @@ GCP_BILLING_EXPORT_TABLE = (
 BILLING_EXPORT_START = date(2026, 5, 1)
 """Oldest partition in the billing export, so the widest scan it can serve."""
 
-AIRFLOW_BASE_URL = 'http://localhost:8080'
+AIRFLOW_BASE_URL = os.environ.get('AIRFLOW_BASE_URL', 'http://localhost:8080')
 """The Airflow API server, as reachable from the VM that runs it.
 
 `compose.yaml` publishes a port for `airflow-apiserver` only, on 127.0.0.1:8080. The
 `postgres` service publishes none, so the REST API is the only way to read Airflow
 state even though a database driver is installed.
+
+Overridable by the environment because the default is only correct *on* the VM. A
+developer reaching the same server from a laptop goes through a tunnel, and
+`deployment/start.sh` and `deployment/tunnel.sh` both publish it on **8081** — so
+without an override, every supervisor command run against a tunnel fails to connect
+while the constant insists 8080 is right. Set `AIRFLOW_BASE_URL=http://localhost:8081`
+alongside `AIRFLOW_USERNAME`/`AIRFLOW_PASSWORD`, which are read from the environment
+for the same reason.
 """
 
 GCS_PIPELINE_RUNS_BUCKET = 'open-targets-pipeline-runs'

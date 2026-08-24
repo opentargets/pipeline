@@ -1,5 +1,7 @@
 """Tests for package util functions."""
 
+import importlib
+
 import pytest
 
 from orchestration.types import ConfigNode
@@ -82,3 +84,27 @@ def test_find_node_in_config(node: str, result: ConfigNode | None) -> None:
     ]
 
     assert find_node_in_config(config_list, node) == result  # ty:ignore[invalid-argument-type]
+
+
+class TestAirflowBaseUrl:
+    """`AIRFLOW_BASE_URL`'s default is only correct on the VM that runs Airflow."""
+
+    def test_defaults_to_the_port_compose_publishes_on_the_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv('AIRFLOW_BASE_URL', raising=False)
+        module = importlib.reload(importlib.import_module('orchestration.utils.common'))
+
+        assert module.AIRFLOW_BASE_URL == 'http://localhost:8080'
+
+    def test_the_environment_overrides_it_for_a_tunnel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without this, every supervisor command run through a tunnel fails to connect.
+
+        `deployment/start.sh` and `deployment/tunnel.sh` both publish the remote API
+        server on 8081, so a developer on a laptop never reaches it at the default.
+        """
+        monkeypatch.setenv('AIRFLOW_BASE_URL', 'http://localhost:8081')
+        module = importlib.reload(importlib.import_module('orchestration.utils.common'))
+
+        assert module.AIRFLOW_BASE_URL == 'http://localhost:8081'
+
+        monkeypatch.delenv('AIRFLOW_BASE_URL')
+        importlib.reload(module)
