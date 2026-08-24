@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from orchestration.supervisor import cli
+from orchestration.supervisor.airflow import DagRun
 from orchestration.supervisor.cli import (
     build_parser,
     main,
@@ -24,6 +25,7 @@ from orchestration.supervisor.cli import (
 from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
+from orchestration.supervisor.snapshot import Snapshot
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
 from orchestration.utils.common import (
     GCP_PROJECT_PLATFORM,
@@ -991,3 +993,259 @@ class TestJsonOutput:
         client.query.side_effect = _results([_usage_row(product='ppp')], [coverage_row])
         assert main(['usage', '--run', 'r', '--json']) == 0
         assert json.loads(capsys.readouterr().out)[0]['product'] == 'ppp'
+
+
+class TestObserveParser:
+    def test_dag_defaults_to_the_unified_pipeline(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5']).dag == 'unified_pipeline'
+
+    def test_issue_is_required_and_parsed_as_an_int(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5']).issue == 5
+
+    def test_dry_run_defaults_off(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5']).dry_run is False
+
+    def test_dry_run_is_settable(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5', '--dry-run']).dry_run is True
+
+    def test_rows_defaults_off(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5']).rows is False
+
+    def test_run_and_reference_default_to_none(self) -> None:
+        """Diffing is opt-in on `observe`.
+
+        See `cli.py`'s module docstring for why neither is derived automatically from
+        `unified_pipeline.yaml`.
+        """
+        args = build_parser().parse_args(['observe', '--issue', '5'])
+        assert args.run is None
+        assert args.reference is None
+
+    def test_bucket_flags_default_to_the_standard_buckets(self) -> None:
+        args = build_parser().parse_args(['observe', '--issue', '5'])
+        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET
+        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET
+
+    def test_threshold_defaults_to_five_percent(self) -> None:
+        assert build_parser().parse_args(['observe', '--issue', '5']).threshold == 0.05
+
+
+def _snapshot(**overrides: Any) -> Snapshot:
+    """A `Snapshot` for a running, otherwise idle wakeup, overridable field by field."""
+    base: dict[str, Any] = {
+        'dag_id': 'unified_pipeline',
+        'run_id': 'run123',
+        'taken_at': datetime(2026, 8, 24, 12, 0, tzinfo=UTC),
+        'run_state': 'running',
+        'counts': {'running': 1},
+        'running': ['pts_target.run_pts_target'],
+        'failed': [],
+        'succeeded': [],
+        'durations': {},
+        'try_numbers': {},
+        'stalls': [],
+        'journal_events': 0,
+    }
+    base.update(overrides)
+    return Snapshot(**base)
+
+
+@pytest.fixture
+def observe_command(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Patch every I/O boundary `observe` crosses.
+
+    `observer.observe` and `render_comment` run for real, so a scenario test is
+    exercising the actual wiring between them, not a second copy of logic those
+    modules' own test files already cover.
+
+    The default `take_snapshot` return is a running, otherwise empty snapshot — the
+    common case per `cli.py`'s module docstring — so a test that never overrides it is
+    exercising "a wakeup with nothing new" by construction, not by accident.
+    """
+    monkeypatch.setenv('AIRFLOW_USERNAME', 'u')
+    monkeypatch.setenv('AIRFLOW_PASSWORD', 'p')
+
+    fake_airflow_client = MagicMock()
+    fake_airflow_client.active_dag_run.return_value = DagRun(dag_run_id='run123', state='running')
+    airflow_client_cls = MagicMock(return_value=fake_airflow_client)
+    monkeypatch.setattr(cli, 'AirflowClient', airflow_client_cls)
+
+    monkeypatch.setattr(cli, 'storage', MagicMock())
+
+    fake_journal = MagicMock()
+    fake_journal.read.return_value = []
+    journal_cls = MagicMock(return_value=fake_journal)
+    monkeypatch.setattr(cli, 'Journal', journal_cls)
+
+    take_snapshot = MagicMock(return_value=_snapshot())
+    monkeypatch.setattr(cli, 'take_snapshot', take_snapshot)
+
+    collect_diffs = MagicMock(return_value=([], Skipped()))
+    monkeypatch.setattr(cli, 'collect_diffs', collect_diffs)
+    footer_reader = MagicMock()
+    monkeypatch.setattr(cli, 'footer_reader', footer_reader)
+    monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
+    monkeypatch.setattr(cli, 'stage_configs', MagicMock(return_value={'pts': {'steps': {}}}))
+
+    fake_github_app = MagicMock()
+    github_app_cls = MagicMock(return_value=fake_github_app)
+    monkeypatch.setattr(cli, 'GitHubApp', github_app_cls)
+    read_app_key = MagicMock(return_value='pem')
+    monkeypatch.setattr(cli, 'read_app_key', read_app_key)
+    monkeypatch.setattr(cli, 'secretmanager', MagicMock())
+
+    return SimpleNamespace(
+        airflow_client=fake_airflow_client,
+        airflow_client_cls=airflow_client_cls,
+        journal=fake_journal,
+        journal_cls=journal_cls,
+        take_snapshot=take_snapshot,
+        collect_diffs=collect_diffs,
+        footer_reader=footer_reader,
+        github_app=fake_github_app,
+        github_app_cls=github_app_cls,
+        read_app_key=read_app_key,
+    )
+
+
+class TestObserveCommand:
+    def test_an_idle_pipeline_exits_zero_and_posts_nothing(
+        self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No active run is the ordinary case, not an error — see `active_dag_run`."""
+        observe_command.airflow_client.active_dag_run.return_value = None
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.github_app.comment.assert_not_called()
+        observe_command.journal_cls.assert_not_called()
+        assert 'unified_pipeline' in capsys.readouterr().out
+
+    def test_a_wakeup_with_nothing_new_posts_nothing(self, observe_command: SimpleNamespace) -> None:
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.github_app.comment.assert_not_called()
+        observe_command.journal.append.assert_not_called()
+
+    def test_dry_run_posts_nothing_and_writes_no_journal_event(
+        self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5', '--dry-run']) == 0
+        assert 'pts_target' in capsys.readouterr().out
+        observe_command.journal.append.assert_not_called()
+        observe_command.github_app.comment.assert_not_called()
+        observe_command.github_app_cls.assert_not_called()
+
+    def test_dry_run_mints_no_token(self, observe_command: SimpleNamespace) -> None:
+        """`read_app_key` is the call that reaches Secret Manager; dry-run must not attempt it."""
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5', '--dry-run']) == 0
+        observe_command.read_app_key.assert_not_called()
+
+    def test_dry_run_with_nothing_new_says_so_rather_than_printing_nothing(
+        self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['observe', '--issue', '5', '--dry-run']) == 0
+        assert capsys.readouterr().out.strip() != ''
+
+    def test_a_real_wakeup_with_something_new_journals_and_posts(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.journal.append.assert_called_once()
+        event = observe_command.journal.append.call_args.args[0]
+        assert event.event_type == 'step_failed'
+        assert event.step == 'pts_target'
+        observe_command.github_app.comment.assert_called_once()
+        assert observe_command.github_app.comment.call_args.args[0] == 5
+
+    def test_a_failed_pipeline_step_exits_zero_not_one(self, observe_command: SimpleNamespace) -> None:
+        """The observer's own health decides the exit code, never the pipeline's state."""
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5']) == 0
+
+    def test_a_finished_run_exits_zero(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='failed')
+        assert main(['observe', '--issue', '5']) == 0
+
+    def test_the_diff_does_not_run_before_a_terminal_state(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='running')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0
+        observe_command.collect_diffs.assert_not_called()
+
+    def test_the_diff_runs_at_a_terminal_state(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0
+        observe_command.collect_diffs.assert_called_once()
+        args = observe_command.collect_diffs.call_args.args
+        assert args[1] == 'r'
+        assert args[3] == 'rel'
+
+    def test_the_diff_is_skipped_at_a_terminal_state_without_run_and_reference(
+        self, observe_command: SimpleNamespace
+    ) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.collect_diffs.assert_not_called()
+
+    def test_row_counts_are_only_read_with_the_rows_flag(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0
+        observe_command.footer_reader.assert_not_called()
+
+    def test_rows_flag_reaches_the_footer_reader(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel', '--rows']) == 0
+        assert observe_command.footer_reader.call_count == 2
+
+    def test_a_terminal_run_with_a_diff_renders_both_sections(
+        self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`diffs=[]` (ran, found nothing) is distinct from `diffs=None` (did not run).
+
+        Both the run-finished heading and a dataset-comparison section must appear.
+        """
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel', '--dry-run']) == 0
+        out = capsys.readouterr().out
+        assert 'Run succeeded' in out
+        assert 'Dataset comparison' in out
+
+    def test_missing_credentials_exit_non_zero(
+        self, observe_command: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.delenv('AIRFLOW_USERNAME', raising=False)
+        monkeypatch.delenv('AIRFLOW_PASSWORD', raising=False)
+        assert main(['observe', '--issue', '5']) == 1
+        assert 'AIRFLOW_USERNAME' in capsys.readouterr().err
+
+    def test_the_journal_prefix_is_keyed_on_the_discovered_dag_run_id(self, observe_command: SimpleNamespace) -> None:
+        assert main(['observe', '--issue', '5']) == 0
+        prefix = observe_command.journal_cls.call_args.kwargs['prefix']
+        assert prefix == '_agent/unified_pipeline/run123/journal'
+
+    def test_the_app_key_is_read_from_the_platform_project(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5']) == 0
+        args = observe_command.read_app_key.call_args.args
+        assert args[1] == GCP_PROJECT_PLATFORM
+        assert args[2] == 'supervisor-github-app-key'
+
+    def test_the_github_app_is_constructed_with_the_verified_identity(
+        self, observe_command: SimpleNamespace
+    ) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
+        )
+        assert main(['observe', '--issue', '5']) == 0
+        kwargs = observe_command.github_app_cls.call_args.kwargs
+        assert kwargs['app_id'] == '4699938'
+        assert kwargs['installation_id'] == 156145657
+        assert kwargs['repo'] == 'opentargets/pipeline'

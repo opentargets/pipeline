@@ -1,8 +1,10 @@
 """Command line entry point for the pipeline supervisor.
 
 Exposes billed cost for a run and for one step's history, both read from the GCP
-billing export, and a read-only `snapshot` of a run's state read from Airflow and
-the run's journal.
+billing export, a read-only `snapshot` of a run's state read from Airflow and the
+run's journal, and `observe` — one wakeup of the stateless observer: discover the
+active run, snapshot it, decide what is new since the journal, journal it, and
+comment on the run's GitHub issue when there is something worth saying.
 
 `--run` and `--step` are matched against GCP labels, which are normalised, so both
 are passed through `clean_label` first. A run ID copied straight out of the Airflow
@@ -13,6 +15,17 @@ pipeline labelled per step, which is not everything it spends. The `usage` repor
 says so with a coverage line rather than leaving its total to be read as the cost of
 the run. Cost only: the export is hourly-bucketed and cannot support a per-step
 duration, which comes from Airflow task instances instead — see `snapshot`.
+
+`observe` diffs the run against a reference release only when both `--run` and
+`--reference` are given, and only once the run has reached a terminal state — never
+on every wakeup, which is what makes the ten-minute cron cheap (see the module
+docstring on `report.py`). Neither is auto-derived: `unified_pipeline.yaml` carries a
+`run_name`/`release_name` pair that *look* like the right values, but confirming
+they are the GCS prefixes those fields actually mean (as opposed to, say, the name
+this dev run is working towards rather than a baseline to diff against) is a product
+decision this module does not make silently. Until that is settled, the diff stays
+opt-in via these two flags, which is also what lets `--dry-run` be exercised against
+a real run today without it.
 """
 
 from __future__ import annotations
@@ -27,13 +40,16 @@ from typing import Literal
 import requests
 from google.api_core.exceptions import GoogleAPICallError
 from google.auth.exceptions import DefaultCredentialsError
-from google.cloud import bigquery, storage
+from google.cloud import bigquery, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
 from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
-from orchestration.supervisor.journal import Journal
+from orchestration.supervisor.github import GitHubApp, read_app_key
+from orchestration.supervisor.journal import Journal, JournalEvent
+from orchestration.supervisor.observer import Observation, observe
+from orchestration.supervisor.report import render_comment
 from orchestration.supervisor.snapshot import render_snapshot, take_snapshot
 from orchestration.supervisor.usage import (
     BillingExport,
@@ -80,6 +96,28 @@ exactly one group, which is the common case and looks like it always did.
 
 _MIN_KEY_WIDTH = 20
 """Floor for the identity column, so a short-labelled table is not cramped."""
+
+_GITHUB_APP_ID = '4699938'
+"""The pipeline supervisor App's numeric id (`iss` claim), verified 2026-08-24 against
+the real App (`GET /app` returns slug `opentargets-pipeline-supervisor`)."""
+
+_GITHUB_APP_KEY_NAME = 'supervisor-github-app-key'
+"""Secret Manager id holding the App's PEM-encoded private key, in `GCP_PROJECT_PLATFORM`."""
+
+_GITHUB_INSTALLATION_ID = 156145657
+"""The App's installation on `_GITHUB_REPO`, verified 2026-08-24."""
+
+_GITHUB_REPO = 'opentargets/pipeline'
+"""The only repository the App's installation covers."""
+
+_OBSERVE_TERMINAL_RUN_STATES = frozenset({'success', 'failed'})
+"""Airflow DAG run states past which the run itself is over, one way or the other.
+
+Mirrors `observer._TERMINAL_RUN_STATES`, kept as its own constant here rather than
+imported so this module does not reach into another module's private name for a
+two-element frozenset. `observe` (the CLI command) diffs a run against a reference
+release only once its state lands in this set — see the module docstring for why not
+on every wakeup."""
 
 _MISSING = '-'
 """Shown for a row that carries no value for an optional column."""
@@ -399,6 +437,54 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, ro
     return '\n'.join(lines + footer)
 
 
+def _observation_events(observation: Observation, at: datetime) -> list[JournalEvent]:
+    """Build the journal events one wakeup's `Observation` implies.
+
+    One event per new item, so `Journal.append`'s per-key idempotency covers each of
+    them individually — a wakeup that journals three completions and then dies before
+    reaching the fourth leaves the first three recorded, not none of them. The payload
+    on each carries enough for a human reading the raw journal, and, for
+    `step_completed`, the one thing another reader depends on: `stall.
+    baseline_from_journal` reads `payload['duration']` back out to build the stall
+    baseline, so that key is not optional decoration.
+
+    Args:
+        observation: What `observer.observe` decided is new this wakeup.
+        at: When this wakeup ran. The same instant for every event this call produces
+            — they were all learned in the same wakeup, even if what they describe
+            happened at different times.
+
+    Returns:
+        The events to append, in no particular order (each carries a distinct key, so
+        `Journal.append` order does not matter here the way `Journal.read`'s
+        chronological order does for a reader).
+    """
+    events = [
+        JournalEvent(
+            event_type='step_failed', step=f.step, map_index=f.map_index, try_number=f.try_number,
+            at=at, payload={'ref': f.ref},
+        )
+        for f in observation.failed
+    ]
+    events.extend(
+        JournalEvent(
+            event_type='stall_detected', step=s.step, map_index=s.map_index, try_number=s.try_number,
+            at=at, payload={'ref': s.ref, 'elapsed': s.elapsed, 'threshold': s.threshold, 'basis': s.basis},
+        )
+        for s in observation.stalled
+    )
+    events.extend(
+        JournalEvent(
+            event_type='step_completed', step=c.step, map_index=c.map_index, try_number=c.try_number,
+            at=at, payload={'ref': c.ref, 'duration': c.duration},
+        )
+        for c in observation.completed
+    )
+    if observation.run_finished is not None:
+        events.append(JournalEvent(event_type='run_finished', at=at, payload={'state': observation.run_finished}))
+    return events
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser.
 
@@ -442,6 +528,48 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     diff.add_argument('--json', action='store_true', help='emit JSON instead of text')
+
+    observe = sub.add_parser(
+        'observe', help='one wakeup: journal what changed since last time and comment on the GitHub issue'
+    )
+    observe.add_argument('--dag', default='unified_pipeline', help='the DAG to watch')
+    observe.add_argument('--issue', required=True, type=int, help='the GitHub issue to comment on')
+    observe.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='render the comment to stdout instead of posting it; write nothing to the journal either',
+    )
+    observe.add_argument(
+        '--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help="bucket holding the run's journal and output data"
+    )
+    observe.add_argument(
+        '--run',
+        default=None,
+        help=(
+            "the run's own prefix in --run-bucket, as `diff --run` (not the Airflow run id — see the "
+            'module docstring). Required alongside --reference to run the terminal-state dataset '
+            'comparison; omitted, the comparison is skipped'
+        ),
+    )
+    observe.add_argument(
+        '--reference',
+        default=None,
+        help=(
+            'reference release name to diff the run against once it reaches a terminal state, as '
+            '`diff --reference`. Required alongside --run to run the comparison; omitted, it is skipped'
+        ),
+    )
+    observe.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
+    observe.add_argument('--threshold', type=float, default=0.05, help='fractional change the diff reports')
+    observe.add_argument(
+        '--rows',
+        action='store_true',
+        help=(
+            'also read row counts on the terminal-state diff. Sizes, file counts and presence are '
+            'always compared and take ~10s for a full release; row counts add ~7min, which is why '
+            'this defaults off for a cron that wakes every ten minutes — see `diff --rows`'
+        ),
+    )
 
     return parser
 
@@ -509,6 +637,62 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(json.dumps(payload, indent=2) + '\n')
             else:
                 sys.stdout.write(render_diff(diffs, skipped, args.threshold, rows_skipped=not args.rows) + '\n')
+            return 0
+        elif args.command == 'observe':
+            now = datetime.now(tz=UTC)
+            username, password = _airflow_credentials()
+            client = AirflowClient(
+                session=requests.Session(), base_url=AIRFLOW_BASE_URL, username=username, password=password
+            )
+            run = client.active_dag_run(args.dag)
+            if run is None:
+                sys.stdout.write(f'no active run of {args.dag}\n')
+                return 0
+
+            bucket = storage.Client().bucket(args.run_bucket)
+            journal = Journal(bucket=bucket, prefix=f'_agent/{args.dag}/{run.dag_run_id}/journal')
+            snapshot = take_snapshot(client, journal, args.dag, run.dag_run_id, now)
+            observation = observe(snapshot, journal.read())
+
+            diffs = None
+            if snapshot.run_state in _OBSERVE_TERMINAL_RUN_STATES and args.run and args.reference:
+                storage_client = storage.Client()
+                run_bucket = storage_client.bucket(args.run_bucket)
+                reference_bucket = storage_client.bucket(args.reference_bucket)
+                run_read_footer = footer_reader(args.run_bucket) if args.rows else None
+                reference_read_footer = footer_reader(args.reference_bucket) if args.rows else None
+                diffs, _skipped = collect_diffs(
+                    run_bucket,
+                    args.run,
+                    reference_bucket,
+                    args.reference,
+                    unified_pipeline_steps(),
+                    stage_configs(),
+                    run_read_footer,
+                    reference_read_footer,
+                )
+
+            body = render_comment(observation, snapshot, diffs=diffs, diff_threshold=args.threshold)
+
+            if args.dry_run:
+                sys.stdout.write((body if body is not None else '(nothing new to report)') + '\n')
+                return 0
+
+            for event in _observation_events(observation, now):
+                journal.append(event)
+
+            if body is not None:
+                private_key = read_app_key(
+                    secretmanager.SecretManagerServiceClient(), GCP_PROJECT_PLATFORM, _GITHUB_APP_KEY_NAME
+                )
+                github_app = GitHubApp(
+                    session=requests.Session(),
+                    app_id=_GITHUB_APP_ID,
+                    private_key=private_key,
+                    installation_id=_GITHUB_INSTALLATION_ID,
+                    repo=_GITHUB_REPO,
+                )
+                github_app.comment(args.issue, body)
             return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')
