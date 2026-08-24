@@ -305,7 +305,7 @@ def _build_target_index(
         targets
         .select(
             'targetId',
-            f.filter(f.col('dbXRefs'), lambda c: c.getField('source') == 'HGNC').alias('h'),
+            f.filter(f.col('dbXrefs'), lambda c: c.getField('source') == 'HGNC').alias('h'),
         )
         .select('targetId', f.explode_outer(f.col('h.id')).alias('hgncId'))
         .withColumn(

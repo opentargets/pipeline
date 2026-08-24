@@ -3437,7 +3437,7 @@ wheels = [
 
 [[package]]
 name = "orchestration"
-version = "26.9.0rc2"
+version = "26.9.0rc5"
 source = { editable = "." }
 dependencies = [
     { name = "apache-airflow", extra = ["async", "celery", "google"] },

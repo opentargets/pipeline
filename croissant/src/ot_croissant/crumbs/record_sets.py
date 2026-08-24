@@ -219,7 +219,7 @@ class PlatformOutputRecordSets:
                 )
                 sub_type_name = element_type.elementType.typeName()
                 if sub_type_name in TYPE_DICT:
-                    croissant_field.data_types.append(TYPE_DICT[field_type])
+                    croissant_field.data_types.append(TYPE_DICT[sub_type_name])
 
         # Test if the field is a struct:
         elif field_type == 'struct':

@@ -8,6 +8,8 @@ from clinical_mining.dataset import ClinicalIndication
 from loguru import logger
 from otter.config.model import Config
 
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
+
 
 def clinical_indication(
     source: Path,
@@ -27,7 +29,7 @@ def clinical_indication(
         config: Config object (not used in this transformer)
     """
     logger.info(f'Source path: {source}')
-    reports = pl.read_parquet(source)
+    reports = scan_dataset(str(source)).collect()
 
     # Filter out clinical reports that fail QC
     invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
@@ -41,7 +43,7 @@ def clinical_indication(
         excluded = reports.filter(pl.lit(False))
 
     logger.info(f'Writing excluded clinical reports to {destination["excluded"]}')
-    excluded.write_parquet(destination['excluded'], mkdir=True)
+    write_dataset(excluded, str(destination['excluded']))
 
     indications = (
         ClinicalIndication
@@ -51,4 +53,4 @@ def clinical_indication(
     )
 
     logger.info(f'Destination path: {destination["output"]}')
-    indications.write_parquet(destination['output'], mkdir=True)
+    write_dataset(indications, str(destination['output']))

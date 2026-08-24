@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from airflow.providers.google.cloud.operators.compute import ComputeEngineDeleteInstanceOperator
@@ -27,8 +28,8 @@ from orchestration.operators.differs.config_differ import ConfigDiffer
 from orchestration.operators.differs.manifest_artifact_differ import ManifestArtifactDiffer
 from orchestration.operators.differs.spark_job_differ import SparkJobDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
-from orchestration.operators.gcs import UploadFileOperator, UploadStringOperator
-from orchestration.utils import resource_name, strhash, to_yaml
+from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
+from orchestration.utils import clean_name, resolve_jar_staging, resource_name, strhash, to_yaml
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
 from orchestration.utils.labels import Labels
 
@@ -143,6 +144,7 @@ with DAG(
     # ==============================================================================================
     def pts_stage() -> None:
         pts_clusters = {}  # map of cluster_name to a list of step_names
+        pts_cluster_spark_jars = {}  # map of cluster_name to its rendered spark.jars
         for step_name in config.steps('pts_'):
 
             @task_group(group_id=step_name)
@@ -225,6 +227,15 @@ with DAG(
 
                     steps_in_cluster = pts_clusters.get(cluster_name, [])
                     pts_clusters[cluster_name] = [*steps_in_cluster, step_name]
+
+                    # The jar a cluster needs is staged once for the whole cluster,
+                    # not once per step — see the staging loop after this one. The
+                    # step only records the tasks that loop wires itself between.
+                    cluster_props = s.cluster_definition.config.get('properties', {})
+                    pts_cluster_spark_jars[cluster_name] = str(
+                        cluster_props.get('spark:spark.jars', '')
+                    )
+
                     chain(u, Label('dataproc pts step'), u2, c, r)
 
                 e = EmptyOperator(
@@ -238,8 +249,59 @@ with DAG(
                     chain(r, e)
                 chain(d, Label('no differences found, skip step'), e)
                 steps[step_name] = {'start': d, 'end': e}
+                if s.is_dataproc:
+                    steps[step_name]['create_cluster'] = c
 
             pts_step(step_name)
+
+        # stage a cluster's jars once, before that cluster is created
+        #
+        # Jars a cluster references via spark.jars are staged into the pipelines
+        # bucket (skipped when already there), then read from GCS at submit time
+        # instead of being resolved from Maven Central on every spark-submit.
+        # Resolved from the rendered spark.jars value against the `staged_jars`
+        # registry, so every such jar on every cluster (currently the Spark-NLP
+        # fat jar on `pts` and `pts_literature`) is covered automatically; a GCS
+        # jar with no registered source fails the DAG at parse time.
+        #
+        # One task per destination object, not per step and not per cluster: the
+        # steps of a cluster share the one object, and so do the clusters —
+        # `pts` and `pts_literature` point spark.jars at the same jar. Staging per
+        # step meant ~60 tasks racing to download the same ~629 MB artifact; per
+        # cluster still left two, and two unsynchronised writers can replace the
+        # object with a new generation while a cluster created by the other one is
+        # already reading it.
+        staged: dict[tuple[str, str], UploadRemoteFileOperator] = {}
+        for cluster_name, steps_in_cluster in pts_clusters.items():
+            dataproc_steps = [s_n for s_n in steps_in_cluster if 'create_cluster' in steps[s_n]]
+            for src_url, dst_uri in resolve_jar_staging(
+                pts_cluster_spark_jars.get(cluster_name, ''),
+                config.staged_jars,
+                config.staged_jar_prefix,
+            ):
+                stage = staged.get((src_url, dst_uri))
+                if stage is None:
+                    # A root task, deliberately: the steps depend on each other, so
+                    # hanging one shared task off every step's upload would close a
+                    # cycle (step B's upload -> stage -> step A's cluster -> ... ->
+                    # step B's upload). Staging has no inputs anyway, and after the
+                    # first run it is an existence check.
+                    stage = UploadRemoteFileOperator(
+                        task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}',
+                        src_url=src_url,
+                        dst_uri=dst_uri,
+                        skip_if_exists=True,
+                        # The DAG's default_args set retries=0, which suits tasks
+                        # whose failure is local to one step. This one gates every
+                        # cluster creation, so a single reset mid-transfer from a
+                        # third-party host would otherwise take down the whole PTS
+                        # stage — where an Ivy failure used to cost one job.
+                        retries=3,
+                        retry_delay=timedelta(minutes=2),
+                    )
+                    staged[(src_url, dst_uri)] = stage
+                for step_name in dataproc_steps:
+                    stage.set_downstream(steps[step_name]['create_cluster'])
 
         # delete a cluster after its steps have run
         for cluster_name, steps_in_cluster in pts_clusters.items():

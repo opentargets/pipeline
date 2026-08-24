@@ -7,6 +7,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.transformers.utils.dataset import write_dataset
+
 
 class FilteredJSONDecoder(json.JSONDecoder):
     """JSON Decoder that filter keys in the JSON object.
@@ -54,5 +56,5 @@ def homology(
     gc.collect()
 
     # write the result locally
-    df.write_parquet(destination, compression='gzip')
+    write_dataset(df, destination)
     logger.info('transformation complete')

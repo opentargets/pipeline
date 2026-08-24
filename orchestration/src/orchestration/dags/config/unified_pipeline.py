@@ -97,12 +97,27 @@ class UnifiedPipelineConfig:
             self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
         """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
 
+        # Without this the sentinel substitution fails with a bare
+        # `TypeError: replace() argument 2 must be str, not None` that breaks the
+        # import of the whole DAG — PIS and GENTROPY stages included — while
+        # `staged_jars` quietly registers a `spark-nlp-assembly-None.jar`.
+        spark_nlp_version = up.get('spark_nlp_version')
+        if not spark_nlp_version:
+            raise ValueError(
+                'spark_nlp_version is missing from unified_pipeline.yaml; the pts and '
+                'pts_literature clusters need it to resolve the Spark-NLP jar they '
+                'load via spark.jars.'
+            )
+
         self.clusters = AppConfig.from_file(
             file_path=config_path / 'clusters.yaml',
             template_context={
                 'pts_version': up.get('pts_version'),
                 'gentropy_version': up.get('gentropy_version'),
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
+                # Lets the pts / pts_literature clusters point spark.jars at the
+                # version-pinned Spark-NLP fat jar in the pipelines bucket.
+                'spark_nlp_version': spark_nlp_version,
             },
         )
         """The cluster definitions."""
@@ -128,6 +143,33 @@ class UnifiedPipelineConfig:
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
+
+        # Spark-NLP fat jar. Clusters that use OnToma (pts, pts_literature) load
+        # it via spark.jars instead of resolving the package from Maven Central
+        # on every spark-submit (see opentargets/issues#4453). Orchestration
+        # stages the version-pinned jar from John Snow Labs into the pipelines
+        # bucket before cluster creation (idempotent), and the clusters read it
+        # from there.
+        self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
+        """GCS prefix under which orchestration stages Spark jars for PTS clusters.
+
+            Any GCS jar a PTS cluster references (via spark.jars) must have a
+            registered upstream source in `staged_jars`, or the DAG fails.
+        """
+        spark_nlp_jar = f'spark-nlp-assembly-{spark_nlp_version}.jar'
+        self.staged_jars: dict[str, str] = {
+            f'{self.staged_jar_prefix}{spark_nlp_jar}': (
+                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_jar}'
+            ),
+        }
+        """Registry of jars orchestration stages: staged destination URI -> source URL.
+
+            Add an entry here to have a new jar staged automatically for any PTS
+            cluster that references it in spark.jars. Only the PTS stage resolves
+            spark.jars against this registry; GENTROPY builds its clusters without
+            consulting it, so a GCS jar on a gentropy cluster is neither staged nor
+            rejected.
+        """
 
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'

@@ -11,22 +11,22 @@ steps:
   disease:
     - name: transform disease_efo
       source: input/disease/efo_otar_slim.json
-      destination: output/disease/disease.parquet
+      destination: output/disease
       transformer: disease
 
     - name: transform disease_hpo
       source: input/disease/hp-full.json
-      destination: output/disease_hpo/disease_hpo.parquet
+      destination: output/disease_hpo
       transformer: disease_hpo
 
     - name: transform disease_phenotype
       requires:
         - transform disease_efo
       source:
-        disease_path: output/disease/disease.parquet
+        disease_path: output/disease
         phenotype_path: input/disease/phenotype.hpoa
         mondo_path: input/disease/mondo.json
-      destination: output/disease_phenotype/disease_phenotype.parquet
+      destination: output/disease_phenotype
       transformer: disease_phenotype
   ##################################################################################################
 
@@ -35,13 +35,13 @@ steps:
     - name: transform go
       transformer: go
       source: input/go/go.obo
-      destination: output/go/go.parquet
+      destination: output/go
   ##################################################################################################
 
   #: OTAR STEP :####################################################################################
   otar:
-    - name: pyspark otar
-      pyspark: otar
+    - name: transform otar
+      transformer: otar
       source:
         diseases: output/disease
         otar_meta: input/otar/otar_meta.csv
@@ -51,8 +51,8 @@ steps:
 
   #: REACTOME STEP :################################################################################
   reactome:
-    - name: pyspark reactome
-      pyspark: reactome
+    - name: transform reactome
+      transformer: reactome
       source:
         pathways: input/reactome/ReactomePathways.txt
         relations: input/reactome/ReactomePathwaysRelation.txt
@@ -274,11 +274,14 @@ steps:
   chemical_probes:
     - name: pyspark chemical probes
       pyspark: chemical_probes
+      settings:
+        partition_count: 2
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
         chembl_molecule: intermediate/chembl_molecule
-      destination: intermediate/chemical_probes_evidence.parquet
+        target: output/target
+      destination: output/chemical_probes
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
@@ -327,7 +330,7 @@ steps:
   so:
     - name: transform so
       source: input/so/so.json
-      destination: output/so/so.parquet
+      destination: output/so
       transformer: so
   ##################################################################################################
 
@@ -346,6 +349,15 @@ steps:
       source: input/target/hpa/subcellular_locations_ssl.tsv
       destination: intermediate/target/hpa/subcellular_locations_ssl.parquet
       separator: "\t"
+
+    # gnomAD ships the constraint metrics bgzip-compressed. Converting to parquet
+    # here keeps the decompression off the spark cluster; `infer_schema: false`
+    # preserves the raw text the target step parses itself.
+    - name: csv_to_parquet gnomad constraint metrics
+      source: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
+      destination: intermediate/target/gnomad/constraint_metrics.parquet
+      separator: "\t"
+      infer_schema: false
 
     - name: download ensembl
       source: input/target/ensembl/homo_sapiens.json
@@ -368,6 +380,16 @@ steps:
       transformer: uniprot
       source: input/target/uniprot/uniprot.txt.gz
       destination: intermediate/target/uniprot/uniprot.parquet
+
+    - name: transform chembl_target_class_dump
+      transformer: chembl_target_class_dump
+      source: input/chembl/chembl.tar.gz
+      destination:
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
   ##################################################################################################
 
   #: TARGET STEP (pyspark) :#######################################################################
@@ -375,45 +397,50 @@ steps:
     - name: pyspark target
       pyspark: target
       settings:
-        partition_count:
-          target: 3
-          gene_essentiality: 4
+        partition_count: 3
       source:
-        diseases: output/disease
         ensembl: intermediate/target/ensembl/homo_sapiens.parquet
         gene_code: input/target/gencode/gencode.gff3.gz
-        genetic_constraints: input/target/gnomad/gnomad_constraint_metrics.tsv
+        genetic_constraints: intermediate/target/gnomad/constraint_metrics.parquet
         gene_ontology_human: input/target/go/goa_human.gaf.gz
         gene_ontology_rna: input/target/go/goa_human_rna.gaf.gz
         gene_ontology_rna_lookup: input/target/go/ensembl.tsv
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
         hgnc: input/target/genenames/hgnc_complete_set.json
-        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
-        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
-        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
         hpa: intermediate/target/hpa/subcellular_location.tsv.gz
         hpa_sl: intermediate/target/hpa/subcellular_locations_ssl.parquet
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        safety_evidence: intermediate/target/safety.parquet
-        tep: input/target/tep/tep.json.gz
-        tractability: input/target/tractability/tractability.tsv
         uniprot: intermediate/target/uniprot/uniprot.parquet
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        chembl: input/target/chembl/chembl_target.jsonl
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
-        gene_essentiality: intermediate/target/gene-essentiality/essentiality.parquet
-      destination:
-        target: output/target
-        gene_essentiality: output/target_essentiality
+        target_dictionary: intermediate/chembl/target_dictionary.parquet
+        target_components: intermediate/chembl/target_components.parquet
+        component_sequences: intermediate/chembl/component_sequences.parquet
+        component_class: intermediate/chembl/component_class.parquet
+        protein_classification: intermediate/chembl/protein_classification.parquet
+      destination: output/target
   ##################################################################################################
 
-  #: TARGET_SAFETY STEP :############### - part of target, pyspark tasks must run standalone for now
-  target_safety:
-    - name: pyspark safety
-      pyspark: target_safety
+  #: TRANSCRIPT STEP :#################################################################################
+  transcript:
+    - name: pyspark transcript
+      pyspark: transcript
+      settings:
+        partition_count: 2
+      source:
+        gene_code: input/target/gencode/gencode.gff3.gz
+        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
+      destination: output/transcript
+  ##################################################################################################
+
+  #: TARGET_SAFETY_EVENT STEP :##########################################################################
+  target_safety_event:
+    - name: pyspark target_safety_event
+      pyspark: target_safety_event
+      settings:
+        partition_count: 2
       source:
         adverse_events: input/target/safety/adverse_effects.tsv
         safety_risks: input/target/safety/safety_risks.tsv
@@ -421,9 +448,54 @@ steps:
         toxcast: input/target/safety/toxcast.tsv
         aopwiki: input/target/safety/aopwiki.json
         pharmacogenetics: output/pharmacogenomics
-      destination: intermediate/target/safety.parquet
+        target: output/target
+        diseases: output/disease
+      destination: output/target_safety_event
+  ##################################################################################################
 
-  #: TARGET_GENE_ESSENTIALITY STEP :#### - part of target, pyspark tasks must run standalone for now
+  #: TARGET_TRACTABILITY STEP :#########################################################################
+  target_tractability:
+    - name: pyspark target_tractability
+      pyspark: target_tractability
+      settings:
+        partition_count: 2
+      source:
+        tractability: input/target/tractability/tractability.tsv
+        target: output/target
+      destination: output/target_tractability
+  ##################################################################################################
+
+  #: HOMOLOGY STEP :#####################################################################################
+  homology:
+    - name: pyspark homology
+      pyspark: homology
+      settings:
+        partition_count: 2
+      source:
+        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
+        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
+        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
+        target: output/target
+      destination: output/homology
+  ##################################################################################################
+
+  #: TARGET_VIEW STEP :##################################################################################
+  target_view:
+    - name: pyspark target_view
+      pyspark: target_view
+      settings:
+        partition_count: 3
+      source:
+        target: output/target
+        homology: output/homology
+        target_tractability: output/target_tractability
+        target_safety_event: output/target_safety_event
+        chemical_probes: output/chemical_probes
+        transcript: output/transcript
+      destination: view/target_view
+  ##################################################################################################
+
+  #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
     - name: pyspark gene_essentiality
       pyspark: gene_essentiality
@@ -435,9 +507,11 @@ steps:
         mutation_hotspots: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixHotspot.csv
         mutation_damaging: input/target/gene-essentiality/depmap/OmicsSomaticMutationsMatrixDamaging.csv
         depmap_tissue_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
-      destination: intermediate/target/gene-essentiality/essentiality.parquet
+        target: output/target
+      destination: output/target_essentiality
       settings:
         keep_only_essentials: false
+        partition_count: 4
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
@@ -456,8 +530,6 @@ steps:
       settings:
         partition_count: 1
         openai_token_filename: /var/run/secrets/openai_token
-      properties:
-        'spark.jars.packages': 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.3'
   ##################################################################################################
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
@@ -633,7 +705,7 @@ steps:
     - name: pyspark ontoma generate lookup tables
       pyspark: ontoma_lut_generation
       source:
-        disease_index: output/disease/disease.parquet
+        disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
         eva_clinvar: input/ontoma/eva_clinvar.txt
         clinvar_xrefs: input/ontoma/clinvar_xrefs.txt
@@ -643,12 +715,12 @@ steps:
 
   # This is split so that we don't run into circularity issues
   # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_target_safety → pts_pharmacogenetics.
+  # on pts_ontoma through pts_target_safety_event → pts_pharmacogenetics.
   literature_ontoma:
     - name: pyspark literature ontoma lut generation
       pyspark: literature_ontoma_lut_generation
       source:
-        disease_index: output/disease/disease.parquet
+        disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
         eva_clinvar: input/ontoma/eva_clinvar.txt
         clinvar_xrefs: input/ontoma/clinvar_xrefs.txt
@@ -660,29 +732,28 @@ steps:
 
   #: DRUG_WARNING STEP :############################################################################
   drug_warning:
-    - name: pyspark drug_warning
-      pyspark: drug_warning
-      source: input/drug/chembl_drug_warning.jsonl
+    - name: transform drug_warning
+      transformer: drug_warning
+      source: input/chembl/chembl.tar.gz
       destination: output/drug_warning
   ##################################################################################################
 
   #: DRUG_MECHANISM_OF_ACTION STEP :###############################################################
   drug_mechanism_of_action:
-    - name: pyspark drug_mechanism_of_action
-      pyspark: drug_mechanism_of_action
+    - name: transform drug_mechanism_of_action
+      transformer: drug_mechanism_of_action
       source:
-        chembl_mechanism: input/drug/chembl_mechanism.jsonl
-        chembl_target: input/drug/chembl_target.jsonl
+        chembl: input/chembl/chembl.tar.gz
         target: intermediate/target/ensembl/homo_sapiens.parquet
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
   chembl_molecule:
-    - name: pyspark chembl_molecule
-      pyspark: chembl_molecule
+    - name: transform chembl_molecule
+      transformer: chembl_molecule
       source:
-        chembl_molecule: input/drug/chembl_molecule.jsonl
+        chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
       destination: intermediate/chembl_molecule
@@ -690,10 +761,8 @@ steps:
 
   #: DRUG_MOLECULE STEP :##########################################################################
   drug_molecule:
-    - name: pyspark drug_molecule
-      pyspark: drug_molecule
-      settings:
-        partition_count: 1
+    - name: transform drug_molecule
+      transformer: drug_molecule
       source:
         molecule: intermediate/chembl_molecule
         chemical_probes: intermediate/chemical_probes_evidence.parquet
@@ -709,27 +778,18 @@ steps:
   clinical_report:
     - name: pyspark clinical_report
       source:
-        chembl_molecule: intermediate/chembl_molecule/*.parquet
-        disease: output/disease/disease.parquet
+        chembl_molecule: intermediate/chembl_molecule
+        disease: output/disease
         pmda: input/clinical_report/pmda.pdf
         ttd: input/clinical_report/ttd.txt
         ema: input/clinical_report/ema_medicines.xlsx
-        aact_studies: input/clinical_report/aact/studies.parquet
-        aact_interventions: input/clinical_report/aact/interventions.parquet
-        aact_conditions: input/clinical_report/aact/conditions.parquet
-        aact_study_references: input/clinical_report/aact/study_references.parquet
-        aact_designs: input/clinical_report/aact/designs.parquet
-        aact_summaries: input/clinical_report/aact/brief_summaries.parquet
-        chembl_indication: input/clinical_report/chembl/drug_indication.parquet
-        chembl_indication_references: input/clinical_report/chembl/drug_indication_refs.parquet
-        chembl_drug_warning: input/clinical_report/chembl/drug_warning.parquet
-        chembl_drug_warning_references: input/clinical_report/chembl/drug_warning_refs.parquet
-        chembl_molecule_dictionary: input/clinical_report/chembl/molecule_dictionary.parquet
+        chembl: input/chembl/chembl.tar.gz
+        aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
-        output: output/clinical_report/clinical_report.parquet
+        output: output/clinical_report
       settings:
         ner_batch_size: 256
       pyspark: clinical_report
@@ -738,10 +798,10 @@ steps:
   #: CLINICAL_INDICATION STEP :####################################################################
   clinical_indication:
     - name: transform clinical_indication
-      source: output/clinical_report/clinical_report.parquet
+      source: output/clinical_report
       destination:
-        output: output/clinical_indication/clinical_indication.parquet
-        excluded: excluded/clinical_indication_failed_report/clinical_indication_failed_report.parquet
+        output: output/clinical_indication
+        excluded: excluded/clinical_indication_failed_report
       transformer: clinical_indication
       settings:
         invalid_clinical_report_qc:
@@ -753,11 +813,11 @@ steps:
   clinical_target:
     - name: transform clinical_target
       source:
-        clinical_report: output/clinical_report/clinical_report.parquet
-        drug_mechanism_of_action: output/drug_mechanism_of_action/*.parquet
+        clinical_report: output/clinical_report
+        drug_mechanism_of_action: output/drug_mechanism_of_action
       destination:
-        output: output/clinical_target/clinical_target.parquet
-        excluded: excluded/clinical_target_failed_report/clinical_target_failed_report.parquet
+        output: output/clinical_target
+        excluded: excluded/clinical_target_failed_report
       transformer: clinical_target
       settings:
         invalid_clinical_report_qc:
@@ -771,6 +831,10 @@ steps:
       pyspark: target_prioritisation
       source:
         targets: output/target
+        tractability: output/target_tractability
+        target_safety_event: output/target_safety_event
+        chemical_probes: output/chemical_probes
+        homology: output/homology
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
         mechanism_of_action: output/drug_mechanism_of_action
@@ -1851,6 +1915,7 @@ steps:
         disease: output/disease
         evidence: output/evidence_*
         target: output/target
+        tractability: output/target_tractability
         association_direct: output/association_overall_direct
         association_indirect: output/association_overall_indirect
       destination: view/association_otf
@@ -1897,6 +1962,7 @@ steps:
         targets: output/target
         go: output/go
         reactome: output/reactome
+        tractability: output/target_tractability
       destination:
         targets: view/search_facet_target
         diseases: view/search_facet_disease
