@@ -16,15 +16,17 @@ NOW = datetime(2026, 7, 21, 20, 0, tzinfo=UTC)
 def _snapshot(**kw: object) -> Snapshot:
     defaults: dict[str, object] = {
         'dag_id': 'unified_pipeline', 'run_id': 'r', 'taken_at': NOW, 'run_state': 'running',
-        'counts': {}, 'running': [], 'failed': [], 'succeeded': [], 'durations': {},
+        'counts': {}, 'running': [], 'failed': [], 'succeeded': [], 'durations': {}, 'try_numbers': {},
         'stalls': [], 'journal_events': 0,
     }
     defaults.update(kw)
     return Snapshot.model_validate(defaults)
 
 
-def _event(event_type: str, step: str | None = None, map_index: int | None = None) -> JournalEvent:
-    return JournalEvent(event_type=event_type, step=step, map_index=map_index, at=NOW)
+def _event(
+    event_type: str, step: str | None = None, map_index: int | None = None, try_number: int | None = None,
+) -> JournalEvent:
+    return JournalEvent(event_type=event_type, step=step, map_index=map_index, try_number=try_number, at=NOW)
 
 
 def _stall(task_id: str, basis: Literal['history', 'ceiling'] = 'ceiling') -> StallVerdict:
@@ -72,6 +74,47 @@ class TestObserveFailures:
     def test_no_failures_reports_none(self) -> None:
         assert observe(_snapshot(failed=[]), []).failed == []
 
+    def test_a_failure_carries_its_try_number(self) -> None:
+        snap = _snapshot(failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1})
+        assert observe(snap, []).failed[0].try_number == 1
+
+    def test_a_repeated_failure_after_a_rerun_is_reported_again(self) -> None:
+        """The defect: a step that fails, is cleared, runs again and fails again went unreported.
+
+        `try_number` is what makes the second failure a distinct event from the first
+        — without it, both attempts produce the same key and the second is discarded
+        as a duplicate.
+        """
+        already = [_event('step_failed', step='pts_target', try_number=1)]
+        snap = _snapshot(failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 2})
+        obs = observe(snap, already)
+        assert [f.step for f in obs.failed] == ['pts_target']
+        assert obs.failed[0].try_number == 2
+
+    def test_a_failure_with_the_same_try_number_already_known_is_not_reported_again(self) -> None:
+        already = [_event('step_failed', step='pts_target', try_number=1)]
+        snap = _snapshot(failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1})
+        assert observe(snap, already).failed == []
+
+    def test_the_teams_exact_reproduction_a_rerun_failure_is_not_swallowed_by_the_first(self) -> None:
+        """The literal repro from the bug report: `step_failed-pts_target` journalled with no try_number.
+
+        Before this fix, `_already_known` never carried `try_number` on the candidate
+        it builds, for *either* attempt — so attempt 1 was journalled as
+        `step_failed-pts_target` (no try_number segment at all), and attempt 2's
+        candidate, still missing `try_number`, computed that exact same key and was
+        discarded as a duplicate. This pins the reported bug in its own words,
+        independent of the `try_number`-aware helper tests above.
+        """
+        journalled_before_the_fix = [_event('step_failed', step='pts_target')]
+
+        wakeup_two = observe(
+            _snapshot(failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 2}),
+            journalled_before_the_fix,
+        )
+        assert [f.step for f in wakeup_two.failed] == ['pts_target']
+        assert wakeup_two.failed[0].try_number == 2
+
 
 class TestObserveStalls:
     def test_a_first_wakeup_reports_every_stall(self) -> None:
@@ -112,6 +155,23 @@ class TestObserveStalls:
 
     def test_no_stalls_reports_none(self) -> None:
         assert observe(_snapshot(stalls=[]), []).stalled == []
+
+    def test_a_stall_carries_its_try_number(self) -> None:
+        snap = _snapshot(stalls=[_stall('slow')], try_numbers={'slow': 1})
+        assert observe(snap, []).stalled[0].try_number == 1
+
+    def test_a_repeated_stall_after_a_rerun_is_reported_again(self) -> None:
+        """The same defect as failures: a re-run step stalling again must be a distinct event."""
+        already = [_event('stall_detected', step='slow', try_number=1)]
+        snap = _snapshot(stalls=[_stall('slow')], try_numbers={'slow': 2})
+        obs = observe(snap, already)
+        assert [s.step for s in obs.stalled] == ['slow']
+        assert obs.stalled[0].try_number == 2
+
+    def test_a_stall_with_the_same_try_number_already_known_is_not_reported_again(self) -> None:
+        already = [_event('stall_detected', step='slow', try_number=1)]
+        snap = _snapshot(stalls=[_stall('slow')], try_numbers={'slow': 1})
+        assert observe(snap, already).stalled == []
 
 
 class TestObserveCompletions:
@@ -192,6 +252,35 @@ class TestObserveCompletions:
 
     def test_no_successes_reports_none(self) -> None:
         assert observe(_snapshot(succeeded=[]), []).completed == []
+
+    def test_a_completion_carries_its_try_number(self) -> None:
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target'],
+            durations={'pts_target.run_pts_target': 3600.0},
+            try_numbers={'pts_target.run_pts_target': 1},
+        )
+        assert observe(snap, []).completed[0].try_number == 1
+
+    def test_a_completion_after_a_rerun_that_previously_failed_is_reported(self) -> None:
+        """The same defect, for a step that failed once and then succeeded on a re-run."""
+        already = [_event('step_failed', step='pts_target', try_number=1)]
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target'],
+            durations={'pts_target.run_pts_target': 3600.0},
+            try_numbers={'pts_target.run_pts_target': 2},
+        )
+        obs = observe(snap, already)
+        assert [c.step for c in obs.completed] == ['pts_target']
+        assert obs.completed[0].try_number == 2
+
+    def test_a_completion_with_the_same_try_number_already_known_is_not_reported_again(self) -> None:
+        already = [_event('step_completed', step='pts_target', try_number=1)]
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target'],
+            durations={'pts_target.run_pts_target': 3600.0},
+            try_numbers={'pts_target.run_pts_target': 1},
+        )
+        assert observe(snap, already).completed == []
 
 
 class TestObserveRunFinished:

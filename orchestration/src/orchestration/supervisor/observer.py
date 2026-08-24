@@ -18,6 +18,14 @@ dead weight at best, a fabricated threshold at worst, for a sibling that is not 
 `stalled` is timing when it later judges that step. `Snapshot.durations` itself stays
 a plain, unfiltered record of everything Airflow reported a duration for; the
 filtering happens here.
+
+**A repeated failure or stall after a re-run is its own event, not a duplicate of
+the first one.** `max_tries` is 0 throughout this pipeline, so Airflow never retries
+a task on its own; a `try_number` above 1 means a human or a future agent
+deliberately cleared and re-ran the step. `JournalEvent.try_number` exists exactly
+so a second attempt's outcome is a distinct key from the first's — every candidate
+key built here carries it, sourced from `Snapshot.try_numbers`, precisely so that
+"you re-ran it and it failed again" is the one moment this tool must not go quiet.
 """
 
 from __future__ import annotations
@@ -75,11 +83,18 @@ class StepFailure(BaseModel):
         map_index: Which instance of a mapped task this is, or -1 outside one —
             mirrors `TaskInstance.map_index`, ready to journal as
             `JournalEvent.map_index`.
+        try_number: Which attempt this is, from `Snapshot.try_numbers`. `max_tries`
+            is 0 throughout this pipeline, so a value above 1 was not an automatic
+            retry — a human or a future agent deliberately cleared and re-ran the
+            step, which is exactly why a second failure at a new `try_number` must
+            not collide with the first one's key (`JournalEvent.key`) and get
+            silently discarded as its duplicate.
     """
 
     ref: str
     step: str
     map_index: int
+    try_number: int | None = None
 
 
 class StepStall(BaseModel):
@@ -89,6 +104,9 @@ class StepStall(BaseModel):
         ref: The task's ref, as `StepFailure.ref`.
         step: The bare step name, as `StepFailure.step`.
         map_index: As `StepFailure.map_index`.
+        try_number: As `StepFailure.try_number` — a step that stalls, gets cleared
+            and stalls again on a re-run needs the same distinction a repeated
+            failure does.
         elapsed: Seconds it has been running, from `StallVerdict.elapsed`.
         threshold: The threshold it passed, from `StallVerdict.threshold`.
         basis: Which rule fired — `history` for a step with observed runs (rare in
@@ -98,6 +116,7 @@ class StepStall(BaseModel):
     ref: str
     step: str
     map_index: int
+    try_number: int | None = None
     elapsed: float
     threshold: float
     basis: Literal['history', 'ceiling']
@@ -110,6 +129,8 @@ class StepCompletion(BaseModel):
         ref: The task's ref, as `StepFailure.ref`.
         step: The bare step name, as `StepFailure.step`.
         map_index: As `StepFailure.map_index`.
+        try_number: As `StepFailure.try_number` — a step that failed once and
+            completed on a re-run must still be reported as the completion it is.
         duration: Seconds it took, from `Snapshot.durations`. This is what
             `stall.baseline_from_journal` reads back out of the `step_completed`
             event this is journalled as, so a completion is only ever reported when a
@@ -119,6 +140,7 @@ class StepCompletion(BaseModel):
     ref: str
     step: str
     map_index: int
+    try_number: int | None = None
     duration: float
 
 
@@ -162,7 +184,7 @@ class Observation(BaseModel):
         return not self.failed and not self.stalled and not self.completed and self.run_finished is None
 
 
-def _already_known(event_type: str, step: str, map_index: int, known: set[str]) -> bool:
+def _already_known(event_type: str, step: str, map_index: int, try_number: int | None, known: set[str]) -> bool:
     """Whether the key this observation would journal is already on record.
 
     Builds the candidate event through `JournalEvent` itself, rather than
@@ -173,12 +195,19 @@ def _already_known(event_type: str, step: str, map_index: int, known: set[str]) 
         event_type: The event type the caller would journal.
         step: The bare step name.
         map_index: The task instance's map_index.
+        try_number: The task instance's try_number, from `Snapshot.try_numbers`.
+            Omitting this from the candidate is the defect this function used to
+            have: two attempts of the same step share a `step_failed`/`stall_detected`
+            key without it, so a repeated failure or stall after a re-run was
+            discarded as a duplicate of the first one's already-journalled event.
         known: Keys already present in the journal.
 
     Returns:
         True if a matching event is already recorded.
     """
-    candidate = JournalEvent(event_type=event_type, step=step, map_index=map_index, at=_KEY_TIMESTAMP)
+    candidate = JournalEvent(
+        event_type=event_type, step=step, map_index=map_index, try_number=try_number, at=_KEY_TIMESTAMP
+    )
     return candidate.key in known
 
 
@@ -199,16 +228,18 @@ def observe(snapshot: Snapshot, events: list[JournalEvent]) -> Observation:
     for ref in snapshot.failed:
         task_id, map_index = _parse_ref(ref)
         step = step_from_task_id(task_id)
-        if not _already_known('step_failed', step, map_index, known):
-            failed.append(StepFailure(ref=ref, step=step, map_index=map_index))
+        try_number = snapshot.try_numbers.get(ref)
+        if not _already_known('step_failed', step, map_index, try_number, known):
+            failed.append(StepFailure(ref=ref, step=step, map_index=map_index, try_number=try_number))
 
     stalled = []
     for verdict in snapshot.stalls:
         task_id, map_index = _parse_ref(verdict.task_id)
         step = step_from_task_id(task_id)
-        if not _already_known('stall_detected', step, map_index, known):
+        try_number = snapshot.try_numbers.get(verdict.task_id)
+        if not _already_known('stall_detected', step, map_index, try_number, known):
             stalled.append(StepStall(
-                ref=verdict.task_id, step=step, map_index=map_index,
+                ref=verdict.task_id, step=step, map_index=map_index, try_number=try_number,
                 elapsed=verdict.elapsed, threshold=verdict.threshold, basis=verdict.basis,
             ))
 
@@ -221,8 +252,11 @@ def observe(snapshot: Snapshot, events: list[JournalEvent]) -> Observation:
         if duration is None:
             continue
         step = step_from_task_id(task_id)
-        if not _already_known('step_completed', step, map_index, known):
-            completed.append(StepCompletion(ref=ref, step=step, map_index=map_index, duration=duration))
+        try_number = snapshot.try_numbers.get(ref)
+        if not _already_known('step_completed', step, map_index, try_number, known):
+            completed.append(
+                StepCompletion(ref=ref, step=step, map_index=map_index, try_number=try_number, duration=duration)
+            )
 
     run_finished = None
     if snapshot.run_state in _TERMINAL_RUN_STATES and 'run_finished' not in known:

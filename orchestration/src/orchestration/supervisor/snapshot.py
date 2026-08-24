@@ -20,7 +20,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from orchestration.supervisor.stall import StallVerdict, baseline_from_journal, stalled
 
@@ -48,6 +48,18 @@ class Snapshot(BaseModel):
             instance has a duration too. This is a plain record of what was seen;
             deciding which durations are worth keeping (a step's own run task,
             successful) is `observer.py`'s job, not this module's.
+        try_numbers: Which attempt each task instance is, keyed by its ref, mirroring
+            `TaskInstance.try_number`. Unlike `durations` this has no missing case for
+            any `Snapshot` `take_snapshot` builds — `try_number` defaults to 0 on
+            `TaskInstance`, not None, so every task instance in
+            `running`/`failed`/`succeeded`/`stalls` has an entry here. This is what
+            lets `observer.py` tell a step that failed, was re-run and failed again
+            apart from the failure already reported for it — see
+            `JournalEvent.try_number`'s docstring. Defaults to `{}`, unlike its
+            siblings above, so a `Snapshot` built by code written before this field
+            existed keeps working; `observer.py` degrades gracefully on a missing
+            entry (`try_number=None`, the same as before this field was added), it
+            does not raise.
         stalls: Running tasks judged to have stalled.
         journal_events: How many events the journal already holds, so the agent can
             tell a first wakeup from a resumption.
@@ -62,6 +74,7 @@ class Snapshot(BaseModel):
     failed: list[str]
     succeeded: list[str]
     durations: dict[str, float]
+    try_numbers: dict[str, int] = Field(default_factory=dict)
     stalls: list[StallVerdict]
     journal_events: int
 
@@ -96,6 +109,7 @@ def take_snapshot(client: Any, journal: Any, dag_id: str, run_id: str, now: date
         failed=[t.ref for t in tasks if t.state == 'failed'],
         succeeded=[t.ref for t in tasks if t.state == 'success'],
         durations={t.ref: t.duration for t in tasks if t.duration is not None},
+        try_numbers={t.ref: t.try_number for t in tasks},
         stalls=verdicts,
         journal_events=len(events),
     )

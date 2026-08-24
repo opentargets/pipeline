@@ -304,13 +304,26 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
         assert snap.durations == {'t[0]': 10.0, 't[1]': 99.0}
 
+    def test_records_each_task_instances_try_number_keyed_by_ref(self) -> None:
+        tasks = [TaskInstance(task_id='a', state='failed', try_number=1),
+                 TaskInstance(task_id='b', state='failed', try_number=2)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.try_numbers == {'a': 1, 'b': 2}
+
+    def test_try_numbers_are_keyed_by_the_mapped_ref_not_the_bare_task_id(self) -> None:
+        """A re-run shard and its sibling must not collapse onto one try_number either."""
+        tasks = [TaskInstance(task_id='t', map_index=0, state='failed', try_number=1),
+                 TaskInstance(task_id='t', map_index=1, state='failed', try_number=2)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.try_numbers == {'t[0]': 1, 't[1]': 2}
+
 
 class TestRenderSnapshot:
     def _snapshot(self, **kw: object) -> Snapshot:
         defaults: dict[str, object] = {
             'dag_id': 'unified_pipeline', 'run_id': 'r', 'taken_at': NOW, 'run_state': 'running',
             'counts': {'success': 40, 'running': 2}, 'running': ['a', 'b'], 'failed': [],
-            'succeeded': [], 'durations': {}, 'stalls': [], 'journal_events': 0,
+            'succeeded': [], 'durations': {}, 'try_numbers': {}, 'stalls': [], 'journal_events': 0,
         }
         defaults.update(kw)
         return Snapshot.model_validate(defaults)
