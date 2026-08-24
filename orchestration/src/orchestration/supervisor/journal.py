@@ -66,6 +66,29 @@ class JournalEvent(BaseModel):
             raise ValueError("must not contain '/': it becomes a path segment in the journal object name")
         return value
 
+    @field_validator('step')
+    @classmethod
+    def _forbid_qualified_task_id(cls, value: str | None) -> str | None:
+        """Reject a fully-qualified Airflow `task_id` where a bare step name belongs.
+
+        `step` must be the bare `unified_pipeline.yaml` step name (`pts_target`), never
+        the `task_group`-qualified `task_id` (`pts_target.run_pts_target`) — see this
+        class's docstring and `stall.baseline_from_journal` for why the two must not be
+        mixed. None of `unified_pipeline.yaml`'s step names contains a `.`, so a `.`
+        here unambiguously means a caller passed a `task_id`. Catching that at
+        construction time turns a permanent, symptomless silent-miss (a baseline keyed
+        in a namespace nothing ever looks up, `basis == 'ceiling'` forever, identical to
+        an honest first run) into an immediate `ValidationError` at the call site that
+        made the mistake.
+        """
+        if value is not None and '.' in value:
+            raise ValueError(
+                f"step={value!r} looks like a qualified Airflow task_id, not a step name: "
+                "strip everything from the first '.' onward (e.g. via step_from_task_id) "
+                'before constructing this event'
+            )
+        return value
+
     @property
     def key(self) -> str:
         """The idempotency key.

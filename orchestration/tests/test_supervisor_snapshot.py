@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import ValidationError
+
 from orchestration.supervisor.airflow import DagRun, TaskInstance
 from orchestration.supervisor.journal import JournalEvent
 from orchestration.supervisor.snapshot import Snapshot, render_snapshot, take_snapshot
@@ -167,22 +170,20 @@ class TestTakeSnapshot:
         assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
         assert snap.stalls[0].basis == 'history'
 
-    def test_a_qualified_task_id_in_the_journal_does_not_match_the_bare_step_name(self) -> None:
-        """The failure mode this pins: a journal keyed on the qualified task id, not the bare step.
+    def test_a_qualified_task_id_cannot_reach_the_journal_at_all(self) -> None:
+        """The failure mode this used to pin: a journal keyed on the qualified task id, not the bare step.
 
-        `pts_target` (the bare step name `stalled` now looks baselines up under) and
+        `pts_target` (the bare step name `stalled` looks baselines up under) and
         `pts_target.run_pts_target` (the fully-qualified Airflow task id) are different
-        strings. If a journal entry were ever written under the qualified id, this would
-        silently and permanently fall back to the ceiling instead of raising, which is
-        exactly why it needs a test rather than a comment: nothing else would ever catch
-        the regression.
+        strings, and a journal entry written under the qualified id would silently and
+        permanently fall back to the ceiling instead of raising — indistinguishable from
+        an honest first run. `JournalEvent` now forbids a `.` in `step`
+        (`journal.py::JournalEvent._forbid_qualified_task_id`), so that mismatch can no
+        longer be constructed in the first place; this pins the defense at its source
+        instead of at `take_snapshot`.
         """
-        tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
-                               start_date=NOW - timedelta(hours=9))]
-        journal = _journal([_completed('pts_target.run_pts_target', 3600.0)])
-        snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
-        assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
-        assert snap.stalls[0].basis == 'ceiling'
+        with pytest.raises(ValidationError):
+            _completed('pts_target.run_pts_target', 3600.0)
 
     def test_stalls_are_detected_by_the_ceiling_when_there_is_no_history(self) -> None:
         """No baseline is the common case on early runs, not a fallback to be left untested."""

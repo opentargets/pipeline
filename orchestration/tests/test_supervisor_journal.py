@@ -109,6 +109,23 @@ class TestJournalEventValidation:
         with pytest.raises(ValidationError):
             JournalEvent(event_type='step_completed', step='pts/target', at=datetime(2026, 7, 21, tzinfo=UTC))
 
+    def test_step_cannot_be_a_qualified_task_id(self) -> None:
+        """`stall.baseline_from_journal` explains why this mismatch fails silently and permanently."""
+        with pytest.raises(ValidationError):
+            JournalEvent(
+                event_type='step_completed',
+                step='pts_target.run_pts_target',
+                at=datetime(2026, 7, 21, tzinfo=UTC),
+            )
+
+    def test_step_accepts_a_bare_step_name(self) -> None:
+        e = JournalEvent(event_type='step_completed', step='pts_target', at=datetime(2026, 7, 21, tzinfo=UTC))
+        assert e.step == 'pts_target'
+
+    def test_step_accepts_none_for_a_run_level_event(self) -> None:
+        e = JournalEvent(event_type='run_finished', step=None, at=datetime(2026, 7, 21, tzinfo=UTC))
+        assert e.step is None
+
 
 class TestJournalKeyCollisions:
     """A key must be an exact match, never a coincidental suffix of a different one."""
