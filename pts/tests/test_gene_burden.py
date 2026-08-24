@@ -64,8 +64,8 @@ def test_binary_totals_sum_cases_and_controls_across_biobanks(spark: SparkSessio
     assert lookup[('T2Diab', 'ALL')] == (2120, 335)
 
 
-def test_an_ancestry_without_a_label_still_counts_towards_the_pooled_groups(spark: SparkSession):
-    """'MID' never appears as an evidence ancestry group, but its participants are part of ALL and non_EUR."""
+def test_an_ancestry_that_is_never_an_evidence_group_still_counts_towards_the_pooled_totals(spark: SparkSession):
+    """'MID' contributes to S4 but never appears as an evidence group, yet it is part of ALL and non_EUR."""
     lookup = _lookup(spark)
 
     assert lookup[('T2Diab', 'MID')] == (20, 5)

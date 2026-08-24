@@ -930,6 +930,7 @@ def process_brava_gene_burden(
         'EAS': 'East Asian',
         'AMR': 'Admixed American',
         'SAS': 'Central and South Asian',
+        'MID': 'Middle Eastern',
         'non_EUR': 'non-European',
         # 'ALL' is a pan-ancestry meta-analysis, so it has no ancestry label. It is deliberately absent:
         # a missing key in a spark map literal returns null, which is what the field should carry.
@@ -939,6 +940,7 @@ def process_brava_gene_burden(
         'AFR': 'HANCESTRO_0010',
         'EAS': 'HANCESTRO_0009',
         'AMR': 'HANCESTRO_0014',
+        'MID': 'HANCESTRO_0852',
         # 'Central and South Asian' requires mapping to two ids, so it is left null here
     }
 
