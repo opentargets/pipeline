@@ -106,6 +106,15 @@ def read_stats(
     `output/disease` would also match `output/disease_hpo` — both real datasets — and
     silently fold one into the other.
 
+    The schema is the first blob's, by name, unconditionally — not the first *non-empty*
+    schema encountered. A first file with no columns is therefore reported as an empty
+    schema rather than skipped in favour of a later file's. This is deliberate: a
+    footer read concurrently cannot fall back to "whichever file happens to have
+    columns" without letting completion order decide the schema, which is exactly the
+    ambiguity the thread pool below must not reintroduce. In practice the case does
+    not arise — a parquet file carries its schema even at zero rows, so `column_types`
+    is empty only for a file with genuinely no columns at all.
+
     Args:
         bucket: The bucket to read.
         prefix: The dataset's full object prefix, e.g. `my-run/output/disease`.
