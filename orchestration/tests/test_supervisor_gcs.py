@@ -175,6 +175,32 @@ class TestReadStatsNdjson:
         stats = read_stats(bucket, 'run/output/evidence', read_footer=_reader)
         assert stats == DatasetStats(rows=None, total_bytes=250, files=2, column_types={}, countable=False)
 
+    def test_a_mixed_format_dataset_is_uncountable_even_though_most_files_are_parquet(self) -> None:
+        """A genuinely mixed dataset — two parquet files and one non-parquet data file.
+
+        `countable` requires *every* data file to be parquet, not merely one. A
+        partial row count from the files that do have a footer would be silently
+        wrong, since the files that don't cannot contribute to it — reporting no
+        count at all is preferable to reporting one that quietly excludes some of
+        the dataset's own rows. `all(...)` computes this; `any(...)` would call this
+        dataset countable off the two parquet files alone and then try to read a
+        footer from the `.json` file. Bytes and files still count all three,
+        regardless of format.
+        """
+        bucket = FakeBucket(
+            [
+                FakeBlob('run/output/disease/part-0000.parquet', 100),
+                FakeBlob('run/output/disease/part-0001.parquet', 150),
+                FakeBlob('run/output/disease/part-0002.json', 75),
+            ]
+        )
+
+        def _reader(name: str) -> Footer:
+            raise AssertionError(f'read_footer must not be called in a mixed-format dataset: {name}')
+
+        stats = read_stats(bucket, 'run/output/disease', read_footer=_reader)
+        assert stats == DatasetStats(rows=None, total_bytes=325, files=3, column_types={}, countable=False)
+
 
 class TestReadStatsWithoutFooterReader:
     def test_no_reader_yields_sizes_only_and_never_calls_a_reader(self) -> None:
