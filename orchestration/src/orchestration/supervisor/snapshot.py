@@ -19,7 +19,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from orchestration.supervisor.stall import StallVerdict, baseline_from_journal, stalled
+from orchestration.supervisor.stall import (
+    RunStallVerdict,
+    StallVerdict,
+    baseline_from_journal,
+    describe_run_stall,
+    run_stalled,
+    stalled,
+)
 
 _PENDING = 'pending'
 """What a task instance with no state is counted as."""
@@ -33,6 +40,31 @@ class Snapshot(BaseModel):
         run_id: The run.
         taken_at: When the snapshot was taken.
         run_state: Airflow's state for the run.
+        run_started: When the run itself started, from `DagRun.start_date`. `None` only
+            for a run so new Airflow has not yet recorded one — in practice
+            `active_dag_run`/`most_recent_dag_run` already filter to runs that have
+            started, so this is `None` in tests more often than in production.
+
+            This is the third time a `take_snapshot` narrowing has had to be reversed:
+            once for `duration`, once for `try_number`, both dropped from `TaskInstance`
+            because no caller needed them *yet*, both added back once one did.
+            `TaskInstance` earns that piecemeal treatment on its own terms — its
+            docstring explains it is a deliberate ~30-field reduction, so hand-picking
+            which of many fields to keep is the right shape of fix there. `DagRun` does
+            not share that shape: it is four fields total, all cheap, and
+            `take_snapshot` already fetches the whole thing on every call — there is
+            nothing left to selectively avoid. Keeping the full `run: DagRun` on
+            `Snapshot`, rather than hand-copying scalars off it one at a time, would
+            close this particular narrowing for good. That refactor was not made here —
+            it would touch `render_snapshot`, `observer.py`, `cli.py` and every existing
+            test's `run_state=...` construction for a change wider than this task asked
+            for — so only `started` is added, since only it has a caller in this branch:
+            `render_snapshot`, right below, is the one place it is rendered for a human, the
+            reason it exists on `Snapshot` at all. `end_date` is deliberately left behind
+            again: it has no consumer yet, and a field with no test exercising real
+            usage is worse than no field. If a fourth `DagRun` scalar is ever needed,
+            that is the point to stop and take the `run: DagRun` refactor instead of
+            adding a fourth one-off.
         counts: Task instances by state, with stateless ones counted as pending.
         running: Task refs currently running — `task_id`, qualified with `map_index`
             for a mapped task instance (see `TaskInstance.ref`).
@@ -58,6 +90,10 @@ class Snapshot(BaseModel):
             entry (`try_number=None`, the same as before this field was added), it
             does not raise.
         stalls: Running tasks judged to have stalled.
+        run_stall: The run as a whole, judged by `stall.run_stalled` from `counts`,
+            `stalls` and the journal's heartbeat history — distinct from `stalls`,
+            which is per task. `None` when neither of its two signatures fires; see
+            `run_stalled` for both.
         journal_events: How many events the journal already holds, so the agent can
             tell a first wakeup from a resumption.
     """
@@ -66,6 +102,7 @@ class Snapshot(BaseModel):
     run_id: str
     taken_at: datetime
     run_state: str | None
+    run_started: datetime | None = None
     counts: dict[str, int]
     running: list[str]
     failed: list[str]
@@ -73,6 +110,7 @@ class Snapshot(BaseModel):
     durations: dict[str, float]
     try_numbers: dict[str, int] = Field(default_factory=dict)
     stalls: list[StallVerdict]
+    run_stall: RunStallVerdict | None = None
     journal_events: int
 
 
@@ -95,19 +133,22 @@ def take_snapshot(client: Any, journal: Any, dag_id: str, run_id: str, now: date
     baseline = baseline_from_journal(events)
 
     verdicts = [v for v in (stalled(t, baseline, now) for t in tasks) if v is not None]
+    counts = dict(Counter(t.state or _PENDING for t in tasks))
 
     return Snapshot(
         dag_id=dag_id,
         run_id=run_id,
         taken_at=now,
         run_state=run.state,
-        counts=dict(Counter(t.state or _PENDING for t in tasks)),
+        run_started=run.start_date,
+        counts=counts,
         running=[t.ref for t in tasks if t.state == 'running'],
         failed=[t.ref for t in tasks if t.state == 'failed'],
         succeeded=[t.ref for t in tasks if t.state == 'success'],
         durations={t.ref: t.duration for t in tasks if t.duration is not None},
         try_numbers={t.ref: t.try_number for t in tasks},
         stalls=verdicts,
+        run_stall=run_stalled(run.state, counts, verdicts, events),
         journal_events=len(events),
     )
 
@@ -125,7 +166,13 @@ def render_snapshot(snapshot: Snapshot) -> str:
         The rendered text.
     """
     lines = [f'{snapshot.dag_id} / {snapshot.run_id} — {snapshot.run_state or "unknown"}']
+    if snapshot.run_started is not None:
+        lines.append(f'started {snapshot.run_started.strftime("%Y-%m-%d %H:%M UTC")}')
     lines.append(' '.join(f'{state}={count}' for state, count in sorted(snapshot.counts.items())))
+
+    if snapshot.run_stall is not None:
+        lines.append('')
+        lines.append(f'RUN STALL: {describe_run_stall(snapshot.run_stall)}')
 
     if snapshot.stalls:
         lines.append('')

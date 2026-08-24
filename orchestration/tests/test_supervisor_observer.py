@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from orchestration.supervisor.journal import JournalEvent
+from orchestration.supervisor.journal import JournalEvent, heartbeat_event
 from orchestration.supervisor.observer import Observation, observe
 from orchestration.supervisor.snapshot import Snapshot
-from orchestration.supervisor.stall import StallVerdict
+from orchestration.supervisor.stall import RunStallVerdict, StallVerdict
 
 NOW = datetime(2026, 7, 21, 20, 0, tzinfo=UTC)
 
@@ -307,6 +307,42 @@ class TestObserveRunFinished:
             assert observe(_snapshot(run_state='success'), already).run_finished is None
 
 
+class TestObserveRunStall:
+    def test_no_run_stall_on_the_snapshot_reports_none(self) -> None:
+        assert observe(_snapshot(run_stall=None), []).run_stall is None
+
+    def test_a_first_wakeup_reports_a_new_run_stall(self) -> None:
+        verdict = RunStallVerdict(reason='stuck_trigger', pending=3)
+        obs = observe(_snapshot(run_stall=verdict), [])
+        assert obs.run_stall == verdict
+
+    def test_a_run_stall_already_journalled_for_the_same_reason_is_not_reported_again(self) -> None:
+        already = [_event('run_stall_detected_stuck_trigger')]
+        verdict = RunStallVerdict(reason='stuck_trigger', pending=3)
+        assert observe(_snapshot(run_stall=verdict), already).run_stall is None
+
+    def test_a_run_stall_stays_unreported_across_several_more_wakeups(self) -> None:
+        """Mirrors `run_finished`'s once-and-never-again idempotency."""
+        already = [_event('run_stall_detected_stuck_trigger')]
+        verdict = RunStallVerdict(reason='stuck_trigger', pending=3)
+        for _ in range(3):
+            assert observe(_snapshot(run_stall=verdict), already).run_stall is None
+
+    def test_a_different_reason_is_not_silenced_by_the_first_ones_journal_entry(self) -> None:
+        """`'no_progress'` firing later in the same run must not be swallowed by an earlier `'stuck_trigger'`."""
+        already = [_event('run_stall_detected_stuck_trigger')]
+        verdict = RunStallVerdict(reason='no_progress', wakeups=6, active_tasks=1)
+        obs = observe(_snapshot(run_stall=verdict), already)
+        assert obs.run_stall == verdict
+
+    def test_heartbeats_in_the_journal_never_make_a_run_stall_verdict_already_known(self) -> None:
+        """A journal full of heartbeats (and nothing else) must not be mistaken for a prior report."""
+        already = [heartbeat_event(NOW), heartbeat_event(NOW)]
+        verdict = RunStallVerdict(reason='stuck_trigger', pending=3)
+        obs = observe(_snapshot(run_stall=verdict), already)
+        assert obs.run_stall == verdict
+
+
 class TestObservationIsEmpty:
     def test_a_fresh_observation_is_empty(self) -> None:
         assert Observation().is_empty is True
@@ -331,6 +367,32 @@ class TestObservationIsEmpty:
 
     def test_nothing_new_at_all_is_empty(self) -> None:
         assert observe(_snapshot(run_state='running'), []).is_empty is True
+
+    def test_a_run_stall_alone_makes_it_not_empty(self) -> None:
+        """`run_stall` can carry news on its own, exactly like `run_finished` above.
+
+        Without this, `_observation_events` (`cli.py`) would still journal the verdict
+        via `run_stall`, but `render_comment` would see an "empty" `Observation` and
+        post nothing — the verdict would be recorded and never surfaced to a human.
+        """
+        verdict = RunStallVerdict(reason='stuck_trigger', pending=3)
+        obs = observe(_snapshot(run_state='running', run_stall=verdict), [])
+        assert obs.failed == []
+        assert obs.stalled == []
+        assert obs.completed == []
+        assert obs.run_finished is None
+        assert obs.is_empty is False
+
+    def test_a_journal_full_of_heartbeats_and_nothing_else_stays_empty(self) -> None:
+        """The requirement stated directly: heartbeats must never make a wakeup report itself.
+
+        A wakeup that finds nothing new, against a journal that holds only heartbeats
+        from earlier wakeups (and a run that has no run-level stall to report), must
+        still be empty — the whole point of a heartbeat is to be silent unless it is
+        also evidence for a real verdict.
+        """
+        already = [heartbeat_event(NOW), heartbeat_event(NOW)]
+        assert observe(_snapshot(run_state='running'), already).is_empty is True
 
 
 class TestObserveComposesAllFour:

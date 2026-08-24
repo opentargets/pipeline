@@ -27,6 +27,7 @@ from __future__ import annotations
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.observer import Observation, StepCompletion, StepFailure, StepStall
 from orchestration.supervisor.snapshot import Snapshot
+from orchestration.supervisor.stall import RunStallVerdict, describe_run_stall
 from orchestration.supervisor.step_identity import is_run_task
 
 _NO_MATERIAL_DIFF = 'No material differences against the reference release.'
@@ -175,6 +176,26 @@ def _render_run_finished(state: str, snapshot: Snapshot) -> str:
     return f'### Run {verb} — `{snapshot.dag_id}` / `{snapshot.run_id}`'
 
 
+def _render_run_stall(verdict: RunStallVerdict, snapshot: Snapshot) -> str:
+    """Render the run as a whole judged to have stalled — distinct from any one step.
+
+    Its own heading, for the same reason `_render_run_finished` gets one: this is news
+    about the run, not about a step, and folding it into `_render_failed`/`_render_stalled`
+    would bury a "the whole run looks dead" headline among ordinary per-step bullets.
+    `describe_run_stall` (`stall.py`) is the single source of the wording, shared with
+    `snapshot.render_snapshot`, so the two never describe the same verdict differently.
+
+    Args:
+        verdict: `Observation.run_stall`. Never None when called.
+        snapshot: For `dag_id`/`run_id`, so the run is named even if the reader has
+            several issue threads open — as `_render_run_finished`.
+
+    Returns:
+        One rendered heading line.
+    """
+    return f'### Run stalled — `{snapshot.dag_id}` / `{snapshot.run_id}`\n{describe_run_stall(verdict)}'
+
+
 def _render_failed(failures: list[StepFailure]) -> str:
     """Render newly failed task instances.
 
@@ -309,9 +330,12 @@ def render_comment(
 
     Sections appear only when they have something new to say, in the order a reader
     should see them: the run reaching a terminal state first (the single biggest thing
-    that can happen to a run), then failures and stalls (escalations), then completions,
-    then a dataset comparison. This mirrors `snapshot.render_snapshot`'s rule that
-    escalations are never folded into routine detail.
+    that can happen to a run), then a run-level stall (the run itself, not any one
+    step — see `_render_run_stall`; this and `run_finished` can never both be set, since
+    `stall.run_stalled` only fires while `snapshot.run_state == 'running'`), then
+    failures and stalls (escalations), then completions, then a dataset comparison.
+    This mirrors `snapshot.render_snapshot`'s rule that escalations are never folded
+    into routine detail.
 
     Args:
         observation: What `observer.observe` decided is new since the journal was last
@@ -344,6 +368,8 @@ def render_comment(
     sections: list[str] = []
     if observation.run_finished is not None:
         sections.append(_render_run_finished(observation.run_finished, snapshot))
+    if observation.run_stall is not None:
+        sections.append(_render_run_stall(observation.run_stall, snapshot))
     if observation.failed:
         sections.append(_render_failed(observation.failed))
     if observation.stalled:

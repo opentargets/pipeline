@@ -8,6 +8,7 @@ from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.observer import Observation, StepCompletion, StepFailure, StepStall
 from orchestration.supervisor.report import render_comment
 from orchestration.supervisor.snapshot import Snapshot
+from orchestration.supervisor.stall import RunStallVerdict
 
 NOW = datetime(2026, 8, 24, 15, 30, tzinfo=UTC)
 
@@ -329,6 +330,48 @@ class TestRunFinished:
         assert result is not None
         assert 'Run succeeded' not in result
         assert 'Run FAILED' not in result
+
+
+class TestRunStall:
+    def test_a_run_stall_gets_its_own_heading(self) -> None:
+        obs = _observation(run_stall=RunStallVerdict(reason='stuck_trigger', pending=4))
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'Run stalled' in result
+
+    def test_a_stuck_trigger_names_the_pending_count(self) -> None:
+        obs = _observation(run_stall=RunStallVerdict(reason='stuck_trigger', pending=4))
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert '4' in result
+        assert 'pending' in result
+
+    def test_a_no_progress_verdict_names_the_wakeups_and_active_tasks(self) -> None:
+        obs = _observation(run_stall=RunStallVerdict(reason='no_progress', wakeups=6, active_tasks=2))
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert '6' in result
+        assert '2' in result
+
+    def test_no_run_stall_renders_no_run_stall_section(self) -> None:
+        obs = _observation(failed=[StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1)])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'Run stalled' not in result
+
+    def test_a_run_stall_precedes_failures_and_stalls(self) -> None:
+        obs = _observation(
+            run_stall=RunStallVerdict(reason='stuck_trigger', pending=4),
+            failed=[StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1)],
+        )
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert result.index('Run stalled') < result.index('**Failed**')
+
+    def test_a_run_stall_alone_is_enough_to_render_a_comment(self) -> None:
+        """`Observation.is_empty` must not swallow a run stall with nothing else new."""
+        obs = _observation(run_stall=RunStallVerdict(reason='stuck_trigger', pending=1))
+        assert render_comment(obs, _snapshot()) is not None
 
 
 class TestDiffs:

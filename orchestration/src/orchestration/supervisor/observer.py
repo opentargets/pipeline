@@ -26,6 +26,21 @@ deliberately cleared and re-ran the step. `JournalEvent.try_number` exists exact
 so a second attempt's outcome is a distinct key from the first's — every candidate
 key built here carries it, sourced from `Snapshot.try_numbers`, precisely so that
 "you re-ran it and it failed again" is the one moment this tool must not go quiet.
+
+**A run-level stall (`Snapshot.run_stall`, from `stall.run_stalled`) is reported once
+per `reason`, the same "once and never again for this exact thing" idempotency every
+other event here gets** — keyed as `run_stall_detected_{reason}` so `'no_progress'` and
+`'stuck_trigger'` are tracked independently and one firing does not silence the other
+should it happen later in the same run.
+
+**Heartbeats never reach this function's notion of "new" at all.** `observe` never
+scans `events` for heartbeats or builds a candidate key for one — the only journal
+reads here are `known` (built from every event's `key`, heartbeats included, but never
+matched against because nothing here ever builds a heartbeat-shaped candidate to look
+up) and, transitively through `Snapshot.run_stall`, `stall.run_stalled`'s own heartbeat
+count. So a heartbeat can change *whether* `run_stall` fires (by advancing that count)
+but can never itself become an item in `failed`/`stalled`/`completed` or a repeated
+`run_finished` — otherwise every wakeup would report its own heartbeat as news, forever.
 """
 
 from __future__ import annotations
@@ -37,6 +52,7 @@ from pydantic import BaseModel, Field
 
 from orchestration.supervisor.journal import JournalEvent
 from orchestration.supervisor.snapshot import Snapshot
+from orchestration.supervisor.stall import RunStallVerdict
 from orchestration.supervisor.step_identity import is_run_task, step_from_task_id
 
 _TERMINAL_RUN_STATES = frozenset({'success', 'failed'})
@@ -162,26 +178,35 @@ class Observation(BaseModel):
             when the run is not yet terminal and when its terminal state was already
             reported on an earlier wakeup — the two read the same from here, since
             both mean there is nothing new to say about the run itself.
+        run_stall: `Snapshot.run_stall`, if it is new — that is, no
+            `run_stall_detected_{reason}` event for this exact `reason` has already
+            been journalled. None both when nothing is run-stalled this wakeup and when
+            it already was reported for the same reason on an earlier wakeup, the same
+            "reads the same from here" case `run_finished` documents above.
     """
 
     failed: list[StepFailure] = Field(default_factory=list)
     stalled: list[StepStall] = Field(default_factory=list)
     completed: list[StepCompletion] = Field(default_factory=list)
     run_finished: str | None = None
+    run_stall: RunStallVerdict | None = None
 
     @property
     def is_empty(self) -> bool:
         """Whether this wakeup found nothing new at all.
 
         A caller must not infer "nothing new" from any single empty field —
-        `run_finished` in particular can carry news on its own, with everything else
-        empty.
+        `run_finished` and `run_stall` in particular can each carry news entirely on
+        their own, with everything else empty.
 
         Returns:
-            True if `failed`, `stalled` and `completed` are all empty and
-            `run_finished` is None.
+            True if `failed`, `stalled` and `completed` are all empty and both
+            `run_finished` and `run_stall` are None.
         """
-        return not self.failed and not self.stalled and not self.completed and self.run_finished is None
+        return (
+            not self.failed and not self.stalled and not self.completed
+            and self.run_finished is None and self.run_stall is None
+        )
 
 
 def _already_known(event_type: str, step: str, map_index: int, try_number: int | None, known: set[str]) -> bool:
@@ -262,4 +287,10 @@ def observe(snapshot: Snapshot, events: list[JournalEvent]) -> Observation:
     if snapshot.run_state in _TERMINAL_RUN_STATES and 'run_finished' not in known:
         run_finished = snapshot.run_state
 
-    return Observation(failed=failed, stalled=stalled, completed=completed, run_finished=run_finished)
+    run_stall = None
+    if snapshot.run_stall is not None and f'run_stall_detected_{snapshot.run_stall.reason}' not in known:
+        run_stall = snapshot.run_stall
+
+    return Observation(
+        failed=failed, stalled=stalled, completed=completed, run_finished=run_finished, run_stall=run_stall
+    )

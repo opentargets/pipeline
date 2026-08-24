@@ -205,3 +205,54 @@ class Journal:
             for blob in self.bucket.list_blobs(prefix=f'{self.prefix}/')
         ]
         return sorted(events, key=lambda event: event.at)
+
+
+_HEARTBEAT_PREFIX = 'heartbeat_'
+"""Every heartbeat event's `event_type` starts with this, followed by a compact UTC
+timestamp (see `heartbeat_event`).
+
+`JournalEvent.key` is built from `event_type`/`step`/`try_number`/`map_index` alone —
+deliberately not `at` — so that two *observations* of the same real-world thing
+collapse onto one key. A heartbeat has no such real-world thing behind it: it exists
+solely to prove this exact wakeup happened, so a constant `event_type` (`'heartbeat'`
+alone) would produce the identical key on every wakeup and `Journal.append` would
+silently no-op every heartbeat after the first — the opposite of what a liveness
+marker needs. Folding the timestamp into `event_type` itself (rather than `step`,
+which `_forbid_qualified_task_id` reserves for a real step name, or `map_index`/
+`try_number`, whose fields have their own meanings) is what makes every heartbeat's
+key distinct, using the one key-bearing field a heartbeat can freely repurpose."""
+
+
+def heartbeat_event(at: datetime) -> JournalEvent:
+    """Build one wakeup's heartbeat: proof this run was observed, carrying no verdict.
+
+    A heartbeat is journalled unconditionally, once per wakeup, alongside whatever else
+    that wakeup found — see `cli.py`'s module docstring for why this closes the
+    liveness gap `_OBSERVATION_STARTED_EVENT` could not (a dead cron and a quiet one
+    used to journal the same thing). `stall.run_stalled` also reads these back to count
+    consecutive silent wakeups without relying on wall-clock time, which is what makes
+    that count robust to the cron itself having been down for a while — see its
+    docstring.
+
+    Args:
+        at: This wakeup's timestamp, the same instant used for every other event this
+            wakeup journals. Assumed UTC, like every other `at` in this package.
+
+    Returns:
+        The event. `step`/`try_number`/`map_index` are all left at their `None`
+        defaults — a heartbeat is a run-level fact, not about any one step.
+    """
+    timestamp = at.strftime('%Y%m%dT%H%M%SZ')
+    return JournalEvent(event_type=f'{_HEARTBEAT_PREFIX}{timestamp}', at=at)
+
+
+def is_heartbeat(event: JournalEvent) -> bool:
+    """Whether an event is a heartbeat, as built by `heartbeat_event`.
+
+    Args:
+        event: The event to classify.
+
+    Returns:
+        True if `event_type` carries the heartbeat prefix.
+    """
+    return event.event_type.startswith(_HEARTBEAT_PREFIX)
