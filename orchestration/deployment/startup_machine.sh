@@ -144,3 +144,73 @@ wait_for_apiserver
 
 # signal that the script is done
 touch /ready
+
+# --- pipeline observer -------------------------------------------------------
+# Everything below is best-effort and MUST NOT be able to fail the boot: /ready
+# is already written above, so start.sh's readiness poll has already succeeded
+# by the time any of this runs, and the whole block is wrapped in its own
+# subshell with `set +e` so a failure partway through cannot even abort the
+# rest of the block, let alone the script above it. A VM that comes up without
+# a working observer is a known, recoverable gap; a VM `start.sh` reports as
+# dead because setup after `touch /ready` failed under `set -e` is a much
+# worse outcome for something that is not on the critical path to a working
+# Airflow stack.
+(
+  set +e
+
+  # the host has git, build-essential and docker (installed above) but no
+  # python and, on a fresh image, no cron -- this is the first thing on the VM
+  # to need either.
+  apt-get install -y --no-install-recommends cron
+  systemctl enable --now cron 2>/dev/null || service cron start
+
+  # install uv system-wide, idempotently, so the observer does not depend on a
+  # developer having run startup_user.sh first (that script installs uv into
+  # the ssh'd-in user's own $HOME, over ssh, on request -- this is unattended
+  # and must not assume it ever ran).
+  if [ ! -x /usr/local/bin/uv ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+  fi
+
+  if [ -x /usr/local/bin/uv ]; then
+    # same sync scope as startup_user.sh (--all-groups --all-extras --dev), not
+    # a narrower one: both scripts share this one venv at /opt/orchestration
+    # (symlinked to /opt/pipeline/orchestration), and this script re-runs on
+    # every boot, so a narrower sync here would silently strip a developer's
+    # dev/test tooling out from under them on the next reboot. --frozen: the
+    # lockfile is authoritative, this must never resolve fresh versions.
+    su orchestration -c '/usr/local/bin/uv sync --frozen --all-groups --all-extras --dev --directory /opt/orchestration'
+    chgrp -R google-sudoers /opt/orchestration/.venv
+    chmod -R g+rX /opt/orchestration/.venv
+
+    chmod 750 /opt/orchestration/deployment/observer_wrapper.sh
+    chgrp google-sudoers /opt/orchestration/deployment/observer_wrapper.sh
+
+    # seeded once, like .env from .env.example -- never overwritten, so a
+    # human's edits for the run currently being watched survive every reboot.
+    # lives at the top level, not under deployment/, since it is generated
+    # state rather than tracked source, mirroring where .env sits next to
+    # .env.example.
+    if [ ! -f /opt/orchestration/observer_run.env ]; then
+      cp /opt/orchestration/deployment/observer_run.env.example /opt/orchestration/observer_run.env
+      chgrp google-sudoers /opt/orchestration/observer_run.env
+      chmod 640 /opt/orchestration/observer_run.env
+    fi
+
+    mkdir -p /var/log/observer
+    chgrp google-sudoers /var/log/observer
+    chmod 770 /var/log/observer
+
+    # ten minutes: comfortably inside a stall threshold measured in hours,
+    # cheap because most wakeups do nothing, slow enough that the issue thread
+    # stays readable. flock -n (fail immediately, don't queue) guards against
+    # a slow wakeup still running when the next one fires: a skipped wakeup
+    # costs ten minutes of latency, a queued backlog costs a pile-up. output is
+    # redirected to a log rather than left for cron to mail on every run.
+    CRON_LINE='*/10 * * * * orchestration flock -n /run/lock/pipeline-observer.lock /opt/orchestration/deployment/observer_wrapper.sh >> /var/log/observer/cron.log 2>&1'
+    if [ ! -f /etc/cron.d/pipeline-observer ] || ! grep -qF "$CRON_LINE" /etc/cron.d/pipeline-observer; then
+      echo "$CRON_LINE" > /etc/cron.d/pipeline-observer
+      chmod 644 /etc/cron.d/pipeline-observer
+    fi
+  fi
+) || true

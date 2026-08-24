@@ -4,14 +4,11 @@ The supervisor is stateless, so this is what it sees on waking: the run's state,
 what each task is doing, anything that looks stalled, and how much the journal
 already knows. Nothing here writes.
 
-The journal is keyed on the Airflow `dag_run_id` (`--run`), which is the only run
-identifier this module has. The design spec's journal path is instead keyed on
-`run_name` from `unified_pipeline.yaml` (e.g. `ds/target_refactor`) — an independent
-identifier for the same run that this CLI cannot derive `dag_run_id` from or vice
-versa. Phase 1 stays self-consistent by keying on `dag_run_id` throughout, but phase
-2's `diff_vs_reference` DAG task knows only `run_name`. If it writes to a
-`run_name`-keyed prefix, it and the agent will silently keep two separate journals
-for what is really one run. This is flagged, not resolved, here.
+**The journal is keyed on the Airflow `dag_run_id` (`--run`), not `run_name` from
+`unified_pipeline.yaml`.** The two are independent identifiers for the same run,
+and this CLI cannot derive one from the other. `dag_run_id` was chosen because it
+comes from Airflow, is authoritative for the run in flight, and needs no file read
+to obtain. The prefix is `_agent/{dag_id}/{dag_run_id}/journal`, built in `cli.py`.
 """
 
 from __future__ import annotations
