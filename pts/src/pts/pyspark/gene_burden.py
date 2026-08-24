@@ -886,7 +886,7 @@ def process_brava_gene_burden(
         'AFR': 'HANCESTRO_0010',
         'EAS': 'HANCESTRO_0009',
         'AMR': 'HANCESTRO_0014',
-        # SAS maps to two ids, so it is not specified
+        # 'Central and South Asian' requires mapping to two ids, so it is left null here
     }
 
     def _brava_sample_size_lookup(
@@ -994,6 +994,9 @@ def process_brava_gene_burden(
             f.col('BETA Burden').alias('beta'),
             (f.col('BETA Burden') - f.col('SE Burden')).alias('betaConfidenceIntervalLower'),
             (f.col('BETA Burden') + f.col('SE Burden')).alias('betaConfidenceIntervalUpper'),
+            # ancestryId and statisticalMethod are among the fields used for constructing the dedup id
+            # as ancestryId is null for ALL/non_EUR/SAS (see ancestry_id dict above), ancestry_group
+            # has to be added to statisticalMethod, otherwise rows will be mistaken as duplicate rows and dropped
             f.concat_ws(
                 '.', f.col('class'), _map_col(mask_abbrev)[f.col('Mask')], f.col('max MAF'), ancestry_group
             ).alias('statisticalMethod'),
@@ -1028,6 +1031,9 @@ def process_brava_gene_burden(
             f.col('Phenotype ID'),
             ancestry_group.alias('Ancestry Group'),
             f.col(pvalue_col).alias('resourceScore'),
+            # ancestryId and statisticalMethod are among the fields used for constructing the dedup id
+            # as ancestryId is null for ALL/non_EUR/SAS (see ancestry_id dict above), ancestry_group
+            # has to be added to statisticalMethod, otherwise rows will be mistaken as duplicate rows and dropped
             f.concat(f.lit('Cauchy.'), ancestry_group).alias('statisticalMethod'),
             f.lit(
                 'Cauchy combination test aggregating Burden and SKAT/SKAT-O results across variant masks '
