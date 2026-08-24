@@ -131,11 +131,6 @@ def clinical_report(
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
-    llm_indications = llm_batch_results.df.select(
-        'id',
-        pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug').unique()).alias('drugs'),
-        pl.col('primary_indications').list.eval(pl.element().struct.field('name').unique()).alias('diseases'),
-    )
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -154,7 +149,7 @@ def clinical_report(
                 'agg': 'unique',
             }
         },
-        llm_extractions=llm_indications,
+        llm_extractions=llm_batch_results.df,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
     if aact_stop_reasons.height > 0:

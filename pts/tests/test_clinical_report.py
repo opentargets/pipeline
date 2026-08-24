@@ -1,5 +1,7 @@
 import polars as pl
+import pytest
 from clinical_mining.dataset import ClinicalReport
+from clinical_mining.provider.aact.clinical_report import replace_with_llm_indications
 from clinical_mining.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
 
 from pts.pyspark.clinical_report import (
@@ -182,3 +184,32 @@ def test_flag_indirect_primary_purpose_non_aact_not_flagged() -> None:
     assert not _flagged(result, 'r1')
     assert not _flagged(result, 'r2')
     assert not _flagged(result, 'r3')
+
+
+def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
+    """A minimal frame in `ClinicalReportExtractionSchema` shape, as `parse_batch_results` returns."""
+    return pl.DataFrame({
+        'id': [nct_id],
+        'drug_intent': ['therapeutic'],
+        'drug_intent_confidence': [0.99],
+        'primary_indications': [[{'name': disease, 'evidence_quote': 'q'}]],
+        'investigated_drugs': [[{'drug': drug, 'evidence_quote': 'q'}]],
+    })
+
+
+def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
+    """`clinical_report` must hand the extraction to clinical_mining unprojected."""
+    studies = pl.DataFrame({
+        'nct_id': ['NCT0001'],
+        'diseaseFromSource': ['from-aact'],
+        'drugFromSource': ['from-aact'],
+    })
+
+    result = replace_with_llm_indications(studies, _extraction('NCT0001', 'asthma', 'aspirin'))
+
+    assert result['diseaseFromSource'].to_list() == ['asthma']
+    assert result['drugFromSource'].to_list() == ['aspirin']
+
+    pre_projected = pl.DataFrame({'id': ['NCT0001'], 'drugs': [['aspirin']], 'diseases': [['asthma']]})
+    with pytest.raises(pl.exceptions.ColumnNotFoundError, match='primary_indications'):
+        replace_with_llm_indications(studies, pre_projected)

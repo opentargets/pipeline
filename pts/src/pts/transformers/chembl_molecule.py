@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from clinical_mining.dataset import ClinicalReportExtraction
 from clinical_mining.provider.aact.llm_extractor import parse_batch_results
 from loguru import logger
 from otter.config.model import Config
@@ -59,7 +58,7 @@ def chembl_molecule(
     aact_batch = None
     if 'aact_extraction_batch_results' in source:
         logger.info(f'Reading AACT batch results from {source["aact_extraction_batch_results"]}')
-        aact_batch = parse_batch_results(str(source['aact_extraction_batch_results']))
+        aact_batch = parse_batch_results(str(source['aact_extraction_batch_results'])).df
 
     logger.info('Processing molecules')
     output_df = process_molecules(
@@ -81,7 +80,7 @@ def process_molecules(
     molecule_hierarchy: pl.DataFrame,
     molecule_synonyms: pl.DataFrame,
     drugbank_lookup: pl.DataFrame,
-    aact_batch: pl.DataFrame | ClinicalReportExtraction | None = None,
+    aact_batch: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Build ChEMBL molecules by joining raw ChEMBL tables.
 
@@ -129,8 +128,7 @@ def process_molecules(
     # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
-        _aact_df = aact_batch.df if isinstance(aact_batch, ClinicalReportExtraction) else aact_batch
-        entries = parse_aact_entries(_aact_df)
+        entries = parse_aact_entries(aact_batch)
         # `mine_aact_synonyms` documents a non-null contract on these list columns. The
         # fills satisfy it explicitly rather than relying on the mining internals to
         # tolerate nulls.
