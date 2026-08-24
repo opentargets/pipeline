@@ -58,8 +58,9 @@ class Snapshot(BaseModel):
             close this particular narrowing for good. That refactor was not made here —
             it would touch `render_snapshot`, `observer.py`, `cli.py` and every existing
             test's `run_state=...` construction for a change wider than this task asked
-            for — so only `started` is added, since only it has a caller in this branch
-            (`report.py`'s run-stall rendering). `end_date` is deliberately left behind
+            for — so only `started` is added, since only it has a caller in this branch:
+            `render_snapshot`, right below, is the one place it is rendered for a human, the
+            reason it exists on `Snapshot` at all. `end_date` is deliberately left behind
             again: it has no consumer yet, and a field with no test exercising real
             usage is worse than no field. If a fourth `DagRun` scalar is ever needed,
             that is the point to stop and take the `run: DagRun` refactor instead of

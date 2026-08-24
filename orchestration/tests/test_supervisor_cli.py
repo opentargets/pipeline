@@ -1305,6 +1305,28 @@ class TestObserveCommand:
         events = [call.args[0] for call in observe_command.journal.append.call_args_list]
         assert any(event.event_type == 'run_finished' for event in events)
 
+    def test_a_terminal_run_journals_no_heartbeat(self, observe_command: SimpleNamespace) -> None:
+        """A finished run must stop accumulating heartbeats, forever, one per wakeup.
+
+        `most_recent_dag_run` rediscovers a finished run on every wakeup (see the
+        module docstring), and `observation_started`/`run_finished` are each gated on
+        their own idempotency key so they stop growing the journal after they first
+        fire — but the heartbeat append had no such gate, so an idle pipeline kept
+        writing 144 objects a day into a journal with nothing left to say. This pins
+        that a terminal `run_state` writes none at all.
+        """
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5']) == 0
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert not any(is_heartbeat(event) for event in events)
+
+    def test_a_failed_terminal_run_journals_no_heartbeat_either(self, observe_command: SimpleNamespace) -> None:
+        """`'failed'` is terminal too, not only `'success'` — both stop the run."""
+        observe_command.take_snapshot.return_value = _snapshot(run_state='failed')
+        assert main(['observe', '--issue', '5']) == 0
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert not any(is_heartbeat(event) for event in events)
+
     def test_the_diff_does_not_run_before_a_terminal_state(self, observe_command: SimpleNamespace) -> None:
         observe_command.take_snapshot.return_value = _snapshot(run_state='running')
         assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0

@@ -165,8 +165,8 @@ every wakeup after the first for a given event, which is correct for this event'
 real purpose but means a dead observer (the cron stopped firing at 10:00) and a
 quiet one (nothing new to report since 10:00) journal the same thing: one
 `observation_started` entry and nothing else. The two are indistinguishable from
-this event alone — `journal.heartbeat_event`, journalled unconditionally alongside
-this one on every wakeup below, is what closes that gap.
+this event alone — `journal.heartbeat_event`, journalled alongside this one on every
+wakeup below *while the run is not yet terminal*, is what closes that gap.
 
 An earlier version of this docstring judged a per-wakeup heartbeat not worth its cost
 (144 journal objects a day for liveness alone) and said not to add one. That judgment
@@ -177,7 +177,17 @@ the observer itself stopped running" — a distinction wall-clock time cannot ma
 since a cron down for three hours and a cron that ran every ten minutes through three
 genuinely quiet hours both show three hours of wall-clock silence, but the former has
 far fewer heartbeats to show for it. One mechanism closing two gaps is what makes the
-cost worth paying now."""
+cost worth paying now.
+
+144 a day only holds while the run is actually running, though: `active_dag_run` falls
+back to `most_recent_dag_run` once a run finishes (see the module docstring), so this
+run is rediscovered and re-observed on every wakeup forever, with nothing left to say
+past its `run_finished`/`dataset_diff_completed` markers. `run_stalled` itself already
+returns before reading `events` at all once `run_state != 'running'` (`stall.py`), so a
+heartbeat journalled after that point buys nothing even for its own stated purpose. The
+heartbeat append below is gated on the run not being in `_OBSERVE_TERMINAL_RUN_STATES`
+for exactly that reason — an idle pipeline must not accumulate one heartbeat object per
+wakeup, unboundedly, for as long as the cron keeps running after the pipeline is done."""
 
 _RUN_STALL_DETECTED_EVENT_PREFIX = 'run_stall_detected_'
 """Journal event type prefix for a run-level stall, completed with `RunStallVerdict.reason`.
@@ -743,7 +753,16 @@ def main(argv: list[str] | None = None) -> int:
             events.append(
                 JournalEvent(event_type=_OBSERVATION_STARTED_EVENT, at=now, payload={'run_name': run_name()})
             )
-            events.append(heartbeat_event(now))
+            # Gated on the run not being terminal, unlike the observation-started marker and
+            # the diff-completed marker above, which are gated on their own idempotency keys
+            # instead. A finished run is rediscovered by `most_recent_dag_run` on every wakeup
+            # forever (see the module docstring), so an unconditional heartbeat would write one
+            # object per wakeup into a journal that has nothing left to say — 144 objects a day,
+            # forever, for a pipeline that finished once. `run_stalled` already returns before
+            # reading `events` at all once `run_state != 'running'`, so a post-terminal heartbeat
+            # buys no liveness signal either: nothing downstream ever counts it.
+            if snapshot.run_state not in _OBSERVE_TERMINAL_RUN_STATES:
+                events.append(heartbeat_event(now))
 
             diffs = None
             if (

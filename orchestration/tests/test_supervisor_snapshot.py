@@ -74,12 +74,15 @@ class TestBaselineFromJournal:
 
         A heartbeat's `event_type` is never `'step_completed'`, so it must be filtered
         out by that check alone — independent of whatever its payload happens to
-        contain. A heartbeat never actually carries a `duration`, so this pins a
-        pathological one that does, to exercise the `event_type` guard itself rather
-        than one that would also be skipped by the `duration is None` check regardless.
+        contain. A heartbeat never actually carries a `step` or a `duration`, so this
+        pins a pathological one that does, with a `step` matching a real completion's,
+        to exercise the `event_type` guard itself: if the rogue carried no `step`
+        (`None`), the `event.step is None` clause would filter it out on its own and
+        the test would stay green even with the `event_type` check deleted — the exact
+        way this test used to pass for the wrong reason.
         """
         heartbeat = heartbeat_event(NOW)
-        rogue = JournalEvent(event_type=heartbeat.event_type, at=NOW, payload={'duration': 999999.0})
+        rogue = JournalEvent(event_type=heartbeat.event_type, step='a', at=NOW, payload={'duration': 999999.0})
         events = [_completed('a', 100.0), rogue]
         assert baseline_from_journal(events) == {'a': 100.0}
 
@@ -313,6 +316,47 @@ class TestRunStalled:
         wakeups_only = run_stalled('running', {'running': 1}, stalls, events)
         assert wakeups_only is not None
         assert wakeups_only.wakeups == 6
+
+    def test_stuck_trigger_does_not_fire_at_a_runs_healthy_opening_minutes(self) -> None:
+        """A run's opening minutes must not read as stuck.
+
+        The scheduler has created all 132 task instances as `pending` and moved a root
+        task through `scheduled` into `queued`, but nothing has reached `running` yet.
+        `active == 0` here, exactly like a truly stuck run, so this shape must be told
+        apart on `queued` alone, not on `active`.
+        """
+        assert run_stalled('running', {'queued': 1, 'pending': 131}, [], []) is None
+
+    def test_stuck_trigger_does_not_fire_during_a_scheduled_handoff(self) -> None:
+        """A routine step hand-off must not read as stuck.
+
+        A step finishing and the next one being handed off sits in `scheduled`, not
+        yet `queued` or `running`. `active == 0` again, and again this is ordinary
+        progress, not a stall.
+        """
+        counts = {'scheduled': 1, 'success': 40, 'pending': 91}
+        assert run_stalled('running', counts, [], []) is None
+
+    def test_stuck_trigger_does_not_fire_during_legitimate_retry_backoff(self) -> None:
+        """Legitimate retry backoff must not read as stuck.
+
+        `up_for_retry` is bounded to ~6 minutes across `stage_jar_*`'s three retries at
+        a 2-minute delay (`unified_pipeline.py:299`) — legitimate backoff, not a
+        scheduler that has given up.
+        """
+        counts = {'up_for_retry': 1, 'pending': 100}
+        assert run_stalled('running', counts, [], []) is None
+
+    def test_stuck_trigger_still_fires_when_nothing_is_moving_at_all(self) -> None:
+        """The real signal must survive alongside the three false-positive fixes above.
+
+        No active task, nothing queued, scheduled or retrying — only completed steps
+        and tasks that have never been touched.
+        """
+        verdict = run_stalled('running', {'success': 32, 'pending': 100}, [], [])
+        assert verdict is not None
+        assert verdict.reason == 'stuck_trigger'
+        assert verdict.pending == 100
 
     def test_stuck_trigger_and_no_progress_can_never_both_fire(self) -> None:
         """Mutually exclusive by construction: one requires zero active tasks, the other at least one."""
