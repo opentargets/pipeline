@@ -57,8 +57,13 @@ class DatasetDiff(BaseModel):
             leaves total size unchanged.
         reference_files: File count on the reference side.
         columns: Schema differences. Always reported, never thresholded.
-        countable: False for formats with no footer, such as NDJSON, where the row
-            counts are unavailable rather than zero.
+        countable: False for formats with no footer, such as NDJSON. Describes the
+            dataset's *format*, not whether either side's row count happens to be
+            present — a `reference_only` dataset is legitimately `countable=True`
+            with `run_rows=None`, because there is simply no run side to read a
+            footer from. `is_material` does not branch on this field; it branches
+            on `run_rows`/`reference_rows` being `None` directly, which is the
+            right test regardless of why a count is missing.
     """
 
     dataset: str
