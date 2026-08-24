@@ -65,6 +65,22 @@ class TestTaskInstance:
         with pytest.raises(ValidationError):
             TaskInstance.model_validate({'state': 'success'})
 
+    def test_map_index_defaults_to_unmapped(self) -> None:
+        """-1 is Airflow's own value for a task instance that is not part of a mapped operator."""
+        assert TaskInstance(task_id='t').map_index == -1
+
+    def test_ref_is_the_bare_task_id_when_unmapped(self) -> None:
+        assert TaskInstance(task_id='t', map_index=-1).ref == 't'
+
+    def test_ref_is_qualified_by_map_index_when_mapped(self) -> None:
+        assert TaskInstance(task_id='t', map_index=3).ref == 't[3]'
+
+    def test_two_mapped_instances_of_the_same_task_have_distinct_refs(self) -> None:
+        """N shards of a `.partial().expand()`'d task share one task_id (unified_pipeline.py:476-482)."""
+        a = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0)
+        b = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=1)
+        assert a.ref != b.ref
+
 
 class TestDagRun:
     def test_parses_a_run(self) -> None:

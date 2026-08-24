@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import ValidationError
+
 from orchestration.supervisor.airflow import DagRun, TaskInstance
 from orchestration.supervisor.journal import JournalEvent
 from orchestration.supervisor.snapshot import Snapshot, render_snapshot, take_snapshot
@@ -13,7 +16,7 @@ from orchestration.supervisor.stall import StallVerdict, baseline_from_journal, 
 NOW = datetime(2026, 7, 21, 20, 0, tzinfo=UTC)
 
 
-def _running(task_id: str = 'run_pts_target', minutes: int = 30) -> TaskInstance:
+def _running(task_id: str = 'pts_target.run_pts_target', minutes: int = 30) -> TaskInstance:
     return TaskInstance(task_id=task_id, state='running', start_date=NOW - timedelta(minutes=minutes))
 
 
@@ -62,12 +65,25 @@ class TestBaselineFromJournal:
 
 class TestStalled:
     def test_a_task_within_its_baseline_is_not_stalled(self) -> None:
-        assert stalled(_running(minutes=30), {'run_pts_target': 3600.0}, NOW) is None
+        assert stalled(_running(minutes=30), {'pts_target': 3600.0}, NOW) is None
 
     def test_a_task_far_past_its_baseline_is_stalled(self) -> None:
-        verdict = stalled(_running(minutes=300), {'run_pts_target': 3600.0}, NOW)
+        verdict = stalled(_running(minutes=300), {'pts_target': 3600.0}, NOW)
         assert verdict is not None
         assert verdict.basis == 'history'
+
+    def test_a_sibling_task_in_the_group_does_not_inherit_the_run_tasks_baseline(self) -> None:
+        """`step_from_task_id` collapses every task in a group onto the same step name.
+
+        Without gating on `is_run_task`, a `delete_vm_` sibling would inherit the run
+        task's history threshold instead of falling to the ceiling — see the module
+        docstring for the concrete failure this produces in both directions.
+        """
+        sibling = TaskInstance(task_id='pts_target.delete_vm_pts_target', state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        verdict = stalled(sibling, {'pts_target': 3600.0}, NOW)
+        assert verdict is not None
+        assert verdict.basis == 'ceiling'
 
     def test_a_task_with_no_history_falls_back_to_the_ceiling(self) -> None:
         """Most steps have no baseline on early runs, so this is the common path."""
@@ -116,6 +132,26 @@ class TestStalled:
         assert verdict.elapsed == 500 * 60
         assert verdict.threshold == 6 * 60 * 60
 
+    def test_two_stalled_mapped_instances_of_the_same_task_get_distinct_verdicts(self) -> None:
+        """N Google Batch shards share one task_id; only map_index tells their verdicts apart."""
+        shard_a = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0, state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        shard_b = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=3, state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        verdict_a = stalled(shard_a, {}, NOW)
+        verdict_b = stalled(shard_b, {}, NOW)
+        assert verdict_a is not None
+        assert verdict_b is not None
+        assert verdict_a.task_id != verdict_b.task_id
+        assert verdict_a.task_id == 'run_gentropy_variant_annotation[0]'
+        assert verdict_b.task_id == 'run_gentropy_variant_annotation[3]'
+
+    def test_an_unmapped_stalled_task_reports_the_bare_task_id(self) -> None:
+        """map_index -1 is the overwhelming majority; the verdict must not grow a suffix for it."""
+        verdict = stalled(_running(minutes=500), {}, NOW)
+        assert verdict is not None
+        assert verdict.task_id == 'pts_target.run_pts_target'
+
 
 class TestTakeSnapshot:
     def test_counts_tasks_by_state(self) -> None:
@@ -135,6 +171,25 @@ class TestTakeSnapshot:
         assert snap.failed == ['c']
         assert snap.running == ['d']
 
+    def test_distinguishes_mapped_running_task_instances(self) -> None:
+        """The two Google Batch steps expand N task instances under one shared task_id.
+
+        Without map_index, `running` would list the same id N times with nothing to
+        tell the shards apart.
+        """
+        tasks = [TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0,
+                               state='running', start_date=NOW),
+                 TaskInstance(task_id='run_gentropy_variant_annotation', map_index=1,
+                               state='running', start_date=NOW)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.running == ['run_gentropy_variant_annotation[0]', 'run_gentropy_variant_annotation[1]']
+
+    def test_distinguishes_mapped_failed_task_instances(self) -> None:
+        tasks = [TaskInstance(task_id='t', map_index=0, state='failed'),
+                 TaskInstance(task_id='t', map_index=1, state='failed')]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.failed == ['t[0]', 't[1]']
+
     def test_a_task_with_no_state_is_counted_as_pending(self) -> None:
         """Airflow reports a null state for a task instance not yet scheduled."""
         snap = take_snapshot(_client([TaskInstance(task_id='a')]), _journal(), 'unified_pipeline', 'r', NOW)
@@ -143,33 +198,31 @@ class TestTakeSnapshot:
     def test_stalls_are_detected_from_the_journal_baseline(self) -> None:
         """A step_completed event for the task gives it a baseline, so this exercises the history path.
 
-        Uses a realistic group-qualified task id, matching what Airflow actually reports
-        (`@task_group(group_id=...)` with `prefix_group_id=True` on every step), rather
-        than a bare name that happens to equal itself and so cannot expose a namespace
-        mismatch between `TaskInstance.task_id` and `JournalEvent.step`.
-        """
-        tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
-                               start_date=NOW - timedelta(hours=9))]
-        journal = _journal([_completed('pts_target.run_pts_target', 3600.0)])
-        snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
-        assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
-        assert snap.stalls[0].basis == 'history'
-
-    def test_a_bare_step_name_in_the_journal_does_not_match_the_qualified_task_id(self) -> None:
-        """The failure mode this pins: a journal keyed on the bare step name, not the task id.
-
-        `pts_target` (a GCP billing label) and `pts_target.run_pts_target` (the real
-        Airflow task id) are different strings. If the baseline were ever looked up
-        under the wrong one, this would silently and permanently fall back to the
-        ceiling instead of raising, which is exactly why it needs a test rather than a
-        comment: nothing else would ever catch the regression.
+        The journal carries the bare step name (`pts_target`), the same spelling
+        `usage.StepUsage.step` and the GCP `step` label already use; `stalled` converts
+        the group-qualified Airflow task id down to it before looking up the baseline.
         """
         tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
                                start_date=NOW - timedelta(hours=9))]
         journal = _journal([_completed('pts_target', 3600.0)])
         snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
         assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
-        assert snap.stalls[0].basis == 'ceiling'
+        assert snap.stalls[0].basis == 'history'
+
+    def test_a_qualified_task_id_cannot_reach_the_journal_at_all(self) -> None:
+        """The failure mode this used to pin: a journal keyed on the qualified task id, not the bare step.
+
+        `pts_target` (the bare step name `stalled` looks baselines up under) and
+        `pts_target.run_pts_target` (the fully-qualified Airflow task id) are different
+        strings, and a journal entry written under the qualified id would silently and
+        permanently fall back to the ceiling instead of raising — indistinguishable from
+        an honest first run. `JournalEvent` now forbids a `.` in `step`
+        (`journal.py::JournalEvent._forbid_qualified_task_id`), so that mismatch can no
+        longer be constructed in the first place; this pins the defense at its source
+        instead of at `take_snapshot`.
+        """
+        with pytest.raises(ValidationError):
+            _completed('pts_target.run_pts_target', 3600.0)
 
     def test_stalls_are_detected_by_the_ceiling_when_there_is_no_history(self) -> None:
         """No baseline is the common case on early runs, not a fallback to be left untested."""
@@ -177,6 +230,18 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
         assert [s.task_id for s in snap.stalls] == ['slow']
         assert snap.stalls[0].basis == 'ceiling'
+
+    def test_stalls_for_two_mapped_shards_of_the_same_step_are_both_reported(self) -> None:
+        """Shard 3 of 40 hanging must not be indistinguishable from — or shadowed by — shard 1's stall."""
+        tasks = [TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0, state='running',
+                               start_date=NOW - timedelta(hours=9)),
+                 TaskInstance(task_id='run_gentropy_variant_annotation', map_index=3, state='running',
+                               start_date=NOW - timedelta(hours=9))]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert {s.task_id for s in snap.stalls} == {
+            'run_gentropy_variant_annotation[0]',
+            'run_gentropy_variant_annotation[3]',
+        }
 
     def test_a_healthy_run_reports_no_stalls(self) -> None:
         tasks = [TaskInstance(task_id='ok', state='running', start_date=NOW - timedelta(minutes=5))]
@@ -240,6 +305,20 @@ class TestRenderSnapshot:
     def test_failures_are_listed(self) -> None:
         out = render_snapshot(self._snapshot(failed=['run_pts_target']))
         assert 'run_pts_target' in out
+
+    def test_stall_lines_distinguish_mapped_instances(self) -> None:
+        """Two STALL lines for the same task_id, with nothing telling them apart, is the bug."""
+        out = render_snapshot(self._snapshot(stalls=[
+            StallVerdict(task_id='run_gentropy_variant_annotation[0]', elapsed=32400.0,
+                        threshold=21600.0, basis='ceiling'),
+            StallVerdict(task_id='run_gentropy_variant_annotation[3]', elapsed=32400.0,
+                        threshold=21600.0, basis='ceiling'),
+        ]))
+        stall_lines = [line for line in out.splitlines() if line.startswith('STALL')]
+        assert len(stall_lines) == 2
+        assert stall_lines[0] != stall_lines[1]
+        assert 'run_gentropy_variant_annotation[0]' in stall_lines[0]
+        assert 'run_gentropy_variant_annotation[3]' in stall_lines[1]
 
     def test_a_run_with_no_tasks_renders_cleanly(self) -> None:
         """A just-triggered run has no task instances yet — a common state, not an edge case."""

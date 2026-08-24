@@ -40,13 +40,23 @@ Matches `dev_uri` in `dags/config/unified_pipeline.py`. Release runs write to
 `open-targets-pre-data-releases` instead, which phase 1 does not target.
 """
 
+GCS_PRE_RELEASES_BUCKET = 'open-targets-pre-data-releases'
+"""Bucket holding published release runs, read as the reference side of a diff.
+
+Matches `release_uri` in `dags/config/unified_pipeline.py`, which builds it from this
+same literal string rather than importing it — currently hardcoded at
+`dags/config/unified_pipeline.py:40`.
+"""
+
 STALL_CEILING_SECONDS = 6 * 60 * 60
 """Absolute stall threshold for a step with no observed history.
 
-Most steps have no baseline on early runs: the billing export holds at most 18 of
-roughly 150 steps, and Airflow's own history is destroyed with the VM. This is the
-fallback, not the normal rule — a step with history is judged against its own
-observed maximum instead.
+This is the rule in practice, not the fallback: `stall.baseline_from_journal` can only
+build a step's observed maximum from a `step_completed` event earlier in the *same
+run's* journal, so the history rule fires only when a step is cleared and re-run within
+one run — see `stall.py`'s module docstring. Most steps never get that far: the
+billing export holds at most 18 of the pipeline's 132 steps, and Airflow's own history
+is destroyed with the VM.
 """
 
 STALL_MULTIPLIER = 2.5

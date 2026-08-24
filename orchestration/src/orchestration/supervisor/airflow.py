@@ -41,7 +41,8 @@ class TaskInstance(BaseModel):
     does not break parsing.
 
     Args:
-        task_id: The task's id within the DAG.
+        task_id: The task's id within the DAG. Shared by every instance of a mapped
+            task (`.partial().expand()`) — see `map_index` and `ref`.
         state: Airflow's state, or None for a task instance not yet scheduled.
         try_number: Which attempt this is.
         max_tries: Retries configured for the task. Zero throughout this pipeline.
@@ -51,6 +52,8 @@ class TaskInstance(BaseModel):
         queued_dttm: When it was queued. The gap to `start_date` is queueing time,
             which is part of task wall time but is not execution.
         operator: The operator class name, useful for telling GCE steps from Dataproc.
+        map_index: Which instance this is among a mapped task's expansion, or -1 for a
+            task instance that is not part of one — see `ref`.
     """
 
     model_config = ConfigDict(extra='ignore')
@@ -64,6 +67,23 @@ class TaskInstance(BaseModel):
     end_date: datetime | None = None
     queued_dttm: datetime | None = None
     operator: str | None = None
+    map_index: int = -1
+
+    @property
+    def ref(self) -> str:
+        """This task instance's identity, qualified with its map_index when it has one.
+
+        The two Google Batch steps use `.partial(task_id=...).expand(...)`
+        (`dags/unified_pipeline.py:476-482`), so N task instances share one `task_id`
+        and it alone cannot tell them apart. -1 is Airflow's value for every task
+        instance that is not part of a mapped operator — the overwhelming majority — so
+        it is left off entirely rather than appended as `[-1]`, keeping this identical
+        to `task_id` for every caller that never sees a mapped task.
+
+        Returns:
+            `task_id`, or `task_id[map_index]` when `map_index` is not -1.
+        """
+        return self.task_id if self.map_index == -1 else f'{self.task_id}[{self.map_index}]'
 
 
 class DagRun(BaseModel):
@@ -102,7 +122,7 @@ def token_request(base_url: str, username: str, password: str) -> tuple[str, dic
 
 
 _PAGE_SIZE = 100
-"""Task instances per request. The unified pipeline has roughly 150 steps."""
+"""Task instances per request. The unified pipeline has 132 steps."""
 
 
 class AirflowClient:

@@ -35,8 +35,16 @@ class JournalEvent(BaseModel):
     Args:
         event_type: What happened, e.g. `step_completed`, `step_failed`,
             `stall_detected`, `retrigger`.
-        step: The step it happened to, or None for run-level events.
+        step: The step it happened to, or None for run-level events. This is always the
+            bare `unified_pipeline.yaml` step name (`pts_target`), never the qualified
+            Airflow `task_id` (`pts_target.run_pts_target`) — the same spelling GCP uses
+            as its billing label and `usage.StepUsage.step` already carries. See
+            `stall.baseline_from_journal` for why the two spellings must not be mixed.
         try_number: Which attempt, so a retry is a distinct event.
+        map_index: Which instance of a mapped task this happened to, mirroring
+            `TaskInstance.map_index` — -1 (or None, for an event with no task instance
+            behind it) for one that is not part of a mapped operator. See `key` for why
+            it is folded into the key only when it distinguishes anything.
         at: When the agent observed it.
         payload: Event-specific detail. Durations live here, which is what makes the
             journal the durable duration record.
@@ -45,6 +53,7 @@ class JournalEvent(BaseModel):
     event_type: str
     step: str | None = None
     try_number: int | None = None
+    map_index: int | None = None
     at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -62,6 +71,29 @@ class JournalEvent(BaseModel):
             raise ValueError("must not contain '/': it becomes a path segment in the journal object name")
         return value
 
+    @field_validator('step')
+    @classmethod
+    def _forbid_qualified_task_id(cls, value: str | None) -> str | None:
+        """Reject a fully-qualified Airflow `task_id` where a bare step name belongs.
+
+        `step` must be the bare `unified_pipeline.yaml` step name (`pts_target`), never
+        the `task_group`-qualified `task_id` (`pts_target.run_pts_target`) — see this
+        class's docstring and `stall.baseline_from_journal` for why the two must not be
+        mixed. None of `unified_pipeline.yaml`'s step names contains a `.`, so a `.`
+        here unambiguously means a caller passed a `task_id`. Catching that at
+        construction time turns a permanent, symptomless silent-miss (a baseline keyed
+        in a namespace nothing ever looks up, `basis == 'ceiling'` forever, identical to
+        an honest first run) into an immediate `ValidationError` at the call site that
+        made the mistake.
+        """
+        if value is not None and '.' in value:
+            raise ValueError(
+                f"step={value!r} looks like a qualified Airflow task_id, not a step name: "
+                "strip everything from the first '.' onward (e.g. via step_from_task_id) "
+                'before constructing this event'
+            )
+        return value
+
     @property
     def key(self) -> str:
         """The idempotency key.
@@ -69,14 +101,25 @@ class JournalEvent(BaseModel):
         Two observations of the same thing produce the same key, which is what stops
         the fourth wakeup re-reporting the first wakeup's completions.
 
+        `map_index` joins the key only when it names a real mapped instance (neither
+        None nor -1, Airflow's value for a task instance outside a mapped operator).
+        Without that guard, every mapped step's N task instances — sharing one
+        `task_id` and therefore one `step` — would collapse onto a single key: the
+        first instance's event would record, and `Journal.append` would then silently
+        drop every other instance's event as a duplicate of it. Guarding the common,
+        unmapped case also means this key is unchanged in shape for every event
+        written before `map_index` existed.
+
         Returns:
-            The key, joining event type, step and try number where present.
+            The key, joining event type, step, try number and map index where present.
         """
         parts = [self.event_type]
         if self.step is not None:
             parts.append(self.step)
         if self.try_number is not None:
             parts.append(str(self.try_number))
+        if self.map_index is not None and self.map_index != -1:
+            parts.append(str(self.map_index))
         return '-'.join(parts)
 
 

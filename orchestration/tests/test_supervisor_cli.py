@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -16,11 +17,20 @@ from orchestration.supervisor.cli import (
     main,
     optional_columns,
     render_coverage,
+    render_diff,
     render_table,
     totals_by_group,
 )
+from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
+from orchestration.supervisor.diff import ColumnChange, DatasetDiff
+from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
-from orchestration.utils.common import GCP_PROJECT_PLATFORM, clean_label
+from orchestration.utils.common import (
+    GCP_PROJECT_PLATFORM,
+    GCS_PIPELINE_RUNS_BUCKET,
+    GCS_PRE_RELEASES_BUCKET,
+    clean_label,
+)
 
 RAW_RUN_ID = 'manual__2026-07-21T15:07:47.545737+00:00'
 CLEAN_RUN_ID = 'manual__2026-07-21t15-07-47-545737-00-00'
@@ -429,6 +439,411 @@ class TestSnapshotCommand:
         err = capsys.readouterr().err
         assert 'AIRFLOW_USERNAME' in err
         assert 'AIRFLOW_PASSWORD' not in err
+
+
+class TestDiffParser:
+    def test_run_and_reference_are_required(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.run == 'r'
+        assert args.reference == 'rel'
+
+    def test_threshold_defaults_to_five_percent(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.threshold == 0.05
+
+    def test_threshold_is_overridable(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel', '--threshold', '0.1'])
+        assert args.threshold == 0.1
+
+    def test_bucket_flags_default_to_the_standard_buckets(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET
+        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET
+
+    def test_bucket_flags_are_overridable(self) -> None:
+        args = build_parser().parse_args(
+            ['diff', '--run', 'r', '--reference', 'rel', '--run-bucket', 'x', '--reference-bucket', 'y']
+        )
+        assert args.run_bucket == 'x'
+        assert args.reference_bucket == 'y'
+
+    def test_json_flag_defaults_off(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.json is False
+
+    def test_rows_flag_defaults_off(self) -> None:
+        """Row counts are opt-in: a full release costs ~10s without them, ~7min with."""
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.rows is False
+
+    def test_rows_flag_is_settable(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel', '--rows'])
+        assert args.rows is True
+
+
+def _diff(**overrides: Any) -> DatasetDiff:
+    base: dict[str, Any] = {
+        'dataset': 'output/disease',
+        'side': 'both',
+        'run_rows': 1000,
+        'reference_rows': 1000,
+        'run_bytes': 1000,
+        'reference_bytes': 1000,
+        'run_files': 2,
+        'reference_files': 2,
+        'columns': [],
+        'countable': True,
+    }
+    base.update(overrides)
+    return DatasetDiff(**base)
+
+
+class TestRenderDiff:
+    def test_no_material_differences_says_so(self) -> None:
+        out = render_diff([_diff()], Skipped(), threshold=0.05)
+        assert '1 datasets compared, 0 with material changes' in out
+        assert 'No material differences.' in out
+
+    def test_schema_changes_are_shown_even_when_the_size_move_is_below_threshold(self) -> None:
+        """A schema-only diff has an unmoved row and byte count.
+
+        With `run_bytes == reference_bytes` and `run_rows == reference_rows`, only
+        `diff.columns` being non-empty can be responsible for this diff being material
+        or for the column line appearing at all.
+        """
+        diff = _diff(columns=[ColumnChange(column='new_col', kind='added', run_type='string')])
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert '1 with material changes' in out
+        assert 'added' in out
+        assert 'new_col' in out
+
+    def test_a_run_only_dataset_is_named_as_such(self) -> None:
+        diff = _diff(side='run_only', reference_rows=None, reference_bytes=0, reference_files=0)
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert 'PRESENT IN THE RUN ONLY' in out
+
+    def test_a_reference_only_dataset_is_named_as_such(self) -> None:
+        diff = _diff(side='reference_only', run_rows=None, run_bytes=0, run_files=0)
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert 'PRESENT IN THE REFERENCE ONLY' in out
+
+    def test_an_uncountable_dataset_renders_n_a_not_a_blank_or_zero(self) -> None:
+        """`countable=False` means the format has no row footer at all.
+
+        Both sides carry `rows=None`. The report must read `n/a`, not an empty cell and
+        not `0`, either of which would misread as "this dataset really has zero rows".
+        The byte side is moved past the threshold so the diff is material without the
+        (skipped, both-None) row comparison being what makes it so.
+        """
+        diff = _diff(run_rows=None, reference_rows=None, countable=False, run_bytes=2000)
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert 'n/a -> n/a' in out
+        assert '0 -> 0' not in out
+
+    def test_a_missing_row_count_on_a_countable_dataset_renders_a_dash_not_n_a(self) -> None:
+        """Distinguishes `_MISSING` ('-') from `_UNCOUNTABLE` ('n/a').
+
+        `countable=True` here (the format does have footers); `reference_rows` is
+        simply unset. `_count` must read this as `-`, not fall through to the
+        `n/a` branch that a format with no footer at all gets.
+        """
+        diff = _diff(reference_rows=None, run_rows=5000, run_bytes=2000)
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert 'rows - -> 5,000' in out
+        assert 'n/a' not in out
+
+    def test_row_counts_are_thousands_separated(self) -> None:
+        diff = _diff(run_rows=1234567, reference_rows=1000, run_bytes=2000)
+        out = render_diff([diff], Skipped(), threshold=0.05)
+        assert '1,234,567' in out
+
+    def test_threshold_is_shown_as_a_percentage(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.1)
+        assert '10%' in out
+
+    def test_the_footer_states_what_is_not_compared(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.05)
+        assert 'intermediate/' in out
+        assert 'templated' in out
+
+    def test_stages_without_config_are_reported_with_a_count_and_gentropy_named(self) -> None:
+        skipped = Skipped(stages_without_config=['gentropy_l2g', 'gentropy_variant_annotation'])
+        out = render_diff([], skipped, threshold=0.05)
+        assert '2 steps skipped' in out
+        assert 'gentropy' in out
+
+    def test_steps_without_datasets_are_reported_as_normal_not_an_anomaly(self) -> None:
+        skipped = Skipped(steps_without_datasets=['pts_association'])
+        out = render_diff([], skipped, threshold=0.05)
+        assert '1 steps declare no release dataset' in out
+        assert 'not an anomaly' in out
+
+    def test_datasets_absent_from_both_are_named(self) -> None:
+        skipped = Skipped(datasets_absent_from_both=['output/orphan'])
+        out = render_diff([], skipped, threshold=0.05)
+        assert '1 datasets absent from both buckets' in out
+        assert 'output/orphan' in out
+
+    def test_undeclared_datasets_are_flagged_as_a_possible_pipeline_drop(self) -> None:
+        skipped = Skipped(undeclared_in_buckets=['output/retired'])
+        out = render_diff([], skipped, threshold=0.05)
+        assert 'output/retired' in out
+        assert 'dropped from the pipeline' in out
+
+    def test_no_skip_footer_lines_appear_when_nothing_was_skipped(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.05)
+        assert 'steps skipped' not in out
+        assert 'declare no release dataset' not in out
+        assert 'absent from both buckets' not in out
+        assert 'declared by no' not in out
+
+    def test_rows_skipped_notes_that_rows_were_not_read(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.05, rows_skipped=True)
+        assert '--rows' in out
+        assert 'not read' in out
+
+    def test_rows_skipped_defaults_to_false_and_adds_no_note(self) -> None:
+        """`render_diff` itself still defaults `rows_skipped` to False.
+
+        The CLI is what makes skipping rows the actual default, by calling this with
+        `rows_skipped=not args.rows`; this pins that `render_diff`'s own default is
+        unchanged, so a caller that does not pass the flag gets no note.
+        """
+        out = render_diff([], Skipped(), threshold=0.05)
+        assert '--rows' not in out
+        assert 'not read' not in out
+
+
+class TestDiffLoadersAgainstTheRealConfig:
+    """Measured against both configs and `unified_pipeline.yaml` on 2026-08-24."""
+
+    def test_loads_pis_and_pts_only(self) -> None:
+        """Gentropy is deliberately excluded; its config is not `{stage}/config.yaml`-shaped."""
+        assert set(stage_configs()) == {'pis', 'pts'}
+
+    def test_loads_every_declared_step(self) -> None:
+        steps = unified_pipeline_steps()
+        assert len(steps) == 132
+        assert 'pts_disease' in steps
+
+    def test_collect_diffs_reconciles_against_the_measured_release_inventory(self) -> None:
+        """With both buckets empty, every declared dataset is absent from both sides.
+
+        Pins the branch's own measured totals (see `test_supervisor_datasets.py`): 71
+        release datasets total, 12 gentropy steps with no local config, 63 steps
+        producing none of the remaining 120 pis/pts steps.
+        """
+
+        class _EmptyBucket:
+            def list_blobs(self, prefix: str) -> list[Any]:
+                return []
+
+        diffs, skipped = collect_diffs(
+            _EmptyBucket(), 'run', _EmptyBucket(), 'release', unified_pipeline_steps(), stage_configs()
+        )
+        assert diffs == []
+        assert len(skipped.stages_without_config) == 12
+        assert len(skipped.steps_without_datasets) == 63
+        assert len(skipped.datasets_absent_from_both) == 71
+        assert skipped.undeclared_in_buckets == []
+
+
+@pytest.fixture
+def diff_command(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch `storage.Client`, `collect_diffs`, and the two config loaders.
+
+    The loaders are stubbed to a single tiny step so tests are isolated from the real
+    yaml files and from each other; `TestDiffLoadersAgainstTheRealConfig` above already
+    covers the loaders against the real repo. `collect_diffs` is stubbed with an empty
+    result by default; tests override `.return_value` to check rendering.
+    """
+    buckets: dict[str, MagicMock] = {}
+
+    def fake_bucket(name: str) -> MagicMock:
+        return buckets.setdefault(name, MagicMock())
+
+    storage_client = MagicMock()
+    storage_client.bucket.side_effect = fake_bucket
+    fake_storage = MagicMock()
+    fake_storage.Client.return_value = storage_client
+    monkeypatch.setattr(cli, 'storage', fake_storage)
+    monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
+    monkeypatch.setattr(cli, 'stage_configs', MagicMock(return_value={'pts': {'steps': {}}}))
+    collect = MagicMock(return_value=([], Skipped()))
+    monkeypatch.setattr(cli, 'collect_diffs', collect)
+    collect.storage_client = storage_client
+    collect.buckets = buckets
+    return collect
+
+
+class TestDiffCommand:
+    def test_buckets_are_constructed_from_the_default_bucket_names(self, diff_command: MagicMock) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        diff_command.storage_client.bucket.assert_any_call(GCS_PIPELINE_RUNS_BUCKET)
+        diff_command.storage_client.bucket.assert_any_call(GCS_PRE_RELEASES_BUCKET)
+
+    def test_the_run_bucket_and_reference_bucket_are_not_swapped(self, diff_command: MagicMock) -> None:
+        """Each bucket object must reach `collect_diffs` in its own slot, not the other's.
+
+        Both bucket names are always called regardless of which variable holds which
+        object, so a test only checking `assert_any_call` on each name would not catch
+        the two being swapped; this checks the actual objects `collect_diffs` receives.
+        """
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        args = diff_command.call_args.args
+        assert args[0] is diff_command.buckets[GCS_PIPELINE_RUNS_BUCKET]
+        assert args[2] is diff_command.buckets[GCS_PRE_RELEASES_BUCKET]
+
+    def test_bucket_flags_override_the_defaults(self, diff_command: MagicMock) -> None:
+        assert (
+            main(
+                [
+                    'diff',
+                    '--run',
+                    'myrun',
+                    '--reference',
+                    'rel1',
+                    '--run-bucket',
+                    'x',
+                    '--reference-bucket',
+                    'y',
+                ]
+            )
+            == 0
+        )
+        diff_command.storage_client.bucket.assert_any_call('x')
+        diff_command.storage_client.bucket.assert_any_call('y')
+
+    def test_collect_diffs_is_called_with_the_run_and_reference_prefixes(self, diff_command: MagicMock) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        args = diff_command.call_args.args
+        assert args[1] == 'myrun'
+        assert args[3] == 'rel1'
+
+    def test_collect_diffs_receives_the_loaded_steps_and_stage_configs(self, diff_command: MagicMock) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        args = diff_command.call_args.args
+        assert args[4] == ['pts_disease']
+        assert args[5] == {'pts': {'steps': {}}}
+
+    def test_text_output_renders_the_report(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        diff_command.return_value = ([_diff()], Skipped())
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        out = capsys.readouterr().out
+        assert 'datasets compared' in out
+
+    def test_json_output_carries_diffs_and_skipped(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        diff_command.return_value = ([_diff()], Skipped(stages_without_config=['gentropy_l2g']))
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--json']) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload['diffs'][0]['dataset'] == 'output/disease'
+        assert payload['skipped']['stages_without_config'] == ['gentropy_l2g']
+
+    def test_the_threshold_flag_reaches_rendering(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A +30% byte move is material at the default 5% threshold but not at 50%."""
+        diff_command.return_value = ([_diff(run_bytes=1300, reference_bytes=1000)], Skipped())
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--threshold', '0.5']) == 0
+        out = capsys.readouterr().out
+        assert '0 with material changes' in out
+
+    def test_a_footer_reader_is_passed_to_collect_diffs_for_each_side_with_rows(
+        self, diff_command: MagicMock
+    ) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--rows']) == 0
+        args = diff_command.call_args.args
+        assert callable(args[6])
+        assert callable(args[7])
+
+    def test_default_passes_none_as_both_footer_readers(self, diff_command: MagicMock) -> None:
+        """Row counts are opt-in, so the default must skip building `footer_reader` for either side.
+
+        Building it for real would still construct two `pyarrow` GCS filesystems for
+        no reason; passing `None` through for both is what makes the default fast.
+        """
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        args = diff_command.call_args.args
+        assert args[6] is None
+        assert args[7] is None
+
+    def test_default_reaches_the_rendered_footer_note(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Row counts being skipped by default must be visible in the report, not silent."""
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        out = capsys.readouterr().out
+        assert '--rows' in out
+
+    def test_with_the_rows_flag_the_footer_carries_no_note(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--rows']) == 0
+        out = capsys.readouterr().out
+        assert '--rows' not in out
+
+    def test_the_same_run_and_reference_name_across_different_buckets_is_a_real_comparison(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`--run 26.09 --reference 26.09` against two different buckets is ordinary CLI input.
+
+        A run and the release of the same name is the most natural pre-publication
+        sanity check there is, and must not be rejected just because the two `--run`/
+        `--reference` values happen to match. `collect_diffs` is left un-mocked here
+        (unlike `diff_command`'s other tests) so this exercises the real per-side
+        routing: each side's footer reader is built from its own `--*-bucket` name and
+        reads distinguishable row counts (5 vs 9), so a reader swapped between the two
+        sides would show up as a wrong number, not just a missing one.
+        """
+        run_bucket = MagicMock()
+        run_bucket.list_blobs.return_value = [SimpleNamespace(name='same-name/output/disease/part-0.parquet', size=1)]
+        reference_bucket = MagicMock()
+        reference_bucket.list_blobs.return_value = [
+            SimpleNamespace(name='same-name/output/disease/part-0.parquet', size=1)
+        ]
+        buckets = {'run-bucket-name': run_bucket, 'reference-bucket-name': reference_bucket}
+
+        storage_client = MagicMock()
+        storage_client.bucket.side_effect = lambda name: buckets[name]
+        fake_storage = MagicMock()
+        fake_storage.Client.return_value = storage_client
+        monkeypatch.setattr(cli, 'storage', fake_storage)
+
+        def fake_footer_reader(bucket_name: str) -> Callable[[str], Footer]:
+            rows = 5 if bucket_name == 'run-bucket-name' else 9
+            return lambda name: Footer(rows=rows)
+
+        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
+        monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
+        monkeypatch.setattr(
+            cli,
+            'stage_configs',
+            MagicMock(
+                return_value={'pts': {'steps': {'disease': [{'name': 't', 'destination': 'output/disease'}]}}}
+            ),
+        )
+
+        assert (
+            main([
+                'diff',
+                '--run',
+                'same-name',
+                '--reference',
+                'same-name',
+                '--run-bucket',
+                'run-bucket-name',
+                '--reference-bucket',
+                'reference-bucket-name',
+                '--rows',
+            ])
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert 'rows 9 -> 5' in out
 
 
 @pytest.fixture
