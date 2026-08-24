@@ -204,10 +204,10 @@ class TestScopedComparison:
         assert disease.reference_files == DISEASE_FILES
 
 
-class TestNoRowsMatchesTheFullPathMinusRows:
-    """Pins that `--no-rows` differs from the full path only in what it omits."""
+class TestDefaultMatchesTheRowsFlagMinusRows:
+    """Pins that the default (no row counts) path differs from `--rows` only in what it omits."""
 
-    def test_no_rows_returns_the_same_datasets_and_bytes_with_rows_none(
+    def test_the_default_returns_the_same_datasets_and_bytes_with_rows_none(
         self,
         run_bucket: Any,
         reference_bucket: Any,
@@ -221,9 +221,9 @@ class TestNoRowsMatchesTheFullPathMinusRows:
             run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), None, None
         )
 
-        assert with_rows, 'nothing to compare the fast path against'
-        # the full path must actually have rows to omit, or "every row count is None"
-        # below is true of both paths and proves nothing about what --no-rows skipped.
+        assert with_rows, 'nothing to compare the default path against'
+        # `--rows` must actually have rows to omit, or "every row count is None" below
+        # is true of both paths and proves nothing about what the default skips.
         assert any(d.run_rows is not None or d.reference_rows is not None for d in with_rows)
 
         by_dataset_with = {d.dataset: d for d in with_rows}

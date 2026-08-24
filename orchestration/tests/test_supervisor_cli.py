@@ -471,13 +471,14 @@ class TestDiffParser:
         args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
         assert args.json is False
 
-    def test_no_rows_flag_defaults_off(self) -> None:
+    def test_rows_flag_defaults_off(self) -> None:
+        """Row counts are opt-in: a full release costs ~10s without them, ~7min with."""
         args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
-        assert args.no_rows is False
+        assert args.rows is False
 
-    def test_no_rows_flag_is_settable(self) -> None:
-        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel', '--no-rows'])
-        assert args.no_rows is True
+    def test_rows_flag_is_settable(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel', '--rows'])
+        assert args.rows is True
 
 
 def _diff(**overrides: Any) -> DatasetDiff:
@@ -598,12 +599,18 @@ class TestRenderDiff:
 
     def test_rows_skipped_notes_that_rows_were_not_read(self) -> None:
         out = render_diff([], Skipped(), threshold=0.05, rows_skipped=True)
-        assert '--no-rows' in out
+        assert '--rows' in out
         assert 'not read' in out
 
     def test_rows_skipped_defaults_to_false_and_adds_no_note(self) -> None:
+        """`render_diff` itself still defaults `rows_skipped` to False.
+
+        The CLI is what makes skipping rows the actual default, by calling this with
+        `rows_skipped=not args.rows`; this pins that `render_diff`'s own default is
+        unchanged, so a caller that does not pass the flag gets no note.
+        """
         out = render_diff([], Skipped(), threshold=0.05)
-        assert '--no-rows' not in out
+        assert '--rows' not in out
         assert 'not read' not in out
 
 
@@ -745,38 +752,39 @@ class TestDiffCommand:
         out = capsys.readouterr().out
         assert '0 with material changes' in out
 
-    def test_a_footer_reader_is_passed_to_collect_diffs_for_each_side_by_default(
+    def test_a_footer_reader_is_passed_to_collect_diffs_for_each_side_with_rows(
         self, diff_command: MagicMock
     ) -> None:
-        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--rows']) == 0
         args = diff_command.call_args.args
         assert callable(args[6])
         assert callable(args[7])
 
-    def test_no_rows_passes_none_as_both_footer_readers(self, diff_command: MagicMock) -> None:
-        """`--no-rows` must skip building `footer_reader` for either side entirely.
+    def test_default_passes_none_as_both_footer_readers(self, diff_command: MagicMock) -> None:
+        """Row counts are opt-in, so the default must skip building `footer_reader` for either side.
 
         Building it for real would still construct two `pyarrow` GCS filesystems for
-        no reason; passing `None` through for both is what makes `--no-rows` fast.
+        no reason; passing `None` through for both is what makes the default fast.
         """
-        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--no-rows']) == 0
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
         args = diff_command.call_args.args
         assert args[6] is None
         assert args[7] is None
 
-    def test_no_rows_reaches_the_rendered_footer_note(
+    def test_default_reaches_the_rendered_footer_note(
         self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--no-rows']) == 0
-        out = capsys.readouterr().out
-        assert '--no-rows' in out
-
-    def test_without_the_flag_the_footer_carries_no_no_rows_note(
-        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+        """Row counts being skipped by default must be visible in the report, not silent."""
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
         out = capsys.readouterr().out
-        assert '--no-rows' not in out
+        assert '--rows' in out
+
+    def test_with_the_rows_flag_the_footer_carries_no_note(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--rows']) == 0
+        out = capsys.readouterr().out
+        assert '--rows' not in out
 
     def test_the_same_run_and_reference_name_across_different_buckets_is_a_real_comparison(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -830,6 +838,7 @@ class TestDiffCommand:
                 'run-bucket-name',
                 '--reference-bucket',
                 'reference-bucket-name',
+                '--rows',
             ])
             == 0
         )

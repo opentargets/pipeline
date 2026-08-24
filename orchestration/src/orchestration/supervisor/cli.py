@@ -334,10 +334,11 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, ro
         diffs: Every dataset compared.
         skipped: What was not covered.
         threshold: Fractional change past which a size or row move is reported.
-        rows_skipped: True when `--no-rows` skipped footer reads for this run. Without
-            this, every row count prints as `-` (`_count`'s "absent" symbol, since
-            `countable` is still True for parquet), which reads as every dataset's
-            counterpart being missing rather than as rows simply not having been read.
+        rows_skipped: True when footer reads were skipped for this run, which is the
+            default (`--rows` opts into them). Without this, every row count prints as
+            `-` (`_count`'s "absent" symbol, since `countable` is still True for
+            parquet), which reads as every dataset's counterpart being missing rather
+            than as rows simply not having been read.
 
     Returns:
         The rendered report.
@@ -370,8 +371,9 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, ro
     ]
     if rows_skipped:
         footer.append(
-            'Row counts were not read (--no-rows). Sizes, file counts and presence are compared; '
-            'a row count of "-" above means not read, not absent.'
+            'Row counts were not read (pass --rows to include them, ~7min for a full release). '
+            'Sizes, file counts and presence are compared; a row count of "-" above means not '
+            'read, not absent.'
         )
     if skipped.stages_without_config:
         footer.append(
@@ -431,9 +433,13 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument('--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help='bucket holding the run')
     diff.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
     diff.add_argument(
-        '--no-rows',
+        '--rows',
         action='store_true',
-        help='skip row counts (sizes, file counts and presence only); seconds instead of minutes',
+        help=(
+            'also read row counts from parquet footers. Sizes, file counts and presence are '
+            'always compared and take ~10s for a full release; row counts add ~7min (2,602 '
+            'footers across both sides, measured 2026-08-24)'
+        ),
     )
     diff.add_argument('--json', action='store_true', help='emit JSON instead of text')
 
@@ -483,8 +489,8 @@ def main(argv: list[str] | None = None) -> int:
             storage_client = storage.Client()
             run_bucket = storage_client.bucket(args.run_bucket)
             reference_bucket = storage_client.bucket(args.reference_bucket)
-            run_read_footer = None if args.no_rows else footer_reader(args.run_bucket)
-            reference_read_footer = None if args.no_rows else footer_reader(args.reference_bucket)
+            run_read_footer = footer_reader(args.run_bucket) if args.rows else None
+            reference_read_footer = footer_reader(args.reference_bucket) if args.rows else None
             diffs, skipped = collect_diffs(
                 run_bucket,
                 args.run,
@@ -502,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 sys.stdout.write(json.dumps(payload, indent=2) + '\n')
             else:
-                sys.stdout.write(render_diff(diffs, skipped, args.threshold, rows_skipped=args.no_rows) + '\n')
+                sys.stdout.write(render_diff(diffs, skipped, args.threshold, rows_skipped=not args.rows) + '\n')
             return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')
