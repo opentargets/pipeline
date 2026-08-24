@@ -29,13 +29,14 @@ from pydantic import BaseModel
 
 from orchestration.supervisor.airflow import TaskInstance
 from orchestration.supervisor.journal import JournalEvent
+from orchestration.supervisor.step_identity import step_from_task_id
 from orchestration.utils.common import STALL_CEILING_SECONDS, STALL_MULTIPLIER
 
 Baseline = dict[str, float]
-"""Observed maximum duration in seconds, keyed by fully-qualified Airflow `task_id`.
+"""Observed maximum duration in seconds, keyed by the bare `unified_pipeline.yaml` step name.
 
-See `baseline_from_journal` for why the key is the qualified `task_id` and not the
-bare step name.
+See `baseline_from_journal` for why the key is the bare step name and not the
+fully-qualified `task_id`.
 """
 
 _ACTIVE_STATES = frozenset({'running', 'deferred', 'restarting'})
@@ -87,24 +88,29 @@ class StallVerdict(BaseModel):
 def baseline_from_journal(events: list[JournalEvent]) -> Baseline:
     """Build a per-step baseline from journalled completions.
 
-    `JournalEvent.step` must hold the fully-qualified Airflow `task_id` — the group
-    prefix included, e.g. `pts_target.run_pts_target` — because that is what `stalled`
-    looks up against (`task.task_id`, taken straight from the Airflow API). This is
-    deliberately not the bare step name (`pts_target`) used elsewhere for GCP billing
-    labels: every step in this pipeline runs inside a `@task_group(group_id=step_name)`
-    with `prefix_group_id` defaulting to True, so the two spellings differ for every
-    step, not just some. A journal written with the bare name would build a baseline
-    keyed in a namespace `stalled` never looks up, and every lookup would silently miss
-    forever — not raise, not warn, just fall back to the ceiling on every verdict,
-    which is also the correct, expected shape of an early run with no history. There is
-    no symptom that tells the two apart from the outside.
+    `JournalEvent.step` holds the bare `unified_pipeline.yaml` step name (`pts_target`),
+    the same spelling GCP uses as its billing label and `usage.StepUsage.step` already
+    carries. That is deliberately not the fully-qualified Airflow `task_id`
+    (`pts_target.run_pts_target`): every step in this pipeline runs inside a
+    `@task_group(group_id=step_name)` with `prefix_group_id` defaulting to True, so the
+    two spellings differ for every step, not just some. `stalled` converts the task id
+    it is handed down to the bare step name (`step_from_task_id`) before looking up the
+    baseline, so both sides of the lookup agree.
+
+    The direction matters because a mismatch here fails silently and permanently: a
+    baseline keyed in a namespace `stalled` never looks up would silently miss on every
+    lookup forever — not raise, not warn, just fall back to the ceiling on every verdict,
+    which is also the correct, expected shape of an early run with no history.
+    `basis == 'ceiling'` is the only symptom, and it is indistinguishable from an honest
+    first run. That is why `tests/test_supervisor_snapshot.py` pins both directions
+    rather than relying on this docstring alone.
 
     Args:
         events: The run journal, or several runs' journals concatenated. `step` on each
-            `step_completed` event must be the fully-qualified `task_id`, as above.
+            `step_completed` event must be the bare step name, as above.
 
     Returns:
-        The observed maximum duration per step (keyed by fully-qualified `task_id`).
+        The observed maximum duration per step (keyed by the bare step name).
         Steps never seen are absent, which is what makes the ceiling fallback necessary
         rather than optional. A completion whose `duration` cannot be read as a number
         is skipped rather than raising, so one malformed event degrades to a partial
@@ -149,7 +155,7 @@ def stalled(
         return None
 
     elapsed = (now - task.start_date).total_seconds()
-    observed = baseline.get(task.task_id)
+    observed = baseline.get(step_from_task_id(task.task_id))
     threshold = observed * multiplier if observed is not None else ceiling
     basis: Literal['history', 'ceiling'] = 'history' if observed is not None else 'ceiling'
 

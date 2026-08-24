@@ -143,30 +143,30 @@ class TestTakeSnapshot:
     def test_stalls_are_detected_from_the_journal_baseline(self) -> None:
         """A step_completed event for the task gives it a baseline, so this exercises the history path.
 
-        Uses a realistic group-qualified task id, matching what Airflow actually reports
-        (`@task_group(group_id=...)` with `prefix_group_id=True` on every step), rather
-        than a bare name that happens to equal itself and so cannot expose a namespace
-        mismatch between `TaskInstance.task_id` and `JournalEvent.step`.
-        """
-        tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
-                               start_date=NOW - timedelta(hours=9))]
-        journal = _journal([_completed('pts_target.run_pts_target', 3600.0)])
-        snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
-        assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
-        assert snap.stalls[0].basis == 'history'
-
-    def test_a_bare_step_name_in_the_journal_does_not_match_the_qualified_task_id(self) -> None:
-        """The failure mode this pins: a journal keyed on the bare step name, not the task id.
-
-        `pts_target` (a GCP billing label) and `pts_target.run_pts_target` (the real
-        Airflow task id) are different strings. If the baseline were ever looked up
-        under the wrong one, this would silently and permanently fall back to the
-        ceiling instead of raising, which is exactly why it needs a test rather than a
-        comment: nothing else would ever catch the regression.
+        The journal carries the bare step name (`pts_target`), the same spelling
+        `usage.StepUsage.step` and the GCP `step` label already use; `stalled` converts
+        the group-qualified Airflow task id down to it before looking up the baseline.
         """
         tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
                                start_date=NOW - timedelta(hours=9))]
         journal = _journal([_completed('pts_target', 3600.0)])
+        snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
+        assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
+        assert snap.stalls[0].basis == 'history'
+
+    def test_a_qualified_task_id_in_the_journal_does_not_match_the_bare_step_name(self) -> None:
+        """The failure mode this pins: a journal keyed on the qualified task id, not the bare step.
+
+        `pts_target` (the bare step name `stalled` now looks baselines up under) and
+        `pts_target.run_pts_target` (the fully-qualified Airflow task id) are different
+        strings. If a journal entry were ever written under the qualified id, this would
+        silently and permanently fall back to the ceiling instead of raising, which is
+        exactly why it needs a test rather than a comment: nothing else would ever catch
+        the regression.
+        """
+        tasks = [TaskInstance(task_id='pts_target.run_pts_target', state='running',
+                               start_date=NOW - timedelta(hours=9))]
+        journal = _journal([_completed('pts_target.run_pts_target', 3600.0)])
         snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
         assert [s.task_id for s in snap.stalls] == ['pts_target.run_pts_target']
         assert snap.stalls[0].basis == 'ceiling'
