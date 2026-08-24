@@ -799,7 +799,7 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
             (f.col('BETA_Burden') + f.col('SE_Burden')).alias('betaConfidenceIntervalUpper'),
             f.col('Pvalue_Burden').alias('resourceScore'),
             f.lit('EUR').alias('ancestry'),
-            f.lit('HANCESTRO_0009').alias('ancestryId'),
+            f.lit('HANCESTRO_0005').alias('ancestryId'),
             f.lit('Genebass').alias('projectId'),
             f.lit('UK Biobank 450k').alias('cohortId'),
             (f.col('n_cases') + f.coalesce('n_controls', f.lit(0))).alias('studySampleSize'),
