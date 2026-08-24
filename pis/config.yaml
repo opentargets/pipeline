@@ -372,6 +372,10 @@ steps:
       source: https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs41588-026-02553-7/MediaObjects/41588_2026_2553_MOESM4_ESM.xlsx
       destination: input/evidence/gene_burden/genes_health.xlsx
 
+    - name: copy gene_burden brava
+      source: https://www.medrxiv.org/content/medrxiv/early/2026/05/24/2026.05.21.26353759/DC2/embed/media-2.xlsx
+      destination: input/evidence/gene_burden/brava.xlsx
+
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
       do:

@@ -88,6 +88,12 @@ def gene_burden(
     gnh_gene_based_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST9')
     gnh_meta_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST13')
     gnh_recessive_df = _excel_sheet_to_spark(spark, source['genes_and_health'], 'ST15')
+    brava_s4_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S4')
+    brava_s5_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S5')
+    brava_s12_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S12')
+    brava_s13_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S13')
+    brava_s14_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S14')
+    brava_s15_df = _excel_sheet_to_spark(spark, source['brava'], 'Table S15')
     burden_curation = spark.load_data(
         source['curated_studies'], header=True, sep='\t', format='csv', schema=CURATION_SCHEMA
     )
@@ -99,6 +105,14 @@ def gene_burden(
         process_finngen_gene_burden(finngen_df, finngen_manifest_df, finngen_version),
         process_cvdi_gene_burden(spark, cvdi_associations_df, cvdi_p_value_cutoff_df),
         process_genes_and_health_gene_burden(st9_df=gnh_gene_based_df, st13_df=gnh_meta_df, st15_df=gnh_recessive_df),
+        process_brava_gene_burden(
+            s4_df=brava_s4_df,
+            s5_df=brava_s5_df,
+            s12_df=brava_s12_df,
+            s13_df=brava_s13_df,
+            s14_df=brava_s14_df,
+            s15_df=brava_s15_df,
+        ),
     ]
     union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
     evd_df = reduce(union_by_diff_schema, burden_evidence_sets).distinct()
@@ -301,7 +315,7 @@ GNH_MAF_DESC = {
 }
 
 
-def _gnh_map(mapping: dict[str, str]) -> Any:
+def _map_col(mapping: dict[str, str]) -> Any:
     """Build a Spark map literal from a python dict for column-value lookups."""
     return f.create_map([f.lit(x) for pair in mapping.items() for x in pair])
 
@@ -319,9 +333,9 @@ def _gnh_method_overview(collapsing: Any, variant_mask_col: Any, freq_col: Any, 
     return f.concat(
         collapsing,
         f.lit(' test carried out with '),
-        _gnh_map(GNH_VARIANT_MASK_DESC)[variant_mask_col],
+        _map_col(GNH_VARIANT_MASK_DESC)[variant_mask_col],
         f.lit(' '),
-        _gnh_map(GNH_MAF_DESC)[f.lower(freq_col.cast('string'))],
+        _map_col(GNH_MAF_DESC)[f.lower(freq_col.cast('string'))],
         f.lit(suffix),
     )
 
@@ -346,7 +360,7 @@ def _process_gnh_additive(st9_df: DataFrame) -> DataFrame:
         f.lit('dominant').alias('allelicRequirements'),
         f.lit('Genes & Health').alias('cohortId'),
         f.concat_ws('_', f.col('TEST'), f.col('Mask')).alias('statisticalMethod'),
-        _gnh_method_overview(_gnh_map(GNH_TEST_DESC)[f.col('TEST')], f.col('Variant Mask'), f.col('Freq'), '.').alias(
+        _gnh_method_overview(_map_col(GNH_TEST_DESC)[f.col('TEST')], f.col('Variant Mask'), f.col('Freq'), '.').alias(
             'statisticalMethodOverview'
         ),
     )
@@ -438,15 +452,9 @@ def process_genes_and_health_gene_burden(
         [_process_gnh_additive(st9_df), _process_gnh_meta(st13_df), _process_gnh_recessive(st15_df)],
     )
 
-    # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Mirror the AZ/Genebass fix and
-    # substitute the minimum non-zero p-value so they pass validation instead of being dropped.
-    zero_p = gh_df.filter(f.col('pValue') == 0.0).count()
-    if zero_p:
-        logger.warning(f'There are {zero_p} Genes & Health evidence with a p-value of 0.0.')
-        minimum_pvalue = gh_df.filter(f.col('pValue') > 0.0).agg({'pValue': 'min'}).collect()[0]['min(pValue)']
-        gh_df = gh_df.withColumn(
-            'pValue', f.when(f.col('pValue') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('pValue'))
-        )
+    # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Substitute the minimum non-zero
+    # p-value so they pass validation instead of being dropped.
+    gh_df = _substitute_zero_pvalues(gh_df, 'pValue', 'Genes & Health')
 
     # Local column expressions reused below (p-value exponent, and the effect ± standard error interval).
     p_exponent = f.log10(f.col('pValue')).cast('int') - f.lit(1)
@@ -631,12 +639,7 @@ def process_az_gene_burden(
     # This is a bug we still have to ellucidate and it might be due to a float overflow.
     # These evidence need to be manually corrected in order not to lose them and for them to pass validation
     # As an interim solution, their p value will equal to the minimum in the evidence set.
-    logger.warning(f'There are {az_phewas_df.filter(f.col("pValue") == 0.0).count()} evidence with a p-value of 0.0.')
-    minimum_pvalue = az_phewas_df.filter(f.col('pValue') > 0.0).agg({'pValue': 'min'}).collect()[0]['min(pValue)']
-    az_phewas_df = az_phewas_df.withColumn(
-        'pValue',
-        f.when(f.col('pValue') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('pValue')),
-    )
+    az_phewas_df = _substitute_zero_pvalues(az_phewas_df, 'pValue', 'AZ')
 
     # Transform data according to original logic
     return (
@@ -751,19 +754,7 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
     # This is a bug we still have to ellucidate and it might be due to a float overflow.
     # These evidence need to be manually corrected in order not to lose them and for them to pass validation
     # As an interim solution, their p value will equal to the minimum in the evidence set.
-    logger.warning(
-        f'There are {genebass_df.filter(f.col("Pvalue_Burden") == 0.0).count()} evidence with a p-value of 0.0.'
-    )
-    minimum_pvalue = (
-        genebass_df
-        .filter(f.col('Pvalue_Burden') > 0.0)
-        .agg({'Pvalue_Burden': 'min'})
-        .collect()[0]['min(Pvalue_Burden)']
-    )
-    genebass_df = genebass_df.withColumn(
-        'Pvalue_Burden',
-        f.when(f.col('Pvalue_Burden') == 0.0, f.lit(minimum_pvalue)).otherwise(f.col('Pvalue_Burden')),
-    )
+    genebass_df = _substitute_zero_pvalues(genebass_df, 'Pvalue_Burden', 'Genebass')
 
     return (
         genebass_df
@@ -826,5 +817,247 @@ def process_genebass_gene_burden(genebass_df: DataFrame):
             .alias('statisticalMethodOverview'),
             f.array(f.lit(genebass_pub)).alias('literature'),
         )
+        .distinct()
+    )
+
+
+def _substitute_zero_pvalues(df: DataFrame, pvalue_col: str, label: str) -> DataFrame:
+    """Substitute p-values that underflow to 0.0 with the minimum non-zero p-value observed."""
+    zero_p = df.filter(f.col(pvalue_col) == 0.0).count()
+    if not zero_p:
+        return df
+    logger.warning(f'There are {zero_p} {label} evidence with a p-value of 0.0.')
+    minimum_pvalue = df.filter(f.col(pvalue_col) > 0.0).agg({pvalue_col: 'min'}).collect()[0][f'min({pvalue_col})']
+    return df.withColumn(
+        pvalue_col, f.when(f.col(pvalue_col) == 0.0, f.lit(minimum_pvalue)).otherwise(f.col(pvalue_col))
+    )
+
+
+def _brava_sample_size_lookup(s4_df: DataFrame, s5_df: DataFrame) -> DataFrame:
+    """Build a (Phenotype ID, Ancestry Group) -> (studySampleSize, studyCases) lookup for BRaVa evidence.
+
+    Every group is aggregated from the per-biobank contribution tables — S4 (binary) and S5 (quantitative) —
+    which are the only place BRaVa reports sample sizes broken down by ancestry:
+
+    - an ancestry-specific group sums the biobanks contributing that ancestry,
+    - 'ALL' sums every contribution,
+    - 'non_EUR' sums every contribution except EUR.
+
+    Deriving all three from the same rows is what keeps them mutually consistent: 'ALL' - 'EUR' == 'non_EUR'
+    holds by construction rather than by agreement between two separately reported tables.
+
+    S5 lists some biobank contributions twice, identically in every column, which reads as the same
+    participants recorded twice rather than as two distinct cohorts. Those rows are deduplicated before
+    aggregation, so the quantitative totals here are *lower* than the publication's pooled totals in Table S7,
+    which count both copies. S6/S7 are therefore not read at all. S4 carries no duplicates, so the binary
+    totals are identical to S6.
+
+    The two frames are unioned without deduplication because a phenotype is either binary or quantitative,
+    never both, so the (Phenotype ID, Ancestry Group) key stays unique across them.
+    """
+
+    def _totals(contributions: DataFrame) -> DataFrame:
+        """Aggregate per-biobank contributions into the ancestry-specific, 'ALL' and 'non_EUR' groups."""
+        return (
+            reduce(
+                DataFrame.unionByName,
+                [
+                    contributions.withColumn('Ancestry Group', f.col('Ancestry')),
+                    contributions.withColumn('Ancestry Group', f.lit('ALL')),
+                    contributions.filter(f.col('Ancestry') != 'EUR').withColumn(
+                        'Ancestry Group', f.lit('non_EUR')
+                    ),
+                ],
+            )
+            .groupBy('Phenotype ID', 'Ancestry Group')
+            .agg(
+                f.sum('sampleSize').cast('int').alias('studySampleSize'),
+                f.sum('cases').cast('int').alias('studyCases'),
+            )
+        )
+
+    binary = s4_df.distinct().select(
+        'Phenotype ID',
+        'Ancestry',
+        (f.col('N cases').cast('int') + f.col('N controls').cast('int')).alias('sampleSize'),
+        f.col('N cases').cast('int').alias('cases'),
+    )
+    quantitative = s5_df.distinct().select(
+        'Phenotype ID',
+        'Ancestry',
+        f.col('N').cast('int').alias('sampleSize'),
+        f.lit(None).cast('int').alias('cases'),
+    )
+    return _totals(binary).unionByName(_totals(quantitative))
+
+
+def process_brava_gene_burden(
+    s4_df: DataFrame,
+    s5_df: DataFrame,
+    s12_df: DataFrame,
+    s13_df: DataFrame,
+    s14_df: DataFrame,
+    s15_df: DataFrame,
+) -> DataFrame:
+    """Process gene burden evidence from the BRaVa consortium publication (PMID 42238450).
+
+    Two types of results are processsed into the gene burden evidence schema:
+    - Granular mask/MAF/ancestry Burden/SKAT/SKAT-O results (S14 quantitative + S15 binary)
+    - Cauchy combination results aggregated across masks/MAFs/test class (S12 quantitative + S13 binary)
+    """
+    brava_pub = '42238450'
+
+    # mask abbrevation for statisticalMethod
+    mask_abbrev = {
+        'pLoF': 'pLoF',
+        'damaging_missense_or_protein_altering': 'DM/PA',
+        'pLoF;damaging_missense_or_protein_altering': 'pLoF;DM/PA',
+    }
+    # mask description for statisticalMethodOverview
+    mask_desc = {
+        'pLoF': 'pLoF variants',
+        'damaging_missense_or_protein_altering': 'damaging missense or protein altering variants',
+        'pLoF;damaging_missense_or_protein_altering': 'pLoF or damaging missense/protein-altering variants',
+    }
+    # max MAF description for statisticalMethodOverview
+    maf_desc = {
+        '0.001': 'with a MAF smaller than 0.1%',
+        '0.0001': 'with a MAF smaller than 0.01%',
+    }
+    ancestry_label = {
+        'EUR': 'European',
+        'AFR': 'African',
+        'EAS': 'East Asian',
+        'AMR': 'Admixed American',
+        'SAS': 'Central and South Asian',
+        'MID': 'Middle Eastern',
+        'non_EUR': 'non-European',
+        # 'ALL' is a pan-ancestry meta-analysis, so it has no ancestry label. It is deliberately absent:
+        # a missing key in a spark map literal returns null, which is what the field should carry.
+    }
+    ancestry_id = {
+        'EUR': 'HANCESTRO_0005',
+        'AFR': 'HANCESTRO_0010',
+        'EAS': 'HANCESTRO_0009',
+        'AMR': 'HANCESTRO_0014',
+        'MID': 'HANCESTRO_0852',
+        # 'Central and South Asian' requires mapping to two ids, so it is left null here
+    }
+
+    def _process_brava_granular(df: DataFrame) -> DataFrame:
+        """Normalise granular BRaVa results into the gene burden evidence schema.
+
+        Processes Tables S14 (quantitative) or S15 (binary).
+
+        Each row is a gene/phenotype/ancestry/mask/MAF/class.
+
+        Only Burden-class rows carry an effect size (BETA Burden/SE Burden); SKAT/SKAT-O rows, and a handful of
+        Burden rows with a missing beta in the source, are kept as p-value-only evidence.
+        """
+        df = (
+            df
+            .withColumn('Pvalue', f.col('Pvalue').cast('double'))
+            .withColumn('BETA Burden', f.col('BETA Burden').cast('double'))
+            .withColumn('SE Burden', f.col('SE Burden').cast('double'))
+        )
+        df = _substitute_zero_pvalues(df, 'Pvalue', 'BRaVa')
+
+        ancestry_group = f.col('meta analyzed')
+
+        return df.select(
+            f.col('Gene ID'),
+            f.col('Description'),
+            f.col('Phenotype ID'),
+            ancestry_group.alias('Ancestry Group'),
+            f.col('Pvalue').alias('resourceScore'),
+            f.col('BETA Burden').alias('beta'),
+            (f.col('BETA Burden') - f.col('SE Burden')).alias('betaConfidenceIntervalLower'),
+            (f.col('BETA Burden') + f.col('SE Burden')).alias('betaConfidenceIntervalUpper'),
+            # ancestryId and statisticalMethod are among the fields used for constructing the dedup id
+            # as ancestryId is null for ALL/non_EUR/SAS (see ancestry_id dict above), ancestry_group
+            # has to be added to statisticalMethod, otherwise rows will be mistaken as duplicate rows and dropped
+            f.concat_ws(
+                '.', f.col('class'), _map_col(mask_abbrev)[f.col('Mask')], f.col('max MAF'), ancestry_group
+            ).alias('statisticalMethod'),
+            f.concat(
+                f.col('class'),
+                f.lit(' test carried out with '),
+                _map_col(mask_desc)[f.col('Mask')],
+                f.lit(' '),
+                _map_col(maf_desc)[f.col('max MAF')],
+                f.lit(', meta-analyzed across BRaVa biobanks.'),
+            ).alias('statisticalMethodOverview'),
+        )
+
+    def _process_brava_cauchy(df: DataFrame) -> DataFrame:
+        """Normalise cauchy combination BRaVa results into the gene burden evidence schema.
+
+        Processes Tables S12 (quantitative) or S13 (binary).
+
+        Each row is Cauchy-aggregrated per gene/phenotype across masks/MAFs/test class.
+
+        P-value-only evidence (no effect size reported for the Cauchy combination test).
+        """
+        pvalue_col = 'Min P-value of significant Cauchy associations'
+        df = df.withColumn(pvalue_col, f.col(pvalue_col).cast('double'))
+        df = _substitute_zero_pvalues(df, pvalue_col, 'BRaVa Cauchy')
+
+        ancestry_group = f.col('Cauchy combination with minimum P-value')
+
+        return df.select(
+            f.col('Gene ID'),
+            f.col('Description'),
+            f.col('Phenotype ID'),
+            ancestry_group.alias('Ancestry Group'),
+            f.col(pvalue_col).alias('resourceScore'),
+            # ancestryId and statisticalMethod are among the fields used for constructing the dedup id
+            # as ancestryId is null for ALL/non_EUR/SAS (see ancestry_id dict above), ancestry_group
+            # has to be added to statisticalMethod, otherwise rows will be mistaken as duplicate rows and dropped
+            f.concat(f.lit('Cauchy.'), ancestry_group).alias('statisticalMethod'),
+            f.lit(
+                'Cauchy combination test aggregating Burden and SKAT/SKAT-O results across variant masks '
+                'and MAF cutoffs.'
+            ).alias('statisticalMethodOverview'),
+        )
+
+    sample_size_lookup = _brava_sample_size_lookup(s4_df, s5_df)
+    union_by_diff_schema = partial(DataFrame.unionByName, allowMissingColumns=True)
+
+    p_exponent = f.log10(f.col('resourceScore')).cast('int') - f.lit(1)
+
+    brava_df = reduce(
+        union_by_diff_schema,
+        [
+            _process_brava_granular(s14_df),
+            _process_brava_granular(s15_df),
+            _process_brava_cauchy(s12_df),
+            _process_brava_cauchy(s13_df),
+        ],
+    ).select(
+        f.lit('gene_burden').alias('datasourceId'),
+        f.lit('genetic_association').alias('datatypeId'),
+        f.lit('BRaVa Consortium').alias('projectId'),
+        f.lit('BRaVa Consortium').alias('cohortId'),
+        f.array(f.lit(brava_pub)).alias('literature'),
+        f.col('Gene ID').alias('targetFromSourceId'),
+        f.col('Description').alias('diseaseFromSource'),
+        f.col('Phenotype ID'),
+        f.col('Ancestry Group'),
+        _map_col(ancestry_label)[f.col('Ancestry Group')].alias('ancestry'),
+        _map_col(ancestry_id)[f.col('Ancestry Group')].alias('ancestryId'),
+        'resourceScore',
+        p_exponent.alias('pValueExponent'),
+        f.round(f.col('resourceScore') / f.pow(f.lit(10), p_exponent), 3).alias('pValueMantissa'),
+        'beta',
+        'betaConfidenceIntervalLower',
+        'betaConfidenceIntervalUpper',
+        'statisticalMethod',
+        'statisticalMethodOverview',
+    )
+
+    return (
+        brava_df
+        .join(sample_size_lookup, ['Phenotype ID', 'Ancestry Group'], 'left')
+        .drop('Phenotype ID', 'Ancestry Group')
         .distinct()
     )
