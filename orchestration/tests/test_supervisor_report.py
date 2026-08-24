@@ -88,6 +88,80 @@ class TestFailures:
         assert '[-1]' not in result
 
 
+class TestTaskIdentity:
+    """F5: two tasks in the same group must not render identically.
+
+    `_label` alone collapses every task in a group onto the bare step name, so a
+    config-upload failure and the run task's own failure — completely different
+    failure modes calling for completely different responses — used to be
+    indistinguishable in the comment.
+    """
+
+    def test_two_tasks_in_the_same_group_render_distinguishably(self) -> None:
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.upload_config_pts_target', step='pts_target', map_index=-1),
+            StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        lines = [line for line in result.split('\n') if line.startswith('- ')]
+        assert len(lines) == 2
+        assert lines[0] != lines[1]
+
+    def test_a_non_run_task_failure_shows_its_full_ref(self) -> None:
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.upload_config_pts_target', step='pts_target', map_index=-1),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'pts_target.upload_config_pts_target' in result
+
+    def test_the_run_tasks_own_failure_stays_terse(self) -> None:
+        """The common case must not get noisier from this fix."""
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert result.endswith('- `pts_target`')
+        assert 'run_pts_target' not in result
+
+    def test_a_mapped_shards_run_task_failure_is_still_identifiable_by_shard_alone(self) -> None:
+        """The run task's own shards stay terse too — disambiguation is orthogonal to sharding."""
+        obs = _observation(failed=[
+            StepFailure(
+                ref='gentropy_variant_annotation.gentropy_variant_annotation_batch_jobs.'
+                    'run_gentropy_variant_annotation[3]',
+                step='gentropy_variant_annotation', map_index=3,
+            ),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert result.endswith('- `gentropy_variant_annotation[3]`')
+
+    def test_a_non_run_task_stall_shows_its_full_ref(self) -> None:
+        obs = _observation(stalled=[
+            StepStall(ref='pts_target.diff_pts_target', step='pts_target', map_index=-1,
+                      elapsed=32400.0, threshold=21600.0, basis='ceiling'),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'pts_target.diff_pts_target' in result
+
+    def test_a_non_run_task_and_the_run_task_stalling_together_are_distinguishable(self) -> None:
+        obs = _observation(stalled=[
+            StepStall(ref='pts_target.diff_pts_target', step='pts_target', map_index=-1,
+                      elapsed=32400.0, threshold=21600.0, basis='ceiling'),
+            StepStall(ref='pts_target.run_pts_target', step='pts_target', map_index=-1,
+                      elapsed=32400.0, threshold=21600.0, basis='ceiling'),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        lines = [line for line in result.split('\n') if line.startswith('- ')]
+        assert len(lines) == 2
+        assert lines[0] != lines[1]
+
+
 class TestStalls:
     def test_a_stall_states_elapsed_against_threshold(self) -> None:
         obs = _observation(stalled=[
@@ -133,13 +207,25 @@ class TestStalls:
         assert 'unusual' not in ceiling_result
 
     def test_a_stalled_mapped_shard_is_identified(self) -> None:
+        """`ref` must be the real, group-qualified Airflow task_id.
+
+        `TaskInstance.ref` is always group-qualified, and `gentropy_l2g_prediction`
+        nests its run task two groups deep (`cluster: false`) — an unqualified ref
+        here would not exercise the real shape, and would silently take
+        `_identify`'s non-run-task branch instead (F5).
+        """
         obs = _observation(stalled=[
-            StepStall(ref='run_gentropy_l2g_prediction[7]', step='gentropy_l2g_prediction', map_index=7,
-                      elapsed=32400.0, threshold=21600.0, basis='ceiling'),
+            StepStall(
+                ref='gentropy_l2g_prediction.gentropy_l2g_prediction_batch_jobs.run_gentropy_l2g_prediction[7]',
+                step='gentropy_l2g_prediction', map_index=7,
+                elapsed=32400.0, threshold=21600.0, basis='ceiling',
+            ),
         ])
         result = render_comment(obs, _snapshot())
         assert result is not None
-        assert '`gentropy_l2g_prediction[7]`' in result
+        assert result.count('- ') == 1
+        assert '- `gentropy_l2g_prediction[7]` — running' in result
+        assert 'task `gentropy_l2g_prediction' not in result
 
     def test_every_stall_is_listed(self) -> None:
         obs = _observation(stalled=[
@@ -173,26 +259,34 @@ class TestCompletions:
         assert '5h' in result
 
     def test_a_completed_mapped_shard_is_identified(self) -> None:
+        """`ref` is fully group-qualified — see `TestStalls`' equivalent test."""
         obs = _observation(completed=[
-            StepCompletion(ref='run_gentropy_variant_annotation[12]', step='gentropy_variant_annotation',
-                            map_index=12, duration=600.0),
+            StepCompletion(
+                ref='gentropy_variant_annotation.gentropy_variant_annotation_batch_jobs.'
+                    'run_gentropy_variant_annotation[12]',
+                step='gentropy_variant_annotation', map_index=12, duration=600.0,
+            ),
         ])
         result = render_comment(obs, _snapshot())
         assert result is not None
-        assert '`gentropy_variant_annotation[12]`' in result
+        assert result.endswith('- `gentropy_variant_annotation[12]` finished in 10m00s')
 
     def test_every_completion_is_listed(self) -> None:
         obs = _observation(completed=[
             StepCompletion(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, duration=120.0),
             StepCompletion(ref='pts_disease.run_pts_disease', step='pts_disease', map_index=-1, duration=180.0),
-            StepCompletion(ref='run_gentropy_variant_annotation[5]', step='gentropy_variant_annotation',
-                            map_index=5, duration=300.0),
+            StepCompletion(
+                ref='gentropy_variant_annotation.gentropy_variant_annotation_batch_jobs.'
+                    'run_gentropy_variant_annotation[5]',
+                step='gentropy_variant_annotation', map_index=5, duration=300.0,
+            ),
         ])
         result = render_comment(obs, _snapshot())
         assert result is not None
         assert '`pts_target`' in result
         assert '`pts_disease`' in result
         assert '`gentropy_variant_annotation[5]`' in result
+        assert 'task `gentropy_variant_annotation' not in result
 
 
 class TestRunFinished:

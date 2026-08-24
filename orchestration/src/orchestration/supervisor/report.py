@@ -27,6 +27,7 @@ from __future__ import annotations
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.observer import Observation, StepCompletion, StepFailure, StepStall
 from orchestration.supervisor.snapshot import Snapshot
+from orchestration.supervisor.step_identity import is_run_task
 
 _NO_MATERIAL_DIFF = 'No material differences against the reference release.'
 """Shown when a dataset comparison ran and found nothing worth reporting — stated
@@ -82,6 +83,53 @@ def _label(step: str, map_index: int) -> str:
     return f'{step}[{map_index}]' if map_index != -1 else step
 
 
+def _task_id_of(ref: str) -> str:
+    """The task_id half of a ref, stripping a mapped instance's trailing `[N]`.
+
+    Mirrors the task_id half of `observer._parse_ref`. Duplicated rather than
+    imported: that is a private helper of `observer.py`, and the parse itself is two
+    lines — not worth a cross-module dependency on another module's private API for.
+
+    Args:
+        ref: A task ref, as `StepFailure.ref` / `StepStall.ref` / `StepCompletion.ref`.
+
+    Returns:
+        The task_id, with any `[N]` shard suffix removed.
+    """
+    if ref.endswith(']') and '[' in ref:
+        task_id, _, _ = ref.rpartition('[')
+        return task_id
+    return ref
+
+
+def _identify(ref: str, step: str, map_index: int) -> str:
+    """Render a task's identity, disambiguated from its siblings when it is not the step's own run task.
+
+    `_label` alone collapses every task in a group onto the same bare step name: a
+    failure of `pts_target.upload_config_pts_target` (a config upload dying before
+    anything ran) and one of `pts_target.run_pts_target` (five hours of Dataproc work
+    lost) would render as the identical `` `pts_target` `` — indistinguishable, despite
+    calling for completely different responses (F5). The step's own run task is the
+    common case — most failures, stalls and completions are it — so that case stays
+    exactly as terse as `_label` alone. Any other task in the group additionally
+    renders its full `ref`, exactly as Airflow shows it, which is also what a later
+    phase needs to fetch that task's logs (`task_id` + `map_index` + `try_number`).
+
+    Args:
+        ref: The task's ref, as `StepFailure.ref`.
+        step: The bare step name, as `StepFailure.step`.
+        map_index: As `StepFailure.map_index`.
+
+    Returns:
+        `` `step[N]` `` for the step's own run task; `` `step[N]` — task `ref` `` for
+        any other task in the same group.
+    """
+    label = f'`{_label(step, map_index)}`'
+    if is_run_task(_task_id_of(ref)):
+        return label
+    return f'{label} — task `{ref}`'
+
+
 def _repeat_note(try_number: int | None) -> str:
     """Render a note when `try_number` shows this is a deliberate re-run.
 
@@ -130,9 +178,12 @@ def _render_run_finished(state: str, snapshot: Snapshot) -> str:
 def _render_failed(failures: list[StepFailure]) -> str:
     """Render newly failed task instances.
 
-    A failure at `try_number` above 1 is flagged as a repeat — see `_repeat_note` —
-    since that is the one moment this tool must not go quiet: a human or a future
-    agent already re-ran the step once, and it failed again.
+    A failure of a task that is not the step's own run task is disambiguated by
+    `_identify` — see its docstring for F5, the defect this fixes: without it, a
+    config-upload failure and a lost multi-hour Dataproc run rendered identically. A
+    failure at `try_number` above 1 is separately flagged as a repeat — see
+    `_repeat_note` — since that is the one moment this tool must not go quiet: a
+    human or a future agent already re-ran the step once, and it failed again.
 
     Args:
         failures: As `Observation.failed`. Never empty when called.
@@ -141,7 +192,7 @@ def _render_failed(failures: list[StepFailure]) -> str:
         A heading followed by one bullet per failure.
     """
     lines = ['**Failed**']
-    lines.extend(f'- `{_label(f.step, f.map_index)}`{_repeat_note(f.try_number)}' for f in failures)
+    lines.extend(f'- {_identify(f.ref, f.step, f.map_index)}{_repeat_note(f.try_number)}' for f in failures)
     return '\n'.join(lines)
 
 
@@ -152,8 +203,10 @@ def _render_stalled(stalls: list[StepStall]) -> str:
     fired. `basis='history'` is called out with its own explanation rather than printed
     as a bare word: `stall.py` documents it as reachable only when a step is cleared and
     re-run within the same DAG run, so it is unusual enough that a reader seeing it
-    deserves to know why, not just that it happened. A stall at `try_number` above 1
-    is separately flagged as a repeat — see `_repeat_note` — since that fires even on
+    deserves to know why, not just that it happened. A stall of a non-run-task
+    sibling (a slow `diff_` listing, say) is disambiguated by `_identify` for the
+    same reason a failure is — see its docstring. A stall at `try_number` above 1 is
+    separately flagged as a repeat — see `_repeat_note` — since that fires even on
     the ordinary `ceiling` basis, not only alongside a `history` verdict.
 
     Args:
@@ -166,7 +219,7 @@ def _render_stalled(stalls: list[StepStall]) -> str:
     for stall in stalls:
         elapsed = _format_duration(stall.elapsed)
         threshold = _format_duration(stall.threshold)
-        label = _label(stall.step, stall.map_index)
+        identity = _identify(stall.ref, stall.step, stall.map_index)
         if stall.basis == 'history':
             note = (
                 f'past its own {threshold} history-based threshold — unusual: this step already '
@@ -174,16 +227,20 @@ def _render_stalled(stalls: list[StepStall]) -> str:
             )
         else:
             note = f'past the {threshold} ceiling (no completed run of this step yet this run)'
-        lines.append(f'- `{label}` — running {elapsed}, {note}{_repeat_note(stall.try_number)}')
+        lines.append(f'- {identity} — running {elapsed}, {note}{_repeat_note(stall.try_number)}')
     return '\n'.join(lines)
 
 
 def _render_completed(completions: list[StepCompletion]) -> str:
     """Render newly completed steps.
 
-    A completion at `try_number` above 1 is flagged as a repeat — see `_repeat_note`
-    — so a step that failed once and succeeded on a re-run reads as the recovery it
-    is, not as an ordinary first-try success.
+    Routed through `_identify` for consistency with `_render_failed`/`_render_stalled`,
+    though `observer.observe` gates `completed` to a step's own run task already
+    (see `observer.py`'s module docstring), so the "other task in the group" branch
+    never actually fires here — this can never render the disambiguated form. A
+    completion at `try_number` above 1 is flagged as a repeat — see `_repeat_note` —
+    so a step that failed once and succeeded on a re-run reads as the recovery it is,
+    not as an ordinary first-try success.
 
     Args:
         completions: As `Observation.completed`. Never empty when called.
@@ -193,7 +250,8 @@ def _render_completed(completions: list[StepCompletion]) -> str:
     """
     lines = ['**Completed**']
     lines.extend(
-        f'- `{_label(c.step, c.map_index)}` finished in {_format_duration(c.duration)}{_repeat_note(c.try_number)}'
+        f'- {_identify(c.ref, c.step, c.map_index)} finished in '
+        f'{_format_duration(c.duration)}{_repeat_note(c.try_number)}'
         for c in completions
     )
     return '\n'.join(lines)
