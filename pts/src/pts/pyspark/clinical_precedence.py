@@ -55,7 +55,16 @@ def clinical_precedence(
         clinical_report_df
         .withColumnRenamed('id', 'clinicalReportId')
         .withColumn('studyStartDate', f.col('trialStartDate').cast('string'))
-        .withColumn('literature', f.col('trialLiterature'))
+        .withColumn(
+            'literature',
+            f.transform(
+                f.filter(
+                    f.col('trialLiterature'),
+                    lambda x: x.getField('type').isin('RESULT', 'DERIVED'),
+                ),
+                lambda x: x.getField('id'),
+            ),
+        )
         .withColumn('_disease', f.explode_outer('diseases'))
         .withColumn('diseaseFromSource', f.col('_disease.diseaseFromSource'))
         .withColumn('diseaseFromSourceMappedId', f.col('_disease.diseaseId'))
