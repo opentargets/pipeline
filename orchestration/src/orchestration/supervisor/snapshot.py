@@ -40,6 +40,14 @@ class Snapshot(BaseModel):
         running: Task refs currently running — `task_id`, qualified with `map_index`
             for a mapped task instance (see `TaskInstance.ref`).
         failed: Task refs that have failed, qualified the same way.
+        succeeded: Task refs that have finished successfully, qualified the same way.
+        durations: Seconds each task instance took, keyed by its ref, wherever
+            Airflow reports one (`TaskInstance.duration` is None while running, so a
+            task instance not yet finished is simply absent rather than carrying a
+            fabricated `None` or `0.0`). Not filtered to `succeeded` — a failed task
+            instance has a duration too. This is a plain record of what was seen;
+            deciding which durations are worth keeping (a step's own run task,
+            successful) is `observer.py`'s job, not this module's.
         stalls: Running tasks judged to have stalled.
         journal_events: How many events the journal already holds, so the agent can
             tell a first wakeup from a resumption.
@@ -52,6 +60,8 @@ class Snapshot(BaseModel):
     counts: dict[str, int]
     running: list[str]
     failed: list[str]
+    succeeded: list[str]
+    durations: dict[str, float]
     stalls: list[StallVerdict]
     journal_events: int
 
@@ -84,6 +94,8 @@ def take_snapshot(client: Any, journal: Any, dag_id: str, run_id: str, now: date
         counts=dict(Counter(t.state or _PENDING for t in tasks)),
         running=[t.ref for t in tasks if t.state == 'running'],
         failed=[t.ref for t in tasks if t.state == 'failed'],
+        succeeded=[t.ref for t in tasks if t.state == 'success'],
+        durations={t.ref: t.duration for t in tasks if t.duration is not None},
         stalls=verdicts,
         journal_events=len(events),
     )

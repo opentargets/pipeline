@@ -16,7 +16,8 @@ NOW = datetime(2026, 7, 21, 20, 0, tzinfo=UTC)
 def _snapshot(**kw: object) -> Snapshot:
     defaults: dict[str, object] = {
         'dag_id': 'unified_pipeline', 'run_id': 'r', 'taken_at': NOW, 'run_state': 'running',
-        'counts': {}, 'running': [], 'failed': [], 'stalls': [], 'journal_events': 0,
+        'counts': {}, 'running': [], 'failed': [], 'succeeded': [], 'durations': {},
+        'stalls': [], 'journal_events': 0,
     }
     defaults.update(kw)
     return Snapshot.model_validate(defaults)

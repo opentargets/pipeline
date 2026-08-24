@@ -260,13 +260,57 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client([]), _journal([_completed('a', 1.0)]), 'unified_pipeline', 'r', NOW)
         assert snap.journal_events == 1
 
+    def test_lists_succeeded_task_refs(self) -> None:
+        tasks = [TaskInstance(task_id='a', state='success', duration=12.0),
+                 TaskInstance(task_id='b', state='failed', duration=5.0)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.succeeded == ['a']
+
+    def test_distinguishes_mapped_succeeded_task_instances(self) -> None:
+        """The two Google Batch steps expand N task instances under one shared task_id.
+
+        Without map_index, `succeeded` would list the same id twice with nothing to
+        tell the shards apart — the same trap `running` and `failed` already guard
+        against.
+        """
+        tasks = [TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0,
+                               state='success', duration=10.0),
+                 TaskInstance(task_id='run_gentropy_variant_annotation', map_index=1,
+                               state='success', duration=20.0)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.succeeded == ['run_gentropy_variant_annotation[0]', 'run_gentropy_variant_annotation[1]']
+
+    def test_records_each_task_instances_duration_keyed_by_ref(self) -> None:
+        tasks = [TaskInstance(task_id='a', state='success', duration=12.5),
+                 TaskInstance(task_id='b', state='failed', duration=5.0)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.durations == {'a': 12.5, 'b': 5.0}
+
+    def test_a_task_instance_with_no_duration_is_absent_from_durations(self) -> None:
+        """A running task has no duration yet — `TaskInstance.duration` is None until it finishes.
+
+        The dict must not carry a fabricated `None` or `0.0` for it: either would make
+        an empty baseline (no `step_completed` history yet) indistinguishable from a
+        step that genuinely ran for zero seconds.
+        """
+        tasks = [TaskInstance(task_id='a', state='running', start_date=NOW, duration=None)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.durations == {}
+
+    def test_durations_are_keyed_by_the_mapped_ref_not_the_bare_task_id(self) -> None:
+        """Two shards sharing a task_id must not collapse onto one duration in the dict."""
+        tasks = [TaskInstance(task_id='t', map_index=0, state='success', duration=10.0),
+                 TaskInstance(task_id='t', map_index=1, state='success', duration=99.0)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.durations == {'t[0]': 10.0, 't[1]': 99.0}
+
 
 class TestRenderSnapshot:
     def _snapshot(self, **kw: object) -> Snapshot:
         defaults: dict[str, object] = {
             'dag_id': 'unified_pipeline', 'run_id': 'r', 'taken_at': NOW, 'run_state': 'running',
             'counts': {'success': 40, 'running': 2}, 'running': ['a', 'b'], 'failed': [],
-            'stalls': [], 'journal_events': 0,
+            'succeeded': [], 'durations': {}, 'stalls': [], 'journal_events': 0,
         }
         defaults.update(kw)
         return Snapshot.model_validate(defaults)
