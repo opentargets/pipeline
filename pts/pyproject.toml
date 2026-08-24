@@ -20,7 +20,7 @@ dependencies = [
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
   "ontoma>=2.5.3",
-  "ot-literature",
+  "ot-literature>=0.1.1",
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
   "pdfplumber>=0.11.9",

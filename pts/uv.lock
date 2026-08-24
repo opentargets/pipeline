@@ -2084,7 +2084,7 @@ wheels = [
 
 [[package]]
 name = "ot-literature"
-version = "0.1.0"
+version = "0.1.1"
 source = { git = "https://github.com/opentargets/ot-literature?tag=0.1.0#7ae05d101c83628be6d4ccf3d949d8c8caca6a8e" }
 dependencies = [
     { name = "loguru" },
