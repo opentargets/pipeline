@@ -20,10 +20,13 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, Field
 
+from orchestration.supervisor.datasets import destinations_for
 from orchestration.supervisor.diff import DatasetDiff, Side, compare_schemas
+from orchestration.supervisor.step_identity import identify
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from typing import Any
 
 PARQUET_SUFFIX = '.parquet'
 
@@ -173,6 +176,115 @@ def compare(dataset: str, run: DatasetStats | None, reference: DatasetStats | No
         columns=columns,
         countable=(run is None or run.countable) and (reference is None or reference.countable),
     )
+
+
+_MISSING = '-'
+
+_UNCOUNTABLE = 'n/a'
+
+
+class Skipped(BaseModel):
+    """What a comparison did not cover, so the report can say so rather than imply completeness.
+
+    Args:
+        steps_without_datasets: Steps declaring no release destination. This is the
+            majority of steps — 68 of 125 — and is not an anomaly.
+        stages_without_config: Steps whose stage has no local config, which is how
+            gentropy's twelve steps are excluded; their destinations live in
+            `dags/config/gentropy.yaml` and are not read here.
+        datasets_absent_from_both: Destinations found in neither bucket, which usually
+            means the step has not run yet.
+        undeclared_in_buckets: Datasets present in one of the buckets that no step
+            declares. The walk is driven by the configs, so these are invisible to it —
+            including a dataset that a previous release produced and the current config
+            no longer does, which is exactly the kind of disappearance a reader wants
+            reported rather than silently omitted.
+    """
+
+    steps_without_datasets: list[str] = Field(default_factory=list)
+    stages_without_config: list[str] = Field(default_factory=list)
+    datasets_absent_from_both: list[str] = Field(default_factory=list)
+    undeclared_in_buckets: list[str] = Field(default_factory=list)
+
+
+def datasets_present(bucket: Bucket, prefix: str) -> set[str]:
+    """List the release datasets actually present under a release root.
+
+    Costs one full listing per namespace rather than one per dataset, so it is cheap
+    relative to the per-dataset reads the comparison already performs.
+
+    Args:
+        bucket: The bucket to read.
+        prefix: The release root prefix within it.
+
+    Returns:
+        Namespaced dataset names, e.g. `output/disease`, for every namespace directory
+        that contains at least one object.
+    """
+    root = prefix.rstrip('/')
+    found: set[str] = set()
+    for namespace in ('output', 'view'):
+        for blob in bucket.list_blobs(prefix=f'{root}/{namespace}/'):
+            tail = blob.name[len(root) + 1 :]
+            parts = tail.split('/')
+            if len(parts) > 1 and parts[1]:
+                found.add(f'{parts[0]}/{parts[1]}')
+    return found
+
+
+def collect_diffs(
+    run_bucket: Bucket,
+    run_prefix: str,
+    reference_bucket: Bucket,
+    reference_prefix: str,
+    steps: list[str],
+    stage_configs: dict[str, Any],
+    read_footer: Callable[[str], Footer] | None = None,
+) -> tuple[list[DatasetDiff], Skipped]:
+    """Compare every release dataset the given steps declare.
+
+    Args:
+        run_bucket: The bucket holding the run.
+        run_prefix: The run's root prefix within it.
+        reference_bucket: The bucket holding the reference release.
+        reference_prefix: The release's root prefix within it.
+        steps: `unified_pipeline.yaml` step names to cover.
+        stage_configs: Each stage's parsed config, keyed by stage name.
+        read_footer: Passed through to `read_stats`.
+
+    Returns:
+        The diffs ordered by dataset, and a record of what was not covered. Both
+        matter: a report that silently omits datasets reads as a clean comparison.
+    """
+    diffs: list[DatasetDiff] = []
+    skipped = Skipped()
+    seen: set[str] = set()
+
+    for step in steps:
+        config = stage_configs.get(identify(step).stage)
+        if config is None:
+            skipped.stages_without_config.append(step)
+            continue
+        destinations = destinations_for(step, config)
+        if not destinations:
+            skipped.steps_without_datasets.append(step)
+            continue
+        for dataset in destinations:
+            if dataset in seen:
+                continue
+            seen.add(dataset)
+            run = read_stats(run_bucket, f'{run_prefix.rstrip("/")}/{dataset}', read_footer)
+            reference = read_stats(reference_bucket, f'{reference_prefix.rstrip("/")}/{dataset}', read_footer)
+            if run is None and reference is None:
+                skipped.datasets_absent_from_both.append(dataset)
+                continue
+            diffs.append(compare(dataset, run, reference))
+
+    present = datasets_present(run_bucket, run_prefix) | datasets_present(reference_bucket, reference_prefix)
+    skipped.undeclared_in_buckets = sorted(present - seen)
+
+    diffs.sort(key=lambda d: d.dataset)
+    return diffs, skipped
 
 
 def footer_reader(bucket_name: str) -> Callable[[str], Footer]:

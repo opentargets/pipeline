@@ -40,6 +40,14 @@ Matches `dev_uri` in `dags/config/unified_pipeline.py`. Release runs write to
 `open-targets-pre-data-releases` instead, which phase 1 does not target.
 """
 
+GCS_PRE_RELEASES_BUCKET = 'open-targets-pre-data-releases'
+"""Bucket holding published release runs, read as the reference side of a diff.
+
+Matches `release_uri` in `dags/config/unified_pipeline.py`, which builds it from this
+same literal string rather than importing it — currently hardcoded at
+`dags/config/unified_pipeline.py:40`.
+"""
+
 STALL_CEILING_SECONDS = 6 * 60 * 60
 """Absolute stall threshold for a step with no observed history.
 

@@ -21,15 +21,20 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 import requests
+import yaml
 from google.api_core.exceptions import GoogleAPICallError
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import bigquery, storage
 
 from orchestration.supervisor.airflow import AirflowClient
+from orchestration.supervisor.diff import DatasetDiff, is_material
+from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs, footer_reader
 from orchestration.supervisor.journal import Journal
 from orchestration.supervisor.snapshot import render_snapshot, take_snapshot
 from orchestration.supervisor.usage import (
@@ -44,6 +49,7 @@ from orchestration.utils.common import (
     BILLING_EXPORT_START,
     GCP_PROJECT_PLATFORM,
     GCS_PIPELINE_RUNS_BUCKET,
+    GCS_PRE_RELEASES_BUCKET,
     clean_label,
 )
 
@@ -299,6 +305,152 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
     return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 
+_UNCOUNTABLE = 'n/a'
+"""Shown for a row count the dataset's format has no footer to have supplied, as
+distinct from `_MISSING`, which marks a side that is absent altogether."""
+
+_REPO = Path(__file__).resolve().parents[4]
+"""Repo root, four levels above this file, holding `pis/`, `pts/` and `orchestration/`."""
+
+_UNIFIED_PIPELINE_YAML = _REPO / 'orchestration/src/orchestration/dags/config/unified_pipeline.yaml'
+
+
+def _stage_configs() -> dict[str, Any]:
+    """Load `pis` and `pts`'s own configs, the only two `collect_diffs` needs.
+
+    Gentropy's steps are deliberately not read here: their destinations live in
+    `dags/config/gentropy.yaml`, and `collect_diffs` records them under
+    `stages_without_config` rather than needing a third config it cannot parse the
+    same way.
+
+    Returns:
+        Each stage's parsed config, keyed by stage name.
+    """
+    return {stage: yaml.safe_load((_REPO / stage / 'config.yaml').read_text()) for stage in ('pis', 'pts')}
+
+
+def _unified_pipeline_steps() -> list[str]:
+    """Load the step list `collect_diffs` walks, from `unified_pipeline.yaml`.
+
+    Returns:
+        Every step name declared under `steps:`, in file order.
+    """
+    up = yaml.safe_load(_UNIFIED_PIPELINE_YAML.read_text())
+    return list(up['steps'])
+
+
+def _dispatching_footer_reader(
+    run_bucket_name: str, run_prefix: str, reference_bucket_name: str, reference_prefix: str
+) -> Callable[[str], Footer]:
+    """Build one footer reader spanning both sides of a diff, which may be different buckets.
+
+    `collect_diffs` shares a single `read_footer` between both sides of the walk, but
+    `gcs.footer_reader` is pinned to one bucket name — the path it builds for `pyarrow`
+    is `f'{bucket_name}/{object_name}'`, which is wrong for an object read from the
+    other bucket. Routing on the object name's prefix is safe because `run_prefix` and
+    `reference_prefix` are a run name and a release name, always distinct strings, so a
+    blob from one side never starts with the other side's root.
+
+    Args:
+        run_bucket_name: The bucket holding the run.
+        run_prefix: The run's root prefix within it.
+        reference_bucket_name: The bucket holding the reference release.
+        reference_prefix: The release's root prefix within it.
+
+    Returns:
+        A callable reading a parquet footer from whichever bucket the object belongs to.
+    """
+    read_run = footer_reader(run_bucket_name)
+    read_reference = footer_reader(reference_bucket_name)
+    run_root = run_prefix.rstrip('/') + '/'
+
+    def read(name: str) -> Footer:
+        return read_run(name) if name.startswith(run_root) else read_reference(name)
+
+    return read
+
+
+def _count(value: int | None, countable: bool) -> str:
+    """Render a row count, distinguishing unavailable from zero.
+
+    Args:
+        value: The count, or None.
+        countable: Whether the dataset's format has row counts at all.
+
+    Returns:
+        The number, `n/a` when the format has no footer, or `-` when the side is absent.
+    """
+    if value is not None:
+        return f'{value:,}'
+    return _UNCOUNTABLE if not countable else _MISSING
+
+
+def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float) -> str:
+    """Render a dataset comparison as text.
+
+    Schema changes are listed for every dataset that has one, never hidden behind the
+    threshold. One-sided datasets are called out explicitly rather than left to be
+    inferred from an absent row. The footer states what the comparison did not cover,
+    because a report that silently omits things reads as a clean run.
+
+    Args:
+        diffs: Every dataset compared.
+        skipped: What was not covered.
+        threshold: Fractional change past which a size or row move is reported.
+
+    Returns:
+        The rendered report.
+    """
+    material = [d for d in diffs if is_material(d, threshold)]
+    lines = [f'{len(diffs)} datasets compared, {len(material)} with material changes']
+    lines.append('')
+
+    if not material:
+        lines.append('No material differences.')
+    for diff in material:
+        if diff.side != 'both':
+            where = 'the run only' if diff.side == 'run_only' else 'the reference only'
+            lines.append(f'{diff.dataset}  PRESENT IN {where.upper()}')
+        else:
+            rows = f'{_count(diff.reference_rows, diff.countable)} -> {_count(diff.run_rows, diff.countable)}'
+            lines.append(
+                f'{diff.dataset}  rows {rows}  bytes {diff.reference_bytes:,} -> {diff.run_bytes:,}'
+                f'  files {diff.reference_files} -> {diff.run_files}'
+            )
+        for change in diff.columns:
+            types = f'{change.reference_type or _MISSING} -> {change.run_type or _MISSING}'
+            lines.append(f'    {change.kind:8} {change.column}  {types}')
+
+    footer = [
+        '',
+        f'Threshold: {threshold:.0%} on rows and bytes. Schema changes are always reported.',
+        'Not compared: intermediate/ (scratch between steps), and templated destinations,',
+        'which resolve only at run time.',
+    ]
+    if skipped.stages_without_config:
+        footer.append(
+            f'{len(skipped.stages_without_config)} steps skipped: their stage has no local config '
+            f'(gentropy declares destinations in dags/config/gentropy.yaml).'
+        )
+    if skipped.steps_without_datasets:
+        footer.append(
+            f'{len(skipped.steps_without_datasets)} steps declare no release dataset. '
+            f'That is normal, not an anomaly.'
+        )
+    if skipped.datasets_absent_from_both:
+        footer.append(
+            f'{len(skipped.datasets_absent_from_both)} datasets absent from both buckets, '
+            f'usually a step that has not run: {", ".join(sorted(skipped.datasets_absent_from_both)[:5])}'
+        )
+    if skipped.undeclared_in_buckets:
+        footer.append(
+            f'{len(skipped.undeclared_in_buckets)} datasets present in a bucket but declared by no '
+            f'step, so NOT compared: {", ".join(skipped.undeclared_in_buckets[:5])}. '
+            f'A dataset here that exists only in the reference has been dropped from the pipeline.'
+        )
+    return '\n'.join(lines + footer)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser.
 
@@ -325,6 +477,14 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
     snapshot.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help="the run's journal bucket")
     snapshot.add_argument('--json', action='store_true', help='emit JSON instead of text')
+
+    diff = sub.add_parser('diff', help="compare a run's datasets against a reference release")
+    diff.add_argument('--run', required=True, help='the run name, a prefix in the runs bucket')
+    diff.add_argument('--reference', required=True, help='the reference release name')
+    diff.add_argument('--threshold', type=float, default=0.05, help='fractional change to report')
+    diff.add_argument('--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help='bucket holding the run')
+    diff.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
+    diff.add_argument('--json', action='store_true', help='emit JSON instead of text')
 
     return parser
 
@@ -367,6 +527,29 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(snapshot.model_dump_json(indent=2) + '\n')
             else:
                 sys.stdout.write(render_snapshot(snapshot) + '\n')
+            return 0
+        elif args.command == 'diff':
+            storage_client = storage.Client()
+            run_bucket = storage_client.bucket(args.run_bucket)
+            reference_bucket = storage_client.bucket(args.reference_bucket)
+            read_footer = _dispatching_footer_reader(args.run_bucket, args.run, args.reference_bucket, args.reference)
+            diffs, skipped = collect_diffs(
+                run_bucket,
+                args.run,
+                reference_bucket,
+                args.reference,
+                _unified_pipeline_steps(),
+                _stage_configs(),
+                read_footer,
+            )
+            if args.json:
+                payload = {
+                    'diffs': [d.model_dump(mode='json') for d in diffs],
+                    'skipped': skipped.model_dump(mode='json'),
+                }
+                sys.stdout.write(json.dumps(payload, indent=2) + '\n')
+            else:
+                sys.stdout.write(render_diff(diffs, skipped, args.threshold) + '\n')
             return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')

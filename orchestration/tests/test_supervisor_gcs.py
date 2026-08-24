@@ -7,7 +7,16 @@ from typing import Any
 
 import pytest
 
-from orchestration.supervisor.gcs import DatasetStats, Footer, compare, is_data_file, read_stats
+from orchestration.supervisor.gcs import (
+    DatasetStats,
+    Footer,
+    Skipped,
+    collect_diffs,
+    compare,
+    datasets_present,
+    is_data_file,
+    read_stats,
+)
 
 
 class FakeBlob:
@@ -311,3 +320,145 @@ class TestCompare:
         diff = compare('output/evidence', run, reference)
         assert diff.run_rows is None
         assert diff.countable is False
+
+
+class TestDatasetsPresent:
+    def test_finds_datasets_under_output_and_view_namespaces(self) -> None:
+        bucket = FakeBucket(
+            [
+                FakeBlob('release/output/disease/part-0000.parquet', 100),
+                FakeBlob('release/view/target/part-0000.parquet', 100),
+            ]
+        )
+        assert datasets_present(bucket, 'release') == {'output/disease', 'view/target'}
+
+    def test_a_namespace_placeholder_object_alone_is_not_a_dataset(self) -> None:
+        """A prefix listing can return the namespace directory object itself.
+
+        Its tail after `{root}/output/` is empty, so it must not be read as a dataset
+        named the empty string. `len(parts) > 1 and parts[1]` is what rules this out;
+        dropping the `parts[1]` truthiness check would let it through.
+        """
+        bucket = FakeBucket([FakeBlob('release/output/', 0)])
+        assert datasets_present(bucket, 'release') == set()
+
+    def test_multiple_files_in_one_dataset_count_once(self) -> None:
+        bucket = FakeBucket(
+            [
+                FakeBlob('release/output/disease/part-0000.parquet', 100),
+                FakeBlob('release/output/disease/part-0001.parquet', 100),
+            ]
+        )
+        assert datasets_present(bucket, 'release') == {'output/disease'}
+
+    def test_a_dataset_outside_output_and_view_is_not_listed(self) -> None:
+        """`intermediate/` scratch must never surface as a 'present' release dataset.
+
+        Adding `'intermediate'` to the namespace tuple would make this fail: the fake
+        bucket's `list_blobs` is a plain prefix match, so a widened namespace loop would
+        pick this blob straight up.
+        """
+        bucket = FakeBucket([FakeBlob('release/intermediate/scratch/part-0000.parquet', 100)])
+        assert datasets_present(bucket, 'release') == set()
+
+    def test_the_trailing_slash_on_prefix_is_optional(self) -> None:
+        bucket = FakeBucket([FakeBlob('release/output/disease/part-0000.parquet', 100)])
+        assert datasets_present(bucket, 'release/') == datasets_present(bucket, 'release')
+
+
+def _stage_config(**tasks_by_key: list[dict[str, object]]) -> dict[str, Any]:
+    """Build a `pts`-shaped `stage_configs` dict, keyed by config key rather than step name."""
+    return {'pts': {'steps': tasks_by_key}}
+
+
+class TestCollectDiffsSkipping:
+    def test_a_step_whose_stage_has_no_config_is_recorded_not_crashed_on(self) -> None:
+        """Guards `if config is None: ... continue`.
+
+        `gentropy_l2g`'s stage, `gentropy`, is absent from `stage_configs` entirely
+        (only `pts` is supplied). Without the `None` guard, `destinations_for` would be
+        called with `stage_config=None` and raise `AttributeError` on `.get('steps')`.
+        """
+        diffs, skipped = collect_diffs(
+            FakeBucket([]), 'run', FakeBucket([]), 'release', ['gentropy_l2g'], {'pts': {'steps': {}}}
+        )
+        assert diffs == []
+        assert skipped == Skipped(stages_without_config=['gentropy_l2g'])
+
+    def test_a_step_with_no_destinations_is_recorded(self) -> None:
+        """`intermediate/` is filtered out by `destinations_for`, leaving no destinations."""
+        stage_configs = _stage_config(no_output=[{'name': 't', 'destination': 'intermediate/scratch'}])
+        diffs, skipped = collect_diffs(
+            FakeBucket([]), 'run', FakeBucket([]), 'release', ['pts_no_output'], stage_configs
+        )
+        assert diffs == []
+        assert skipped == Skipped(steps_without_datasets=['pts_no_output'])
+
+    def test_a_dataset_absent_from_both_buckets_is_recorded_not_compared(self) -> None:
+        stage_configs = _stage_config(disease=[{'name': 't', 'destination': 'output/disease'}])
+        diffs, skipped = collect_diffs(
+            FakeBucket([]), 'run', FakeBucket([]), 'release', ['pts_disease'], stage_configs
+        )
+        assert diffs == []
+        assert skipped == Skipped(datasets_absent_from_both=['output/disease'])
+
+
+class TestCollectDiffsDatasets:
+    def test_a_dataset_declared_by_two_steps_is_compared_once(self) -> None:
+        """Guards the `seen` set against a dataset two different steps both declare.
+
+        `disease_a` and `disease_b` both declare `output/disease`. With the dedup
+        removed, the same run-only dataset would appear twice in `diffs`; this asserts
+        the list holds exactly one entry.
+        """
+        stage_configs = _stage_config(
+            disease_a=[{'name': 't', 'destination': 'output/disease'}],
+            disease_b=[{'name': 't', 'destination': 'output/disease'}],
+        )
+        run_bucket = FakeBucket([FakeBlob('run/output/disease/part-0000.parquet', 100)])
+        diffs, skipped = collect_diffs(
+            run_bucket, 'run', FakeBucket([]), 'release', ['pts_disease_a', 'pts_disease_b'], stage_configs
+        )
+        assert [d.dataset for d in diffs] == ['output/disease']
+        assert skipped.datasets_absent_from_both == []
+
+    def test_a_dataset_present_in_a_bucket_but_declared_by_no_step_is_surfaced(self) -> None:
+        """The walk is config-driven, so this is the one case it cannot see on its own.
+
+        `output/orphan` has real files in the run bucket but no step in `stage_configs`
+        declares it. Without `datasets_present` reconciling against the bucket contents,
+        this dataset would vanish from the report entirely — no diff, no skip entry.
+        """
+        run_bucket = FakeBucket([FakeBlob('run/output/orphan/part-0000.parquet', 100)])
+        diffs, skipped = collect_diffs(run_bucket, 'run', FakeBucket([]), 'release', [], {'pts': {'steps': {}}})
+        assert diffs == []
+        assert skipped == Skipped(undeclared_in_buckets=['output/orphan'])
+
+    def test_a_declared_dataset_is_not_also_reported_as_undeclared(self) -> None:
+        """The `seen` set doubles as the reconciliation baseline for `undeclared_in_buckets`.
+
+        `output/disease` is both declared by a step and present in the bucket, so it
+        must appear as a compared diff and nowhere in `undeclared_in_buckets`.
+        """
+        stage_configs = _stage_config(disease=[{'name': 't', 'destination': 'output/disease'}])
+        run_bucket = FakeBucket([FakeBlob('run/output/disease/part-0000.parquet', 100)])
+        diffs, skipped = collect_diffs(
+            run_bucket, 'run', FakeBucket([]), 'release', ['pts_disease'], stage_configs
+        )
+        assert [d.dataset for d in diffs] == ['output/disease']
+        assert skipped.undeclared_in_buckets == []
+
+    def test_the_diff_list_is_ordered_by_dataset(self) -> None:
+        """Steps are declared `zzz` before `aaa`; the output must be alphabetical regardless."""
+        stage_configs = _stage_config(
+            zzz=[{'name': 't', 'destination': 'output/zzz'}],
+            aaa=[{'name': 't', 'destination': 'output/aaa'}],
+        )
+        run_bucket = FakeBucket(
+            [
+                FakeBlob('run/output/zzz/part-0000.parquet', 100),
+                FakeBlob('run/output/aaa/part-0000.parquet', 100),
+            ]
+        )
+        diffs, _ = collect_diffs(run_bucket, 'run', FakeBucket([]), 'release', ['pts_zzz', 'pts_aaa'], stage_configs)
+        assert [d.dataset for d in diffs] == ['output/aaa', 'output/zzz']
