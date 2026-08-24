@@ -289,3 +289,67 @@ class TestActiveDagRun:
         client.active_dag_run('unified_pipeline')
         url = session.get.call_args.args[0]
         assert url == 'http://a:8080/api/v2/dags/unified_pipeline/dagRuns'
+
+
+class TestMostRecentDagRun:
+    def test_a_finished_run_is_returned(self) -> None:
+        """Unlike `active_dag_run`, a terminal state is exactly what this method must find."""
+        payload = {'dag_runs': [_dag_run('r1', 'failed', '2026-07-21T14:00:00Z')]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'r1'
+
+    def test_no_run_ever_started_returns_none_rather_than_raising(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        assert client.most_recent_dag_run('unified_pipeline') is None
+
+    def test_several_finished_runs_returns_the_newest_by_start_date(self) -> None:
+        payload = {'dag_runs': [
+            _dag_run('newer', 'success', '2026-07-21T15:00:00Z'),
+            _dag_run('older', 'failed', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'newer'
+
+    def test_a_queued_run_ranked_ahead_does_not_crowd_out_a_finished_run(self) -> None:
+        """A queued run's null start_date sorts first under Postgres' NULLS FIRST default for DESC.
+
+        Mirrors `test_a_queued_run_ranked_ahead_does_not_crowd_out_the_real_running_run`
+        above, but for the no-state-filter request this method sends.
+        """
+        payload = {'dag_runs': [
+            _dag_run('queued-one', 'queued', None),
+            _dag_run('finished-one', 'failed', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'finished-one'
+
+    def test_a_run_still_running_is_also_returned(self) -> None:
+        """No state filter: a caller that already ruled out `active_dag_run` still gets one back."""
+        payload = {'dag_runs': [_dag_run('r1', 'running', '2026-07-21T14:00:00Z')]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'r1'
+
+    def test_sends_no_state_filter(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.most_recent_dag_run('unified_pipeline')
+        assert 'state' not in session.get.call_args.kwargs['params']
+
+    def test_requests_a_total_order_sort(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.most_recent_dag_run('unified_pipeline')
+        assert session.get.call_args.kwargs['params']['order_by'] == ['-start_date', '-id']

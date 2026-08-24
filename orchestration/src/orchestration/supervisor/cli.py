@@ -29,6 +29,21 @@ this dev run is working towards rather than a baseline to diff against) is a pro
 decision this module does not make silently. Until that is settled, the diff stays
 opt-in via these two flags, which is also what lets `--dry-run` be exercised against
 a real run today without it.
+
+`observe` discovers the run to watch with `active_dag_run`, falling back to
+`AirflowClient.most_recent_dag_run` when nothing is running: a run that finished
+between two wakeups is not "running" any more, so `active_dag_run` alone can never
+lead this command into its own terminal-state branch — the fallback is what lets a
+finished run still be found, comment once more, and go quiet. Once found, the diff
+itself runs at most once per run: the terminal branch checks the journal for a
+`dataset_diff_completed` marker before running `collect_diffs`, and journals that
+marker alongside the wakeup's other events (after the post, per the ordering note
+below) — without it, every wakeup after the run finishes would re-run the comparison
+and repost the same "Dataset comparison" section forever. A separate
+`observation_started` event, carrying `run_name` from `unified_pipeline.yaml`, is
+journalled on the first wakeup that finds this run (idempotent like every other
+event here) — a durable "alive and watching run X" marker letting a human map a
+journal prefix back to a bucket path, distinct from a dead or never-started observer.
 """
 
 from __future__ import annotations
@@ -46,7 +61,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import bigquery, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
-from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
+from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
 from orchestration.supervisor.github import GitHubApp, read_app_key
@@ -121,6 +136,29 @@ imported so this module does not reach into another module's private name for a
 two-element frozenset. `observe` (the CLI command) diffs a run against a reference
 release only once its state lands in this set — see the module docstring for why not
 on every wakeup."""
+
+_DATASET_DIFF_COMPLETED_EVENT = 'dataset_diff_completed'
+"""Journal event type marking that the terminal-state dataset comparison has run for
+this run.
+
+`observe` checks for this key before calling `collect_diffs`, and journals it once
+the comparison has actually run — never speculatively. Without this gate, F1's fix
+(discovering a finished run via the `most_recent_dag_run` fallback) would make things
+worse, not better: a finished run would be rediscovered on every wakeup forever, and
+each one would re-run the full comparison and repost the same "Dataset comparison"
+section, re-reading every parquet footer on both sides each time when `--rows` is set.
+Carries no `step`/`try_number`/`map_index` — one run has exactly one comparison to
+mark, never per-step — so its `JournalEvent.key` is the bare event type."""
+
+_OBSERVATION_STARTED_EVENT = 'observation_started'
+"""Journal event type marking that this run has been discovered and is being watched.
+
+Journalled once per run (idempotent, like every other event here), carrying
+`run_name` (see `datasets.run_name`) in its payload so a human can map this journal's
+GCS prefix — keyed on the Airflow `dag_run_id`, not `run_name`, see `journal.py`'s
+module docstring — back to the run's own prefix in the runs bucket. It also doubles
+as a liveness marker: without it, a dead observer (the cron stopped firing) and a
+quiet one (nothing new to report) are indistinguishable from the journal alone."""
 
 _MISSING = '-'
 """Shown for a row that carries no value for an optional column."""
@@ -647,18 +685,33 @@ def main(argv: list[str] | None = None) -> int:
             client = AirflowClient(
                 session=requests.Session(), base_url=AIRFLOW_BASE_URL, username=username, password=password
             )
-            run = client.active_dag_run(args.dag)
+            # `active_dag_run` alone would only ever find a run that is still running —
+            # a run that finished between two wakeups has stopped being "active" by the
+            # time this runs, so it falls out of that discovery forever, and the
+            # terminal-state handling below (a run_finished comment, the dataset diff)
+            # would never fire in production. `most_recent_dag_run` is the fallback for
+            # exactly that: "what did we most recently start watching", in any state.
+            run = client.active_dag_run(args.dag) or client.most_recent_dag_run(args.dag)
             if run is None:
-                sys.stdout.write(f'no active run of {args.dag}\n')
+                sys.stdout.write(f'no run of {args.dag} has ever started\n')
                 return 0
 
             bucket = storage.Client().bucket(args.run_bucket)
             journal = Journal(bucket=bucket, prefix=f'_agent/{args.dag}/{run.dag_run_id}/journal')
             snapshot = take_snapshot(client, journal, args.dag, run.dag_run_id, now)
             observation = observe(snapshot, journal.read())
+            events = _observation_events(observation, now)
+            events.append(
+                JournalEvent(event_type=_OBSERVATION_STARTED_EVENT, at=now, payload={'run_name': run_name()})
+            )
 
             diffs = None
-            if snapshot.run_state in _OBSERVE_TERMINAL_RUN_STATES and args.run and args.reference:
+            if (
+                snapshot.run_state in _OBSERVE_TERMINAL_RUN_STATES
+                and args.run
+                and args.reference
+                and not journal.has(_DATASET_DIFF_COMPLETED_EVENT)
+            ):
                 storage_client = storage.Client()
                 run_bucket = storage_client.bucket(args.run_bucket)
                 reference_bucket = storage_client.bucket(args.reference_bucket)
@@ -674,6 +727,7 @@ def main(argv: list[str] | None = None) -> int:
                     run_read_footer,
                     reference_read_footer,
                 )
+                events.append(JournalEvent(event_type=_DATASET_DIFF_COMPLETED_EVENT, at=now))
 
             body = render_comment(observation, snapshot, diffs=diffs, diff_threshold=args.threshold)
 
@@ -708,15 +762,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 github_app.comment(args.issue, body)
 
-            # Unconditional on `body`, not nested under the `if` above: `_observation_events`
-            # journals exactly `observation`'s failed/stalled/completed/run_finished, and
-            # `render_comment` returns `None` only when `observation.is_empty` — the same
-            # fields, empty. So today, `body is None` implies this loop is journalling nothing
-            # anyway. But that is an alignment between two functions, not something this line
-            # enforces, so it is written to hold even if that ever changes: an `Observation`
-            # that somehow carried an event `render_comment` did not turn into a section must
-            # still be journalled, not silently dropped because nothing was posted for it.
-            for event in _observation_events(observation, now):
+            # Unconditional on `body`, not nested under the `if` above. Unlike before F3/F7,
+            # `body is None` no longer implies `events` is empty: `_OBSERVATION_STARTED_EVENT`
+            # is always in `events`, and once journalled once for this run `journal.append`'s
+            # own idempotency (via `has`) makes writing it again a no-op — so this loop still
+            # has to run on the "nothing new to report" wakeup that follows, not only on one
+            # with a comment to post. More generally: `_observation_events` journals exactly
+            # `observation`'s failed/stalled/completed/run_finished, and `render_comment`
+            # returns `None` only when `observation.is_empty` and no diff ran — the same
+            # events, empty, plus whatever this call always appends. An `Observation` that
+            # somehow carried an event `render_comment` did not turn into a section must still
+            # be journalled, not silently dropped because nothing was posted for it.
+            for event in events:
                 journal.append(event)
             return 0
         else:

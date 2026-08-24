@@ -125,13 +125,14 @@ _PAGE_SIZE = 100
 """Task instances per request. The unified pipeline has 132 steps."""
 
 _ACTIVE_RUN_CANDIDATES = 10
-"""Rows fetched by `active_dag_run` when looking for the run in flight.
+"""Rows fetched by `active_dag_run` and `most_recent_dag_run` when looking for a run.
 
-The `state=running` filter already excludes queued runs server-side, so one row
-is normally enough. This margin exists only so the client-side `state` re-check
-below cannot be starved by a single anomalous row that made it past the filter,
-without needing full pagination for something that never happens: the unified
-pipeline runs one DAG run at a time."""
+`active_dag_run`'s `state=running` filter already excludes queued runs server-side, so
+one row is normally enough there; `most_recent_dag_run` sends no filter at all, so its
+own client-side `start_date is not None` re-check needs the same margin against a
+queued run or two sorting ahead of it. Either way this is not full pagination — that
+is never needed for something the unified pipeline does not do: run more than one DAG
+run at a time."""
 
 
 class AirflowClient:
@@ -242,6 +243,39 @@ class AirflowClient:
         )
         running = [run for run in page['dag_runs'] if run.get('state') == 'running']
         return DagRun.model_validate(running[0]) if running else None
+
+    def most_recent_dag_run(self, dag_id: str) -> DagRun | None:
+        """Find the run that started most recently, in any state.
+
+        `active_dag_run` answers "what is running right now", which a run that has
+        already finished can never be — the observer's terminal-state handling
+        (comparing datasets, journalling `run_finished`) would never fire if that
+        were the only way to find a run. This method answers a different question,
+        "what did we most recently start watching", so a caller that finds nothing
+        running can still pick up a run that finished between wakeups. Teaching
+        `active_dag_run` itself to fall back this way would make it lie about what
+        "active" means — hence a separate method rather than a flag on that one.
+
+        No `state` filter is sent, so a queued run — whose `start_date` is null —
+        would sort ahead of every started run, the same Postgres NULLS FIRST
+        behaviour `active_dag_run`'s docstring explains. That method re-checks
+        `state == 'running'` client-side for the same reason; this re-checks
+        `start_date is not None` instead, since "has it started at all" is what
+        this method needs rather than "is it still running".
+
+        Args:
+            dag_id: The DAG's id.
+
+        Returns:
+            The most recently started run in any state, or None if no run of this
+            DAG has ever started.
+        """
+        page = self._get(
+            f'/api/v2/dags/{dag_id}/dagRuns',
+            {'order_by': ['-start_date', '-id'], 'limit': _ACTIVE_RUN_CANDIDATES},
+        )
+        started = [run for run in page['dag_runs'] if run.get('start_date') is not None]
+        return DagRun.model_validate(started[0]) if started else None
 
     def task_instances(self, dag_id: str, run_id: str) -> list[TaskInstance]:
         """Read every task instance in one DAG run, following pagination.

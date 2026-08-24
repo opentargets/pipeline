@@ -150,3 +150,21 @@ def unified_pipeline_steps() -> list[str]:
     """
     up = yaml.safe_load(_UNIFIED_PIPELINE_YAML.read_text())
     return list(up['steps'])
+
+
+def run_name() -> str | None:
+    """Read `run_name` straight out of `unified_pipeline.yaml`, the same file the DAG parsed.
+
+    `dags/config/unified_pipeline.py`'s own `UnifiedPipelineConfig.run_name` falls back
+    to a fresh timestamp (`datetime.now().strftime(...)`) when the field is unset. This
+    function does not reproduce that fallback: the timestamp is generated once, at
+    DAG-parse time, on the Airflow side, and there is no way to recover that exact value
+    by re-reading the file afterwards — a second timestamp minted here would not be the
+    DAG's `run_name`, it would just look like it.
+
+    Returns:
+        The run's own prefix in the runs bucket, or None if the field is unset in the
+        yaml (in which case the DAG itself picked a timestamp this function cannot see).
+    """
+    up = yaml.safe_load(_UNIFIED_PIPELINE_YAML.read_text())
+    return up.get('run_name')

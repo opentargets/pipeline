@@ -22,7 +22,7 @@ from orchestration.supervisor.cli import (
     render_table,
     totals_by_group,
 )
-from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
+from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
 from orchestration.supervisor.snapshot import Snapshot
@@ -628,6 +628,10 @@ class TestDiffLoadersAgainstTheRealConfig:
         assert len(steps) == 132
         assert 'pts_disease' in steps
 
+    def test_loads_the_configured_run_name(self) -> None:
+        """Pins the branch's own measured value; a rename of the field would silently break F7."""
+        assert run_name() == 'ds/target_refactor'
+
     def test_collect_diffs_reconciles_against_the_measured_release_inventory(self) -> None:
         """With both buckets empty, every declared dataset is absent from both sides.
 
@@ -1067,6 +1071,11 @@ def observe_command(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     fake_airflow_client = MagicMock()
     fake_airflow_client.active_dag_run.return_value = DagRun(dag_run_id='run123', state='running')
+    # No run has ever finished by default: `most_recent_dag_run` is the F1 fallback,
+    # consulted only when `active_dag_run` finds nothing. Most scenarios here short-circuit
+    # past it (see `main`'s `or`), so this default only matters to a test that overrides
+    # `active_dag_run` to None and wants the genuinely-idle case rather than the fallback.
+    fake_airflow_client.most_recent_dag_run.return_value = None
     airflow_client_cls = MagicMock(return_value=fake_airflow_client)
     monkeypatch.setattr(cli, 'AirflowClient', airflow_client_cls)
 
@@ -1074,6 +1083,9 @@ def observe_command(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     fake_journal = MagicMock()
     fake_journal.read.return_value = []
+    # No dataset diff has run for this journal yet, by default — see F3's once-only gate
+    # in `main`. A test that wants to simulate an already-diffed run overrides this.
+    fake_journal.has.return_value = False
     journal_cls = MagicMock(return_value=fake_journal)
     monkeypatch.setattr(cli, 'Journal', journal_cls)
 
@@ -1086,6 +1098,8 @@ def observe_command(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(cli, 'footer_reader', footer_reader)
     monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
     monkeypatch.setattr(cli, 'stage_configs', MagicMock(return_value={'pts': {'steps': {}}}))
+    fake_run_name = MagicMock(return_value='ds/some_run')
+    monkeypatch.setattr(cli, 'run_name', fake_run_name)
 
     fake_github_app = MagicMock()
     github_app_cls = MagicMock(return_value=fake_github_app)
@@ -1105,6 +1119,7 @@ def observe_command(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         github_app=fake_github_app,
         github_app_cls=github_app_cls,
         read_app_key=read_app_key,
+        run_name=fake_run_name,
     )
 
 
@@ -1112,17 +1127,31 @@ class TestObserveCommand:
     def test_an_idle_pipeline_exits_zero_and_posts_nothing(
         self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """No active run is the ordinary case, not an error — see `active_dag_run`."""
+        """No run has ever started is the ordinary case, not an error.
+
+        Distinct from a run that finished between wakeups (F1's fallback via
+        `most_recent_dag_run`, covered below): here neither discovery call finds
+        anything, because nothing has ever run.
+        """
         observe_command.airflow_client.active_dag_run.return_value = None
         assert main(['observe', '--issue', '5']) == 0
         observe_command.github_app.comment.assert_not_called()
         observe_command.journal_cls.assert_not_called()
         assert 'unified_pipeline' in capsys.readouterr().out
 
-    def test_a_wakeup_with_nothing_new_posts_nothing(self, observe_command: SimpleNamespace) -> None:
+    def test_a_wakeup_with_nothing_new_posts_no_comment_but_marks_observation_started(
+        self, observe_command: SimpleNamespace
+    ) -> None:
+        """No comment, but `observation_started` still gets journalled — see F7.
+
+        Regression: before F7, `body is None` implied the journal loop wrote nothing at
+        all, so a wakeup with nothing new left no trace it had run.
+        """
         assert main(['observe', '--issue', '5']) == 0
         observe_command.github_app.comment.assert_not_called()
-        observe_command.journal.append.assert_not_called()
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert [event.event_type for event in events] == ['observation_started']
+        assert events[0].payload == {'run_name': 'ds/some_run'}
 
     def test_dry_run_posts_nothing_and_writes_no_journal_event(
         self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
@@ -1155,10 +1184,10 @@ class TestObserveCommand:
             failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
         )
         assert main(['observe', '--issue', '5']) == 0
-        observe_command.journal.append.assert_called_once()
-        event = observe_command.journal.append.call_args.args[0]
-        assert event.event_type == 'step_failed'
-        assert event.step == 'pts_target'
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert {event.event_type for event in events} == {'step_failed', 'observation_started'}
+        failure = next(event for event in events if event.event_type == 'step_failed')
+        assert failure.step == 'pts_target'
         observe_command.github_app.comment.assert_called_once()
         assert observe_command.github_app.comment.call_args.args[0] == 5
 
@@ -1172,7 +1201,9 @@ class TestObserveCommand:
         observe_command.journal.append.side_effect = lambda *a, **kw: order.append('append')
 
         assert main(['observe', '--issue', '5']) == 0
-        assert order == ['comment', 'append']
+        # Two journal writes now (`step_failed` and `observation_started`, see F7), both
+        # still after the single post — the post itself must lead, not just come first.
+        assert order == ['comment', 'append', 'append']
 
     def test_a_failed_post_leaves_the_journal_empty_and_is_retried_next_wakeup(
         self, observe_command: SimpleNamespace
@@ -1196,7 +1227,8 @@ class TestObserveCommand:
         observe_command.github_app.comment.side_effect = None
         assert main(['observe', '--issue', '5']) == 0
         assert observe_command.github_app.comment.call_count == 2
-        observe_command.journal.append.assert_called_once()
+        # `step_failed` and `observation_started` (see F7) — the retried wakeup journals both.
+        assert observe_command.journal.append.call_count == 2
 
     def test_a_failed_pipeline_step_exits_zero_not_one(self, observe_command: SimpleNamespace) -> None:
         """The observer's own health decides the exit code, never the pipeline's state."""
@@ -1205,9 +1237,30 @@ class TestObserveCommand:
         )
         assert main(['observe', '--issue', '5']) == 0
 
-    def test_a_finished_run_exits_zero(self, observe_command: SimpleNamespace) -> None:
+    def test_a_run_discovered_only_via_the_fallback_still_reports_and_journals_finishing(
+        self, observe_command: SimpleNamespace
+    ) -> None:
+        """Regression for F1: a run that finished between wakeups must not go unreported.
+
+        `active_dag_run` finding nothing is not the end of the story: without the
+        `most_recent_dag_run` fallback, a run that finished between two wakeups is never
+        discovered again, so its terminal-state comment and `run_finished` event never
+        fire. This drives the whole path through that fallback — not just `main`'s exit
+        code, which a weaker version of this test (mocking `active_dag_run` to return a
+        *running* run while `take_snapshot` reported `failed`, a combination production
+        cannot produce, since `take_snapshot`'s `run_state` describes the very run
+        `active_dag_run` found) used to certify even with the fallback absent.
+        """
+        observe_command.airflow_client.active_dag_run.return_value = None
+        observe_command.airflow_client.most_recent_dag_run.return_value = DagRun(dag_run_id='run123', state='failed')
         observe_command.take_snapshot.return_value = _snapshot(run_state='failed')
+
         assert main(['observe', '--issue', '5']) == 0
+
+        observe_command.github_app.comment.assert_called_once()
+        assert 'Run FAILED' in observe_command.github_app.comment.call_args.args[1]
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert any(event.event_type == 'run_finished' for event in events)
 
     def test_the_diff_does_not_run_before_a_terminal_state(self, observe_command: SimpleNamespace) -> None:
         observe_command.take_snapshot.return_value = _snapshot(run_state='running')
@@ -1228,6 +1281,27 @@ class TestObserveCommand:
         observe_command.take_snapshot.return_value = _snapshot(run_state='success')
         assert main(['observe', '--issue', '5']) == 0
         observe_command.collect_diffs.assert_not_called()
+
+    def test_the_diff_journals_its_own_completion_once_it_runs(self, observe_command: SimpleNamespace) -> None:
+        """See F3: the terminal-state diff marks itself done, so a later wakeup can skip it."""
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert any(event.event_type == 'dataset_diff_completed' for event in events)
+
+    def test_the_diff_does_not_rerun_once_already_marked_complete(self, observe_command: SimpleNamespace) -> None:
+        """Regression for F3: an already-marked run must not rerun the diff.
+
+        Without this gate, a finished run's diff would rerun — and repost a full "Dataset
+        comparison" section — on every ten-minute wakeup forever, re-reading every parquet
+        footer on both sides each time `--rows` is set.
+        """
+        observe_command.take_snapshot.return_value = _snapshot(run_state='success')
+        observe_command.journal.has.return_value = True
+        assert main(['observe', '--issue', '5', '--run', 'r', '--reference', 'rel']) == 0
+        observe_command.collect_diffs.assert_not_called()
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert not any(event.event_type == 'dataset_diff_completed' for event in events)
 
     def test_row_counts_are_only_read_with_the_rows_flag(self, observe_command: SimpleNamespace) -> None:
         observe_command.take_snapshot.return_value = _snapshot(run_state='success')
