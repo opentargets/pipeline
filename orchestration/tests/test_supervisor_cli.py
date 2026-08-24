@@ -56,9 +56,13 @@ def _usage(
         product=product,
         started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
+        billed_hours=2,
         net_cost=net_cost,
         currency=currency,
         shared_cluster=shared,
+        core_seconds=None,
+        spot_core_seconds=None,
+        machine_families=[],
     )
 
 
@@ -892,9 +896,13 @@ def _usage_row(**kw: Any) -> SimpleNamespace:
         'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 22, 2, 0, tzinfo=UTC),
+        'billed_hours': 4,
         'net_cost': 21.60,
         'currency': 'GBP',
         'shared_cluster': False,
+        'core_seconds': None,
+        'spot_core_seconds': None,
+        'machine_families': [],
     }
     base.update(kw)
     return SimpleNamespace(**base)

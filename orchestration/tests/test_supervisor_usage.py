@@ -42,12 +42,17 @@ class TestStepUsage:
             product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
+            billed_hours=2,
             net_cost=1.5,
             currency='GBP',
             shared_cluster=False,
+            core_seconds=7200.0,
+            spot_core_seconds=0.0,
+            machine_families=['N1'],
         )
         assert u.step == 'pts_target'
         assert u.product == 'platform'
+        assert u.billed_hours == 2
 
     def test_tool_must_be_a_pipeline_tool(self) -> None:
         with pytest.raises(ValidationError):
@@ -58,9 +63,13 @@ class TestStepUsage:
                 'product': 'platform',
                 'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
                 'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+                'billed_hours': 1,
                 'net_cost': 0.1,
                 'currency': 'GBP',
                 'shared_cluster': False,
+                'core_seconds': None,
+                'spot_core_seconds': None,
+                'machine_families': [],
             })
 
     def test_product_may_be_missing(self) -> None:
@@ -72,9 +81,13 @@ class TestStepUsage:
             'product': None,
             'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            'billed_hours': 1,
             'net_cost': 0.1,
             'currency': 'GBP',
             'shared_cluster': False,
+            'core_seconds': None,
+            'spot_core_seconds': None,
+            'machine_families': [],
         })
         assert u.product is None
 
@@ -87,11 +100,60 @@ class TestStepUsage:
             product='platform',
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            billed_hours=1,
             net_cost=-0.02,
             currency='GBP',
             shared_cluster=False,
+            core_seconds=None,
+            spot_core_seconds=None,
+            machine_families=[],
         )
         assert u.net_cost < 0
+
+    def test_core_seconds_and_spot_core_seconds_may_both_be_absent(self) -> None:
+        """A Batch step, or one that is storage/network cost only, billed no core SKU.
+
+        `None` here must not collapse to `0.0` — that would claim measured zero CPU
+        rather than "this figure cannot see this step's CPU at all".
+        """
+        u = StepUsage(
+            run='r',
+            step='s',
+            tool='pis',
+            product='platform',
+            started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
+            ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            billed_hours=1,
+            net_cost=0.01,
+            currency='GBP',
+            shared_cluster=False,
+            core_seconds=None,
+            spot_core_seconds=None,
+            machine_families=[],
+        )
+        assert u.core_seconds is None
+        assert u.spot_core_seconds is None
+        assert u.machine_families == []
+
+    def test_spot_core_seconds_can_be_a_measured_zero(self) -> None:
+        """Core time billed and none of it spot is a fact, distinct from `None`."""
+        u = StepUsage(
+            run='r',
+            step='s',
+            tool='pis',
+            product='platform',
+            started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
+            ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            billed_hours=1,
+            net_cost=0.01,
+            currency='GBP',
+            shared_cluster=False,
+            core_seconds=3600.0,
+            spot_core_seconds=0.0,
+            machine_families=['N1'],
+        )
+        assert u.core_seconds == 3600.0
+        assert u.spot_core_seconds == 0.0
 
 
 class TestRunUsageQuery:
@@ -250,6 +312,59 @@ class TestLabelExtraction:
         assert _label_aliases(_LABELLED_CTE)['product'] == 'product'
 
 
+class TestCoreSkuExtraction:
+    """The row-level flags `core_seconds`/`spot_core_seconds`/`machine_families` are built from.
+
+    Verified live (2026-08-24) against the two real core SKU descriptions in the export:
+    `N1 Predefined Instance Core running in EMEA` and
+    `Spot Preemptible N1 Predefined Instance Core running in EMEA`. Both contain the literal
+    substring `Instance Core`; only the second starts with `Spot `; both yield `N1` from the
+    family regex.
+    """
+
+    def test_the_core_flag_matches_on_the_instance_core_substring(self) -> None:
+        assert "sku.description LIKE '%Instance Core%' AS is_core" in _LABELLED_CTE
+
+    def test_the_spot_flag_matches_the_spot_prefix_not_preemptible_generally(self) -> None:
+        """`STARTS_WITH`, not `LIKE '%Spot%'`.
+
+        A description mentioning spot mid-string (there are none today, but a future SKU
+        rename could add one) must not be misread as pricing this row spot.
+        """
+        assert "STARTS_WITH(sku.description, 'Spot ') AS is_spot" in _LABELLED_CTE
+
+    def test_usage_amount_is_carried_through_unconverted(self) -> None:
+        """Core SKUs bill `usage.amount` in seconds already; no unit conversion belongs here."""
+        assert 'usage.amount AS usage_amount' in _LABELLED_CTE
+
+    def test_machine_family_is_null_for_non_core_rows(self) -> None:
+        """A RAM or disk row must not contribute a family — only core rows name one."""
+        match = re.search(
+            r'IF\(\s*sku\.description LIKE \'%Instance Core%\',\s*'
+            r"REGEXP_EXTRACT\(sku\.description, r'([^']*)'\),\s*NULL\s*\) AS machine_family",
+            _LABELLED_CTE,
+        )
+        assert match is not None, 'the machine_family expression must guard on is-core'
+
+    def test_the_family_regex_reads_the_token_before_instance_core(self) -> None:
+        """Pinned against the two real descriptions rather than reasoned about only.
+
+        `Spot Preemptible N1 Predefined Instance Core running in EMEA` -> `N1`: the
+        `Spot Preemptible ` prefix sits before the captured token, not inside it.
+        """
+        pattern = re.search(r"REGEXP_EXTRACT\(sku\.description, r'([^']*)'\)", _LABELLED_CTE)
+        assert pattern is not None
+        family_re = re.compile(pattern.group(1))
+
+        on_demand = family_re.search('N1 Predefined Instance Core running in EMEA')
+        assert on_demand is not None
+        assert on_demand.group(1) == 'N1'
+
+        spot = family_re.search('Spot Preemptible N1 Predefined Instance Core running in EMEA')
+        assert spot is not None
+        assert spot.group(1) == 'N1'
+
+
 class TestAggregate:
     def test_started_is_the_earliest_start_and_ended_the_latest_end(self) -> None:
         """The only guard on these two columns, and both are load-bearing.
@@ -280,6 +395,37 @@ class TestAggregate:
         """`ANY_VALUE(currency)` over a mixed group stamps one currency on a mixed sum."""
         assert _aggregate_expressions(_AGGREGATE)['currency'] == 'currency'
         assert 'currency' in _group_by_columns(_AGGREGATE)
+
+    def test_billed_hours_counts_distinct_hourly_buckets_not_the_row_count(self) -> None:
+        """`COUNT(*)` would count rows (several SKUs per hour); this counts distinct hours.
+
+        That distinction is the whole feature: a step billed across several SKUs in one
+        hour must still report 1, not one per SKU.
+        """
+        assert _aggregate_expressions(_AGGREGATE)['billed_hours'] == (
+            'COUNT(DISTINCT TIMESTAMP_TRUNC(usage_start_time, HOUR))'
+        )
+
+    def test_core_seconds_is_null_not_zero_when_the_step_billed_no_core_sku(self) -> None:
+        """`SUM(IF(is_core, usage_amount, 0))` alone would report 0.0 for a Batch step.
+
+        The `COUNTIF(is_core) = 0` guard is what turns "no core rows" into `NULL` rather
+        than a summed zero that reads as "measured zero CPU".
+        """
+        assert _aggregate_expressions(_AGGREGATE)['core_seconds'] == (
+            'IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core, usage_amount, 0)))'
+        )
+
+    def test_spot_core_seconds_shares_the_same_null_guard_as_core_seconds(self) -> None:
+        """Both must go absent together: a step with core rows but no spot rows is 0.0."""
+        assert _aggregate_expressions(_AGGREGATE)['spot_core_seconds'] == (
+            'IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core AND is_spot, usage_amount, 0)))'
+        )
+
+    def test_machine_families_are_deduplicated_ordered_and_drop_the_non_core_nulls(self) -> None:
+        assert _aggregate_expressions(_AGGREGATE)['machine_families'] == (
+            'ARRAY_AGG(DISTINCT machine_family IGNORE NULLS ORDER BY machine_family)'
+        )
 
     def test_product_is_grouped(self) -> None:
         assert 'product' in _group_by_columns(_AGGREGATE)
@@ -566,9 +712,13 @@ def _row(**kw: object) -> SimpleNamespace:
         'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
+        'billed_hours': 2,
         'net_cost': 1.5,
         'currency': 'GBP',
         'shared_cluster': False,
+        'core_seconds': 7200.0,
+        'spot_core_seconds': 0.0,
+        'machine_families': ['N1'],
     }
     base.update(kw)
     return SimpleNamespace(**base)
@@ -607,6 +757,27 @@ class TestBillingExport:
         """A run with no billed rows yet is normal early in a pipeline run."""
         export = BillingExport(client=_client([]), table=TABLE)
         assert export.run_usage(run='r', since=date(2026, 5, 1)) == []
+
+    def test_a_step_with_no_core_sku_maps_to_none_not_zero(self) -> None:
+        """BigQuery's own `NULL` for `core_seconds`/`spot_core_seconds` must reach the model as `None`.
+
+        A row-mapping bug that defaulted a missing value to `0.0` would pass every other
+        test here, because every other fixture row has core rows.
+        """
+        row = _row(core_seconds=None, spot_core_seconds=None, machine_families=[])
+        export = BillingExport(client=_client([row]), table=TABLE)
+        result = export.run_usage(run='r', since=date(2026, 5, 1))
+        assert result[0].core_seconds is None
+        assert result[0].spot_core_seconds is None
+        assert result[0].machine_families == []
+
+    def test_machine_families_from_the_row_become_a_plain_list(self) -> None:
+        """BigQuery returns a repeated field as its own array type; the model wants `list[str]`."""
+        row = _row(machine_families=('N1',))
+        export = BillingExport(client=_client([row]), table=TABLE)
+        result = export.run_usage(run='r', since=date(2026, 5, 1))
+        assert result[0].machine_families == ['N1']
+        assert isinstance(result[0].machine_families, list)
 
     def test_step_history_uses_the_history_query(self) -> None:
         client = _client([_row(run='older-run')])

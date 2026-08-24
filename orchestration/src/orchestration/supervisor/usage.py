@@ -8,7 +8,15 @@ task instances, which have the resolution for it.
 `started` and `ended` remain, and are hour-aligned like the rows they come from. They fix
 the row order and bound the window `window_coverage` measures. Subtracting them yields an
 envelope over a step's billed rows that includes every gap between them, which is not a
-duration and is not offered as one.
+duration and is not offered as one, and it can overstate wildly: a labelled resource that
+outlives its step keeps billing under that step's labels for as long as it exists. `started`
+and `ended` alone cannot tell a reader that happened; `billed_hours` can, because it counts
+only the hourly buckets the step actually billed in, gaps excluded. The two are meant to be
+read together, never `started`/`ended` alone.
+
+`core_seconds` and `spot_core_seconds` answer a different question again: not when the step
+billed, but how much CPU it paid for and whether that CPU was pre-emptible. Both come from
+the same `Instance Core` SKUs `billed_hours` does not touch.
 
 Not every pound the pipeline spends carries a `step` label, either. Google Batch jobs are
 unlabelled and some Dataproc disk and licensing rows fall outside the step's labels, so
@@ -93,8 +101,19 @@ class StepUsage(BaseModel):
         product: The `product` label, `platform` or `ppp`. The partner preview pipeline
             runs the same DAG, so two runs can share a `run` label and differ only here.
             `None` for rows that carry no `product` label.
-        started: Earliest `usage_start_time` across the step's billed rows.
-        ended: Latest `usage_end_time` across the step's billed rows.
+        started: Earliest `usage_start_time` across the step's billed rows. Part of the
+            billed *envelope* — see `billed_hours` before reading this as a duration.
+        ended: Latest `usage_end_time` across the step's billed rows. Same caveat as
+            `started`.
+        billed_hours: `COUNT(DISTINCT TIMESTAMP_TRUNC(usage_start_time, HOUR))` across the
+            step's billed rows — the number of hourly buckets it actually billed in, not
+            the span between the first and the last. This is the figure that catches what
+            `started`/`ended` cannot: a real run showed a step's envelope at 39.00 hours
+            against 1.00 in every other run of it, because a labelled Dataproc cluster
+            outlived the step that created it. `ended - started` on that row would have
+            sent a reader looking at the wrong thing; `billed_hours` of 1 tells the truth.
+            Always show the two together — the envelope is still worth reporting, it just
+            must never stand alone.
         net_cost: `SUM(cost) + SUM(credits.amount)`. Credits are negative in the export,
             so this subtracts them. Ignoring credits overstates cost by roughly 7%.
         currency: Currency code from the export. `GBP` for this billing account. Part of
@@ -107,6 +126,19 @@ class StepUsage(BaseModel):
             (`use_if_exists=True`) that does not currently manifest, not a description of
             observed billing. Detected, never re-apportioned: splitting an instance's cost
             between steps needs the Dataproc Jobs API.
+        core_seconds: Total `usage.amount` (already in seconds) billed under a SKU whose
+            description contains `Instance Core` — on-demand and spot combined. Divide by
+            3600 for core-hours. `None`, never `0.0`, when the step billed no core SKU at
+            all: a Batch step, or one whose cost is storage/network only, used no CPU that
+            this figure can see, which is not the same claim as "used none".
+        spot_core_seconds: The subset of `core_seconds` billed under a SKU whose
+            description starts with `Spot ` (Google's preemptible-VM pricing). `None`
+            under exactly the condition `core_seconds` is `None` — no core SKU rows to
+            split. `0.0` is a real, measured value here: it means the step billed core
+            time and none of it was spot, which is different from not knowing.
+        machine_families: Distinct machine family (e.g. `N1`) read off each core SKU's
+            description, sorted. Empty — never omitted, never a sentinel — when
+            `core_seconds` is `None`, for the same reason: nothing to name a family from.
     """
 
     run: str
@@ -115,9 +147,13 @@ class StepUsage(BaseModel):
     product: str | None
     started: datetime
     ended: datetime
+    billed_hours: int
     net_cost: float
     currency: str
     shared_cluster: bool
+    core_seconds: float | None
+    spot_core_seconds: float | None
+    machine_families: list[str]
 
 
 class WindowCoverage(BaseModel):
@@ -156,7 +192,7 @@ class WindowCoverage(BaseModel):
         return self.labelled_cost > self.pipeline_cost
 
 
-_LABELLED_CTE = """
+_LABELLED_CTE = r"""
 WITH labelled AS (
   SELECT
     (SELECT value FROM UNNEST(labels) WHERE key = 'run') AS run,
@@ -168,7 +204,15 @@ WITH labelled AS (
     usage_end_time,
     cost,
     (SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) c) AS credit,
-    currency
+    currency,
+    sku.description LIKE '%Instance Core%' AS is_core,
+    STARTS_WITH(sku.description, 'Spot ') AS is_spot,
+    usage.amount AS usage_amount,
+    IF(
+      sku.description LIKE '%Instance Core%',
+      REGEXP_EXTRACT(sku.description, r'(\w+) (?:Predefined )?Instance Core'),
+      NULL
+    ) AS machine_family
   FROM `{table}`
   WHERE DATE(_PARTITIONTIME) >= @since
     AND cost_type = 'regular'
@@ -193,9 +237,13 @@ SELECT
   product,
   MIN(usage_start_time) AS started,
   MAX(usage_end_time) AS ended,
+  COUNT(DISTINCT TIMESTAMP_TRUNC(usage_start_time, HOUR)) AS billed_hours,
   SUM(cost) + SUM(credit) AS net_cost,
   currency,
-  IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster
+  IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster,
+  IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core, usage_amount, 0))) AS core_seconds,
+  IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core AND is_spot, usage_amount, 0))) AS spot_core_seconds,
+  ARRAY_AGG(DISTINCT machine_family IGNORE NULLS ORDER BY machine_family) AS machine_families
 FROM labelled
 LEFT JOIN cluster_steps ON run = cluster_run AND cluster_instance = cluster_key
 WHERE step IS NOT NULL
@@ -358,9 +406,13 @@ class BillingExport:
                 product=row.product,
                 started=row.started,
                 ended=row.ended,
+                billed_hours=row.billed_hours,
                 net_cost=row.net_cost,
                 currency=row.currency,
                 shared_cluster=row.shared_cluster,
+                core_seconds=row.core_seconds,
+                spot_core_seconds=row.spot_core_seconds,
+                machine_families=list(row.machine_families),
             )
             for row in self._run_query(sql, params)
         ]
