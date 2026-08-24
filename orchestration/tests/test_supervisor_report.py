@@ -277,6 +277,72 @@ class TestDiffs:
         assert 'Dataset comparison' not in result
 
 
+class TestRepeatAttempts:
+    def test_a_repeat_failure_says_so(self) -> None:
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=3),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt 3' in result
+
+    def test_a_first_attempt_failure_does_not_mention_an_attempt(self) -> None:
+        """The universal ordinary case must not render as if it were news.
+
+        try_number=1 is the universal ordinary case (max_tries is 0 throughout this
+        pipeline) and must not render as if it were news.
+        """
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=1),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt' not in result
+
+    def test_an_unknown_try_number_does_not_mention_an_attempt(self) -> None:
+        """None must render exactly like 1, and never as a fabricated attempt.
+
+        try_number=None must render exactly like try_number=1 — nothing — not as
+        'attempt None' and not by defaulting silently to 'attempt 1'.
+        """
+        obs = _observation(failed=[
+            StepFailure(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=None),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt' not in result
+        assert 'None' not in result
+
+    def test_a_repeat_stall_says_so(self) -> None:
+        obs = _observation(stalled=[
+            StepStall(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=2,
+                      elapsed=32400.0, threshold=21600.0, basis='ceiling'),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt 2' in result
+
+    def test_a_repeat_completion_says_so(self) -> None:
+        obs = _observation(completed=[
+            StepCompletion(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=4,
+                            duration=252.0),
+        ])
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt 4' in result
+
+    def test_first_attempt_stalls_and_completions_do_not_mention_an_attempt(self) -> None:
+        obs = _observation(
+            stalled=[StepStall(ref='pts_target.run_pts_target', step='pts_target', map_index=-1, try_number=1,
+                                elapsed=32400.0, threshold=21600.0, basis='ceiling')],
+            completed=[StepCompletion(ref='pts_disease.run_pts_disease', step='pts_disease', map_index=-1,
+                                       try_number=None, duration=120.0)],
+        )
+        result = render_comment(obs, _snapshot())
+        assert result is not None
+        assert 'attempt' not in result
+
+
 class TestSectionOrdering:
     def test_run_finished_leads_before_failures(self) -> None:
         obs = _observation(

@@ -82,6 +82,31 @@ def _label(step: str, map_index: int) -> str:
     return f'{step}[{map_index}]' if map_index != -1 else step
 
 
+def _repeat_note(try_number: int | None) -> str:
+    """Render a note when `try_number` shows this is a deliberate re-run.
+
+    `max_tries` is 0 throughout this pipeline (see `observer.py`'s module docstring),
+    so Airflow never retries a task on its own: `try_number == 1` is the ordinary,
+    universal case, and a `try_number` of `None` means the snapshot did not carry one.
+    Neither is news, so both render nothing — the "absent value reads as a zero"
+    mistake this project keeps guarding against, applied here to "no attempt shown
+    reads as attempt 1", which must not happen for either input. A `try_number` above
+    1 means a human or a future agent cleared and re-ran the step, which is exactly
+    the moment a reader needs flagged: it turns "this step failed" into "this step
+    failed *again*, after someone already tried once".
+
+    Args:
+        try_number: From `StepFailure.try_number` / `StepStall.try_number` /
+            `StepCompletion.try_number`.
+
+    Returns:
+        A parenthetical to append to the bullet, or `''` when there is nothing to say.
+    """
+    if try_number is None or try_number <= 1:
+        return ''
+    return f' (attempt {try_number}, a re-run)'
+
+
 def _render_run_finished(state: str, snapshot: Snapshot) -> str:
     """Render the run reaching a terminal state.
 
@@ -105,6 +130,10 @@ def _render_run_finished(state: str, snapshot: Snapshot) -> str:
 def _render_failed(failures: list[StepFailure]) -> str:
     """Render newly failed task instances.
 
+    A failure at `try_number` above 1 is flagged as a repeat — see `_repeat_note` —
+    since that is the one moment this tool must not go quiet: a human or a future
+    agent already re-ran the step once, and it failed again.
+
     Args:
         failures: As `Observation.failed`. Never empty when called.
 
@@ -112,7 +141,7 @@ def _render_failed(failures: list[StepFailure]) -> str:
         A heading followed by one bullet per failure.
     """
     lines = ['**Failed**']
-    lines.extend(f'- `{_label(f.step, f.map_index)}`' for f in failures)
+    lines.extend(f'- `{_label(f.step, f.map_index)}`{_repeat_note(f.try_number)}' for f in failures)
     return '\n'.join(lines)
 
 
@@ -123,7 +152,9 @@ def _render_stalled(stalls: list[StepStall]) -> str:
     fired. `basis='history'` is called out with its own explanation rather than printed
     as a bare word: `stall.py` documents it as reachable only when a step is cleared and
     re-run within the same DAG run, so it is unusual enough that a reader seeing it
-    deserves to know why, not just that it happened.
+    deserves to know why, not just that it happened. A stall at `try_number` above 1
+    is separately flagged as a repeat — see `_repeat_note` — since that fires even on
+    the ordinary `ceiling` basis, not only alongside a `history` verdict.
 
     Args:
         stalls: As `Observation.stalled`. Never empty when called.
@@ -143,12 +174,16 @@ def _render_stalled(stalls: list[StepStall]) -> str:
             )
         else:
             note = f'past the {threshold} ceiling (no completed run of this step yet this run)'
-        lines.append(f'- `{label}` — running {elapsed}, {note}')
+        lines.append(f'- `{label}` — running {elapsed}, {note}{_repeat_note(stall.try_number)}')
     return '\n'.join(lines)
 
 
 def _render_completed(completions: list[StepCompletion]) -> str:
     """Render newly completed steps.
+
+    A completion at `try_number` above 1 is flagged as a repeat — see `_repeat_note`
+    — so a step that failed once and succeeded on a re-run reads as the recovery it
+    is, not as an ordinary first-try success.
 
     Args:
         completions: As `Observation.completed`. Never empty when called.
@@ -157,7 +192,10 @@ def _render_completed(completions: list[StepCompletion]) -> str:
         A heading followed by one bullet per completion.
     """
     lines = ['**Completed**']
-    lines.extend(f'- `{_label(c.step, c.map_index)}` finished in {_format_duration(c.duration)}' for c in completions)
+    lines.extend(
+        f'- `{_label(c.step, c.map_index)}` finished in {_format_duration(c.duration)}{_repeat_note(c.try_number)}'
+        for c in completions
+    )
     return '\n'.join(lines)
 
 
