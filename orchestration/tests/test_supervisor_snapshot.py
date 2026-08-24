@@ -13,7 +13,7 @@ from orchestration.supervisor.stall import StallVerdict, baseline_from_journal, 
 NOW = datetime(2026, 7, 21, 20, 0, tzinfo=UTC)
 
 
-def _running(task_id: str = 'run_pts_target', minutes: int = 30) -> TaskInstance:
+def _running(task_id: str = 'pts_target.run_pts_target', minutes: int = 30) -> TaskInstance:
     return TaskInstance(task_id=task_id, state='running', start_date=NOW - timedelta(minutes=minutes))
 
 
@@ -62,12 +62,25 @@ class TestBaselineFromJournal:
 
 class TestStalled:
     def test_a_task_within_its_baseline_is_not_stalled(self) -> None:
-        assert stalled(_running(minutes=30), {'run_pts_target': 3600.0}, NOW) is None
+        assert stalled(_running(minutes=30), {'pts_target': 3600.0}, NOW) is None
 
     def test_a_task_far_past_its_baseline_is_stalled(self) -> None:
-        verdict = stalled(_running(minutes=300), {'run_pts_target': 3600.0}, NOW)
+        verdict = stalled(_running(minutes=300), {'pts_target': 3600.0}, NOW)
         assert verdict is not None
         assert verdict.basis == 'history'
+
+    def test_a_sibling_task_in_the_group_does_not_inherit_the_run_tasks_baseline(self) -> None:
+        """`step_from_task_id` collapses every task in a group onto the same step name.
+
+        Without gating on `is_run_task`, a `delete_vm_` sibling would inherit the run
+        task's history threshold instead of falling to the ceiling — see the module
+        docstring for the concrete failure this produces in both directions.
+        """
+        sibling = TaskInstance(task_id='pts_target.delete_vm_pts_target', state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        verdict = stalled(sibling, {'pts_target': 3600.0}, NOW)
+        assert verdict is not None
+        assert verdict.basis == 'ceiling'
 
     def test_a_task_with_no_history_falls_back_to_the_ceiling(self) -> None:
         """Most steps have no baseline on early runs, so this is the common path."""

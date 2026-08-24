@@ -1,6 +1,6 @@
-"""The four names a pipeline step answers to, and how to move between them.
+"""The names a pipeline step answers to, and how to move between them.
 
-One step is identified four different ways, and code that assumes any two are the
+One step is identified several different ways, and code that assumes any two are the
 same fails silently rather than loudly:
 
 | Where | Example |
@@ -19,6 +19,16 @@ The qualified task id matters because Airflow prefixes group ids onto their chil
 That mismatch is invisible: a baseline keyed one way and looked up the other simply never
 hits, and stall detection falls back to its ceiling — which is also what a first run looks
 like.
+
+`StepIdentity` deliberately does not carry a run task id. Most steps nest their execution
+task one group deep (`{step}.run_{step}`), but a step with `cluster: false` nests it two
+groups deep instead (`{step}.{step}_batch_jobs.run_{step}`, see `gentropy_variant_annotation`
+and `gentropy_l2g_prediction` in `dags/config/gentropy.yaml:120-223`), so a run task id built
+from `RUN_TASK_PREFIX` alone is wrong for those two steps out of 132. Nothing in this codebase
+reconstructs one — `is_run_task` below recognises a real task id instead of building one, and
+is correct at any nesting depth. A future caller needing the qualified id has the DAG config in
+hand and can build it correctly then; carrying a field that is silently wrong for two steps and
+unread by anything is a trap, not a convenience.
 """
 
 from __future__ import annotations
@@ -37,13 +47,11 @@ class StepIdentity(NamedTuple):
             and the Airflow task group id.
         stage: The application that runs it, one of `pis`, `pts` or `gentropy`.
         config_key: The key under `steps:` in that stage's own config file.
-        run_task_id: The fully-qualified Airflow task id of the execution task.
     """
 
     step: str
     stage: str
     config_key: str
-    run_task_id: str
 
 
 def identify(step: str) -> StepIdentity:
@@ -56,22 +64,22 @@ def identify(step: str) -> StepIdentity:
         The step's identity.
 
     Raises:
-        ValueError: If the name carries no stage prefix, which means it is not a
-            `unified_pipeline.yaml` step name and the caller has one of the other
-            three spellings.
+        ValueError: If the name carries no config key or no stage, which means it is
+            not a `unified_pipeline.yaml` step name and the caller has one of the
+            other three spellings.
     """
     stage, _, config_key = step.partition('_')
     if not config_key:
         raise ValueError(
-            f'{step!r} has no stage prefix, so it is not a unified_pipeline step name. '
+            f'{step!r} has no config key, so it is not a unified_pipeline step name. '
             f'Expected something like "pts_disease".'
         )
-    return StepIdentity(
-        step=step,
-        stage=stage,
-        config_key=config_key,
-        run_task_id=f'{step}.{RUN_TASK_PREFIX}{step}',
-    )
+    if not stage:
+        raise ValueError(
+            f'{step!r} has no stage, so it is not a unified_pipeline step name. '
+            f'Expected something like "pts_disease".'
+        )
+    return StepIdentity(step=step, stage=stage, config_key=config_key)
 
 
 def step_from_task_id(task_id: str) -> str:
@@ -86,3 +94,22 @@ def step_from_task_id(task_id: str) -> str:
     """
     group, _, _ = task_id.partition('.')
     return group
+
+
+def is_run_task(task_id: str) -> bool:
+    """Whether a task id names its step's own execution task, not a sibling in its group.
+
+    Checked against the task id's last path component rather than reconstructed from
+    the step name, because reconstruction is wrong for a step nested two groups deep
+    (`cluster: false`, see the module docstring) — this check is correct regardless of
+    nesting depth.
+
+    Args:
+        task_id: An Airflow task id, at any nesting depth inside its step's group(s).
+
+    Returns:
+        True if the last `.`-delimited component is `run_{step}`, where `step` is
+        `step_from_task_id(task_id)`.
+    """
+    step = step_from_task_id(task_id)
+    return task_id.rsplit('.', 1)[-1] == f'{RUN_TASK_PREFIX}{step}'

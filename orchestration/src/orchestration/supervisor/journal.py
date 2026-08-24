@@ -35,7 +35,11 @@ class JournalEvent(BaseModel):
     Args:
         event_type: What happened, e.g. `step_completed`, `step_failed`,
             `stall_detected`, `retrigger`.
-        step: The step it happened to, or None for run-level events.
+        step: The step it happened to, or None for run-level events. This is always the
+            bare `unified_pipeline.yaml` step name (`pts_target`), never the qualified
+            Airflow `task_id` (`pts_target.run_pts_target`) — the same spelling GCP uses
+            as its billing label and `usage.StepUsage.step` already carries. See
+            `stall.baseline_from_journal` for why the two spellings must not be mixed.
         try_number: Which attempt, so a retry is a distinct event.
         at: When the agent observed it.
         payload: Event-specific detail. Durations live here, which is what makes the

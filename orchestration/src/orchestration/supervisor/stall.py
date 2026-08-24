@@ -7,6 +7,15 @@ against its own observed maximum and a step without one against a single absolut
 ceiling. The verdict records which rule fired, because "four times its usual" and
 "past the blanket limit" are different things to tell a human.
 
+The baseline is only ever consulted for a step's own execution task, never for a
+sibling in its group. `step_from_task_id` collapses every task in a group onto the
+same step name (`pts_target.delete_vm_pts_target` and `pts_target.run_pts_target`
+both map to `pts_target`), so an ungated lookup would hand the run task's journalled
+duration to every sibling — a `diff_` task doing a slow GCS listing judged stalled on
+a fabricated history basis, or a `delete_vm_` task getting a run task's five-hour
+threshold instead of the ceiling, delaying a real hang report by hours. `stalled`
+gates the lookup with `is_run_task` for exactly this reason.
+
 Elapsed time here is measured from `start_date` — when the task began executing —
 and therefore excludes queueing. That is deliberate, not an oversight: the baseline
 this elapsed time is compared against comes from Airflow's own `duration`, which is
@@ -29,7 +38,7 @@ from pydantic import BaseModel
 
 from orchestration.supervisor.airflow import TaskInstance
 from orchestration.supervisor.journal import JournalEvent
-from orchestration.supervisor.step_identity import step_from_task_id
+from orchestration.supervisor.step_identity import is_run_task, step_from_task_id
 from orchestration.utils.common import STALL_CEILING_SECONDS, STALL_MULTIPLIER
 
 Baseline = dict[str, float]
@@ -140,6 +149,11 @@ def stalled(
 ) -> StallVerdict | None:
     """Judge whether a running task has stalled.
 
+    Only the step's own execution task is judged against its history; a sibling task in
+    the same group always falls to the ceiling, since the baseline holds durations for
+    the execution task alone and `step_from_task_id` would otherwise hand its duration
+    to every sibling — see the module docstring.
+
     Args:
         task: The task instance to judge.
         baseline: Observed maxima per step.
@@ -155,7 +169,7 @@ def stalled(
         return None
 
     elapsed = (now - task.start_date).total_seconds()
-    observed = baseline.get(step_from_task_id(task.task_id))
+    observed = baseline.get(step_from_task_id(task.task_id)) if is_run_task(task.task_id) else None
     threshold = observed * multiplier if observed is not None else ceiling
     basis: Literal['history', 'ceiling'] = 'history' if observed is not None else 'ceiling'
 
