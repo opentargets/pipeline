@@ -187,8 +187,15 @@ class AllocationSpec(BaseModel):
         """
         return batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=[self.region] if self.region else self.zones)
 
-    def build(self) -> batch_v1.AllocationPolicy:
+    def build(self, labels: dict[str, str] | None = None) -> batch_v1.AllocationPolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy` object from the allocation specification.
+
+        Args:
+            labels: Optional labels to override the labels defined in the AllocationSpec.
+                Batch applies the allocation policy labels to the job and to every Compute Engine
+                resource the policy creates (VMs and disks), which are the resources that carry the
+                cost. The job level labels only reach the job object and its log entries, so cost
+                attribution depends on these.
 
         Returns:
             batch_v1.AllocationPolicy: The built AllocationPolicy object.
@@ -209,7 +216,7 @@ class AllocationSpec(BaseModel):
         """  # noqa: E501
         ap = {
             'instances': [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
-            'labels': self.labels or dict(Labels()),
+            'labels': labels or self.labels or dict(Labels()),
         }
         if self.location:
             ap['location'] = self.location
