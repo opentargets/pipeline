@@ -10,6 +10,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import node
 from pts.transformers.disease.coalescing import (
     annotate_name_duplicates,
+    annotate_xref_duplicates,
     remap_edges,
     resolve_replacement_chains,
 )
@@ -39,10 +40,16 @@ def disease(
         initial['graphs'][0][0]['edges'],
     )
 
-    # annotate name-collision nodes as deprecated before any filtering, resolve
-    # any replacement pointer that names a node which is itself deprecated, then
-    # rewrite edges so they reference only retained identifiers
+    # Mark duplicate nodes deprecated before any filtering: first the terms
+    # sharing a label, then the cross-ontology equivalents whose labels differ.
+    # Each pass is followed by resolving its replacement pointers and rewriting
+    # edges onto retained identifiers.  Edges must be rewritten between the two
+    # passes as well as after them, because the second pass reads the is_a
+    # hierarchy: an unresolved merge hides ancestor links, and the hierarchy
+    # guard would then let a parent and child merge.
     n = resolve_replacement_chains(annotate_name_duplicates(n))
+    e = remap_edges(e, n)
+    n = resolve_replacement_chains(annotate_xref_duplicates(n, e))
     e = remap_edges(e, n)
 
     # clean the nodes
