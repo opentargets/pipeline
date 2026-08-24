@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from orchestration.supervisor.journal import Journal, JournalEvent
+from orchestration.supervisor.journal import Journal, JournalEvent, heartbeat_event, is_heartbeat
 
 
 def _event(
@@ -202,6 +202,49 @@ class TestJournalKeyCollisions:
         journal, _ = _journal()
         journal.append(JournalEvent(event_type='x-a-b', at=datetime(2026, 7, 21, 14, 0, tzinfo=UTC)))
         assert journal.has('a-b') is False
+
+
+class TestHeartbeatEvent:
+    def test_two_heartbeats_a_minute_apart_get_different_keys(self) -> None:
+        """The defect this exists to prevent: a constant key would no-op after the first.
+
+        `Journal.append` skips writing whenever `has(event.key)` is already true, so if
+        every heartbeat shared one key, only the first wakeup's would ever be recorded.
+        """
+        first = heartbeat_event(datetime(2026, 7, 21, 14, 0, tzinfo=UTC))
+        second = heartbeat_event(datetime(2026, 7, 21, 14, 10, tzinfo=UTC))
+        assert first.key != second.key
+
+    def test_the_same_wakeup_produces_the_same_key(self) -> None:
+        at = datetime(2026, 7, 21, 14, 0, tzinfo=UTC)
+        assert heartbeat_event(at).key == heartbeat_event(at).key
+
+    def test_the_key_sorts_chronologically(self) -> None:
+        """A raw journal listing sorts by key (object-name prefix) first, not by `at`.
+
+        See `journal.py`'s `Journal.read` docstring: object names are not stored in
+        timestamp order, so a key that does not itself sort chronologically would read
+        as scrambled in a raw `gsutil ls`/`list_blobs` listing.
+        """
+        earlier = heartbeat_event(datetime(2026, 7, 21, 14, 0, tzinfo=UTC))
+        later = heartbeat_event(datetime(2026, 7, 21, 14, 10, tzinfo=UTC))
+        assert sorted([later.key, earlier.key]) == [earlier.key, later.key]
+
+    def test_a_heartbeat_carries_no_step(self) -> None:
+        """A heartbeat is a run-level fact, not about any one step."""
+        assert heartbeat_event(datetime(2026, 7, 21, 14, 0, tzinfo=UTC)).step is None
+
+    def test_a_heartbeat_is_recognised_as_one(self) -> None:
+        assert is_heartbeat(heartbeat_event(datetime(2026, 7, 21, 14, 0, tzinfo=UTC))) is True
+
+    def test_an_ordinary_event_is_not_a_heartbeat(self) -> None:
+        assert is_heartbeat(_event()) is False
+
+    def test_a_heartbeat_round_trips_through_the_journal(self) -> None:
+        journal, _ = _journal()
+        journal.append(heartbeat_event(datetime(2026, 7, 21, 14, 0, tzinfo=UTC)))
+        journal.append(heartbeat_event(datetime(2026, 7, 21, 14, 10, tzinfo=UTC)))
+        assert sum(1 for e in journal.read() if is_heartbeat(e)) == 2
 
 
 class TestJournalRead:

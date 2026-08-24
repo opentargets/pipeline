@@ -67,7 +67,7 @@ from orchestration.supervisor.datasets import run_name, stage_configs, unified_p
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
 from orchestration.supervisor.github import GitHubApp, read_app_key
-from orchestration.supervisor.journal import Journal, JournalEvent
+from orchestration.supervisor.journal import Journal, JournalEvent, heartbeat_event
 from orchestration.supervisor.observer import Observation, observe
 from orchestration.supervisor.report import render_comment
 from orchestration.supervisor.snapshot import render_snapshot, take_snapshot
@@ -165,9 +165,30 @@ every wakeup after the first for a given event, which is correct for this event'
 real purpose but means a dead observer (the cron stopped firing at 10:00) and a
 quiet one (nothing new to report since 10:00) journal the same thing: one
 `observation_started` entry and nothing else. The two are indistinguishable from
-the journal alone. Do not add a per-wakeup heartbeat to close this gap — that
-trades one false sentence for 144 journal objects a day — liveness needs a
-different mechanism entirely."""
+this event alone — `journal.heartbeat_event`, journalled unconditionally alongside
+this one on every wakeup below, is what closes that gap.
+
+An earlier version of this docstring judged a per-wakeup heartbeat not worth its cost
+(144 journal objects a day for liveness alone) and said not to add one. That judgment
+is reversed here, because the cost turns out to buy a second thing at no extra price:
+`stall.run_stalled`'s `'no_progress'` signature counts these same heartbeats to tell
+"the run is quiet because nothing is happening" apart from "the run is quiet because
+the observer itself stopped running" — a distinction wall-clock time cannot make,
+since a cron down for three hours and a cron that ran every ten minutes through three
+genuinely quiet hours both show three hours of wall-clock silence, but the former has
+far fewer heartbeats to show for it. One mechanism closing two gaps is what makes the
+cost worth paying now."""
+
+_RUN_STALL_DETECTED_EVENT_PREFIX = 'run_stall_detected_'
+"""Journal event type prefix for a run-level stall, completed with `RunStallVerdict.reason`.
+
+Mirrors `observer.observe`'s own `f'run_stall_detected_{reason}'` string — kept as its
+own constant here rather than imported, the same choice `_OBSERVE_TERMINAL_RUN_STATES`
+above makes against `observer._TERMINAL_RUN_STATES`, so this module does not reach into
+another module's private detail for a one-line format string. `'no_progress'` and
+`'stuck_trigger'` are tracked as independent, idempotent-per-reason events this way —
+the same "once and never again" idempotency `_DATASET_DIFF_COMPLETED_EVENT`/
+`_OBSERVATION_STARTED_EVENT` get for a whole run, applied per reason instead."""
 
 _MISSING = '-'
 """Shown for a row that carries no value for an optional column."""
@@ -496,7 +517,11 @@ def _observation_events(observation: Observation, at: datetime) -> list[JournalE
     on each carries enough for a human reading the raw journal, and, for
     `step_completed`, the one thing another reader depends on: `stall.
     baseline_from_journal` reads `payload['duration']` back out to build the stall
-    baseline, so that key is not optional decoration.
+    baseline, so that key is not optional decoration. A run-level stall is journalled
+    under `_RUN_STALL_DETECTED_EVENT_PREFIX` + its `reason`, so `'no_progress'` and
+    `'stuck_trigger'` are independently idempotent (see that constant's docstring); the
+    heartbeat itself is not built here — it is not derived from `observation` at all,
+    so it is appended directly in `main`'s `observe` branch instead.
 
     Args:
         observation: What `observer.observe` decided is new this wakeup.
@@ -532,6 +557,11 @@ def _observation_events(observation: Observation, at: datetime) -> list[JournalE
     )
     if observation.run_finished is not None:
         events.append(JournalEvent(event_type='run_finished', at=at, payload={'state': observation.run_finished}))
+    if observation.run_stall is not None:
+        events.append(JournalEvent(
+            event_type=f'{_RUN_STALL_DETECTED_EVENT_PREFIX}{observation.run_stall.reason}', at=at,
+            payload=observation.run_stall.model_dump(exclude_none=True),
+        ))
     return events
 
 
@@ -713,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
             events.append(
                 JournalEvent(event_type=_OBSERVATION_STARTED_EVENT, at=now, payload={'run_name': run_name()})
             )
+            events.append(heartbeat_event(now))
 
             diffs = None
             if (

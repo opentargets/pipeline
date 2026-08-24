@@ -25,7 +25,9 @@ from orchestration.supervisor.cli import (
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
+from orchestration.supervisor.journal import JournalEvent, is_heartbeat
 from orchestration.supervisor.snapshot import Snapshot
+from orchestration.supervisor.stall import RunStallVerdict
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
 from orchestration.utils.common import (
     GCP_PROJECT_PLATFORM,
@@ -1159,8 +1161,14 @@ class TestObserveCommand:
         assert main(['observe', '--issue', '5']) == 0
         observe_command.github_app.comment.assert_not_called()
         events = [call.args[0] for call in observe_command.journal.append.call_args_list]
-        assert [event.event_type for event in events] == ['observation_started']
-        assert events[0].payload == {'run_name': 'ds/some_run'}
+        non_heartbeats = [e for e in events if not is_heartbeat(e)]
+        assert [e.event_type for e in non_heartbeats] == ['observation_started']
+        assert non_heartbeats[0].payload == {'run_name': 'ds/some_run'}
+        assert sum(1 for e in events if is_heartbeat(e)) == 1
+
+    def test_dry_run_journals_no_heartbeat_either(self, observe_command: SimpleNamespace) -> None:
+        assert main(['observe', '--issue', '5', '--dry-run']) == 0
+        observe_command.journal.append.assert_not_called()
 
     def test_dry_run_posts_nothing_and_writes_no_journal_event(
         self, observe_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
@@ -1194,7 +1202,9 @@ class TestObserveCommand:
         )
         assert main(['observe', '--issue', '5']) == 0
         events = [call.args[0] for call in observe_command.journal.append.call_args_list]
-        assert {event.event_type for event in events} == {'step_failed', 'observation_started'}
+        non_heartbeats = {event.event_type for event in events if not is_heartbeat(event)}
+        assert non_heartbeats == {'step_failed', 'observation_started'}
+        assert sum(1 for event in events if is_heartbeat(event)) == 1
         failure = next(event for event in events if event.event_type == 'step_failed')
         assert failure.step == 'pts_target'
         observe_command.github_app.comment.assert_called_once()
@@ -1210,9 +1220,10 @@ class TestObserveCommand:
         observe_command.journal.append.side_effect = lambda *a, **kw: order.append('append')
 
         assert main(['observe', '--issue', '5']) == 0
-        # Two journal writes now (`step_failed` and `observation_started`, see F7), both
-        # still after the single post — the post itself must lead, not just come first.
-        assert order == ['comment', 'append', 'append']
+        # Three journal writes now (`step_failed`, `observation_started`, and the
+        # heartbeat every wakeup carries), all still after the single post — the post
+        # itself must lead, not just come first.
+        assert order == ['comment', 'append', 'append', 'append']
 
     def test_a_failed_post_leaves_the_journal_empty_and_is_retried_next_wakeup(
         self, observe_command: SimpleNamespace
@@ -1236,8 +1247,9 @@ class TestObserveCommand:
         observe_command.github_app.comment.side_effect = None
         assert main(['observe', '--issue', '5']) == 0
         assert observe_command.github_app.comment.call_count == 2
-        # `step_failed` and `observation_started` (see F7) — the retried wakeup journals both.
-        assert observe_command.journal.append.call_count == 2
+        # `step_failed`, `observation_started` (see F7), and the heartbeat — the retried
+        # wakeup journals all three.
+        assert observe_command.journal.append.call_count == 3
 
     def test_a_failed_pipeline_step_exits_zero_not_one(self, observe_command: SimpleNamespace) -> None:
         """The observer's own health decides the exit code, never the pipeline's state."""
@@ -1245,6 +1257,28 @@ class TestObserveCommand:
             failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
         )
         assert main(['observe', '--issue', '5']) == 0
+
+    def test_a_run_stall_is_posted_and_journalled_under_its_reason(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            run_stall=RunStallVerdict(reason='stuck_trigger', pending=4)
+        )
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.github_app.comment.assert_called_once()
+        assert 'Run stalled' in observe_command.github_app.comment.call_args.args[1]
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert any(event.event_type == 'run_stall_detected_stuck_trigger' for event in events)
+
+    def test_a_run_stall_already_journalled_is_not_reposted(self, observe_command: SimpleNamespace) -> None:
+        observe_command.take_snapshot.return_value = _snapshot(
+            run_stall=RunStallVerdict(reason='stuck_trigger', pending=4)
+        )
+        observe_command.journal.read.return_value = [
+            JournalEvent(event_type='run_stall_detected_stuck_trigger', at=datetime(2026, 8, 24, 12, 0, tzinfo=UTC)),
+        ]
+        assert main(['observe', '--issue', '5']) == 0
+        observe_command.github_app.comment.assert_not_called()
+        events = [call.args[0] for call in observe_command.journal.append.call_args_list]
+        assert not any(event.event_type == 'run_stall_detected_stuck_trigger' for event in events)
 
     def test_a_run_discovered_only_via_the_fallback_still_reports_and_journals_finishing(
         self, observe_command: SimpleNamespace
