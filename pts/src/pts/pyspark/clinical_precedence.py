@@ -4,8 +4,41 @@ from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
+from pyspark.sql import Column
 
 from pts.pyspark.common.session import Session
+
+#: `trialLiterature` entries that cite the trial's own outcome, as opposed to the
+#: background literature its authors cited. AACT spells `study_references.reference_type`
+#: uppercase -- BACKGROUND (721,368), DERIVED (191,429), RESULT (153,442) in the
+#: 2026-06 dump -- but the comparison is folded to lower case so a case change upstream
+#: degrades into a visible mismatch rather than a silently empty column.
+TRIAL_OUTCOME_REFERENCE_TYPES = ('result', 'derived')
+
+
+def _result_literature(trial_literature: Column) -> Column:
+    """Flatten `trialLiterature` structs to the PMIDs that report the trial's outcome.
+
+    Background citations are dropped. Two shapes in the source need care: ~3.8k AACT
+    RESULT rows carry a null `pmid`, which must not reach the published array, and
+    ~66.5k trials cite background literature only, which must yield null rather than
+    an empty array so the field stays absent for them as it is for non-trial reports.
+
+    Args:
+        trial_literature: `array<struct<id: string, type: string>>` column, or null.
+
+    Returns:
+        `array<string>` of PMIDs, or null when nothing survives the filter.
+    """
+    pmids = f.transform(
+        f.filter(
+            trial_literature,
+            lambda x: f.lower(x.getField('type')).isin(*TRIAL_OUTCOME_REFERENCE_TYPES)
+            & x.getField('id').isNotNull(),
+        ),
+        lambda x: x.getField('id'),
+    )
+    return f.when(f.size(pmids) > 0, pmids).otherwise(f.lit(None))
 
 
 def clinical_precedence(
@@ -55,16 +88,7 @@ def clinical_precedence(
         clinical_report_df
         .withColumnRenamed('id', 'clinicalReportId')
         .withColumn('studyStartDate', f.col('trialStartDate').cast('string'))
-        .withColumn(
-            'literature',
-            f.transform(
-                f.filter(
-                    f.col('trialLiterature'),
-                    lambda x: x.getField('type').isin('RESULT', 'DERIVED'),
-                ),
-                lambda x: x.getField('id'),
-            ),
-        )
+        .withColumn('literature', _result_literature(f.col('trialLiterature')))
         .withColumn('_disease', f.explode_outer('diseases'))
         .withColumn('diseaseFromSource', f.col('_disease.diseaseFromSource'))
         .withColumn('diseaseFromSourceMappedId', f.col('_disease.diseaseId'))
