@@ -132,6 +132,26 @@ class TestStalled:
         assert verdict.elapsed == 500 * 60
         assert verdict.threshold == 6 * 60 * 60
 
+    def test_two_stalled_mapped_instances_of_the_same_task_get_distinct_verdicts(self) -> None:
+        """N Google Batch shards share one task_id; only map_index tells their verdicts apart."""
+        shard_a = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0, state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        shard_b = TaskInstance(task_id='run_gentropy_variant_annotation', map_index=3, state='running',
+                                start_date=NOW - timedelta(minutes=500))
+        verdict_a = stalled(shard_a, {}, NOW)
+        verdict_b = stalled(shard_b, {}, NOW)
+        assert verdict_a is not None
+        assert verdict_b is not None
+        assert verdict_a.task_id != verdict_b.task_id
+        assert verdict_a.task_id == 'run_gentropy_variant_annotation[0]'
+        assert verdict_b.task_id == 'run_gentropy_variant_annotation[3]'
+
+    def test_an_unmapped_stalled_task_reports_the_bare_task_id(self) -> None:
+        """map_index -1 is the overwhelming majority; the verdict must not grow a suffix for it."""
+        verdict = stalled(_running(minutes=500), {}, NOW)
+        assert verdict is not None
+        assert verdict.task_id == 'pts_target.run_pts_target'
+
 
 class TestTakeSnapshot:
     def test_counts_tasks_by_state(self) -> None:
@@ -150,6 +170,25 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
         assert snap.failed == ['c']
         assert snap.running == ['d']
+
+    def test_distinguishes_mapped_running_task_instances(self) -> None:
+        """The two Google Batch steps expand N task instances under one shared task_id.
+
+        Without map_index, `running` would list the same id N times with nothing to
+        tell the shards apart.
+        """
+        tasks = [TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0,
+                               state='running', start_date=NOW),
+                 TaskInstance(task_id='run_gentropy_variant_annotation', map_index=1,
+                               state='running', start_date=NOW)]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.running == ['run_gentropy_variant_annotation[0]', 'run_gentropy_variant_annotation[1]']
+
+    def test_distinguishes_mapped_failed_task_instances(self) -> None:
+        tasks = [TaskInstance(task_id='t', map_index=0, state='failed'),
+                 TaskInstance(task_id='t', map_index=1, state='failed')]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert snap.failed == ['t[0]', 't[1]']
 
     def test_a_task_with_no_state_is_counted_as_pending(self) -> None:
         """Airflow reports a null state for a task instance not yet scheduled."""
@@ -191,6 +230,18 @@ class TestTakeSnapshot:
         snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
         assert [s.task_id for s in snap.stalls] == ['slow']
         assert snap.stalls[0].basis == 'ceiling'
+
+    def test_stalls_for_two_mapped_shards_of_the_same_step_are_both_reported(self) -> None:
+        """Shard 3 of 40 hanging must not be indistinguishable from — or shadowed by — shard 1's stall."""
+        tasks = [TaskInstance(task_id='run_gentropy_variant_annotation', map_index=0, state='running',
+                               start_date=NOW - timedelta(hours=9)),
+                 TaskInstance(task_id='run_gentropy_variant_annotation', map_index=3, state='running',
+                               start_date=NOW - timedelta(hours=9))]
+        snap = take_snapshot(_client(tasks), _journal(), 'unified_pipeline', 'r', NOW)
+        assert {s.task_id for s in snap.stalls} == {
+            'run_gentropy_variant_annotation[0]',
+            'run_gentropy_variant_annotation[3]',
+        }
 
     def test_a_healthy_run_reports_no_stalls(self) -> None:
         tasks = [TaskInstance(task_id='ok', state='running', start_date=NOW - timedelta(minutes=5))]
@@ -254,6 +305,20 @@ class TestRenderSnapshot:
     def test_failures_are_listed(self) -> None:
         out = render_snapshot(self._snapshot(failed=['run_pts_target']))
         assert 'run_pts_target' in out
+
+    def test_stall_lines_distinguish_mapped_instances(self) -> None:
+        """Two STALL lines for the same task_id, with nothing telling them apart, is the bug."""
+        out = render_snapshot(self._snapshot(stalls=[
+            StallVerdict(task_id='run_gentropy_variant_annotation[0]', elapsed=32400.0,
+                        threshold=21600.0, basis='ceiling'),
+            StallVerdict(task_id='run_gentropy_variant_annotation[3]', elapsed=32400.0,
+                        threshold=21600.0, basis='ceiling'),
+        ]))
+        stall_lines = [line for line in out.splitlines() if line.startswith('STALL')]
+        assert len(stall_lines) == 2
+        assert stall_lines[0] != stall_lines[1]
+        assert 'run_gentropy_variant_annotation[0]' in stall_lines[0]
+        assert 'run_gentropy_variant_annotation[3]' in stall_lines[1]
 
     def test_a_run_with_no_tasks_renders_cleanly(self) -> None:
         """A just-triggered run has no task instances yet — a common state, not an edge case."""

@@ -10,11 +10,17 @@ from pydantic import ValidationError
 from orchestration.supervisor.journal import Journal, JournalEvent
 
 
-def _event(event_type: str = 'step_completed', step: str = 'pts_target', try_number: int = 1) -> JournalEvent:
+def _event(
+    event_type: str = 'step_completed',
+    step: str = 'pts_target',
+    try_number: int = 1,
+    map_index: int | None = None,
+) -> JournalEvent:
     return JournalEvent(
         event_type=event_type,
         step=step,
         try_number=try_number,
+        map_index=map_index,
         at=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         payload={'duration': 3600.0},
     )
@@ -67,6 +73,28 @@ class TestJournalEventKey:
         """Run-level events such as run_finished have no step."""
         e = JournalEvent(event_type='run_finished', at=datetime(2026, 7, 21, tzinfo=UTC))
         assert e.key == 'run_finished'
+
+    def test_an_unmapped_task_keeps_the_key_unchanged(self) -> None:
+        """-1 is Airflow's value for a task instance outside a mapped operator, and by far the common case.
+
+        The key must not grow a segment for it, or every existing key (and every event
+        already written to a real journal) changes shape.
+        """
+        assert _event(map_index=-1).key == 'step_completed-pts_target-1'
+
+    def test_no_map_index_keeps_the_key_unchanged(self) -> None:
+        assert _event(map_index=None).key == 'step_completed-pts_target-1'
+
+    def test_a_mapped_instance_gets_a_key_segment(self) -> None:
+        assert _event(map_index=2).key == 'step_completed-pts_target-1-2'
+
+    def test_two_mapped_instances_of_the_same_step_get_different_keys(self) -> None:
+        """The defect this closes: N shards sharing one task_id used to collapse onto one key.
+
+        A `stall_detected` event for shard 1 would be recorded first, and `Journal.append`
+        would then silently drop shard 3's event as a duplicate of it.
+        """
+        assert _event(map_index=0).key != _event(map_index=3).key
 
 
 class TestJournalAppend:

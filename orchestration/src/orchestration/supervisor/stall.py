@@ -89,7 +89,9 @@ class StallVerdict(BaseModel):
     """A running task judged to have stalled.
 
     Args:
-        task_id: The task instance's id.
+        task_id: The task instance's ref — `task_id`, qualified with `map_index` for a
+            mapped instance (see `TaskInstance.ref`) — so two shards of the same mapped
+            task never produce indistinguishable verdicts.
         elapsed: Seconds since `start_date`, i.e. execution time only, excluding
             queueing — see the module docstring for why.
         threshold: The threshold it passed.
@@ -192,4 +194,4 @@ def stalled(
 
     if elapsed <= threshold:
         return None
-    return StallVerdict(task_id=task.task_id, elapsed=elapsed, threshold=threshold, basis=basis)
+    return StallVerdict(task_id=task.ref, elapsed=elapsed, threshold=threshold, basis=basis)

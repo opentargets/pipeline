@@ -41,6 +41,10 @@ class JournalEvent(BaseModel):
             as its billing label and `usage.StepUsage.step` already carries. See
             `stall.baseline_from_journal` for why the two spellings must not be mixed.
         try_number: Which attempt, so a retry is a distinct event.
+        map_index: Which instance of a mapped task this happened to, mirroring
+            `TaskInstance.map_index` — -1 (or None, for an event with no task instance
+            behind it) for one that is not part of a mapped operator. See `key` for why
+            it is folded into the key only when it distinguishes anything.
         at: When the agent observed it.
         payload: Event-specific detail. Durations live here, which is what makes the
             journal the durable duration record.
@@ -49,6 +53,7 @@ class JournalEvent(BaseModel):
     event_type: str
     step: str | None = None
     try_number: int | None = None
+    map_index: int | None = None
     at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -96,14 +101,25 @@ class JournalEvent(BaseModel):
         Two observations of the same thing produce the same key, which is what stops
         the fourth wakeup re-reporting the first wakeup's completions.
 
+        `map_index` joins the key only when it names a real mapped instance (neither
+        None nor -1, Airflow's value for a task instance outside a mapped operator).
+        Without that guard, every mapped step's N task instances — sharing one
+        `task_id` and therefore one `step` — would collapse onto a single key: the
+        first instance's event would record, and `Journal.append` would then silently
+        drop every other instance's event as a duplicate of it. Guarding the common,
+        unmapped case also means this key is unchanged in shape for every event
+        written before `map_index` existed.
+
         Returns:
-            The key, joining event type, step and try number where present.
+            The key, joining event type, step, try number and map index where present.
         """
         parts = [self.event_type]
         if self.step is not None:
             parts.append(self.step)
         if self.try_number is not None:
             parts.append(str(self.try_number))
+        if self.map_index is not None and self.map_index != -1:
+            parts.append(str(self.map_index))
         return '-'.join(parts)
 
 

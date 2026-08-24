@@ -37,8 +37,9 @@ class Snapshot(BaseModel):
         taken_at: When the snapshot was taken.
         run_state: Airflow's state for the run.
         counts: Task instances by state, with stateless ones counted as pending.
-        running: Task ids currently running.
-        failed: Task ids that have failed.
+        running: Task refs currently running — `task_id`, qualified with `map_index`
+            for a mapped task instance (see `TaskInstance.ref`).
+        failed: Task refs that have failed, qualified the same way.
         stalls: Running tasks judged to have stalled.
         journal_events: How many events the journal already holds, so the agent can
             tell a first wakeup from a resumption.
@@ -81,8 +82,8 @@ def take_snapshot(client: Any, journal: Any, dag_id: str, run_id: str, now: date
         taken_at=now,
         run_state=run.state,
         counts=dict(Counter(t.state or _PENDING for t in tasks)),
-        running=[t.task_id for t in tasks if t.state == 'running'],
-        failed=[t.task_id for t in tasks if t.state == 'failed'],
+        running=[t.ref for t in tasks if t.state == 'running'],
+        failed=[t.ref for t in tasks if t.state == 'failed'],
         stalls=verdicts,
         journal_events=len(events),
     )
