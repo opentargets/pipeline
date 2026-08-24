@@ -12,9 +12,9 @@ into the molecule synonyms.
 """
 
 import polars as pl
-from clinical_mining.schemas import ClinicalSource
+from clinical_mining.schemas import ClinicalProvider
 
-AACT_SOURCE = ClinicalSource.AACT.value
+AACT_SOURCE = ClinicalProvider.AACT.value
 
 # --- tunables ----------------------------------------------------------------
 
@@ -138,7 +138,7 @@ def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
 
     Args:
         batch: DataFrame as returned by
-            :func:`clinical_mining.data_sources.aact.llm_extractor.parse_batch_results`
+            :func:`clinical_mining.provider.aact.llm_extractor.parse_batch_results`
             (or, for tests, anything carrying the same ``id``,
             ``investigated_drugs``/``comparator_drugs``/``supportive_drugs`` columns).
 
