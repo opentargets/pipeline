@@ -8,16 +8,16 @@ shows against the `JournalEvent.key`s already on record. Everything downstream (
 rendered comment, the journal write) only ever sees what this function decided is
 new; it does no I/O itself.
 
-**Step completions are not observed here.** `Snapshot` lists task refs currently
-`running` or `failed`, and running tasks judged `stalled` — but it carries no list of
-task refs that have *succeeded*, and no per-instance duration. Both would be needed
-to report "step X finished" the same way `step_failed` and `stall_detected` are
-reported below, and a duration is also what `stall.baseline_from_journal` needs to
-seed a `step_completed` event's payload. Rather than fabricate either from data
-`Snapshot` does not carry, this module reports only what it can actually support:
-newly failed steps, newly stalled steps, and the run itself reaching a terminal
-state. Giving `Snapshot` a `succeeded` ref list (and durations) is a prerequisite
-for a later task, not a gap papered over here.
+**A completion is reported only for a step's own run task**, gated by `is_run_task`
+— the same gate `stalled` uses before consulting a baseline. A sibling in the same
+task group (`delete_vm_pts_target`, a `diff_` task) finishing is not the step
+finishing, and its duration is not the step's duration: `stall.baseline_from_journal`
+keys the baseline on the bare step name alone, so a sibling's duration journalled
+under that key would sit in the same baseline the run task's own duration feeds —
+dead weight at best, a fabricated threshold at worst, for a sibling that is not what
+`stalled` is timing when it later judges that step. `Snapshot.durations` itself stays
+a plain, unfiltered record of everything Airflow reported a duration for; the
+filtering happens here.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from orchestration.supervisor.journal import JournalEvent
 from orchestration.supervisor.snapshot import Snapshot
-from orchestration.supervisor.step_identity import step_from_task_id
+from orchestration.supervisor.step_identity import is_run_task, step_from_task_id
 
 _TERMINAL_RUN_STATES = frozenset({'success', 'failed'})
 """Airflow DAG run states that mean the run itself is over, one way or the other."""
@@ -103,6 +103,25 @@ class StepStall(BaseModel):
     basis: Literal['history', 'ceiling']
 
 
+class StepCompletion(BaseModel):
+    """One step's own run task, found to have finished successfully, not yet reported.
+
+    Args:
+        ref: The task's ref, as `StepFailure.ref`.
+        step: The bare step name, as `StepFailure.step`.
+        map_index: As `StepFailure.map_index`.
+        duration: Seconds it took, from `Snapshot.durations`. This is what
+            `stall.baseline_from_journal` reads back out of the `step_completed`
+            event this is journalled as, so a completion is only ever reported when a
+            duration is actually available for it (see `observe`).
+    """
+
+    ref: str
+    step: str
+    map_index: int
+    duration: float
+
+
 class Observation(BaseModel):
     """What one wakeup has not already reported.
 
@@ -113,6 +132,9 @@ class Observation(BaseModel):
     Args:
         failed: Newly failed task instances.
         stalled: Newly stalled task instances.
+        completed: Newly completed steps — their own run task, successfully
+            finished. Siblings in the same task group are not represented here; see
+            the module docstring for why.
         run_finished: The run's terminal state (`success` or `failed`), if the run
             has just reached one and that has not already been reported. None both
             when the run is not yet terminal and when its terminal state was already
@@ -122,20 +144,22 @@ class Observation(BaseModel):
 
     failed: list[StepFailure] = Field(default_factory=list)
     stalled: list[StepStall] = Field(default_factory=list)
+    completed: list[StepCompletion] = Field(default_factory=list)
     run_finished: str | None = None
 
     @property
     def is_empty(self) -> bool:
         """Whether this wakeup found nothing new at all.
 
-        A caller must not infer "nothing new" from an empty `failed` or `stalled`
-        list alone — `run_finished` can carry news on its own, with both lists
+        A caller must not infer "nothing new" from any single empty field —
+        `run_finished` in particular can carry news on its own, with everything else
         empty.
 
         Returns:
-            True if `failed` and `stalled` are both empty and `run_finished` is None.
+            True if `failed`, `stalled` and `completed` are all empty and
+            `run_finished` is None.
         """
-        return not self.failed and not self.stalled and self.run_finished is None
+        return not self.failed and not self.stalled and not self.completed and self.run_finished is None
 
 
 def _already_known(event_type: str, step: str, map_index: int, known: set[str]) -> bool:
@@ -188,8 +212,20 @@ def observe(snapshot: Snapshot, events: list[JournalEvent]) -> Observation:
                 elapsed=verdict.elapsed, threshold=verdict.threshold, basis=verdict.basis,
             ))
 
+    completed = []
+    for ref in snapshot.succeeded:
+        task_id, map_index = _parse_ref(ref)
+        if not is_run_task(task_id):
+            continue
+        duration = snapshot.durations.get(ref)
+        if duration is None:
+            continue
+        step = step_from_task_id(task_id)
+        if not _already_known('step_completed', step, map_index, known):
+            completed.append(StepCompletion(ref=ref, step=step, map_index=map_index, duration=duration))
+
     run_finished = None
     if snapshot.run_state in _TERMINAL_RUN_STATES and 'run_finished' not in known:
         run_finished = snapshot.run_state
 
-    return Observation(failed=failed, stalled=stalled, run_finished=run_finished)
+    return Observation(failed=failed, stalled=stalled, completed=completed, run_finished=run_finished)

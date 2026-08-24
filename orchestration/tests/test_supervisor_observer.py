@@ -114,6 +114,86 @@ class TestObserveStalls:
         assert observe(_snapshot(stalls=[]), []).stalled == []
 
 
+class TestObserveCompletions:
+    def test_a_first_wakeup_reports_every_completed_run_task(self) -> None:
+        snap = _snapshot(succeeded=['pts_target.run_pts_target'], durations={'pts_target.run_pts_target': 3600.0})
+        obs = observe(snap, [])
+        assert [c.step for c in obs.completed] == ['pts_target']
+
+    def test_a_second_wakeup_reports_none_of_the_same_completion_again(self) -> None:
+        snap = _snapshot(succeeded=['pts_target.run_pts_target'], durations={'pts_target.run_pts_target': 3600.0})
+        already = [_event('step_completed', step='pts_target')]
+        assert observe(snap, already).completed == []
+
+    def test_a_newly_completed_step_is_reported_alongside_an_already_known_one(self) -> None:
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target', 'pts_disease.run_pts_disease'],
+            durations={'pts_target.run_pts_target': 3600.0, 'pts_disease.run_pts_disease': 1800.0},
+        )
+        already = [_event('step_completed', step='pts_target')]
+        obs = observe(snap, already)
+        assert [c.step for c in obs.completed] == ['pts_disease']
+
+    def test_a_completion_carries_its_ref_step_map_index_and_duration(self) -> None:
+        snap = _snapshot(succeeded=['pts_target.run_pts_target'], durations={'pts_target.run_pts_target': 3600.0})
+        obs = observe(snap, [])
+        assert obs.completed[0].ref == 'pts_target.run_pts_target'
+        assert obs.completed[0].step == 'pts_target'
+        assert obs.completed[0].map_index == -1
+        assert obs.completed[0].duration == 3600.0
+
+    def test_two_completed_shards_of_one_mapped_step_both_surface(self) -> None:
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target[0]', 'pts_target.run_pts_target[3]'],
+            durations={'pts_target.run_pts_target[0]': 10.0, 'pts_target.run_pts_target[3]': 20.0},
+        )
+        obs = observe(snap, [])
+        assert {c.ref for c in obs.completed} == {
+            'pts_target.run_pts_target[0]',
+            'pts_target.run_pts_target[3]',
+        }
+
+    def test_a_completed_shard_already_known_does_not_swallow_its_sibling(self) -> None:
+        """The map_index trap, for completions this time.
+
+        Shard 3 finishing must not be mistaken for shard 0's already-journalled
+        completion.
+        """
+        snap = _snapshot(
+            succeeded=['pts_target.run_pts_target[0]', 'pts_target.run_pts_target[3]'],
+            durations={'pts_target.run_pts_target[0]': 10.0, 'pts_target.run_pts_target[3]': 20.0},
+        )
+        already = [_event('step_completed', step='pts_target', map_index=0)]
+        obs = observe(snap, already)
+        assert [c.ref for c in obs.completed] == ['pts_target.run_pts_target[3]']
+
+    def test_a_non_run_task_siblings_success_is_not_reported(self) -> None:
+        """A `delete_vm_` sibling succeeding is not the step finishing — only the run task counts.
+
+        `stalled` never consults the baseline for anything but a step's own run task
+        (`is_run_task`); journalling a sibling's duration into that baseline would be
+        dead weight at best, misleading at worst.
+        """
+        snap = _snapshot(
+            succeeded=['pts_target.delete_vm_pts_target'],
+            durations={'pts_target.delete_vm_pts_target': 5.0},
+        )
+        assert observe(snap, []).completed == []
+
+    def test_a_succeeded_run_task_with_no_recorded_duration_is_skipped(self) -> None:
+        """A completion with no duration is skipped rather than journalled with a fabricated one.
+
+        Should not happen in practice — Airflow populates `duration` whenever a task
+        instance finishes — but a duration-less completion would be useless to the
+        baseline anyway.
+        """
+        snap = _snapshot(succeeded=['pts_target.run_pts_target'], durations={})
+        assert observe(snap, []).completed == []
+
+    def test_no_successes_reports_none(self) -> None:
+        assert observe(_snapshot(succeeded=[]), []).completed == []
+
+
 class TestObserveRunFinished:
     def test_a_running_run_reports_no_run_finished(self) -> None:
         assert observe(_snapshot(run_state='running'), []).run_finished is None
@@ -148,25 +228,33 @@ class TestObservationIsEmpty:
     def test_a_stall_makes_it_not_empty(self) -> None:
         assert observe(_snapshot(stalls=[_stall('slow')]), []).is_empty is False
 
+    def test_a_completion_makes_it_not_empty(self) -> None:
+        snap = _snapshot(succeeded=['pts_target.run_pts_target'], durations={'pts_target.run_pts_target': 3600.0})
+        assert observe(snap, []).is_empty is False
+
     def test_a_finished_run_alone_makes_it_not_empty(self) -> None:
-        """run_finished can carry news on its own, with both lists empty."""
+        """run_finished can carry news on its own, with everything else empty."""
         obs = observe(_snapshot(run_state='success'), [])
         assert obs.failed == []
         assert obs.stalled == []
+        assert obs.completed == []
         assert obs.is_empty is False
 
     def test_nothing_new_at_all_is_empty(self) -> None:
         assert observe(_snapshot(run_state='running'), []).is_empty is True
 
 
-class TestObserveComposesAllThree:
-    def test_a_failure_a_stall_and_a_finished_run_all_surface_together(self) -> None:
+class TestObserveComposesAllFour:
+    def test_a_failure_a_stall_a_completion_and_a_finished_run_all_surface_together(self) -> None:
         snap = _snapshot(
-            run_state='failed',
+            run_state='success',
             failed=['pts_target.run_pts_target'],
             stalls=[_stall('slow')],
+            succeeded=['pts_disease.run_pts_disease'],
+            durations={'pts_disease.run_pts_disease': 300.0},
         )
         obs = observe(snap, [])
         assert [f.step for f in obs.failed] == ['pts_target']
         assert [s.step for s in obs.stalled] == ['slow']
-        assert obs.run_finished == 'failed'
+        assert [c.step for c in obs.completed] == ['pts_disease']
+        assert obs.run_finished == 'success'
