@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 
+from orchestration.supervisor import gcs
 from orchestration.supervisor.gcs import (
     DatasetStats,
     Footer,
@@ -167,6 +169,66 @@ class TestReadStatsParquet:
         assert stats.total_bytes == 250
         assert stats.files == 2
         assert stats.countable is True
+
+
+class TestReadStatsFooterConcurrency:
+    """Footers are read through a thread pool, for the wall-clock reasons in `read_stats`'s docstring."""
+
+    def test_the_schema_is_the_first_blobs_even_when_a_later_blob_completes_first(self) -> None:
+        """Guards `Executor.map`'s ordering guarantee, not merely that a schema is picked.
+
+        `part-0000` (first by name) is deliberately the slower read; `part-0001`
+        finishes first in wall-clock time. If the schema were taken by completion
+        order instead of blob order — e.g. via `as_completed` — this would return
+        `part-0001`'s columns instead.
+        """
+        bucket = FakeBucket(
+            [
+                FakeBlob('run/output/disease/part-0000.parquet', 100),
+                FakeBlob('run/output/disease/part-0001.parquet', 150),
+            ]
+        )
+
+        def _reader(name: str) -> Footer:
+            if name.endswith('part-0000.parquet'):
+                time.sleep(0.05)
+                return Footer(rows=10, column_types={'a': 'int64'})
+            return Footer(rows=20, column_types={'b': 'string'})
+
+        stats = read_stats(bucket, 'run/output/disease', read_footer=_reader, max_workers=2)
+        assert stats is not None
+        assert stats.column_types == {'a': 'int64'}
+        assert stats.rows == 30
+
+    def test_max_workers_defaults_to_sixteen(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, int | None] = {}
+        real_executor = gcs.ThreadPoolExecutor
+
+        class _SpyExecutor(real_executor):  # type: ignore[misc, valid-type]
+            def __init__(self, max_workers: int | None = None, **kwargs: Any) -> None:
+                captured['max_workers'] = max_workers
+                super().__init__(max_workers=max_workers, **kwargs)
+
+        monkeypatch.setattr(gcs, 'ThreadPoolExecutor', _SpyExecutor)
+        bucket = FakeBucket([FakeBlob('run/output/disease/part-0000.parquet', 100)])
+        footers = {'run/output/disease/part-0000.parquet': Footer(rows=1)}
+        read_stats(bucket, 'run/output/disease', read_footer=_footer_reader(footers))
+        assert captured['max_workers'] == 16
+
+    def test_max_workers_is_honoured_when_the_caller_overrides_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, int | None] = {}
+        real_executor = gcs.ThreadPoolExecutor
+
+        class _SpyExecutor(real_executor):  # type: ignore[misc, valid-type]
+            def __init__(self, max_workers: int | None = None, **kwargs: Any) -> None:
+                captured['max_workers'] = max_workers
+                super().__init__(max_workers=max_workers, **kwargs)
+
+        monkeypatch.setattr(gcs, 'ThreadPoolExecutor', _SpyExecutor)
+        bucket = FakeBucket([FakeBlob('run/output/disease/part-0000.parquet', 100)])
+        footers = {'run/output/disease/part-0000.parquet': Footer(rows=1)}
+        read_stats(bucket, 'run/output/disease', read_footer=_footer_reader(footers), max_workers=4)
+        assert captured['max_workers'] == 4
 
 
 class TestReadStatsNdjson:

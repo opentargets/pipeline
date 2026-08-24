@@ -348,8 +348,13 @@ def _dispatching_footer_reader(
     `gcs.footer_reader` is pinned to one bucket name — the path it builds for `pyarrow`
     is `f'{bucket_name}/{object_name}'`, which is wrong for an object read from the
     other bucket. Routing on the object name's prefix is safe because `run_prefix` and
-    `reference_prefix` are a run name and a release name, always distinct strings, so a
-    blob from one side never starts with the other side's root.
+    `reference_prefix` are normally a run name and a release name, always distinct
+    strings, so a blob from one side never starts with the other side's root — a
+    prefix that is a strict prefix of the other (`26.03` vs `26.03-ppp`) is still safe,
+    since the trailing `/` this appends makes `26.03-ppp/...` fail to start with
+    `26.03/`. What is not safe is the two normalising to the *same* root, which
+    `--run` and `--reference` naming the same release would do; that is checked for
+    explicitly rather than left to silently route every object to the run side.
 
     Args:
         run_bucket_name: The bucket holding the run.
@@ -359,10 +364,23 @@ def _dispatching_footer_reader(
 
     Returns:
         A callable reading a parquet footer from whichever bucket the object belongs to.
+
+    Raises:
+        ValueError: If `run_prefix` and `reference_prefix` normalise to the same root.
+            Routing cannot tell the two sides apart in that case, and reading every
+            object through the run side's reader — silently comparing a release
+            against itself, or 404ing on every reference object — is worse than
+            refusing outright.
     """
+    run_root = run_prefix.rstrip('/') + '/'
+    reference_root = reference_prefix.rstrip('/') + '/'
+    if run_root == reference_root:
+        raise ValueError(
+            f'--run {run_prefix!r} and --reference {reference_prefix!r} are the same root, so a diff '
+            'cannot tell which bucket an object belongs to'
+        )
     read_run = footer_reader(run_bucket_name)
     read_reference = footer_reader(reference_bucket_name)
-    run_root = run_prefix.rstrip('/') + '/'
 
     def read(name: str) -> Footer:
         return read_run(name) if name.startswith(run_root) else read_reference(name)
@@ -385,7 +403,7 @@ def _count(value: int | None, countable: bool) -> str:
     return _UNCOUNTABLE if not countable else _MISSING
 
 
-def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float) -> str:
+def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, rows_skipped: bool = False) -> str:
     """Render a dataset comparison as text.
 
     Schema changes are listed for every dataset that has one, never hidden behind the
@@ -397,6 +415,10 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float) ->
         diffs: Every dataset compared.
         skipped: What was not covered.
         threshold: Fractional change past which a size or row move is reported.
+        rows_skipped: True when `--no-rows` skipped footer reads for this run. Without
+            this, every row count prints as `-` (`_count`'s "absent" symbol, since
+            `countable` is still True for parquet), which reads as every dataset's
+            counterpart being missing rather than as rows simply not having been read.
 
     Returns:
         The rendered report.
@@ -427,6 +449,11 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float) ->
         'Not compared: intermediate/ (scratch between steps), and templated destinations,',
         'which resolve only at run time.',
     ]
+    if rows_skipped:
+        footer.append(
+            'Row counts were not read (--no-rows). Sizes, file counts and presence are compared; '
+            'a row count of "-" above means not read, not absent.'
+        )
     if skipped.stages_without_config:
         footer.append(
             f'{len(skipped.stages_without_config)} steps skipped: their stage has no local config '
@@ -484,6 +511,11 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument('--threshold', type=float, default=0.05, help='fractional change to report')
     diff.add_argument('--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help='bucket holding the run')
     diff.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
+    diff.add_argument(
+        '--no-rows',
+        action='store_true',
+        help='skip row counts (sizes, file counts and presence only); seconds instead of minutes',
+    )
     diff.add_argument('--json', action='store_true', help='emit JSON instead of text')
 
     return parser
@@ -532,7 +564,11 @@ def main(argv: list[str] | None = None) -> int:
             storage_client = storage.Client()
             run_bucket = storage_client.bucket(args.run_bucket)
             reference_bucket = storage_client.bucket(args.reference_bucket)
-            read_footer = _dispatching_footer_reader(args.run_bucket, args.run, args.reference_bucket, args.reference)
+            read_footer = (
+                None
+                if args.no_rows
+                else _dispatching_footer_reader(args.run_bucket, args.run, args.reference_bucket, args.reference)
+            )
             diffs, skipped = collect_diffs(
                 run_bucket,
                 args.run,
@@ -549,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 sys.stdout.write(json.dumps(payload, indent=2) + '\n')
             else:
-                sys.stdout.write(render_diff(diffs, skipped, args.threshold) + '\n')
+                sys.stdout.write(render_diff(diffs, skipped, args.threshold, rows_skipped=args.no_rows) + '\n')
             return 0
         else:
             raise ValueError(f'unknown subcommand: {args.command}')
@@ -566,6 +602,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f'could not reach Airflow: {" ".join(str(exc).split())}\n')
         return 1
     except RuntimeError as exc:
+        sys.stderr.write(f'{" ".join(str(exc).split())}\n')
+        return 1
+    except ValueError as exc:
         sys.stderr.write(f'{" ".join(str(exc).split())}\n')
         return 1
 

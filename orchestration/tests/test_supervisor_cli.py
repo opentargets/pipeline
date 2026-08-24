@@ -472,6 +472,14 @@ class TestDiffParser:
         args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
         assert args.json is False
 
+    def test_no_rows_flag_defaults_off(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
+        assert args.no_rows is False
+
+    def test_no_rows_flag_is_settable(self) -> None:
+        args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel', '--no-rows'])
+        assert args.no_rows is True
+
 
 class TestDispatchingFooterReader:
     """`collect_diffs` shares one `read_footer` across both sides of a diff.
@@ -523,6 +531,39 @@ class TestDispatchingFooterReader:
         monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
         read = _dispatching_footer_reader('run-bucket', 'myrun/', 'reference-bucket', 'rel1')
         assert read('myrun/output/disease/part-0000.parquet').rows == 1
+
+    def test_the_same_root_on_both_sides_raises_rather_than_silently_routing_everything_to_the_run_side(
+        self,
+    ) -> None:
+        """`--run 26.03 --reference 26.03` against different buckets is valid CLI input.
+
+        Without this guard, every object would match `run_root` and the reference
+        side would be silently read through the run bucket's reader instead — wrong
+        data or a 404 storm, neither of which explains itself. The message must name
+        both sides so the cause is obvious from the error alone.
+        """
+        with pytest.raises(ValueError, match=r'26\.03'):
+            _dispatching_footer_reader('run-bucket', '26.03', 'reference-bucket', '26.03')
+
+    def test_a_prefix_that_is_a_strict_prefix_of_the_other_is_not_treated_as_equal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`26.03` and `26.03-ppp` share a string prefix but are different roots.
+
+        Guards that the equality check is on the normalised, slash-terminated root
+        (`26.03/` vs `26.03-ppp/`), not on `str.startswith`, which would wrongly treat
+        this pair as the same root and raise.
+        """
+
+        def fake_footer_reader(bucket_name: str) -> Any:
+            def read(name: str) -> Footer:
+                return Footer(rows=1 if bucket_name == 'run-bucket' else 2)
+
+            return read
+
+        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
+        read = _dispatching_footer_reader('run-bucket', '26.03', 'reference-bucket', '26.03-ppp')
+        assert read('26.03-ppp/output/disease/part-0000.parquet').rows == 2
 
 
 def _diff(**overrides: Any) -> DatasetDiff:
@@ -640,6 +681,16 @@ class TestRenderDiff:
         assert 'declare no release dataset' not in out
         assert 'absent from both buckets' not in out
         assert 'declared by no' not in out
+
+    def test_rows_skipped_notes_that_rows_were_not_read(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.05, rows_skipped=True)
+        assert '--no-rows' in out
+        assert 'not read' in out
+
+    def test_rows_skipped_defaults_to_false_and_adds_no_note(self) -> None:
+        out = render_diff([], Skipped(), threshold=0.05)
+        assert '--no-rows' not in out
+        assert 'not read' not in out
 
 
 class TestDiffLoadersAgainstTheRealConfig:
@@ -779,6 +830,50 @@ class TestDiffCommand:
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--threshold', '0.5']) == 0
         out = capsys.readouterr().out
         assert '0 with material changes' in out
+
+    def test_a_footer_reader_is_passed_to_collect_diffs_by_default(self, diff_command: MagicMock) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        args = diff_command.call_args.args
+        assert callable(args[6])
+
+    def test_no_rows_passes_none_as_the_footer_reader(self, diff_command: MagicMock) -> None:
+        """`--no-rows` must skip `_dispatching_footer_reader` entirely, not just decline to use its result.
+
+        Building it for real would still construct two `pyarrow` GCS filesystems for
+        no reason; passing `None` through is what makes `--no-rows` fast.
+        """
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--no-rows']) == 0
+        args = diff_command.call_args.args
+        assert args[6] is None
+
+    def test_no_rows_reaches_the_rendered_footer_note(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--no-rows']) == 0
+        out = capsys.readouterr().out
+        assert '--no-rows' in out
+
+    def test_without_the_flag_the_footer_carries_no_no_rows_note(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
+        out = capsys.readouterr().out
+        assert '--no-rows' not in out
+
+    def test_the_same_run_and_reference_name_exits_non_zero_without_calling_collect_diffs(
+        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`_dispatching_footer_reader`'s guard must reach the user as a clean message.
+
+        Confirms both that `main`'s new `ValueError` handler catches it and that the
+        walk never starts — `collect_diffs` would otherwise still run against a
+        reader that silently routes every reference object to the run bucket.
+        """
+        assert main(['diff', '--run', 'same-name', '--reference', 'same-name']) == 1
+        err = capsys.readouterr().err
+        assert 'same-name' in err
+        assert err.count('\n') == 1
+        diff_command.assert_not_called()
 
 
 @pytest.fixture
