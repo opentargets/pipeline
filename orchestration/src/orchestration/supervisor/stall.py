@@ -133,9 +133,9 @@ def baseline_from_journal(events: list[JournalEvent]) -> Baseline:
             `step_completed` event must be the bare step name, as above. A baseline
             spanning several runs would make the history rule the common case instead
             of the narrow one, but building it needs to enumerate prior runs' journal
-            prefixes — and which key those prefixes use is unsettled (`dag_run_id` vs
-            `run_name`, see `journal.py`'s module docstring). Nothing in this codebase
-            does that yet; deferred until that key is settled.
+            prefixes — keyed on `dag_run_id`, per `journal.py`'s module docstring.
+            Nothing in this codebase enumerates prior runs' journals yet; deferred
+            until that need arises.
 
     Returns:
         The observed maximum duration per step (keyed by the bare step name).

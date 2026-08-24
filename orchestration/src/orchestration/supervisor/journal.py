@@ -10,14 +10,13 @@ immutable, so appending to a single file means read-modify-write, and this journ
 has two writers — the reference-diff DAG task and the agent. A lost update would
 silently drop the record the journal exists to keep.
 
-Both writers must agree on the object prefix, and that is not settled yet. The agent
-(`snapshot.py`) keys it on the Airflow `dag_run_id`, the only run identifier it has.
-The design spec's journal path is instead keyed on `run_name` from
-`unified_pipeline.yaml` — an independent identifier for the same run. If
-`diff_vs_reference` writes to a `run_name`-keyed prefix while the agent reads and
-writes a `dag_run_id`-keyed one, the two writers will silently keep separate
-journals for what is really one run — the exact failure two writers on one journal
-is meant to avoid. See `snapshot.py`'s module docstring for the fuller account.
+**The journal is keyed on the Airflow `dag_run_id`, not `run_name`.** Both would
+have identified the same run, but `dag_run_id` comes from Airflow, is authoritative
+for the run in flight, and needs no file read to obtain — see `snapshot.py`'s module
+docstring for the fuller account. The `diff_vs_reference` DAG task this module's
+docstring used to warn about is superseded: the observer diffs once at terminal
+state instead (see `cli.py`'s module docstring), so there is now only one writer,
+and it always keys on `dag_run_id`.
 """
 
 from __future__ import annotations
@@ -101,25 +100,37 @@ class JournalEvent(BaseModel):
         Two observations of the same thing produce the same key, which is what stops
         the fourth wakeup re-reporting the first wakeup's completions.
 
-        `map_index` joins the key only when it names a real mapped instance (neither
-        None nor -1, Airflow's value for a task instance outside a mapped operator).
-        Without that guard, every mapped step's N task instances — sharing one
-        `task_id` and therefore one `step` — would collapse onto a single key: the
-        first instance's event would record, and `Journal.append` would then silently
-        drop every other instance's event as a duplicate of it. Guarding the common,
-        unmapped case also means this key is unchanged in shape for every event
-        written before `map_index` existed.
+        `try_number` and `map_index` are both optional, and a plain positional join
+        of optional parts is ambiguous: `step_failed-pts_target-1` cannot tell
+        `try_number=1, map_index=-1` (or None) apart from `try_number=None,
+        map_index=1` — both produce the identical trailing `-1`. Each is tagged with
+        its own letter instead — `t` for `try_number`, `m` for `map_index` — so
+        `step_failed-pts_target-t1` and `step_failed-pts_target-m1` cannot be
+        confused with one another, by construction, regardless of which optional
+        parts are present or absent. `map_index` still joins only when it names a
+        real mapped instance (neither None nor -1, Airflow's value for a task
+        instance outside a mapped operator): without that guard, every mapped step's
+        N task instances — sharing one `task_id` and therefore one `step` — would
+        collapse onto a single key, and `Journal.append` would silently drop every
+        instance but the first as a duplicate of it.
+
+        No journal has ever been written in production — `baseline_from_journal` had
+        no writer until this branch, and the cron that would run `observe` is not yet
+        enabled — so there is no installed base of untagged keys this format needs to
+        stay compatible with. That is why the tags were free to add now and this
+        docstring no longer explains how to preserve the old shape.
 
         Returns:
-            The key, joining event type, step, try number and map index where present.
+            The key: event type, then step, then `t{try_number}` and `m{map_index}`
+            wherever each is present, joined with `-`.
         """
         parts = [self.event_type]
         if self.step is not None:
             parts.append(self.step)
         if self.try_number is not None:
-            parts.append(str(self.try_number))
+            parts.append(f't{self.try_number}')
         if self.map_index is not None and self.map_index != -1:
-            parts.append(str(self.map_index))
+            parts.append(f'm{self.map_index}')
         return '-'.join(parts)
 
 

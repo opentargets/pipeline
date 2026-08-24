@@ -124,6 +124,16 @@ def token_request(base_url: str, username: str, password: str) -> tuple[str, dic
 _PAGE_SIZE = 100
 """Task instances per request. The unified pipeline has 132 steps."""
 
+_ACTIVE_RUN_CANDIDATES = 10
+"""Rows fetched by `active_dag_run` and `most_recent_dag_run` when looking for a run.
+
+`active_dag_run`'s `state=running` filter already excludes queued runs server-side, so
+one row is normally enough there; `most_recent_dag_run` sends no filter at all, so its
+own client-side `start_date is not None` re-check needs the same margin against a
+queued run or two sorting ahead of it. Either way this is not full pagination — that
+is never needed for something the unified pipeline does not do: run more than one DAG
+run at a time."""
+
 
 class AirflowClient:
     """Reads DAG runs and task instances from the Airflow REST API.
@@ -198,6 +208,74 @@ class AirflowClient:
             The run.
         """
         return DagRun.model_validate(self._get(f'/api/v2/dags/{dag_id}/dagRuns/{run_id}'))
+
+    def active_dag_run(self, dag_id: str) -> DagRun | None:
+        """Find the run currently in flight, if any.
+
+        A cron is handed no run id and must discover one. Returning None when nothing
+        is running is the ordinary case, not an error: the observer wakes to an idle
+        pipeline far more often than a busy one, and a cron that raises on that gets
+        muted by whoever receives the mail, so nothing gets watched at all.
+
+        The request filters to `state=running`, which excludes `queued`: a queued run
+        has been created but has not started, and treating it as active would have the
+        observer report on a run that has not begun. That filter is re-checked on the
+        client below rather than trusted blindly, because a queued run's `start_date`
+        is null, and Postgres sorts nulls *first* in a descending `ORDER BY` — if the
+        state filter were ever dropped, a queued run would sort ahead of every running
+        one instead of falling to the back where "no start yet" belongs.
+
+        `order_by` pins `-start_date,-id` for the same reason `task_instances` pins
+        `order_by=id`: `start_date` alone is not a total order (two runs can start in
+        the same tick), so ties are broken on `id`, DagRun's autoincrement primary key
+        and therefore unique. When several runs are genuinely active, this always picks
+        the same one: the newest by start date.
+
+        Args:
+            dag_id: The DAG's id.
+
+        Returns:
+            The most recently started running run, or None if nothing is running.
+        """
+        page = self._get(
+            f'/api/v2/dags/{dag_id}/dagRuns',
+            {'state': 'running', 'order_by': ['-start_date', '-id'], 'limit': _ACTIVE_RUN_CANDIDATES},
+        )
+        running = [run for run in page['dag_runs'] if run.get('state') == 'running']
+        return DagRun.model_validate(running[0]) if running else None
+
+    def most_recent_dag_run(self, dag_id: str) -> DagRun | None:
+        """Find the run that started most recently, in any state.
+
+        `active_dag_run` answers "what is running right now", which a run that has
+        already finished can never be — the observer's terminal-state handling
+        (comparing datasets, journalling `run_finished`) would never fire if that
+        were the only way to find a run. This method answers a different question,
+        "what did we most recently start watching", so a caller that finds nothing
+        running can still pick up a run that finished between wakeups. Teaching
+        `active_dag_run` itself to fall back this way would make it lie about what
+        "active" means — hence a separate method rather than a flag on that one.
+
+        No `state` filter is sent, so a queued run — whose `start_date` is null —
+        would sort ahead of every started run, the same Postgres NULLS FIRST
+        behaviour `active_dag_run`'s docstring explains. That method re-checks
+        `state == 'running'` client-side for the same reason; this re-checks
+        `start_date is not None` instead, since "has it started at all" is what
+        this method needs rather than "is it still running".
+
+        Args:
+            dag_id: The DAG's id.
+
+        Returns:
+            The most recently started run in any state, or None if no run of this
+            DAG has ever started.
+        """
+        page = self._get(
+            f'/api/v2/dags/{dag_id}/dagRuns',
+            {'order_by': ['-start_date', '-id'], 'limit': _ACTIVE_RUN_CANDIDATES},
+        )
+        started = [run for run in page['dag_runs'] if run.get('start_date') is not None]
+        return DagRun.model_validate(started[0]) if started else None
 
     def task_instances(self, dag_id: str, run_id: str) -> list[TaskInstance]:
         """Read every task instance in one DAG run, following pagination.

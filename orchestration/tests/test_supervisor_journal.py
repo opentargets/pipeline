@@ -60,8 +60,8 @@ def _journal() -> tuple[Journal, FakeBucket]:
 
 
 class TestJournalEventKey:
-    def test_key_combines_type_step_and_try(self) -> None:
-        assert _event().key == 'step_completed-pts_target-1'
+    def test_key_combines_type_step_and_tagged_try(self) -> None:
+        assert _event().key == 'step_completed-pts_target-t1'
 
     def test_the_same_event_twice_has_the_same_key(self) -> None:
         assert _event().key == _event().key
@@ -77,16 +77,15 @@ class TestJournalEventKey:
     def test_an_unmapped_task_keeps_the_key_unchanged(self) -> None:
         """-1 is Airflow's value for a task instance outside a mapped operator, and by far the common case.
 
-        The key must not grow a segment for it, or every existing key (and every event
-        already written to a real journal) changes shape.
+        The key must not grow a segment for it.
         """
-        assert _event(map_index=-1).key == 'step_completed-pts_target-1'
+        assert _event(map_index=-1).key == 'step_completed-pts_target-t1'
 
     def test_no_map_index_keeps_the_key_unchanged(self) -> None:
-        assert _event(map_index=None).key == 'step_completed-pts_target-1'
+        assert _event(map_index=None).key == 'step_completed-pts_target-t1'
 
-    def test_a_mapped_instance_gets_a_key_segment(self) -> None:
-        assert _event(map_index=2).key == 'step_completed-pts_target-1-2'
+    def test_a_mapped_instance_gets_a_tagged_key_segment(self) -> None:
+        assert _event(map_index=2).key == 'step_completed-pts_target-t1-m2'
 
     def test_two_mapped_instances_of_the_same_step_get_different_keys(self) -> None:
         """The defect this closes: N shards sharing one task_id used to collapse onto one key.
@@ -95,6 +94,35 @@ class TestJournalEventKey:
         would then silently drop shard 3's event as a duplicate of it.
         """
         assert _event(map_index=0).key != _event(map_index=3).key
+
+    def test_a_plain_unmapped_single_attempt_event_has_a_stable_readable_key(self) -> None:
+        """The common case — one attempt, no mapped instance — reads plainly, with exactly one tag."""
+        e = JournalEvent(event_type='step_failed', step='pts_target', try_number=1,
+                         at=datetime(2026, 7, 21, tzinfo=UTC))
+        assert e.key == 'step_failed-pts_target-t1'
+
+    def test_try_number_one_and_map_index_one_are_tagged_so_they_cannot_be_confused(self) -> None:
+        """The ambiguity this format exists to close.
+
+        A positional join collapses `try_number=1, map_index=-1/None` and
+        `try_number=None, map_index=1` onto the identical trailing `-1` — one means a
+        first attempt outside a mapped operator, the other means an unattempted
+        (`try_number` unknown) mapped instance 1, and a plain join cannot tell them
+        apart. Tagging each with its own letter makes them different strings by
+        construction.
+        """
+        try_number_one = JournalEvent(event_type='step_failed', step='pts_target', try_number=1,
+                                      at=datetime(2026, 7, 21, tzinfo=UTC))
+        map_index_one = JournalEvent(event_type='step_failed', step='pts_target', map_index=1,
+                                     at=datetime(2026, 7, 21, tzinfo=UTC))
+        assert try_number_one.key != map_index_one.key
+        assert try_number_one.key == 'step_failed-pts_target-t1'
+        assert map_index_one.key == 'step_failed-pts_target-m1'
+
+    def test_a_try_number_and_a_map_index_together_are_both_tagged_and_in_order(self) -> None:
+        e = JournalEvent(event_type='stall_detected', step='pts_target', try_number=2, map_index=7,
+                         at=datetime(2026, 7, 21, tzinfo=UTC))
+        assert e.key == 'stall_detected-pts_target-t2-m7'
 
 
 class TestJournalAppend:
@@ -123,7 +151,7 @@ class TestJournalAppend:
     def test_the_object_name_carries_the_key(self) -> None:
         journal, bucket = _journal()
         journal.append(_event())
-        assert 'step_completed-pts_target-1' in next(iter(bucket.objects))
+        assert 'step_completed-pts_target-t1' in next(iter(bucket.objects))
 
 
 class TestJournalEventValidation:
@@ -196,7 +224,7 @@ class TestJournalRead:
         journal, _ = _journal()
         journal.append(_event())
         assert journal.has(_event().key) is True
-        assert journal.has('step_failed-pts_target-1') is False
+        assert journal.has('step_failed-pts_target-t1') is False
 
     def test_read_orders_by_time_even_when_key_order_disagrees(self) -> None:
         """Object names now sort by key first, not by timestamp.

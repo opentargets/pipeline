@@ -218,3 +218,138 @@ class TestAirflowClient:
         client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
         with pytest.raises(RuntimeError, match='500'):
             client.task_instances('unified_pipeline', 'r')
+
+
+def _dag_run(dag_run_id: str, state: str, start_date: str | None) -> dict[str, object]:
+    return {'dag_run_id': dag_run_id, 'state': state, 'start_date': start_date, 'end_date': None}
+
+
+class TestActiveDagRun:
+    def test_a_single_running_run_is_returned(self) -> None:
+        payload = {'dag_runs': [_dag_run('r1', 'running', '2026-07-21T14:00:00Z')]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.active_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'r1'
+
+    def test_no_running_run_returns_none_rather_than_raising(self) -> None:
+        """The idle pipeline is the ordinary case, not an error."""
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        assert client.active_dag_run('unified_pipeline') is None
+
+    def test_several_running_runs_returns_the_newest_by_start_date(self) -> None:
+        """The server is asked to sort newest-first; the client trusts and takes the first."""
+        payload = {'dag_runs': [
+            _dag_run('newer', 'running', '2026-07-21T15:00:00Z'),
+            _dag_run('older', 'running', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.active_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'newer'
+
+    def test_a_queued_run_is_not_mistaken_for_active(self) -> None:
+        """Queued runs have not started; the client re-checks state rather than trusting the response."""
+        payload = {'dag_runs': [_dag_run('queued-one', 'queued', None)]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        assert client.active_dag_run('unified_pipeline') is None
+
+    def test_a_queued_run_ranked_ahead_does_not_crowd_out_the_real_running_run(self) -> None:
+        """A queued run's null start_date can sort first under Postgres' NULLS FIRST default for DESC."""
+        payload = {'dag_runs': [
+            _dag_run('queued-one', 'queued', None),
+            _dag_run('running-one', 'running', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.active_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'running-one'
+
+    def test_requests_the_running_state_filter(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.active_dag_run('unified_pipeline')
+        assert session.get.call_args.kwargs['params']['state'] == 'running'
+
+    def test_requests_a_total_order_sort(self) -> None:
+        """`start_date` alone can tie between two runs started in the same instant."""
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.active_dag_run('unified_pipeline')
+        assert session.get.call_args.kwargs['params']['order_by'] == ['-start_date', '-id']
+
+    def test_requests_the_documented_dag_runs_path(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.active_dag_run('unified_pipeline')
+        url = session.get.call_args.args[0]
+        assert url == 'http://a:8080/api/v2/dags/unified_pipeline/dagRuns'
+
+
+class TestMostRecentDagRun:
+    def test_a_finished_run_is_returned(self) -> None:
+        """Unlike `active_dag_run`, a terminal state is exactly what this method must find."""
+        payload = {'dag_runs': [_dag_run('r1', 'failed', '2026-07-21T14:00:00Z')]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'r1'
+
+    def test_no_run_ever_started_returns_none_rather_than_raising(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        assert client.most_recent_dag_run('unified_pipeline') is None
+
+    def test_several_finished_runs_returns_the_newest_by_start_date(self) -> None:
+        payload = {'dag_runs': [
+            _dag_run('newer', 'success', '2026-07-21T15:00:00Z'),
+            _dag_run('older', 'failed', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'newer'
+
+    def test_a_queued_run_ranked_ahead_does_not_crowd_out_a_finished_run(self) -> None:
+        """A queued run's null start_date sorts first under Postgres' NULLS FIRST default for DESC.
+
+        Mirrors `test_a_queued_run_ranked_ahead_does_not_crowd_out_the_real_running_run`
+        above, but for the no-state-filter request this method sends.
+        """
+        payload = {'dag_runs': [
+            _dag_run('queued-one', 'queued', None),
+            _dag_run('finished-one', 'failed', '2026-07-21T14:00:00Z'),
+        ]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'finished-one'
+
+    def test_a_run_still_running_is_also_returned(self) -> None:
+        """No state filter: a caller that already ruled out `active_dag_run` still gets one back."""
+        payload = {'dag_runs': [_dag_run('r1', 'running', '2026-07-21T14:00:00Z')]}
+        session = _session(_token(), _response(payload))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        run = client.most_recent_dag_run('unified_pipeline')
+        assert run is not None
+        assert run.dag_run_id == 'r1'
+
+    def test_sends_no_state_filter(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.most_recent_dag_run('unified_pipeline')
+        assert 'state' not in session.get.call_args.kwargs['params']
+
+    def test_requests_a_total_order_sort(self) -> None:
+        session = _session(_token(), _response({'dag_runs': []}))
+        client = AirflowClient(session=session, base_url='http://a:8080', username='u', password=_CREDENTIAL)
+        client.most_recent_dag_run('unified_pipeline')
+        assert session.get.call_args.kwargs['params']['order_by'] == ['-start_date', '-id']

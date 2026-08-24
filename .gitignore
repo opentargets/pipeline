@@ -30,3 +30,7 @@ logs
 
 # holds the generated airflow api/jwt secrets; seeded from .env.example
 orchestration/.env
+
+# holds the run-specific observer settings (issue/run/reference); seeded from
+# deployment/observer_run.env.example
+orchestration/observer_run.env
