@@ -162,9 +162,23 @@ def run_name() -> str | None:
     by re-reading the file afterwards — a second timestamp minted here would not be the
     DAG's `run_name`, it would just look like it.
 
+    Whether this field is in fact the run's own prefix in the runs bucket is unverified
+    for any particular run — see `cli.py`'s module docstring on why `observe`'s dataset
+    diff does not auto-derive `--reference` from it. This function only reads whatever
+    is in the config the observer can see; it is a config snapshot, not confirmed
+    provenance.
+
+    That snapshot is also not necessarily the observed run's own: `unified_pipeline.yaml`
+    is read fresh at wakeup time from the observer's own checkout, never from the run
+    being watched. A run discovered on the first wakeup after the cron is enabled may
+    have started well before that wakeup, against a yaml that has since been edited for
+    the next dev run — so the value returned here can describe a different run than the
+    one it gets journalled against, with nothing to signal the mismatch.
+
     Returns:
-        The run's own prefix in the runs bucket, or None if the field is unset in the
-        yaml (in which case the DAG itself picked a timestamp this function cannot see).
+        The `run_name` field from the config the observer can currently see, or None if
+        the field is unset in the yaml (in which case the DAG itself picked a timestamp
+        this function cannot see).
     """
     up = yaml.safe_load(_UNIFIED_PIPELINE_YAML.read_text())
     return up.get('run_name')

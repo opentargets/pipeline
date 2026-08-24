@@ -629,8 +629,17 @@ class TestDiffLoadersAgainstTheRealConfig:
         assert 'pts_disease' in steps
 
     def test_loads_the_configured_run_name(self) -> None:
-        """Pins the branch's own measured value; a rename of the field would silently break F7."""
-        assert run_name() == 'ds/target_refactor'
+        """Checks the field is read at all, not its live value.
+
+        `run_name` is edited to configure each dev run — unlike the step count above,
+        which changes deliberately and rarely — so pinning today's value would red-fail
+        CI on the next dev run that sets a different one, teaching people to edit this
+        test to match config. A non-None return is enough to catch what this test
+        actually guards against: a rename of the *field* in `unified_pipeline.yaml`
+        that would silently turn `datasets.run_name`'s `up.get('run_name')` into a
+        permanent `None`.
+        """
+        assert run_name() is not None
 
     def test_collect_diffs_reconciles_against_the_measured_release_inventory(self) -> None:
         """With both buckets empty, every declared dataset is absent from both sides.

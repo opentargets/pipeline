@@ -42,8 +42,10 @@ below) — without it, every wakeup after the run finishes would re-run the comp
 and repost the same "Dataset comparison" section forever. A separate
 `observation_started` event, carrying `run_name` from `unified_pipeline.yaml`, is
 journalled on the first wakeup that finds this run (idempotent like every other
-event here) — a durable "alive and watching run X" marker letting a human map a
-journal prefix back to a bucket path, distinct from a dead or never-started observer.
+event here) — a durable "this run was discovered" marker letting a human map a
+journal prefix back to a bucket path. It is not a liveness marker: because it is
+journalled once per run and every later wakeup no-ops, a dead observer and a quiet
+one produce byte-identical journals, so liveness is not addressed here.
 """
 
 from __future__ import annotations
@@ -156,9 +158,16 @@ _OBSERVATION_STARTED_EVENT = 'observation_started'
 Journalled once per run (idempotent, like every other event here), carrying
 `run_name` (see `datasets.run_name`) in its payload so a human can map this journal's
 GCS prefix — keyed on the Airflow `dag_run_id`, not `run_name`, see `journal.py`'s
-module docstring — back to the run's own prefix in the runs bucket. It also doubles
-as a liveness marker: without it, a dead observer (the cron stopped firing) and a
-quiet one (nothing new to report) are indistinguishable from the journal alone."""
+module docstring — back to the run's own prefix in the runs bucket.
+
+It is not a liveness marker, despite looking like one. `Journal.append` no-ops on
+every wakeup after the first for a given event, which is correct for this event's
+real purpose but means a dead observer (the cron stopped firing at 10:00) and a
+quiet one (nothing new to report since 10:00) journal the same thing: one
+`observation_started` entry and nothing else. The two are indistinguishable from
+the journal alone. Do not add a per-wakeup heartbeat to close this gap — that
+trades one false sentence for 144 journal objects a day — liveness needs a
+different mechanism entirely."""
 
 _MISSING = '-'
 """Shown for a row that carries no value for an optional column."""
