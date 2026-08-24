@@ -524,3 +524,33 @@ class TestCollectDiffsDatasets:
         )
         diffs, _ = collect_diffs(run_bucket, 'run', FakeBucket([]), 'release', ['pts_zzz', 'pts_aaa'], stage_configs)
         assert [d.dataset for d in diffs] == ['output/aaa', 'output/zzz']
+
+
+class TestCollectDiffsPerSideFooterReaders:
+    def test_each_side_reads_footers_through_its_own_reader(self) -> None:
+        """`run_read_footer` and `reference_read_footer` must never be swapped.
+
+        The two sides can be different buckets, which is exactly why `collect_diffs`
+        takes one reader per side rather than one shared between them. Distinguishable
+        row counts per side (5 vs 9) mean a reader swapped between the two sides would
+        show up as a wrong number, not just a missing one.
+        """
+        stage_configs = _stage_config(disease=[{'name': 't', 'destination': 'output/disease'}])
+        run_bucket = FakeBucket([FakeBlob('run/output/disease/part-0000.parquet', 100)])
+        reference_bucket = FakeBucket([FakeBlob('release/output/disease/part-0000.parquet', 100)])
+        run_read_footer = _footer_reader({'run/output/disease/part-0000.parquet': Footer(rows=5)})
+        reference_read_footer = _footer_reader({'release/output/disease/part-0000.parquet': Footer(rows=9)})
+
+        diffs, _ = collect_diffs(
+            run_bucket,
+            'run',
+            reference_bucket,
+            'release',
+            ['pts_disease'],
+            stage_configs,
+            run_read_footer,
+            reference_read_footer,
+        )
+        disease = next(d for d in diffs if d.dataset == 'output/disease')
+        assert disease.run_rows == 5
+        assert disease.reference_rows == 9

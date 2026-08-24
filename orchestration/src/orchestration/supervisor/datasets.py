@@ -23,12 +23,43 @@ failure mode that looks exactly like a real finding.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from orchestration.supervisor.step_identity import identify
 
 RELEASE_NAMESPACES = ('output/', 'view/')
 """The only `destination:` prefixes that name a published release dataset."""
+
+_SRC_ROOT = Path(__file__).resolve().parents[1]
+"""`src/orchestration`, two directories above this file.
+
+This holds in both a source checkout and the Airflow container: `compose.yaml`
+mounts the whole `src/` directory at `/opt/airflow/dags`, so this file lives at
+`.../orchestration/supervisor/datasets.py` in the checkout and at
+`/opt/airflow/dags/orchestration/supervisor/datasets.py` in the container, and
+either way `parents[1]` is the `orchestration` directory that holds `dags/`. A path
+built under it, like `_UNIFIED_PIPELINE_YAML` below, therefore resolves correctly
+in both layouts without needing to know which one it is running in.
+"""
+
+_UNIFIED_PIPELINE_YAML = _SRC_ROOT / 'dags' / 'config' / 'unified_pipeline.yaml'
+
+_STAGE_ROOT = _SRC_ROOT.parents[2]
+"""Where `pis/` and `pts/` live: the repo root in a source checkout, `/opt` in the
+container.
+
+Unlike `_SRC_ROOT`, this crosses out of `src/` entirely, so the two layouts are not
+the same directory by construction — they only happen to hold the same two files at
+this depth. `compose.yaml` mounts `../pis/config.yaml` and `../pts/config.yaml` to
+`/opt/pis/config.yaml` and `/opt/pts/config.yaml` specifically so that this offset —
+three levels above `_SRC_ROOT`, matching `dags/config/unified_pipeline.py`'s own
+`config_path.parents[4]` from one directory deeper — lands on them in the container
+too. Getting this offset wrong does not raise: a wrong depth still resolves to some
+existing directory and silently reads whatever config lives there instead.
+"""
 
 
 def _raw_destinations(tasks: list[dict[str, Any]]) -> list[Any]:
@@ -95,3 +126,27 @@ def destinations_for(step: str, stage_config: dict[str, Any]) -> list[str]:
             if path.startswith(RELEASE_NAMESPACES) and '${' not in path and path not in destinations:
                 destinations.append(path)
     return destinations
+
+
+def stage_configs() -> dict[str, Any]:
+    """Load `pis` and `pts`'s own configs, the only two `destinations_for` needs.
+
+    Gentropy's steps are deliberately not read here: their destinations live in
+    `dags/config/gentropy.yaml`, and callers walking `unified_pipeline_steps()`
+    record them as having no stage config rather than needing a third config this
+    does not parse the same way.
+
+    Returns:
+        Each stage's parsed config, keyed by stage name.
+    """
+    return {stage: yaml.safe_load((_STAGE_ROOT / stage / 'config.yaml').read_text()) for stage in ('pis', 'pts')}
+
+
+def unified_pipeline_steps() -> list[str]:
+    """Load the step list a full comparison walks, from `unified_pipeline.yaml`.
+
+    Returns:
+        Every step name declared under `steps:`, in file order.
+    """
+    up = yaml.safe_load(_UNIFIED_PIPELINE_YAML.read_text())
+    return list(up['steps'])

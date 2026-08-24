@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -12,9 +13,6 @@ import pytest
 
 from orchestration.supervisor import cli
 from orchestration.supervisor.cli import (
-    _dispatching_footer_reader,
-    _stage_configs,
-    _unified_pipeline_steps,
     build_parser,
     main,
     optional_columns,
@@ -23,6 +21,7 @@ from orchestration.supervisor.cli import (
     render_table,
     totals_by_group,
 )
+from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
@@ -481,91 +480,6 @@ class TestDiffParser:
         assert args.no_rows is True
 
 
-class TestDispatchingFooterReader:
-    """`collect_diffs` shares one `read_footer` across both sides of a diff.
-
-    `gcs.footer_reader` is pinned to a single bucket name, so a shared reader that
-    reads the wrong bucket for one side would either 404 or silently read the wrong
-    object. `_dispatching_footer_reader` routes each call by which root prefix the
-    object name starts with; these tests guard that routing directly.
-    """
-
-    def test_a_run_side_object_is_read_by_the_run_buckets_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        built: list[str] = []
-
-        def fake_footer_reader(bucket_name: str) -> Any:
-            built.append(bucket_name)
-
-            def read(name: str) -> Footer:
-                return Footer(rows=1 if bucket_name == 'run-bucket' else 2)
-
-            return read
-
-        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
-        read = _dispatching_footer_reader('run-bucket', 'myrun', 'reference-bucket', 'rel1')
-        assert built == ['run-bucket', 'reference-bucket']
-        assert read('myrun/output/disease/part-0000.parquet').rows == 1
-
-    def test_a_reference_side_object_is_read_by_the_reference_buckets_reader(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def fake_footer_reader(bucket_name: str) -> Any:
-            def read(name: str) -> Footer:
-                return Footer(rows=1 if bucket_name == 'run-bucket' else 2)
-
-            return read
-
-        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
-        read = _dispatching_footer_reader('run-bucket', 'myrun', 'reference-bucket', 'rel1')
-        assert read('rel1/output/disease/part-0000.parquet').rows == 2
-
-    def test_a_trailing_slash_on_the_run_prefix_does_not_change_the_routing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def fake_footer_reader(bucket_name: str) -> Any:
-            def read(name: str) -> Footer:
-                return Footer(rows=1 if bucket_name == 'run-bucket' else 2)
-
-            return read
-
-        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
-        read = _dispatching_footer_reader('run-bucket', 'myrun/', 'reference-bucket', 'rel1')
-        assert read('myrun/output/disease/part-0000.parquet').rows == 1
-
-    def test_the_same_root_on_both_sides_raises_rather_than_silently_routing_everything_to_the_run_side(
-        self,
-    ) -> None:
-        """`--run 26.03 --reference 26.03` against different buckets is valid CLI input.
-
-        Without this guard, every object would match `run_root` and the reference
-        side would be silently read through the run bucket's reader instead — wrong
-        data or a 404 storm, neither of which explains itself. The message must name
-        both sides so the cause is obvious from the error alone.
-        """
-        with pytest.raises(ValueError, match=r'26\.03'):
-            _dispatching_footer_reader('run-bucket', '26.03', 'reference-bucket', '26.03')
-
-    def test_a_prefix_that_is_a_strict_prefix_of_the_other_is_not_treated_as_equal(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`26.03` and `26.03-ppp` share a string prefix but are different roots.
-
-        Guards that the equality check is on the normalised, slash-terminated root
-        (`26.03/` vs `26.03-ppp/`), not on `str.startswith`, which would wrongly treat
-        this pair as the same root and raise.
-        """
-
-        def fake_footer_reader(bucket_name: str) -> Any:
-            def read(name: str) -> Footer:
-                return Footer(rows=1 if bucket_name == 'run-bucket' else 2)
-
-            return read
-
-        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
-        read = _dispatching_footer_reader('run-bucket', '26.03', 'reference-bucket', '26.03-ppp')
-        assert read('26.03-ppp/output/disease/part-0000.parquet').rows == 2
-
-
 def _diff(**overrides: Any) -> DatasetDiff:
     base: dict[str, Any] = {
         'dataset': 'output/disease',
@@ -698,10 +612,10 @@ class TestDiffLoadersAgainstTheRealConfig:
 
     def test_loads_pis_and_pts_only(self) -> None:
         """Gentropy is deliberately excluded; its config is not `{stage}/config.yaml`-shaped."""
-        assert set(_stage_configs()) == {'pis', 'pts'}
+        assert set(stage_configs()) == {'pis', 'pts'}
 
     def test_loads_every_declared_step(self) -> None:
-        steps = _unified_pipeline_steps()
+        steps = unified_pipeline_steps()
         assert len(steps) == 132
         assert 'pts_disease' in steps
 
@@ -718,7 +632,7 @@ class TestDiffLoadersAgainstTheRealConfig:
                 return []
 
         diffs, skipped = collect_diffs(
-            _EmptyBucket(), 'run', _EmptyBucket(), 'release', _unified_pipeline_steps(), _stage_configs()
+            _EmptyBucket(), 'run', _EmptyBucket(), 'release', unified_pipeline_steps(), stage_configs()
         )
         assert diffs == []
         assert len(skipped.stages_without_config) == 12
@@ -746,8 +660,8 @@ def diff_command(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     fake_storage = MagicMock()
     fake_storage.Client.return_value = storage_client
     monkeypatch.setattr(cli, 'storage', fake_storage)
-    monkeypatch.setattr(cli, '_unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
-    monkeypatch.setattr(cli, '_stage_configs', MagicMock(return_value={'pts': {'steps': {}}}))
+    monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
+    monkeypatch.setattr(cli, 'stage_configs', MagicMock(return_value={'pts': {'steps': {}}}))
     collect = MagicMock(return_value=([], Skipped()))
     monkeypatch.setattr(cli, 'collect_diffs', collect)
     collect.storage_client = storage_client
@@ -831,20 +745,24 @@ class TestDiffCommand:
         out = capsys.readouterr().out
         assert '0 with material changes' in out
 
-    def test_a_footer_reader_is_passed_to_collect_diffs_by_default(self, diff_command: MagicMock) -> None:
+    def test_a_footer_reader_is_passed_to_collect_diffs_for_each_side_by_default(
+        self, diff_command: MagicMock
+    ) -> None:
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
         args = diff_command.call_args.args
         assert callable(args[6])
+        assert callable(args[7])
 
-    def test_no_rows_passes_none_as_the_footer_reader(self, diff_command: MagicMock) -> None:
-        """`--no-rows` must skip `_dispatching_footer_reader` entirely, not just decline to use its result.
+    def test_no_rows_passes_none_as_both_footer_readers(self, diff_command: MagicMock) -> None:
+        """`--no-rows` must skip building `footer_reader` for either side entirely.
 
         Building it for real would still construct two `pyarrow` GCS filesystems for
-        no reason; passing `None` through is what makes `--no-rows` fast.
+        no reason; passing `None` through for both is what makes `--no-rows` fast.
         """
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1', '--no-rows']) == 0
         args = diff_command.call_args.args
         assert args[6] is None
+        assert args[7] is None
 
     def test_no_rows_reaches_the_rendered_footer_note(
         self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
@@ -860,20 +778,63 @@ class TestDiffCommand:
         out = capsys.readouterr().out
         assert '--no-rows' not in out
 
-    def test_the_same_run_and_reference_name_exits_non_zero_without_calling_collect_diffs(
-        self, diff_command: MagicMock, capsys: pytest.CaptureFixture[str]
+    def test_the_same_run_and_reference_name_across_different_buckets_is_a_real_comparison(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """`_dispatching_footer_reader`'s guard must reach the user as a clean message.
+        """`--run 26.09 --reference 26.09` against two different buckets is ordinary CLI input.
 
-        Confirms both that `main`'s new `ValueError` handler catches it and that the
-        walk never starts — `collect_diffs` would otherwise still run against a
-        reader that silently routes every reference object to the run bucket.
+        A run and the release of the same name is the most natural pre-publication
+        sanity check there is, and must not be rejected just because the two `--run`/
+        `--reference` values happen to match. `collect_diffs` is left un-mocked here
+        (unlike `diff_command`'s other tests) so this exercises the real per-side
+        routing: each side's footer reader is built from its own `--*-bucket` name and
+        reads distinguishable row counts (5 vs 9), so a reader swapped between the two
+        sides would show up as a wrong number, not just a missing one.
         """
-        assert main(['diff', '--run', 'same-name', '--reference', 'same-name']) == 1
-        err = capsys.readouterr().err
-        assert 'same-name' in err
-        assert err.count('\n') == 1
-        diff_command.assert_not_called()
+        run_bucket = MagicMock()
+        run_bucket.list_blobs.return_value = [SimpleNamespace(name='same-name/output/disease/part-0.parquet', size=1)]
+        reference_bucket = MagicMock()
+        reference_bucket.list_blobs.return_value = [
+            SimpleNamespace(name='same-name/output/disease/part-0.parquet', size=1)
+        ]
+        buckets = {'run-bucket-name': run_bucket, 'reference-bucket-name': reference_bucket}
+
+        storage_client = MagicMock()
+        storage_client.bucket.side_effect = lambda name: buckets[name]
+        fake_storage = MagicMock()
+        fake_storage.Client.return_value = storage_client
+        monkeypatch.setattr(cli, 'storage', fake_storage)
+
+        def fake_footer_reader(bucket_name: str) -> Callable[[str], Footer]:
+            rows = 5 if bucket_name == 'run-bucket-name' else 9
+            return lambda name: Footer(rows=rows)
+
+        monkeypatch.setattr(cli, 'footer_reader', fake_footer_reader)
+        monkeypatch.setattr(cli, 'unified_pipeline_steps', MagicMock(return_value=['pts_disease']))
+        monkeypatch.setattr(
+            cli,
+            'stage_configs',
+            MagicMock(
+                return_value={'pts': {'steps': {'disease': [{'name': 't', 'destination': 'output/disease'}]}}}
+            ),
+        )
+
+        assert (
+            main([
+                'diff',
+                '--run',
+                'same-name',
+                '--reference',
+                'same-name',
+                '--run-bucket',
+                'run-bucket-name',
+                '--reference-bucket',
+                'reference-bucket-name',
+            ])
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert 'rows 9 -> 5' in out
 
 
 @pytest.fixture

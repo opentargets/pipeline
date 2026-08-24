@@ -31,7 +31,7 @@ from typing import Any
 import pytest
 from google.cloud import storage
 
-from orchestration.supervisor.cli import _dispatching_footer_reader, _stage_configs, _unified_pipeline_steps
+from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
 from orchestration.supervisor.gcs import Footer, collect_diffs, footer_reader, read_stats
 from orchestration.utils.common import GCS_PIPELINE_RUNS_BUCKET, GCS_PRE_RELEASES_BUCKET
 
@@ -84,8 +84,8 @@ def reference_footer() -> Callable[[str], Footer]:
 
 
 @pytest.fixture(scope='module')
-def read_footer() -> Callable[[str], Footer]:
-    return _dispatching_footer_reader(GCS_PIPELINE_RUNS_BUCKET, RUN, GCS_PRE_RELEASES_BUCKET, REFERENCE)
+def run_footer() -> Callable[[str], Footer]:
+    return footer_reader(GCS_PIPELINE_RUNS_BUCKET)
 
 
 class TestKnownDatasets:
@@ -145,28 +145,40 @@ class TestScopedComparison:
     """Runs `collect_diffs` for real, scoped to `pts_disease` to stay cheap by default."""
 
     def test_at_least_one_dataset_is_compared(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
         diffs, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), read_footer
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), run_footer, reference_footer
         )
         assert diffs, 'an empty comparison proves nothing about the plumbing that produced it'
         assert {d.dataset for d in diffs} >= {'output/disease'}
 
     def test_every_dataset_path_carries_its_namespace(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
         diffs, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), read_footer
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), run_footer, reference_footer
         )
         assert diffs
         assert all(d.dataset.startswith(('output/', 'view/')) for d in diffs)
 
     def test_row_counts_are_present_for_parquet_and_never_zero(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
         diffs, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), read_footer
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), run_footer, reference_footer
         )
         countable = [d for d in diffs if d.countable]
         assert countable, 'every pts_disease dataset is parquet; an empty set here means read_stats regressed'
@@ -177,10 +189,14 @@ class TestScopedComparison:
                 assert d.reference_rows
 
     def test_the_disease_dataset_matches_the_recorded_reference_figures(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
         diffs, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), read_footer
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), run_footer, reference_footer
         )
         disease = next(d for d in diffs if d.dataset == 'output/disease')
         assert disease.reference_rows == DISEASE_ROWS
@@ -192,13 +208,17 @@ class TestNoRowsMatchesTheFullPathMinusRows:
     """Pins that `--no-rows` differs from the full path only in what it omits."""
 
     def test_no_rows_returns_the_same_datasets_and_bytes_with_rows_none(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
         with_rows, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), read_footer
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), run_footer, reference_footer
         )
         without_rows, _ = collect_diffs(
-            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, _stage_configs(), None
+            run_bucket, RUN, reference_bucket, REFERENCE, DISEASE_STEP, stage_configs(), None, None
         )
 
         assert with_rows, 'nothing to compare the fast path against'
@@ -230,11 +250,17 @@ class TestWholeRelease:
     """
 
     def test_the_whole_release_compares_with_rows_and_reports_its_wall_time(
-        self, run_bucket: Any, reference_bucket: Any, read_footer: Callable[[str], Footer]
+        self,
+        run_bucket: Any,
+        reference_bucket: Any,
+        run_footer: Callable[[str], Footer],
+        reference_footer: Callable[[str], Footer],
     ) -> None:
-        steps = _unified_pipeline_steps()
+        steps = unified_pipeline_steps()
         start = time.monotonic()
-        diffs, _ = collect_diffs(run_bucket, RUN, reference_bucket, REFERENCE, steps, _stage_configs(), read_footer)
+        diffs, _ = collect_diffs(
+            run_bucket, RUN, reference_bucket, REFERENCE, steps, stage_configs(), run_footer, reference_footer
+        )
         elapsed = time.monotonic() - start
         assert diffs, 'an empty whole-release comparison proves nothing'
         assert all(d.dataset.startswith(('output/', 'view/')) for d in diffs)
@@ -243,9 +269,9 @@ class TestWholeRelease:
     def test_the_whole_release_no_rows_path_reports_its_wall_time(
         self, run_bucket: Any, reference_bucket: Any
     ) -> None:
-        steps = _unified_pipeline_steps()
+        steps = unified_pipeline_steps()
         start = time.monotonic()
-        diffs, _ = collect_diffs(run_bucket, RUN, reference_bucket, REFERENCE, steps, _stage_configs(), None)
+        diffs, _ = collect_diffs(run_bucket, RUN, reference_bucket, REFERENCE, steps, stage_configs(), None, None)
         elapsed = time.monotonic() - start
         assert diffs, 'an empty whole-release comparison proves nothing'
         assert all(d.run_rows is None and d.reference_rows is None for d in diffs)

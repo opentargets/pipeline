@@ -251,9 +251,17 @@ def collect_diffs(
     reference_prefix: str,
     steps: list[str],
     stage_configs: dict[str, Any],
-    read_footer: Callable[[str], Footer] | None = None,
+    run_read_footer: Callable[[str], Footer] | None = None,
+    reference_read_footer: Callable[[str], Footer] | None = None,
 ) -> tuple[list[DatasetDiff], Skipped]:
     """Compare every release dataset the given steps declare.
+
+    Each side gets its own `read_footer`, rather than one shared between both, because
+    the two sides can be different buckets — `footer_reader` is pinned to a single
+    bucket name, so no single callable can correctly read both. Routing by which side
+    is asking is correct by construction; routing by inspecting the object name, which
+    this used to do, is not: it cannot tell a run and a reference release of the same
+    name apart, and rejected that ordinary comparison outright.
 
     Args:
         run_bucket: The bucket holding the run.
@@ -262,7 +270,8 @@ def collect_diffs(
         reference_prefix: The release's root prefix within it.
         steps: `unified_pipeline.yaml` step names to cover.
         stage_configs: Each stage's parsed config, keyed by stage name.
-        read_footer: Passed through to `read_stats`.
+        run_read_footer: Passed through to `read_stats` for the run side.
+        reference_read_footer: Passed through to `read_stats` for the reference side.
 
     Returns:
         The diffs ordered by dataset, and a record of what was not covered. Both
@@ -285,8 +294,8 @@ def collect_diffs(
             if dataset in seen:
                 continue
             seen.add(dataset)
-            run = read_stats(run_bucket, f'{run_prefix.rstrip("/")}/{dataset}', read_footer)
-            reference = read_stats(reference_bucket, f'{reference_prefix.rstrip("/")}/{dataset}', read_footer)
+            run = read_stats(run_bucket, f'{run_prefix.rstrip("/")}/{dataset}', run_read_footer)
+            reference = read_stats(reference_bucket, f'{reference_prefix.rstrip("/")}/{dataset}', reference_read_footer)
             if run is None and reference is None:
                 skipped.datasets_absent_from_both.append(dataset)
                 continue
