@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from orchestration.supervisor.step_identity import identify, is_run_task, step_from_task_id
+from orchestration.supervisor.step_identity import RUN_TASK_PREFIX, identify, is_run_task, step_from_task_id
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -36,14 +36,21 @@ class TestIdentify:
         with pytest.raises(ValueError, match='no config key'):
             identify('disease')
 
+    def test_a_trailing_underscore_is_rejected(self) -> None:
+        """`pts_` has a stage but no config key.
+
+        Splitting it silently would yield `config_key=''`, a step with no way to look
+        up its task list.
+        """
+        with pytest.raises(ValueError, match='no config key'):
+            identify('pts_')
+
     def test_a_leading_underscore_is_rejected(self) -> None:
         """`_disease` has a config key but no stage.
 
         Splitting it silently would yield `stage=''`, which resolves to nothing in a
         `{stage: config}` lookup and drops the step with no error at all.
         """
-        with pytest.raises(ValueError, match='no config key'):
-            identify('pts_')
         with pytest.raises(ValueError, match='no stage'):
             identify('_disease')
 
@@ -78,6 +85,32 @@ class TestIsRunTask:
         `run_{step}` would then equal `run_run_pts_target`, which this id is not.
         """
         assert is_run_task('run_pts_target') is False
+
+
+class TestIsRunTaskAgainstTheRealDag:
+    """`TestIsRunTask` above uses hand-typed ids.
+
+    If the DAG's own naming pattern ever drifted — a stage-level group added around
+    every step, say — `is_run_task` would return False for every real task id, and
+    `stalled` would silently drop to the ceiling for every step: the exact symptom
+    `baseline_from_journal` warns is indistinguishable from an honest first run.
+    Building ids from the real step list and the real `RUN_TASK_PREFIX` template,
+    rather than from strings typed by hand, is what would actually catch that.
+    """
+
+    def test_every_step_run_task_id_is_recognised(self) -> None:
+        up = yaml.safe_load((REPO / 'orchestration/src/orchestration/dags/config/unified_pipeline.yaml').read_text())
+        for step in up['steps']:
+            assert is_run_task(f'{step}.{RUN_TASK_PREFIX}{step}') is True, step
+
+    def test_the_batch_nested_steps_are_recognised_two_groups_deep(self) -> None:
+        """`gentropy_variant_annotation` and `gentropy_l2g_prediction` set `cluster: false`.
+
+        See `dags/config/gentropy.yaml:120-121,222-223` and the module docstring.
+        """
+        for step in ('gentropy_variant_annotation', 'gentropy_l2g_prediction'):
+            task_id = f'{step}.{step}_batch_jobs.{RUN_TASK_PREFIX}{step}'
+            assert is_run_task(task_id) is True, step
 
 
 class TestAgainstTheRealConfigs:

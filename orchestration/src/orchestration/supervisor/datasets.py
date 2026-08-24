@@ -1,7 +1,11 @@
 """Which release datasets a pipeline step produces, per its stage config.
 
 A task's `destination:` can be a scalar string, a list of strings, or a mapping whose
-values are paths — `pts/config.yaml` and `pis/config.yaml` use all three shapes today.
+values are paths. `pts/config.yaml` and `pis/config.yaml` use two of those shapes
+today — 206 scalar and 51 mapping declarations, no list. The list branch is handled
+anyway, defensively, in case the yaml grows one; it is not exercised by either config
+as of 2026-08-24.
+
 `foreach:` fans a task out at run time by templating one nested task under `do:`; the
 nested task carries the real `destination`, one level below the step's own task list,
 so a walk that only reads the step's own list misses it entirely.
@@ -51,6 +55,14 @@ def _raw_destinations(tasks: list[dict[str, Any]]) -> list[Any]:
 def destinations_for(step: str, stage_config: dict[str, Any]) -> list[str]:
     """Derive the release datasets a step produces from its stage config.
 
+    `stage_config` is assumed well-formed. It is a repo-tracked YAML file that pis/pts
+    themselves parse and run against, not an externally-written, eventually-consistent
+    record like the run journal — contrast `stall.baseline_from_journal`, which must
+    degrade gracefully because it cannot make that assumption. A malformed
+    `stage_config` (a non-string destination, a `steps:` entry that is not a mapping)
+    is a bug in the caller and is left to raise rather than silently producing a
+    partial or wrong answer.
+
     Args:
         step: The `unified_pipeline.yaml` step name, e.g. `pts_disease`.
         stage_config: The parsed config for the step's stage (`pis/config.yaml` or
@@ -58,8 +70,14 @@ def destinations_for(step: str, stage_config: dict[str, Any]) -> list[str]:
 
     Returns:
         The step's `output/`/`view/` destinations, in first-seen order with
-        duplicates removed. Empty if the step has no matching config entry — most
-        steps produce no release dataset at all, which is expected, not an error.
+        duplicates removed. Empty if `step` resolves but has no matching entry in
+        `stage_config` — most steps produce no release dataset at all, which is
+        expected, not an error.
+
+    Raises:
+        ValueError: If `step` itself is malformed — carries no stage or no config key,
+            per `identify`. This is distinct from a step that resolves but has no
+            config *entry*, which is not an error and returns `[]`.
     """
     tasks = stage_config.get('steps', {}).get(identify(step).config_key)
     if not tasks:

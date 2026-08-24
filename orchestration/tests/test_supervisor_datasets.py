@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from orchestration.supervisor.datasets import destinations_for
+from orchestration.supervisor.datasets import _raw_destinations, destinations_for
 
 REPO = Path(__file__).resolve().parents[2]  # tests -> orchestration -> pipeline
 
@@ -96,11 +96,15 @@ class TestAgainstTheRealConfigs:
         assert checked > 0, 'asserted over nothing, which proves nothing'
 
     def test_both_configs_together_yield_the_measured_release_datasets(self) -> None:
-        """Pins the totals so a regression in the `do:` recursion cannot pass silently.
+        """Pins the measured release-dataset inventory across both configs.
 
-        Counting only what a walk actually reaches is exactly the bug this guards: an
-        implementation that never enters `foreach`/`do` produces a plausible-looking
-        subset and every other assertion in this file still holds.
+        This does NOT guard the `do:` recursion: all 28 tasks it reaches are
+        simultaneously templated and under `input:`/`intermediate:`, so both filters
+        independently drop every one of them and these totals are unchanged whether
+        `_raw_destinations` recurses or not. `test_recurses_into_a_foreach_do_block`
+        above guards the recursion's correctness on synthetic input;
+        `test_the_do_recursion_changes_the_raw_destination_count` below guards it
+        against the real configs directly.
         """
         up = yaml.safe_load((REPO / 'orchestration/src/orchestration/dags/config/unified_pipeline.yaml').read_text())
         configs = {s: yaml.safe_load((REPO / s / 'config.yaml').read_text()) for s in ('pis', 'pts')}
@@ -116,3 +120,18 @@ class TestAgainstTheRealConfigs:
         assert len(found) == 71, f'expected 71 unique release datasets, got {len(found)}'
         assert sum(d.startswith('view/') for d in found) == 13
         assert producing == 57, f'expected 57 steps producing release datasets, got {producing}'
+
+    def test_the_do_recursion_changes_the_raw_destination_count(self) -> None:
+        """Exercises `_raw_destinations` directly against both real configs.
+
+        Unlike the release-dataset totals above, this count is actually sensitive to
+        the recursion: deleting it drops every step's task list back to its own,
+        un-recursed tasks, and the total falls from 257 to 229 — the 28 tasks that
+        live only inside `foreach:`/`do:` blocks. Confirmed by temporarily removing
+        the recursion from `_raw_destinations` and rerunning this test.
+        """
+        configs = {s: yaml.safe_load((REPO / s / 'config.yaml').read_text()) for s in ('pis', 'pts')}
+        total = sum(
+            len(_raw_destinations(tasks)) for cfg in configs.values() for tasks in cfg.get('steps', {}).values()
+        )
+        assert total == 257, f'expected 257 raw destination declarations across both configs, got {total}'

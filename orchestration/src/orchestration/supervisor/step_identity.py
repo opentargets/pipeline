@@ -36,7 +36,13 @@ from __future__ import annotations
 from typing import NamedTuple
 
 RUN_TASK_PREFIX = 'run_'
-"""Every stage names its execution task `run_{step}`, inside a group named `{step}`."""
+"""Every stage names its execution task `run_{step}`.
+
+Most steps nest that task in a single group named `{step}`. A step with `cluster:
+false` nests it one group deeper, inside `{step}_batch_jobs` inside `{step}` — see
+`is_run_task`, which checks for the prefix at whatever depth a task id actually has
+rather than assuming the single-group shape.
+"""
 
 
 class StepIdentity(NamedTuple):
