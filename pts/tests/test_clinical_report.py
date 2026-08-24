@@ -1,6 +1,6 @@
 import polars as pl
 from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalSource
+from clinical_mining.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
 
 from pts.pyspark.clinical_report import (
     ClinicalReportFlags,
@@ -24,13 +24,12 @@ def _report_entry(report_id: str, disease_struct: dict[str, str | None]) -> dict
     return {
         'id': report_id,
         'phaseFromSource': 'black box warning',
-        'type': 'CURATED_RESOURCE',
+        'type': ClinicalReportType.INDICATION.value,
+        'origin': ClinicalReportOrigin.DRUG_LABEL.value,
         'source': ClinicalSource.DailyMed.value,
         'provider': ClinicalProvider.CHEMBL.value,
-        'origin': ClinicalReportOrigin.CURATED_RESOURCE.value,
         'year': None,
         'countries': ['United States'],
-        'hasExpertReview': True,
         'url': 'https://example.org',
         'drugs': [{'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}],
         'diseases': [disease_struct],
@@ -74,7 +73,7 @@ def _report(id_: str, source: str, primary_purpose: str | None = None) -> dict:
     return {
         'id': id_,
         'phaseFromSource': 'phase 3',
-        'type': 'CURATED_RESOURCE',
+        'type': ClinicalReportType.INDICATION.value,
         'source': source,
         'provider': (
             ClinicalProvider.AACT.value
@@ -84,7 +83,7 @@ def _report(id_: str, source: str, primary_purpose: str | None = None) -> dict:
         'origin': (
             ClinicalReportOrigin.CLINICAL_TRIAL.value
             if source == ClinicalSource.CLINICAL_TRIALS_GOV.value
-            else ClinicalReportOrigin.CURATED_RESOURCE.value
+            else ClinicalReportOrigin.DRUG_LABEL.value
         ),
         'trialPrimaryPurpose': primary_purpose,
         'drugs': [{'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}],

@@ -19,7 +19,7 @@ from clinical_mining.provider.pmda import extract_clinical_report as extract_pmd
 from clinical_mining.provider.pmda import parse_pmda_approvals
 from clinical_mining.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
 from clinical_mining.provider.ttd import extract_indication as extract_ttd_indication
-from clinical_mining.schemas import ClinicalSource, ClinicalStageCategory
+from clinical_mining.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
@@ -81,6 +81,7 @@ class ClinicalReportFlags(StrEnum):
     INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
     NO_DISEASE = 'NO_DISEASE'
     NO_DRUGS = 'NO_DRUGS'
+    SAFETY_REPORT = 'SAFETY_REPORT'
 
 
 def clinical_report(
@@ -212,6 +213,7 @@ def clinical_report(
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
+        .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
         .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.df.select('id', 'drug_intent'))
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
@@ -535,6 +537,17 @@ def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
             df=reports.df,
             flag_condition=pl.col('drugs').is_null(),
             flag_text=ClinicalReportFlags.NO_DRUGS.value,
+        )
+    )
+
+
+def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
+    """Flag SAFETY-type reports (clinical_mining#57, informational, not a failure)."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=pl.col('type').eq(ClinicalReportType.SAFETY.value),
+            flag_text=ClinicalReportFlags.SAFETY_REPORT.value,
         )
     )
 
