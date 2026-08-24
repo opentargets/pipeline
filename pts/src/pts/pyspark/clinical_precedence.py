@@ -8,11 +8,6 @@ from pyspark.sql import Column
 
 from pts.pyspark.common.session import Session
 
-#: `trialLiterature` entries that cite the trial's own outcome, as opposed to the
-#: background literature its authors cited. AACT spells `study_references.reference_type`
-#: uppercase -- BACKGROUND (721,368), DERIVED (191,429), RESULT (153,442) in the
-#: 2026-06 dump -- but the comparison is folded to lower case so a case change upstream
-#: degrades into a visible mismatch rather than a silently empty column.
 TRIAL_OUTCOME_REFERENCE_TYPES = ('result', 'derived')
 
 
