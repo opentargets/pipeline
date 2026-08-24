@@ -198,14 +198,7 @@ def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
 
 
 def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
-    """`clinical_report` must hand the extraction to clinical_mining unprojected.
-
-    0.6.3 required the caller to pre-project into `drugs`/`diseases` and renamed them
-    internally. 0.9.0 moved that reshape upstream, so `replace_with_llm_indications`
-    now reads `primary_indications`/`investigated_drugs` off the validated schema and a
-    pre-projected frame raises ColumnNotFoundError. This pins the contract so the next
-    clinical_mining bump surfaces here rather than in a Dataproc run.
-    """
+    """`clinical_report` must hand the extraction to clinical_mining unprojected."""
     studies = pl.DataFrame({
         'nct_id': ['NCT0001'],
         'diseaseFromSource': ['from-aact'],

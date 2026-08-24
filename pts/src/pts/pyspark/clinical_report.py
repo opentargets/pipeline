@@ -142,10 +142,6 @@ def clinical_report(
         conditions=aact_conditions,
         additional_metadata=[aact_study_references, aact_designs, aact_summaries],
         aggregation_specs={
-            # `pmid` and `reference_type` are collected verbatim into the published
-            # `trialLiterature` array of {id, type} structs. AACT spells the type
-            # uppercase (BACKGROUND/DERIVED/RESULT) and `pmid` is nullable; both
-            # matter to `clinical_precedence`, which filters and flattens this field.
             'study_references': {
                 'group_by': 'nct_id',
                 'alias': 'literature',
@@ -153,10 +149,6 @@ def clinical_report(
                 'agg': 'unique',
             }
         },
-        # 0.9.0 reshapes the raw extraction itself: `replace_with_llm_indications`
-        # reads `primary_indications`/`investigated_drugs` off the validated schema.
-        # Pre-projecting to `drugs`/`diseases` here (as 0.6.3 required) raises
-        # ColumnNotFoundError.
         llm_extractions=llm_batch_results.df,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
