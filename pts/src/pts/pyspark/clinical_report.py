@@ -73,7 +73,6 @@ AACT_TABLES = {
 }
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
-"""``pmid`` is collected into the published ``literature`` array."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -146,7 +145,14 @@ def clinical_report(
         interventions=aact_interventions,
         conditions=aact_conditions,
         additional_metadata=[aact_study_references, aact_designs, aact_summaries],
-        aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
+        aggregation_specs={
+            'study_references': {
+                'group_by': 'nct_id',
+                'alias': 'literature',
+                'struct': {'id': 'pmid', 'type': 'reference_type'},
+                'agg': 'unique',
+            }
+        },
         llm_extractions=llm_indications,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
