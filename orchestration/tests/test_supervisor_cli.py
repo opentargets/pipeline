@@ -642,7 +642,7 @@ class TestRenderDiff:
 
 
 class TestDiffLoadersAgainstTheRealConfig:
-    """Measured against both configs and `unified_pipeline.yaml` on 2026-08-24."""
+    """Measured against both configs and `unified_pipeline.yaml` on 2026-08-25."""
 
     def test_loads_pis_and_pts_only(self) -> None:
         """Gentropy is deliberately excluded; its config is not `{stage}/config.yaml`-shaped."""
@@ -650,7 +650,7 @@ class TestDiffLoadersAgainstTheRealConfig:
 
     def test_loads_every_declared_step(self) -> None:
         steps = unified_pipeline_steps()
-        assert len(steps) == 132
+        assert len(steps) == 131
         assert 'pts_disease' in steps
 
     def test_loads_the_configured_run_name(self) -> None:
@@ -670,8 +670,12 @@ class TestDiffLoadersAgainstTheRealConfig:
         """With both buckets empty, every declared dataset is absent from both sides.
 
         Pins the branch's own measured totals (see `test_supervisor_datasets.py`): 71
-        release datasets total, 12 gentropy steps with no local config, 63 steps
-        producing none of the remaining 120 pis/pts steps.
+        release datasets total, 12 gentropy steps with no local config, 62 steps
+        producing none of the remaining 119 pis/pts steps.
+
+        119 = 57 producing + 62 not, which is the reconciliation this test exists to
+        make. 120/63 until #51 removed `pis_enhancer_to_gene`, a step that declared no
+        datasets — so the count of producers is deliberately unchanged by that removal.
         """
 
         class _EmptyBucket:
@@ -683,7 +687,7 @@ class TestDiffLoadersAgainstTheRealConfig:
         )
         assert diffs == []
         assert len(skipped.stages_without_config) == 12
-        assert len(skipped.steps_without_datasets) == 63
+        assert len(skipped.steps_without_datasets) == 62
         assert len(skipped.datasets_absent_from_both) == 71
         assert skipped.undeclared_in_buckets == []
 
