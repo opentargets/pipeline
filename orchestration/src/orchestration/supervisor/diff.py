@@ -98,6 +98,40 @@ class DatasetDiff(BaseModel):
         return self.run_bytes - self.reference_bytes
 
 
+_BYTE_UNITS = ('B', 'kB', 'MB', 'GB', 'TB', 'PB')
+"""Decimal units, deliberately, not the binary kiB/MiB set.
+
+Google Cloud Storage sizes objects in powers of ten — what the console and `gcloud`
+show — so a report that silently switched to powers of two would disagree with every
+other view of the same bucket by 5% at MB scale and 10% at GB scale. That is the same
+order as this comparison's own materiality threshold, which is exactly the wrong size
+of discrepancy to introduce into a report about size changes.
+"""
+
+
+def human_bytes(value: int) -> str:
+    """Render a byte count for a human reading a comment, not for a machine parsing one.
+
+    Raw byte counts are what the comparison is computed on and what `--json` still
+    emits; this is presentation only. Precision is deliberately dropped: the threshold
+    that decides whether a change is worth reporting at all is fractional, so a change
+    large enough to appear here is large enough to be visible at one decimal place.
+
+    Args:
+        value: A non-negative byte count.
+
+    Returns:
+        The count with a decimal unit suffix — `938 B`, `26.4 kB`, `85.0 MB`. Whole
+        bytes below 1 kB, since a fractional byte is meaningless.
+    """
+    size = float(value)
+    index = 0
+    while size >= 1000 and index < len(_BYTE_UNITS) - 1:
+        size /= 1000
+        index += 1
+    return f'{value} {_BYTE_UNITS[0]}' if index == 0 else f'{size:,.1f} {_BYTE_UNITS[index]}'
+
+
 def compare_schemas(run: dict[str, str], reference: dict[str, str]) -> list[ColumnChange]:
     """Classify the differences between two schemas.
 

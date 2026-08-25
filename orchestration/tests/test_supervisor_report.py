@@ -390,6 +390,22 @@ class TestDiffs:
         assert '`output/disease`' in result
         assert '10 -> 100' in result
 
+    def test_sizes_are_rendered_for_humans_not_as_raw_byte_counts(self) -> None:
+        """Guards the wiring, which `test_supervisor_diff.py` cannot.
+
+        That module proves `human_bytes` formats correctly; nothing proved this renderer
+        actually calls it. Until this test existed, reverting the call site to
+        `f'{diff.reference_bytes:,}'` left the whole suite green while every comment on
+        every run went back to printing nine-digit byte counts.
+        """
+        diffs = [DatasetDiff(dataset='output/target', side='both',
+                              run_bytes=26_911_681, reference_bytes=85_031_914,
+                              run_files=5, reference_files=11)]
+        result = render_comment(_observation(), _snapshot(), diffs=diffs)
+        assert result is not None
+        assert '85.0 MB -> 26.9 MB' in result
+        assert '85,031,914' not in result
+
     def test_a_one_sided_dataset_is_named(self) -> None:
         diffs = [DatasetDiff(dataset='output/new_thing', side='run_only', run_bytes=500, run_files=1)]
         result = render_comment(_observation(), _snapshot(), diffs=diffs)

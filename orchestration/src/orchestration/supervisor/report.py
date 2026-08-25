@@ -24,7 +24,7 @@ whole-world view belongs, for a human pulling a snapshot on demand.
 
 from __future__ import annotations
 
-from orchestration.supervisor.diff import DatasetDiff, is_material
+from orchestration.supervisor.diff import DatasetDiff, human_bytes, is_material
 from orchestration.supervisor.observer import Observation, StepCompletion, StepFailure, StepStall
 from orchestration.supervisor.snapshot import Snapshot
 from orchestration.supervisor.stall import RunStallVerdict, describe_run_stall
@@ -312,7 +312,7 @@ def _render_diffs(diffs: list[DatasetDiff], threshold: float) -> str:
             rows_after = '-' if diff.run_rows is None else f'{diff.run_rows:,}'
             lines.append(
                 f'- `{diff.dataset}` — rows {rows_before} -> {rows_after}, '
-                f'bytes {diff.reference_bytes:,} -> {diff.run_bytes:,}'
+                f'bytes {human_bytes(diff.reference_bytes)} -> {human_bytes(diff.run_bytes)}'
             )
         for change in diff.columns:
             types = f'{change.reference_type or "-"} -> {change.run_type or "-"}'

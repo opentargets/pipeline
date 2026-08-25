@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from orchestration.supervisor.diff import ColumnChange, DatasetDiff, compare_schemas, is_material, schema_of
+from orchestration.supervisor.diff import (
+    ColumnChange,
+    DatasetDiff,
+    compare_schemas,
+    human_bytes,
+    is_material,
+    schema_of,
+)
 
 
 class TestCompareSchemas:
@@ -260,3 +267,55 @@ class TestSchemaOf:
 
     def test_empty_footer_yields_an_empty_schema(self) -> None:
         assert schema_of([]) == {}
+
+
+class TestHumanBytes:
+    """Presentation only — the comparison itself is computed on raw byte counts."""
+
+    def test_below_a_kilobyte_stays_whole_bytes(self) -> None:
+        """A fractional byte is meaningless, and small datasets are where it would show."""
+        assert human_bytes(0) == '0 B'
+        assert human_bytes(1) == '1 B'
+        assert human_bytes(999) == '999 B'
+
+    def test_it_steps_up_at_exactly_one_thousand_not_1024(self) -> None:
+        """Decimal, matching how GCS and the console size the same objects.
+
+        At 1024 a binary implementation would still say `1,024 B`; this must not.
+        """
+        assert human_bytes(1000) == '1.0 kB'
+        assert human_bytes(1024) == '1.0 kB'
+
+    def test_it_scales_through_every_unit(self) -> None:
+        assert human_bytes(2_500) == '2.5 kB'
+        assert human_bytes(2_500_000) == '2.5 MB'
+        assert human_bytes(2_500_000_000) == '2.5 GB'
+        assert human_bytes(2_500_000_000_000) == '2.5 TB'
+        assert human_bytes(2_500_000_000_000_000) == '2.5 PB'
+
+    def test_it_does_not_run_off_the_end_of_the_unit_list(self) -> None:
+        """Beyond PB it must saturate rather than IndexError on a value it cannot name."""
+        assert human_bytes(9_000_000_000_000_000_000).endswith(' PB')
+
+    def test_the_real_shakedown_sizes_render_as_expected(self) -> None:
+        """The exact byte counts the 2026-08-25 run compared against release 26.03.
+
+        Pinned from real data rather than round numbers: these are the values that
+        appeared as raw digits in the run's GitHub comment and prompted this change.
+        """
+        assert human_bytes(85_031_914) == '85.0 MB'
+        assert human_bytes(26_911_681) == '26.9 MB'
+        assert human_bytes(7_312_633) == '7.3 MB'
+        assert human_bytes(745_909) == '745.9 kB'
+        assert human_bytes(26_378) == '26.4 kB'
+
+    def test_a_material_change_is_still_visible_after_rounding(self) -> None:
+        """One decimal place must not collapse a reportable change into two equal strings.
+
+        The materiality threshold is fractional (5% by default), so the smallest change
+        that reaches a report is far larger than the rounding step. If this ever failed,
+        the report would show a dataset flagged as changed with identical before/after
+        sizes, which reads as a bug in the comparison rather than in the formatting.
+        """
+        before, after = 7_312_633, int(7_312_633 * 1.05)
+        assert human_bytes(before) != human_bytes(after)

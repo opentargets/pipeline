@@ -80,7 +80,7 @@ from orchestration.supervisor.compute import (
 )
 from orchestration.supervisor.dataproc import TERMINAL_JOB_STATES, job_executions
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
-from orchestration.supervisor.diff import DatasetDiff, is_material
+from orchestration.supervisor.diff import DatasetDiff, human_bytes, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
 from orchestration.supervisor.github import GitHubApp, read_app_key
 from orchestration.supervisor.journal import Journal, JournalEvent, heartbeat_event
@@ -806,7 +806,8 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, ro
         else:
             rows = f'{_count(diff.reference_rows, diff.countable)} -> {_count(diff.run_rows, diff.countable)}'
             lines.append(
-                f'{diff.dataset}  rows {rows}  bytes {diff.reference_bytes:,} -> {diff.run_bytes:,}'
+                f'{diff.dataset}  rows {rows}  '
+                f'bytes {human_bytes(diff.reference_bytes)} -> {human_bytes(diff.run_bytes)}'
                 f'  files {diff.reference_files} -> {diff.run_files}'
             )
         for change in diff.columns:
