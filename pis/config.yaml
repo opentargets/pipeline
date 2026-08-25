@@ -125,7 +125,7 @@ steps:
   #: BIOSAMPLE STEP :###############################################################################
   biosample:
     - name: copy cell ontology
-      source: https://github.com/obophenotype/cell-ontology/v${cell_ontology_version}/latest/download/cl.json
+      source: https://github.com/obophenotype/cell-ontology/v${cell_ontology_version}/download/cl.json
       destination: input/biosample/cl.json
 
     - name: copy uberon
