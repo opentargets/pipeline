@@ -1264,9 +1264,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             return 0
         elif args.command == 'diff':
+            # `user_project` on both, because a reference release is not always in a bucket
+            # we own. `open-targets-data-releases` -- where a release lands before the
+            # pre-releases bucket has it -- has requester-pays enabled, and listing a
+            # requester-pays bucket without naming a billing project fails with a 400, not a
+            # permission error. Passing one is harmless on a bucket that does not need it
+            # (verified against both), which is what makes it safe to pass unconditionally
+            # rather than maintaining a list of which buckets currently charge: that setting
+            # changes without notice, as four input buckets did on 2026-07-01.
             storage_client = storage.Client()
-            run_bucket = storage_client.bucket(args.run_bucket)
-            reference_bucket = storage_client.bucket(args.reference_bucket)
+            run_bucket = storage_client.bucket(args.run_bucket, user_project=GCP_PROJECT_PLATFORM)
+            reference_bucket = storage_client.bucket(args.reference_bucket, user_project=GCP_PROJECT_PLATFORM)
             run_read_footer = footer_reader(args.run_bucket) if args.rows else None
             reference_read_footer = footer_reader(args.reference_bucket) if args.rows else None
             diffs, skipped = collect_diffs(
@@ -1313,16 +1321,34 @@ def main(argv: list[str] | None = None) -> int:
             events.append(
                 JournalEvent(event_type=_OBSERVATION_STARTED_EVENT, at=now, payload={'run_name': run_name()})
             )
-            # Gated on the run not being terminal, unlike the observation-started marker and
-            # the diff-completed marker above, which are gated on their own idempotency keys
-            # instead. A finished run is rediscovered by `most_recent_dag_run` on every wakeup
-            # forever (see the module docstring), so an unconditional heartbeat would write one
-            # object per wakeup into a journal that has nothing left to say — 144 objects a day,
-            # forever, for a pipeline that finished once. `run_stalled` already returns before
-            # reading `events` at all once `run_state != 'running'`, so a post-terminal heartbeat
-            # buys no liveness signal either: nothing downstream ever counts it.
-            if snapshot.run_state not in _OBSERVE_TERMINAL_RUN_STATES:
-                events.append(heartbeat_event(now))
+            # Journalled HERE, immediately, and deliberately not added to `events` with
+            # everything else. `events` is written at the end of this branch, after the diff
+            # and after the GitHub post, so a wakeup that raises anywhere in between writes
+            # none of it — including, before this was moved, its own heartbeat. That is the
+            # one event that must survive a failing wakeup: its whole purpose is to separate
+            # "the cron is not running" from "the cron is running and something is wrong",
+            # and a heartbeat written only on success collapses those two back together at
+            # exactly the moment the distinction matters. Observed on 2026-08-25: the diff
+            # began raising on every wakeup, and because the heartbeat went unwritten the
+            # journal became indistinguishable from a dead observer while cron was firing
+            # every five minutes.
+            #
+            # It is not news, so it is exempt from the post-before-journal ordering the rest
+            # of this branch follows (see the long comment below). Nothing reads a heartbeat
+            # to decide what to report; only `run_stalled` counts them.
+            #
+            # Still gated on the run not being terminal. A finished run is rediscovered by
+            # `most_recent_dag_run` on every wakeup forever (see the module docstring), so an
+            # unconditional heartbeat would write one object per wakeup into a journal that
+            # has nothing left to say — 288 objects a day, forever, for a pipeline that
+            # finished once. `run_stalled` returns before counting them once the run is not
+            # running, so a post-terminal heartbeat buys no liveness signal either.
+            # `not args.dry_run` because --dry-run's contract is that it writes nothing at
+            # all, journal included. Moving the heartbeat earlier put it before the dry-run
+            # early return, which broke that; the gate belongs here rather than after the
+            # return, so a real wakeup still records the heartbeat before anything can raise.
+            if snapshot.run_state not in _OBSERVE_TERMINAL_RUN_STATES and not args.dry_run:
+                journal.append(heartbeat_event(now))
 
             diffs = None
             if (
@@ -1332,8 +1358,8 @@ def main(argv: list[str] | None = None) -> int:
                 and not journal.has(_DATASET_DIFF_COMPLETED_EVENT)
             ):
                 storage_client = storage.Client()
-                run_bucket = storage_client.bucket(args.run_bucket)
-                reference_bucket = storage_client.bucket(args.reference_bucket)
+                run_bucket = storage_client.bucket(args.run_bucket, user_project=GCP_PROJECT_PLATFORM)
+                reference_bucket = storage_client.bucket(args.reference_bucket, user_project=GCP_PROJECT_PLATFORM)
                 run_read_footer = footer_reader(args.run_bucket) if args.rows else None
                 reference_read_footer = footer_reader(args.reference_bucket) if args.rows else None
                 diffs, _skipped = collect_diffs(
@@ -1404,7 +1430,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     except GoogleAPICallError as exc:
-        sys.stderr.write(f'billing export query failed: {" ".join(str(exc).split())}\n')
+        # Deliberately says nothing about WHICH Google API. This is the catch-all for every
+        # subcommand, and most of them never touch the billing export: `observe` reads GCS
+        # and Secret Manager, `snapshot` reads GCS. It used to read "billing export query
+        # failed", which on 2026-08-25 labelled a GCS 400 from the dataset diff as a BigQuery
+        # problem and would have sent the next reader to the wrong service entirely. Branches
+        # that DO know what they were doing catch this themselves and say so -- see `compute`,
+        # which splits its three call sites for exactly this reason.
+        sys.stderr.write(f'Google Cloud API call failed: {" ".join(str(exc).split())}\n')
         return 1
     except requests.RequestException as exc:
         sys.stderr.write(f'could not reach Airflow: {" ".join(str(exc).split())}\n')

@@ -704,7 +704,10 @@ def diff_command(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """
     buckets: dict[str, MagicMock] = {}
 
-    def fake_bucket(name: str) -> MagicMock:
+    def fake_bucket(name: str, user_project: str | None = None) -> MagicMock:
+        # Accepts `user_project` rather than ignoring it: the diff passes one on every
+        # bucket so a requester-pays reference release stays readable, and a signature
+        # that did not take it would fail with a TypeError that says nothing about why.
         return buckets.setdefault(name, MagicMock())
 
     storage_client = MagicMock()
@@ -724,8 +727,29 @@ def diff_command(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 class TestDiffCommand:
     def test_buckets_are_constructed_from_the_default_bucket_names(self, diff_command: MagicMock) -> None:
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
-        diff_command.storage_client.bucket.assert_any_call(GCS_PIPELINE_RUNS_BUCKET_NAME)
-        diff_command.storage_client.bucket.assert_any_call(GCS_PRE_RELEASES_BUCKET_NAME)
+        diff_command.storage_client.bucket.assert_any_call(
+            GCS_PIPELINE_RUNS_BUCKET_NAME, user_project=GCP_PROJECT_PLATFORM
+        )
+        diff_command.storage_client.bucket.assert_any_call(
+            GCS_PRE_RELEASES_BUCKET_NAME, user_project=GCP_PROJECT_PLATFORM
+        )
+
+    def test_a_billing_project_is_named_on_every_bucket(self, diff_command: MagicMock) -> None:
+        """A reference release is not always in a bucket we own.
+
+        `open-targets-data-releases` has requester-pays enabled, and listing such a bucket
+        without naming a billing project fails with a 400 — which is what silently broke the
+        observer's terminal-state diff on 2026-08-25. Passing one is harmless on buckets that
+        do not need it, so it is passed unconditionally rather than from a list of which
+        buckets currently charge; that setting changes without notice.
+        """
+        assert main(['diff', '--run', 'myrun', '--reference', 'rel1',
+                     '--reference-bucket', 'open-targets-data-releases']) == 0
+        for call in diff_command.storage_client.bucket.call_args_list:
+            assert call.kwargs.get('user_project') == GCP_PROJECT_PLATFORM, (
+                f'bucket {call.args[0]!r} was constructed without a billing project; a '
+                'requester-pays bucket would fail with a 400 rather than a permission error'
+            )
 
     def test_the_run_bucket_and_reference_bucket_are_not_swapped(self, diff_command: MagicMock) -> None:
         """Each bucket object must reach `collect_diffs` in its own slot, not the other's.
@@ -756,8 +780,8 @@ class TestDiffCommand:
             )
             == 0
         )
-        diff_command.storage_client.bucket.assert_any_call('x')
-        diff_command.storage_client.bucket.assert_any_call('y')
+        diff_command.storage_client.bucket.assert_any_call('x', user_project=GCP_PROJECT_PLATFORM)
+        diff_command.storage_client.bucket.assert_any_call('y', user_project=GCP_PROJECT_PLATFORM)
 
     def test_collect_diffs_is_called_with_the_run_and_reference_prefixes(self, diff_command: MagicMock) -> None:
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
@@ -853,7 +877,7 @@ class TestDiffCommand:
         buckets = {'run-bucket-name': run_bucket, 'reference-bucket-name': reference_bucket}
 
         storage_client = MagicMock()
-        storage_client.bucket.side_effect = lambda name: buckets[name]
+        storage_client.bucket.side_effect = lambda name, user_project=None: buckets[name]
         fake_storage = MagicMock()
         fake_storage.Client.return_value = storage_client
         monkeypatch.setattr(cli, 'storage', fake_storage)
@@ -1004,11 +1028,18 @@ class TestMain:
     def test_api_error_exits_non_zero_with_a_message(
         self, client: MagicMock, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A missing table or a denied project must not surface as a traceback."""
+        """A missing table or a denied project must not surface as a traceback.
+
+        The message names no particular Google service. This is the catch-all for every
+        subcommand and most never touch the billing export, so claiming one sends the
+        reader to the wrong place — as it did on 2026-08-25, when it labelled a GCS 400
+        from the dataset diff as a BigQuery failure.
+        """
         client.query.side_effect = cli.GoogleAPICallError('403 Access Denied\non the export')
         assert main(['usage', '--run', 'r']) == 1
         err = capsys.readouterr().err
-        assert 'billing export query failed' in err
+        assert 'Google Cloud API call failed' in err
+        assert 'billing export' not in err, 'the catch-all must not name a service it cannot know'
         assert err.count('\n') == 1
 
     def test_missing_credentials_exit_non_zero_with_a_message(
@@ -1770,29 +1801,39 @@ class TestObserveCommand:
         assert observe_command.github_app.comment.call_args.args[0] == 5
 
     def test_the_post_happens_before_the_journal_write(self, observe_command: SimpleNamespace) -> None:
-        """Posting must be attempted first — see `main`'s comment on why the order matters."""
+        """Posting must precede every NEWS journal write — see `main`'s comment on why.
+
+        The heartbeat is deliberately outside that ordering and goes first, because it must
+        survive a wakeup that raises. So the sequence is heartbeat, then post, then news —
+        and what this pins is that no news event is written before the post, not that the
+        post is literally first.
+        """
         observe_command.take_snapshot.return_value = _snapshot(
             failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
         )
         order: list[str] = []
         observe_command.github_app.comment.side_effect = lambda *a, **kw: order.append('comment')
-        observe_command.journal.append.side_effect = lambda *a, **kw: order.append('append')
+        observe_command.journal.append.side_effect = lambda event, *a, **kw: order.append(
+            'heartbeat' if is_heartbeat(event) else 'news'
+        )
 
         assert main(['observe', '--issue', '5']) == 0
-        # Three journal writes now (`step_failed`, `observation_started`, and the
-        # heartbeat every wakeup carries), all still after the single post — the post
-        # itself must lead, not just come first.
-        assert order == ['comment', 'append', 'append', 'append']
+        assert order == ['heartbeat', 'comment', 'news', 'news']
+        assert order.index('comment') < order.index('news'), 'a news event was journalled before the post'
 
-    def test_a_failed_post_leaves_the_journal_empty_and_is_retried_next_wakeup(
+    def test_a_failed_post_journals_no_news_and_is_retried_next_wakeup(
         self, observe_command: SimpleNamespace
     ) -> None:
         """Regression: journalling before posting would silently lose a report on a failed post.
 
-        `github_app.comment` raising must leave the journal untouched, so the next wakeup's
-        `observe()` recomputes the same observation (the journal fixture's `read()` still
-        returns `[]`, exactly as if nothing had been recorded) and tries to post it again —
-        a retry, not a silent drop.
+        `github_app.comment` raising must leave every NEWS event unjournalled, so the next
+        wakeup's `observe()` recomputes the same observation (the journal fixture's `read()`
+        still returns `[]`, exactly as if nothing had been recorded) and tries to post it
+        again — a retry, not a silent drop.
+
+        The heartbeat is the one exception and IS written, which is the point of moving it
+        earlier: a wakeup that fails here must still leave proof it happened, or the journal
+        looks the same as one where cron never fired.
         """
         observe_command.take_snapshot.return_value = _snapshot(
             failed=['pts_target.run_pts_target'], try_numbers={'pts_target.run_pts_target': 1}
@@ -1800,15 +1841,18 @@ class TestObserveCommand:
         observe_command.github_app.comment.side_effect = RuntimeError('comment post failed with HTTP 502: boom')
 
         assert main(['observe', '--issue', '5']) == 1
-        observe_command.journal.append.assert_not_called()
+        journalled = [c.args[0] for c in observe_command.journal.append.call_args_list]
+        assert [e for e in journalled if not is_heartbeat(e)] == [], 'news was journalled despite a failed post'
+        assert [e for e in journalled if is_heartbeat(e)] != [], 'the failing wakeup left no heartbeat'
         assert observe_command.github_app.comment.call_count == 1
 
         observe_command.github_app.comment.side_effect = None
         assert main(['observe', '--issue', '5']) == 0
         assert observe_command.github_app.comment.call_count == 2
-        # `step_failed`, `observation_started` (see F7), and the heartbeat — the retried
-        # wakeup journals all three.
-        assert observe_command.journal.append.call_count == 3
+        # The retried wakeup journals its own heartbeat plus the two news events
+        # (`step_failed` and `observation_started`, see F7), on top of the first
+        # wakeup's heartbeat: four appends across the two wakeups.
+        assert observe_command.journal.append.call_count == 4
 
     def test_a_failed_pipeline_step_exits_zero_not_one(self, observe_command: SimpleNamespace) -> None:
         """The observer's own health decides the exit code, never the pipeline's state."""
