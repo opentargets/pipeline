@@ -38,11 +38,11 @@ export AIRFLOW_USERNAME="${FROM_ENV_USERNAME:-airflow}"
 export AIRFLOW_PASSWORD="${FROM_ENV_PASSWORD:-airflow}"
 
 # --- the run being watched ---------------------------------------------------
-# OBSERVER_ISSUE, OBSERVER_RUN and OBSERVER_REFERENCE are explicit, human-chosen
-# identifiers set in observer_run.env (seeded once from the tracked .example --
-# see that file for why none of the three can be derived automatically).
-# Updating them for a new run means editing that file, not this script or the
-# crontab.
+# OBSERVER_ISSUE, OBSERVER_RUN, OBSERVER_REFERENCE and OBSERVER_REFERENCE_BUCKET
+# are explicit, human-chosen identifiers set in observer_run.env (seeded once
+# from the tracked .example -- see that file for why none of them can be derived
+# automatically). Updating them for a new run means editing that file, not this
+# script or the crontab.
 RUN_ENV_FILE=/opt/orchestration/observer_run.env
 if [ -r "$RUN_ENV_FILE" ]; then
   # shellcheck disable=SC1090
@@ -57,6 +57,20 @@ fi
 ARGS=(observe --issue "$OBSERVER_ISSUE")
 if [ -n "${OBSERVER_RUN:-}" ] && [ -n "${OBSERVER_REFERENCE:-}" ]; then
   ARGS+=(--run "$OBSERVER_RUN" --reference "$OBSERVER_REFERENCE")
+  # A reference release does NOT always live in the bucket `--reference-bucket`
+  # defaults to. Releases are published to open-targets-pre-data-releases first
+  # and to the public open-targets-data-releases later, and the two do not hold
+  # the same set: 26.06 exists only in the public one, while the pre-releases
+  # bucket stops at 26.03.
+  #
+  # Getting this wrong does not fail. `collect_diffs` finds no objects under the
+  # reference prefix and reports every dataset as "present in the run only" --
+  # a comparison that looks like a dramatic finding and is really just the wrong
+  # bucket. That is why this is worth an explicit override rather than a default
+  # someone has to remember to doubt.
+  if [ -n "${OBSERVER_REFERENCE_BUCKET:-}" ]; then
+    ARGS+=(--reference-bucket "$OBSERVER_REFERENCE_BUCKET")
+  fi
 fi
 
 # absolute path, not a bare `uv`: cron's default PATH (/usr/bin:/bin on Debian)
