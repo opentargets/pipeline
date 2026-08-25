@@ -17,7 +17,15 @@ from pyspark.sql import types as t
 from pts.pyspark.common import Session
 from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
-# Chemical probe data sources
+# Chemical probe data sources.
+#
+# Every entry must be a column of the PROBES sheet of the upstream Probes & Drugs
+# spreadsheet: collapse_cols_data_in_array resolves each one against the frame, so
+# a name that has drifted upstream fails the whole step with UNRESOLVED_COLUMN.
+#
+# The upstream sheet also carries "A Collection of Useful Nuisance Compounds (CONS)
+# for Interrogation of Bioassay Integrity", deliberately left out here: adding it
+# would put a new datasourceId into the published dataset.
 PROBES_SETS = [
     'Bromodomains chemical toolbox',
     'Chemical Probes for Understudied Kinases',
@@ -28,11 +36,9 @@ PROBES_SETS = [
     'Nature Chemical Biology Probes',
     'Open Science Probes',
     'opnMe Portal',
-    'Probe Miner (suitable probes)',
     'Protein methyltransferases chemical toolbox',
     'SGC Probes',
-    'Tool Compound Set',
-    'Concise Guide to Pharmacology 2019/20',
+    'Concise Guide to Pharmacology 2025/26',
     'Kinase Chemogenomic Set (KCGS)',
     'Kinase Inhibitors (best-in-class)',
     'Novartis Chemogenetic Library (NIBR MoA Box)',
@@ -253,7 +259,10 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             f.col('target').alias('targetFromSource'),
             'mechanismOfAction',
             process_scores('`P&D probe-likeness score`').alias('probesDrugsScore'),
-            process_scores('`Probe Miner Score`').alias('probeMinerScore'),
+            # Probe Miner was retired upstream: the PROBES TARGETS sheet no longer carries
+            # a "Probe Miner Score" column. Emitted as null to keep probeMinerScore in the
+            # published target.chemicalProbes schema until the field itself is retired.
+            f.lit(None).cast(t.DoubleType()).alias('probeMinerScore'),
             process_scores('`Cells score (Chemical Probes.org)`').alias('scoreInCells'),
             process_scores('`Organisms score (Chemical Probes.org)`').alias('scoreInOrganisms'),
         )
