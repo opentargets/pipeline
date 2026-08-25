@@ -24,7 +24,7 @@ run_name: "do/platform-2608-2"
 # not git refs: a tag that does not exist there fails at container pull, well after
 # the VM is up and the step has been billed for. Both were confirmed present in
 # Artifact Registry before being set here.
-pis_version: "26.9.0rc11"
+pis_version: "26.9.0rc12"
 pts_version: "26.9.0rc23"
 gentropy_version: "3.3.0-rc.1"
 # Built by opentargets/vep-image; the tag here must match a release there AND an
