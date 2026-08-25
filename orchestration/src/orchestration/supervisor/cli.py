@@ -64,8 +64,8 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import bigquery, dataproc_v1, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
-from orchestration.supervisor.compute import StepCompute, compute_report
-from orchestration.supervisor.dataproc import job_executions
+from orchestration.supervisor.compute import StepCompute, compute_report, unresolved_job_count
+from orchestration.supervisor.dataproc import TERMINAL_JOB_STATES, job_executions
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
@@ -421,8 +421,10 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
     """
     if window is None:
         return (
-            'coverage: unknown. This run has billed nothing yet, so there is no window\n'
-            'over which to compare its labelled cost against total pipeline spend.'
+            'coverage: unknown. No billed usage was found at or after --since, so there is no\n'
+            'window over which to compare labelled cost against total pipeline spend. This may\n'
+            'mean the run has not billed yet, or that --since prunes the scan past when it did --\n'
+            'a --since narrower than the run produces exactly this, not a claim the run is free.'
         )
     period = f'{_stamp(window[0])} to {_stamp(window[1])} UTC'
     if not coverage:
@@ -521,7 +523,25 @@ def _compute_table_columns(
     return columns
 
 
-def render_compute(steps: list[StepCompute]) -> str:
+_FAILED_JOB_STATES = TERMINAL_JOB_STATES - {'DONE'}
+"""`{'ERROR', 'CANCELLED'}` -- a job that reached a terminal state without succeeding.
+
+Distinct from a job still in progress (`RUNNING`, `PENDING`, `SETUP_DONE`, ...), which
+has not failed, it simply has not finished yet -- see `render_compute`'s F3 fix and
+`dataproc.TERMINAL_JOB_STATES`."""
+
+def _unresolved_job_block(count: int) -> list[str]:
+    """The footer paragraph naming how many Dataproc jobs joined no step, or []."""
+    if not count:
+        return []
+    return [
+        f'{count} Dataproc job(s) in this run matched no known step (no step label, and the job',
+        "id matched no known step name either) and are not counted in any step's row above --",
+        'see compute.unresolved_job_count.',
+    ]
+
+
+def render_compute(steps: list[StepCompute], unresolved_jobs: int = 0) -> str:
     """Render a per-step compute report: cost, execution time, and the gaps between them.
 
     Rows are sorted by `billed_execution_gap_seconds`, worst first -- see
@@ -533,11 +553,19 @@ def render_compute(steps: list[StepCompute]) -> str:
 
     Args:
         steps: One row per step, normally `compute.compute_report`'s result.
+        unresolved_jobs: Count of Dataproc jobs that could not be joined to any step,
+            normally `compute.unresolved_job_count` on the same executions passed to
+            `compute_report`. Defaults to 0 -- most callers (including every existing
+            test of this function) have nothing to report here, and the footer this
+            adds is silent at 0, so it is additive rather than a required migration.
 
     Returns:
         The rendered report, or a message when there is nothing to show.
     """
     if not steps:
+        block = _unresolved_job_block(unresolved_jobs)
+        if block:
+            return f'{_EMPTY_COMPUTE}\n\n{"\n".join(block)}'
         return _EMPTY_COMPUTE
 
     ordered = sorted(steps, key=_compute_sort_key)
@@ -555,7 +583,8 @@ def render_compute(steps: list[StepCompute]) -> str:
     lines.append('-' * len(header))
 
     no_job = sum(1 for s in ordered if not s.dataproc_job_states)
-    partial_job = sum(1 for s in ordered if s.dataproc_job_states and set(s.dataproc_job_states) - {'DONE'})
+    failed_job = sum(1 for s in ordered if set(s.dataproc_job_states) & _FAILED_JOB_STATES)
+    in_flight_job = sum(1 for s in ordered if set(s.dataproc_job_states) - TERMINAL_JOB_STATES)
     measured = [s.billed_execution_gap_seconds for s in ordered if s.billed_execution_gap_seconds is not None]
 
     blocks = [[
@@ -569,11 +598,21 @@ def render_compute(steps: list[StepCompute]) -> str:
             f'measured for: {total:,.0f}s ({total / 3600:.1f}h). This is a floor, not the total waste of the',
             'run: steps with no Dataproc job are not counted here at all, not counted as zero waste.',
         ])
-    if partial_job:
+    if failed_job:
         blocks.append([
-            f'{partial_job} step(s) had a Dataproc job that did not reach DONE (cancelled or errored)',
-            'alongside or instead of a successful one -- see dataproc_job_states in --json for which.',
+            f'{failed_job} step(s) had a Dataproc job that reached a terminal state other than DONE',
+            '(cancelled or errored) alongside or instead of a successful one -- see dataproc_job_states',
+            'in --json for which.',
         ])
+    if in_flight_job:
+        blocks.append([
+            f'{in_flight_job} step(s) had a Dataproc job still in progress (pending, running, or setting',
+            'up) when this report ran -- expected for the currently active run, not evidence anything',
+            'failed. Re-run the report once the run finishes for a settled figure.',
+        ])
+    unresolved_block = _unresolved_job_block(unresolved_jobs)
+    if unresolved_block:
+        blocks.append(unresolved_block)
     if not any(s.wall_seconds is not None for s in ordered):
         blocks.append(_WALL_UNAVAILABLE_FOOTER)
 
@@ -857,25 +896,45 @@ def main(argv: list[str] | None = None) -> int:
             usages = export.step_history(step=clean_label(args.step), since=args.since)
         elif args.command == 'compute':
             run = clean_label(args.run)
-            export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
-            usages = export.run_usage(run=run, since=args.since)
-            window = usage_window(usages)
-            if window is not None and not args.json:
-                coverage = export.window_coverage(run=run, window=window, since=args.since)
-            dataproc_client = dataproc_v1.JobControllerClient(
-                client_options={'api_endpoint': f'{GCP_REGION}-dataproc.googleapis.com:443'}
-            )
-            executions = job_executions(dataproc_client, project=GCP_PROJECT_PLATFORM, region=GCP_REGION, run=run)
-            bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
-            # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
-            # never the cleaned billing label -- see journal.py's module docstring, and
-            # `snapshot`/`observe` below, which key it the same way.
-            journal = Journal(bucket=bucket, prefix=f'_agent/unified_pipeline/{args.run}/journal')
-            steps = compute_report(usages, executions, journal.read())
+            # `compute` crosses three separate Google APIs (BigQuery, Dataproc, GCS), each of
+            # which raises its own `GoogleAPICallError` subclass. A single `except
+            # GoogleAPICallError` around the whole branch (as this used to be) cannot tell
+            # them apart, so a Dataproc `PermissionDenied` or a GCS read failure would print
+            # as "billing export query failed" -- true of none of the three -- and send
+            # whoever reads it hunting in the wrong system. Each stage below is wrapped
+            # separately and re-raised as a `RuntimeError` carrying which API actually failed;
+            # `main`'s `except RuntimeError` below renders that message as-is, unprefixed.
+            try:
+                export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
+                usages = export.run_usage(run=run, since=args.since)
+                window = usage_window(usages)
+                if window is not None and not args.json:
+                    coverage = export.window_coverage(run=run, window=window, since=args.since)
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'billing export query failed: {" ".join(str(exc).split())}') from exc
+            try:
+                dataproc_client = dataproc_v1.JobControllerClient(
+                    client_options={'api_endpoint': f'{GCP_REGION}-dataproc.googleapis.com:443'}
+                )
+                executions = job_executions(dataproc_client, project=GCP_PROJECT_PLATFORM, region=GCP_REGION, run=run)
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'Dataproc job query failed: {" ".join(str(exc).split())}') from exc
+            try:
+                bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+                # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
+                # never the cleaned billing label -- see journal.py's module docstring, and
+                # `snapshot`/`observe` below, which key it the same way.
+                journal = Journal(bucket=bucket, prefix=f'_agent/unified_pipeline/{args.run}/journal')
+                journal_events = journal.read()
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'GCS journal read failed: {" ".join(str(exc).split())}') from exc
+            steps = compute_report(usages, executions, journal_events)
+            unresolved_jobs = unresolved_job_count(executions)
             if args.json:
-                sys.stdout.write(json.dumps([s.model_dump(mode='json') for s in steps], indent=2) + '\n')
+                payload = {'steps': [s.model_dump(mode='json') for s in steps], 'unresolved_jobs': unresolved_jobs}
+                sys.stdout.write(json.dumps(payload, indent=2) + '\n')
             else:
-                report = render_compute(steps) + '\n\n' + render_coverage(window, coverage)
+                report = render_compute(steps, unresolved_jobs) + '\n\n' + render_coverage(window, coverage)
                 sys.stdout.write(report + '\n')
             return 0
         elif args.command == 'snapshot':

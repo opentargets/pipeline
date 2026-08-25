@@ -298,6 +298,17 @@ class TestRenderCoverage:
         assert 'unknown' in out
         assert '%' not in out
 
+    def test_an_unknown_window_does_not_claim_the_run_has_billed_nothing(self) -> None:
+        """F5: a `--since` narrower than the run also yields `window is None`.
+
+        The same message must not assert the run "has billed nothing yet" underneath a
+        table full of execution data, which is a false claim in that case, not merely
+        an unhelpful one.
+        """
+        out = render_coverage(None, [])
+        assert 'has billed nothing' not in out
+        assert 'no billed usage was found at or after --since' in out.lower()
+
     def test_an_empty_window_says_so(self) -> None:
         out = render_coverage(WINDOW, [])
         assert 'no pipeline spend' in out
@@ -1209,11 +1220,55 @@ class TestRenderComputeFooter:
         """The verified `pts_drug_molecule` shape: a CANCELLED job beside the DONE one."""
         step = _compute('pts_drug_molecule', dataproc_job_states=['CANCELLED', 'DONE'])
         out = render_compute([step])
-        assert 'did not reach DONE' in out
+        assert 'terminal state other than DONE' in out
+        assert 'cancelled or errored' in out
 
     def test_no_partial_job_note_when_every_job_reached_done(self) -> None:
         out = render_compute([_compute('pts_reactome', dataproc_job_states=['DONE'])])
-        assert 'did not reach DONE' not in out
+        assert 'terminal state other than DONE' not in out
+
+    def test_a_job_still_running_is_not_flagged_as_cancelled_or_errored(self) -> None:
+        """F3: a step whose only job is `RUNNING` failed nothing -- it just is not done yet.
+
+        Before F3, this counted toward the same "did not reach DONE (cancelled or
+        errored)" footer as a genuinely failed job, so running `compute` against the
+        active run -- the obvious use for a supervisor -- reported every in-flight
+        step as a failed attempt.
+        """
+        step = _compute('pts_target', dataproc_job_states=['RUNNING'])
+        out = render_compute([step])
+        assert 'terminal state other than DONE' not in out
+        assert 'in progress' in out
+
+    def test_a_job_still_pending_or_setting_up_is_also_reported_as_in_flight(self) -> None:
+        pending = _compute('pts_a', dataproc_job_states=['PENDING'])
+        setup = _compute('pts_b', dataproc_job_states=['SETUP_DONE'])
+        out = render_compute([pending, setup])
+        assert 'terminal state other than DONE' not in out
+        assert '2 step(s) had a Dataproc job still in progress' in out
+
+    def test_in_flight_and_failed_jobs_are_counted_and_worded_separately(self) -> None:
+        """One step of each shape must not be folded into the other's count or message."""
+        running = _compute('pts_running', dataproc_job_states=['RUNNING'])
+        failed = _compute('pts_failed', dataproc_job_states=['ERROR'])
+        out = render_compute([running, failed])
+        assert '1 step(s) had a Dataproc job that reached a terminal state other than DONE' in out
+        assert '1 step(s) had a Dataproc job still in progress' in out
+
+    def test_unresolved_jobs_are_reported_when_present(self) -> None:
+        out = render_compute([_compute('pts_reactome')], unresolved_jobs=2)
+        assert '2 Dataproc job(s) in this run matched no known step' in out
+
+    def test_no_unresolved_job_note_by_default(self) -> None:
+        """`unresolved_jobs` defaults to 0 -- every pre-F2 caller of this function still works."""
+        out = render_compute([_compute('pts_reactome')])
+        assert 'matched no known step' not in out
+
+    def test_unresolved_jobs_are_reported_even_with_no_step_rows_at_all(self) -> None:
+        """Every job in the run was unresolved: `steps` is empty, but the count must not be lost."""
+        out = render_compute([], unresolved_jobs=3)
+        assert 'no step joined' in out.lower()
+        assert '3 Dataproc job(s) in this run matched no known step' in out
 
     def test_the_measured_waste_total_sums_only_the_computable_steps(self) -> None:
         computable = _compute('pts_a', billed_hours=1, execution_seconds=100.0)  # gap = 3600 - 100
@@ -1325,9 +1380,23 @@ class TestComputeCommand:
         ]
         assert main(['compute', '--run', 'r', '--json']) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload[0]['step'] == 'pts_reactome'
-        assert payload[0]['billed_seconds'] == 14400.0
+        assert payload['steps'][0]['step'] == 'pts_reactome'
+        assert payload['steps'][0]['billed_seconds'] == 14400.0
+        assert payload['unresolved_jobs'] == 0
         assert compute_command.bigquery.query.call_count == 1
+
+    def test_json_output_carries_the_unresolved_job_count(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F2: a job that resolves to no step must not simply vanish from `--json` either."""
+        compute_command.job_executions.return_value = [
+            JobExecution(job_id='j1', step='pts_reactome', state='DONE', execution_seconds=153.8),
+            JobExecution(job_id='j2', step=None, state='DONE', execution_seconds=10.0),
+        ]
+        assert main(['compute', '--run', 'r', '--json']) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload['unresolved_jobs'] == 1
+        assert {s['step'] for s in payload['steps']} == {'pts_reactome'}
 
     def test_dataproc_and_journal_results_reach_the_join(
         self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
@@ -1340,12 +1409,47 @@ class TestComputeCommand:
         assert 'pts_reactome' in out
         assert '154s' in out
 
+    def test_a_job_that_matched_no_step_is_reported_in_the_text_footer_too(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        compute_command.job_executions.return_value = [
+            JobExecution(job_id='j1', step='pts_reactome', state='DONE', execution_seconds=153.8),
+            JobExecution(job_id='j2', step=None, state='DONE', execution_seconds=10.0),
+        ]
+        assert main(['compute', '--run', 'r']) == 0
+        out = capsys.readouterr().out
+        assert '1 Dataproc job(s) in this run matched no known step' in out
+
     def test_api_error_exits_non_zero_with_a_message(
         self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
     ) -> None:
         compute_command.bigquery.query.side_effect = cli.GoogleAPICallError('403 Access Denied')
         assert main(['compute', '--run', 'r']) == 1
         assert 'billing export query failed' in capsys.readouterr().err
+
+    def test_a_dataproc_api_error_is_not_blamed_on_the_billing_export(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F6: `compute` crosses three APIs under three different clients.
+
+        Each failure must name the one that actually failed, not always "billing export
+        query".
+        """
+        compute_command.job_executions.side_effect = cli.GoogleAPICallError('403 Access Denied')
+        assert main(['compute', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'Dataproc job query failed' in err
+        assert 'billing export' not in err
+
+    def test_a_gcs_api_error_is_not_blamed_on_the_billing_export(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F6: the journal read (GCS) is the third API `compute` crosses."""
+        compute_command.storage_client.bucket.side_effect = cli.GoogleAPICallError('403 Access Denied')
+        assert main(['compute', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'GCS journal read failed' in err
+        assert 'billing export' not in err
 
 
 class TestObserveParser:

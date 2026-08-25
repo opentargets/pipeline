@@ -16,16 +16,35 @@ Execution time is therefore `status.state_start_time` minus the `RUNNING` entry'
 `state_start_time` from `status_history`, not a difference taken entirely from one
 place.
 
-**A job id encodes its step, but not at a fixed position.** `up-pts-f5014-
-pts_drug_molecule-c516h` and `up-pts-literature-f5014-pts_literature_ontoma-5znfv`
-both carry a real step name, but the cluster-name prefix before it varies in length
-(`SubmitJobOperator.execute` in `operators/dataproc.py` builds the id as
-`f'{cluster_name}-{step_name}-{random_id()}'`, and `cluster_name` is not fixed
-width). Splitting on `-` and indexing works for one shape and silently mis-slices the
-other. `step_for_job_id` instead matches the id against
-`datasets.unified_pipeline_steps()` and keeps the longest match, which also resolves
-the one real ambiguity this creates: a step name that is itself a substring of
-another step name (`pts_disease` inside `pts_disease_hpo`).
+**The job's own `step` label is authoritative; matching the id against known steps is
+only a fallback.** Every job `SubmitJobOperator` submits carries a `step` label (see
+`operators/dataproc.py`'s `execute` and `utils/labels.py`), set once at submission
+time from the same `step_name` that names the job in `unified_pipeline.yaml` -- so
+`job.labels['step']` is ground truth, not a guess. `step_for_job_id`, matching the id
+against `known_steps`, exists only for a job with no `step` label, which by
+construction should not happen for anything `SubmitJobOperator` submits, but is kept
+as a fallback rather than an assumption. This distinction was not academic: on a
+verified run (`up-20260527-1458`), `pts_target_safety` had since grown a same-run
+sibling step, `pts_target`, whose name is a prefix of the older job ids' cluster
+segment; two real jobs matched `pts_target` by substring while their own labels said
+`pts_target_safety`, and two `etl_literature` jobs matched no `known_steps` entry at
+all (the yaml had renamed away from it) and were dropped entirely by the
+substring-only path. Reading the label first gets both right regardless of what the
+*current* checkout's yaml happens to contain, which id-matching alone can never
+guarantee for a run from a different point in time.
+
+**A job id encodes its step, but not at a fixed position** -- this is what the
+id-matching fallback has to work around. `up-pts-f5014-pts_drug_molecule-c516h` and
+`up-pts-literature-f5014-pts_literature_ontoma-5znfv` both carry a real step name, but
+the cluster-name prefix before it varies in length (`SubmitJobOperator.execute` in
+`operators/dataproc.py` builds the id as `f'{cluster_name}-{step_name}-
+{random_id()}'`, and `cluster_name` is not fixed width). Splitting on `-` and
+indexing works for one shape and silently mis-slices the other. `step_for_job_id`
+instead matches the id against `datasets.unified_pipeline_steps()` and keeps the
+longest match, which also resolves the one real ambiguity this creates: a step name
+that is itself a substring of another step name (`pts_disease` inside
+`pts_disease_hpo`) -- a resolution that only holds when both names are still in the
+yaml, which is exactly why it is a fallback and not the primary path.
 
 **A step can have several jobs in one run.** `pts_drug_molecule` in the run verified
 above has exactly this: a `CANCELLED` job (`...-gttbk`) beside the `DONE` job that
@@ -48,7 +67,7 @@ from pydantic import BaseModel
 from orchestration.supervisor.datasets import unified_pipeline_steps
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
 _TERMINAL_STATES = frozenset({'DONE', 'ERROR', 'CANCELLED'})
 """`JobStatus.State` values that mean a job has stopped running for good.
@@ -58,14 +77,22 @@ transitioning and has not yet reached the state `status.state_start_time` would 
 to mean "when it stopped" for `job_execution`'s subtraction to be meaningful.
 """
 
+TERMINAL_JOB_STATES = _TERMINAL_STATES
+"""Public alias of `_TERMINAL_STATES`, for callers outside this module that need to
+tell a job still in progress apart from one that has stopped for good -- e.g.
+`cli.py`'s `compute` command footer, which must not call a `RUNNING`, `PENDING` or
+`SETUP_DONE` job "cancelled or errored"."""
+
 
 class JobExecution(BaseModel):
     """One Dataproc job's actual compute time, as distinct from how long it was billed.
 
     Args:
         job_id: The Dataproc job id, e.g. `up-pts-f5014-pts_drug_molecule-c516h`.
-        step: The `unified_pipeline.yaml` step name recovered from `job_id`, or None
-            if no known step name appears in it. Reported rather than dropped: a
+        step: The `unified_pipeline.yaml` step name, read from the job's own `step`
+            label when present (see `job_execution`) and otherwise recovered from
+            `job_id` by substring match, or None if the label is absent and no known
+            step name appears in the id either. Reported rather than dropped: a
             silently-skipped job would understate its step's execution time with
             nothing to show anything was missing.
         state: The job's current or terminal state name (`DONE`, `ERROR`,
@@ -125,6 +152,9 @@ class JobLike(Protocol):
     @property
     def status_history(self) -> Iterable[_StatusLike]: ...
 
+    @property
+    def labels(self) -> Mapping[str, str]: ...
+
 
 class Client(Protocol):
     """The part of a Dataproc `JobControllerClient` this module uses."""
@@ -152,13 +182,18 @@ def _state_name(state: Any) -> str:
 
 
 def step_for_job_id(job_id: str, known_steps: Iterable[str]) -> str | None:
-    """Recover a `unified_pipeline.yaml` step name from a job id.
+    """Recover a `unified_pipeline.yaml` step name from a job id, by substring match.
 
-    Matches by substring rather than by position, since the cluster-name prefix
-    before the step name is not fixed width -- see this module's docstring. When more
-    than one known step name is a substring (a shorter step name that is itself a
-    prefix of a longer one, e.g. `pts_disease` inside `pts_disease_hpo`), the longest
-    match wins, since it is the more specific -- and, being longer, correct -- answer.
+    This is the fallback path used only when a job carries no `step` label -- see
+    `job_execution` and this module's docstring for why the label, not this function,
+    is the primary source. Matches by substring rather than by position, since the
+    cluster-name prefix before the step name is not fixed width. When more than one
+    known step name is a substring (a shorter step name that is itself a prefix of a
+    longer one, e.g. `pts_disease` inside `pts_disease_hpo`), the longest match wins,
+    since it is the more specific -- and, being longer, correct -- answer. This
+    resolution only holds while `known_steps` still contains both names; a step
+    renamed out of the current yaml can no longer be told apart from a shorter
+    surviving prefix, which is exactly the failure the `step` label sidesteps.
 
     Args:
         job_id: The Dataproc job id.
@@ -174,11 +209,20 @@ def step_for_job_id(job_id: str, known_steps: Iterable[str]) -> str | None:
 def job_execution(job: JobLike, known_steps: Iterable[str] | None = None) -> JobExecution:
     """Convert one Dataproc job into its execution record.
 
+    Reads the step from `job.labels['step']` first -- the value `SubmitJobOperator`
+    itself set at submission time, so it names the step that job actually ran for,
+    regardless of what the current checkout's `unified_pipeline.yaml` says. Only when
+    that label is absent or empty does this fall back to `step_for_job_id`, matching
+    the id against `known_steps` -- see this module's and `step_for_job_id`'s
+    docstrings for why that fallback can silently disagree with the truth for an old
+    or renamed run.
+
     Args:
         job: The job, as returned by the Job Controller API, or a stand-in with the
             same shape.
-        known_steps: Step names to match the job id against, passed to
-            `step_for_job_id`. Defaults to `datasets.unified_pipeline_steps()`.
+        known_steps: Step names to match the job id against when `job` carries no
+            `step` label, passed to `step_for_job_id`. Defaults to
+            `datasets.unified_pipeline_steps()`.
 
     Returns:
         The job's execution record.
@@ -192,9 +236,12 @@ def job_execution(job: JobLike, known_steps: Iterable[str] | None = None) -> Job
     )
     ended = job.status.state_start_time if state in _TERMINAL_STATES else None
     execution_seconds = (ended - started).total_seconds() if started is not None and ended is not None else None
+    step = job.labels.get('step') or None
+    if step is None:
+        step = step_for_job_id(job_id, steps)
     return JobExecution(
         job_id=job_id,
-        step=step_for_job_id(job_id, steps),
+        step=step,
         state=state,
         execution_seconds=execution_seconds,
         started=started,

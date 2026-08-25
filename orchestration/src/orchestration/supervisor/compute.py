@@ -70,6 +70,30 @@ from orchestration.supervisor.journal import JournalEvent
 from orchestration.supervisor.stall import baseline_from_journal
 from orchestration.supervisor.usage import StepUsage
 
+
+def unresolved_job_count(executions: Iterable[JobExecution]) -> int:
+    """Count Dataproc jobs whose step could not be resolved to any known step name.
+
+    `compute_report` skips exactly these -- an execution with `step is None` cannot be
+    joined to any step's row, so it contributes to no `StepCompute` (see
+    `compute_report`'s `executions` arg). `dataproc.JobExecution.step`'s own docstring
+    promises an unresolved job is "reported rather than dropped", and `job_executions`
+    keeps that promise at its own layer -- but a caller that only looks at
+    `compute_report`'s result would still see it vanish with nothing to show anything
+    was missing. This function is what lets a caller (`cli.py`'s `compute` command)
+    keep that promise at the assembled level too: call it on the same `executions`
+    passed to `compute_report`, and surface the count alongside the per-step table
+    rather than discarding it silently.
+
+    Args:
+        executions: Job executions, normally the same list passed to `compute_report`.
+
+    Returns:
+        How many executions have `step is None`.
+    """
+    return sum(1 for execution in executions if execution.step is None)
+
+
 _KEPT_JOB_STATE = 'DONE'
 """The only `JobExecution.state` that contributes to a step's `execution_seconds`.
 
@@ -263,10 +287,12 @@ def compute_report(
             summed rather than assumed impossible; see `_accumulate_usage` for the one
             case that is rejected outright rather than silently mixed.
         executions: Dataproc job records, normally every entry `dataproc.job_executions`
-            returned for the same run. An execution whose `step` is `None` — a job id
-            that matched no known step — cannot be joined to anything and is skipped;
-            `dataproc.job_executions` is what reports it, this function is not the place
-            that would silently drop it.
+            returned for the same run. An execution whose `step` is `None` — a job with
+            no `step` label whose id also matched no known step, see `dataproc.py` —
+            cannot be joined to anything and is skipped here; `unresolved_job_count`
+            on this same `executions` argument is how a caller surfaces that count
+            instead of letting it vanish, since this function's own return value has
+            nowhere to carry it.
         journal_events: The run's journal, normally `Journal.read()`'s result. Read once
             through `stall.baseline_from_journal` for `wall_seconds`; see this module's
             docstring for what that reuse means for a step re-run within the same run.

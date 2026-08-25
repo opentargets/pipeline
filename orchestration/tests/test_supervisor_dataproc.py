@@ -47,24 +47,37 @@ class FakeReference:
 
 
 class FakeJob:
-    def __init__(self, job_id: str, status: FakeStatus, status_history: list[FakeStatus]) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        status: FakeStatus,
+        status_history: list[FakeStatus],
+        labels: dict[str, str] | None = None,
+    ) -> None:
         self.reference = FakeReference(job_id)
         self.status = status
         self.status_history = status_history
+        self.labels = labels if labels is not None else {}
 
 
-def _job(job_id: str, state: Any, ended: datetime | None, history: list[FakeStatus]) -> FakeJob:
-    return FakeJob(job_id, FakeStatus(state, ended), history)
+def _job(
+    job_id: str,
+    state: Any,
+    ended: datetime | None,
+    history: list[FakeStatus],
+    labels: dict[str, str] | None = None,
+) -> FakeJob:
+    return FakeJob(job_id, FakeStatus(state, ended), history, labels)
 
 
-def _finished_job(job_id: str, state: Any = 'DONE') -> FakeJob:
+def _finished_job(job_id: str, state: Any = 'DONE', labels: dict[str, str] | None = None) -> FakeJob:
     """A job that ran to completion: PENDING -> SETUP_DONE -> RUNNING -> `state`."""
     history = [
         FakeStatus('PENDING', _PENDING),
         FakeStatus('SETUP_DONE', _SETUP_DONE),
         FakeStatus('RUNNING', _RUNNING),
     ]
-    return _job(job_id, state, _DONE, history)
+    return _job(job_id, state, _DONE, history, labels)
 
 
 class FakeClient:
@@ -168,6 +181,50 @@ class TestStepForJobId:
         job_id = 'up-pts-f5014-pts_disease_hpo-c516h'
         assert step_for_job_id(job_id, ['pts_disease', 'pts_disease_hpo']) == 'pts_disease_hpo'
         assert step_for_job_id(job_id, ['pts_disease_hpo', 'pts_disease']) == 'pts_disease_hpo'
+
+
+class TestStepLabelIsAuthoritative:
+    """F2: the job's own `step` label is read first; id-matching is only a fallback.
+
+    Every case here sets the label and the id-matched step to *disagree* -- the shape
+    verified live on `up-20260527-1458`, where `pts_target_safety`'s job ids matched
+    the shorter, unrelated `pts_target` by substring while their labels correctly said
+    `pts_target_safety`. A fixture where the two agree cannot tell "the label is
+    preferred" apart from "id-matching happened to be right too".
+    """
+
+    def test_the_label_wins_over_a_disagreeing_id_match(self) -> None:
+        job = _finished_job('up-pts-5df4f-pts_target-3omgp', labels={'step': 'pts_target_safety'})
+        execution = job_execution(job, known_steps=['pts_target', 'pts_target_safety'])
+        assert execution.step == 'pts_target_safety'
+
+    def test_the_label_wins_even_when_the_id_matches_nothing_at_all(self) -> None:
+        """The label alone is enough; id-matching does not even need to be attempted."""
+        job = _finished_job('up-something-unrelated-abcde', labels={'step': 'pts_ontoma_literature'})
+        execution = job_execution(job, known_steps=['pts_ontoma'])
+        assert execution.step == 'pts_ontoma_literature'
+
+    def test_an_absent_label_falls_back_to_id_matching(self) -> None:
+        """No `step` key at all -- the shape every pre-F2 test in this module already covers."""
+        job = _finished_job('up-pts-f5014-pts_drug_molecule-c516h', labels={})
+        execution = job_execution(job, known_steps=['pts_drug_molecule'])
+        assert execution.step == 'pts_drug_molecule'
+
+    def test_an_empty_label_value_falls_back_to_id_matching(self) -> None:
+        """A `step` label present but empty must not be treated as a real answer."""
+        job = _finished_job('up-pts-f5014-pts_drug_molecule-c516h', labels={'step': ''})
+        execution = job_execution(job, known_steps=['pts_drug_molecule'])
+        assert execution.step == 'pts_drug_molecule'
+
+    def test_a_label_naming_an_unknown_step_is_still_trusted(self) -> None:
+        """The label is authoritative even when `known_steps` has renamed it away.
+
+        `known_steps` here stands for the local checkout's yaml -- the `etl_literature`
+        shape verified live, where the id-matching fallback alone found nothing at all.
+        """
+        job = _finished_job('up-etl-literature-5df4f-etl_literature-wz1ct', labels={'step': 'etl_literature'})
+        execution = job_execution(job, known_steps=['pts_target'])
+        assert execution.step == 'etl_literature'
 
 
 class TestJobExecutionReportsUnmatchedSteps:
