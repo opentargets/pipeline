@@ -46,6 +46,11 @@ class FakeReference:
         self.job_id = job_id
 
 
+class FakePlacement:
+    def __init__(self, cluster_uuid: str = '') -> None:
+        self.cluster_uuid = cluster_uuid
+
+
 class FakeJob:
     def __init__(
         self,
@@ -53,11 +58,13 @@ class FakeJob:
         status: FakeStatus,
         status_history: list[FakeStatus],
         labels: dict[str, str] | None = None,
+        cluster_uuid: str = '',
     ) -> None:
         self.reference = FakeReference(job_id)
         self.status = status
         self.status_history = status_history
         self.labels = labels if labels is not None else {}
+        self.placement = FakePlacement(cluster_uuid)
 
 
 def _job(
@@ -66,18 +73,21 @@ def _job(
     ended: datetime | None,
     history: list[FakeStatus],
     labels: dict[str, str] | None = None,
+    cluster_uuid: str = '',
 ) -> FakeJob:
-    return FakeJob(job_id, FakeStatus(state, ended), history, labels)
+    return FakeJob(job_id, FakeStatus(state, ended), history, labels, cluster_uuid)
 
 
-def _finished_job(job_id: str, state: Any = 'DONE', labels: dict[str, str] | None = None) -> FakeJob:
+def _finished_job(
+    job_id: str, state: Any = 'DONE', labels: dict[str, str] | None = None, cluster_uuid: str = ''
+) -> FakeJob:
     """A job that ran to completion: PENDING -> SETUP_DONE -> RUNNING -> `state`."""
     history = [
         FakeStatus('PENDING', _PENDING),
         FakeStatus('SETUP_DONE', _SETUP_DONE),
         FakeStatus('RUNNING', _RUNNING),
     ]
-    return _job(job_id, state, _DONE, history, labels)
+    return _job(job_id, state, _DONE, history, labels, cluster_uuid)
 
 
 class FakeClient:
@@ -291,3 +301,25 @@ class TestJobExecutionModel:
         assert execution.execution_seconds is None
         assert execution.started is None
         assert execution.ended is None
+        assert execution.cluster_instance is None
+
+
+class TestClusterInstance:
+    """F1: `job.placement.cluster_uuid` is what lets `compute.py` see cluster reuse.
+
+    `usage.py`'s `shared_cluster` cannot detect it -- a cluster instance's billing
+    rows are all labelled by whichever step created it, so `COUNT(DISTINCT step)`
+    over billing alone is always 1. Reading the same instance uuid Dataproc's own
+    job record carries is the one path that can tell two steps apart on one cluster.
+    """
+
+    def test_the_cluster_uuid_is_read_onto_the_execution(self) -> None:
+        job = _finished_job('up-pts-f5014-pts_reactome-ym95s', cluster_uuid='5b71ec48-...')
+        execution = job_execution(job, known_steps=['pts_reactome'])
+        assert execution.cluster_instance == '5b71ec48-...'
+
+    def test_an_empty_cluster_uuid_is_none_not_an_empty_string(self) -> None:
+        """An empty string is falsy but is not the same claim as 'no cluster instance'."""
+        job = _finished_job('up-pts-f5014-pts_reactome-ym95s', cluster_uuid='')
+        execution = job_execution(job, known_steps=['pts_reactome'])
+        assert execution.cluster_instance is None

@@ -64,7 +64,13 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import bigquery, dataproc_v1, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
-from orchestration.supervisor.compute import StepCompute, compute_report, unresolved_job_count
+from orchestration.supervisor.compute import (
+    ClusterCompute,
+    StepCompute,
+    cluster_compute_report,
+    compute_report,
+    unresolved_job_count,
+)
 from orchestration.supervisor.dataproc import TERMINAL_JOB_STATES, job_executions
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
@@ -494,9 +500,9 @@ def _compute_table_columns(
     """Which columns this result has to show, in table order, and how to render each cell.
 
     `cost`/`billed`/`exec`/`waste` are always shown -- they are this report's whole
-    point. `ccy`/`core-hrs`/`spot`/`machines`/`wall`/`queue-gap` are shown only when at
-    least one row carries a value for them; a column of nothing but `-` is noise, and
-    for `wall`/`queue-gap` specifically it is worse than noise -- see
+    point. `ccy`/`shared`/`core-hrs`/`spot`/`machines`/`wall`/`queue-gap` are shown only
+    when at least one row carries a value for them; a column of nothing but `-` is noise,
+    and for `wall`/`queue-gap` specifically it is worse than noise -- see
     `_WALL_UNAVAILABLE_FOOTER`, appended instead whenever this leaves them out.
 
     Args:
@@ -513,6 +519,12 @@ def _compute_table_columns(
     columns.append(('billed', lambda s: _hours(s.billed_hours)))
     columns.append(('exec', lambda s: _seconds(s.execution_seconds)))
     columns.append(('waste', lambda s: _seconds(s.billed_execution_gap_seconds)))
+    if any(s.shared_cluster for s in steps):
+        # Explains every `-` in the `waste` column above that is not a "no Dataproc job"
+        # row: `waste` reads `-` for a shared step too, and without this column that looks
+        # identical to a step that simply never ran on Dataproc -- see F1 in the review
+        # ledger and `compute.py`'s `shared_cluster` docstring.
+        columns.append(('shared', lambda s: 'yes' if s.shared_cluster else _MISSING))
     if any(s.core_seconds is not None for s in steps):
         columns.append(('core-hrs', lambda s: _core_hours(s.core_hours)))
         columns.append(('spot', lambda s: _share(s.spot_share)))
@@ -541,7 +553,68 @@ def _unresolved_job_block(count: int) -> list[str]:
     ]
 
 
-def render_compute(steps: list[StepCompute], unresolved_jobs: int = 0) -> str:
+def _journal_read_block(journal_prefix: str | None, journal_event_count: int | None) -> list[str]:
+    """F4: name which journal prefix was actually read, so a wrong `--run` form is visible.
+
+    `compute --run` accepts both the raw Airflow run id (what the journal is keyed on)
+    and the cleaned billing label (what `usage`'s own output, and this flag's help text,
+    show) -- billing and Dataproc clean either form to the same value, so both appear to
+    work, but the journal never exists under the cleaned form's prefix. Silent today
+    because no journal exists for any run yet; stating the prefix and whether it was
+    empty is what lets a reader tell "this run predates the observer" apart from "I
+    passed --run in the wrong form" once one does.
+    """
+    if journal_prefix is None:
+        return []
+    return [
+        f'journal prefix read for this report: {journal_prefix} ({journal_event_count} event(s) found).',
+        'If --run was given in its cleaned label form (as usage/history print it) rather',
+        'than the raw Airflow run id, this is the wrong prefix and will always read empty --',
+        'pass the raw id instead.',
+    ]
+
+
+def _cluster_block(clusters: list[ClusterCompute]) -> list[str]:
+    """The cluster-idle breakdown for every *shared* instance, or [] when none is shared.
+
+    An unshared instance is already fully represented by its one step's own row above --
+    repeating it here would be noise. See F1 in the review ledger and `compute.py`'s
+    `cluster_compute_report`.
+    """
+    shared = sorted((c for c in clusters if c.shared), key=lambda c: -(c.idle_seconds or 0.0))
+    if not shared:
+        return []
+
+    id_width = max(len('cluster instance'), *(len(c.cluster_instance) for c in shared))
+    step_width = max(len('billing step'), *(len(c.billing_step or _MISSING) for c in shared))
+    header = (
+        f'{"cluster instance":<{id_width}} {"billing step":<{step_width}} {"steps":>5} '
+        f'{"billed":>8} {"exec":>10} {"idle":>10}'
+    )
+    lines = [header, '-' * len(header)]
+    lines.extend(
+        f'{c.cluster_instance:<{id_width}} {(c.billing_step or _MISSING):<{step_width}} {len(c.steps):>5} '
+        f'{_seconds(c.billed_seconds):>8} {_seconds(c.execution_seconds):>10} {_seconds(c.idle_seconds):>10}'
+        for c in shared
+    )
+    lines.append('-' * len(header))
+    return [
+        'cluster idle time -- billed and not computing, pooled across every step that ran a Dataproc',
+        'job on the instance. Every step above showing waste as - because it shares one of these',
+        "instances (see the shared column) has its true idle time here instead, at the instance's",
+        'own row, not attributed to any one step:',
+        '',
+        *lines,
+    ]
+
+
+def render_compute(
+    steps: list[StepCompute],
+    unresolved_jobs: int = 0,
+    clusters: list[ClusterCompute] | None = None,
+    journal_prefix: str | None = None,
+    journal_event_count: int | None = None,
+) -> str:
     """Render a per-step compute report: cost, execution time, and the gaps between them.
 
     Rows are sorted by `billed_execution_gap_seconds`, worst first -- see
@@ -558,14 +631,31 @@ def render_compute(steps: list[StepCompute], unresolved_jobs: int = 0) -> str:
             `compute_report`. Defaults to 0 -- most callers (including every existing
             test of this function) have nothing to report here, and the footer this
             adds is silent at 0, so it is additive rather than a required migration.
+        clusters: One row per Dataproc cluster instance, normally
+            `compute.cluster_compute_report`'s result on the same inputs passed to
+            `compute_report`. Only the *shared* instances are rendered -- see
+            `_cluster_block` -- so this is what lets a shared step's `-` waste cell be
+            followed by the real number, at the instance level, instead of just
+            vanishing. Defaults to `None`, rendered the same as `[]`: additive, like
+            `unresolved_jobs`.
+        journal_prefix: The GCS journal prefix this report actually read, or `None` to
+            omit the line entirely (existing callers with nothing to report here are
+            unaffected). See `_journal_read_block` and F4 in the review ledger.
+        journal_event_count: How many events that prefix returned. Shown alongside
+            `journal_prefix`; meaningless without it.
 
     Returns:
         The rendered report, or a message when there is nothing to show.
     """
+    clusters = clusters or []
     if not steps:
-        block = _unresolved_job_block(unresolved_jobs)
-        if block:
-            return f'{_EMPTY_COMPUTE}\n\n{"\n".join(block)}'
+        empty_blocks = [
+            _unresolved_job_block(unresolved_jobs),
+            _journal_read_block(journal_prefix, journal_event_count),
+        ]
+        blocks = [block for block in empty_blocks if block]
+        if blocks:
+            return f'{_EMPTY_COMPUTE}\n\n' + '\n\n'.join('\n'.join(block) for block in blocks)
         return _EMPTY_COMPUTE
 
     ordered = sorted(steps, key=_compute_sort_key)
@@ -583,20 +673,35 @@ def render_compute(steps: list[StepCompute], unresolved_jobs: int = 0) -> str:
     lines.append('-' * len(header))
 
     no_job = sum(1 for s in ordered if not s.dataproc_job_states)
+    shared_job = sum(1 for s in ordered if s.shared_cluster)
     failed_job = sum(1 for s in ordered if set(s.dataproc_job_states) & _FAILED_JOB_STATES)
     in_flight_job = sum(1 for s in ordered if set(s.dataproc_job_states) - TERMINAL_JOB_STATES)
-    measured = [s.billed_execution_gap_seconds for s in ordered if s.billed_execution_gap_seconds is not None]
+    step_measured = [s.billed_execution_gap_seconds for s in ordered if s.billed_execution_gap_seconds is not None]
+    # Only *shared* clusters, not every cluster `cluster_compute_report` returned: an
+    # unshared instance's idle time is already counted once, above, as its one step's own
+    # `billed_execution_gap_seconds` -- adding `idle_seconds` for that same instance here
+    # too would double it. Only a shared instance's idle time is absent from `step_measured`
+    # (its billing step's gap is suppressed to `None`), so only shared instances belong here.
+    cluster_measured = [c.idle_seconds for c in clusters if c.shared and c.idle_seconds is not None]
 
     blocks = [[
         f'{len(ordered)} steps. {no_job} had no Dataproc job at all -- normal for a step that runs on a',
         'plain GCE VM rather than Dataproc, not evidence of a problem.',
     ]]
-    if measured:
-        total = sum(measured)
+    if step_measured or cluster_measured:
+        total = sum(step_measured) + sum(cluster_measured)
         blocks.append([
-            f'billed time paid for and not computing, summed across the {len(measured)} steps this can be',
-            f'measured for: {total:,.0f}s ({total / 3600:.1f}h). This is a floor, not the total waste of the',
-            'run: steps with no Dataproc job are not counted here at all, not counted as zero waste.',
+            f'billed time paid for and not computing: {total:,.0f}s ({total / 3600:.1f}h), a floor covering',
+            f'{len(step_measured)} step(s) with an exclusive Dataproc cluster and {len(cluster_measured)} shared',
+            'cluster instance(s) (see the table below). Steps with no Dataproc job, and any step whose',
+            'usage could not be attributed to exactly one cluster instance, are not counted here at all --',
+            'not counted as zero waste.',
+        ])
+    if shared_job:
+        blocks.append([
+            f'{shared_job} step(s) share a Dataproc cluster instance with other steps in this run -- their',
+            'own waste could not be isolated from the instance (waste reads - above); see the cluster',
+            "breakdown below for the instance's true idle time, pooled across every step that used it.",
         ])
     if failed_job:
         blocks.append([
@@ -613,8 +718,13 @@ def render_compute(steps: list[StepCompute], unresolved_jobs: int = 0) -> str:
     unresolved_block = _unresolved_job_block(unresolved_jobs)
     if unresolved_block:
         blocks.append(unresolved_block)
+    cluster_block = _cluster_block(clusters)
+    if cluster_block:
+        blocks.append(cluster_block)
     if not any(s.wall_seconds is not None for s in ordered):
-        blocks.append(_WALL_UNAVAILABLE_FOOTER)
+        journal_block = list(_WALL_UNAVAILABLE_FOOTER)
+        journal_block.extend(_journal_read_block(journal_prefix, journal_event_count))
+        blocks.append(journal_block)
 
     return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
@@ -923,18 +1033,35 @@ def main(argv: list[str] | None = None) -> int:
                 bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
                 # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
                 # never the cleaned billing label -- see journal.py's module docstring, and
-                # `snapshot`/`observe` below, which key it the same way.
-                journal = Journal(bucket=bucket, prefix=f'_agent/unified_pipeline/{args.run}/journal')
+                # `snapshot`/`observe` below, which key it the same way. F4: `--run` accepts
+                # either form (its own help text points at the cleaned one, which `usage` also
+                # prints), but only the raw form ever finds a real journal here -- see
+                # `_journal_read_block`, which is what surfaces this prefix and its event count
+                # to the reader instead of a silent, permanently-empty read.
+                journal_prefix = f'_agent/unified_pipeline/{args.run}/journal'
+                journal = Journal(bucket=bucket, prefix=journal_prefix)
                 journal_events = journal.read()
             except GoogleAPICallError as exc:
                 raise RuntimeError(f'GCS journal read failed: {" ".join(str(exc).split())}') from exc
             steps = compute_report(usages, executions, journal_events)
+            clusters = cluster_compute_report(usages, executions)
             unresolved_jobs = unresolved_job_count(executions)
             if args.json:
-                payload = {'steps': [s.model_dump(mode='json') for s in steps], 'unresolved_jobs': unresolved_jobs}
+                payload = {
+                    'steps': [s.model_dump(mode='json') for s in steps],
+                    'unresolved_jobs': unresolved_jobs,
+                    'clusters': [c.model_dump(mode='json') for c in clusters],
+                }
                 sys.stdout.write(json.dumps(payload, indent=2) + '\n')
             else:
-                report = render_compute(steps, unresolved_jobs) + '\n\n' + render_coverage(window, coverage)
+                report = render_compute(
+                    steps,
+                    unresolved_jobs,
+                    clusters=clusters,
+                    journal_prefix=journal_prefix,
+                    journal_event_count=len(journal_events),
+                )
+                report += '\n\n' + render_coverage(window, coverage)
                 sys.stdout.write(report + '\n')
             return 0
         elif args.command == 'snapshot':

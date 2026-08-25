@@ -28,7 +28,7 @@ import pytest
 from google.cloud import bigquery, dataproc_v1, storage
 
 from orchestration.supervisor.cli import render_compute, render_coverage
-from orchestration.supervisor.compute import StepCompute, compute_report
+from orchestration.supervisor.compute import ClusterCompute, StepCompute, cluster_compute_report, compute_report
 from orchestration.supervisor.dataproc import JobExecution, job_executions
 from orchestration.supervisor.journal import Journal
 from orchestration.supervisor.usage import BillingExport, StepUsage, WindowCoverage, usage_window
@@ -56,6 +56,19 @@ REACTOME_STEP = 'pts_reactome'
 `REACTOME_STEP`): this run's most expensive step, and the one whose billed envelope
 most exceeds what it actually computed -- 4 billed hours and 162.1 core-hours for
 153.8s of Dataproc execution, costing 6.69 GBP net."""
+
+REACTOME_CLUSTER_INSTANCE = '5b71ec48-50c5-44be-83f6-0f1c03367d7e'
+"""F1, re-verified live 2026-08-25 after the fix.
+
+The instance `REACTOME_STEP`'s billing is charged against. Not exclusive to it:
+Dataproc's own job records show 17 distinct steps ran a job here, all under this one
+`step=pts_reactome` billing label (`operators/dataproc.py`'s `use_if_exists=True`).
+`REACTOME_STEP`'s own `billed_execution_gap_seconds` is therefore `None` -- the
+14,400s billed here is not its own -- and this instance's true idle time,
+14,400 - 9,792.2 = 4,607.8s, is what `cluster_compute_report` reports instead. This
+replaces the pre-fix pinned figure of "14,246.2s wasted by pts_reactome", which
+`.superpowers/sdd/2026-08-24-pipeline-compute-report-plan/`'s review found to be a
+3.1x overstatement naming the wrong culprit."""
 
 REACTOME_JOB_ID = 'up-pts-f5014-pts_reactome-ym95s'
 """The one Dataproc job behind `REACTOME_STEP` in this run: RUNNING ~15:14:18 -> DONE
@@ -105,6 +118,7 @@ class LiveCompute:
     usages: list[StepUsage]
     executions: list[JobExecution]
     steps: list[StepCompute]
+    clusters: list[ClusterCompute]
     window: tuple[datetime, datetime] | None
     coverage: list[WindowCoverage]
     rendered: str
@@ -127,9 +141,20 @@ def live() -> LiveCompute:
     events = journal.read()
 
     steps = compute_report(usages, executions, events)
-    rendered = render_compute(steps) + '\n\n' + render_coverage(window, coverage)
+    clusters = cluster_compute_report(usages, executions)
+    rendered = (
+        render_compute(steps, clusters=clusters, journal_prefix=journal.prefix, journal_event_count=len(events))
+        + '\n\n'
+        + render_coverage(window, coverage)
+    )
     return LiveCompute(
-        usages=usages, executions=executions, steps=steps, window=window, coverage=coverage, rendered=rendered
+        usages=usages,
+        executions=executions,
+        steps=steps,
+        clusters=clusters,
+        window=window,
+        coverage=coverage,
+        rendered=rendered,
     )
 
 
@@ -172,11 +197,16 @@ class TestAbsentIsNeverZero:
 
         A join that dropped `billed_seconds` while keeping `execution_seconds` (or the
         reverse) would still pass a test that only checks the `None` direction.
+
+        F1: `billed_execution_gap_seconds`'s biconditional gained a third term,
+        `not step.shared_cluster` -- both inputs can be present and the gap still
+        `None`, exactly for `REACTOME_STEP` in this run (see `TestSharedCluster` below).
+        `wall_execution_gap_seconds` is untouched by F1 and keeps the plain two-term form.
         """
         for step in live.steps:
             has_billed_gap = step.billed_execution_gap_seconds is not None
             both_present = step.billed_seconds is not None and step.execution_seconds is not None
-            assert has_billed_gap == both_present, step.step
+            assert has_billed_gap == (both_present and not step.shared_cluster), step.step
 
             has_wall_gap = step.wall_execution_gap_seconds is not None
             both_present = step.wall_seconds is not None and step.execution_seconds is not None
@@ -259,8 +289,17 @@ class TestReactomeMatchesTheVerifiedFigures:
         assert reactome.billed_hours == 4
 
     def test_execution_time_and_waste(self, reactome: StepCompute) -> None:
+        """F1, corrected 2026-08-25: `billed_execution_gap_seconds` is no longer 14,246.2s.
+
+        That figure was `REACTOME_CLUSTER_INSTANCE`'s whole 14,400s billed span minus only
+        `pts_reactome`'s own 153.8s of execution, as if the instance served no one else --
+        it did not (see `TestSharedCluster` below), so the number was wrong and the fix
+        makes it `None` rather than a smaller wrong number. `execution_seconds` itself is
+        untouched by F1: it was always this step's own DONE job, correctly.
+        """
         assert reactome.execution_seconds == pytest.approx(153.8, abs=1.0)
-        assert reactome.billed_execution_gap_seconds == pytest.approx(14246.2, abs=2.0)
+        assert reactome.shared_cluster is True
+        assert reactome.billed_execution_gap_seconds is None
 
     def test_core_hours_and_spot_share(self, reactome: StepCompute) -> None:
         assert reactome.core_hours == pytest.approx(162.1, abs=0.1)
@@ -281,6 +320,71 @@ class TestReactomeMatchesTheVerifiedFigures:
         assert abs((execution.started - REACTOME_STARTED_APPROX).total_seconds()) < 2
         assert abs((execution.ended - REACTOME_ENDED_APPROX).total_seconds()) < 2
         assert execution.execution_seconds == pytest.approx(153.8, abs=1.0)
+
+
+class TestSharedCluster:
+    """F1: `REACTOME_CLUSTER_INSTANCE`'s true idle time, pooled across all 17 steps.
+
+    `shared_cluster` fires live for the first time here -- before this fix it could
+    not, on any data, ever (see `usage.py`'s module docstring on why the billing-only
+    guard is structurally unable to see this). This class is what confirms the reviewer's
+    own re-derivation from the raw Dataproc API (jobs=19, distinct steps=17, DONE
+    compute=9,792s) is exactly what `cluster_compute_report` now computes.
+    """
+
+    @pytest.fixture
+    def cluster(self, live: LiveCompute) -> ClusterCompute:
+        return next(c for c in live.clusters if c.cluster_instance == REACTOME_CLUSTER_INSTANCE)
+
+    def test_the_instance_is_flagged_shared(self, cluster: ClusterCompute) -> None:
+        assert cluster.shared is True
+        assert cluster.billing_step == REACTOME_STEP
+
+    def test_seventeen_distinct_steps_ran_a_job_on_this_instance(self, cluster: ClusterCompute) -> None:
+        assert len(cluster.steps) == 17
+        assert REACTOME_STEP in cluster.steps
+
+    def test_the_pooled_execution_time_matches_the_reviewer_s_re_derivation(self, cluster: ClusterCompute) -> None:
+        assert cluster.billed_seconds == pytest.approx(14400.0, abs=1.0)
+        assert cluster.execution_seconds == pytest.approx(9792.2, abs=2.0)
+        assert cluster.idle_seconds == pytest.approx(4607.8, abs=3.0)
+
+    def test_other_clusters_in_this_run_are_not_shared(self, live: LiveCompute) -> None:
+        """The two single-job clusters the reviewer also measured (`c0e18726`, `70a57f16`).
+
+        Confirms `shared_cluster` does not over-fire: a cluster instance that served
+        only its own creating step must read `shared=False`, not just "the flagged one
+        happens to be correct".
+        """
+        unshared = [c for c in live.clusters if c.cluster_instance != REACTOME_CLUSTER_INSTANCE]
+        assert unshared, 'this run must have other clusters besides the reactome one to test against'
+        for c in unshared:
+            assert c.shared is False
+            assert len(c.steps) == 1
+
+    def test_the_rendered_report_shows_the_dash_and_the_true_idle_time_separately(self, live: LiveCompute) -> None:
+        header = live.rendered.splitlines()[0].split()
+        reactome_row = next(line for line in live.rendered.splitlines() if line.startswith(REACTOME_STEP)).split()
+        assert reactome_row[header.index('shared')] == 'yes'
+        assert reactome_row[header.index('waste')] == '-', "pts_reactome's own waste cell must be -, not a number"
+        assert REACTOME_CLUSTER_INSTANCE in live.rendered
+        assert '4,608s' in live.rendered
+
+    def test_the_floor_total_is_the_corrected_figure_not_the_pre_fix_overstatement(self, live: LiveCompute) -> None:
+        """The report's headline number, pinned exactly.
+
+        Before the fix this run's floor read 24,292s (6.7h): `pts_reactome`'s own row
+        naively claimed `REACTOME_CLUSTER_INSTANCE`'s whole 14,400s as its own, on top
+        of `gentropy_biosample` and `pts_literature_ontoma`'s correct 3,420.6s and
+        6,625.1s -- a 66% overstatement the ledger's F1 finding measured by hand. The
+        corrected floor sums the same two unshared steps' own gaps plus the shared
+        instance's pooled idle time once, not twice: 3,420.6 + 6,625.1 + 4,607.8 ≈
+        14,653s (4.1h), which is what this asserts.
+        """
+        floor_line = next(line for line in live.rendered.splitlines() if line.startswith('billed time paid for'))
+        assert '14,653s' in floor_line
+        assert '24,292s' not in floor_line
+        assert '24,699s' not in floor_line, 'the double-counted-cluster-idle shape of this same bug'
 
 
 class TestCoverage:

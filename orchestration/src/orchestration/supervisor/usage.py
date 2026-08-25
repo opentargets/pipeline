@@ -23,12 +23,28 @@ unlabelled and some Dataproc disk and licensing rows fall outside the step's lab
 the per-step figures are a subset of pipeline spend, never all of it. `window_coverage`
 measures that subset against everything the pipeline billed over the same period.
 
-`shared_cluster` guards the one way a labelled pound could fail to be the labelled step's
-own. `operators/dataproc.py` passes `use_if_exists=True` and does not relabel, so a cluster
-instance outliving the step that created it would bill its hours under that step's labels.
-The flag marks any row where more than one step billed against a single cluster *instance*
-in one run. **It does not fire on today's data and is expected not to**: measured over the
-export on 2026-08-21, all 181 cluster instances served exactly one step (£2,039.82).
+`shared_cluster` was meant to guard the one way a labelled pound could fail to be the
+labelled step's own: `operators/dataproc.py` passes `use_if_exists=True` and does not
+relabel, so a cluster instance outliving the step that created it would bill its hours
+under that step's labels for as long as it exists. **It cannot do that job, structurally,
+and is kept here only as what it actually is: a check that a cluster instance's own
+billing rows never disagree with each other about which step created it.** A GCP
+resource's labels are stamped once, at creation, and every billing row for that
+resource for the rest of its life repeats them unchanged — `operators/dataproc.py` never
+relabels a reused cluster. So `COUNT(DISTINCT step)` taken over one cluster instance's
+billing rows alone is 1 by construction, always, for every instance that has ever
+existed; the flag reporting FALSE on 2026-08-21's 181 instances was never evidence that
+none of them were reused, it was the SQL correctly measuring a quantity that cannot see
+reuse at all. Verified live 2026-08-24 (F1 in this project's review ledger): cluster
+instance `5b71ec48` in run `manual__2026-07-21t15-07-47-545737-00-00` billed 9,792s of
+Dataproc execution across 17 distinct steps, entirely under `step=pts_reactome`'s
+label — `shared_cluster` reads FALSE on every one of that instance's billing rows,
+correctly by this field's own definition, and wrongly by the definition its docstring
+used to claim. Real reuse can
+only be seen by cross-referencing the *submitting* step of every job placed on an
+instance, which billing labels do not carry — `dataproc.JobExecution.step`, joined by
+`dataproc.JobExecution.cluster_instance`, does. That join, and the `shared_cluster` field
+it produces on `compute.StepCompute`, live in `compute.py`, not here.
 
 Instance means the `goog-dataproc-cluster-uuid` label, never the name. Names are reused
 within a run — `up-pts-5df4f` in `up-20260527-1458` covers 6 steps across 12 separate
@@ -113,19 +129,32 @@ class StepUsage(BaseModel):
             outlived the step that created it. `ended - started` on that row would have
             sent a reader looking at the wrong thing; `billed_hours` of 1 tells the truth.
             Always show the two together — the envelope is still worth reporting, it just
-            must never stand alone.
+            must never stand alone. Scoped to this row's own (tool, product, currency)
+            group: a step billed under two of those in the same run has one `StepUsage`
+            row each, and this is that row's own hour count, not a union with the other —
+            see `billed_hour_buckets` for the value a caller summing across a step's rows
+            needs instead.
+        billed_hour_buckets: The distinct `TIMESTAMP_TRUNC(usage_start_time, HOUR)` values
+            behind `billed_hours`, as timestamps rather than a count, sorted. Exists so a
+            caller folding more than one `StepUsage` row into one step's total (`compute.py`
+            does exactly this for `tool`/`product` splits) can take the union of actual
+            hours rather than sum two counts that may share a bucket — summing
+            `billed_hours` across two rows that both billed in, say, 14:00 UTC would count
+            that hour twice, inflating the step's total beyond what it actually billed.
         net_cost: `SUM(cost) + SUM(credits.amount)`. Credits are negative in the export,
             so this subtracts them. Ignoring credits overstates cost by roughly 7%.
         currency: Currency code from the export. `GBP` for this billing account. Part of
             the grouping key, so an amount here is never a mix of currencies.
         shared_cluster: True when more than one step of this run billed against a single
             Dataproc cluster *instance* (`goog-dataproc-cluster-uuid`, not the reused
-            name). Such a row is charged the instance's whole cost rather than the step's
-            own, because the instance keeps the labels it was created with. False for
-            every row in the export as of 2026-08-21 — this is a guard on a code path
-            (`use_if_exists=True`) that does not currently manifest, not a description of
-            observed billing. Detected, never re-apportioned: splitting an instance's cost
-            between steps needs the Dataproc Jobs API.
+            name). **This can never be true**, for any row, however this run's billing
+            actually happened — see this module's docstring for why a cluster instance's
+            billing rows cannot disagree about the step that created them, and
+            `compute.StepCompute.shared_cluster` for where the real, working guard lives
+            instead (cross-referencing Dataproc's own job records, which billing labels do
+            not carry). Kept on this model rather than deleted so a caller reading the raw
+            `usage`/`history` commands still sees the field name and can be pointed here,
+            not because it is expected to ever fire.
         core_seconds: Total `usage.amount` (already in seconds) billed under a SKU whose
             description contains `Instance Core` — on-demand and spot combined. Divide by
             3600 for core-hours. `None`, never `0.0`, when the step billed no core SKU at
@@ -139,6 +168,12 @@ class StepUsage(BaseModel):
         machine_families: Distinct machine family (e.g. `N1`) read off each core SKU's
             description, sorted. Empty — never omitted, never a sentinel — when
             `core_seconds` is `None`, for the same reason: nothing to name a family from.
+        cluster_instances: Distinct `goog-dataproc-cluster-uuid` values across this row's
+            billed rows, sorted. Empty for a step that ran on a plain GCE VM rather than
+            Dataproc. Usually at most one entry — a step creates one cluster per run in
+            the common case — but not guaranteed to be: a step whose usage spans more than
+            one instance cannot be attributed to either one alone, which is exactly the
+            ambiguity `compute.cluster_compute_report` skips rather than guesses at.
     """
 
     run: str
@@ -148,12 +183,14 @@ class StepUsage(BaseModel):
     started: datetime
     ended: datetime
     billed_hours: int
+    billed_hour_buckets: list[datetime]
     net_cost: float
     currency: str
     shared_cluster: bool
     core_seconds: float | None
     spot_core_seconds: float | None
     machine_families: list[str]
+    cluster_instances: list[str]
 
 
 class WindowCoverage(BaseModel):
@@ -202,6 +239,7 @@ WITH labelled AS (
     (SELECT value FROM UNNEST(labels) WHERE key = 'goog-dataproc-cluster-uuid') AS cluster_instance,
     usage_start_time,
     usage_end_time,
+    TIMESTAMP_TRUNC(usage_start_time, HOUR) AS billed_hour,
     cost,
     (SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) c) AS credit,
     currency,
@@ -237,13 +275,15 @@ SELECT
   product,
   MIN(usage_start_time) AS started,
   MAX(usage_end_time) AS ended,
-  COUNT(DISTINCT TIMESTAMP_TRUNC(usage_start_time, HOUR)) AS billed_hours,
+  COUNT(DISTINCT billed_hour) AS billed_hours,
+  ARRAY_AGG(DISTINCT billed_hour ORDER BY billed_hour) AS billed_hour_buckets,
   SUM(cost) + SUM(credit) AS net_cost,
   currency,
   IFNULL(LOGICAL_OR(steps_on_cluster > 1), FALSE) AS shared_cluster,
   IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core, usage_amount, 0))) AS core_seconds,
   IF(COUNTIF(is_core) = 0, NULL, SUM(IF(is_core AND is_spot, usage_amount, 0))) AS spot_core_seconds,
-  ARRAY_AGG(DISTINCT machine_family IGNORE NULLS ORDER BY machine_family) AS machine_families
+  ARRAY_AGG(DISTINCT machine_family IGNORE NULLS ORDER BY machine_family) AS machine_families,
+  ARRAY_AGG(DISTINCT cluster_instance IGNORE NULLS ORDER BY cluster_instance) AS cluster_instances
 FROM labelled
 LEFT JOIN cluster_steps ON run = cluster_run AND cluster_instance = cluster_key
 WHERE step IS NOT NULL
@@ -407,12 +447,14 @@ class BillingExport:
                 started=row.started,
                 ended=row.ended,
                 billed_hours=row.billed_hours,
+                billed_hour_buckets=list(row.billed_hour_buckets),
                 net_cost=row.net_cost,
                 currency=row.currency,
                 shared_cluster=row.shared_cluster,
                 core_seconds=row.core_seconds,
                 spot_core_seconds=row.spot_core_seconds,
                 machine_families=list(row.machine_families),
+                cluster_instances=list(row.cluster_instances),
             )
             for row in self._run_query(sql, params)
         ]

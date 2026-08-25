@@ -55,6 +55,16 @@ whichever jobs lost, and there is no one correct choice between summing, taking 
 successful attempt, or keeping both without knowing what the number is for. That
 choice belongs to `compute.py`'s join, which has the full list -- and the other two
 sources -- in hand to make it.
+
+**`job.placement.cluster_uuid` is the same instance `usage.py` bills under
+`goog-dataproc-cluster-uuid`.** `operators/dataproc.py` submits jobs with
+`use_if_exists=True`, so one cluster instance can carry jobs from several steps while
+its billing rows -- set once, at creation -- still name only the step that created it
+(see `usage.py`'s module docstring on `shared_cluster`, and F1 in this project's
+review ledger: the guard billing alone can compute is structurally unable to see
+this). Reading `job.placement.cluster_uuid` here, alongside the job's own `step`
+label, is what lets `compute.py` reconstruct, from Dataproc's own record, every step
+that actually ran on a given instance -- the one join billing cannot do by itself.
 """
 
 from __future__ import annotations
@@ -105,6 +115,12 @@ class JobExecution(BaseModel):
             never did (e.g. it failed during setup).
         ended: When the job reached its terminal state, from
             `status.state_start_time`, or None while the job is still in progress.
+        cluster_instance: `job.placement.cluster_uuid` -- the same value `usage.py`
+            reads off `goog-dataproc-cluster-uuid`. None only if the API ever omits
+            it, which has not been observed; every submitted job is placed on some
+            cluster. This, not the job id or the cluster name, is what lets
+            `compute.py` tell "this instance served only this step" apart from "this
+            instance also carried other steps' jobs" -- see this module's docstring.
     """
 
     job_id: str
@@ -113,6 +129,7 @@ class JobExecution(BaseModel):
     execution_seconds: float | None = None
     started: datetime | None = None
     ended: datetime | None = None
+    cluster_instance: str | None = None
 
 
 class _StatusLike(Protocol):
@@ -140,6 +157,13 @@ class _ReferenceLike(Protocol):
     def job_id(self) -> str: ...
 
 
+class _PlacementLike(Protocol):
+    """The part of a Dataproc `JobPlacement` this module reads."""
+
+    @property
+    def cluster_uuid(self) -> str: ...
+
+
 class JobLike(Protocol):
     """The part of a Dataproc `Job` this module reads."""
 
@@ -154,6 +178,9 @@ class JobLike(Protocol):
 
     @property
     def labels(self) -> Mapping[str, str]: ...
+
+    @property
+    def placement(self) -> _PlacementLike: ...
 
 
 class Client(Protocol):
@@ -246,6 +273,7 @@ def job_execution(job: JobLike, known_steps: Iterable[str] | None = None) -> Job
         execution_seconds=execution_seconds,
         started=started,
         ended=ended,
+        cluster_instance=job.placement.cluster_uuid or None,
     )
 
 

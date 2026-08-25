@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -23,7 +23,7 @@ from orchestration.supervisor.cli import (
     render_table,
     totals_by_group,
 )
-from orchestration.supervisor.compute import StepCompute
+from orchestration.supervisor.compute import ClusterCompute, StepCompute
 from orchestration.supervisor.dataproc import JobExecution
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
@@ -51,6 +51,7 @@ def _usage(
     currency: str = 'GBP',
     product: str | None = 'platform',
     shared: bool = False,
+    cluster_instances: list[str] | None = None,
 ) -> StepUsage:
     return StepUsage(
         run=run,
@@ -60,12 +61,16 @@ def _usage(
         started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
         billed_hours=2,
+        billed_hour_buckets=[
+            datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+        ],
         net_cost=net_cost,
         currency=currency,
         shared_cluster=shared,
         core_seconds=None,
         spot_core_seconds=None,
         machine_families=[],
+        cluster_instances=cluster_instances if cluster_instances is not None else [],
     )
 
 
@@ -917,8 +922,12 @@ def _usage_row(**kw: Any) -> SimpleNamespace:
         'core_seconds': None,
         'spot_core_seconds': None,
         'machine_families': [],
+        'cluster_instances': [],
     }
     base.update(kw)
+    if 'billed_hour_buckets' not in kw:
+        started = base['started']
+        base['billed_hour_buckets'] = [started + timedelta(hours=h) for h in range(base['billed_hours'])]
     return SimpleNamespace(**base)
 
 
@@ -1044,6 +1053,7 @@ def _compute(
     execution_seconds: float | None = 153.8,
     dataproc_job_states: list[str] | None = None,
     wall_seconds: float | None = None,
+    shared_cluster: bool = False,
 ) -> StepCompute:
     """A `StepCompute` with a Dataproc job and a bill by default, no wall time.
 
@@ -1066,6 +1076,7 @@ def _compute(
             else (['DONE'] if execution_seconds is not None else [])
         ),
         wall_seconds=wall_seconds,
+        shared_cluster=shared_cluster,
     )
 
 
@@ -1275,11 +1286,12 @@ class TestRenderComputeFooter:
         uncomputable = _compute('pts_b', billed_hours=None, execution_seconds=None, dataproc_job_states=[])
         out = render_compute([computable, uncomputable])
         assert '3,500s' in out
-        assert 'the 1 steps this can be' in out
+        assert '1 step(s) with an exclusive Dataproc cluster' in out
+        assert '0 shared' in out
 
     def test_no_waste_total_line_when_nothing_is_computable(self) -> None:
         out = render_compute([_compute('pts_a', billed_hours=None, execution_seconds=None, dataproc_job_states=[])])
-        assert 'this can be' not in out
+        assert 'a floor covering' not in out
 
     def test_wall_unavailable_note_explains_why_not_just_that_it_is_missing(self) -> None:
         """Otherwise an empty wall column reads as 'no step queued', which is not measured here."""
@@ -1291,6 +1303,106 @@ class TestRenderComputeFooter:
     def test_wall_unavailable_note_is_absent_once_wall_time_is_present(self) -> None:
         out = render_compute([_compute(wall_seconds=1191.0)])
         assert 'never taken' not in out
+
+
+class TestRenderComputeSharedCluster:
+    """F1: a shared step's own waste is `-`, and the report must say why, not just show it."""
+
+    def test_the_shared_column_is_hidden_when_no_step_is_shared(self) -> None:
+        out = render_compute([_compute('pts_reactome')])
+        assert 'shared' not in out.splitlines()[0].split()
+
+    def test_the_shared_column_appears_and_flags_only_the_shared_step(self) -> None:
+        shared = _compute('pts_reactome', shared_cluster=True)
+        unshared = _compute('pts_other', shared_cluster=False)
+        out = render_compute([shared, unshared])
+        header = out.splitlines()[0].split()
+        assert 'shared' in header
+        col = header.index('shared')
+        rows = {line.split()[0]: line.split() for line in out.splitlines()[2:4]}
+        assert rows['pts_reactome'][col] == 'yes'
+        assert rows['pts_other'][col] == '-'
+
+    def test_the_shared_step_footer_explains_the_dash(self) -> None:
+        cluster = ClusterCompute(
+            cluster_instance='c1', billing_step='pts_reactome', steps=['pts_other', 'pts_reactome'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([_compute('pts_reactome', shared_cluster=True)], clusters=[cluster])
+        assert '1 step(s) share a Dataproc cluster instance with other steps' in out
+        assert 'breakdown below' in out
+
+    def test_no_shared_footer_when_nothing_is_shared(self) -> None:
+        out = render_compute([_compute('pts_reactome')])
+        assert 'share a Dataproc cluster instance' not in out
+
+    def test_a_shared_step_is_excluded_from_the_step_level_floor_but_its_cluster_is_added(self) -> None:
+        """The corrected `pts_reactome` shape, shrunk.
+
+        Waste moves from the wrong step-level number to the right instance-level one,
+        rather than merely disappearing.
+        """
+        step = _compute('pts_reactome', shared_cluster=True, billed_hours=4, execution_seconds=153.8)
+        cluster = ClusterCompute(
+            cluster_instance='c1', billing_step='pts_reactome', steps=['pts_reactome', 'pts_other'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([step], clusters=[cluster])
+        floor_line = next(line for line in out.splitlines() if line.startswith('billed time paid for'))
+        assert '4,608s' in floor_line, (
+            'the floor must include the true instance-level idle time, not the naive 14,246s '
+            "the step alone would have shown, and not silently drop to 0 once the step's own "
+            'gap is suppressed'
+        )
+        assert '0 step(s) with an exclusive Dataproc cluster and 1 shared' in out
+
+    def test_the_cluster_breakdown_lists_only_shared_instances(self) -> None:
+        unshared = ClusterCompute(
+            cluster_instance='c-solo', billing_step='pts_solo', steps=['pts_solo'],
+            currency='GBP', billed_seconds=3600.0, execution_seconds=100.0,
+        )
+        shared = ClusterCompute(
+            cluster_instance='c-shared', billing_step='pts_reactome', steps=['pts_other', 'pts_reactome'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([_compute('pts_reactome', shared_cluster=True)], clusters=[unshared, shared])
+        assert 'c-shared' in out
+        assert 'c-solo' not in out, 'an unshared instance is already fully shown by its own step row'
+
+    def test_an_unshared_cluster_s_idle_time_is_not_double_counted_in_the_floor(self) -> None:
+        """The real shape of the verified run.
+
+        An unshared step's own gap is already in the floor via its `StepCompute` row;
+        adding its cluster's `idle_seconds` too (identical under the hood, since an
+        unshared instance's idle time IS its one step's own gap) would double it.
+        """
+        unshared_step = _compute('pts_solo', billed_hours=1, execution_seconds=100.0)  # gap = 3500
+        unshared_cluster = ClusterCompute(
+            cluster_instance='c-solo', billing_step='pts_solo', steps=['pts_solo'],
+            currency='GBP', billed_seconds=3600.0, execution_seconds=100.0,  # idle = 3500, same fact
+        )
+        out = render_compute([unshared_step], clusters=[unshared_cluster])
+        floor_line = next(line for line in out.splitlines() if line.startswith('billed time paid for'))
+        assert '3,500s' in floor_line
+        assert '7,000s' not in floor_line, '3,500s counted once, not once per source that can see it'
+
+
+class TestRenderComputeJournalPrefix:
+    """F4: `--run` accepts a form that silently reads an empty journal forever."""
+
+    def test_the_prefix_and_event_count_are_named_when_wall_time_is_unavailable(self) -> None:
+        out = render_compute([_compute()], journal_prefix='_agent/unified_pipeline/r/journal', journal_event_count=0)
+        assert '_agent/unified_pipeline/r/journal' in out
+        assert '0 event(s) found' in out
+        assert 'cleaned label form' in out
+
+    def test_nothing_is_added_when_the_prefix_is_not_given(self) -> None:
+        out = render_compute([_compute()])
+        assert 'journal prefix read' not in out
+
+    def test_the_prefix_note_still_appears_when_steps_is_empty(self) -> None:
+        out = render_compute([], journal_prefix='_agent/unified_pipeline/r/journal', journal_event_count=0)
+        assert '_agent/unified_pipeline/r/journal' in out
 
 
 class TestComputeParser:

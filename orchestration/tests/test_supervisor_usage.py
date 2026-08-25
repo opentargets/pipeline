@@ -43,12 +43,16 @@ class TestStepUsage:
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
             billed_hours=2,
+            billed_hour_buckets=[
+                datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+            ],
             net_cost=1.5,
             currency='GBP',
             shared_cluster=False,
             core_seconds=7200.0,
             spot_core_seconds=0.0,
             machine_families=['N1'],
+            cluster_instances=[],
         )
         assert u.step == 'pts_target'
         assert u.product == 'platform'
@@ -82,12 +86,14 @@ class TestStepUsage:
             'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             'ended': datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
             'billed_hours': 1,
+            'billed_hour_buckets': [datetime(2026, 7, 21, 14, 0, tzinfo=UTC)],
             'net_cost': 0.1,
             'currency': 'GBP',
             'shared_cluster': False,
             'core_seconds': None,
             'spot_core_seconds': None,
             'machine_families': [],
+            'cluster_instances': [],
         })
         assert u.product is None
 
@@ -101,12 +107,14 @@ class TestStepUsage:
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
             billed_hours=1,
+            billed_hour_buckets=[datetime(2026, 7, 21, 14, 0, tzinfo=UTC)],
             net_cost=-0.02,
             currency='GBP',
             shared_cluster=False,
             core_seconds=None,
             spot_core_seconds=None,
             machine_families=[],
+            cluster_instances=[],
         )
         assert u.net_cost < 0
 
@@ -124,12 +132,14 @@ class TestStepUsage:
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
             billed_hours=1,
+            billed_hour_buckets=[datetime(2026, 7, 21, 14, 0, tzinfo=UTC)],
             net_cost=0.01,
             currency='GBP',
             shared_cluster=False,
             core_seconds=None,
             spot_core_seconds=None,
             machine_families=[],
+            cluster_instances=[],
         )
         assert u.core_seconds is None
         assert u.spot_core_seconds is None
@@ -145,12 +155,14 @@ class TestStepUsage:
             started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
             ended=datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
             billed_hours=1,
+            billed_hour_buckets=[datetime(2026, 7, 21, 14, 0, tzinfo=UTC)],
             net_cost=0.01,
             currency='GBP',
             shared_cluster=False,
             core_seconds=3600.0,
             spot_core_seconds=0.0,
             machine_families=['N1'],
+            cluster_instances=[],
         )
         assert u.core_seconds == 3600.0
         assert u.spot_core_seconds == 0.0
@@ -400,10 +412,25 @@ class TestAggregate:
         """`COUNT(*)` would count rows (several SKUs per hour); this counts distinct hours.
 
         That distinction is the whole feature: a step billed across several SKUs in one
-        hour must still report 1, not one per SKU.
+        hour must still report 1, not one per SKU. `billed_hour` is defined once, in the
+        `labelled` CTE, and read here rather than re-truncated -- see the next test.
         """
-        assert _aggregate_expressions(_AGGREGATE)['billed_hours'] == (
-            'COUNT(DISTINCT TIMESTAMP_TRUNC(usage_start_time, HOUR))'
+        assert _aggregate_expressions(_AGGREGATE)['billed_hours'] == 'COUNT(DISTINCT billed_hour)'
+
+    def test_billed_hour_is_truncated_once_in_the_cte_not_rederived_in_the_aggregate(self) -> None:
+        """`billed_hours` and `billed_hour_buckets` must agree on what an hour bucket is.
+
+        Both read the same `billed_hour` column rather than each calling
+        `TIMESTAMP_TRUNC(usage_start_time, HOUR)` on their own -- two independent
+        truncations could in principle drift, and could not be told apart from a
+        genuine measurement drifting.
+        """
+        assert 'TIMESTAMP_TRUNC(usage_start_time, HOUR) AS billed_hour' in _LABELLED_CTE
+
+    def test_billed_hour_buckets_is_the_distinct_ordered_array(self) -> None:
+        """The array form `compute.py` needs to union hours across a step's several rows."""
+        assert _aggregate_expressions(_AGGREGATE)['billed_hour_buckets'] == (
+            'ARRAY_AGG(DISTINCT billed_hour ORDER BY billed_hour)'
         )
 
     def test_core_seconds_is_null_not_zero_when_the_step_billed_no_core_sku(self) -> None:
@@ -425,6 +452,12 @@ class TestAggregate:
     def test_machine_families_are_deduplicated_ordered_and_drop_the_non_core_nulls(self) -> None:
         assert _aggregate_expressions(_AGGREGATE)['machine_families'] == (
             'ARRAY_AGG(DISTINCT machine_family IGNORE NULLS ORDER BY machine_family)'
+        )
+
+    def test_cluster_instances_are_deduplicated_ordered_and_drop_the_gce_nulls(self) -> None:
+        """A GCE step billed no `goog-dataproc-cluster-uuid` label; it must not become `[NULL]`."""
+        assert _aggregate_expressions(_AGGREGATE)['cluster_instances'] == (
+            'ARRAY_AGG(DISTINCT cluster_instance IGNORE NULLS ORDER BY cluster_instance)'
         )
 
     def test_product_is_grouped(self) -> None:
@@ -713,12 +746,14 @@ def _row(**kw: object) -> SimpleNamespace:
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
         'billed_hours': 2,
+        'billed_hour_buckets': [datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 21, 15, 0, tzinfo=UTC)],
         'net_cost': 1.5,
         'currency': 'GBP',
         'shared_cluster': False,
         'core_seconds': 7200.0,
         'spot_core_seconds': 0.0,
         'machine_families': ['N1'],
+        'cluster_instances': [],
     }
     base.update(kw)
     return SimpleNamespace(**base)
@@ -778,6 +813,20 @@ class TestBillingExport:
         result = export.run_usage(run='r', since=date(2026, 5, 1))
         assert result[0].machine_families == ['N1']
         assert isinstance(result[0].machine_families, list)
+
+    def test_cluster_instances_from_the_row_become_a_plain_list(self) -> None:
+        row = _row(cluster_instances=('5b71ec48',))
+        export = BillingExport(client=_client([row]), table=TABLE)
+        result = export.run_usage(run='r', since=date(2026, 5, 1))
+        assert result[0].cluster_instances == ['5b71ec48']
+        assert isinstance(result[0].cluster_instances, list)
+
+    def test_billed_hour_buckets_from_the_row_become_a_plain_list(self) -> None:
+        row = _row(billed_hour_buckets=(datetime(2026, 7, 21, 14, 0, tzinfo=UTC),))
+        export = BillingExport(client=_client([row]), table=TABLE)
+        result = export.run_usage(run='r', since=date(2026, 5, 1))
+        assert result[0].billed_hour_buckets == [datetime(2026, 7, 21, 14, 0, tzinfo=UTC)]
+        assert isinstance(result[0].billed_hour_buckets, list)
 
     def test_step_history_uses_the_history_query(self) -> None:
         client = _client([_row(run='older-run')])
