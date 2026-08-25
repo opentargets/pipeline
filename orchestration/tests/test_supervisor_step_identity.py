@@ -122,15 +122,28 @@ class TestAgainstTheRealConfigs:
             stage: yaml.safe_load((REPO / stage / 'config.yaml').read_text()).get('steps', {})
             for stage in ('pis', 'pts')
         }
-        unresolved = []
+        resolved, unresolved = [], []
         for step in up['steps']:
             ident = identify(step)
             if ident.stage not in configs:
                 continue
-            if ident.config_key not in configs[ident.stage]:
+            if ident.config_key in configs[ident.stage]:
+                resolved.append(step)
+            else:
                 unresolved.append(step)
-        assert unresolved == ['pis_enhancer_to_gene'], (
-            'pis_enhancer_to_gene is a known stale entry in unified_pipeline.yaml — it has no '
-            'enhancer_to_gene step in pis/config.yaml, and gentropy_enhancer_to_gene is declared '
-            'separately. Any OTHER unresolved step means the mapping is wrong.'
+
+        assert set(unresolved) <= {'pis_enhancer_to_gene'}, (
+            f'unresolved steps: {sorted(unresolved)}. Any unresolved step other than '
+            'pis_enhancer_to_gene means the mapping is wrong. That one is a known stale entry: it '
+            'has no enhancer_to_gene step in pis/config.yaml, and gentropy_enhancer_to_gene is '
+            'declared separately. Asserted as a subset rather than pinned as a list because '
+            'removing the stale entry is the desired outcome, not a regression — a pinned list '
+            'would fail on the very commit that fixes it.'
+        )
+        assert len(resolved) > 100, (
+            f'only {len(resolved)} step(s) resolved to a config key. The assertion above passes '
+            'vacuously if nothing reaches the mapping at all: an identify() returning a stage '
+            'outside `configs` for every step would `continue` past all of them and leave both '
+            'lists empty. This floor is what stops that from reading as success. It is a floor '
+            'rather than a pinned count so adding a step to the pipeline does not fail it.'
         )
