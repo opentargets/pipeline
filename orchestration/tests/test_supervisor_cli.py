@@ -20,6 +20,7 @@ from orchestration.supervisor.cli import (
     render_compute,
     render_coverage,
     render_diff,
+    render_journal,
     render_table,
     totals_by_group,
 )
@@ -1987,3 +1988,100 @@ class TestObserveCommand:
             'that finds something to say fails to say it — and the healthy state of this '
             'tool is silence, so nothing would look wrong.'
         )
+
+
+class TestRenderJournal:
+    """The journal is the durable record, so reading it must not mislead about absence."""
+
+    def _completion(self, step: str, duration: float, try_number: int = 1) -> JournalEvent:
+        return JournalEvent(event_type='step_completed', step=step, try_number=try_number,
+                            map_index=-1, at=datetime(2026, 8, 25, 11, 10, tzinfo=UTC),
+                            payload={'duration': duration, 'ref': f'{step}.run_{step}'})
+
+    def test_an_empty_journal_says_so_and_names_the_prefix_it_read(self) -> None:
+        """An empty read must never look like a run where nothing happened.
+
+        The two are indistinguishable from the events alone, and the likeliest cause is
+        a wrong `--run`, so the prefix and the cleaned-label warning both have to be
+        present exactly when there is nothing else to show.
+        """
+        out = render_journal([], prefix='_agent/unified_pipeline/r/journal')
+        assert 'No events.' in out
+        assert '_agent/unified_pipeline/r/journal' in out
+        assert 'cleaned label form' in out
+
+    def test_a_duration_is_rendered_for_humans_not_as_stored_seconds(self) -> None:
+        out = render_journal([self._completion('pis_chembl', 306.974283)])
+        assert '5m07s' in out
+        assert '306.974283' not in out
+
+    def test_hidden_heartbeats_are_counted_rather_than_silently_dropped(self) -> None:
+        """Filtering them out of the view must not make the liveness record vanish."""
+        latest = datetime(2026, 8, 25, 11, 20, tzinfo=UTC)
+        out = render_journal([self._completion('pis_go', 97.0)], hidden_heartbeats=240,
+                             latest_heartbeat=latest)
+        assert '240 heartbeat(s) hidden' in out
+        assert '11:20:00' in out
+
+    def test_no_heartbeat_at_all_is_called_out(self) -> None:
+        """Zero heartbeats means the observer never ran, or --run names the wrong prefix.
+
+        Absent is not zero: rendering nothing here would let a journal the observer never
+        touched read exactly like a healthy one.
+        """
+        out = render_journal([self._completion('pis_go', 97.0)])
+        assert 'No heartbeat in this journal' in out
+
+    def test_a_finished_run_explains_why_its_heartbeat_is_stale(self) -> None:
+        """`observe` stops journalling heartbeats at a terminal state, by design.
+
+        So the newest heartbeat on a finished run is always older than its newest event.
+        Unexplained, that gap appears at exactly the moment a reader is looking for
+        trouble, and reads as an observer that died mid-run.
+        """
+        latest = datetime(2026, 8, 25, 11, 20, tzinfo=UTC)
+        out = render_journal([self._completion('pts_target', 295.0)], hidden_heartbeats=3,
+                             latest_heartbeat=latest, run_finished=True)
+        assert 'heartbeats stop there by design' in out
+
+    def test_a_still_running_run_gets_no_such_reassurance(self) -> None:
+        """The same gap on a live run is exactly what the heartbeat exists to expose."""
+        latest = datetime(2026, 8, 25, 11, 20, tzinfo=UTC)
+        out = render_journal([self._completion('pts_target', 295.0)], hidden_heartbeats=3,
+                             latest_heartbeat=latest, run_finished=False)
+        assert 'by design' not in out
+
+    def test_a_retried_step_is_marked_and_a_first_attempt_is_not(self) -> None:
+        """max_tries is 0 here, so attempt 1 is universal and saying so on every line is noise."""
+        assert '(try 2)' in render_journal([self._completion('pts_disease', 10.0, try_number=2)])
+        assert '(try' not in render_journal([self._completion('pts_disease', 10.0, try_number=1)])
+
+    def test_a_run_level_event_renders_a_dash_not_an_empty_column(self) -> None:
+        """So "about the run" is distinguishable from a column that failed to render."""
+        event = JournalEvent(event_type='run_finished', at=datetime(2026, 8, 25, 11, 30, tzinfo=UTC),
+                             payload={'state': 'success'})
+        out = render_journal([event])
+        assert 'run_finished' in out
+        assert 'state=success' in out
+
+
+class TestJournalCommandParsing:
+    def test_run_is_required(self) -> None:
+        """Without it the command would read some default prefix and report an empty journal."""
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(['journal'])
+
+    def test_heartbeats_are_hidden_unless_asked_for(self) -> None:
+        args = build_parser().parse_args(['journal', '--run', RAW_RUN_ID])
+        assert args.heartbeats is False
+        assert args.journal_bucket == GCS_PIPELINE_RUNS_BUCKET_NAME
+        assert args.dag == 'unified_pipeline'
+
+    def test_the_filters_parse(self) -> None:
+        args = build_parser().parse_args(
+            ['journal', '--run', RAW_RUN_ID, '--step', 'pts_target', '--type', 'step_', '--heartbeats', '--json']
+        )
+        assert args.step == 'pts_target'
+        assert args.event_type == 'step_'
+        assert args.heartbeats is True
+        assert args.json is True

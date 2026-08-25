@@ -36,7 +36,7 @@ plainly rather than left as an absent section, which would read as the compariso
 never having run at all."""
 
 
-def _format_duration(seconds: float) -> str:
+def format_duration(seconds: float) -> str:
     """Render a duration for a human, in the coarsest unit that keeps it readable.
 
     Existing renderers in this package (`snapshot.render_snapshot`) show stall
@@ -238,8 +238,8 @@ def _render_stalled(stalls: list[StepStall]) -> str:
     """
     lines = ['**Stalled**']
     for stall in stalls:
-        elapsed = _format_duration(stall.elapsed)
-        threshold = _format_duration(stall.threshold)
+        elapsed = format_duration(stall.elapsed)
+        threshold = format_duration(stall.threshold)
         identity = _identify(stall.ref, stall.step, stall.map_index)
         if stall.basis == 'history':
             note = (
@@ -272,7 +272,7 @@ def _render_completed(completions: list[StepCompletion]) -> str:
     lines = ['**Completed**']
     lines.extend(
         f'- {_identify(c.ref, c.step, c.map_index)} finished in '
-        f'{_format_duration(c.duration)}{_repeat_note(c.try_number)}'
+        f'{format_duration(c.duration)}{_repeat_note(c.try_number)}'
         for c in completions
     )
     return '\n'.join(lines)

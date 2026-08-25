@@ -83,9 +83,9 @@ from orchestration.supervisor.datasets import run_name, stage_configs, unified_p
 from orchestration.supervisor.diff import DatasetDiff, human_bytes, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
 from orchestration.supervisor.github import GitHubApp, read_app_key
-from orchestration.supervisor.journal import Journal, JournalEvent, heartbeat_event
+from orchestration.supervisor.journal import Journal, JournalEvent, heartbeat_event, is_heartbeat
 from orchestration.supervisor.observer import Observation, observe
-from orchestration.supervisor.report import render_comment
+from orchestration.supervisor.report import format_duration, render_comment
 from orchestration.supervisor.snapshot import render_snapshot, take_snapshot
 from orchestration.supervisor.usage import (
     BillingExport,
@@ -850,6 +850,129 @@ def render_diff(diffs: list[DatasetDiff], skipped: Skipped, threshold: float, ro
     return '\n'.join(lines + footer)
 
 
+_JOURNAL_PAYLOAD_WIDTH = 60
+"""How much of an event's payload one line shows before it is elided.
+
+The journal is the durable record, so the full payload is always one `--json` away.
+This is the reading view: a payload that wraps the terminal costs more legibility than
+the elided characters were worth."""
+
+
+def _payload_summary(event: JournalEvent) -> str:
+    """Render an event's payload as one short line.
+
+    `duration` is formatted rather than printed raw because it is the field this whole
+    record exists to preserve, and the one a reader is most often here for — seconds to
+    four decimal places is the storage format, not a reading format. Everything else is
+    shown as `key=value`, sorted, so two events of the same type line up.
+
+    Args:
+        event: The event whose payload to summarise.
+
+    Returns:
+        The summary, elided at `_JOURNAL_PAYLOAD_WIDTH`, or `''` for an empty payload.
+    """
+    parts = []
+    for key in sorted(event.payload):
+        value = event.payload[key]
+        if key == 'duration' and isinstance(value, (int, float)):
+            parts.append(format_duration(float(value)))
+        else:
+            parts.append(f'{key}={value}')
+    summary = '  '.join(parts)
+    if len(summary) > _JOURNAL_PAYLOAD_WIDTH:
+        return summary[: _JOURNAL_PAYLOAD_WIDTH - 1] + '…'
+    return summary
+
+
+def _journal_identity(event: JournalEvent) -> str:
+    """Render which step and attempt an event belongs to.
+
+    Run-level events (`observation_started`, `run_finished`, heartbeats) carry no step,
+    and are shown with a dash rather than an empty column so a reader can tell "this
+    event is about the run" from "this column failed to render". `try_number` is shown
+    only above 1, matching `report._repeat_note`: `max_tries` is 0 throughout this
+    pipeline, so attempt 1 is the universal case and saying so on every line is noise,
+    while attempt 2 means a human cleared and re-ran the step.
+
+    Args:
+        event: The event.
+
+    Returns:
+        The step name, qualified with a shard index and attempt where those say
+        something, or `-` for a run-level event.
+    """
+    if event.step is None:
+        return '-'
+    label = event.step if event.map_index in (None, -1) else f'{event.step}[{event.map_index}]'
+    return label if event.try_number is None or event.try_number <= 1 else f'{label} (try {event.try_number})'
+
+
+def render_journal(events: list[JournalEvent], hidden_heartbeats: int = 0,
+                   latest_heartbeat: datetime | None = None, prefix: str = '',
+                   run_finished: bool = False) -> str:
+    """Render a run's journal as one line per event, oldest first.
+
+    Args:
+        events: The events to show, already filtered and in chronological order.
+        hidden_heartbeats: How many heartbeats were filtered out of `events`.
+        latest_heartbeat: When the most recent heartbeat was written, whether or not it
+            is in `events`.
+        prefix: The GCS prefix that was read, named in the output so an empty result can
+            be told apart from a wrong prefix.
+        run_finished: Whether the journal records the run reaching a terminal state.
+            Changes what a stale heartbeat means, which is why it is worth a parameter:
+            `observe` deliberately stops journalling heartbeats once the run is terminal
+            (see this module's docstring), so the newest heartbeat on a finished run is
+            always older than its last event. Without saying so, this report would show
+            a heartbeat gap at the exact moment a reader is looking for trouble and let
+            them read a healthy, finished run as an observer that died mid-run.
+
+    Returns:
+        The rendered journal.
+    """
+    lines = []
+    if events:
+        width = max(len(event.event_type) for event in events)
+        identity_width = max(len(_journal_identity(event)) for event in events)
+        for event in events:
+            identity = _journal_identity(event).ljust(identity_width)
+            payload = _payload_summary(event)
+            stamp = f'{event.at:%Y-%m-%d %H:%M:%S}'
+            lines.append(f'{stamp}  {event.event_type.ljust(width)}  {identity}  {payload}'.rstrip())
+    else:
+        lines.append('No events.')
+
+    footer = ['']
+    if hidden_heartbeats:
+        latest = f', latest {latest_heartbeat:%Y-%m-%d %H:%M:%S} UTC' if latest_heartbeat else ''
+        footer.append(
+            f"{hidden_heartbeats} heartbeat(s) hidden{latest}. They are the observer's liveness "
+            f'record, not run news: one is written every wakeup whether or not anything happened, '
+            f'so a long run has hundreds. Pass --heartbeats to show them.'
+        )
+    elif latest_heartbeat is not None:
+        footer.append(f'Latest heartbeat {latest_heartbeat:%Y-%m-%d %H:%M:%S} UTC.')
+    else:
+        footer.append(
+            'No heartbeat in this journal. Either the observer never ran for this run, or '
+            '--run does not name the prefix it wrote to.'
+        )
+
+    if run_finished and latest_heartbeat is not None:
+        footer.append(
+            'The run reached a terminal state, so heartbeats stop there by design — the newest one '
+            'being older than the newest event is expected here, not a sign the observer died.'
+        )
+
+    footer.append(f'Read from {prefix} — times are UTC, as the observer recorded them.')
+    footer.append(
+        'If --run was given in its cleaned label form (as usage/history print it) rather than the '
+        'raw Airflow run id, this is the wrong prefix and will always read empty — pass the raw id.'
+    )
+    return '\n'.join(lines + footer)
+
+
 def _observation_events(observation: Observation, at: datetime) -> list[JournalEvent]:
     """Build the journal events one wakeup's `Observation` implies.
 
@@ -940,6 +1063,20 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
     snapshot.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET_NAME, help="the run's journal bucket")
     snapshot.add_argument('--json', action='store_true', help='emit JSON instead of text')
+
+    journal = sub.add_parser('journal', help="read a run's journal, the durable record of what happened")
+    journal.add_argument('--run', required=True, help='the raw Airflow DAG run id, NOT its cleaned label form')
+    journal.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
+    journal.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET_NAME, help="the run's journal bucket")
+    journal.add_argument('--step', help='show only events for this step')
+    journal.add_argument('--type', dest='event_type', help='show only events whose type starts with this')
+    journal.add_argument(
+        '--heartbeats',
+        action='store_true',
+        help='include heartbeats, which are hidden by default: one is written every wakeup whether '
+        'or not anything happened, so a long run has hundreds and they bury the run news',
+    )
+    journal.add_argument('--json', action='store_true', help='emit JSON instead of text')
 
     diff = sub.add_parser('diff', help="compare a run's datasets against a reference release")
     diff.add_argument('--run', required=True, help='the run name, a prefix in the runs bucket')
@@ -1101,6 +1238,30 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(snapshot.model_dump_json(indent=2) + '\n')
             else:
                 sys.stdout.write(render_snapshot(snapshot) + '\n')
+            return 0
+        elif args.command == 'journal':
+            prefix = f'_agent/{args.dag}/{args.run}/journal'
+            bucket = storage.Client().bucket(args.journal_bucket)
+            events = Journal(bucket=bucket, prefix=prefix).read()
+
+            heartbeats = [event for event in events if is_heartbeat(event)]
+            latest_heartbeat = heartbeats[-1].at if heartbeats else None
+
+            shown = events if args.heartbeats else [event for event in events if not is_heartbeat(event)]
+            hidden = len(events) - len(shown)
+            if args.step:
+                shown = [event for event in shown if event.step == args.step]
+            if args.event_type:
+                shown = [event for event in shown if event.event_type.startswith(args.event_type)]
+
+            if args.json:
+                payload = [event.model_dump(mode='json') for event in shown]
+                sys.stdout.write(json.dumps(payload, indent=2) + '\n')
+            else:
+                finished = any(event.event_type == 'run_finished' for event in events)
+                sys.stdout.write(
+                    render_journal(shown, hidden, latest_heartbeat, prefix, finished) + '\n'
+                )
             return 0
         elif args.command == 'diff':
             storage_client = storage.Client()
