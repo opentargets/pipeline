@@ -26,7 +26,11 @@ run_name: "do/platform-2608-2"
 # Artifact Registry before being set here.
 pis_version: "26.9.0rc12"
 pts_version: "26.9.0rc23"
-gentropy_version: "3.3.0-rc.1"
+# No leading `v` here: this value is used both ways and each consumer adds what it
+# needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
+# while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
+# gentropy:v3.4.0-dev.7` is a 404 while `:3.4.0-dev.7` resolves.
+gentropy_version: "3.4.0-dev.7"
 # Built by opentargets/vep-image; the tag here must match a release there AND an
 # image tag in the `vep` Artifact Registry repo, which are published separately.
 # https://github.com/opentargets/vep-image/releases/tag/release_116.1
