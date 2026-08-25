@@ -142,7 +142,7 @@ class TestComputeNoveltyRegression:
         filled rows carry NULL — so the sum equals the input total. If a future
         refactor populates yearlyEvidenceCount on filled rows, this expectation
         would change and that change should be intentional.
-        """  # noqa: D403
+        """
         rows = self.association.compute_novelty().collect()
         by_key = {(r.targetId, r.diseaseId): r for r in rows}
         # Group A: one row with yearlyEvidenceCount=1

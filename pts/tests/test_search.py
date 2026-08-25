@@ -803,7 +803,7 @@ def test_build_drug_index_nct_ids_appear_in_keywords(spark):
 
 
 def test_build_drug_index_child_chembl_ids_appear_in_terms_not_keywords(spark):
-    """childChemblIds belong in terms (low-priority) not keywords (top-hit ranked)."""  # noqa: D403
+    """childChemblIds belong in terms (low-priority) not keywords (top-hit ranked)."""
     drugs = spark.createDataFrame(
         [
             Row(
