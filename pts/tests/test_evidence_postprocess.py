@@ -278,7 +278,7 @@ class TestResolveEvidenceDate:
         assert isinstance(self.evidence_with_dates.resolve_evidence_date(), Evidence)
 
     def test_column_added(self: TestResolveEvidenceDate) -> None:
-        """evidenceDate column is added to the DataFrame."""  # noqa: D403
+        """evidenceDate column is added to the DataFrame."""
         assert 'evidenceDate' in self.evidence_with_dates.resolve_evidence_date().df.columns
 
     def test_all_dates_present_picks_minimum(self: TestResolveEvidenceDate) -> None:

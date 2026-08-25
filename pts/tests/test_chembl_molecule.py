@@ -124,7 +124,7 @@ def _process(t: dict, aact_batch: pl.DataFrame | None = None) -> pl.DataFrame:
 
 class TestMoleculePreprocess:
     def test_molblock_truncated_and_sdf_tags_stripped(self):
-        """molblock is the source molfile truncated at `M  END`, SDF tags dropped."""  # noqa: D403
+        """molblock is the source molfile truncated at `M  END`, SDF tags dropped."""
         t = tables()
         result = _preprocess(t, drugbank())
         molblock = rows_by_id(result)['CHEMBL1']['molblock']
@@ -133,7 +133,7 @@ class TestMoleculePreprocess:
         assert '$$$$' not in molblock
 
     def test_molblock_null_when_no_compound_structure(self):
-        """molblock is null when the molecule has no compound_structures row."""  # noqa: D403
+        """molblock is null when the molecule has no compound_structures row."""
         t = tables()
         result = _preprocess(t, drugbank())
         assert rows_by_id(result)['CHEMBL2']['molblock'] is None
@@ -145,7 +145,7 @@ class TestMoleculePreprocess:
         assert rows_by_id(result)['CHEMBL4']['molblock'] == MOLFILE_NO_TERMINATOR
 
     def test_molblock_is_string_column(self):
-        """molblock is exposed as a string column."""  # noqa: D403
+        """molblock is exposed as a string column."""
         t = tables()
         result = _preprocess(t, drugbank())
         assert result.schema['molblock'] == pl.Utf8
