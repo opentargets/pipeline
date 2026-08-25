@@ -7,19 +7,19 @@ from functools import lru_cache
 import pdfplumber
 import polars as pl
 import torch
-from clinical_mining.data_sources.aact import extract_clinical_report as extract_aact_clinical_report
-from clinical_mining.data_sources.aact.llm_extractor import parse_batch_results
-from clinical_mining.data_sources.chembl.drug_warnings import (
+from clinical_mining.dataset import ClinicalReport
+from clinical_mining.provider.aact import extract_clinical_report as extract_aact_clinical_report
+from clinical_mining.provider.aact.llm_extractor import parse_batch_results
+from clinical_mining.provider.chembl.drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
-from clinical_mining.data_sources.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
-from clinical_mining.data_sources.ema import extract_clinical_report as extract_ema_clinical_report
-from clinical_mining.data_sources.pmda import extract_clinical_report as extract_pmda_clinical_report
-from clinical_mining.data_sources.pmda import parse_pmda_approvals
-from clinical_mining.data_sources.ttd import extract_clinical_report as extract_ttd_clinical_report
-from clinical_mining.data_sources.ttd import extract_indication as extract_ttd_indication
-from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalSource, ClinicalStageCategory
+from clinical_mining.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
+from clinical_mining.provider.ema import extract_clinical_report as extract_ema_clinical_report
+from clinical_mining.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
+from clinical_mining.provider.pmda import parse_pmda_approvals
+from clinical_mining.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
+from clinical_mining.provider.ttd import extract_indication as extract_ttd_indication
+from clinical_mining.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
@@ -73,7 +73,6 @@ AACT_TABLES = {
 }
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
-"""``pmid`` is collected into the published ``literature`` array."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -82,6 +81,7 @@ class ClinicalReportFlags(StrEnum):
     INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
     NO_DISEASE = 'NO_DISEASE'
     NO_DRUGS = 'NO_DRUGS'
+    SAFETY_REPORT = 'SAFETY_REPORT'
 
 
 def clinical_report(
@@ -131,11 +131,6 @@ def clinical_report(
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
-    llm_indications = llm_batch_results.select(
-        'id',
-        pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug').unique()).alias('drugs'),
-        pl.col('primary_indications').list.eval(pl.element().struct.field('name').unique()).alias('diseases'),
-    )
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -146,8 +141,15 @@ def clinical_report(
         interventions=aact_interventions,
         conditions=aact_conditions,
         additional_metadata=[aact_study_references, aact_designs, aact_summaries],
-        aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
-        llm_extraction_df=llm_indications,
+        aggregation_specs={
+            'study_references': {
+                'group_by': 'nct_id',
+                'alias': 'literature',
+                'struct': {'id': 'pmid', 'type': 'reference_type'},
+                'agg': 'unique',
+            }
+        },
+        llm_extractions=llm_batch_results.df,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
     if aact_stop_reasons.height > 0:
@@ -206,8 +208,9 @@ def clinical_report(
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
+        .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.select('id', 'drug_intent'))
+        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.df.select('id', 'drug_intent'))
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
@@ -489,7 +492,7 @@ def flag_indirect_primary_purpose(
         reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
         llm_drug_intent_condition = (
             # Flagging should only act on AACT reports
-            (pl.col('source') == ClinicalSource.AACT.value) &
+            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value) &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
             # or when LLM was not able to infer the intent (null)
             ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())
@@ -529,6 +532,17 @@ def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
             df=reports.df,
             flag_condition=pl.col('drugs').is_null(),
             flag_text=ClinicalReportFlags.NO_DRUGS.value,
+        )
+    )
+
+
+def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
+    """Flag SAFETY-type reports (clinical_mining#57, informational, not a failure)."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=pl.col('type').eq(ClinicalReportType.SAFETY.value),
+            flag_text=ClinicalReportFlags.SAFETY_REPORT.value,
         )
     )
 

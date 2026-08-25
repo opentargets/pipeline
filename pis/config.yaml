@@ -4,16 +4,16 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-08-01'
+  aact_version: '2026-08-25'
   chembl_version: '37'
-  efo_version: '3.88.0'
-  ensembl_version: '115'
-  gencode_version: '49'
+  efo_version: '3.93.0'
+  ensembl_version: '116'
+  gencode_version: '50'
   depmap_version: '2026Q1'
-  hpo_version: '2026-02-16'
-  mondo_version: '2026-05-05'
-  ot_curation: '26.05'
-  probes_drugs_version: '02_2025'
+  hpo_version: '2026-06-23'
+  mondo_version: '2026-08-04'
+  ot_curation: '26.08'
+  probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
   gtex_version: '11'
 
@@ -372,6 +372,10 @@ steps:
       source: https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs41588-026-02553-7/MediaObjects/41588_2026_2553_MOESM4_ESM.xlsx
       destination: input/evidence/gene_burden/genes_health.xlsx
 
+    - name: copy gene_burden brava
+      source: https://www.medrxiv.org/content/medrxiv/early/2026/05/24/2026.05.21.26353759/DC2/embed/media-2.xlsx
+      destination: input/evidence/gene_burden/brava.xlsx
+
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
       do:
@@ -693,13 +697,34 @@ steps:
 
   #: MOLQTL STEP: ##################################################################################
   molqtl:
-    - name: copy_many eQTL Catalogue study
-      sources: gs://eqtl_catalogue_data/study_index/*.parquet
-      destination: input/molqtl/study/eqtl_catalogue
+    - name: explode otar2077 molqtl
+      foreach:
+        - MAGE_OTAR
+        - IBDverse
+      do:
+        - name: copy_many molqtl ${each} study
+          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
+          destination: input/molqtl/study/otar2077/${each}
 
-    - name: copy_many eQTL Catalogue credible sets
+        - name: copy_many molqtl ${each} credible sets
+          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_locus/*/*.parquet
+          destination: input/molqtl/credible_set/otar2077/${each}
+
+    - name: copy_many molqtl eQTL Catalogue GTEx v10 study
+      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_index/*/*.parquet
+      destination: input/molqtl/study/GTEx_v10
+
+    - name: copy_many molqtl eQTL Catalogue GTEx v10 credible sets
+      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_locus/*/*.parquet
+      destination: input/molqtl/credible_set/GTEx_v10
+
+    - name: copy_many eQTL Catalogue r7 study
+      sources: gs://eqtl_catalogue_data/study_index/*.parquet
+      destination: input/molqtl/study/eqtl_catalogue/r7
+
+    - name: copy_many eQTL Catalogue r7 credible sets
       sources: gs://eqtl_catalogue_data/credible_set_datasets/eqtl_catalogue_susie_patched_v2/*.parquet
-      destination: input/molqtl/credible_set/eqtl_catalogue
+      destination: input/molqtl/credible_set/eqtl_catalogue/r7
 
     - name: copy_many UKBB PPP EUR study
       sources: gs://ukb_ppp_eur_data/study_index/*.parquet
@@ -715,8 +740,7 @@ steps:
     - name: explode otar2077 molqtl
       foreach:
         - microglia
-        - MAGE_OTAR
-        - IBDverse
+
       do:
         - name: copy_many molqtl ${each} study
           sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
@@ -739,13 +763,13 @@ steps:
           sources: gs://eqtlgen_data/${each}/260326/credible_set/*.parquet
           destination: input/molqtl/credible_set/eQTLGen/${each}
 
-    - name: copy_many molqtl eQTL Catalogue GTEx v10 study
-      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_index/*/*.parquet
-      destination: input/molqtl/study/GTEx_v10
+    - name: copy_many eQTL Catalogue r8 study
+      sources: gs://eqtl_catalogue_data/r8/study_index/*.parquet
+      destination: input/molqtl/study/eqtl_catalogue/r8
 
-    - name: copy_many molqtl eQTL Catalogue GTEx v10 credible sets
-      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_locus/*/*.parquet
-      destination: input/molqtl/credible_set/GTEx_v10
+    - name: copy_many eQTL Catalogue r8 credible sets
+      sources: gs://eqtl_catalogue_data/r8/credible_set/*.parquet
+      destination: input/molqtl/credible_set/eqtl_catalogue/r8
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from clinical_mining.data_sources.aact.llm_extractor import parse_batch_results
+from clinical_mining.provider.aact.llm_extractor import parse_batch_results
 from loguru import logger
 from otter.config.model import Config
 
@@ -58,7 +58,7 @@ def chembl_molecule(
     aact_batch = None
     if 'aact_extraction_batch_results' in source:
         logger.info(f'Reading AACT batch results from {source["aact_extraction_batch_results"]}')
-        aact_batch = parse_batch_results(str(source['aact_extraction_batch_results']))
+        aact_batch = parse_batch_results(str(source['aact_extraction_batch_results'])).df
 
     logger.info('Processing molecules')
     output_df = process_molecules(
@@ -91,7 +91,7 @@ def process_molecules(
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
         aact_batch: (optional) Parsed AACT batch extractions, as returned by
-            :func:`clinical_mining.data_sources.aact.llm_extractor.parse_batch_results`.
+            :func:`clinical_mining.provider.aact.llm_extractor.parse_batch_results`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.

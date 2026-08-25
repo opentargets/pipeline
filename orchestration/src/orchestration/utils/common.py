@@ -16,6 +16,7 @@ GCP_PROJECT_GENETICS = 'open-targets-genetics-dev'
 GCP_SERVICE_ACCOUNT = 'up-airflow-dev@open-targets-eu-dev.iam.gserviceaccount.com'
 GCP_REGION = 'europe-west1'
 GCP_ZONE = 'europe-west1-d'
+GCS_PIPELINE_RUNS_BUCKET = 'gs://open-targets-pipeline-runs'
 
 GCP_BILLING_EXPORT_TABLE = (
     'open-targets-eu-dev.billing_export.gcp_billing_export_resource_v1_0001BA_599363_94C6B1'

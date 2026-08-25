@@ -36,7 +36,10 @@ steps:
         - '{{release_uri}}/input/gwas/study/gcss_susie'
         - '{{release_uri}}/input/gwas/study/finngen'
         # molQTL
-        - '{{release_uri}}/input/molqtl/study/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/study/eqtl_catalogue/r7'
+        - '{{release_uri}}/input/molqtl/study/otar2077/MAGE_OTAR'
+        - '{{release_uri}}/input/molqtl/study/otar2077/IBDverse'
+        - '{{release_uri}}/input/molqtl/study/GTEx_v10'
         - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
       step.target_index_path: '{{release_uri}}/intermediate/target/ensembl'
       step.disease_index_path: '{{release_uri}}/output/disease'
@@ -45,6 +48,8 @@ steps:
       # OUTPUTS
       step.valid_study_index_path: '{{release_uri}}/output/study'
       step.invalid_study_index_path: '{{release_uri}}/excluded/study'
+      step.deprecated_project_ids:
+        - GTEx # GTEx v8 studies from eqtl Catalogue are swapped with newly ingested GTEX-v10
 
   credible_set:
     params:
@@ -77,7 +82,10 @@ steps:
         - '{{release_uri}}/input/gwas/credible_set/gcss_susie'
         - '{{release_uri}}/input/gwas/credible_set/finngen'
         # molQTL
-        - '{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue'
+        - '{{release_uri}}/input/molqtl/credible_set/eqtl_catalogue/r7'
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/MAGE_OTAR'
+        - '{{release_uri}}/input/molqtl/credible_set/otar2077/IBDverse'
+        - '{{release_uri}}/input/molqtl/credible_set/GTEx_v10'
         - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
       step.study_index_path: '{{release_uri}}/output/study'
       step.target_index_path: '{{release_uri}}/output/target'
@@ -120,7 +128,7 @@ steps:
   variant_annotation:
     cluster: false
     google_batch_index_specs:
-      pointer: "vep" # pointer to the vep manifest generator implementation.
+      pointer: 'vep' # pointer to the vep manifest generator implementation.
       max_task_count: 500 # Max number of tasks running in a single google batch job.
       generator_specs:
         generator_options:
@@ -186,7 +194,7 @@ steps:
     params:
       step: locus_to_gene_feature_matrix
       step.session.write_mode: overwrite
-      +step.session.extended_spark_conf: "{spark.sql.autoBroadcastJoinThreshold:'-1'}"
+      +step.session.extended_spark_conf: '{spark.sql.autoBroadcastJoinThreshold:''-1''}'
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
       step.variant_index_path: '{{release_uri}}/output/variant'
@@ -216,13 +224,13 @@ steps:
       step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
       # OUTPUTS
       step.model_path: '{{release_uri}}/etc/model/locus_to_gene_model/classifier.skops'
-      step.hf_credentials_path: "/var/run/secrets/hfhub-key"
-      step.wandb_credentials_path: "/var/run/secrets/wandb-key"
+      step.hf_credentials_path: '/var/run/secrets/hfhub-key'
+      step.wandb_credentials_path: '/var/run/secrets/wandb-key'
 
   l2g_prediction:
     cluster: false
     google_batch_index_specs:
-      pointer: "gentropy_step"
+      pointer: 'gentropy_step'
       max_task_count: 1000 # Number of tasks running in a single google batch job.
       generator_specs:
         generator_options:
@@ -245,7 +253,7 @@ steps:
                   HF_TOKEN:
                     secret_id: hfhub-key
             max_retry_count: 2
-            max_run_duration: "1h"
+            max_run_duration: '1h'
             instance_resource_spec:
               cpu_milli: 2000
               memory_mib: 7000

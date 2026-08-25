@@ -34,17 +34,21 @@
     "foreign_key": "drug_molecule/id"
   },
   {
-    "id": "hasExpertReview",
-    "description": "Flag indicating whether the clinical report has undergone expert review"
-  },
-  {
     "id": "id",
     "description": "Unique identifier for the clinical report",
     "isPrimaryKey": true
   },
   {
+    "id": "origin",
+    "description": "Nature of the record the report originates from (e.g. CLINICAL_TRIAL, DRUG_LABEL, REGULATORY_AGENCY, CURATED_RESOURCE)"
+  },
+  {
     "id": "phaseFromSource",
     "description": "Clinical phase as reported in the source"
+  },
+  {
+    "id": "provider",
+    "description": "Resource or organisation that distributes the data fetched from the primary source (e.g. AACT, ChEMBL, EMA, PMDA, TTD)"
   },
   {
     "id": "qualityControls",
@@ -78,6 +82,14 @@
   {
     "id": "trialLiterature",
     "description": "Literature references associated with the clinical trial"
+  },
+  {
+    "id": "trialLiterature/id",
+    "description": "PubMed identifier of the reference, when the source records one"
+  },
+  {
+    "id": "trialLiterature/type",
+    "description": "How the reference relates to the trial: RESULT and DERIVED report its outcome, BACKGROUND is literature its authors cited"
   },
   {
     "id": "trialNumberOfArms",
@@ -117,7 +129,7 @@
   },
   {
     "id": "type",
-    "description": "Type classification of the clinical report"
+    "description": "Kind of evidence the report describes: INDICATION for a drug/disease claim, SAFETY for a drug warning"
   },
   {
     "id": "url",
