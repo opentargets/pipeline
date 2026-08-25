@@ -135,10 +135,27 @@ _GITHUB_APP_KEY_NAME = 'supervisor-github-app-key'
 """Secret Manager id holding the App's PEM-encoded private key, in `GCP_PROJECT_PLATFORM`."""
 
 _GITHUB_INSTALLATION_ID = 156145657
-"""The App's installation on `_GITHUB_REPO`, verified 2026-08-24."""
+"""The App's installation on the `opentargets` org, verified 2026-08-25.
 
-_GITHUB_REPO = 'opentargets/pipeline'
-"""The only repository the App's installation covers."""
+One installation spans every repo it is granted, so this id does not change when
+`_GITHUB_REPO` does. `repository_selection` is `selected`, meaning the grant is
+per-repo and an org **owner** has to extend it — repo admin is not enough, and the
+attempt fails with a 403 that names the org rather than the repo.
+"""
+
+_GITHUB_REPO = 'opentargets/issues'
+"""The repository the observer comments on.
+
+**Not `opentargets/pipeline`.** That repo has issues disabled (`has_issues: false`),
+so it can host no run-tracking issue at all — `gh issue create` there fails outright.
+The mistake is easy to make because the pipeline's issue tracker *is* elsewhere: the
+org keeps one shared tracker at `opentargets/issues`, and that is where run issues
+live.
+
+Pull requests would have been the loophole, since GitHub's REST API treats a PR as an
+issue and `POST /issues/{n}/comments` works on one even when issues are disabled. That
+is deliberately not done here: a run's observations do not belong in a code review.
+"""
 
 _OBSERVE_TERMINAL_RUN_STATES = frozenset({'success', 'failed'})
 """Airflow DAG run states past which the run itself is over, one way or the other.

@@ -1981,4 +1981,9 @@ class TestObserveCommand:
         kwargs = observe_command.github_app_cls.call_args.kwargs
         assert kwargs['app_id'] == '4699938'
         assert kwargs['installation_id'] == 156145657
-        assert kwargs['repo'] == 'opentargets/pipeline'
+        assert kwargs['repo'] == 'opentargets/issues', (
+            'Comments go to opentargets/issues, not opentargets/pipeline. The pipeline '
+            'repo has issues disabled, so pointing the observer at it means every wakeup '
+            'that finds something to say fails to say it — and the healthy state of this '
+            'tool is silence, so nothing would look wrong.'
+        )
