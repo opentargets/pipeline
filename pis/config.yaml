@@ -4,16 +4,16 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-08-01'
+  aact_version: '2026-08-25'
   chembl_version: '37'
-  efo_version: '3.88.0'
-  ensembl_version: '115'
-  gencode_version: '49'
+  efo_version: '3.93.0'
+  ensembl_version: '116'
+  gencode_version: '50'
   depmap_version: '2026Q1'
-  hpo_version: '2026-02-16'
-  mondo_version: '2026-05-05'
-  ot_curation: '26.05'
-  probes_drugs_version: '02_2025'
+  hpo_version: '2026-06-23'
+  mondo_version: '2026-08-04'
+  ot_curation: '26.08'
+  probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
   gtex_version: '11'
 
