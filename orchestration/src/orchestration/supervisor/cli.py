@@ -54,15 +54,24 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Literal
 
 import requests
 from google.api_core.exceptions import GoogleAPICallError
 from google.auth.exceptions import DefaultCredentialsError
-from google.cloud import bigquery, secretmanager, storage
+from google.cloud import bigquery, dataproc_v1, secretmanager, storage
 
 from orchestration.supervisor.airflow import AirflowClient
+from orchestration.supervisor.compute import (
+    ClusterCompute,
+    StepCompute,
+    cluster_compute_report,
+    compute_report,
+    unresolved_job_count,
+)
+from orchestration.supervisor.dataproc import TERMINAL_JOB_STATES, job_executions
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import DatasetDiff, is_material
 from orchestration.supervisor.gcs import Skipped, collect_diffs, footer_reader
@@ -82,6 +91,7 @@ from orchestration.utils.common import (
     AIRFLOW_BASE_URL,
     BILLING_EXPORT_START,
     GCP_PROJECT_PLATFORM,
+    GCP_REGION,
     GCS_PIPELINE_RUNS_BUCKET,
     GCS_PRE_RELEASES_BUCKET,
     clean_label,
@@ -244,6 +254,21 @@ _IMPOSSIBLE_SHARE_FOOTER = [
     'report shows is not labelled as created by the pipeline. Treat the figure as wrong.',
 ]
 
+_EMPTY_COMPUTE = """No step joined any cost, execution or wall-time data for this run. It may not
+have billed yet, produced no Dataproc job, and never reached the journal -- or the run
+label may not match. Labels are lowercased with everything outside [a-z0-9-_] replaced
+by '-', and --run is normalised the same way, so check the normalised form: an Airflow
+run ID like manual__2026-07-21T15:07:47.545737+00:00 is stored as the label
+manual__2026-07-21t15-07-47-545737-00-00."""
+
+_WALL_UNAVAILABLE_FOOTER = [
+    'task wall time (queueing under cluster contention) is not shown: no step in this',
+    'report has one. That does not mean no step queued -- it means the measurement was',
+    "never taken. Wall time comes from the pipeline supervisor's journal, which only",
+    'exists for a run the observer watched; Airflow keeps no history of its own once the',
+    'VM that ran it is torn down. It arrives with the first run the observer watches.',
+]
+
 
 def _airflow_credentials() -> tuple[str, str]:
     """Read Airflow FAB credentials from the environment.
@@ -402,8 +427,10 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
     """
     if window is None:
         return (
-            'coverage: unknown. This run has billed nothing yet, so there is no window\n'
-            'over which to compare its labelled cost against total pipeline spend.'
+            'coverage: unknown. No billed usage was found at or after --since, so there is no\n'
+            'window over which to compare labelled cost against total pipeline spend. This may\n'
+            'mean the run has not billed yet, or that --since prunes the scan past when it did --\n'
+            'a --since narrower than the run produces exactly this, not a claim the run is free.'
         )
     period = f'{_stamp(window[0])} to {_stamp(window[1])} UTC'
     if not coverage:
@@ -419,6 +446,286 @@ def render_coverage(window: tuple[datetime, datetime] | None, coverage: list[Win
     blocks = [_COVERAGE_FOOTER]
     if any(entry.exceeds_pipeline_cost for entry in coverage):
         blocks.append(_IMPOSSIBLE_SHARE_FOOTER)
+    return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
+
+
+def _money(value: float | None) -> str:
+    return f'{value:.2f}' if value is not None else _MISSING
+
+
+def _hours(value: int | None) -> str:
+    return f'{value}h' if value is not None else _MISSING
+
+
+def _seconds(value: float | None) -> str:
+    return f'{value:,.0f}s' if value is not None else _MISSING
+
+
+def _core_hours(value: float | None) -> str:
+    return f'{value:.1f}' if value is not None else _MISSING
+
+
+def _share(value: float | None) -> str:
+    return f'{value:.0%}' if value is not None else _MISSING
+
+
+def _families(values: list[str]) -> str:
+    return ','.join(values) if values else _MISSING
+
+
+def _compute_sort_key(step: StepCompute) -> tuple[int, float, int, float, str]:
+    """Waste first, worst to least; steps this cannot be judged on sort after, by cost.
+
+    Sorting by cost puts the run's most expensive step first, which is not always the
+    step wasting the most cluster time and is not the number a reader can act on -- see
+    `compute.py`'s module docstring. A step with no `billed_execution_gap_seconds` (no
+    Dataproc job, or no billing) cannot be placed on that axis at all, so it sorts after
+    every step that can be, rather than at either extreme of a mixed ranking that would
+    misread a `None` as either the worst or the best case.
+    """
+    gap = step.billed_execution_gap_seconds
+    cost = step.net_cost
+    return (
+        0 if gap is not None else 1,
+        -(gap if gap is not None else 0.0),
+        0 if cost is not None else 1,
+        -(cost if cost is not None else 0.0),
+        step.step,
+    )
+
+
+def _compute_table_columns(
+    steps: list[StepCompute],
+) -> list[tuple[str, Callable[[StepCompute], str]]]:
+    """Which columns this result has to show, in table order, and how to render each cell.
+
+    `cost`/`billed`/`exec`/`waste` are always shown -- they are this report's whole
+    point. `ccy`/`shared`/`core-hrs`/`spot`/`machines`/`wall`/`queue-gap` are shown only
+    when at least one row carries a value for them; a column of nothing but `-` is noise,
+    and for `wall`/`queue-gap` specifically it is worse than noise -- see
+    `_WALL_UNAVAILABLE_FOOTER`, appended instead whenever this leaves them out.
+
+    Args:
+        steps: The rows to be rendered.
+
+    Returns:
+        `(header, cell)` pairs, in table order.
+    """
+    columns: list[tuple[str, Callable[[StepCompute], str]]] = [
+        ('cost', lambda s: _money(s.net_cost)),
+    ]
+    if len({s.currency for s in steps if s.currency is not None}) > 1:
+        columns.append(('ccy', lambda s: s.currency or _MISSING))
+    columns.append(('billed', lambda s: _hours(s.billed_hours)))
+    columns.append(('exec', lambda s: _seconds(s.execution_seconds)))
+    columns.append(('waste', lambda s: _seconds(s.billed_execution_gap_seconds)))
+    if any(s.shared_cluster for s in steps):
+        # Explains every `-` in the `waste` column above that is not a "no Dataproc job"
+        # row: `waste` reads `-` for a shared step too, and without this column that looks
+        # identical to a step that simply never ran on Dataproc -- see F1 in the review
+        # ledger and `compute.py`'s `shared_cluster` docstring.
+        columns.append(('shared', lambda s: 'yes' if s.shared_cluster else _MISSING))
+    if any(s.core_seconds is not None for s in steps):
+        columns.append(('core-hrs', lambda s: _core_hours(s.core_hours)))
+        columns.append(('spot', lambda s: _share(s.spot_share)))
+        columns.append(('machines', lambda s: _families(s.machine_families)))
+    if any(s.wall_seconds is not None for s in steps):
+        columns.append(('wall', lambda s: _seconds(s.wall_seconds)))
+        columns.append(('queue-gap', lambda s: _seconds(s.wall_execution_gap_seconds)))
+    return columns
+
+
+_FAILED_JOB_STATES = TERMINAL_JOB_STATES - {'DONE'}
+"""`{'ERROR', 'CANCELLED'}` -- a job that reached a terminal state without succeeding.
+
+Distinct from a job still in progress (`RUNNING`, `PENDING`, `SETUP_DONE`, ...), which
+has not failed, it simply has not finished yet -- see `render_compute`'s F3 fix and
+`dataproc.TERMINAL_JOB_STATES`."""
+
+def _unresolved_job_block(count: int) -> list[str]:
+    """The footer paragraph naming how many Dataproc jobs joined no step, or []."""
+    if not count:
+        return []
+    return [
+        f'{count} Dataproc job(s) in this run matched no known step (no step label, and the job',
+        "id matched no known step name either) and are not counted in any step's row above --",
+        'see compute.unresolved_job_count.',
+    ]
+
+
+def _journal_read_block(journal_prefix: str | None, journal_event_count: int | None) -> list[str]:
+    """F4: name which journal prefix was actually read, so a wrong `--run` form is visible.
+
+    `compute --run` accepts both the raw Airflow run id (what the journal is keyed on)
+    and the cleaned billing label (what `usage`'s own output, and this flag's help text,
+    show) -- billing and Dataproc clean either form to the same value, so both appear to
+    work, but the journal never exists under the cleaned form's prefix. Silent today
+    because no journal exists for any run yet; stating the prefix and whether it was
+    empty is what lets a reader tell "this run predates the observer" apart from "I
+    passed --run in the wrong form" once one does.
+    """
+    if journal_prefix is None:
+        return []
+    return [
+        f'journal prefix read for this report: {journal_prefix} ({journal_event_count} event(s) found).',
+        'If --run was given in its cleaned label form (as usage/history print it) rather',
+        'than the raw Airflow run id, this is the wrong prefix and will always read empty --',
+        'pass the raw id instead.',
+    ]
+
+
+def _cluster_block(clusters: list[ClusterCompute]) -> list[str]:
+    """The cluster-idle breakdown for every *shared* instance, or [] when none is shared.
+
+    An unshared instance is already fully represented by its one step's own row above --
+    repeating it here would be noise. See F1 in the review ledger and `compute.py`'s
+    `cluster_compute_report`.
+    """
+    shared = sorted((c for c in clusters if c.shared), key=lambda c: -(c.idle_seconds or 0.0))
+    if not shared:
+        return []
+
+    id_width = max(len('cluster instance'), *(len(c.cluster_instance) for c in shared))
+    step_width = max(len('billing step'), *(len(c.billing_step or _MISSING) for c in shared))
+    header = (
+        f'{"cluster instance":<{id_width}} {"billing step":<{step_width}} {"steps":>5} '
+        f'{"billed":>8} {"exec":>10} {"idle":>10}'
+    )
+    lines = [header, '-' * len(header)]
+    lines.extend(
+        f'{c.cluster_instance:<{id_width}} {(c.billing_step or _MISSING):<{step_width}} {len(c.steps):>5} '
+        f'{_seconds(c.billed_seconds):>8} {_seconds(c.execution_seconds):>10} {_seconds(c.idle_seconds):>10}'
+        for c in shared
+    )
+    lines.append('-' * len(header))
+    return [
+        'cluster idle time -- billed and not computing, pooled across every step that ran a Dataproc',
+        'job on the instance. Every step above showing waste as - because it shares one of these',
+        "instances (see the shared column) has its true idle time here instead, at the instance's",
+        'own row, not attributed to any one step:',
+        '',
+        *lines,
+    ]
+
+
+def render_compute(
+    steps: list[StepCompute],
+    unresolved_jobs: int = 0,
+    clusters: list[ClusterCompute] | None = None,
+    journal_prefix: str | None = None,
+    journal_event_count: int | None = None,
+) -> str:
+    """Render a per-step compute report: cost, execution time, and the gaps between them.
+
+    Rows are sorted by `billed_execution_gap_seconds`, worst first -- see
+    `_compute_sort_key`. That is deliberately not the same as sorting by cost: the
+    run's most expensive step and its most wasteful one are not always the same step,
+    and the wasteful one is the one a reader can act on. The report does not say why
+    the gap is there -- a cluster held open across a step group, a late delete, and
+    unlabelled work on the same cluster all look identical here -- only that it is.
+
+    Args:
+        steps: One row per step, normally `compute.compute_report`'s result.
+        unresolved_jobs: Count of Dataproc jobs that could not be joined to any step,
+            normally `compute.unresolved_job_count` on the same executions passed to
+            `compute_report`. Defaults to 0 -- most callers (including every existing
+            test of this function) have nothing to report here, and the footer this
+            adds is silent at 0, so it is additive rather than a required migration.
+        clusters: One row per Dataproc cluster instance, normally
+            `compute.cluster_compute_report`'s result on the same inputs passed to
+            `compute_report`. Only the *shared* instances are rendered -- see
+            `_cluster_block` -- so this is what lets a shared step's `-` waste cell be
+            followed by the real number, at the instance level, instead of just
+            vanishing. Defaults to `None`, rendered the same as `[]`: additive, like
+            `unresolved_jobs`.
+        journal_prefix: The GCS journal prefix this report actually read, or `None` to
+            omit the line entirely (existing callers with nothing to report here are
+            unaffected). See `_journal_read_block` and F4 in the review ledger.
+        journal_event_count: How many events that prefix returned. Shown alongside
+            `journal_prefix`; meaningless without it.
+
+    Returns:
+        The rendered report, or a message when there is nothing to show.
+    """
+    clusters = clusters or []
+    if not steps:
+        empty_blocks = [
+            _unresolved_job_block(unresolved_jobs),
+            _journal_read_block(journal_prefix, journal_event_count),
+        ]
+        blocks = [block for block in empty_blocks if block]
+        if blocks:
+            return f'{_EMPTY_COMPUTE}\n\n' + '\n\n'.join('\n'.join(block) for block in blocks)
+        return _EMPTY_COMPUTE
+
+    ordered = sorted(steps, key=_compute_sort_key)
+    columns = _compute_table_columns(ordered)
+
+    key_width = max(_MIN_KEY_WIDTH, len('step'), *(len(s.step) for s in ordered))
+    widths = {name: max(len(name), *(len(cell(s)) for s in ordered)) for name, cell in columns}
+
+    header = f'{"step":<{key_width}}' + ''.join(f' {name:>{widths[name]}}' for name, _ in columns)
+    lines = [header, '-' * len(header)]
+    lines.extend(
+        f'{s.step:<{key_width}}' + ''.join(f' {cell(s):>{widths[name]}}' for name, cell in columns)
+        for s in ordered
+    )
+    lines.append('-' * len(header))
+
+    no_job = sum(1 for s in ordered if not s.dataproc_job_states)
+    shared_job = sum(1 for s in ordered if s.shared_cluster)
+    failed_job = sum(1 for s in ordered if set(s.dataproc_job_states) & _FAILED_JOB_STATES)
+    in_flight_job = sum(1 for s in ordered if set(s.dataproc_job_states) - TERMINAL_JOB_STATES)
+    step_measured = [s.billed_execution_gap_seconds for s in ordered if s.billed_execution_gap_seconds is not None]
+    # Only *shared* clusters, not every cluster `cluster_compute_report` returned: an
+    # unshared instance's idle time is already counted once, above, as its one step's own
+    # `billed_execution_gap_seconds` -- adding `idle_seconds` for that same instance here
+    # too would double it. Only a shared instance's idle time is absent from `step_measured`
+    # (its billing step's gap is suppressed to `None`), so only shared instances belong here.
+    cluster_measured = [c.idle_seconds for c in clusters if c.shared and c.idle_seconds is not None]
+
+    blocks = [[
+        f'{len(ordered)} steps. {no_job} had no Dataproc job at all -- normal for a step that runs on a',
+        'plain GCE VM rather than Dataproc, not evidence of a problem.',
+    ]]
+    if step_measured or cluster_measured:
+        total = sum(step_measured) + sum(cluster_measured)
+        blocks.append([
+            f'billed time paid for and not computing: {total:,.0f}s ({total / 3600:.1f}h), a floor covering',
+            f'{len(step_measured)} step(s) with an exclusive Dataproc cluster and {len(cluster_measured)} shared',
+            'cluster instance(s) (see the table below). Steps with no Dataproc job, and any step whose',
+            'usage could not be attributed to exactly one cluster instance, are not counted here at all --',
+            'not counted as zero waste.',
+        ])
+    if shared_job:
+        blocks.append([
+            f'{shared_job} step(s) share a Dataproc cluster instance with other steps in this run -- their',
+            'own waste could not be isolated from the instance (waste reads - above); see the cluster',
+            "breakdown below for the instance's true idle time, pooled across every step that used it.",
+        ])
+    if failed_job:
+        blocks.append([
+            f'{failed_job} step(s) had a Dataproc job that reached a terminal state other than DONE',
+            '(cancelled or errored) alongside or instead of a successful one -- see dataproc_job_states',
+            'in --json for which.',
+        ])
+    if in_flight_job:
+        blocks.append([
+            f'{in_flight_job} step(s) had a Dataproc job still in progress (pending, running, or setting',
+            'up) when this report ran -- expected for the currently active run, not evidence anything',
+            'failed. Re-run the report once the run finishes for a settled figure.',
+        ])
+    unresolved_block = _unresolved_job_block(unresolved_jobs)
+    if unresolved_block:
+        blocks.append(unresolved_block)
+    cluster_block = _cluster_block(clusters)
+    if cluster_block:
+        blocks.append(cluster_block)
+    if not any(s.wall_seconds is not None for s in ordered):
+        journal_block = list(_WALL_UNAVAILABLE_FOOTER)
+        journal_block.extend(_journal_read_block(journal_prefix, journal_event_count))
+        blocks.append(journal_block)
+
     return '\n'.join([*lines, '', '\n\n'.join('\n'.join(block) for block in blocks)])
 
 
@@ -596,6 +903,13 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
     history.add_argument('--json', action='store_true', help='emit JSON instead of a table')
 
+    compute = sub.add_parser(
+        'compute', help='billed cost, Dataproc execution time and task wall time per step, joined'
+    )
+    compute.add_argument('--run', required=True, help='the run label to report on, as `usage --run`')
+    compute.add_argument('--since', type=date.fromisoformat, default=BILLING_EXPORT_START, help=since_help)
+    compute.add_argument('--json', action='store_true', help='emit JSON instead of a table')
+
     snapshot = sub.add_parser('snapshot', help='read-only view of a pipeline run')
     snapshot.add_argument('--run', required=True, help='the Airflow DAG run id')
     snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
@@ -690,6 +1004,66 @@ def main(argv: list[str] | None = None) -> int:
             key = 'run'
             export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
             usages = export.step_history(step=clean_label(args.step), since=args.since)
+        elif args.command == 'compute':
+            run = clean_label(args.run)
+            # `compute` crosses three separate Google APIs (BigQuery, Dataproc, GCS), each of
+            # which raises its own `GoogleAPICallError` subclass. A single `except
+            # GoogleAPICallError` around the whole branch (as this used to be) cannot tell
+            # them apart, so a Dataproc `PermissionDenied` or a GCS read failure would print
+            # as "billing export query failed" -- true of none of the three -- and send
+            # whoever reads it hunting in the wrong system. Each stage below is wrapped
+            # separately and re-raised as a `RuntimeError` carrying which API actually failed;
+            # `main`'s `except RuntimeError` below renders that message as-is, unprefixed.
+            try:
+                export = BillingExport(client=bigquery.Client(project=GCP_PROJECT_PLATFORM))
+                usages = export.run_usage(run=run, since=args.since)
+                window = usage_window(usages)
+                if window is not None and not args.json:
+                    coverage = export.window_coverage(run=run, window=window, since=args.since)
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'billing export query failed: {" ".join(str(exc).split())}') from exc
+            try:
+                dataproc_client = dataproc_v1.JobControllerClient(
+                    client_options={'api_endpoint': f'{GCP_REGION}-dataproc.googleapis.com:443'}
+                )
+                executions = job_executions(dataproc_client, project=GCP_PROJECT_PLATFORM, region=GCP_REGION, run=run)
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'Dataproc job query failed: {" ".join(str(exc).split())}') from exc
+            try:
+                bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+                # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
+                # never the cleaned billing label -- see journal.py's module docstring, and
+                # `snapshot`/`observe` below, which key it the same way. F4: `--run` accepts
+                # either form (its own help text points at the cleaned one, which `usage` also
+                # prints), but only the raw form ever finds a real journal here -- see
+                # `_journal_read_block`, which is what surfaces this prefix and its event count
+                # to the reader instead of a silent, permanently-empty read.
+                journal_prefix = f'_agent/unified_pipeline/{args.run}/journal'
+                journal = Journal(bucket=bucket, prefix=journal_prefix)
+                journal_events = journal.read()
+            except GoogleAPICallError as exc:
+                raise RuntimeError(f'GCS journal read failed: {" ".join(str(exc).split())}') from exc
+            steps = compute_report(usages, executions, journal_events)
+            clusters = cluster_compute_report(usages, executions)
+            unresolved_jobs = unresolved_job_count(executions)
+            if args.json:
+                payload = {
+                    'steps': [s.model_dump(mode='json') for s in steps],
+                    'unresolved_jobs': unresolved_jobs,
+                    'clusters': [c.model_dump(mode='json') for c in clusters],
+                }
+                sys.stdout.write(json.dumps(payload, indent=2) + '\n')
+            else:
+                report = render_compute(
+                    steps,
+                    unresolved_jobs,
+                    clusters=clusters,
+                    journal_prefix=journal_prefix,
+                    journal_event_count=len(journal_events),
+                )
+                report += '\n\n' + render_coverage(window, coverage)
+                sys.stdout.write(report + '\n')
+            return 0
         elif args.command == 'snapshot':
             username, password = _airflow_credentials()
             client = AirflowClient(

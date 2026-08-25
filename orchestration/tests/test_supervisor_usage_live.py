@@ -84,6 +84,61 @@ class TestLiveExport:
         assert {u.product for u in usages} == {'platform'}
 
 
+REACTOME_STEP = 'pts_reactome'
+"""Verified live (2026-08-24) as the step whose envelope most exceeds its billed hours.
+
+Its rows span 30 hourly SKU groups by `started`/`ended` but land in only 4 distinct billed
+hours, cost £6.69 net, and put ~59.1 of its ~162.1 core-hours on Spot Preemptible N1.
+"""
+
+
+class TestLiveCoreUsage:
+    """Reproduces the exact figures this task exists to add, against the real export.
+
+    Not "some step has core data" — the specific step, the specific numbers, matched
+    against a live independent query in the report this task's brief was built from.
+    """
+
+    def test_pts_reactome_matches_the_verified_billed_hours_and_cost(
+        self, export: BillingExport
+    ) -> None:
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        reactome = next(u for u in usages if u.step == REACTOME_STEP)
+        assert reactome.billed_hours == 4
+        assert reactome.net_cost == pytest.approx(6.69, abs=0.01)
+
+    def test_pts_reactome_matches_the_verified_core_hours(self, export: BillingExport) -> None:
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        reactome = next(u for u in usages if u.step == REACTOME_STEP)
+        assert reactome.core_seconds is not None
+        assert reactome.core_seconds / 3600 == pytest.approx(162.1, abs=0.1)
+
+    def test_pts_reactome_shows_spot_core_time_and_the_n1_family(self, export: BillingExport) -> None:
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        reactome = next(u for u in usages if u.step == REACTOME_STEP)
+        assert reactome.core_seconds is not None
+        assert reactome.spot_core_seconds is not None
+        assert reactome.spot_core_seconds > 0
+        assert reactome.spot_core_seconds < reactome.core_seconds
+        assert reactome.machine_families == ['N1']
+
+    def test_every_step_in_the_known_run_has_core_data(self, export: BillingExport) -> None:
+        """Every step here ran on Dataproc or GCE, so none should show `None`.
+
+        A `None`-for-everything result would satisfy the three tests above vacuously if
+        the guard were inverted; this is what would catch that.
+        """
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert usages
+        assert all(u.core_seconds is not None for u in usages)
+        assert all(u.machine_families == ['N1'] for u in usages)
+
+    def test_the_total_cost_the_usage_command_reports_is_unmoved(self, export: BillingExport) -> None:
+        """This task must not change what `total_cost` already reported for this run."""
+        usages = export.run_usage(run=KNOWN_RUN, since=date(2026, 5, 1))
+        assert total_cost(usages) == pytest.approx(21.60, abs=0.01)
+
+
 class TestLiveClusterSharing:
     """The flag is a guard on a path that does not manifest, so live it must stay silent.
 
@@ -140,7 +195,14 @@ SYNTHETIC_TABLE = 'synthetic.billing.rows'
 
 
 def _synthetic_row(step: str, uuid: str, name: str) -> str:
-    """One billing row as a STRUCT literal, shaped like the export's schema."""
+    """One billing row as a STRUCT literal, shaped like the export's schema.
+
+    `sku` and `usage` are here only so the query resolves — `_LABELLED_CTE` reads
+    `sku.description` and `usage.amount` unconditionally now, for every row regardless of
+    what this test is checking. Values chosen so nothing here counts as a core SKU, which
+    keeps these rows out of `core_seconds`/`spot_core_seconds`/`machine_families` and
+    leaves the sharing checks these rows exist for undisturbed.
+    """
     return f"""STRUCT(
       TIMESTAMP '2026-07-21 15:00:00' AS _PARTITIONTIME,
       TIMESTAMP '2026-07-21 15:00:00' AS usage_start_time,
@@ -156,7 +218,9 @@ def _synthetic_row(step: str, uuid: str, name: str) -> str:
         STRUCT('product' AS key, 'platform' AS value),
         STRUCT('goog-dataproc-cluster-uuid' AS key, '{uuid}' AS value),
         STRUCT('goog-dataproc-cluster-name' AS key, '{name}' AS value)
-      ] AS labels
+      ] AS labels,
+      STRUCT('Synthetic SKU, not a core SKU' AS description) AS sku,
+      STRUCT(0.0 AS amount) AS usage
     )"""
 
 

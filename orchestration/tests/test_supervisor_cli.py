@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -17,11 +17,14 @@ from orchestration.supervisor.cli import (
     build_parser,
     main,
     optional_columns,
+    render_compute,
     render_coverage,
     render_diff,
     render_table,
     totals_by_group,
 )
+from orchestration.supervisor.compute import ClusterCompute, StepCompute
+from orchestration.supervisor.dataproc import JobExecution
 from orchestration.supervisor.datasets import run_name, stage_configs, unified_pipeline_steps
 from orchestration.supervisor.diff import ColumnChange, DatasetDiff
 from orchestration.supervisor.gcs import Footer, Skipped, collect_diffs
@@ -48,6 +51,7 @@ def _usage(
     currency: str = 'GBP',
     product: str | None = 'platform',
     shared: bool = False,
+    cluster_instances: list[str] | None = None,
 ) -> StepUsage:
     return StepUsage(
         run=run,
@@ -56,9 +60,17 @@ def _usage(
         product=product,
         started=datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         ended=datetime(2026, 7, 21, 16, 0, tzinfo=UTC),
+        billed_hours=2,
+        billed_hour_buckets=[
+            datetime(2026, 7, 21, 14, 0, tzinfo=UTC), datetime(2026, 7, 21, 15, 0, tzinfo=UTC),
+        ],
         net_cost=net_cost,
         currency=currency,
         shared_cluster=shared,
+        core_seconds=None,
+        spot_core_seconds=None,
+        machine_families=[],
+        cluster_instances=cluster_instances if cluster_instances is not None else [],
     )
 
 
@@ -290,6 +302,17 @@ class TestRenderCoverage:
         out = render_coverage(None, [])
         assert 'unknown' in out
         assert '%' not in out
+
+    def test_an_unknown_window_does_not_claim_the_run_has_billed_nothing(self) -> None:
+        """F5: a `--since` narrower than the run also yields `window is None`.
+
+        The same message must not assert the run "has billed nothing yet" underneath a
+        table full of execution data, which is a false claim in that case, not merely
+        an unhelpful one.
+        """
+        out = render_coverage(None, [])
+        assert 'has billed nothing' not in out
+        assert 'no billed usage was found at or after --since' in out.lower()
 
     def test_an_empty_window_says_so(self) -> None:
         out = render_coverage(WINDOW, [])
@@ -892,11 +915,19 @@ def _usage_row(**kw: Any) -> SimpleNamespace:
         'product': 'platform',
         'started': datetime(2026, 7, 21, 14, 0, tzinfo=UTC),
         'ended': datetime(2026, 7, 22, 2, 0, tzinfo=UTC),
+        'billed_hours': 4,
         'net_cost': 21.60,
         'currency': 'GBP',
         'shared_cluster': False,
+        'core_seconds': None,
+        'spot_core_seconds': None,
+        'machine_families': [],
+        'cluster_instances': [],
     }
     base.update(kw)
+    if 'billed_hour_buckets' not in kw:
+        started = base['started']
+        base['billed_hour_buckets'] = [started + timedelta(hours=h) for h in range(base['billed_hours'])]
     return SimpleNamespace(**base)
 
 
@@ -1008,6 +1039,529 @@ class TestJsonOutput:
         client.query.side_effect = _results([_usage_row(product='ppp')], [coverage_row])
         assert main(['usage', '--run', 'r', '--json']) == 0
         assert json.loads(capsys.readouterr().out)[0]['product'] == 'ppp'
+
+
+def _compute(
+    step: str = 'pts_target',
+    *,
+    net_cost: float | None = 6.69,
+    currency: str | None = 'GBP',
+    billed_hours: int | None = 4,
+    core_seconds: float | None = None,
+    spot_core_seconds: float | None = None,
+    machine_families: list[str] | None = None,
+    execution_seconds: float | None = 153.8,
+    dataproc_job_states: list[str] | None = None,
+    wall_seconds: float | None = None,
+    shared_cluster: bool = False,
+) -> StepCompute:
+    """A `StepCompute` with a Dataproc job and a bill by default, no wall time.
+
+    `dataproc_job_states` defaults to `['DONE']` whenever `execution_seconds` is set and
+    `[]` otherwise, matching what `compute_report` itself would produce -- a caller only
+    needs to override it to build the states-disagree-with-execution shapes directly.
+    """
+    return StepCompute(
+        step=step,
+        net_cost=net_cost,
+        currency=currency,
+        billed_hours=billed_hours,
+        core_seconds=core_seconds,
+        spot_core_seconds=spot_core_seconds,
+        machine_families=machine_families if machine_families is not None else [],
+        execution_seconds=execution_seconds,
+        dataproc_job_states=(
+            dataproc_job_states
+            if dataproc_job_states is not None
+            else (['DONE'] if execution_seconds is not None else [])
+        ),
+        wall_seconds=wall_seconds,
+        shared_cluster=shared_cluster,
+    )
+
+
+class TestRenderComputeEmptyAndAbsence:
+    def test_empty_says_so_rather_than_printing_an_empty_table(self) -> None:
+        assert 'no step joined' in render_compute([]).lower()
+
+    def test_a_step_known_only_from_the_journal_never_renders_a_zero_cost(self) -> None:
+        """The mutation this guards against: defaulting a missing `net_cost` to `0.00`.
+
+        `0.00` claims "billed and cost nothing", a different and false claim from "no
+        usage row was ever seen for this step". Confirmed live: reverting `_money` to
+        `f'{value or 0.0:.2f}'` turns this row's cost cell into `0.00` and fails this
+        test, with the rest of the suite still green.
+        """
+        step = StepCompute(step='pts_only_in_journal', wall_seconds=42.0)
+        out = render_compute([step])
+        row = next(line for line in out.splitlines() if line.startswith('pts_only_in_journal'))
+        assert '0.00' not in row
+        assert '0s' not in row.split()
+        cells = dict(zip(out.splitlines()[0].split(), row.split(), strict=True))
+        assert cells['cost'] == '-'
+        assert cells['billed'] == '-'
+        assert cells['exec'] == '-'
+        assert cells['waste'] == '-'
+        assert cells['wall'] == '42s'
+
+    def test_a_step_billed_but_never_run_on_dataproc_never_renders_a_zero_gap(self) -> None:
+        """The common shape: 15 of 34 steps in the verified test run have no Dataproc job.
+
+        `billed_execution_gap_seconds` must read `-`, never `0.0` -- a `0` here claims
+        no waste was measured, which is a different claim from "this cannot be judged
+        on that axis at all" (see `compute.py`'s module docstring).
+        """
+        step = _compute('pis_disease', execution_seconds=None, dataproc_job_states=[])
+        out = render_compute([step])
+        row = next(line for line in out.splitlines() if line.startswith('pis_disease'))
+        cells = dict(zip(out.splitlines()[0].split(), row.split(), strict=True))
+        assert cells['exec'] == '-'
+        assert cells['waste'] == '-'
+        assert cells['cost'] == '6.69'
+
+
+class TestRenderComputeSortOrder:
+    def test_the_wasteful_step_leads_even_when_it_is_not_the_costliest(self) -> None:
+        """Sorting by cost would put the expensive-but-efficient step first -- it must not."""
+        expensive_efficient = _compute('pts_expensive', net_cost=100.0, billed_hours=1, execution_seconds=3599.0)
+        cheap_wasteful = _compute('pts_wasteful', net_cost=1.0, billed_hours=4, execution_seconds=10.0)
+        out = render_compute([expensive_efficient, cheap_wasteful])
+        rows = [line.split()[0] for line in out.splitlines() if line.startswith('pts_')]
+        assert rows == ['pts_wasteful', 'pts_expensive']
+
+    def test_steps_with_no_measurable_waste_sort_after_those_that_have_one(self) -> None:
+        measured = _compute('pts_measured', net_cost=1.0, billed_hours=1, execution_seconds=10.0)
+        unmeasured_pricier = _compute(
+            'pts_unmeasured', net_cost=50.0, billed_hours=None, execution_seconds=None, dataproc_job_states=[]
+        )
+        out = render_compute([measured, unmeasured_pricier])
+        rows = [line.split()[0] for line in out.splitlines() if line.startswith('pts_')]
+        assert rows == ['pts_measured', 'pts_unmeasured']
+
+    def test_among_unmeasured_steps_the_costlier_one_leads(self) -> None:
+        cheap = _compute('pts_cheap', net_cost=1.0, billed_hours=None, execution_seconds=None, dataproc_job_states=[])
+        pricier = _compute(
+            'pts_pricier', net_cost=50.0, billed_hours=None, execution_seconds=None, dataproc_job_states=[]
+        )
+        out = render_compute([pricier, cheap])
+        rows = [line.split()[0] for line in out.splitlines() if line.startswith('pts_')]
+        assert rows == ['pts_pricier', 'pts_cheap']
+
+
+class TestRenderComputeOptionalColumns:
+    def test_core_spot_and_machine_columns_are_hidden_when_no_step_billed_a_core_sku(self) -> None:
+        out = render_compute([_compute()])
+        header = out.splitlines()[0]
+        assert 'core-hrs' not in header
+        assert 'spot' not in header
+        assert 'machines' not in header
+
+    def test_core_spot_and_machine_columns_appear_and_are_correct_when_one_step_has_them(self) -> None:
+        """Reactome's own verified figures: 583,552 core-seconds, 212,831 of them spot."""
+        step = _compute(
+            'pts_reactome', core_seconds=583552.0, spot_core_seconds=212831.0, machine_families=['N1']
+        )
+        out = render_compute([step])
+        header = out.splitlines()[0]
+        assert 'core-hrs' in header
+        assert 'spot' in header
+        row = next(line for line in out.splitlines() if line.startswith('pts_reactome'))
+        cells = dict(zip(header.split(), row.split(), strict=True))
+        assert cells['core-hrs'] == '162.1'
+        assert cells['spot'] == '36%'
+        assert cells['machines'] == 'N1'
+
+    def test_wall_and_queue_gap_columns_are_hidden_when_no_step_has_wall_time(self) -> None:
+        out = render_compute([_compute()])
+        header = out.splitlines()[0]
+        assert 'wall' not in header
+        assert 'queue-gap' not in header
+
+    def test_wall_and_queue_gap_columns_appear_when_one_step_has_wall_time(self) -> None:
+        step = _compute('pts_drug_molecule', wall_seconds=1191.0, execution_seconds=1162.0)
+        out = render_compute([step])
+        header = out.splitlines()[0]
+        assert 'wall' in header
+        assert 'queue-gap' in header
+        row = next(line for line in out.splitlines() if line.startswith('pts_drug_molecule'))
+        cells = dict(zip(header.split(), row.split(), strict=True))
+        assert cells['wall'] == '1,191s'
+        assert cells['queue-gap'] == '29s'
+
+    def test_currency_column_is_hidden_when_every_step_agrees(self) -> None:
+        out = render_compute([_compute('pts_a'), _compute('pts_b')])
+        assert 'ccy' not in out.splitlines()[0]
+
+    def test_currency_column_appears_when_steps_disagree(self) -> None:
+        out = render_compute([_compute('pts_a', currency='GBP'), _compute('pts_b', currency='USD')])
+        assert 'ccy' in out.splitlines()[0]
+
+    def test_a_table_with_only_the_default_columns_matches_the_common_case_layout(self) -> None:
+        """The common shape (verified live): no core/spot/machine data, no wall time yet."""
+        out = render_compute([_compute('pts_reactome')])
+        assert out.splitlines()[0].split() == ['step', 'cost', 'billed', 'exec', 'waste']
+
+
+class TestRenderComputeFooter:
+    def test_the_no_dataproc_job_count_is_reported(self) -> None:
+        with_job = _compute('pts_reactome')
+        no_job = _compute('pis_disease', execution_seconds=None, dataproc_job_states=[])
+        out = render_compute([with_job, no_job])
+        assert '2 steps' in out
+        assert '1 had no Dataproc job' in out
+
+    def test_no_dataproc_job_is_explained_as_normal_not_a_problem(self) -> None:
+        """Otherwise 15-of-34 steps with no job (the verified test-run shape) reads as broken."""
+        out = render_compute([_compute('pis_disease', execution_seconds=None, dataproc_job_states=[])])
+        assert 'not evidence of a problem' in out
+
+    def test_a_cancelled_only_job_does_not_count_as_no_dataproc_job(self) -> None:
+        """`execution_seconds is None` alone conflates two different shapes.
+
+        A job that ran and was cancelled is not the same fact as no job having run at
+        all -- `dataproc_job_states` is what tells them apart (see `compute.py`'s module
+        docstring), and this count must key on it, not on `execution_seconds`, which is
+        `None` in both cases.
+        """
+        cancelled_only = _compute('pts_drug_molecule', execution_seconds=None, dataproc_job_states=['CANCELLED'])
+        out = render_compute([cancelled_only])
+        assert '0 had no Dataproc job' in out
+
+    def test_a_job_that_never_reached_done_is_flagged(self) -> None:
+        """The verified `pts_drug_molecule` shape: a CANCELLED job beside the DONE one."""
+        step = _compute('pts_drug_molecule', dataproc_job_states=['CANCELLED', 'DONE'])
+        out = render_compute([step])
+        assert 'terminal state other than DONE' in out
+        assert 'cancelled or errored' in out
+
+    def test_no_partial_job_note_when_every_job_reached_done(self) -> None:
+        out = render_compute([_compute('pts_reactome', dataproc_job_states=['DONE'])])
+        assert 'terminal state other than DONE' not in out
+
+    def test_a_job_still_running_is_not_flagged_as_cancelled_or_errored(self) -> None:
+        """F3: a step whose only job is `RUNNING` failed nothing -- it just is not done yet.
+
+        Before F3, this counted toward the same "did not reach DONE (cancelled or
+        errored)" footer as a genuinely failed job, so running `compute` against the
+        active run -- the obvious use for a supervisor -- reported every in-flight
+        step as a failed attempt.
+        """
+        step = _compute('pts_target', dataproc_job_states=['RUNNING'])
+        out = render_compute([step])
+        assert 'terminal state other than DONE' not in out
+        assert 'in progress' in out
+
+    def test_a_job_still_pending_or_setting_up_is_also_reported_as_in_flight(self) -> None:
+        pending = _compute('pts_a', dataproc_job_states=['PENDING'])
+        setup = _compute('pts_b', dataproc_job_states=['SETUP_DONE'])
+        out = render_compute([pending, setup])
+        assert 'terminal state other than DONE' not in out
+        assert '2 step(s) had a Dataproc job still in progress' in out
+
+    def test_in_flight_and_failed_jobs_are_counted_and_worded_separately(self) -> None:
+        """One step of each shape must not be folded into the other's count or message."""
+        running = _compute('pts_running', dataproc_job_states=['RUNNING'])
+        failed = _compute('pts_failed', dataproc_job_states=['ERROR'])
+        out = render_compute([running, failed])
+        assert '1 step(s) had a Dataproc job that reached a terminal state other than DONE' in out
+        assert '1 step(s) had a Dataproc job still in progress' in out
+
+    def test_unresolved_jobs_are_reported_when_present(self) -> None:
+        out = render_compute([_compute('pts_reactome')], unresolved_jobs=2)
+        assert '2 Dataproc job(s) in this run matched no known step' in out
+
+    def test_no_unresolved_job_note_by_default(self) -> None:
+        """`unresolved_jobs` defaults to 0 -- every pre-F2 caller of this function still works."""
+        out = render_compute([_compute('pts_reactome')])
+        assert 'matched no known step' not in out
+
+    def test_unresolved_jobs_are_reported_even_with_no_step_rows_at_all(self) -> None:
+        """Every job in the run was unresolved: `steps` is empty, but the count must not be lost."""
+        out = render_compute([], unresolved_jobs=3)
+        assert 'no step joined' in out.lower()
+        assert '3 Dataproc job(s) in this run matched no known step' in out
+
+    def test_the_measured_waste_total_sums_only_the_computable_steps(self) -> None:
+        computable = _compute('pts_a', billed_hours=1, execution_seconds=100.0)  # gap = 3600 - 100
+        uncomputable = _compute('pts_b', billed_hours=None, execution_seconds=None, dataproc_job_states=[])
+        out = render_compute([computable, uncomputable])
+        assert '3,500s' in out
+        assert '1 step(s) with an exclusive Dataproc cluster' in out
+        assert '0 shared' in out
+
+    def test_no_waste_total_line_when_nothing_is_computable(self) -> None:
+        out = render_compute([_compute('pts_a', billed_hours=None, execution_seconds=None, dataproc_job_states=[])])
+        assert 'a floor covering' not in out
+
+    def test_wall_unavailable_note_explains_why_not_just_that_it_is_missing(self) -> None:
+        """Otherwise an empty wall column reads as 'no step queued', which is not measured here."""
+        out = render_compute([_compute()])
+        assert 'never taken' in out
+        assert 'observer' in out
+        assert 'torn down' in out
+
+    def test_wall_unavailable_note_is_absent_once_wall_time_is_present(self) -> None:
+        out = render_compute([_compute(wall_seconds=1191.0)])
+        assert 'never taken' not in out
+
+
+class TestRenderComputeSharedCluster:
+    """F1: a shared step's own waste is `-`, and the report must say why, not just show it."""
+
+    def test_the_shared_column_is_hidden_when_no_step_is_shared(self) -> None:
+        out = render_compute([_compute('pts_reactome')])
+        assert 'shared' not in out.splitlines()[0].split()
+
+    def test_the_shared_column_appears_and_flags_only_the_shared_step(self) -> None:
+        shared = _compute('pts_reactome', shared_cluster=True)
+        unshared = _compute('pts_other', shared_cluster=False)
+        out = render_compute([shared, unshared])
+        header = out.splitlines()[0].split()
+        assert 'shared' in header
+        col = header.index('shared')
+        rows = {line.split()[0]: line.split() for line in out.splitlines()[2:4]}
+        assert rows['pts_reactome'][col] == 'yes'
+        assert rows['pts_other'][col] == '-'
+
+    def test_the_shared_step_footer_explains_the_dash(self) -> None:
+        cluster = ClusterCompute(
+            cluster_instance='c1', billing_step='pts_reactome', steps=['pts_other', 'pts_reactome'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([_compute('pts_reactome', shared_cluster=True)], clusters=[cluster])
+        assert '1 step(s) share a Dataproc cluster instance with other steps' in out
+        assert 'breakdown below' in out
+
+    def test_no_shared_footer_when_nothing_is_shared(self) -> None:
+        out = render_compute([_compute('pts_reactome')])
+        assert 'share a Dataproc cluster instance' not in out
+
+    def test_a_shared_step_is_excluded_from_the_step_level_floor_but_its_cluster_is_added(self) -> None:
+        """The corrected `pts_reactome` shape, shrunk.
+
+        Waste moves from the wrong step-level number to the right instance-level one,
+        rather than merely disappearing.
+        """
+        step = _compute('pts_reactome', shared_cluster=True, billed_hours=4, execution_seconds=153.8)
+        cluster = ClusterCompute(
+            cluster_instance='c1', billing_step='pts_reactome', steps=['pts_reactome', 'pts_other'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([step], clusters=[cluster])
+        floor_line = next(line for line in out.splitlines() if line.startswith('billed time paid for'))
+        assert '4,608s' in floor_line, (
+            'the floor must include the true instance-level idle time, not the naive 14,246s '
+            "the step alone would have shown, and not silently drop to 0 once the step's own "
+            'gap is suppressed'
+        )
+        assert '0 step(s) with an exclusive Dataproc cluster and 1 shared' in out
+
+    def test_the_cluster_breakdown_lists_only_shared_instances(self) -> None:
+        unshared = ClusterCompute(
+            cluster_instance='c-solo', billing_step='pts_solo', steps=['pts_solo'],
+            currency='GBP', billed_seconds=3600.0, execution_seconds=100.0,
+        )
+        shared = ClusterCompute(
+            cluster_instance='c-shared', billing_step='pts_reactome', steps=['pts_other', 'pts_reactome'],
+            currency='GBP', billed_seconds=14400.0, execution_seconds=9792.0,
+        )
+        out = render_compute([_compute('pts_reactome', shared_cluster=True)], clusters=[unshared, shared])
+        assert 'c-shared' in out
+        assert 'c-solo' not in out, 'an unshared instance is already fully shown by its own step row'
+
+    def test_an_unshared_cluster_s_idle_time_is_not_double_counted_in_the_floor(self) -> None:
+        """The real shape of the verified run.
+
+        An unshared step's own gap is already in the floor via its `StepCompute` row;
+        adding its cluster's `idle_seconds` too (identical under the hood, since an
+        unshared instance's idle time IS its one step's own gap) would double it.
+        """
+        unshared_step = _compute('pts_solo', billed_hours=1, execution_seconds=100.0)  # gap = 3500
+        unshared_cluster = ClusterCompute(
+            cluster_instance='c-solo', billing_step='pts_solo', steps=['pts_solo'],
+            currency='GBP', billed_seconds=3600.0, execution_seconds=100.0,  # idle = 3500, same fact
+        )
+        out = render_compute([unshared_step], clusters=[unshared_cluster])
+        floor_line = next(line for line in out.splitlines() if line.startswith('billed time paid for'))
+        assert '3,500s' in floor_line
+        assert '7,000s' not in floor_line, '3,500s counted once, not once per source that can see it'
+
+
+class TestRenderComputeJournalPrefix:
+    """F4: `--run` accepts a form that silently reads an empty journal forever."""
+
+    def test_the_prefix_and_event_count_are_named_when_wall_time_is_unavailable(self) -> None:
+        out = render_compute([_compute()], journal_prefix='_agent/unified_pipeline/r/journal', journal_event_count=0)
+        assert '_agent/unified_pipeline/r/journal' in out
+        assert '0 event(s) found' in out
+        assert 'cleaned label form' in out
+
+    def test_nothing_is_added_when_the_prefix_is_not_given(self) -> None:
+        out = render_compute([_compute()])
+        assert 'journal prefix read' not in out
+
+    def test_the_prefix_note_still_appears_when_steps_is_empty(self) -> None:
+        out = render_compute([], journal_prefix='_agent/unified_pipeline/r/journal', journal_event_count=0)
+        assert '_agent/unified_pipeline/r/journal' in out
+
+
+class TestComputeParser:
+    def test_run_is_required(self) -> None:
+        args = build_parser().parse_args(['compute', '--run', 'my-run'])
+        assert args.run == 'my-run'
+
+    def test_since_defaults_to_export_start(self) -> None:
+        assert build_parser().parse_args(['compute', '--run', 'r']).since.isoformat() == '2026-05-01'
+
+    def test_json_flag_defaults_off(self) -> None:
+        assert build_parser().parse_args(['compute', '--run', 'r']).json is False
+        assert build_parser().parse_args(['compute', '--run', 'r', '--json']).json is True
+
+
+@pytest.fixture
+def compute_command(monkeypatch: pytest.MonkeyPatch, client: MagicMock) -> SimpleNamespace:
+    """Patch every I/O boundary `compute` crosses beyond BigQuery.
+
+    `client` is the same fixture `usage`/`history` use for billing. `job_executions`
+    and `Journal` are patched directly here, the same way `diff_command` patches
+    `collect_diffs` rather than faking GCS blobs and `observe_command` patches
+    `take_snapshot` rather than faking Airflow responses -- `test_supervisor_dataproc.py`
+    and `test_supervisor_journal.py` already cover what is behind each of them, and
+    `dataproc_v1.JobControllerClient` needs no real shape here since nothing calls it.
+    """
+    monkeypatch.setattr(cli, 'dataproc_v1', MagicMock())
+    job_executions = MagicMock(return_value=[])
+    monkeypatch.setattr(cli, 'job_executions', job_executions)
+
+    fake_journal = MagicMock()
+    fake_journal.read.return_value = []
+    journal_cls = MagicMock(return_value=fake_journal)
+    monkeypatch.setattr(cli, 'Journal', journal_cls)
+
+    storage_client = MagicMock()
+    fake_storage = MagicMock()
+    fake_storage.Client.return_value = storage_client
+    monkeypatch.setattr(cli, 'storage', fake_storage)
+
+    return SimpleNamespace(
+        bigquery=client,
+        job_executions=job_executions,
+        journal=fake_journal,
+        journal_cls=journal_cls,
+        storage_client=storage_client,
+    )
+
+
+class TestComputeCommand:
+    def test_run_is_normalised_for_billing_and_dataproc(self, compute_command: SimpleNamespace) -> None:
+        assert main(['compute', '--run', RAW_RUN_ID]) == 0
+        assert _bound(compute_command.bigquery)['run'] == CLEAN_RUN_ID
+        assert compute_command.job_executions.call_args.kwargs['run'] == CLEAN_RUN_ID
+
+    def test_the_journal_is_keyed_on_the_raw_run_id_not_the_cleaned_label(
+        self, compute_command: SimpleNamespace
+    ) -> None:
+        """Mirrors `observe`'s own journal keying -- see `journal.py`'s module docstring."""
+        assert main(['compute', '--run', RAW_RUN_ID]) == 0
+        prefix = compute_command.journal_cls.call_args.kwargs['prefix']
+        assert prefix == f'_agent/unified_pipeline/{RAW_RUN_ID}/journal'
+
+    def test_an_empty_result_still_renders_a_useful_message(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(['compute', '--run', 'r']) == 0
+        assert 'no step joined' in capsys.readouterr().out.lower()
+
+    def test_text_output_reuses_the_coverage_renderer(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Pins the verified test-run figure: 21.60 of 30.99 GBP is 69.7%."""
+        coverage_row = SimpleNamespace(currency='GBP', labelled_cost=21.60, pipeline_cost=30.99)
+        compute_command.bigquery.query.side_effect = _results([_usage_row(step='pts_reactome')], [coverage_row])
+        assert main(['compute', '--run', 'r']) == 0
+        out = capsys.readouterr().out
+        assert 'coverage:' in out
+        assert '69.7%' in out
+        assert 'pts_reactome' in out
+
+    def test_json_output_carries_the_computed_gap_without_the_coverage_query(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        compute_command.bigquery.query.return_value.result.return_value = [
+            _usage_row(step='pts_reactome', billed_hours=4)
+        ]
+        assert main(['compute', '--run', 'r', '--json']) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload['steps'][0]['step'] == 'pts_reactome'
+        assert payload['steps'][0]['billed_seconds'] == 14400.0
+        assert payload['unresolved_jobs'] == 0
+        assert compute_command.bigquery.query.call_count == 1
+
+    def test_json_output_carries_the_unresolved_job_count(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F2: a job that resolves to no step must not simply vanish from `--json` either."""
+        compute_command.job_executions.return_value = [
+            JobExecution(job_id='j1', step='pts_reactome', state='DONE', execution_seconds=153.8),
+            JobExecution(job_id='j2', step=None, state='DONE', execution_seconds=10.0),
+        ]
+        assert main(['compute', '--run', 'r', '--json']) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload['unresolved_jobs'] == 1
+        assert {s['step'] for s in payload['steps']} == {'pts_reactome'}
+
+    def test_dataproc_and_journal_results_reach_the_join(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        compute_command.job_executions.return_value = [
+            JobExecution(job_id='j1', step='pts_reactome', state='DONE', execution_seconds=153.8)
+        ]
+        assert main(['compute', '--run', 'r']) == 0
+        out = capsys.readouterr().out
+        assert 'pts_reactome' in out
+        assert '154s' in out
+
+    def test_a_job_that_matched_no_step_is_reported_in_the_text_footer_too(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        compute_command.job_executions.return_value = [
+            JobExecution(job_id='j1', step='pts_reactome', state='DONE', execution_seconds=153.8),
+            JobExecution(job_id='j2', step=None, state='DONE', execution_seconds=10.0),
+        ]
+        assert main(['compute', '--run', 'r']) == 0
+        out = capsys.readouterr().out
+        assert '1 Dataproc job(s) in this run matched no known step' in out
+
+    def test_api_error_exits_non_zero_with_a_message(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        compute_command.bigquery.query.side_effect = cli.GoogleAPICallError('403 Access Denied')
+        assert main(['compute', '--run', 'r']) == 1
+        assert 'billing export query failed' in capsys.readouterr().err
+
+    def test_a_dataproc_api_error_is_not_blamed_on_the_billing_export(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F6: `compute` crosses three APIs under three different clients.
+
+        Each failure must name the one that actually failed, not always "billing export
+        query".
+        """
+        compute_command.job_executions.side_effect = cli.GoogleAPICallError('403 Access Denied')
+        assert main(['compute', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'Dataproc job query failed' in err
+        assert 'billing export' not in err
+
+    def test_a_gcs_api_error_is_not_blamed_on_the_billing_export(
+        self, compute_command: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """F6: the journal read (GCS) is the third API `compute` crosses."""
+        compute_command.storage_client.bucket.side_effect = cli.GoogleAPICallError('403 Access Denied')
+        assert main(['compute', '--run', 'r']) == 1
+        err = capsys.readouterr().err
+        assert 'GCS journal read failed' in err
+        assert 'billing export' not in err
 
 
 class TestObserveParser:
