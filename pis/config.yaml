@@ -12,10 +12,13 @@ scratchpad:
   depmap_version: '2026Q1'
   hpo_version: '2026-06-23'
   mondo_version: '2026-08-04'
-  ot_curation: '26.08'
+  ot_curation: '26.08.1'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
   gtex_version: '11'
+  cell_ontology_version: '2026-06-08'
+  uberon_version: '2026-06-23'
+  clinical_mining_version: '2026-05-27'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -122,11 +125,11 @@ steps:
   #: BIOSAMPLE STEP :###############################################################################
   biosample:
     - name: copy cell ontology
-      source: https://github.com/obophenotype/cell-ontology/releases/latest/download/cl.json
+      source: https://github.com/obophenotype/cell-ontology/v${cell_ontology_version}/latest/download/cl.json
       destination: input/biosample/cl.json
 
     - name: copy uberon
-      source: https://github.com/obophenotype/uberon/releases/latest/download/uberon.json
+      source: https://github.com/obophenotype/uberon/releases/v${uberon_version}/download/uberon.json
       destination: input/biosample/uberon.json
 
     - name: copy efo
@@ -151,7 +154,7 @@ steps:
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/*
+      glob: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
@@ -792,7 +795,7 @@ steps:
   # '.results.drug.event.partitions[0:10] | map(.file)[]'
   openfda:
     - name: copy blacklisted event
-      source: https://raw.githubusercontent.com/opentargets/platform-etl-backend/master/src/main/resources/blacklisted_events.txt
+      source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/target_safety/openfda_blacklisted_events.txt
       destination: input/openfda/blacklisted_events.txt
 
     - name: copy openfda archive manifest
@@ -853,6 +856,7 @@ steps:
   #: SO STEP :######################################################################################
   so:
     - name: copy sequence ontology
+      # SO has no releases on github. We cannot reference tags or release, we have to pull from the default branch:
       source: https://raw.githubusercontent.com/The-Sequence-Ontology/SO-Ontologies/master/Ontology_Files/so.json
       destination: input/so/so.json
   ##################################################################################################
