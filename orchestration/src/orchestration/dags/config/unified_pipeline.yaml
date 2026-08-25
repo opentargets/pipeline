@@ -16,11 +16,16 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "sz/platform-2605-1"
+run_name: "do/platform-2608-1"
 
 # Pipeline package versions
-pis_version: "26.9.0.dev0.refactor-target.671c87e"
-pts_version: "26.9.0.dev0.refactor-target.2538485"
+#
+# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline,
+# not git refs: a tag that does not exist there fails at container pull, well after
+# the VM is up and the step has been billed for. Both were confirmed present in
+# Artifact Registry before being set here.
+pis_version: "26.9.0rc11"
+pts_version: "26.9.0rc23"
 gentropy_version: "3.3.0-rc.1"
 vep_version: "release_115.2"
 spark_nlp_version: "6.1.5"
