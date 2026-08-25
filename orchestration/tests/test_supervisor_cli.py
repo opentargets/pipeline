@@ -1916,7 +1916,7 @@ class TestObserveCommand:
         """Regression for F3: an already-marked run must not rerun the diff.
 
         Without this gate, a finished run's diff would rerun — and repost a full "Dataset
-        comparison" section — on every ten-minute wakeup forever, re-reading every parquet
+        comparison" section — on every five-minute wakeup forever, re-reading every parquet
         footer on both sides each time `--rows` is set.
         """
         observe_command.take_snapshot.return_value = _snapshot(run_state='success')

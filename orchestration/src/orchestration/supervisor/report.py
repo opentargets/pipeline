@@ -7,7 +7,7 @@ snapshot for anything the `Observation` has already filtered; the whole point of
 worth saying.
 
 That restraint is the actual requirement, not a style preference. This comment lands on
-a GitHub issue every ten minutes for potentially more than a day. A comment that
+a GitHub issue every five minutes for potentially more than a day. A comment that
 carries nothing new trains the reader to skip the thread, and the one wakeup that
 matters gets skipped along with it — which is worse than never having commented, because
 it looks like the thread is being watched when it is not. So an `Observation` with

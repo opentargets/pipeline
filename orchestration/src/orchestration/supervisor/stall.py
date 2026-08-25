@@ -245,9 +245,16 @@ sitting in one of these states does not, on its own, prove the scheduler is dead
 unlike a task that is neither active, moving, nor even touched at all
 (`_PENDING_STATE`), which has nothing else that could still be about to move it."""
 
-_RUN_STALL_WAKEUP_THRESHOLD = 6
-"""Consecutive silent wakeups before `'no_progress'` fires — one hour, at the 10-minute
+_RUN_STALL_WAKEUP_THRESHOLD = 12
+"""Consecutive silent wakeups before `'no_progress'` fires — one hour, at the 5-minute
 cadence `deployment/startup_machine.sh`'s `CRON_LINE` actually runs the observer on.
+
+**This constant and that cron interval are one decision, not two.** It is a count of
+wakeups, so it only means "one hour" while the interval is what it was chosen against;
+changing the cron alone silently rescales this threshold. It was 6 at the former
+10-minute cadence. `test_the_no_progress_threshold_still_means_one_hour` reads the real
+`CRON_LINE` out of `startup_machine.sh` and multiplies, so the pair cannot drift apart
+unnoticed.
 
 Counted in wakeups rather than minutes so a cron that was itself down for a while does
 not, on its own, manufacture a false alarm the moment it comes back — see

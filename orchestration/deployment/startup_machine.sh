@@ -201,13 +201,24 @@ touch /ready
     chgrp google-sudoers /var/log/observer
     chmod 770 /var/log/observer
 
-    # ten minutes: comfortably inside a stall threshold measured in hours,
+    # five minutes: comfortably inside a stall threshold measured in hours,
     # cheap because most wakeups do nothing, slow enough that the issue thread
     # stays readable. flock -n (fail immediately, don't queue) guards against
     # a slow wakeup still running when the next one fires: a skipped wakeup
-    # costs ten minutes of latency, a queued backlog costs a pile-up. output is
+    # costs five minutes of latency, a queued backlog costs a pile-up. output is
     # redirected to a log rather than left for cron to mail on every run.
-    CRON_LINE='*/10 * * * * orchestration flock -n /run/lock/pipeline-observer.lock /opt/orchestration/deployment/observer_wrapper.sh >> /var/log/observer/cron.log 2>&1'
+    #
+    # Was ten. Halved because the first live run measured steps finishing in as
+    # little as 88s, so at ten minutes a failure could go unreported for longer
+    # than several steps take to run end to end -- on a 20h pipeline that is
+    # blocked downstream work, not just late news.
+    #
+    # CHANGING THIS INTERVAL IS NOT A LOCAL EDIT. `stall._RUN_STALL_WAKEUP_THRESHOLD`
+    # is a count of *wakeups*, chosen to mean one hour at this cadence; halving the
+    # interval without doubling that constant silently halves the no-progress
+    # threshold. `test_supervisor_stall.py` pins the two together -- see it before
+    # editing either.
+    CRON_LINE='*/5 * * * * orchestration flock -n /run/lock/pipeline-observer.lock /opt/orchestration/deployment/observer_wrapper.sh >> /var/log/observer/cron.log 2>&1'
     if [ ! -f /etc/cron.d/pipeline-observer ] || ! grep -qF "$CRON_LINE" /etc/cron.d/pipeline-observer; then
       echo "$CRON_LINE" > /etc/cron.d/pipeline-observer
       chmod 644 /etc/cron.d/pipeline-observer

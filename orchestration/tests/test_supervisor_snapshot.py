@@ -12,6 +12,7 @@ from orchestration.supervisor.airflow import DagRun, TaskInstance
 from orchestration.supervisor.journal import JournalEvent, heartbeat_event
 from orchestration.supervisor.snapshot import Snapshot, render_snapshot, take_snapshot
 from orchestration.supervisor.stall import (
+    _RUN_STALL_WAKEUP_THRESHOLD,
     RunStallVerdict,
     StallVerdict,
     _wakeups_since_step_event,
@@ -259,7 +260,7 @@ class TestRunStalled:
     def test_no_progress_fires_once_every_active_task_is_already_flagged(self) -> None:
         stalls = [StallVerdict(task_id='pts_target.run_pts_target', elapsed=99999.0, threshold=21600.0,
                                basis='ceiling')]
-        verdict = run_stalled('running', {'running': 1}, stalls, _heartbeats(6))
+        verdict = run_stalled('running', {'running': 1}, stalls, _heartbeats(6), wakeup_threshold=6)
         assert verdict is not None
         assert verdict.reason == 'no_progress'
         assert verdict.wakeups == 6
@@ -267,7 +268,7 @@ class TestRunStalled:
 
     def test_no_progress_does_not_fire_below_the_wakeup_threshold(self) -> None:
         stalls = [StallVerdict(task_id='t', elapsed=99999.0, threshold=21600.0, basis='ceiling')]
-        assert run_stalled('running', {'running': 1}, stalls, _heartbeats(5)) is None
+        assert run_stalled('running', {'running': 1}, stalls, _heartbeats(5), wakeup_threshold=6) is None
 
     def test_no_progress_does_not_fire_at_the_threshold_minus_one(self) -> None:
         """Boundary check: exactly one short of the threshold must not be enough."""
@@ -291,7 +292,7 @@ class TestRunStalled:
             StallVerdict(task_id='b', elapsed=99999.0, threshold=21600.0, basis='ceiling'),
         ]
         counts = {'running': 1, 'deferred': 1}
-        verdict = run_stalled('running', counts, stalls, _heartbeats(6))
+        verdict = run_stalled('running', counts, stalls, _heartbeats(6), wakeup_threshold=6)
         assert verdict is not None
         assert verdict.active_tasks == 2
 
@@ -304,7 +305,7 @@ class TestRunStalled:
                         at=NOW + timedelta(minutes=3), payload={'duration': 10.0}),
             *_heartbeats(2, start=NOW + timedelta(minutes=4)),
         ]
-        assert run_stalled('running', {'running': 1}, stalls, events) is None
+        assert run_stalled('running', {'running': 1}, stalls, events, wakeup_threshold=6) is None
 
     def test_a_step_failure_also_resets_the_silence(self) -> None:
         """`step_failed` is a step event too, not only `step_completed`."""
@@ -313,7 +314,7 @@ class TestRunStalled:
             JournalEvent(event_type='step_failed', step='pts_disease', try_number=1, at=NOW, payload={}),
             *_heartbeats(6, start=NOW + timedelta(minutes=1)),
         ]
-        wakeups_only = run_stalled('running', {'running': 1}, stalls, events)
+        wakeups_only = run_stalled('running', {'running': 1}, stalls, events, wakeup_threshold=6)
         assert wakeups_only is not None
         assert wakeups_only.wakeups == 6
 
@@ -362,7 +363,7 @@ class TestRunStalled:
         """Mutually exclusive by construction: one requires zero active tasks, the other at least one."""
         active_verdict = run_stalled('running', {'running': 1, 'pending': 1},
                                      [StallVerdict(task_id='t', elapsed=1.0, threshold=1.0, basis='ceiling')],
-                                     _heartbeats(6))
+                                     _heartbeats(6), wakeup_threshold=6)
         idle_verdict = run_stalled('running', {'pending': 1}, [], [])
         assert active_verdict is not None
         assert active_verdict.reason == 'no_progress'
@@ -556,13 +557,19 @@ class TestTakeSnapshot:
 
         One active, already-flagged task plus a journal already carrying enough
         heartbeats for `'no_progress'` to fire on the very first wakeup that computes it.
+
+        Unlike the `TestRunStalled` cases above, this one deliberately does NOT inject a
+        threshold: `take_snapshot` is the production wiring, so the point is that it
+        applies the real `_RUN_STALL_WAKEUP_THRESHOLD`. The heartbeat count therefore
+        tracks that constant, and `test_supervisor_stall.py` is what keeps the constant
+        honest against the deployed cron interval.
         """
         tasks = [TaskInstance(task_id='slow', state='running', start_date=NOW - timedelta(hours=9))]
-        journal = _journal(_heartbeats(6, start=NOW - timedelta(hours=1)))
+        journal = _journal(_heartbeats(_RUN_STALL_WAKEUP_THRESHOLD, start=NOW - timedelta(hours=1)))
         snap = take_snapshot(_client(tasks), journal, 'unified_pipeline', 'r', NOW)
         assert snap.run_stall is not None
         assert snap.run_stall.reason == 'no_progress'
-        assert snap.run_stall.wakeups == 6
+        assert snap.run_stall.wakeups == _RUN_STALL_WAKEUP_THRESHOLD
 
 
 class TestRenderSnapshot:

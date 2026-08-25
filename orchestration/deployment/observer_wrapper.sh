@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs one `pipeline-supervisor observe` wakeup and exits. Invoked by cron every
-# ten minutes as the `orchestration` user, via the /etc/cron.d entry
+# five minutes as the `orchestration` user, via the /etc/cron.d entry
 # startup_machine.sh installs; that entry wraps this script in `flock -n` to
 # guard against overlap -- see its comment for why -n specifically.
 #

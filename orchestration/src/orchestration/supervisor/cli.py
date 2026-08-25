@@ -21,7 +21,7 @@ duration, which comes from Airflow task instances instead — see `snapshot`.
 
 `observe` diffs the run against a reference release only when both `--run` and
 `--reference` are given, and only once the run has reached a terminal state — never
-on every wakeup, which is what makes the ten-minute cron cheap (see the module
+on every wakeup, which is what makes the five-minute cron cheap (see the module
 docstring on `report.py`). Neither is auto-derived: `unified_pipeline.yaml` carries a
 `run_name`/`release_name` pair that *look* like the right values, but confirming
 they are the GCS prefixes those fields actually mean (as opposed to, say, the name
@@ -44,8 +44,15 @@ and repost the same "Dataset comparison" section forever. A separate
 journalled on the first wakeup that finds this run (idempotent like every other
 event here) — a durable "this run was discovered" marker letting a human map a
 journal prefix back to a bucket path. It is not a liveness marker: because it is
-journalled once per run and every later wakeup no-ops, a dead observer and a quiet
-one produce byte-identical journals, so liveness is not addressed here.
+journalled once per run and every later wakeup no-ops, on its own it cannot tell a
+dead observer from a quiet one.
+
+Liveness is carried by `heartbeat_event` instead, journalled on *every* wakeup
+whether or not there was anything to report — so the journal distinguishes a cron
+that died at 10:00 from one running quietly until 18:00, which `observation_started`
+alone could not. This matters more here than it would elsewhere because the healthy
+state of this tool is silence: an empty `cron.log` is the normal case, not a symptom,
+and the heartbeat is the only thing that makes the difference visible.
 """
 
 from __future__ import annotations
@@ -201,7 +208,7 @@ is reversed here, because the cost turns out to buy a second thing at no extra p
 `stall.run_stalled`'s `'no_progress'` signature counts these same heartbeats to tell
 "the run is quiet because nothing is happening" apart from "the run is quiet because
 the observer itself stopped running" — a distinction wall-clock time cannot make,
-since a cron down for three hours and a cron that ran every ten minutes through three
+since a cron down for three hours and a cron that ran every five minutes through three
 genuinely quiet hours both show three hours of wall-clock silence, but the former has
 far fewer heartbeats to show for it. One mechanism closing two gaps is what makes the
 cost worth paying now.
@@ -988,7 +995,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             'also read row counts on the terminal-state diff. Sizes, file counts and presence are '
             'always compared and take ~10s for a full release; row counts add ~7min, which is why '
-            'this defaults off for a cron that wakes every ten minutes — see `diff --rows`'
+            'this defaults off for a cron that wakes every five minutes — see `diff --rows`'
         ),
     )
 
