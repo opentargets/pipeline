@@ -92,7 +92,7 @@ def compute_target_prioritisation(
 
     Args:
         targets: Target data.
-        tractability: target_tractability data (targetId, modality, id, value).
+        tractability: target_tractability data (targetId, modality, category, value).
         target_safety_event: target_safety_event data (one row per event record).
         chemical_probes: chemical_probes data (one row per probe/target).
         homology: homology data (one row per target/homologue pair).
@@ -429,7 +429,7 @@ def _ligand_pocket_query(queryset: DataFrame, tractability: DataFrame) -> DataFr
         tractability
         .select(
             f.col('targetId').alias('targetid'),
-            f.col('id').alias('type'),
+            f.col('category').alias('type'),
             f.col('value').cast('int').alias('presence'),
         )
         .filter(f.col('type').isin('High-Quality Ligand', 'High-Quality Pocket', 'Small Molecule Binder'))
