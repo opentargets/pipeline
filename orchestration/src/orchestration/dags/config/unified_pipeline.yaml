@@ -93,7 +93,6 @@ steps:
     ppp_only: true
   pis_go:
   pis_interaction:
-  pis_enhancer_to_gene:
   pis_heritability:
   pis_l2g:
   pis_literature:
