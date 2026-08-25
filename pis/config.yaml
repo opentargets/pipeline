@@ -627,26 +627,38 @@ steps:
   gwas:
     - name: copy_many GCCA study
       sources: gs://gwas_catalog_top_hits/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcca
 
     - name: copy_many GCCA credible sets
       sources: gs://gwas_catalog_top_hits/credible_sets/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcca
 
     - name: copy_many GCSS pics study
       sources: gs://gwas_catalog_sumstats_pics/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_pics
 
     - name: copy_many GCSS pics credible sets
       sources: gs://gwas_catalog_sumstats_pics/credible_sets/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_pics
 
     - name: copy_many GCSS susie study
       sources: gs://gwas_catalog_sumstats_susie/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_susie
 
     - name: copy_many GCSS susie credible sets
       sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260519/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_susie
 
     - name: copy_many finngen study
@@ -673,6 +685,8 @@ steps:
   heritability:
     - name: copy_many gwas ldsc h2 estimates
       sources: gs://gwas_catalog_sumstats_susie/heritability_estimates/**/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/heritability_estimate
   ##################################################################################################
 
@@ -731,10 +745,14 @@ steps:
 
     - name: copy_many UKBB PPP EUR study
       sources: gs://ukb_ppp_eur_data/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/molqtl/study/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible sets
       sources: gs://ukb_ppp_eur_data/credible_set_clean/20250129/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set/ukb_ppp_eur
   ##################################################################################################
 
