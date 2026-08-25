@@ -34,8 +34,8 @@ from orchestration.supervisor.stall import RunStallVerdict
 from orchestration.supervisor.usage import StepUsage, WindowCoverage
 from orchestration.utils.common import (
     GCP_PROJECT_PLATFORM,
-    GCS_PIPELINE_RUNS_BUCKET,
-    GCS_PRE_RELEASES_BUCKET,
+    GCS_PIPELINE_RUNS_BUCKET_NAME,
+    GCS_PRE_RELEASES_BUCKET_NAME,
     clean_label,
 )
 
@@ -484,8 +484,8 @@ class TestDiffParser:
 
     def test_bucket_flags_default_to_the_standard_buckets(self) -> None:
         args = build_parser().parse_args(['diff', '--run', 'r', '--reference', 'rel'])
-        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET
-        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET
+        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET_NAME
+        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET_NAME
 
     def test_bucket_flags_are_overridable(self) -> None:
         args = build_parser().parse_args(
@@ -719,8 +719,8 @@ def diff_command(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 class TestDiffCommand:
     def test_buckets_are_constructed_from_the_default_bucket_names(self, diff_command: MagicMock) -> None:
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
-        diff_command.storage_client.bucket.assert_any_call(GCS_PIPELINE_RUNS_BUCKET)
-        diff_command.storage_client.bucket.assert_any_call(GCS_PRE_RELEASES_BUCKET)
+        diff_command.storage_client.bucket.assert_any_call(GCS_PIPELINE_RUNS_BUCKET_NAME)
+        diff_command.storage_client.bucket.assert_any_call(GCS_PRE_RELEASES_BUCKET_NAME)
 
     def test_the_run_bucket_and_reference_bucket_are_not_swapped(self, diff_command: MagicMock) -> None:
         """Each bucket object must reach `collect_diffs` in its own slot, not the other's.
@@ -731,8 +731,8 @@ class TestDiffCommand:
         """
         assert main(['diff', '--run', 'myrun', '--reference', 'rel1']) == 0
         args = diff_command.call_args.args
-        assert args[0] is diff_command.buckets[GCS_PIPELINE_RUNS_BUCKET]
-        assert args[2] is diff_command.buckets[GCS_PRE_RELEASES_BUCKET]
+        assert args[0] is diff_command.buckets[GCS_PIPELINE_RUNS_BUCKET_NAME]
+        assert args[2] is diff_command.buckets[GCS_PRE_RELEASES_BUCKET_NAME]
 
     def test_bucket_flags_override_the_defaults(self, diff_command: MagicMock) -> None:
         assert (
@@ -1592,8 +1592,8 @@ class TestObserveParser:
 
     def test_bucket_flags_default_to_the_standard_buckets(self) -> None:
         args = build_parser().parse_args(['observe', '--issue', '5'])
-        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET
-        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET
+        assert args.run_bucket == GCS_PIPELINE_RUNS_BUCKET_NAME
+        assert args.reference_bucket == GCS_PRE_RELEASES_BUCKET_NAME
 
     def test_threshold_defaults_to_five_percent(self) -> None:
         assert build_parser().parse_args(['observe', '--issue', '5']).threshold == 0.05

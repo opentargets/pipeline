@@ -92,8 +92,8 @@ from orchestration.utils.common import (
     BILLING_EXPORT_START,
     GCP_PROJECT_PLATFORM,
     GCP_REGION,
-    GCS_PIPELINE_RUNS_BUCKET,
-    GCS_PRE_RELEASES_BUCKET,
+    GCS_PIPELINE_RUNS_BUCKET_NAME,
+    GCS_PRE_RELEASES_BUCKET_NAME,
     clean_label,
 )
 
@@ -913,15 +913,15 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot = sub.add_parser('snapshot', help='read-only view of a pipeline run')
     snapshot.add_argument('--run', required=True, help='the Airflow DAG run id')
     snapshot.add_argument('--dag', default='unified_pipeline', help='the DAG to read')
-    snapshot.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help="the run's journal bucket")
+    snapshot.add_argument('--journal-bucket', default=GCS_PIPELINE_RUNS_BUCKET_NAME, help="the run's journal bucket")
     snapshot.add_argument('--json', action='store_true', help='emit JSON instead of text')
 
     diff = sub.add_parser('diff', help="compare a run's datasets against a reference release")
     diff.add_argument('--run', required=True, help='the run name, a prefix in the runs bucket')
     diff.add_argument('--reference', required=True, help='the reference release name')
     diff.add_argument('--threshold', type=float, default=0.05, help='fractional change to report')
-    diff.add_argument('--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help='bucket holding the run')
-    diff.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
+    diff.add_argument('--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET_NAME, help='bucket holding the run')
+    diff.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET_NAME, help='bucket holding the release')
     diff.add_argument(
         '--rows',
         action='store_true',
@@ -944,7 +944,7 @@ def build_parser() -> argparse.ArgumentParser:
         help='render the comment to stdout instead of posting it; write nothing to the journal either',
     )
     observe.add_argument(
-        '--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET, help="bucket holding the run's journal and output data"
+        '--run-bucket', default=GCS_PIPELINE_RUNS_BUCKET_NAME, help="bucket holding the run's journal and output data"
     )
     observe.add_argument(
         '--run',
@@ -963,7 +963,7 @@ def build_parser() -> argparse.ArgumentParser:
             '`diff --reference`. Required alongside --run to run the comparison; omitted, it is skipped'
         ),
     )
-    observe.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET, help='bucket holding the release')
+    observe.add_argument('--reference-bucket', default=GCS_PRE_RELEASES_BUCKET_NAME, help='bucket holding the release')
     observe.add_argument('--threshold', type=float, default=0.05, help='fractional change the diff reports')
     observe.add_argument(
         '--rows',
@@ -1030,7 +1030,7 @@ def main(argv: list[str] | None = None) -> int:
             except GoogleAPICallError as exc:
                 raise RuntimeError(f'Dataproc job query failed: {" ".join(str(exc).split())}') from exc
             try:
-                bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+                bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET_NAME)
                 # Unlike `run`/`step` above, the journal is keyed on the raw Airflow `dag_run_id`,
                 # never the cleaned billing label -- see journal.py's module docstring, and
                 # `snapshot`/`observe` below, which key it the same way. F4: `--run` accepts

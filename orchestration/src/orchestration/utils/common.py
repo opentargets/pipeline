@@ -42,19 +42,25 @@ alongside `AIRFLOW_USERNAME`/`AIRFLOW_PASSWORD`, which are read from the environ
 for the same reason.
 """
 
-GCS_PIPELINE_RUNS_BUCKET = 'open-targets-pipeline-runs'
+GCS_PIPELINE_RUNS_BUCKET_NAME = 'open-targets-pipeline-runs'
 """Bucket holding development pipeline runs, and therefore the agent's journal.
 
-Matches `dev_uri` in `dags/config/unified_pipeline.py`. Release runs write to
-`open-targets-pre-data-releases` instead, which phase 1 does not target.
+**A bare bucket name, deliberately, and that is why the name says `_NAME`.** It is
+passed to `storage.Client().bucket()`, which takes a name and rejects a `gs://`
+scheme. `main` separately defines `GCS_PIPELINE_RUNS_BUCKET` as the *URI* form
+(`gs://open-targets-pipeline-runs`) and interpolates it into `release_uri` in
+`models/run_config.py`. Two different things that were briefly one name: merging the
+two definitions produced a file defining the same constant twice, where the later one
+wins silently and strips the scheme off every URI the pipeline writes to. Keep these
+names distinct, or derive one from the other — do not share one.
 """
 
-GCS_PRE_RELEASES_BUCKET = 'open-targets-pre-data-releases'
+GCS_PRE_RELEASES_BUCKET_NAME = 'open-targets-pre-data-releases'
 """Bucket holding published release runs, read as the reference side of a diff.
 
-Matches `release_uri` in `dags/config/unified_pipeline.py`, which builds it from this
-same literal string rather than importing it — currently hardcoded at
-`dags/config/unified_pipeline.py:40`.
+A bare bucket name, for the same reason as `GCS_PIPELINE_RUNS_BUCKET_NAME` above: it
+reaches `storage.Client().bucket()`. `dags/config/unified_pipeline.py` builds its
+`release_uri` from this same literal rather than importing it.
 """
 
 STALL_CEILING_SECONDS = 6 * 60 * 60

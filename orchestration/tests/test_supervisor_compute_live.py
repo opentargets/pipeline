@@ -32,7 +32,7 @@ from orchestration.supervisor.compute import ClusterCompute, StepCompute, cluste
 from orchestration.supervisor.dataproc import JobExecution, job_executions
 from orchestration.supervisor.journal import Journal
 from orchestration.supervisor.usage import BillingExport, StepUsage, WindowCoverage, usage_window
-from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_REGION, GCS_PIPELINE_RUNS_BUCKET
+from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_REGION, GCS_PIPELINE_RUNS_BUCKET_NAME
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get('RUN_COMPUTE_TESTS'),
@@ -136,7 +136,7 @@ def live() -> LiveCompute:
     )
     executions = job_executions(dataproc_client, project=GCP_PROJECT_PLATFORM, region=GCP_REGION, run=KNOWN_RUN)
 
-    bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+    bucket = storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET_NAME)
     journal = Journal(bucket=bucket, prefix=f'_agent/unified_pipeline/{RAW_RUN}/journal')
     events = journal.read()
 

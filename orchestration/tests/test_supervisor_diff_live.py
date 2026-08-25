@@ -33,7 +33,7 @@ from google.cloud import storage
 
 from orchestration.supervisor.datasets import stage_configs, unified_pipeline_steps
 from orchestration.supervisor.gcs import Footer, collect_diffs, footer_reader, read_stats
-from orchestration.utils.common import GCS_PIPELINE_RUNS_BUCKET, GCS_PRE_RELEASES_BUCKET
+from orchestration.utils.common import GCS_PIPELINE_RUNS_BUCKET_NAME, GCS_PRE_RELEASES_BUCKET_NAME
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get('RUN_GCS_TESTS'),
@@ -70,22 +70,22 @@ FULL_RELEASE = pytest.mark.skipif(
 # exact signature, only that a `prefix=` keyword call succeeds.
 @pytest.fixture(scope='module')
 def run_bucket() -> Any:
-    return storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET)
+    return storage.Client().bucket(GCS_PIPELINE_RUNS_BUCKET_NAME)
 
 
 @pytest.fixture(scope='module')
 def reference_bucket() -> Any:
-    return storage.Client().bucket(GCS_PRE_RELEASES_BUCKET)
+    return storage.Client().bucket(GCS_PRE_RELEASES_BUCKET_NAME)
 
 
 @pytest.fixture(scope='module')
 def reference_footer() -> Callable[[str], Footer]:
-    return footer_reader(GCS_PRE_RELEASES_BUCKET)
+    return footer_reader(GCS_PRE_RELEASES_BUCKET_NAME)
 
 
 @pytest.fixture(scope='module')
 def run_footer() -> Callable[[str], Footer]:
-    return footer_reader(GCS_PIPELINE_RUNS_BUCKET)
+    return footer_reader(GCS_PIPELINE_RUNS_BUCKET_NAME)
 
 
 class TestKnownDatasets:
