@@ -117,7 +117,7 @@ extend-safe-fixes = [
 
 [lint.extend-per-file-ignores]
 '**/tasks/*.py' = ['D102']                   # Neither for run() in Otter tasks
-'tests/**/*.py' = ['D', 'S108', 'S602']      # We don't do docs in tests
+'**/tests/**/*.py' = ['D', 'S108', 'S602']   # We don't do docs in tests
 '**/tests/test_secret.py' = ['S105', 'S106'] # Those are not real secrets
 # '**/transformers/*.py' = ['D100', 'D103']
 # '**/pyspark/*.py' = ['RUF069', 'D100', 'D101', 'D102', 'D103']
