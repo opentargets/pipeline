@@ -88,14 +88,15 @@ def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFram
     """Compute tractability facets by modality.
 
     Aggregates the flat target_tractability dataset per target, collecting the
-    ids of assessments with value=True into one array column per modality
-    (SM, AB, PR, OC), then left-joins the result onto targets_df. The join can
-    reorder rows, so the result is re-sorted by targetId for deterministic output.
+    bucket categories of assessments with value=True into one array column per
+    modality (SM, AB, PR, OC), then left-joins the result onto targets_df. The
+    join can reorder rows, so the result is re-sorted by targetId for
+    deterministic output.
 
     Args:
         targets_df: DataFrame with a `targetId` column to enrich.
         tractability_df: target_tractability dataset with columns targetId,
-            modality, id, value.
+            modality, category, value.
 
     Returns:
         DataFrame: targets_df enriched with the four facetTractability* columns,
@@ -103,7 +104,7 @@ def _compute_facet_tractability(targets_df: DataFrame, tractability_df: DataFram
     """
 
     def facet_ids(modality: str):
-        return f.collect_list(f.when((f.col('modality') == modality) & f.col('value'), f.col('id')))
+        return f.collect_list(f.when((f.col('modality') == modality) & f.col('value'), f.col('category')))
 
     tractability_facets_df = tractability_df.groupBy('targetId').agg(
         facet_ids('SM').alias('facetTractabilitySmallmolecule'),

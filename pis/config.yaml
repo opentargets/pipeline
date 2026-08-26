@@ -277,7 +277,7 @@ steps:
   #: EVIDENCE_EXPRESSION_ATLAS STEP :###############################################################
   evidence_expression_atlas:
     - name: find_latest atlas
-      source: gs://otar010-atlas
+      source: gs://otar010-atlas/*.json.bz2
       scratchpad_key: 'latest_atlas'
     - name: copy atlas
       requires:
