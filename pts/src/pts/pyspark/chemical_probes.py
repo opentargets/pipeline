@@ -17,8 +17,11 @@ from pyspark.sql import types as t
 from pts.pyspark.common import Session
 from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
-# Chemical probe data sources
+# Chemical probe data sources. Every entry must be a column of the PROBES sheet of the
+# upstream Probes & Drugs spreadsheet: a name that drifts upstream fails the step with
+# UNRESOLVED_COLUMN, so these are checked against the real headers, not just each other.
 PROBES_SETS = [
+    'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity',
     'Bromodomains chemical toolbox',
     'Chemical Probes for Understudied Kinases',
     'Chemical Probes.org',
@@ -28,11 +31,9 @@ PROBES_SETS = [
     'Nature Chemical Biology Probes',
     'Open Science Probes',
     'opnMe Portal',
-    'Probe Miner (suitable probes)',
     'Protein methyltransferases chemical toolbox',
     'SGC Probes',
-    'Tool Compound Set',
-    'Concise Guide to Pharmacology 2019/20',
+    'Concise Guide to Pharmacology 2025/26',
     'Kinase Chemogenomic Set (KCGS)',
     'Kinase Inhibitors (best-in-class)',
     'Novartis Chemogenetic Library (NIBR MoA Box)',
@@ -253,7 +254,6 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             f.col('target').alias('targetFromSource'),
             'mechanismOfAction',
             process_scores('`P&D probe-likeness score`').alias('probesDrugsScore'),
-            process_scores('`Probe Miner Score`').alias('probeMinerScore'),
             process_scores('`Cells score (Chemical Probes.org)`').alias('scoreInCells'),
             process_scores('`Organisms score (Chemical Probes.org)`').alias('scoreInOrganisms'),
         )
@@ -333,7 +333,6 @@ def generate_chemical_probes_evidence(
         'control',
         'isHighQuality',
         'probesDrugsScore',
-        'probeMinerScore',
         'scoreInCells',
         'scoreInOrganisms',
     ]

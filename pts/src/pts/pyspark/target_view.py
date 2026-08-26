@@ -123,7 +123,7 @@ def _build_tractability(df: DataFrame) -> DataFrame:
     """Group tractability rows by target into the old ``tractability`` array.
 
     Args:
-        df: output/target_tractability, one row per (targetId, modality, id) assessment.
+        df: output/target_tractability, one row per (targetId, modality, category) assessment.
 
     Returns:
         DataFrame with [id, tractability[{modality, id, value}]].
@@ -177,8 +177,8 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
     Returns:
         DataFrame with [id, chemicalProbes[{targetFromSourceId, id,
         drugFromSourceId, drugId, mechanismOfAction, origin, control,
-        isHighQuality, probesDrugsScore, probeMinerScore, scoreInCells,
-        scoreInOrganisms, urls}]].
+        isHighQuality, probesDrugsScore, scoreInCells, scoreInOrganisms,
+        urls}]].
     """
     return (
         df
@@ -194,7 +194,6 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
                 'control',
                 'isHighQuality',
                 'probesDrugsScore',
-                'probeMinerScore',
                 'scoreInCells',
                 'scoreInOrganisms',
                 'urls',

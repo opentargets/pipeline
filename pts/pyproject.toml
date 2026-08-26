@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.9.0rc23"
+version = "26.9.0rc28"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -9,7 +9,7 @@ license = { text = "Apache-2.0" }
 
 dependencies = [
   "loguru>=0.7.3",
-  "opentargets-otter>=26.6.2",
+  "opentargets-otter>=26.9.1",
   "pandas>=2.3.3",
   "polars[connectorx]>=1.41.2",
   "pyspark>=3.5.7",

@@ -63,7 +63,7 @@ def _build_tractability(df: DataFrame, target_ids: DataFrame) -> DataFrame:
 
     Returns:
         DataFrame with one row per tractability assessment and columns
-        ``targetId``, ``modality``, ``id``, ``value``.
+        ``targetId``, ``modality``, ``category``, ``value``.
     """
     bucket_cols = [c for c in df.columns if re.match(r'.*_B\d+_.*', c)]
     tractability = df.select('ensembl_gene_id', *bucket_cols)

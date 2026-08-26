@@ -29,7 +29,7 @@ from pts.pyspark.target_prioritisation import (
 TRACTABILITY_SCHEMA = StructType([
     StructField('targetId', StringType()),
     StructField('modality', StringType()),
-    StructField('id', StringType()),
+    StructField('category', StringType()),
     StructField('value', BooleanType()),
 ])
 
@@ -69,7 +69,7 @@ def _queryset(spark, target_ids):
 def test_ligand_pocket_query_flags_high_quality_ligand(spark):
     """A target with a True High-Quality Ligand assessment gets Nr_Ligand=1."""
     tractability = spark.createDataFrame(
-        [Row(targetId='T1', modality='SM', id='High-Quality Ligand', value=True)],
+        [Row(targetId='T1', modality='SM', category='High-Quality Ligand', value=True)],
         TRACTABILITY_SCHEMA,
     )
     result = _ligand_pocket_query(_queryset(spark, ['T1']), tractability)
@@ -83,7 +83,7 @@ def test_ligand_pocket_query_flags_high_quality_ligand(spark):
 def test_ligand_pocket_query_ignores_false_values(spark):
     """A False assessment does not flag the corresponding facet."""
     tractability = spark.createDataFrame(
-        [Row(targetId='T1', modality='SM', id='High-Quality Pocket', value=False)],
+        [Row(targetId='T1', modality='SM', category='High-Quality Pocket', value=False)],
         TRACTABILITY_SCHEMA,
     )
     result = _ligand_pocket_query(_queryset(spark, ['T1']), tractability)
@@ -103,8 +103,8 @@ def test_ligand_pocket_query_ignores_unrelated_modality_ids(spark):
     """Assessment ids outside the three tracked categories don't produce extra pivot columns."""
     tractability = spark.createDataFrame(
         [
-            Row(targetId='T1', modality='SM', id='High-Quality Ligand', value=True),
-            Row(targetId='T1', modality='AB', id='Clinical Precedence', value=True),
+            Row(targetId='T1', modality='SM', category='High-Quality Ligand', value=True),
+            Row(targetId='T1', modality='AB', category='Clinical Precedence', value=True),
         ],
         TRACTABILITY_SCHEMA,
     )
