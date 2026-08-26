@@ -1,5 +1,6 @@
 """Tests for the chemical_probes module."""
 
+import pandas as pd
 from pyspark.sql import Row
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
@@ -8,6 +9,7 @@ from pts.pyspark.chemical_probes import (
     _build_ensg_lookup,
     _resolve_targets,
     collapse_cols_data_in_array,
+    process_probes_targets_data,
 )
 
 # ---------------------------------------------------------------------------
@@ -288,4 +290,68 @@ def test_the_cons_set_is_collected_as_its_own_datasource(spark):
     assert row_both is not None
     assert sorted(row_both.datasourceIds) == sorted([cons, older]), (
         'the two nuisance sets must be collected independently, not collapsed into one'
+    )
+
+
+# ---------------------------------------------------------------------------
+# PROBES TARGETS sheet
+# ---------------------------------------------------------------------------
+
+
+def _probes_targets_xlsx(path, extra_columns=None):
+    """Write a minimal PROBES TARGETS workbook, shaped like the upstream export.
+
+    The first column becomes the index, as the step reads the sheet with index_col=0.
+    """
+    frame = pd.DataFrame({
+        'pdid': ['PD-1', 'PD-2', 'PD-3'],
+        # PD-3 is dropped by the step's own gene_name filter. The surviving rows must
+        # keep both shapes of any mixed column, or there is nothing left to merge.
+        'gene_name': ['BRD4', 'EGFR', '-'],
+        'organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
+        'target': ['BRD4', 'EGFR', 'KRAS'],
+        'action': ['inhibitor', '-', '-'],
+        'control_smiles': ['CC', 'CC', 'CC'],
+        'P&D probe-likeness score': [1.0, 2.0, 3.0],
+        'Cells score (Chemical Probes.org)': [1.0, 2.0, 3.0],
+        'Organisms score (Chemical Probes.org)': [1.0, 2.0, 3.0],
+        **(extra_columns or {}),
+    })
+    frame.to_excel(path, sheet_name='PROBES TARGETS', index=False)
+    return path
+
+
+def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
+    """An unused column mixing booleans and blanks must not reach spark.
+
+    Upstream 01_2026 changed `covalent` from a string column to real booleans with
+    blank cells. Pandas types the blanks as float, and spark's schema inference
+    cannot merge DoubleType with BooleanType, so the step died on a column it
+    never reads. Handing spark only the columns the step uses keeps that class of
+    upstream drift out of inference.
+    """
+    xlsx = _probes_targets_xlsx(
+        tmp_path / 'probes.xlsx',
+        # Upstream writes the literal text 'True' and leaves the rest blank. Pandas
+        # turns that text into real bools and the blanks into NaN, giving one object
+        # column holding both -- writing a python True instead round-trips to 1.0 and
+        # reproduces nothing.
+        extra_columns={'covalent': ['True', None, None]},
+    )
+
+    # The shared fixture enables arrow, whose converter tolerates the mixed column.
+    # Production sets no arrow config, so spark falls back to row-wise schema
+    # inference -- the path that actually failed. Match production here, and put the
+    # session-scoped setting back for everyone else.
+    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
+    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
+    try:
+        df = process_probes_targets_data(spark, str(xlsx))
+        rows = df.collect()
+    finally:
+        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+
+    assert 'covalent' not in df.columns
+    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
+        'only the row without a gene_name should be dropped'
     )

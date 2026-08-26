@@ -40,6 +40,16 @@ PROBES_SETS = [
     'Nuisance compounds in cellular assays',
 ]
 
+PROBES_TARGETS_COLUMNS = [
+    'pdid',
+    'organism',
+    'target',
+    'action',
+    'P&D probe-likeness score',
+    'Cells score (Chemical Probes.org)',
+    'Organisms score (Chemical Probes.org)',
+]
+
 
 def chemical_probes(
     source: dict[str, str],
@@ -239,7 +249,7 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             # Probes that do not have an associated target are marked with "-"
             .query("gene_name != '-'")
             .reset_index()
-            .drop('control_smiles', axis=1)
+            [PROBES_TARGETS_COLUMNS]
         )
         .filter(f.col('organism') == 'Homo sapiens')
         .withColumn(
