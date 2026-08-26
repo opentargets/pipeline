@@ -2504,7 +2504,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.9.0rc24"
+version = "26.9.0rc25"
 source = { editable = "." }
 dependencies = [
     { name = "clinical-mining" },
