@@ -765,7 +765,7 @@ steps:
       transformer: drug_molecule
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: intermediate/chemical_probes_evidence.parquet
+        chemical_probes: output/chemical_probes
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
