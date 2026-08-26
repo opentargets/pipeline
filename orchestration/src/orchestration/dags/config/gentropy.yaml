@@ -41,7 +41,7 @@ steps:
         - '{{release_uri}}/input/molqtl/study/otar2077/IBDverse'
         - '{{release_uri}}/input/molqtl/study/GTEx_v10'
         - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
-      step.target_index_path: '{{release_uri}}/intermediate/target/ensembl'
+      step.target_index_path: '{{release_uri}}/intermediate/target/ensembl/homo_sapiens.parquet'
       step.disease_index_path: '{{release_uri}}/output/disease'
       step.biosample_index_path: '{{release_uri}}/output/biosample'
       step.heritability_input_path: '{{release_uri}}/input/heritability_estimate'
