@@ -23,10 +23,12 @@ from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 # spreadsheet: collapse_cols_data_in_array resolves each one against the frame, so
 # a name that has drifted upstream fails the whole step with UNRESOLVED_COLUMN.
 #
-# The upstream sheet also carries "A Collection of Useful Nuisance Compounds (CONS)
-# for Interrogation of Bioassay Integrity", deliberately left out here: adding it
-# would put a new datasourceId into the published dataset.
+# The CONS entry below is new in the 01_2026 export and adds a datasourceId that was
+# not in previous releases. It is a distinct set, not a rename: the older 'Nuisance
+# compounds in cellular assays' is still its own column upstream, and the two hold
+# different compounds.
 PROBES_SETS = [
+    'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity',
     'Bromodomains chemical toolbox',
     'Chemical Probes for Understudied Kinases',
     'Chemical Probes.org',
@@ -259,10 +261,10 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             f.col('target').alias('targetFromSource'),
             'mechanismOfAction',
             process_scores('`P&D probe-likeness score`').alias('probesDrugsScore'),
-            # Probe Miner was retired upstream: the PROBES TARGETS sheet no longer carries
-            # a "Probe Miner Score" column. Emitted as null to keep probeMinerScore in the
-            # published target.chemicalProbes schema until the field itself is retired.
-            f.lit(None).cast(t.DoubleType()).alias('probeMinerScore'),
+            # No probeMinerScore. Probe Miner was retired upstream -- neither the PROBES
+            # sheet nor PROBES TARGETS carries a Probe Miner column any more -- so the
+            # field is dropped rather than emitted as a permanent null. See the recordset
+            # in croissant, which no longer describes it either.
             process_scores('`Cells score (Chemical Probes.org)`').alias('scoreInCells'),
             process_scores('`Organisms score (Chemical Probes.org)`').alias('scoreInOrganisms'),
         )
@@ -342,7 +344,6 @@ def generate_chemical_probes_evidence(
         'control',
         'isHighQuality',
         'probesDrugsScore',
-        'probeMinerScore',
         'scoreInCells',
         'scoreInOrganisms',
     ]

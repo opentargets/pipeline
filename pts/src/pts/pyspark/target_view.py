@@ -177,8 +177,8 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
     Returns:
         DataFrame with [id, chemicalProbes[{targetFromSourceId, id,
         drugFromSourceId, drugId, mechanismOfAction, origin, control,
-        isHighQuality, probesDrugsScore, probeMinerScore, scoreInCells,
-        scoreInOrganisms, urls}]].
+        isHighQuality, probesDrugsScore, scoreInCells, scoreInOrganisms,
+        urls}]].
     """
     return (
         df
@@ -194,7 +194,6 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
                 'control',
                 'isHighQuality',
                 'probesDrugsScore',
-                'probeMinerScore',
                 'scoreInCells',
                 'scoreInOrganisms',
                 'urls',

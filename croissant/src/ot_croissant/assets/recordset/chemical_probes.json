@@ -29,10 +29,6 @@
     "description": "Origin of the chemical probe (e.g. experimental, calculated)"
   },
   {
-    "id": "probeMinerScore",
-    "description": "Score from ProbeMiner for chemical probe quality"
-  },
-  {
     "id": "probesDrugsScore",
     "description": "Score for chemical probes related to druggability"
   },
