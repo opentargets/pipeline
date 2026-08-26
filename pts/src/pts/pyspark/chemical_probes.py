@@ -40,10 +40,6 @@ PROBES_SETS = [
     'Nuisance compounds in cellular assays',
 ]
 
-# Columns read from the PROBES TARGETS sheet. Taking only these keeps the rest of the
-# sheet away from spark's schema inference, which cannot merge an object column that
-# mixes types: 01_2026 turned `covalent` into booleans plus blank cells, and inference
-# read the blanks as double and failed on the first boolean.
 PROBES_TARGETS_COLUMNS = [
     'pdid',
     'organism',
