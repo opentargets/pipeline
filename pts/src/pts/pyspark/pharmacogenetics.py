@@ -14,7 +14,7 @@ from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 from pyspark.sql import DataFrame
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
@@ -70,7 +70,12 @@ def pharmacogenetics(
         logger.info('all phenotypes have been parsed')
     else:
         logger.warning(f'{len(unparsed_texts)} phenotypes have not been parsed')
-        client = OpenAI(api_key=openai_key)
+        # Retries and a timeout, rather than the client's defaults. These calls are made
+        # sequentially from a Dataproc driver against a third-party API, so a single
+        # transient failure is likely over a long enough list and costs that text its
+        # extraction. `max_retries` covers connection errors, timeouts and 429/5xx with
+        # exponential backoff; `timeout` stops one hung request stalling the step.
+        client = OpenAI(api_key=openai_key, max_retries=5, timeout=60.0)
         new_phenotypes_df = parse_phenotypes(
             spark=spark,
             texts_to_parse=unparsed_texts,
@@ -149,18 +154,28 @@ def parse_phenotype_with_gpt(
 
         "{genotype_text}"
     """
-    completion = openai_client.chat.completions.create(
-        model=gpt_model,
-        response_format={'type': 'json_object'},
-        messages=[
-            {
-                'role': 'system',
-                'content': 'you are an expert in clinical pharmacology designed to output JSON.',
-            },
-            {'role': 'user', 'content': prompt},
-        ],
-        seed=42,
-    )
+    try:
+        completion = openai_client.chat.completions.create(
+            model=gpt_model,
+            response_format={'type': 'json_object'},
+            messages=[
+                {
+                    'role': 'system',
+                    'content': 'you are an expert in clinical pharmacology designed to output JSON.',
+                },
+                {'role': 'user', 'content': prompt},
+            ],
+            seed=42,
+        )
+    except OpenAIError as e:
+        # The call itself was previously outside any `try` -- the one below guards only the
+        # parsing of a response, which by definition has already arrived. So a connection
+        # error, a rate limit or an expired key propagated out of the step and discarded the
+        # whole run's work. Returning None instead puts this text on the same footing as one
+        # the model declined to extract: `parse_phenotypes` skips it, the row keeps a null
+        # phenotypeText, and the step continues.
+        logger.warning(f'{type(e).__name__} extracting phenotype, leaving it unparsed: {e}')
+        return None
     try:
         generated_text = completion.choices[0].message.content
         if not generated_text:
@@ -174,7 +189,13 @@ def parse_phenotype_with_gpt(
 
 
 def parse_phenotypes(spark: Session, texts_to_parse: list[str], openai_client: OpenAI) -> DataFrame:
-    """Parse the phenotypes from the given texts by calling the OpenAI API."""
+    """Parse the phenotypes from the given texts by calling the OpenAI API.
+
+    Texts that cannot be extracted are left out rather than failing the step: they keep a
+    null `phenotypeText`, exactly as they would have before the API was consulted. The
+    counts are logged because that degradation is otherwise invisible -- a step that
+    extracts nothing and one that extracts everything both succeed.
+    """
     results_dict = {}
     for text in texts_to_parse:
         result = parse_phenotype_with_gpt(text, openai_client)
@@ -182,6 +203,19 @@ def parse_phenotypes(spark: Session, texts_to_parse: list[str], openai_client: O
             results_dict[text] = result
         elif isinstance(result, str):
             results_dict[text] = [result]
+
+    unresolved = len(texts_to_parse) - len(results_dict)
+    if unresolved == len(texts_to_parse) and texts_to_parse:
+        logger.error(
+            f'extracted none of {len(texts_to_parse)} phenotypes; the API was unreachable, '
+            f'unauthorised or rate limited throughout. Those rows keep a null phenotypeText '
+            f'and the step continues.'
+        )
+    elif unresolved:
+        logger.warning(f'extracted {len(results_dict)} of {len(texts_to_parse)} phenotypes')
+    else:
+        logger.info(f'extracted all {len(results_dict)} phenotypes')
+
     return spark.spark.createDataFrame(
         list(results_dict.items()),
         StructType([
