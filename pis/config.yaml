@@ -277,12 +277,6 @@ steps:
   #: EVIDENCE_EXPRESSION_ATLAS STEP :###############################################################
   evidence_expression_atlas:
     - name: find_latest atlas
-      # Constrained to the expected extension, not the bare prefix. The bucket gained a
-      # .parquet sibling of the same export on 2026-08-15, and find_latest has no notion
-      # of which format is wanted -- it returns the newest thing it is shown. The parquet
-      # is genuinely newer, so it wins on merit and `copy` then writes it to
-      # atlas.json.bz2, which is not an error. The wrong file surfaces three steps later
-      # as a missing-column error in evidence_postprocess.
       source: gs://otar010-atlas/*.json.bz2
       scratchpad_key: 'latest_atlas'
     - name: copy atlas
