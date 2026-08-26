@@ -16,7 +16,7 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "do/platform-2608-2"
+run_name: "do/platform-2608-3"
 
 # Pipeline package versions
 #
@@ -24,13 +24,13 @@ run_name: "do/platform-2608-2"
 # (and .../vep for vep_version), not git refs. A tag that does not exist there fails at
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
-pis_version: "26.9.0rc12"
-pts_version: "26.9.0rc23"
+pis_version: "26.9.0rc13"
+pts_version: "26.9.0rc28"
 # No leading `v` here: this value is used both ways and each consumer adds what it
 # needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
 # while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
-# gentropy:v3.4.0-dev.7` is a 404 while `:3.4.0-dev.7` resolves.
-gentropy_version: "3.4.0-dev.7"
+# gentropy:v3.4.0-dev.8` is a 404 while `:3.4.0-dev.8` resolves.
+gentropy_version: "3.4.0-dev.8"
 # Built by opentargets/vep-image; the GitHub release and the registry image are
 # published separately, so the tag existing in one does not mean it exists in the
 # other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
