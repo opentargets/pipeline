@@ -116,7 +116,9 @@ def _compute_tractability_facets(tractability_df: DataFrame, categories: dict[st
 
     Args:
         tractability_df: target_tractability dataset with columns targetId,
-            modality, id, value.
+            modality, category, value. ``modality`` is the code (SM/AB/PR/OC)
+            that becomes the facet category; ``category`` is the human-readable
+            bucket name that becomes the facet label.
         categories: category label mapping.
 
     Returns:
@@ -138,18 +140,19 @@ def _compute_tractability_facets(tractability_df: DataFrame, categories: dict[st
         .where(f.col('value'))
         .select(
             f.col('targetId').alias('ensemblGeneId'),
-            f.col('modality').alias('category'),
-            f.col('id').alias('label'),
+            f.col('modality'),
+            f.col('category').alias('label'),
         )
-        .groupBy('category', 'label')
+        .groupBy('modality', 'label')
         .agg(f.collect_set('ensemblGeneId').alias('entityIds'))
         .withColumn(
             'category',
             f.when(
-                modality_map[f.col('category')].isNotNull(),
-                modality_map[f.col('category')],
-            ).otherwise(f.col('category')),
+                modality_map[f.col('modality')].isNotNull(),
+                modality_map[f.col('modality')],
+            ).otherwise(f.col('modality')),
         )
+        .drop('modality')
         .withColumn('datasourceId', f.lit(None).cast('string'))
     )
 

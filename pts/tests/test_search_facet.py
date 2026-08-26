@@ -156,7 +156,7 @@ def test_therapeutic_area_label_is_area_name(spark):
 TRACTABILITY_SCHEMA = StructType([
     StructField('targetId', StringType()),
     StructField('modality', StringType()),
-    StructField('id', StringType()),
+    StructField('category', StringType()),
     StructField('value', BooleanType()),
 ])
 
@@ -164,8 +164,8 @@ TRACTABILITY_SCHEMA = StructType([
 def test_tractability_facet_produces_modality_categories(spark):
     """Tractability facet produces SM/AB/PR/OC modality categories."""
     data = [
-        Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True),
-        Row(targetId='ENSG00000001', modality='AB', id='Predicted Tractable High', value=True),
+        Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True),
+        Row(targetId='ENSG00000001', modality='AB', category='Advanced Clinical', value=True),
     ]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
@@ -178,20 +178,34 @@ def test_tractability_facet_produces_modality_categories(spark):
 def test_tractability_facet_only_true_values(spark):
     """Tractability facet only includes entries where value=True."""
     data = [
-        Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True),
-        Row(targetId='ENSG00000001', modality='SM', id='Discovery Precedence', value=False),
+        Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True),
+        Row(targetId='ENSG00000001', modality='SM', category='Druggable Family', value=False),
     ]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
     rows = result.collect()
     labels = {r.label for r in rows}
-    assert 'Clinical Precedence' in labels
-    assert 'Discovery Precedence' not in labels
+    assert 'Approved Drug' in labels
+    assert 'Druggable Family' not in labels
+
+
+def test_tractability_facet_label_is_the_bucket_category(spark):
+    """Facet label comes from the bucket ``category``, not from ``modality``.
+
+    The producer renamed this column from ``id`` to ``category``; pinning the
+    label/category pairing on one row keeps the two apart.
+    """
+    data = [Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True)]
+    df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
+    row = _compute_tractability_facets(df, CATEGORIES).collect()[0]
+    assert row.label == 'Approved Drug'
+    assert row.category == 'Tractability Small Molecule'
+    assert row.entityIds == ['ENSG00000001']
 
 
 def test_tractability_facet_entry_structure(spark):
     """Tractability facet entries have label, category, entityIds, datasourceId."""
-    data = [Row(targetId='ENSG00000001', modality='SM', id='Clinical Precedence', value=True)]
+    data = [Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True)]
     df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
     result = _compute_tractability_facets(df, CATEGORIES)
     row = result.collect()[0]

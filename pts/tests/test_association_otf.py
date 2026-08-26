@@ -189,7 +189,7 @@ class TestComputeFacetTractability:
         .StructType()
         .add('targetId', t.StringType())
         .add('modality', t.StringType())
-        .add('id', t.StringType())
+        .add('category', t.StringType())
         .add('value', t.BooleanType())
     )
 

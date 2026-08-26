@@ -123,7 +123,7 @@ def _build_tractability(df: DataFrame) -> DataFrame:
     """Group tractability rows by target into the old ``tractability`` array.
 
     Args:
-        df: output/target_tractability, one row per (targetId, modality, id) assessment.
+        df: output/target_tractability, one row per (targetId, modality, category) assessment.
 
     Returns:
         DataFrame with [id, tractability[{modality, id, value}]].
