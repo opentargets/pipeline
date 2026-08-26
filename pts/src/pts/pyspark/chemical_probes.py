@@ -17,16 +17,9 @@ from pyspark.sql import types as t
 from pts.pyspark.common import Session
 from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
 
-# Chemical probe data sources.
-#
-# Every entry must be a column of the PROBES sheet of the upstream Probes & Drugs
-# spreadsheet: collapse_cols_data_in_array resolves each one against the frame, so
-# a name that has drifted upstream fails the whole step with UNRESOLVED_COLUMN.
-#
-# The CONS entry below is new in the 01_2026 export and adds a datasourceId that was
-# not in previous releases. It is a distinct set, not a rename: the older 'Nuisance
-# compounds in cellular assays' is still its own column upstream, and the two hold
-# different compounds.
+# Chemical probe data sources. Every entry must be a column of the PROBES sheet of the
+# upstream Probes & Drugs spreadsheet: a name that drifts upstream fails the step with
+# UNRESOLVED_COLUMN, so these are checked against the real headers, not just each other.
 PROBES_SETS = [
     'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity',
     'Bromodomains chemical toolbox',
@@ -261,10 +254,6 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             f.col('target').alias('targetFromSource'),
             'mechanismOfAction',
             process_scores('`P&D probe-likeness score`').alias('probesDrugsScore'),
-            # No probeMinerScore. Probe Miner was retired upstream -- neither the PROBES
-            # sheet nor PROBES TARGETS carries a Probe Miner column any more -- so the
-            # field is dropped rather than emitted as a permanent null. See the recordset
-            # in croissant, which no longer describes it either.
             process_scores('`Cells score (Chemical Probes.org)`').alias('scoreInCells'),
             process_scores('`Organisms score (Chemical Probes.org)`').alias('scoreInOrganisms'),
         )
