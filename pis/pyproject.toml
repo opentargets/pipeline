@@ -10,7 +10,7 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "jq>=1.11.0",
   "loguru>=0.7.3",
-  "opentargets-otter>=26.6.2",
+  "opentargets-otter>=26.9.1",
   "requests>=2.34.2",
   "urllib3>=2.7.0",
 ]
