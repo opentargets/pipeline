@@ -1,9 +1,14 @@
-"""Tests for the ENSG resolution functions in the chemical_probes module."""
+"""Tests for the chemical_probes module."""
 
 from pyspark.sql import Row
-from pyspark.sql.types import ArrayType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
-from pts.pyspark.chemical_probes import _build_ensg_lookup, _resolve_targets
+from pts.pyspark.chemical_probes import (
+    PROBES_SETS,
+    _build_ensg_lookup,
+    _resolve_targets,
+    collapse_cols_data_in_array,
+)
 
 # ---------------------------------------------------------------------------
 # Shared schemas and helpers
@@ -187,3 +192,100 @@ def test_resolve_targets_multiple_probes_same_target(spark):
     result = _resolve_targets(evidence, lut)
     assert result.count() == 2
     assert result.filter('targetId = "ENSG00000001"').count() == 2
+
+
+# ---------------------------------------------------------------------------
+# collapse_cols_data_in_array / PROBES_SETS
+# ---------------------------------------------------------------------------
+
+# One-hot datasource columns of the PROBES sheet, read from the upstream Probes &
+# Drugs spreadsheet used by the 2026.09 release
+# (input/target/chemicalprobes/probes.xlsx). Kept verbatim so that a name drifting
+# upstream shows up here as a failure rather than as an UNRESOLVED_COLUMN crash in
+# production.
+PROBES_SHEET_DATASOURCE_COLUMNS = [
+    'Bromodomains chemical toolbox',
+    'Chemical Probes for Understudied Kinases',
+    'Chemical Probes.org',
+    'Gray Laboratory Probes',
+    'High-quality chemical probes',
+    'MLP Probes',
+    'Nature Chemical Biology Probes',
+    'Open Science Probes',
+    'opnMe Portal',
+    'Protein methyltransferases chemical toolbox',
+    'SGC Probes',
+    'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity',
+    'Concise Guide to Pharmacology 2025/26',
+    'Kinase Chemogenomic Set (KCGS)',
+    'Kinase Inhibitors (best-in-class)',
+    'Novartis Chemogenetic Library (NIBR MoA Box)',
+    'Nuisance compounds in cellular assays',
+]
+
+
+def _probes_sheet_df(spark, memberships):
+    """Build a PROBES-sheet-shaped frame with the real upstream column names.
+
+    Args:
+        spark: Spark session.
+        memberships: Datasource column names the single probe row belongs to.
+
+    Returns:
+        DataFrame with one row, ``pdid`` plus every one-hot datasource column.
+    """
+    schema = StructType(
+        [StructField('pdid', StringType())]
+        + [StructField(c, DoubleType()) for c in PROBES_SHEET_DATASOURCE_COLUMNS]
+    )
+    row = [1.0 if c in memberships else None for c in PROBES_SHEET_DATASOURCE_COLUMNS]
+    return spark.createDataFrame([['PD000001', *row]], schema)
+
+
+def test_probes_sets_are_all_columns_of_the_probes_sheet(spark):
+    """Every PROBES_SETS entry resolves against the upstream PROBES sheet columns.
+
+    Regression test for header drift: an entry naming a column the spreadsheet no
+    longer has makes collapse_cols_data_in_array raise UNRESOLVED_COLUMN and fails the
+    whole step, on Dataproc, after cluster spin-up.
+    """
+    df = _probes_sheet_df(spark, memberships=['SGC Probes'])
+    result = collapse_cols_data_in_array(df, PROBES_SETS, 'datasourceIds')
+    row = result.first()
+    assert row is not None
+    assert row.datasourceIds == ['SGC Probes']
+
+
+def test_collapse_cols_data_in_array_collects_every_membership(spark):
+    """A probe in several sets collects all of them, and only them."""
+    memberships = ['Chemical Probes.org', 'High-quality chemical probes', 'Concise Guide to Pharmacology 2025/26']
+    df = _probes_sheet_df(spark, memberships=memberships)
+    result = collapse_cols_data_in_array(df, PROBES_SETS, 'datasourceIds')
+    row = result.first()
+    assert row is not None
+    assert sorted(row.datasourceIds) == sorted(memberships)
+
+
+def test_the_cons_set_is_collected_as_its_own_datasource(spark):
+    """CONS is a set of its own, not a rename of 'Nuisance compounds in cellular assays'.
+
+    Both columns exist upstream and their memberships do not overlap, so a probe can be
+    in either or both. Pinned because the two names invite being collapsed into one.
+    """
+    cons = 'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity'
+    older = 'Nuisance compounds in cellular assays'
+    assert cons in PROBES_SHEET_DATASOURCE_COLUMNS
+    assert cons in PROBES_SETS
+    assert older in PROBES_SETS, 'adopting CONS must not displace the set it sits alongside'
+
+    df = _probes_sheet_df(spark, memberships=[cons])
+    row = collapse_cols_data_in_array(df, PROBES_SETS, 'datasourceIds').first()
+    assert row is not None
+    assert row.datasourceIds == [cons]
+
+    both = _probes_sheet_df(spark, memberships=[cons, older])
+    row_both = collapse_cols_data_in_array(both, PROBES_SETS, 'datasourceIds').first()
+    assert row_both is not None
+    assert sorted(row_both.datasourceIds) == sorted([cons, older]), (
+        'the two nuisance sets must be collected independently, not collapsed into one'
+    )
