@@ -304,15 +304,17 @@ def _probes_targets_xlsx(path, extra_columns=None):
     The first column becomes the index, as the step reads the sheet with index_col=0.
     """
     frame = pd.DataFrame({
-        'pdid': ['PD-1', 'PD-2'],
-        'gene_name': ['BRD4', '-'],
-        'organism': ['Homo sapiens', 'Homo sapiens'],
-        'target': ['BRD4', 'EGFR'],
-        'action': ['inhibitor', '-'],
-        'control_smiles': ['CC', 'CC'],
-        'P&D probe-likeness score': [1.0, 2.0],
-        'Cells score (Chemical Probes.org)': [1.0, 2.0],
-        'Organisms score (Chemical Probes.org)': [1.0, 2.0],
+        'pdid': ['PD-1', 'PD-2', 'PD-3'],
+        # PD-3 is dropped by the step's own gene_name filter. The surviving rows must
+        # keep both shapes of any mixed column, or there is nothing left to merge.
+        'gene_name': ['BRD4', 'EGFR', '-'],
+        'organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
+        'target': ['BRD4', 'EGFR', 'KRAS'],
+        'action': ['inhibitor', '-', '-'],
+        'control_smiles': ['CC', 'CC', 'CC'],
+        'P&D probe-likeness score': [1.0, 2.0, 3.0],
+        'Cells score (Chemical Probes.org)': [1.0, 2.0, 3.0],
+        'Organisms score (Chemical Probes.org)': [1.0, 2.0, 3.0],
         **(extra_columns or {}),
     })
     frame.to_excel(path, sheet_name='PROBES TARGETS', index=False)
@@ -330,12 +332,26 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
     """
     xlsx = _probes_targets_xlsx(
         tmp_path / 'probes.xlsx',
-        extra_columns={'covalent': [True, None]},
+        # Upstream writes the literal text 'True' and leaves the rest blank. Pandas
+        # turns that text into real bools and the blanks into NaN, giving one object
+        # column holding both -- writing a python True instead round-trips to 1.0 and
+        # reproduces nothing.
+        extra_columns={'covalent': ['True', None, None]},
     )
 
-    df = process_probes_targets_data(spark, str(xlsx))
+    # The shared fixture enables arrow, whose converter tolerates the mixed column.
+    # Production sets no arrow config, so spark falls back to row-wise schema
+    # inference -- the path that actually failed. Match production here, and put the
+    # session-scoped setting back for everyone else.
+    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
+    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
+    try:
+        df = process_probes_targets_data(spark, str(xlsx))
+        rows = df.collect()
+    finally:
+        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
 
     assert 'covalent' not in df.columns
-    rows = df.collect()
-    assert [r.pdid for r in rows] == ['PD-1'], 'rows without a gene_name must be dropped'
-    assert rows[0].targetFromSource == 'BRD4'
+    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
+        'only the row without a gene_name should be dropped'
+    )
