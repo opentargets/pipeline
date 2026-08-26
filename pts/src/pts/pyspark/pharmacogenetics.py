@@ -112,7 +112,7 @@ def pharmacogenetics(
 
 
 def parse_phenotype_with_gpt(
-    genotype_text: str, openai_client: OpenAI, gpt_model: str = 'gpt-3.5-turbo-1106'
+    genotype_text: str, openai_client: OpenAI, gpt_model: str = 'gpt-5-nano-2025-08-07'
 ) -> list[str] | None:
     """Query the OpenAI API to extract the phenotype from the genotype text."""
     prompt = f"""
@@ -182,7 +182,16 @@ def parse_phenotype_with_gpt(
             logger.warning(f'No content generated for text: {genotype_text}')
             return None
         json_obj = json.loads(generated_text)
-        return json_obj.get('gptExtractedPhenotype', [])
+        if 'gptExtractedPhenotype' not in json_obj:
+            # Distinguished from an empty extraction, which is legitimate: 1,411 of the
+            # curated entries have an empty phenotypeText because the annotation genuinely
+            # describes no phenotype. A missing key is different -- the model answered in a
+            # shape the prompt did not ask for. Defaulting it to [] recorded that as a
+            # successful extraction, so the text entered the lookup table permanently empty
+            # and was never attempted again.
+            logger.warning(f'no gptExtractedPhenotype in the response for: {genotype_text[:80]}')
+            return None
+        return json_obj['gptExtractedPhenotype']
     except Exception as e:
         logger.error(f'Error parsing phenotype: {e}')
         return None

@@ -86,3 +86,27 @@ class TestParsePhenotypes:
         result = parse_phenotypes(session, ['a', 'b', 'c'], client)
         assert result.count() == 2, 'a single failed call discarded the successful ones'
         assert sorted(r.genotypeAnnotationText for r in result.collect()) == ['a', 'c']
+
+
+class TestResponseShape:
+    def test_a_missing_key_is_not_treated_as_an_empty_extraction(self) -> None:
+        """A model answering in the wrong shape must be retried, not recorded as done.
+
+        `gptExtractedPhenotype` absent means the model ignored the requested shape. That
+        used to default to `[]`, which `parse_phenotypes` stores as a successful
+        extraction — so the text entered the lookup table permanently empty and was never
+        attempted again. Observed while probing a model swap: both models answered with
+        `phenotype` and `phenotypes` when the prompt was abbreviated.
+        """
+        client = _client(content='{"phenotype": "increased response"}')
+        assert parse_phenotype_with_gpt('text', client) is None
+
+    def test_a_genuinely_empty_extraction_is_kept(self) -> None:
+        """An empty list is real data, not a failure.
+
+        1,411 of the curated entries have an empty phenotypeText because the annotation
+        describes no phenotype. Those must stay distinguishable from a bad response, or
+        the fix above would make the step re-query them forever.
+        """
+        client = _client(content='{"gptExtractedPhenotype": []}')
+        assert parse_phenotype_with_gpt('text', client) == []
