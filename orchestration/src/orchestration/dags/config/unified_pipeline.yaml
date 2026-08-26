@@ -20,10 +20,10 @@ run_name: "do/platform-2608-3"
 
 # Pipeline package versions
 #
-# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline,
-# not git refs: a tag that does not exist there fails at container pull, well after
-# the VM is up and the step has been billed for. Both were confirmed present in
-# Artifact Registry before being set here.
+# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline
+# (and .../vep for vep_version), not git refs. A tag that does not exist there fails at
+# container pull — after the VM is up, the disk is attached and the step is being
+# billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.9.0rc13"
 pts_version: "26.9.0rc28"
 # No leading `v` here: this value is used both ways and each consumer adds what it
@@ -31,9 +31,9 @@ pts_version: "26.9.0rc28"
 # while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
 # gentropy:v3.4.0-dev.8` is a 404 while `:3.4.0-dev.8` resolves.
 gentropy_version: "3.4.0-dev.8"
-# Built by opentargets/vep-image; the tag here must match a release there AND an
-# image tag in the `vep` Artifact Registry repo, which are published separately.
-# https://github.com/opentargets/vep-image/releases/tag/release_116.1
+# Built by opentargets/vep-image; the GitHub release and the registry image are
+# published separately, so the tag existing in one does not mean it exists in the
+# other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
 vep_version: "release_116.1"
 spark_nlp_version: "6.1.5"
 
