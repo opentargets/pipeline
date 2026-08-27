@@ -41,9 +41,8 @@ def _is_diff(step_name: str) -> bool:
 def test_a_step_that_did_not_succeed_must_run(result: str) -> None:
     """Anything other than success has to run when the step is cleared.
 
-    `pending` matters as much as `failure`: it is what a hung step, or one whose vm
-    disappeared underneath it, leaves in the manifest. Narrowing this to `failure`
-    would let both of those skip themselves.
+    Narrowing this to `failure` would let a hung step, which leaves `pending`, go on
+    skipping itself.
     """
     with _manifest({'steps': {'pts_x': {'result': result, 'artifacts': []}}}):
         assert _is_diff('pts_x') is True
@@ -52,8 +51,7 @@ def test_a_step_that_did_not_succeed_must_run(result: str) -> None:
 def test_a_succeeded_step_does_not_need_to_run() -> None:
     """The differ must not force a rerun of work that is already done.
 
-    Paired with the test above: without this, always reporting a difference would
-    pass, and every step would rerun on every pass.
+    Without this, always reporting a difference would pass the test above.
     """
     with _manifest({'steps': {'pts_x': {'result': 'success', 'artifacts': [{'destination': 'gs://b/o'}]}}}):
         assert _is_diff('pts_x') is False
@@ -62,9 +60,8 @@ def test_a_succeeded_step_does_not_need_to_run() -> None:
 def test_the_differ_is_registered_for_pis_and_pts_only(dag_bag: DagBag) -> None:
     """Both directions matter, so they are checked together on the built DAG.
 
-    A pis or pts stage that omits the differ silently reinstates the skip. Gentropy
-    steps are absent from otter's manifest, so registering it there would report a
-    difference for them on every pass and none of them could ever skip.
+    Omitting it from a pis or pts stage reinstates the skip. Adding it to gentropy,
+    whose steps are absent from otter's manifest, stops those ever skipping.
     """
     dag = dag_bag.dags['unified_pipeline']
     seen = {'pis_pts': 0, 'gentropy': 0}
@@ -75,9 +72,8 @@ def test_the_differ_is_registered_for_pis_and_pts_only(dag_bag: DagBag) -> None:
             continue
         step_name = name.removeprefix('diff_')
 
+        # Absent must fail, not pass vacuously -- the shape of the bug being fixed.
         differs = getattr(task, 'differs', None)
-        # An absent attribute must fail rather than pass vacuously -- that is the
-        # shape of the bug this differ exists to fix.
         assert differs is not None, f'{task.task_id} exposes no differs to check'
         kinds = {type(d).__name__ for d in differs}
 

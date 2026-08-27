@@ -13,12 +13,8 @@ SUCCESS = 'success'
 class StepResultDiffer(Differ):
     """Check whether the step succeeded the last time it ran.
 
-    Without this, clearing a failed step makes it skip itself: `upload_config` runs
-    before `run_`, so the config the ConfigDiffer compares against always matches, and
-    a failed step records no artifacts, so the ManifestArtifactDiffer walks an empty
-    list and reports that all of them exist.
-
-    See opentargets/issues#4511.
+    The other differs cannot tell: a failed step leaves a matching config behind, and
+    records no artifacts for the artifact check to miss. See opentargets/issues#4511.
     """
 
     def __init__(self) -> None:
@@ -33,9 +29,8 @@ class StepResultDiffer(Differ):
     ) -> bool:
         """Report a difference unless the manifest records the step as succeeded.
 
-        Anything other than success has to run: `failure` and `aborted` are obvious,
-        and `pending` covers a step that started and never recorded an outcome, which
-        is what a hung or externally killed step leaves behind.
+        `pending` counts too: a step that started and never recorded an outcome, which
+        is what a hung step leaves behind.
 
         Args:
             step_name (str): The name of the step to compare.
