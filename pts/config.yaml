@@ -2141,7 +2141,7 @@ steps:
   #: LDSC CTS ANNOTATION STEPS :####################################################################
   # These six steps are intentionally independent of GWAS regression steps. Run each
   # expression/reference combination once; later GWAS steps consume these outputs.
-  ldsc_cts_annotations_tabula_sapiens_celltype_nfe:
+  ldsc_cts_annotations:
     - name: pyspark ldsc cts annotation tabula sapiens celltype nfe
       pyspark: ldsc_cts_annotation
       source:
@@ -2169,7 +2169,6 @@ steps:
         'spark.default.parallelism': '16'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
-  ldsc_cts_annotations_tabula_sapiens_celltype_eas:
     - name: pyspark ldsc cts annotation tabula sapiens celltype eas
       pyspark: ldsc_cts_annotation
       source:
@@ -2197,7 +2196,6 @@ steps:
         'spark.default.parallelism': '16'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
-  ldsc_cts_annotations_tabula_sapiens_tissue_nfe:
     - name: pyspark ldsc cts annotation tabula sapiens tissue nfe
       pyspark: ldsc_cts_annotation
       source:
@@ -2225,7 +2223,6 @@ steps:
         'spark.default.parallelism': '16'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
-  ldsc_cts_annotations_tabula_sapiens_tissue_eas:
     - name: pyspark ldsc cts annotation tabula sapiens tissue eas
       pyspark: ldsc_cts_annotation
       source:
@@ -2253,7 +2250,6 @@ steps:
         'spark.default.parallelism': '16'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
-  ldsc_cts_annotations_gtex_tissue_nfe:
     - name: pyspark ldsc cts annotation gtex tissue nfe
       pyspark: ldsc_cts_annotation
       source:
@@ -2281,7 +2277,6 @@ steps:
         'spark.default.parallelism': '16'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
-  ldsc_cts_annotations_gtex_tissue_eas:
     - name: pyspark ldsc cts annotation gtex tissue eas
       pyspark: ldsc_cts_annotation
       source:
