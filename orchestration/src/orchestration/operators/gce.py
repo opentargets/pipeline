@@ -107,11 +107,8 @@ def _backoff(request_interval: float) -> float:
 class RateLimitedLoggingClient(logging_v2.Client):
     """Client for the Google Cloud Logging service that backs off when rate-limited.
 
-    The read quota is 60 requests a minute for the whole project, and steps copy their
-    logs as they finish, so a burst of steps finishing together exhausts it. Requests
-    that come back rate-limited are retried with a growing wait rather than raised.
-
-    This can delay the logs of a step with many entries, but it does not fail the step.
+    The read quota is 60 requests a minute per project, and steps copy their logs as
+    they finish, so a burst of steps finishing together exhausts it.
     """
 
     def __init__(
@@ -126,8 +123,8 @@ class RateLimitedLoggingClient(logging_v2.Client):
     def _retrying(self, call: Callable[[], Any]) -> Any:
         """Call something, backing off while the logging api is rate-limiting us.
 
-        Gives up once the next wait would take it past LOGGING_RETRY_MAX_WAIT, so a
-        quota that never recovers surfaces as an error instead of sleeping forever.
+        Gives up past LOGGING_RETRY_MAX_WAIT, so a quota that never recovers raises
+        rather than waiting forever, which is indistinguishable from a hung task.
         """
         interval = LOGGING_REQUEST_INTERVAL
         deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
@@ -144,10 +141,8 @@ class RateLimitedLoggingClient(logging_v2.Client):
     def list_entries(self, *args, **kwargs) -> Iterator[Any]:
         """Yield log entries, retrying any page the logging api rate-limits.
 
-        `super().list_entries` is lazy: it fetches the first page and hands back a
-        pager, so wrapping only that call leaves every later page unguarded — which is
-        where the quota is actually hit, since the caller pages through the whole log.
-        Iterating here puts the backoff around every request.
+        The pager is lazy: `super().list_entries` fetches page one, the rest arrive as
+        this iterates. Guarding only that call would leave every later page unprotected.
         """
         list_page_one = super().list_entries
         pages = iter(self._retrying(lambda: list_page_one(*args, **kwargs)))
@@ -620,9 +615,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
     def copy_machine_logs(self) -> None:
         """Copy logs from the machine to the Airflow logs.
 
-        Mirroring the logs is presentation, so nothing here is allowed to decide the
-        outcome of the step. A step that did its work reports success even if its logs
-        could not be fetched; the warning says so, and the logs remain in Cloud Logging.
+        Mirroring logs is presentation, so it never decides the outcome of a step. The
+        logs stay in Cloud Logging either way.
         """
         try:
             self._copy_machine_logs()
