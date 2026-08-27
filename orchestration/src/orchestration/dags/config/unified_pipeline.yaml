@@ -142,6 +142,7 @@ steps:
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
+    machine_type: n1-highmem-32
     depends_on:
       - pis_openfda
       - pts_drug_molecule
