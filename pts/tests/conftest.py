@@ -1,32 +1,26 @@
 """Pytest configuration and shared fixtures for PTS tests."""
 
 import pytest
-from pyspark.sql import SparkSession
 
 from pts.pyspark.common.session import Session
 
 
 @pytest.fixture(scope='session')
-def spark():
+def spark(pts_session):
     """Create a Spark session for testing.
 
     This fixture is session-scoped to avoid recreating Spark sessions
     for multiple tests, which improves test performance.
+
+    It depends on ``pts_session`` so both share the same underlying
+    ``SparkSession`` singleton. Otherwise the raw ``SparkSession``
+    created here (without ``spark.jars.packages``) and the
+    ``Session``-created one (with ``gcs-connector`` + ``spark-nlp``)
+    clash via ``getOrCreate()`` depending on test order - the first
+    fixture to run wins and the other reuses its config, making
+    ``OnToma._spark_nlp_available`` flaky.
     """
-    spark_session = (
-        SparkSession.builder
-        .appName('pts_test_suite')
-        .master('local[1]')
-        .config('spark.sql.adaptive.enabled', 'false')
-        .config('spark.sql.adaptive.coalescePartitions.enabled', 'false')
-        .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
-        .config('spark.sql.execution.arrow.pyspark.enabled', 'true')
-        .config('spark.sql.shuffle.partitions', '1')
-        .getOrCreate()
-    )
-    spark_session.sparkContext.setLogLevel('ERROR')
-    yield spark_session
-    spark_session.stop()
+    return pts_session.spark
 
 
 @pytest.fixture(scope='session')
