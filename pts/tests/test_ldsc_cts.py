@@ -10,7 +10,7 @@ import pytest
 from gentropy.method.ldsc import infer_ld_ancestry
 from pyspark.sql import Row
 
-from pts.pyspark.ldsc_cts_annotation import _read_edges
+from pts.pyspark.ldsc_cts_annotation import _read_edges, _read_specificity
 from pts.pyspark.ldsc_cts_regression import (
     _chunks,
     _prepare_sumstats,
@@ -117,6 +117,22 @@ def test_score_edge_schema_and_chromosome_are_validated(spark, tmp_path: Path) -
     missing.write.mode('overwrite').parquet(missing_path)
     with pytest.raises(ValueError, match='missing required'):
         _read_edges(spark, missing_path, '1')
+
+
+def test_specificity_reader_coerces_mixed_annotation_columns(spark, monkeypatch) -> None:
+    """A string-inferred annotation column is normalised before Gentropy melts it."""
+    raw = spark.createDataFrame([
+        Row(gene='ENSG1', numeric=0.5, sparse='0.75'),
+        Row(gene='ENSG2', numeric=0.0, sparse=''),
+    ])
+    monkeypatch.setattr(
+        'pts.pyspark.ldsc_cts_annotation.read_table',
+        lambda *_args, **_kwargs: raw,
+    )
+    normalised = _read_specificity(spark, 'unused', {})
+    assert normalised.schema['gene'].dataType.simpleString() == 'string'
+    assert normalised.schema['numeric'].dataType.simpleString() == 'double'
+    assert normalised.schema['sparse'].dataType.simpleString() == 'double'
 
 
 def test_summary_statistics_coordinates_are_validated(spark) -> None:

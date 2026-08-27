@@ -25,6 +25,7 @@ from pts.pyspark.ldsc_cts_utils import (
     normalise_chromosomes,
     normalise_dataset_registry,
     normalise_populations,
+    quoted_col,
     read_table,
     reference_path,
     success_exists,
@@ -328,11 +329,28 @@ def _resolve_edge_manifest(
 
 
 def _read_specificity(spark: SparkSession, path: str, settings: dict[str, Any]) -> DataFrame:
-    return read_table(
+    raw = read_table(
         spark,
         path,
         fmt=str(settings.get('format', settings.get('specificity_format', 'csv'))),
         sep=str(settings.get('separator', settings.get('specificity_sep', ','))),
+    )
+    gene_id_column = str(settings.get('gene_id_column', 'gene'))
+    if gene_id_column not in raw.columns:
+        raise ValueError(f"Specificity input is missing gene id column '{gene_id_column}'")
+
+    # CSV schema inference can leave a mostly numeric column as ``string`` when
+    # it contains an empty or otherwise non-numeric cell.  Gentropy's wide
+    # matrix unpivot requires all annotation columns to share one type, so
+    # normalise the input at the PTS boundary.  Invalid/missing values become
+    # null and are discarded by ``melt_specificity_matrix``.
+    return raw.select(
+        *[
+            quoted_col(column).cast('string').alias(column)
+            if column == gene_id_column
+            else quoted_col(column).cast('double').alias(column)
+            for column in raw.columns
+        ]
     )
 
 
