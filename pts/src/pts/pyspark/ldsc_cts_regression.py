@@ -99,7 +99,7 @@ def ldsc_cts_regression(
             analysis_id,
             specificity_id,
             None,
-            ['study_not_found_in_index'],
+            [],
             'skipped',
             ['Study not found in Open Targets study index'],
             [],

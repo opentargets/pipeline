@@ -98,6 +98,8 @@ def load_edge_manifest(path: str, ancestry: str, chromosomes: list[int | str]) -
         value = values.get(f'chr{chromosome}') or values.get(chromosome)
         if value is None:
             raise ValueError(f'Edge manifest is missing {ancestry}/chr{chromosome}')
+        if not isinstance(value, str) or not value:
+            raise TypeError(f'Edge manifest path for {ancestry}/chr{chromosome} must be a string')
         result[chromosome] = value
     return result
 
@@ -122,7 +124,7 @@ def _parse_edge_command(command: str) -> dict[str, str]:
         raise ValueError('LDSC-CTS edge reference must use --ld-window-cm 1.0')
     if values['--output-path'] != 'edges.parquet':
         raise ValueError('Unexpected edge output path in edge exporter command')
-    return {'ancestry': match.group(1), 'chromosome': chromosome}
+    return {'ancestry': match.group(1).lower(), 'chromosome': chromosome}
 
 
 def success_exists(spark: SparkSession, path: str) -> bool:
