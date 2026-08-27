@@ -80,8 +80,8 @@ def pharmacogenetics(
         # is wrapped as `APIConnectionError`. Disable `br` to avoid that path.
         client = OpenAI(
             api_key=openai_key,
-            max_retries=5,
-            timeout=60.0,
+            max_retries=2,
+            timeout=30.0,
             default_headers={'Accept-Encoding': 'gzip, deflate'},
         )
         new_phenotypes_df = parse_phenotypes(
