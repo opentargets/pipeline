@@ -142,9 +142,6 @@ steps:
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
-    # Each task holds a whole compressed archive in memory; the largest reach 8-9GB,
-    # so one worker per vCPU exhausts the machine and the workers are OOM-killed.
-    # See opentargets/issues#4509.
     pool_size: 8
     depends_on:
       - pis_openfda
