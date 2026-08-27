@@ -9,6 +9,8 @@ This module processes ClinPGx pharmacogenetics data:
 """
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -84,10 +86,13 @@ def pharmacogenetics(
             timeout=30.0,
             default_headers={'Accept-Encoding': 'gzip, deflate'},
         )
+        max_workers = int(settings.get('openai_concurrency', 10))
+        logger.info(f'parsing {len(unparsed_texts)} phenotypes with concurrency={max_workers}')
         new_phenotypes_df = parse_phenotypes(
             spark=spark,
             texts_to_parse=unparsed_texts,
             openai_client=client,
+            max_workers=max_workers,
         )
         updated_phenotypes_df = update_phenotypes_lut(new_phenotypes_df, pgx_phenotypes_df)
         logger.info(f'save updated phenotypes to {destination["phenotypes"]}')
@@ -207,31 +212,52 @@ def parse_phenotype_with_gpt(
         return None
 
 
-def parse_phenotypes(spark: Session, texts_to_parse: list[str], openai_client: OpenAI) -> DataFrame:
+def parse_phenotypes(
+    spark: Session, texts_to_parse: list[str], openai_client: OpenAI, max_workers: int = 10
+) -> DataFrame:
     """Parse the phenotypes from the given texts by calling the OpenAI API.
 
     Texts that cannot be extracted are left out rather than failing the step: they keep a
     null `phenotypeText`, exactly as they would have before the API was consulted. The
     counts are logged because that degradation is otherwise invisible -- a step that
     extracts nothing and one that extracts everything both succeed.
-    """
-    results_dict = {}
-    for text in texts_to_parse:
-        result = parse_phenotype_with_gpt(text, openai_client)
-        if isinstance(result, list):
-            results_dict[text] = result
-        elif isinstance(result, str):
-            results_dict[text] = [result]
 
-    unresolved = len(texts_to_parse) - len(results_dict)
-    if unresolved == len(texts_to_parse) and texts_to_parse:
+    Concurrency is bounded by ``max_workers`` (default 10) via a thread pool.
+    """
+    results_dict: dict[str, list[str]] = {}
+    total = len(texts_to_parse)
+    if total == 0:
+        logger.info('no phenotypes to parse')
+    else:
+        t_start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # future_to_text maps each Future back to its input text (genotypeAnnotationText)
+            future_to_text = {
+                executor.submit(parse_phenotype_with_gpt, text, openai_client): text
+                for text in texts_to_parse
+            }
+            # as_completed yields futures in completion order (fastest first)
+            for i, future in enumerate(as_completed(future_to_text), 1):
+                text = future_to_text[future]
+                result = future.result()
+                if isinstance(result, list):
+                    results_dict[text] = result
+                elif isinstance(result, str):
+                    results_dict[text] = [result]
+                if i % 50 == 0 or i == total:
+                    logger.info(f'progress {i}/{total}')
+        elapsed = time.perf_counter() - t_start
+        logger.info(f'parsed {len(results_dict)}/{total} in {elapsed:.1f}s')
+
+    unresolved = total - len(results_dict)
+    if unresolved == total and texts_to_parse:
         logger.error(
-            f'extracted none of {len(texts_to_parse)} phenotypes; the API was unreachable, '
+            f'extracted none of {total} phenotypes; the API was unreachable, '
             f'unauthorised or rate limited throughout. Those rows keep a null phenotypeText '
             f'and the step continues.'
         )
     elif unresolved:
-        logger.warning(f'extracted {len(results_dict)} of {len(texts_to_parse)} phenotypes')
+        logger.warning(f'extracted {len(results_dict)} of {total} phenotypes')
     else:
         logger.info(f'extracted all {len(results_dict)} phenotypes')
 
