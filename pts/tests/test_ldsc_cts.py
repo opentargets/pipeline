@@ -1,4 +1,4 @@
-"""Focused tests for the PTS LDSC-CTS orchestration helpers."""
+"""Focused tests for the data-driven PTS LDSC-CTS tasks."""
 
 from __future__ import annotations
 
@@ -11,8 +11,19 @@ from gentropy.method.ldsc import infer_ld_ancestry
 from pyspark.sql import Row
 
 from pts.pyspark.ldsc_cts_annotation import _read_edges
-from pts.pyspark.ldsc_cts_regression import _prepare_sumstats
-from pts.pyspark.ldsc_cts_utils import discover_edge_manifest, success_exists
+from pts.pyspark.ldsc_cts_regression import (
+    _chunks,
+    _prepare_sumstats,
+    _read_annotation_catalog,
+    _resolve_root_dataset_ids,
+)
+from pts.pyspark.ldsc_cts_utils import (
+    discover_completed_study_paths,
+    discover_edge_manifest,
+    normalise_dataset_registry,
+    normalise_populations,
+    success_exists,
+)
 
 
 def _write_edge_task(root: Path, name: str, ancestry: str, chromosome: int) -> Path:
@@ -41,6 +52,22 @@ def test_edge_manifest_requires_complete_unique_exports(tmp_path: Path) -> None:
         discover_edge_manifest(str(tmp_path), 'nfe', [1, 2])
 
 
+def test_dataset_registry_and_population_validation() -> None:
+    assert normalise_dataset_registry([{'id': 'one', 'path': 'one.csv'}]) == [
+        {'id': 'one', 'path': 'one.csv'}
+    ]
+    with pytest.raises(ValueError, match='duplicate id'):
+        normalise_dataset_registry([
+            {'id': 'one', 'path': 'one.csv'},
+            {'id': 'one', 'path': 'two.csv'},
+        ])
+    with pytest.raises(ValueError, match='non-empty path'):
+        normalise_dataset_registry([{'id': 'one', 'path': ''}])
+    assert normalise_populations('nfe,eas') == ['nfe', 'eas']
+    with pytest.raises(ValueError, match='duplicate population'):
+        normalise_populations(['nfe', 'NFE'])
+
+
 def test_study_index_plurality_is_independent_of_analysis_id() -> None:
     """A descriptive ID containing EUR/EAS cannot select the LD ancestry."""
     structure = [
@@ -48,6 +75,39 @@ def test_study_index_plurality_is_independent_of_analysis_id() -> None:
         {'ldPopulation': 'nfe', 'relativeSampleSize': 0.4},
     ]
     assert infer_ld_ancestry(structure) == 'eas'
+
+
+def test_completed_study_discovery_filters_success_markers(tmp_path: Path, spark) -> None:
+    complete = tmp_path / 'GCST1'
+    complete.mkdir()
+    (complete / '_SUCCESS').write_text('')
+    incomplete = tmp_path / 'GCST2'
+    incomplete.mkdir()
+    assert discover_completed_study_paths(spark, str(tmp_path)) == [('GCST1', str(complete))]
+    with pytest.raises(ValueError, match='Missing completed'):
+        discover_completed_study_paths(spark, str(tmp_path), ['GCST2'])
+
+
+def test_summary_directory_id_must_match_single_study_id(spark, tmp_path: Path) -> None:
+    path = tmp_path / 'GCST1'
+    spark.createDataFrame([Row(studyId='GCST2')]).write.mode('overwrite').parquet(str(path))
+    with pytest.raises(ValueError, match='does not match'):
+        _resolve_root_dataset_ids(spark, [('GCST1', str(path))])
+
+
+def test_malformed_child_can_be_isolated_with_directory_id(spark, tmp_path: Path) -> None:
+    path = tmp_path / 'GCST1'
+    spark.createDataFrame([Row(value=1)]).write.mode('overwrite').parquet(str(path))
+    issues: dict[str, str] = {}
+    assert _resolve_root_dataset_ids(spark, [('GCST1', str(path))], issues) == [
+        ('GCST1', str(path))
+    ]
+    assert 'GCST1' in issues
+
+
+def test_study_batch_boundaries() -> None:
+    studies = [type('Study', (), {'study_id': str(i)})() for i in range(5)]
+    assert [len(batch) for batch in _chunks(studies, 2)] == [2, 2, 1]
 
 
 def test_score_edge_schema_and_chromosome_are_validated(spark, tmp_path: Path) -> None:
@@ -90,8 +150,10 @@ def test_success_marker_is_checked_for_local_outputs(spark, tmp_path: Path) -> N
     assert success_exists(spark, str(output))
 
 
-def test_two_chromosome_annotation_and_regression_fixture(spark, tmp_path: Path, monkeypatch) -> None:
-    """Run both PTS tasks on a tiny fixture with manually checkable dimensions."""
+def test_two_chromosome_two_dataset_annotation_and_batched_regression(
+    spark, tmp_path: Path, monkeypatch
+) -> None:
+    """Run both generic tasks on a fixture with two datasets and two studies."""
     import importlib
 
     annotation_module = importlib.import_module('pts.pyspark.ldsc_cts_annotation')
@@ -107,34 +169,44 @@ def test_two_chromosome_annotation_and_regression_fixture(spark, tmp_path: Path,
     target_path = tmp_path / 'target'
     spark.createDataFrame([
         Row(id='GENE1', genomicLocation=Row(chromosome='1', start=95, end=105)),
-        Row(id='GENE2', genomicLocation=Row(chromosome='2', start=195, end=205)),
+        Row(id='GENE2', genomicLocation=Row(chromosome='1', start=115, end=125)),
+        Row(id='GENE3', genomicLocation=Row(chromosome='2', start=195, end=205)),
+        Row(id='GENE4', genomicLocation=Row(chromosome='2', start=215, end=225)),
     ]).write.mode('overwrite').parquet(str(target_path))
 
-    specificity_path = tmp_path / 'specificity'
-    spark.createDataFrame([
-        Row(gene='GENE1', cell=1.0),
-        Row(gene='GENE2', cell=1.0),
-    ]).write.mode('overwrite').option('header', 'true').csv(str(specificity_path))
+    specificity_root = tmp_path / 'specificity'
+    for dataset_id, annotation in [('one', 'cell'), ('two', 'cell_two')]:
+        path = specificity_root / f'{dataset_id}.csv.gz'
+        spark.createDataFrame([
+            Row(gene='GENE1', **{annotation: 1.0}),
+            Row(gene='GENE2', **{annotation: 2.0}),
+            Row(gene='GENE3', **{annotation: 1.0}),
+            Row(gene='GENE4', **{annotation: 2.0}),
+        ]).write.mode('overwrite').option('header', 'true').csv(str(path))
 
-    score_path = tmp_path / 'score_variants'
-    spark.createDataFrame([
-        Row(variantId='1_100_A_G'),
-        Row(variantId='1_120_C_T'),
-        Row(variantId='2_200_G_A'),
-        Row(variantId='2_220_T_C'),
-    ]).write.mode('overwrite').option('header', 'true').csv(str(score_path))
+    variants = [
+        ('1_100_A_G', '1', 100, 'A', 'G'),
+        ('1_120_C_T', '1', 120, 'C', 'T'),
+        ('2_200_G_A', '2', 200, 'G', 'A'),
+        ('2_220_T_C', '2', 220, 'T', 'C'),
+    ]
+    score_path = tmp_path / 'baseline' / 'nfe' / 'baseline_ld_scores.tsv.gz'
+    spark.createDataFrame([Row(variantId=value[0]) for value in variants]).write.mode(
+        'overwrite'
+    ).option('header', 'true').csv(str(score_path))
 
     edge_manifest = {'nfe': {}}
-    for chromosome, rows in {
-        '1': [
+    edge_rows = {
+        1: [
             Row(variantId='1_100_A_G', tagVariantId='1_100_A_G', r=1.0),
             Row(variantId='1_100_A_G', tagVariantId='1_120_C_T', r=0.5),
         ],
-        '2': [
+        2: [
             Row(variantId='2_200_G_A', tagVariantId='2_200_G_A', r=1.0),
             Row(variantId='2_200_G_A', tagVariantId='2_220_T_C', r=0.25),
         ],
-    }.items():
+    }
+    for chromosome, rows in edge_rows.items():
         edge_path = tmp_path / f'edges-{chromosome}'
         spark.createDataFrame(rows).write.mode('overwrite').parquet(str(edge_path))
         edge_manifest['nfe'][f'chr{chromosome}'] = str(edge_path)
@@ -144,65 +216,35 @@ def test_two_chromosome_annotation_and_regression_fixture(spark, tmp_path: Path,
     from pts.pyspark.ldsc_cts_annotation import ldsc_cts_annotation
 
     annotation_root = tmp_path / 'annotations'
-    ldsc_cts_annotation(
-        {
-            'specificity': str(specificity_path),
-            'target_index': str(target_path),
-            'score_variants': str(score_path),
-            'edge_manifest': str(manifest_path),
-        },
-        {'annotations': str(annotation_root)},
-        {
-            'specificity_id': 'fixture',
-            'ancestry': 'nfe',
-            'chromosomes': [1, 2],
-            'specificity_format': 'csv',
-            'specificity_sep': ',',
-            'score_variant_format': 'csv',
-            'score_variant_sep': ',',
-            'window_kb': 1,
-        },
-        {},
-    )
+    annotation_source = {
+        'specificity_root': str(specificity_root),
+        'target_index': str(target_path),
+        'reference_root': str(tmp_path / 'baseline'),
+        'edge_manifest': str(manifest_path),
+    }
+    annotation_settings = {
+        'datasets': [
+            {'id': 'one', 'path': 'one.csv.gz'},
+            {'id': 'two', 'path': 'two.csv.gz'},
+        ],
+        'populations': ['nfe'],
+        'chromosomes': [1, 2],
+        'format': 'csv',
+        'separator': ',',
+        'score_variant_format': 'csv',
+        'score_variant_sep': ',',
+        'window_kb': 0,
+    }
+    ldsc_cts_annotation(annotation_source, {'annotations': str(annotation_root)}, annotation_settings, {})
 
-    for chromosome, expected_m, expected_score in [('1', 2.0, 1.25), ('2', 2.0, 1.0625)]:
-        output = annotation_root / 'nfe' / f'chr{chromosome}'
-        scores = spark.read.parquet(str(output / 'ld_scores'))
-        m_values = {
-            row['annotation']: row['M']
-            for row in spark.read.parquet(str(output / 'm_annot')).collect()
-        }
-        lead_variant = '1_100_A_G' if chromosome == '1' else '2_200_G_A'
-        score_row = scores.filter(f"variantId = '{lead_variant}'").filter(
-            "annotation = 'cell'"
-        ).first()
-        assert score_row is not None
-        assert score_row['ldScore'] == pytest.approx(expected_score)
-        assert m_values['cell'] == pytest.approx(expected_m)
-
-    from pts.pyspark.ldsc_cts_regression import ldsc_cts_regression
-
-    variant_rows = [
-        ('1_100_A_G', '1', 100, 'A', 'G'),
-        ('1_120_C_T', '1', 120, 'C', 'T'),
-        ('2_200_G_A', '2', 200, 'G', 'A'),
-        ('2_220_T_C', '2', 220, 'T', 'C'),
-    ]
-    spark.createDataFrame([
-        Row(
-            studyId='GCSTFIX',
-            variantId=variant_id,
-            chromosome=chromosome,
-            position=position,
-            beta=0.1 + index * 0.03,
-            standardError=0.2,
-            sampleSize=100_000.0,
-        )
-        for index, (variant_id, chromosome, position, _ref, _alt) in enumerate(variant_rows)
-    ]).write.mode('overwrite').parquet(str(tmp_path / 'sumstats'))
+    catalog = spark.read.parquet(str(annotation_root / '_catalog'))
+    assert catalog.count() == 4
+    assert set(catalog.select('specificityId').distinct().toPandas()['specificityId']) == {'one', 'two'}
+    # The second run sees both output markers and must not recompute units.
+    ldsc_cts_annotation(annotation_source, {'annotations': str(annotation_root)}, annotation_settings, {})
+    assert spark.read.parquet(str(annotation_root / '_catalog')).count() == 4
 
     baseline_root = tmp_path / 'baseline' / 'nfe'
-    baseline_root.mkdir(parents=True)
     spark.createDataFrame([
         Row(
             variantId=variant_id,
@@ -212,48 +254,82 @@ def test_two_chromosome_annotation_and_regression_fixture(spark, tmp_path: Path,
             alt=alt,
             base=1.0 + index * 0.1,
         )
-        for index, (variant_id, chromosome, position, ref, alt) in enumerate(variant_rows)
+        for index, (variant_id, chromosome, position, ref, alt) in enumerate(variants)
     ]).write.mode('overwrite').option('header', 'true').option('sep', '\t').csv(
         str(baseline_root / 'baseline_ld_scores.tsv.gz')
     )
     spark.createDataFrame([Row(annotation='base', M=4.0)]).write.mode('overwrite').parquet(
         str(baseline_root / 'baseline_m')
     )
+    summaries_root = tmp_path / 'summaries'
+    for study_id, offset in [('GCSTFIX1', 0.0), ('GCSTFIX2', 0.01)]:
+        spark.createDataFrame([
+            Row(
+                studyId=study_id,
+                variantId=variant_id,
+                chromosome=chromosome,
+                position=position,
+                beta=0.1 + index * 0.03 + offset,
+                standardError=0.2,
+                sampleSize=100_000.0,
+            )
+            for index, (variant_id, chromosome, position, _ref, _alt) in enumerate(variants)
+        ]).write.mode('overwrite').parquet(str(summaries_root / study_id))
     spark.createDataFrame([
         Row(
-            studyId='GCSTFIX',
+            studyId=study_id,
             nCases=50_000,
             nControls=50_000,
             nSamples=100_000,
             ldPopulationStructure=[Row(ldPopulation='nfe', relativeSampleSize=1.0)],
             analysisFlags=['exwas'],
         )
+        for study_id in ('GCSTFIX1', 'GCSTFIX2')
     ]).write.mode('overwrite').parquet(str(tmp_path / 'study'))
 
+    from pts.pyspark.ldsc_cts_regression import ldsc_cts_regression
+
     result_path = tmp_path / 'results'
-    ldsc_cts_regression(
-        {
-            'summary_statistics': str(tmp_path / 'sumstats'),
-            'study_index': str(tmp_path / 'study'),
-            'annotation_root': str(annotation_root),
-            'baseline_root': str(tmp_path / 'baseline'),
-        },
-        {'results': str(result_path)},
-        {
-            'study_id': 'GCSTFIX',
-            'analysis_id': 'contains-EUR-but-not-used',
-            'specificity_id': 'fixture',
-            'chromosomes': [1, 2],
-            'min_samples': 1,
-            'n_blocks': 2,
-            'baseline_format': 'csv',
-            'baseline_sep': '\t',
-        },
-        {},
-    )
+    regression_source = {
+        'summary_statistics_root': str(summaries_root),
+        'study_index': str(tmp_path / 'study'),
+        'annotations': str(annotation_root),
+        'reference_root': str(tmp_path / 'baseline'),
+    }
+    regression_settings = {
+        'study_batch_size': 1,
+        'study_ids': ['GCSTFIX1', 'GCSTFIX2'],
+        'chromosomes': [1, 2],
+        'min_samples': 1,
+        'n_blocks': 2,
+        'intercept': 1.0,
+        'baseline_format': 'csv',
+        'baseline_sep': '\t',
+    }
+    ldsc_cts_regression(regression_source, {'results': str(result_path)}, regression_settings, {})
     result = spark.read.parquet(str(result_path)).collect()
-    assert len(result) == 1
+    assert {row['studyId'] for row in result} == {'GCSTFIX1', 'GCSTFIX2'}
+    assert {row['specificityId'] for row in result} == {'one', 'two'}
+    assert {row['analysisId'] for row in result} == {'GCSTFIX1', 'GCSTFIX2'}
     assert {row['ld_ancestry'] for row in result} == {'nfe'}
-    assert {row['analysisId'] for row in result} == {'contains-EUR-but-not-used'}
     assert {row['runStatus'] for row in result} == {'success'}
     assert {row['n_snps_used'] for row in result} == {4}
+    ldsc_cts_regression(regression_source, {'results': str(result_path)}, regression_settings, {})
+    assert spark.read.parquet(str(result_path)).count() == len(result)
+
+
+def test_annotation_catalog_requires_complete_chromosomes(spark, tmp_path: Path) -> None:
+    root = tmp_path / 'annotations'
+    catalog = root / '_catalog'
+    catalog.parent.mkdir(parents=True)
+    spark.createDataFrame([
+        Row(
+            specificityId='one',
+            ldPopulation='nfe',
+            chromosome=1,
+            ldScoresPath=str(tmp_path / 'chr1' / 'ld_scores'),
+            mAnnotPath=str(tmp_path / 'chr1' / 'm_annot'),
+        )
+    ]).write.mode('overwrite').parquet(str(catalog))
+    with pytest.raises(ValueError, match='no complete references'):
+        _read_annotation_catalog(spark, str(root), ['1', '2'])

@@ -131,3 +131,22 @@ def test_every_requires_entry_names_a_task_in_the_same_step() -> None:
                 assert dependency in names, (
                     f'step {step_name}: task {task["name"]!r} requires {dependency!r}, which is not in the step'
                 )
+
+
+def test_ldsc_cts_steps_are_generic_and_registry_driven() -> None:
+    """LDSC-CTS scales through settings rather than GWAS-specific tasks."""
+    config = _config_dict()['steps']
+    annotations = config['ldsc_cts_annotations']
+    regressions = config['ldsc_cts_regression']
+    assert len(annotations) == 1
+    assert len(regressions) == 1
+    forbidden = ('GCST', 'EUR', 'EAS', 'tabula_sapiens', 'gtex')
+    for task in (*annotations, *regressions):
+        assert not any(token in task['name'] for token in forbidden)
+    annotation_settings = annotations[0]['settings']
+    assert {dataset['id'] for dataset in annotation_settings['datasets']} == {
+        'tabula_sapiens-celltype',
+        'tabula_sapiens-tissue',
+        'gtex-tissue',
+    }
+    assert regressions[0]['settings']['study_batch_size'] == 8

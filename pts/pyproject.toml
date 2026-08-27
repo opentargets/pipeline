@@ -11,6 +11,7 @@ dependencies = [
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",
   "pandas>=2.3.3",
+  "pyarrow>=25.0.1",
   "polars[connectorx]>=1.41.2",
   "pyspark>=3.5.7",
   "openai>=2.41.1",
@@ -49,7 +50,7 @@ torchvision = [{ index = "pytorch-cpu" }]
 ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.1" }
 clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.9.0" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
-gentropy = { git = "https://github.com/opentargets/gentropy", rev = "ea167c83fa76f8c8eb74e93a51bbc1c63183654c" }
+gentropy = { git = "https://github.com/opentargets/gentropy", rev = "b3800fa03277dcdb5d35a406ab9ceb223a6e577e" }
 
 [project.scripts]
 pts = "pts.core:main"

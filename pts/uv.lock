@@ -1141,7 +1141,7 @@ wheels = [
 [[package]]
 name = "gentropy"
 version = "0.0.0"
-source = { git = "https://github.com/opentargets/gentropy?rev=ea167c83fa76f8c8eb74e93a51bbc1c63183654c#ea167c83fa76f8c8eb74e93a51bbc1c63183654c" }
+source = { git = "https://github.com/opentargets/gentropy?rev=b3800fa03277dcdb5d35a406ab9ceb223a6e577e#b3800fa03277dcdb5d35a406ab9ceb223a6e577e" }
 dependencies = [
     { name = "google-cloud-storage" },
     { name = "hail" },
@@ -3064,6 +3064,7 @@ dependencies = [
     { name = "opentargets-otter" },
     { name = "ot-literature" },
     { name = "pandas" },
+    { name = "pyarrow" },
     { name = "pdfplumber" },
     { name = "pixeltable-pgserver" },
     { name = "polars", extra = ["connectorx"] },
@@ -3099,7 +3100,8 @@ requires-dist = [
     { name = "cellex", marker = "extra == 'baseline-expression'", git = "https://github.com/perslab/CELLEX?rev=119c7ca" },
     { name = "clinical-mining", git = "https://github.com/opentargets/clinical_mining?tag=0.9.0" },
     { name = "gcsfs", specifier = ">=2026.2.0" },
-    { name = "gentropy", git = "https://github.com/opentargets/gentropy?rev=ea167c83fa76f8c8eb74e93a51bbc1c63183654c" },
+    { name = "gentropy", git = "https://github.com/opentargets/gentropy?rev=b3800fa03277dcdb5d35a406ab9ceb223a6e577e" },
+    { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "huggingface-hub", specifier = ">=0.32.4" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "networkx", specifier = ">=3.6.1" },
