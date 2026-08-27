@@ -113,10 +113,6 @@ with DAG(
                 t = DeleteInstanceOperator(
                     task_id=f'delete_vm_{step_name}',
                     resource_id=vm_name,
-                    # Delete after a failed run too, or the vm leaks and its
-                    # deterministic name 409s the retry. Not ALL_DONE: that also fires
-                    # when the differ skipped the step, and the operator raises on a
-                    # missing instance.
                     trigger_rule=TriggerRule.NONE_SKIPPED,
                 )
 
@@ -200,7 +196,6 @@ with DAG(
                         project_id=GCP_PROJECT_PLATFORM,
                         zone=GCP_ZONE,
                         resource_id=vm_name,
-                        # As above: delete after a failed run, but not after a skip.
                         trigger_rule=TriggerRule.NONE_SKIPPED,
                     )
 
@@ -251,8 +246,6 @@ with DAG(
                 )
 
                 if s.is_gce:
-                    # `e` needs the run task too: the delete now succeeds after a failed
-                    # run, so `e` hanging off the delete alone would report success.
                     chain(r, e)
                     chain(t, e)
                 elif s.is_dataproc:
