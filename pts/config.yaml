@@ -2305,8 +2305,11 @@ steps:
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
   #: LDSC CTS REGRESSION STEPS :####################################################################
-  ldsc_cts_regression_gcst90081522:
-    - name: pyspark ldsc cts regression tabula sapiens celltype
+  # This generic step contains one independently runnable task per
+  # study/specificity combination; add studies or specificity sources here
+  # without creating new step names.
+  ldsc_cts_regression:
+    - name: pyspark ldsc cts regression GCST90081522 tabula sapiens celltype
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
@@ -2333,7 +2336,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression tabula sapiens tissue
+    - name: pyspark ldsc cts regression GCST90081522 tabula sapiens tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
@@ -2360,7 +2363,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression gtex tissue
+    - name: pyspark ldsc cts regression GCST90081522 gtex tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
@@ -2387,8 +2390,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-  ldsc_cts_regression_gcst004131:
-    - name: pyspark ldsc cts regression tabula sapiens celltype
+    - name: pyspark ldsc cts regression GCST004131 tabula sapiens celltype
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
@@ -2415,7 +2417,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression tabula sapiens tissue
+    - name: pyspark ldsc cts regression GCST004131 tabula sapiens tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
@@ -2442,7 +2444,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression gtex tissue
+    - name: pyspark ldsc cts regression GCST004131 gtex tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
@@ -2469,8 +2471,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-  ldsc_cts_regression_gcst90018699:
-    - name: pyspark ldsc cts regression tabula sapiens celltype
+    - name: pyspark ldsc cts regression GCST90018699 tabula sapiens celltype
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
@@ -2497,7 +2498,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression tabula sapiens tissue
+    - name: pyspark ldsc cts regression GCST90018699 tabula sapiens tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
@@ -2524,7 +2525,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression gtex tissue
+    - name: pyspark ldsc cts regression GCST90018699 gtex tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
@@ -2551,8 +2552,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-  ldsc_cts_regression_gcst90275158:
-    - name: pyspark ldsc cts regression tabula sapiens celltype
+    - name: pyspark ldsc cts regression GCST90275158 tabula sapiens celltype
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
@@ -2579,7 +2579,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression tabula sapiens tissue
+    - name: pyspark ldsc cts regression GCST90275158 tabula sapiens tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
@@ -2606,7 +2606,7 @@ steps:
         'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
 
-    - name: pyspark ldsc cts regression gtex tissue
+    - name: pyspark ldsc cts regression GCST90275158 gtex tissue
       pyspark: ldsc_cts_regression
       source:
         summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
