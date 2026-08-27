@@ -316,7 +316,7 @@ steps:
       pyspark: openfda
       source:
         drug_molecule: output/drug_molecule
-        fda_data: intermediate/openfda
+        fda_data: intermediate/openfda/*.parquet
         blacklisted_events: input/openfda/blacklisted_events.txt
       destination:
         fda_unfiltered: intermediate/openfda_adverse_drug_reactions
