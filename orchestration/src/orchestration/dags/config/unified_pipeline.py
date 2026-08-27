@@ -69,6 +69,9 @@ class UnifiedPipelineConfig:
         self.pts.config['work_path'] = '/mnt/disks/work'
         self.pts.config['log_level'] = 'INFO'
         self.pts.config['pool_size'] = 32
+        """One worker per vCPU of `pts_machine_type`. A step whose individual tasks
+            need more memory than the machine has per core can lower this by setting
+            `pool_size` in its `unified_pipeline.yaml` definition."""
 
         if self.is_ppp:
             self.pts = self.pts.overwrite(config_path / 'ppp' / 'pts.override.yaml')
@@ -187,11 +190,21 @@ class UnifiedPipelineConfig:
         }
 
     def pts_env_vars(self, step_name: str) -> dict[str, str]:
-        """Return the environment variables for a PTS step."""
-        return {
+        """Return the environment variables for a PTS step.
+
+        A step may set `pool_size` in its `unified_pipeline.yaml` definition to run
+        fewer workers than the default. otter resolves config as
+        `cli > env > yaml > defaults`, so passing it here outranks the pool_size
+        written into the step's config.yaml.
+        """
+        env = {
             'PTS_STEP': step_name.removeprefix('pts_'),
             'PTS_CONFIG_PATH': '/config.yaml',
         }
+        pool_size = self.step_definition(step_name).get('pool_size')
+        if pool_size is not None:
+            env['PTS_POOL_SIZE'] = str(pool_size)
+        return env
 
     def steps(self, prefix: str = '') -> list[str]:
         """Return a list of steps in the pipeline.
