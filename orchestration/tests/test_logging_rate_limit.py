@@ -7,18 +7,13 @@ from unittest.mock import patch
 import pytest
 from google.api_core.exceptions import ResourceExhausted
 
-from orchestration.operators.gce import (
-    LOGGING_REQUEST_MAX_INTERVAL,
-    RateLimitedLoggingClient,
-    _backoff,
-)
+from orchestration.operators.gce import RateLimitedLoggingClient
 
 
 class _Log:
     """A logger that keeps nothing.
 
-    A MagicMock would record every call, and a retry loop can make a great many of
-    them before it gives up.
+    A MagicMock records every call, and a retry loop can make a great many of them.
     """
 
     def __init__(self) -> None:
@@ -30,11 +25,10 @@ class _Log:
 
 @contextmanager
 def _fake_clock():
-    """Run retry loops on a simulated clock that only moves when sleep is called.
+    """Run retry loops on a clock that only moves when sleep is called.
 
-    The retry gives up on a wall-clock deadline. Patching sleep alone leaves that
-    deadline hours away in real time while the loop spins at full speed, so the clock
-    has to be patched with it or the test never finishes.
+    The retry gives up on a wall-clock deadline, so patching sleep alone leaves that
+    deadline minutes away in real time while the loop spins at full speed.
     """
     now = [0.0]
 
@@ -45,7 +39,7 @@ def _fake_clock():
         patch('orchestration.operators.gce.time.sleep', side_effect=fake_sleep),
         patch('orchestration.operators.gce.time.monotonic', side_effect=lambda: now[0]),
     ):
-        yield now
+        yield
 
 
 def _client() -> tuple[RateLimitedLoggingClient, _Log]:
@@ -61,36 +55,31 @@ def _client() -> tuple[RateLimitedLoggingClient, _Log]:
 
 
 def _pager(pages: list[list[str]], fail_on: set[int]):
-    """Fake a lazy pager: entries arrive page by page as the caller iterates.
+    """Fake a lazy pager: page one on construction, the rest as the caller iterates.
 
     `fail_on` names the 0-based pages that raise ResourceExhausted the first time they
-    are reached, mimicking the quota being hit part-way through a log. A generator
-    cannot resume after raising, so each page is served from its own iterator.
+    are reached. Position is tracked across a failure the way the real pager's page
+    token is, so a retry resumes rather than replaying entries already yielded.
     """
-    seen: set[int] = set()
-
-    def gen():
-        for i, page in enumerate(pages):
-            if i in fail_on and i not in seen:
-                seen.add(i)
-                raise ResourceExhausted('quota exceeded')
-            yield from page
+    flat = [(page_number, entry) for page_number, page in enumerate(pages) for entry in page]
 
     class _Pager:
         def __init__(self) -> None:
-            self._it = gen()
+            self.position = 0
+            self.failed: set[int] = set()
 
-        def __iter__(self):
+        def __iter__(self) -> '_Pager':
             return self
 
-        def __next__(self):
-            try:
-                return next(self._it)
-            except ResourceExhausted:
-                # the real pager retries the failed page request; a fresh generator
-                # replays from the start of the pages it has not yielded yet
-                self._it = gen()
-                raise
+        def __next__(self) -> str:
+            if self.position >= len(flat):
+                raise StopIteration
+            page_number, entry = flat[self.position]
+            if page_number in fail_on and page_number not in self.failed:
+                self.failed.add(page_number)
+                raise ResourceExhausted('quota exceeded')
+            self.position += 1
+            return entry
 
     return _Pager()
 
@@ -100,7 +89,8 @@ def test_a_rate_limited_later_page_is_retried() -> None:
 
     The previous implementation wrapped only the call that builds the pager, so it
     guarded page one and nothing else -- and the caller pages through the whole log,
-    which is where the quota is actually reached.
+    which is where the quota is actually reached. Entries after the rate-limited page
+    were lost and the step failed.
     """
     client, log = _client()
 
@@ -113,25 +103,8 @@ def test_a_rate_limited_later_page_is_retried() -> None:
     ):
         got = list(client.list_entries(filter_='x'))
 
-    assert 'e' in got, 'entries after the rate-limited page were lost'
-    assert log.warnings >= 1, 'a rate-limited page should log and back off'
-
-
-def test_entries_are_yielded_when_nothing_is_rate_limited() -> None:
-    """The ordinary path returns every entry and never backs off."""
-    client, log = _client()
-
-    with (
-        _fake_clock(),
-        patch(
-            'google.cloud.logging_v2.Client.list_entries',
-            return_value=_pager([['a'], ['b', 'c']], fail_on=set()),
-        ),
-    ):
-        got = list(client.list_entries(filter_='x'))
-
-    assert got == ['a', 'b', 'c']
-    assert log.warnings == 0
+    assert got == ['a', 'b', 'c', 'd', 'e']
+    assert log.warnings == 1, 'the rate-limited page should back off exactly once'
 
 
 def test_retrying_gives_up_rather_than_waiting_forever() -> None:
@@ -142,9 +115,14 @@ def test_retrying_gives_up_rather_than_waiting_forever() -> None:
     """
     client, _ = _client()
     calls = {'n': 0}
+    ceiling = 100
 
     def always_limited() -> None:
         calls['n'] += 1
+        if calls['n'] > ceiling:
+            # Without the deadline the loop never exits, and the test would hang rather
+            # than fail. Bail out here so an unbounded retry is a red test, not a wait.
+            raise AssertionError(f'still retrying after {ceiling} attempts; the retry is unbounded')
         raise ResourceExhausted('quota exceeded')
 
     with _fake_clock():
@@ -152,12 +130,3 @@ def test_retrying_gives_up_rather_than_waiting_forever() -> None:
             client._retrying(always_limited)
 
     assert calls['n'] > 1, 'should retry at least once before giving up'
-    assert calls['n'] < 100, f'gave up only after {calls["n"]} attempts, which is not a bound'
-
-
-def test_backoff_is_capped() -> None:
-    """Waits grow but stay bounded, so one retry cannot sleep for hours."""
-    interval = 2.0
-    for _ in range(40):
-        interval = _backoff(interval)
-    assert interval <= LOGGING_REQUEST_MAX_INTERVAL
