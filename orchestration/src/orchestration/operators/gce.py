@@ -6,7 +6,7 @@ import asyncio
 import datetime
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from functools import cached_property
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 CONTAINER_NAME = 'workload_container'
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
+LOGGING_RETRY_MAX_WAIT = 600
+
+_NO_MORE_ENTRIES = object()
 
 # WARNING
 # After any change in deferrable operators, you must restart the airflow triggerer
@@ -102,17 +105,13 @@ def _backoff(request_interval: float) -> float:
 
 
 class RateLimitedLoggingClient(logging_v2.Client):
-    """Client for the Google Cloud Logging service with rate limiting.
+    """Client for the Google Cloud Logging service that backs off when rate-limited.
 
-    This client will wait for a minimum interval between requests to avoid
-    hitting the rate limits of the Google Cloud Logging service.
+    The read quota is 60 requests a minute for the whole project, and steps copy their
+    logs as they finish, so a burst of steps finishing together exhausts it. Requests
+    that come back rate-limited are retried with a growing wait rather than raised.
 
-    We are hitting logging API rate limits when we are trying to list log entries
-    to copy them to the airflow logs, as there are numerous concurrent requests
-    when running all of PIS steps in parallel.
-
-    This may delay the logs from being copied to the Airflow logs for steps with
-    a large number of log entries, but it will prevent the rate limit errors.
+    This can delay the logs of a step with many entries, but it does not fail the step.
     """
 
     def __init__(
@@ -123,27 +122,41 @@ class RateLimitedLoggingClient(logging_v2.Client):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.log = log
-        self.request_interval = LOGGING_REQUEST_INTERVAL
 
-    def list_entries(self, *args, **kwargs):
-        """List log entries and retries request that get rate-limited."""
-        entries = None
+    def _retrying(self, call: Callable[[], Any]) -> Any:
+        """Call something, backing off while the logging api is rate-limiting us.
 
+        Gives up once the next wait would take it past LOGGING_RETRY_MAX_WAIT, so a
+        quota that never recovers surfaces as an error instead of sleeping forever.
+        """
+        interval = LOGGING_REQUEST_INTERVAL
+        deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
         while True:
             try:
-                entries = super().list_entries(*args, **kwargs)
-                self.request_interval = _backoff(self.request_interval)
-                break
+                return call()
             except ResourceExhausted:
-                self.log.warning(
-                    'Rate limit for logging api exceeded, waiting for %d seconds',
-                    self.request_interval,
-                )
-                time.sleep(self.request_interval)
-                self.request_interval *= 2
+                if time.monotonic() + interval > deadline:
+                    raise
+                self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', interval)
+                time.sleep(interval)
+                interval = _backoff(interval)
 
-        self.request_interval = LOGGING_REQUEST_INTERVAL
-        return entries
+    def list_entries(self, *args, **kwargs) -> Iterator[Any]:
+        """Yield log entries, retrying any page the logging api rate-limits.
+
+        `super().list_entries` is lazy: it fetches the first page and hands back a
+        pager, so wrapping only that call leaves every later page unguarded — which is
+        where the quota is actually hit, since the caller pages through the whole log.
+        Iterating here puts the backoff around every request.
+        """
+        list_page_one = super().list_entries
+        pages = iter(self._retrying(lambda: list_page_one(*args, **kwargs)))
+
+        while True:
+            entry = self._retrying(lambda: next(pages, _NO_MORE_ENTRIES))
+            if entry is _NO_MORE_ENTRIES:
+                return
+            yield entry
 
 
 class CloudLoggingHook(GoogleBaseHook):
@@ -605,7 +618,22 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.log.info(f'created vm {self.instance_name}')
 
     def copy_machine_logs(self) -> None:
-        """Copy logs from the machine to the Airflow logs."""
+        """Copy logs from the machine to the Airflow logs.
+
+        Mirroring the logs is presentation, so nothing here is allowed to decide the
+        outcome of the step. A step that did its work reports success even if its logs
+        could not be fetched; the warning says so, and the logs remain in Cloud Logging.
+        """
+        try:
+            self._copy_machine_logs()
+        except Exception as e:
+            self.log.warning(
+                'could not copy the logs for %s, they are still in cloud logging: %s',
+                self.instance_name,
+                ' '.join(str(e).split()),
+            )
+
+    def _copy_machine_logs(self) -> None:
         client = self.logging_hook.get_conn()
         query = f'resource.type="gce_instance" jsonPayload.instance.name="{self.instance_name}" jsonPayload.container.name="/{CONTAINER_NAME}"'  # noqa: E501
         entries = client.list_entries(
