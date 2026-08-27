@@ -18,11 +18,12 @@ def _client(side_effect=None, content: str | None = None) -> MagicMock:
     """An OpenAI client stub whose `create` either raises or returns `content`."""
     client = MagicMock()
     if side_effect is not None:
-        client.chat.completions.create.side_effect = side_effect
+        client.responses.create.side_effect = side_effect
     else:
         completion = MagicMock()
-        completion.choices = [MagicMock(message=MagicMock(content=content))]
-        client.chat.completions.create.return_value = completion
+        completion.output_text = content
+        completion.output = [MagicMock(content=[MagicMock(text=content)])]
+        client.responses.create.return_value = completion
     return client
 
 
@@ -77,9 +78,10 @@ class TestParsePhenotypes:
     def test_a_partial_outage_keeps_what_succeeded(self, spark) -> None:
         """One failure must not discard the extractions that worked."""
         good = MagicMock()
-        good.choices = [MagicMock(message=MagicMock(content='{"gptExtractedPhenotype": ["increased response"]}'))]
+        good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
+        good.output = [MagicMock(content=[MagicMock(text='{"gptExtractedPhenotype": ["increased response"]}')])]
         client = MagicMock()
-        client.chat.completions.create.side_effect = [good, _connection_error(), good]
+        client.responses.create.side_effect = [good, _connection_error(), good]
 
         session = MagicMock()
         session.spark = spark

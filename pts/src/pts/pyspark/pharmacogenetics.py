@@ -164,18 +164,19 @@ def parse_phenotype_with_gpt(
         "{genotype_text}"
     """
     try:
-        completion = openai_client.chat.completions.create(
+        completion = openai_client.responses.create(
             model=gpt_model,
-            response_format={'type': 'json_object'},
-            messages=[
+            text={'format': {'type': 'json_object'}},
+            input=[
                 {
                     'role': 'system',
                     'content': 'you are an expert in clinical pharmacology designed to output JSON.',
                 },
                 {'role': 'user', 'content': prompt},
             ],
-            seed=42,
+            reasoning={'effort': 'minimal'},
         )
+
     except OpenAIError as e:
         # The call itself was previously outside any `try` -- the one below guards only the
         # parsing of a response, which by definition has already arrived. So a connection
@@ -186,7 +187,7 @@ def parse_phenotype_with_gpt(
         logger.warning(f'{type(e).__name__} extracting phenotype, leaving it unparsed: {e}')
         return None
     try:
-        generated_text = completion.choices[0].message.content
+        generated_text = completion.output_text
         if not generated_text:
             logger.warning(f'No content generated for text: {genotype_text}')
             return None
