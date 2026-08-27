@@ -28,6 +28,7 @@ dependencies = [
   "clinical-mining",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
+  "gentropy",
 ]
 
 [dependency-groups]
@@ -48,6 +49,7 @@ torchvision = [{ index = "pytorch-cpu" }]
 ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.1" }
 clinical-mining = { git = "https://github.com/opentargets/clinical_mining", tag = "0.9.0" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
+gentropy = { git = "https://github.com/opentargets/gentropy", rev = "34485c182bdcc98c76dbc644781d0ce223ffbee6" }
 
 [project.scripts]
 pts = "pts.core:main"

@@ -2137,3 +2137,503 @@ steps:
         'spark.sql.adaptive.skewJoin.skewedPartitionFactor': '2'
         'spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes': '64MB'
   ##################################################################################################
+
+  #: LDSC CTS ANNOTATION STEPS :####################################################################
+  # These six steps are intentionally independent of GWAS regression steps. Run each
+  # expression/reference combination once; later GWAS steps consume these outputs.
+  ldsc_cts_annotations_tabula_sapiens_celltype_nfe:
+    - name: pyspark ldsc cts annotation tabula sapiens celltype nfe
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/tabula_sapiens-cell_type_ontology_term_id__sum/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/nfe/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+      settings:
+        specificity_id: tabula_sapiens-celltype
+        ancestry: nfe
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  ldsc_cts_annotations_tabula_sapiens_celltype_eas:
+    - name: pyspark ldsc cts annotation tabula sapiens celltype eas
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/tabula_sapiens-cell_type_ontology_term_id__sum/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/eas/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+      settings:
+        specificity_id: tabula_sapiens-celltype
+        ancestry: eas
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  ldsc_cts_annotations_tabula_sapiens_tissue_nfe:
+    - name: pyspark ldsc cts annotation tabula sapiens tissue nfe
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/tabula_sapiens-tissue_ontology_term_id__sum/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/nfe/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+      settings:
+        specificity_id: tabula_sapiens-tissue
+        ancestry: nfe
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  ldsc_cts_annotations_tabula_sapiens_tissue_eas:
+    - name: pyspark ldsc cts annotation tabula sapiens tissue eas
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/tabula_sapiens-tissue_ontology_term_id__sum/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/eas/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+      settings:
+        specificity_id: tabula_sapiens-tissue
+        ancestry: eas
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  ldsc_cts_annotations_gtex_tissue_nfe:
+    - name: pyspark ldsc cts annotation gtex tissue nfe
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/gtex/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/nfe/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/gtex-tissue
+      settings:
+        specificity_id: gtex-tissue
+        ancestry: nfe
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  ldsc_cts_annotations_gtex_tissue_eas:
+    - name: pyspark ldsc cts annotation gtex tissue eas
+      pyspark: ldsc_cts_annotation
+      source:
+        specificity: /home/alegbe/results/specificity/cellex/gtex/esmu.csv.gz
+        target_index: /home/alegbe/repos/pipeline_work/output/target
+        score_variants: /home/alegbe/repos/ldsc-baseline-generate-nf/results/eas/baseline_ld_scores.tsv.gz
+        edge_work_root: /mnt/disks/ldsc-scratch/nf-work
+      destination:
+        annotations: intermediate/ldsc_cts/annotations/gtex-tissue
+      settings:
+        specificity_id: gtex-tissue
+        ancestry: eas
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        specificity_format: csv
+        specificity_sep: ','
+        score_variant_format: csv
+        score_variant_sep: "\t"
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
+
+  #: LDSC CTS REGRESSION STEPS :####################################################################
+  ldsc_cts_regression_gcst90081522:
+    - name: pyspark ldsc cts regression tabula sapiens celltype
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0001073-obesity-UKB-EUR/tabula_sapiens-celltype
+      settings:
+        study_id: GCST90081522
+        analysis_id: EFO_0001073-obesity-UKB-EUR
+        specificity_id: tabula_sapiens-celltype
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression tabula sapiens tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0001073-obesity-UKB-EUR/tabula_sapiens-tissue
+      settings:
+        study_id: GCST90081522
+        analysis_id: EFO_0001073-obesity-UKB-EUR
+        specificity_id: tabula_sapiens-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression gtex tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90081522
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/gtex-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0001073-obesity-UKB-EUR/gtex-tissue
+      settings:
+        study_id: GCST90081522
+        analysis_id: EFO_0001073-obesity-UKB-EUR
+        specificity_id: gtex-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+  ldsc_cts_regression_gcst004131:
+    - name: pyspark ldsc cts regression tabula sapiens celltype
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0003767-inflammatory_bowel_disease-Unknown-EUR/tabula_sapiens-celltype
+      settings:
+        study_id: GCST004131
+        analysis_id: EFO_0003767-inflammatory_bowel_disease-Unknown-EUR
+        specificity_id: tabula_sapiens-celltype
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression tabula sapiens tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0003767-inflammatory_bowel_disease-Unknown-EUR/tabula_sapiens-tissue
+      settings:
+        study_id: GCST004131
+        analysis_id: EFO_0003767-inflammatory_bowel_disease-Unknown-EUR
+        specificity_id: tabula_sapiens-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression gtex tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST004131
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/gtex-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/EFO_0003767-inflammatory_bowel_disease-Unknown-EUR/gtex-tissue
+      settings:
+        study_id: GCST004131
+        analysis_id: EFO_0003767-inflammatory_bowel_disease-Unknown-EUR
+        specificity_id: gtex-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+  ldsc_cts_regression_gcst90018699:
+    - name: pyspark ldsc cts regression tabula sapiens celltype
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-BBJ-EAS/tabula_sapiens-celltype
+      settings:
+        study_id: GCST90018699
+        analysis_id: MONDO_0005090-schizophrenia-BBJ-EAS
+        specificity_id: tabula_sapiens-celltype
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression tabula sapiens tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-BBJ-EAS/tabula_sapiens-tissue
+      settings:
+        study_id: GCST90018699
+        analysis_id: MONDO_0005090-schizophrenia-BBJ-EAS
+        specificity_id: tabula_sapiens-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression gtex tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90018699
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/gtex-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-BBJ-EAS/gtex-tissue
+      settings:
+        study_id: GCST90018699
+        analysis_id: MONDO_0005090-schizophrenia-BBJ-EAS
+        specificity_id: gtex-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+  ldsc_cts_regression_gcst90275158:
+    - name: pyspark ldsc cts regression tabula sapiens celltype
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-celltype
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-NR-EUR/tabula_sapiens-celltype
+      settings:
+        study_id: GCST90275158
+        analysis_id: MONDO_0005090-schizophrenia-NR-EUR
+        specificity_id: tabula_sapiens-celltype
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression tabula sapiens tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/tabula_sapiens-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-NR-EUR/tabula_sapiens-tissue
+      settings:
+        study_id: GCST90275158
+        analysis_id: MONDO_0005090-schizophrenia-NR-EUR
+        specificity_id: tabula_sapiens-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
+
+    - name: pyspark ldsc cts regression gtex tissue
+      pyspark: ldsc_cts_regression
+      source:
+        summary_statistics: gs://gwas_catalog_inputs/harmonised_summary_statistics/GCST90275158
+        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        annotation_root: intermediate/ldsc_cts/annotations/gtex-tissue
+        baseline_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
+      destination: output/ldsc_cts/MONDO_0005090-schizophrenia-NR-EUR/gtex-tissue
+      settings:
+        study_id: GCST90275158
+        analysis_id: MONDO_0005090-schizophrenia-NR-EUR
+        specificity_id: gtex-tissue
+        chromosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        min_samples: 10000
+        n_blocks: 200
+        spark_uri: local[4]
+      properties:
+        'spark.driver.memory': '30g'
+        'spark.executor.memory': '30g'
+        'spark.driver.memoryOverhead': '3g'
+        'spark.executor.memoryOverhead': '3g'
+        'spark.sql.shuffle.partitions': '1024'
+        'spark.default.parallelism': '16'
+        'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
