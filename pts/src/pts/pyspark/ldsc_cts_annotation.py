@@ -25,6 +25,8 @@ from pts.pyspark.ldsc_cts_utils import (
     variant_positions_from_edges,
 )
 
+_SUPPORTED_REFERENCE_POPULATIONS = {'nfe', 'eas'}
+
 
 def ldsc_cts_annotation(
     source: dict[str, str],
@@ -68,6 +70,10 @@ def ldsc_cts_annotation(
         )
     )
     ancestry = str(settings['ancestry']).lower()
+    if ancestry not in _SUPPORTED_REFERENCE_POPULATIONS:
+        raise ValueError(
+            f'No LDSC-CTS edge/baseline artifacts are configured for ancestry {ancestry}'
+        )
     specificity_id = str(settings.get('specificity_id', 'specificity'))
     edge_manifest = _resolve_edge_manifest(source, ancestry, chromosomes)
     # Keep the task destination reusable across populations while avoiding

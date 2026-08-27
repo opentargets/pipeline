@@ -191,7 +191,26 @@ def ldsc_cts_regression(
             if column not in joined.columns:
                 joined = joined.withColumn(column, f.lit(0.0))
             else:
-                joined = joined.withColumn(column, f.coalesce(quoted_col(column), f.lit(0.0)))
+                value = quoted_col(column)
+                joined = joined.withColumn(
+                    column,
+                    f.when(f.isnan(value), f.lit(0.0)).otherwise(
+                        f.coalesce(value, f.lit(0.0))
+                    ),
+                )
+
+        # LDSC cannot use rows with missing/NaN baseline scores.  Dropping them
+        # here makes the overlap check below produce a traceable skipped result
+        # instead of passing invalid values into the numerical regression.
+        for column in baseline_columns:
+            value = quoted_col(column)
+            joined = joined.filter(value.isNotNull() & ~f.isnan(value))
+        weight_column = next(
+            (column for column in baseline_columns if column.lower() in {'base', 'basel2'}),
+            None,
+        )
+        if weight_column is not None:
+            joined = joined.filter(quoted_col(weight_column) > 0)
 
         joined = joined.dropDuplicates(['variantId'])
         joined = joined.filter(
@@ -395,13 +414,11 @@ def _read_baseline(
     ).dropDuplicates(key)
     m_values = {}
     if m_path:
-        m_values = {
-            row['annotation']: float(row['M'])
-            for row in spark.read.parquet(m_path)
+        m_values = _collect_m_values(
+            spark.read.parquet(m_path)
             .groupBy('annotation')
             .agg(f.sum(f.col('M').cast('double')).alias('M'))
-            .collect()
-        }
+        )
     default_m = float(selected.count())
     return selected, key, columns, {column: m_values.get(column, default_m) for column in columns}
 
@@ -440,12 +457,18 @@ def _read_annotation_m(spark: SparkSession, paths: list[str]) -> dict[str, float
     missing = required - set(raw.columns)
     if missing:
         raise ValueError(f'Annotation M values are missing columns: {sorted(missing)}')
-    return {
-        row['annotation']: float(row['M'])
-        for row in raw.groupBy('annotation')
-        .agg(f.sum(f.col('M').cast('double')).alias('M'))
-        .collect()
-    }
+    return _collect_m_values(raw.groupBy('annotation').agg(f.sum(f.col('M').cast('double')).alias('M')))
+
+
+def _collect_m_values(grouped: DataFrame) -> dict[str, float]:
+    """Collect and validate grouped annotation M values."""
+    values: dict[str, float] = {}
+    for row in grouped.collect():
+        value = finite_or_none(row['M'])
+        if row['annotation'] is None or value is None or value < 0:
+            raise ValueError('Annotation M values must be finite and non-negative')
+        values[str(row['annotation'])] = value
+    return values
 
 
 def _regress_cell_types(
