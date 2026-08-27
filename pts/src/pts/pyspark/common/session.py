@@ -34,18 +34,44 @@ class Session:
         )
         self.spark.sparkContext.setLogLevel('WARN')
 
-    def _create_config(self, properties: dict[str, str] | None = None) -> SparkConf:
+    @staticmethod
+    def _merge_jars_packages(base: str | None, extra: str | None) -> str | None:
+        """Merge two ``spark.jars.packages`` comma-lists, deduping preserving order."""
+        if not base and not extra:
+            return None
+        seen: set[str] = set()
+        merged: list[str] = []
+        for part in ((base or '') + ',' + (extra or '')).split(','):
+            p = part.strip()
+            if p and p not in seen:
+                seen.add(p)
+                merged.append(p)
+        return ','.join(merged) if merged else None
+
+    def _effective_properties(self, properties: dict[str, str] | None = None) -> dict[str, str]:
+        """Return the merged Spark properties without touching JVM global state.
+
+        Separated for unit testability: ``SparkConf`` inherits JVM/system
+        properties once a ``SparkContext`` exists, so ``conf.get`` is
+        polluted by previous ``Session``s in the same pytest session.
+        Tests should assert on this dict, not on ``SparkConf.get``.
+        """
         if properties is None:
             properties = {}
-        base_properties = {}
+        base_properties: dict[str, str] = {}
 
         if not self.is_dataproc:
             base_properties = {
                 'spark.driver.maxResultSize': '0',
                 'spark.debug.maxToStringFields': '2000',
                 'spark.sql.broadcastTimeout': '3000',
-                # google cloud storage connector
-                'spark.jars.packages': 'com.google.cloud.bigdataoss:gcs-connector:hadoop3-2.2.21',
+                # google cloud storage connector + Spark NLP (required by OnToma for local runs).
+                # On Dataproc the jar is provided via ``spark.jars``
+                # so base is empty there; locally we need Ivy resolution.
+                'spark.jars.packages': ','.join([
+                    'com.google.cloud.bigdataoss:gcs-connector:hadoop3-2.2.21',
+                    'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.5',
+                ]),
                 'spark.sql.adaptive.enabled': 'true',
                 'spark.sql.adaptive.coalescePartitions.enabled': 'true',
                 'spark.serializer': 'org.apache.spark.serializer.KryoSerializer',
@@ -66,9 +92,26 @@ class Session:
                 'spark.sql.parquet.compression.codec': 'zstd',
             }
 
-        effective_properties = {**base_properties, **properties}
+        # ``spark.jars.packages`` needs merging, not last-write-wins, so caller-supplied
+        # jars are not dropped and duplicates are avoided.
+        jars_key = 'spark.jars.packages'
+        if jars_key in base_properties or jars_key in properties:
+            merged = self._merge_jars_packages(
+                base_properties.get(jars_key), properties.get(jars_key)
+            )
+            effective_properties = {**base_properties, **properties}
+            if merged:
+                effective_properties[jars_key] = merged
+            else:
+                effective_properties.pop(jars_key, None)
+        else:
+            effective_properties = {**base_properties, **properties}
 
-        return SparkConf().setAll(list(effective_properties.items()))
+        return effective_properties  # ty: ignore[invalid-return-type]
+
+    def _create_config(self, properties: dict[str, str] | None = None) -> SparkConf:
+        effective = self._effective_properties(properties)
+        return SparkConf().setAll(list(effective.items()))
 
     def load_data(
         self,
