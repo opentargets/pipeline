@@ -27,6 +27,7 @@ from orchestration.operators.diff import DiffOperator
 from orchestration.operators.differs.config_differ import ConfigDiffer
 from orchestration.operators.differs.manifest_artifact_differ import ManifestArtifactDiffer
 from orchestration.operators.differs.spark_job_differ import SparkJobDiffer
+from orchestration.operators.differs.step_result_differ import StepResultDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
 from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
 from orchestration.utils import clean_name, resolve_jar_staging, resource_name, strhash, to_yaml
@@ -87,6 +88,7 @@ with DAG(
                     differs=[
                         ConfigDiffer(),
                         ManifestArtifactDiffer(),
+                        StepResultDiffer(),
                     ],
                     config=config,
                 )
@@ -164,6 +166,7 @@ with DAG(
                     differs=[
                         ConfigDiffer(),
                         ManifestArtifactDiffer(),
+                        StepResultDiffer(),
                     ],
                 )
 
