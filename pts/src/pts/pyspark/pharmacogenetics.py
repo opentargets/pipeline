@@ -75,7 +75,15 @@ def pharmacogenetics(
         # transient failure is likely over a long enough list and costs that text its
         # extraction. `max_retries` covers connection errors, timeouts and 429/5xx with
         # exponential backoff; `timeout` stops one hung request stalling the step.
-        client = OpenAI(api_key=openai_key, max_retries=5, timeout=60.0)
+        # Dataproc image Brotli 1.1.0 does not support `output_buffer_limit` expected
+        # by httpx2 (bundled with openai==3.2.0) `BrotliDecoder`, whose `TypeError`
+        # is wrapped as `APIConnectionError`. Disable `br` to avoid that path.
+        client = OpenAI(
+            api_key=openai_key,
+            max_retries=5,
+            timeout=60.0,
+            default_headers={'Accept-Encoding': 'gzip, deflate'},
+        )
         new_phenotypes_df = parse_phenotypes(
             spark=spark,
             texts_to_parse=unparsed_texts,
@@ -83,6 +91,7 @@ def pharmacogenetics(
         )
         updated_phenotypes_df = update_phenotypes_lut(new_phenotypes_df, pgx_phenotypes_df)
         logger.info(f'save updated phenotypes to {destination["phenotypes"]}')
+        Path(destination['phenotypes']).parent.mkdir(parents=True, exist_ok=True)
         updated_phenotypes_df.toPandas().to_json(destination['phenotypes'], orient='records')
         annotated_pgx_df = annotate_phenotype(pgx_df, updated_phenotypes_df)
 
