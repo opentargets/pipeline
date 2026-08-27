@@ -113,6 +113,7 @@ with DAG(
                 t = DeleteInstanceOperator(
                     task_id=f'delete_vm_{step_name}',
                     resource_id=vm_name,
+                    trigger_rule=TriggerRule.NONE_SKIPPED,
                 )
 
                 e = EmptyOperator(
@@ -195,6 +196,7 @@ with DAG(
                         project_id=GCP_PROJECT_PLATFORM,
                         zone=GCP_ZONE,
                         resource_id=vm_name,
+                        trigger_rule=TriggerRule.NONE_SKIPPED,
                     )
 
                     chain(u, Label('gce pts step'), r, t)
@@ -244,6 +246,7 @@ with DAG(
                 )
 
                 if s.is_gce:
+                    chain(r, e)
                     chain(t, e)
                 elif s.is_dataproc:
                     chain(r, e)
