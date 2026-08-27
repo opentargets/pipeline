@@ -113,13 +113,10 @@ with DAG(
                 t = DeleteInstanceOperator(
                     task_id=f'delete_vm_{step_name}',
                     resource_id=vm_name,
-                    # A failed run must still take its vm down. Under ALL_SUCCESS the
-                    # delete was skipped, the instance leaked, and because instance
-                    # names are deterministic the next attempt died on a 409 before it
-                    # ran anything. NONE_SKIPPED runs the delete whether the step
-                    # succeeded or failed, while still skipping it when the differ
-                    # skipped the step and no vm was ever created — the delete operator
-                    # raises on a missing instance, so ALL_DONE would fail that path.
+                    # Delete after a failed run too, or the vm leaks and its
+                    # deterministic name 409s the retry. Not ALL_DONE: that also fires
+                    # when the differ skipped the step, and the operator raises on a
+                    # missing instance.
                     trigger_rule=TriggerRule.NONE_SKIPPED,
                 )
 
@@ -203,8 +200,7 @@ with DAG(
                         project_id=GCP_PROJECT_PLATFORM,
                         zone=GCP_ZONE,
                         resource_id=vm_name,
-                        # See the note on the pis delete: run the delete for a failed
-                        # step too, so the instance does not leak and 409 the retry.
+                        # As above: delete after a failed run, but not after a skip.
                         trigger_rule=TriggerRule.NONE_SKIPPED,
                     )
 
@@ -255,10 +251,8 @@ with DAG(
                 )
 
                 if s.is_gce:
-                    # `e` takes an edge from the run task as well as the delete. The
-                    # delete now runs even when the run fails, so hanging `e` off the
-                    # delete alone would let a failed step end on a successful delete
-                    # and report the whole group as succeeded.
+                    # `e` needs the run task too: the delete now succeeds after a failed
+                    # run, so `e` hanging off the delete alone would report success.
                     chain(r, e)
                     chain(t, e)
                 elif s.is_dataproc:
