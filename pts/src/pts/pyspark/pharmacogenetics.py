@@ -72,14 +72,14 @@ def pharmacogenetics(
         logger.info('all phenotypes have been parsed')
     else:
         logger.warning(f'{len(unparsed_texts)} phenotypes have not been parsed')
-        # Retries and a timeout, rather than the client's defaults. These calls are made
-        # sequentially from a Dataproc driver against a third-party API, so a single
-        # transient failure is likely over a long enough list and costs that text its
-        # extraction. `max_retries` covers connection errors, timeouts and 429/5xx with
+        # Retries and a timeout, rather than the client's defaults: a transient failure
+        # against a third-party API is likely over a long enough list, and costs that text
+        # its extraction. `max_retries` covers connection errors, timeouts and 429/5xx with
         # exponential backoff; `timeout` stops one hung request stalling the step.
-        # Dataproc image Brotli 1.1.0 does not support `output_buffer_limit` expected
-        # by httpx2 (bundled with openai==3.2.0) `BrotliDecoder`, whose `TypeError`
-        # is wrapped as `APIConnectionError`. Disable `br` to avoid that path.
+        #
+        # `br` is excluded from `Accept-Encoding` because the Dataproc image's Brotli 1.1.0
+        # has no `output_buffer_limit`, so the `BrotliDecoder` in httpx2 (bundled with
+        # openai==3.2.0) raises `TypeError` and the sdk reports it as `APIConnectionError`.
         client = OpenAI(
             api_key=openai_key,
             max_retries=2,
@@ -239,7 +239,11 @@ def parse_phenotypes(
             # as_completed yields futures in completion order (fastest first)
             for i, future in enumerate(as_completed(future_to_text), 1):
                 text = future_to_text[future]
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as e:
+                    logger.warning(f'{type(e).__name__} extracting phenotype, leaving it unparsed: {e}')
+                    result = None
                 if isinstance(result, list):
                     results_dict[text] = result
                 elif isinstance(result, str):

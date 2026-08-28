@@ -22,7 +22,6 @@ def _client(side_effect=None, content: str | None = None) -> MagicMock:
     else:
         completion = MagicMock()
         completion.output_text = content
-        completion.output = [MagicMock(content=[MagicMock(text=content)])]
         client.responses.create.return_value = completion
     return client
 
@@ -79,7 +78,6 @@ class TestParsePhenotypes:
         """One failure must not discard the extractions that worked."""
         good = MagicMock()
         good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
-        good.output = [MagicMock(content=[MagicMock(text='{"gptExtractedPhenotype": ["increased response"]}')])]
         client = MagicMock()
         client.responses.create.side_effect = [good, _connection_error(), good]
 
@@ -93,7 +91,6 @@ class TestParsePhenotypes:
         """Same as above but with concurrency, order is nondeterministic so only count is checked."""
         good = MagicMock()
         good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
-        good.output = [MagicMock(content=[MagicMock(text='{"gptExtractedPhenotype": ["increased response"]}')])]
 
         calls = {'count': 0}
 
