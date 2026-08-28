@@ -25,9 +25,8 @@ clusters:
 
   gentropy:
     image_version: '2.2'
-    autoscaling_policy: otg-etl
     num_masters: 1
-    num_workers: 2
+    num_workers: 32
     worker_machine_type: 'n1-highmem-16'
     idle_delete_ttl: 360
     internal_ip_only: false
