@@ -17,6 +17,7 @@ from typing import Any
 import pyspark.sql.functions as f
 from loguru import logger
 from openai import OpenAI, OpenAIError
+from otter.storage.synchronous.handle import StorageHandle
 from pyspark.sql import DataFrame
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
