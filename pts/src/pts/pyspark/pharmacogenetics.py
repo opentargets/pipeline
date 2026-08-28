@@ -96,8 +96,9 @@ def pharmacogenetics(
         )
         updated_phenotypes_df = update_phenotypes_lut(new_phenotypes_df, pgx_phenotypes_df)
         logger.info(f'save updated phenotypes to {destination["phenotypes"]}')
-        Path(destination['phenotypes']).parent.mkdir(parents=True, exist_ok=True)
-        updated_phenotypes_df.toPandas().to_json(destination['phenotypes'], orient='records')
+        StorageHandle(destination['phenotypes']).write_text(
+            updated_phenotypes_df.toPandas().to_json(orient='records')
+        )
         annotated_pgx_df = annotate_phenotype(pgx_df, updated_phenotypes_df)
 
     logger.info('parse variantId')
