@@ -27,6 +27,7 @@ from orchestration.operators.diff import DiffOperator
 from orchestration.operators.differs.config_differ import ConfigDiffer
 from orchestration.operators.differs.manifest_artifact_differ import ManifestArtifactDiffer
 from orchestration.operators.differs.spark_job_differ import SparkJobDiffer
+from orchestration.operators.differs.step_result_differ import StepResultDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
 from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
 from orchestration.utils import clean_name, resolve_jar_staging, resource_name, strhash, to_yaml
@@ -87,6 +88,7 @@ with DAG(
                     differs=[
                         ConfigDiffer(),
                         ManifestArtifactDiffer(),
+                        StepResultDiffer(),
                     ],
                     config=config,
                 )
@@ -113,6 +115,7 @@ with DAG(
                 t = DeleteInstanceOperator(
                     task_id=f'delete_vm_{step_name}',
                     resource_id=vm_name,
+                    trigger_rule=TriggerRule.NONE_SKIPPED,
                 )
 
                 e = EmptyOperator(
@@ -163,6 +166,7 @@ with DAG(
                     differs=[
                         ConfigDiffer(),
                         ManifestArtifactDiffer(),
+                        StepResultDiffer(),
                     ],
                 )
 
@@ -186,7 +190,7 @@ with DAG(
                         container_files={config_uri: '/config.yaml'},
                         container_secret_files=step_definition.get('gce_secret_files'),
                         work_disk_size_gb=config.pts_disk_size,
-                        machine_type=config.pts_machine_type,
+                        machine_type=s.machine_type,
                         deferrable=True,
                     )
 
@@ -195,6 +199,7 @@ with DAG(
                         project_id=GCP_PROJECT_PLATFORM,
                         zone=GCP_ZONE,
                         resource_id=vm_name,
+                        trigger_rule=TriggerRule.NONE_SKIPPED,
                     )
 
                     chain(u, Label('gce pts step'), r, t)
@@ -244,6 +249,7 @@ with DAG(
                 )
 
                 if s.is_gce:
+                    chain(r, e)
                     chain(t, e)
                 elif s.is_dataproc:
                     chain(r, e)

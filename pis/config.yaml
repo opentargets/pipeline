@@ -19,6 +19,7 @@ scratchpad:
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
+  literature_lut_version: '2026.08'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -704,7 +705,7 @@ steps:
       destination: input/literature/PMID_PMCID_DOI.csv.gz
 
     - name: explode_glob literature dating lut
-      glob: gs://otar000-evidence_input/literature_export/2026.05/*.json.gz
+      glob: gs://otar000-evidence_input/literature_export/${literature_lut_version}/*.json.gz
       do:
         - name: copy literature dating lut ${match_stem}
           source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}

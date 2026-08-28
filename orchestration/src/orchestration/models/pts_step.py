@@ -77,6 +77,17 @@ class PTSStep(UnifiedPipelineStep):
         """Returns the URI for the step config."""
         return f'{self.config_destination_prefix}/{self.name}.yaml'
 
+    @property
+    def machine_type(self) -> str:
+        """Returns the machine type for the step's vm.
+
+        A step can set `machine_type` in its `unified_pipeline.yaml` definition when
+        the shared default does not suit it, for example because its tasks need more
+        memory per core than the default machine provides. Steps that declare nothing
+        get `pts_machine_type`.
+        """
+        return self.config.step_definition(self.name).get('machine_type') or self.config.pts_machine_type
+
 
 class PTSDataprocStep(PTSStep):
     """PTS Dataproc step class.
