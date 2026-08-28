@@ -18,11 +18,11 @@ def _client(side_effect=None, content: str | None = None) -> MagicMock:
     """An OpenAI client stub whose `create` either raises or returns `content`."""
     client = MagicMock()
     if side_effect is not None:
-        client.chat.completions.create.side_effect = side_effect
+        client.responses.create.side_effect = side_effect
     else:
         completion = MagicMock()
-        completion.choices = [MagicMock(message=MagicMock(content=content))]
-        client.chat.completions.create.return_value = completion
+        completion.output_text = content
+        client.responses.create.return_value = completion
     return client
 
 
@@ -70,22 +70,46 @@ class TestParsePhenotypes:
         """
         session = MagicMock()
         session.spark = spark
-        result = parse_phenotypes(session, ['a', 'b', 'c'], _client(side_effect=_connection_error()))
+        result = parse_phenotypes(session, ['a', 'b', 'c'], _client(side_effect=_connection_error()), max_workers=1)
         assert result.count() == 0
         assert result.columns == ['genotypeAnnotationText', 'phenotypeText']
 
     def test_a_partial_outage_keeps_what_succeeded(self, spark) -> None:
         """One failure must not discard the extractions that worked."""
         good = MagicMock()
-        good.choices = [MagicMock(message=MagicMock(content='{"gptExtractedPhenotype": ["increased response"]}'))]
+        good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
         client = MagicMock()
-        client.chat.completions.create.side_effect = [good, _connection_error(), good]
+        client.responses.create.side_effect = [good, _connection_error(), good]
 
         session = MagicMock()
         session.spark = spark
-        result = parse_phenotypes(session, ['a', 'b', 'c'], client)
+        result = parse_phenotypes(session, ['a', 'b', 'c'], client, max_workers=1)
         assert result.count() == 2, 'a single failed call discarded the successful ones'
         assert sorted(r.genotypeAnnotationText for r in result.collect()) == ['a', 'c']
+
+    def test_concurrent_partial_outage_keeps_what_succeeded(self, spark) -> None:
+        """Same as above but with concurrency, order is nondeterministic so only count is checked."""
+        good = MagicMock()
+        good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
+
+        calls = {'count': 0}
+
+        def side_effect(*args, **kwargs):
+            # The genotype_text is embedded in the prompt as '"b"', use call order fallback
+            # by tracking calls; first and third succeed, second fails regardless of text.
+            calls['count'] += 1
+            if calls['count'] == 2:
+                raise _connection_error()
+            return good
+
+        client = MagicMock()
+        client.responses.create.side_effect = side_effect
+
+        session = MagicMock()
+        session.spark = spark
+        result = parse_phenotypes(session, ['a', 'b', 'c'], client, max_workers=3)
+        assert result.count() == 2
+        assert {r.genotypeAnnotationText for r in result.collect()}.issubset({'a', 'b', 'c'})
 
 
 class TestResponseShape:
