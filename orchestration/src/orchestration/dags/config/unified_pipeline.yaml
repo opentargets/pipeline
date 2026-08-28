@@ -25,7 +25,7 @@ run_name: "do/platform-2608-3"
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.9.0rc13"
-pts_version: "26.9.0rc28"
+pts_version: "26.9.0rc31"
 # No leading `v` here: this value is used both ways and each consumer adds what it
 # needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
 # while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
