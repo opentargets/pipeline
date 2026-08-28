@@ -25,7 +25,9 @@ from google.api_core.extended_operation import ExtendedOperation
 from google.cloud import compute_v1, logging_v2
 from google.cloud import logging as google_logging
 from google.cloud.compute_v1 import types
+from google.cloud.logging_v2.client import _add_defaults_to_filter
 from google.cloud.logging_v2.services.logging_service_v2 import LoggingServiceV2AsyncClient
+from google.cloud.logging_v2.types import ListLogEntriesRequest, LogEntry
 
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.labels import Labels
@@ -39,8 +41,6 @@ CONTAINER_NAME = 'workload_container'
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 LOGGING_RETRY_MAX_WAIT = 600
-
-_NO_MORE_ENTRIES = object()
 
 # WARNING
 # After any change in deferrable operators, you must restart the airflow triggerer
@@ -104,6 +104,36 @@ def _backoff(request_interval: float) -> float:
     return min(request_interval * random.uniform(2, 2.5), LOGGING_REQUEST_MAX_INTERVAL)
 
 
+class _RetryBudget:
+    """One backoff schedule and one deadline, shared by every request of a paged read.
+
+    A budget per request would let a read of many pages wait LOGGING_RETRY_MAX_WAIT on
+    each of them, and would drop the interval back to the minimum on every page, so a
+    quota under sustained pressure would never see the backoff grow.
+    """
+
+    def __init__(self, log: Logger) -> None:
+        self.log = log
+        self.interval = LOGGING_REQUEST_INTERVAL
+        self.deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
+
+    def run(self, call: Callable[[], Any]) -> Any:
+        """Call something, backing off while the logging api is rate-limiting us.
+
+        Gives up once the budget is spent, so a quota that never recovers raises rather
+        than waiting forever, which is indistinguishable from a hung task.
+        """
+        while True:
+            try:
+                return call()
+            except ResourceExhausted:
+                if time.monotonic() + self.interval > self.deadline:
+                    raise
+                self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', self.interval)
+                time.sleep(self.interval)
+                self.interval = _backoff(self.interval)
+
+
 class RateLimitedLoggingClient(logging_v2.Client):
     """Client for the Google Cloud Logging service that backs off when rate-limited.
 
@@ -120,38 +150,50 @@ class RateLimitedLoggingClient(logging_v2.Client):
         super().__init__(*args, **kwargs)
         self.log = log
 
-    def _retrying(self, call: Callable[[], Any]) -> Any:
-        """Call something, backing off while the logging api is rate-limiting us.
-
-        Gives up past LOGGING_RETRY_MAX_WAIT, so a quota that never recovers raises
-        rather than waiting forever, which is indistinguishable from a hung task.
-        """
-        interval = LOGGING_REQUEST_INTERVAL
-        deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
-        while True:
-            try:
-                return call()
-            except ResourceExhausted:
-                if time.monotonic() + interval > deadline:
-                    raise
-                self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', interval)
-                time.sleep(interval)
-                interval = _backoff(interval)
-
-    def list_entries(self, *args, **kwargs) -> Iterator[Any]:
+    def list_entries(
+        self,
+        *,
+        resource_names: Sequence[str] | None = None,
+        filter_: str | None = None,
+        order_by: str | None = None,
+        page_size: int | None = None,
+        page_token: str | None = None,
+        max_results: int | None = None,
+    ) -> Iterator[LogEntry]:
         """Yield log entries, retrying any page the logging api rate-limits.
 
-        The pager is lazy: `super().list_entries` fetches page one, the rest arrive as
-        this iterates. Guarding only that call would leave every later page unprotected.
+        The base client hands back a generator that fetches the next page as it is
+        consumed. A generator that raises is closed, so a retry wrapped around its
+        `next()` cannot resume it -- it sees StopIteration and silently drops the rest
+        of the log. Page explicitly instead: the page token is ours, so a rate-limited
+        request can simply be made again.
+
+        Entries are the raw `LogEntry` protos rather than the base client's parsed
+        entries, so read `entry.json_payload`, as `CloudLoggingAsyncHook` already does.
         """
-        list_page_one = super().list_entries
-        pages = iter(self._retrying(lambda: list_page_one(*args, **kwargs)))
+        if max_results is not None:
+            raise NotImplementedError('max_results is not supported')
+
+        request = ListLogEntriesRequest(
+            resource_names=list(resource_names) if resource_names else [f'projects/{self.project}'],
+            filter=_add_defaults_to_filter(filter_),
+            order_by=order_by,
+            page_size=page_size,
+            page_token=page_token,
+        )
+        budget = _RetryBudget(self.log)
+        list_log_entries = self.logging_api._gapic_api.list_log_entries
 
         while True:
-            entry = self._retrying(lambda: next(pages, _NO_MORE_ENTRIES))
-            if entry is _NO_MORE_ENTRIES:
+            # the generated method fetches one page and wraps it in a pager whose
+            # attributes delegate to it. Reading them takes nothing further off the
+            # wire; only iterating the pager would, and that is the lazy fetch this
+            # method exists to avoid.
+            page = budget.run(lambda: list_log_entries(request=request))
+            yield from page.entries
+            if not page.next_page_token:
                 return
-            yield entry
+            request.page_token = page.next_page_token
 
 
 class CloudLoggingHook(GoogleBaseHook):
@@ -251,6 +293,12 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
         query = rf'resource.type="gce_instance" labels.instance_name="{instance_name}" timestamp>"{timestamp}" jsonPayload.message=~"startup-script[\w\\\":\s]*exit status [0-9]+"'  # noqa: E501
         log_pages = None
 
+        # This retry has no deadline, unlike the one in RateLimitedLoggingClient, and
+        # that asymmetry is deliberate. Copying logs is presentation, so giving up there
+        # costs a log. This call is how the step's outcome is read, so giving up here
+        # fails a step whose work has already succeeded -- the very failure the retry is
+        # meant to prevent. The read quota is per minute and always recovers, so waiting
+        # is the cheaper wrong answer. The deferral is what bounds this in the end.
         while True:
             try:
                 log_pages = await client.list_log_entries(
@@ -636,7 +684,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             page_size=1000,
         )
         for entry in entries:
-            self.log.info(entry.payload.get('message', 'Empty log message'))
+            payload = entry.json_payload or {}
+            self.log.info(payload.get('message', 'Empty log message'))  # ty:ignore[unresolved-attribute]
 
     def poke(self, context: Context) -> bool:
         """Check if the instance is still running in a synchronous way."""
