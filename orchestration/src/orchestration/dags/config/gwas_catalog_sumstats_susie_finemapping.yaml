@@ -9,16 +9,7 @@ environment_specs:
       output_path: gs://ot_orchestration/test/gwas_catalog_sumstats_susie
       GENTROPY_REF: 3.2.0
 
-# NOTE: gentropy 3.2.0 is the version assets/susie_finemap.sh targets and the value
-# committed on this branch. It is NOT a workaround: the "No FileSystem for scheme gs"
-# failures of 2026-08-28 occurred identically on 3.2.0 and 3.4.0-dev.8, and were caused
-# by the script passing the GCS connector via spark.jars with an https URL -- fixed in
-# susie_finemap.sh by fetching the jar to local disk and setting driver.extraClassPath
-# plus fs.gs.impl. Upgrading gentropy here is therefore safe on that front; if you do,
-# note that gentropy >= 3.3 also offers Session(add_gcs_connector=True) as the
-# first-class way to configure this, which would let the script drop the manual setup.
-
-env: Test
+env: Prod
 
 nodes:
   - id: generate_finemapping_index
