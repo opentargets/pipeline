@@ -4,8 +4,8 @@ environment_specs:
     vars:
       input_path: gs://gwas_catalog_inputs
       output_path: gs://gwas_catalog_sumstats_susie
-      curation_date: '20260421'
-      sync_date: '20260421'
+      curation_date: '20260812'
+      sync_date: '20260802'
 
 env: Prod
 
@@ -13,9 +13,19 @@ dataproc:
   cluster_name: otg-gwas-catalog-sumstat-susie-clumping
   cluster_config:
     project_id: open-targets-genetics-dev
-    autoscaling_policy: otg-etl
+    num_workers: 30
+    worker_machine_type: n1-highmem-16
+    worker_disk_type: pd-ssd
+    worker_disk_size: 1024
     metadata:
-      GENTROPY_REF: v3.2.0
+      GENTROPY_REF: a2ccc1d6f2ca0e7233799dbec485a99c8b1beb41
+    properties:
+      'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
+      'spark:spark.sql.files.maxPartitionBytes': '536870912'
+      'spark:spark.sql.shuffle.partitions': '8000'
+      'spark:spark.driver.maxResultSize': '4g'
     init_actions_uris:
       - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
 
@@ -39,7 +49,7 @@ nodes:
     params:
       step: locus_breaker_clumping
       step.summary_statistics_input_path: "{input_path}/harmonised_summary_statistics/*/*.parquet"
-      step.clumped_study_locus_output_path: "{output_path}/study_locus_lb_clumped"
+      step.clumped_study_locus_output_path: "{output_path}/study_locus_lb_clumped_{sync_date}"
       step.lbc_baseline_pvalue: 1.0e-5
       step.lbc_distance_cutoff: 250_000
       step.lbc_pvalue_threshold: 1.0e-8
@@ -49,8 +59,6 @@ nodes:
       step.wbc_pvalue_threshold: 1.0e-8
       step.collect_locus: True
       step.remove_mhc: True
-      # More memory on driver to speed up the partition discovery
-      # Added spark.sql.sources.parallelPartitionDiscovery.parallelism to allow for discovering ~70k processed sumstats
       +step.session.extended_spark_conf: >-
-        {spark.sql.sources.parallelPartitionDiscovery.parallelism: '100000', spark.driver.memory: '10g'}
+        {spark.sql.sources.parallelPartitionDiscovery.parallelism: '100000'}
       step.session.write_mode: overwrite

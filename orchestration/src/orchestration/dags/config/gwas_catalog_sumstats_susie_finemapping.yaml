@@ -9,7 +9,16 @@ environment_specs:
       output_path: gs://ot_orchestration/test/gwas_catalog_sumstats_susie
       GENTROPY_REF: 3.2.0
 
-env: Prod
+# NOTE: gentropy 3.2.0 is the version assets/susie_finemap.sh targets and the value
+# committed on this branch. It is NOT a workaround: the "No FileSystem for scheme gs"
+# failures of 2026-08-28 occurred identically on 3.2.0 and 3.4.0-dev.8, and were caused
+# by the script passing the GCS connector via spark.jars with an https URL -- fixed in
+# susie_finemap.sh by fetching the jar to local disk and setting driver.extraClassPath
+# plus fs.gs.impl. Upgrading gentropy here is therefore safe on that front; if you do,
+# note that gentropy >= 3.3 also offers Session(add_gcs_connector=True) as the
+# first-class way to configure this, which would let the script drop the manual setup.
+
+env: Test
 
 nodes:
   - id: generate_finemapping_index
@@ -20,7 +29,7 @@ nodes:
       max_task_count: 40000
       generator_specs:
         generator_options:
-          collected_loci_path: '{output_path}/study_locus_lb_clumped'
+          collected_loci_path: '{output_path}/study_locus_lb_clumped_20260802'
           manifest_output_path: '{output_path}/finemapping_manifest.csv'
           output_path: '{output_path}/credible_set_datasets'
           #!WARNING: DO NOT CHANGE THE DATE for the log_path, as it is used to back reference the already fine-mapped loci.
@@ -33,7 +42,7 @@ nodes:
     google_batch:
       job:
         task_group:
-          parallelism: 40000
+          parallelism: 1000
           task_environments:
             environments: [] # populated at runtime by BatchIndexOperator
           task_config:

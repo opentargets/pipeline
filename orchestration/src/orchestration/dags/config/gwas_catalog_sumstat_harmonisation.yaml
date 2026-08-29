@@ -41,7 +41,7 @@ nodes:
               memory_mib: 8000
               boot_disk_mib: 8000
             runnable_spec:
-              image_uri: ghcr.io/opentargets/orchestration-harmonisation:26.1-staging.1
+              image_uri: europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.4.0-dev.8-dctest
               entrypoint: /usr/bin/bash
               inline_commands:
                 - '-c'

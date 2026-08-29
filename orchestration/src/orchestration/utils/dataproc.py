@@ -38,6 +38,7 @@ def create_cluster(cluster_name: str, cluster_config: CustomClusterConfig) -> Cr
         cluster_name=cluster_name,
         cluster_config=cluster_config,
         labels=Labels(project=GCP_PROJECT_GENETICS),
+        deferrable=True,
     )
 
 
@@ -56,6 +57,7 @@ def delete_cluster(cluster_name: str) -> DeleteClusterOperator:
         cluster_name=cluster_name,
         region=GCP_REGION,
         trigger_rule=TriggerRule.ALL_SUCCESS,
+        deferrable=True,
     )
 
 
@@ -109,6 +111,7 @@ def submit_gentropy_step(
         step_name=step_name,
         py_spark_job=job,
         labels=labels,
+        deferrable=True,
     )
 
 
