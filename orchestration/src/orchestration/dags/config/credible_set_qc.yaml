@@ -24,16 +24,3 @@ nodes:
       step.session.write_mode: overwrite
       step.session.start_hail: true
 
-  - id: ukb_ppp_eur_data_credible_set_qc
-    kind: Task
-    prerequisites: []
-    params:
-      step: credible_set_qc
-      step.credible_sets_path: gs://ukb_ppp_eur_data/credible_set_datasets/susie/20250129
-      step.output_path: gs://ukb_ppp_eur_data/credible_set_clean/20250129
-      step.p_value_threshold: 1.0e-5
-      step.purity_min_r2: 0.25
-      step.n_partitions: 50
-      step.clump: false
-      step.session.write_mode: overwrite
-      step.session.start_hail: true

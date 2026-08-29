@@ -4,7 +4,7 @@ environment_specs:
     vars:
       input_path: gs://gwas_catalog_inputs
       output_path: gs://gwas_catalog_sumstats_pics
-      sync_date: '20260421'
+      sync_date: '20260802'
 
 env: Prod
 
@@ -12,10 +12,12 @@ dataproc:
   cluster_name: otg-gwascatalog-sumstats-pics
   cluster_config:
     project_id: open-targets-genetics-dev
-    autoscaling_policy: otg-preprocess-gwascatalog
     metadata:
-      GENTROPY_REF: v3.2.0
-    num_workers: 5
+      GENTROPY_REF: a2ccc1d6f2ca0e7233799dbec485a99c8b1beb41
+    num_workers: 10
+    worker_machine_type: n1-highmem-16
+    worker_disk_type: pd-ssd
+    worker_disk_size: 256
     init_actions_uris:
       - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
 
@@ -42,7 +44,7 @@ nodes:
       step.study_locus_output_path: "{output_path}/study_locus_window_based_clumped"
       step.session.write_mode: overwrite
       # yamllint disable rule:line-length
-      +step.session.extended_spark_conf: "{spark.executor.memory: '25g', spark.executor.cores: '4', spark.shuffle.mapOutput.minSizeForBroadcast: '20m'}"
+      +step.session.extended_spark_conf: "{spark.shuffle.mapOutput.minSizeForBroadcast: '20m'}"
       # yamllint enable rule:line-length
   - id: ld_based_clumping
     kind: Task
@@ -56,7 +58,7 @@ nodes:
       step.study_index_path: "{output_path}/study_index"
       step.session.write_mode: overwrite
       # yamllint disable rule:line-length
-      +step.session.extended_spark_conf: "{spark.executor.memory: '25g', spark.executor.cores: '4', spark.shuffle.mapOutput.minSizeForBroadcast: '20m'}"
+      +step.session.extended_spark_conf: "{spark.shuffle.mapOutput.minSizeForBroadcast: '20m'}"
       # yamllint enable rule:line-length
   - id: pics
     kind: Task
