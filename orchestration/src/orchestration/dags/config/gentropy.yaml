@@ -206,22 +206,36 @@ steps:
       # OUTPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
 
+  l2g_train_test_split:
+    params:
+      step: locus_to_gene_train_test_split
+      step.session.write_mode: overwrite
+      step.test_size: 0.15
+      +step.session.extended_spark_conf: >-
+        {spark.sql.autoBroadcastJoinThreshold:'-1'}
+      # INPUTS
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+      step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
+      # OUTPUTS
+      step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
+      step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
+      step.split_stats_path: '{{release_uri}}/intermediate/l2g_train_test_split_stats.json'
+
   l2g_training:
     params:
       step: locus_to_gene
       step.session.write_mode: overwrite
       step.run_mode: train
       step.wandb_run_name: '{{l2g_training_version}}'
-      step.cross_validate: false
       step.train_on_full_dataset: false
       step.hf_hub_repo_id: opentargets/locus_to_gene_{{l2g_training_version}}
       step.hf_model_commit_message: 'chore: update model base model for {{l2g_training_version}} run'
       +step.session.extended_spark_conf: >-
         {spark.kryoserializer.buffer.max:500m, spark.sql.autoBroadcastJoinThreshold:'-1'}
       # INPUTS
-      step.credible_set_path: '{{release_uri}}/output/credible_set'
-      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
-      step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
+      step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
+      step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
       # OUTPUTS
       step.model_path: '{{release_uri}}/etc/model/locus_to_gene_model/classifier.skops'
       step.hf_credentials_path: '/var/run/secrets/hfhub-key'

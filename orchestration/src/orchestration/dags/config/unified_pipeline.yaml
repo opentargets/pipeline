@@ -570,12 +570,14 @@ steps:
       - gentropy_colocalisation
       - gentropy_variant
       - gentropy_enhancer_to_gene
-  gentropy_l2g_training:
+  gentropy_l2g_train_test_split:
     depends_on:
       - pis_l2g
       - pts_interaction
       - gentropy_l2g_feature_matrix
-      - pts_interaction
+  gentropy_l2g_training:
+    depends_on:
+      - gentropy_l2g_train_test_split
   gentropy_l2g_prediction:
     depends_on:
       - gentropy_l2g_training
