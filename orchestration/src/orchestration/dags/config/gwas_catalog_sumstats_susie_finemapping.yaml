@@ -38,7 +38,7 @@ nodes:
             environments: [] # populated at runtime by BatchIndexOperator
           task_config:
             max_retry_count: 1
-            max_run_duration: "7200s"
+            max_run_duration: '7200s'
             instance_resource_spec:
               cpu_milli: 4000
               memory_mib: 25000
