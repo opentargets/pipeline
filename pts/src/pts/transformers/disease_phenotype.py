@@ -8,6 +8,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
 def disease_phenotype(
@@ -27,14 +28,14 @@ def disease_phenotype(
 
     # load the sources
     logger.debug('loading disease dataset')
-    df_disease = pl.read_parquet(source['disease_path'])
+    df_disease = scan_dataset(source['disease_path']).collect()
     logger.debug('loading phenotype dataset')
-    df_phenotype = pl.read_csv(
+    df_phenotype = scan_dataset(
         source['phenotype_path'],
-        separator='\t',
+        format='tsv',
         has_header=True,
         comment_prefix='#',
-    )
+    ).collect()
     logger.debug('loading mondo dataset')
     h = StorageHandle(source['mondo_path'])
     f = h.open()
@@ -275,5 +276,5 @@ def disease_phenotype(
 
     # write the result locally
     # raise NotImplementedError
-    grouped_phenotypes.write_parquet(destination, compression='gzip')
+    write_dataset(grouped_phenotypes, destination)
     logger.info('transformation complete')

@@ -1,21 +1,29 @@
 ---
-release_name: '26.06.0-ppp-dev1'
-
-# If `is_dev` is true:
-#   * the bucket used for the run will be `open-targets-pipeline-runs`
-#   * the prefix inside the bucket will be `run_name`
-#         which defaults to a timestamp if not provided.
-is_dev: true
-run_name: 'ds/26.06.0-ppp-dev1'
-
-# Whether this will be a partner preview platform release (PPP)
-is_ppp: true
+# run_name identifies this pipeline run and controls where outputs are written in GCS.
+#
+# Format: <prefix>/<flavor>-<YYMM>-<N>
+#   prefix - your personal/team identifier (lowercase letter start, then letters or digits)
+#   flavor - 'platform' for the standard unified-pipeline path or 'ppp' for the Partner Preview path
+#          - determines PPP configuration overrides and the downstream release label
+#          - when set to 'ppp', the pipeline loads PPP overrides and includes ppp_only steps
+#   YYMM   - two-digit year + two-digit month (e.g. '2605' for May 2026)
+#   N      - revision number, starting from 1; increment when re-running the same run definition
+#
+# Examples: run_name: 'sz/platform-2605-1'  (is_ppp derived as False)
+#           run_name: 'sz/ppp-2605-1'       (is_ppp derived as True)
+#
+# Every unified pipeline execution writes to:
+#   gs://open-targets-pipeline-runs/<run_name>
+#
+# Promotion to a final release location happens after the run and outside this DAG.
+run_name: "sz/platform-2605-1"
 
 # Pipeline package versions
-pis_version: '26.6.0'
-pts_version: '26.6.0'
-gentropy_version: '3.3.0-rc.1'
-vep_version: 'release_115.2'
+pis_version: "26.9.0.dev0.refactor-target.671c87e"
+pts_version: "26.9.0.dev0.refactor-target.2538485"
+gentropy_version: "3.3.0-rc.1"
+vep_version: "release_115.2"
+spark_nlp_version: "6.1.5"
 
 # Dependency graph
 # ----------------
@@ -36,10 +44,27 @@ vep_version: 'release_115.2'
 # pipeline, it is not worth the effort to implement this until things have
 # stabilised.
 #
+# Target-refactor changes (opentargets/issues#4457, opentargets/pipeline#9):
+#   - pts_target_safety (embedded-only) merged into the new standalone
+#     pts_target_safety_event, which now depends on pts_target + pts_disease
+#     directly instead of pts_target depending on it.
+#   - pts_target_gene_essentiality decoupled from pts_target: now depends on
+#     pts_target (rather than the other way around).
+#   - New standalone steps extracted from pts_target: pts_transcript,
+#     pts_target_tractability, pts_homology (all depend on pts_target/
+#     pts_pre_target; none of this existed as separate steps before).
+#   - pts_chemical_probes promoted to depend on pts_target (now ENSG-resolved).
+#   - pts_target's own depends_on shrank to [pts_pre_target, pts_reactome]
+#     now that safety/essentiality/disease resolution live in their own steps.
+#   - Downstream consumers (pts_target_prioritisation, pts_association_otf,
+#     pts_search_facet) gained edges onto the new pts_target_tractability/
+#     pts_target_safety_event/pts_chemical_probes/pts_homology datasets.
+#
 steps:
   # PIS STEPS
   pis_encode:
   pis_baseline_expression:
+  pis_chembl:
   pis_clinical_report:
   pis_biosample:
   pis_disease:
@@ -68,7 +93,6 @@ steps:
     ppp_only: true
   pis_go:
   pis_interaction:
-  pis_enhancer_to_gene:
   pis_heritability:
   pis_l2g:
   pis_literature:
@@ -111,12 +135,14 @@ steps:
     depends_on:
       - pis_target
       - pts_chembl_molecule
+      - pts_target
   pts_coding_variant:
     depends_on:
       - gentropy_variant
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
+    machine_type: n1-highmem-32
     depends_on:
       - pis_openfda
       - pts_drug_molecule
@@ -129,12 +155,11 @@ steps:
   pts_pre_target:
     depends_on:
       - pis_target
-  pts_target_safety:
-    depends_on:
-      - pts_pharmacogenetics
+      - pis_chembl
   pts_target_gene_essentiality:
     depends_on:
       - pis_target
+      - pts_target
   pts_pharmacogenetics:
     depends_on:
       - pis_pharmacogenetics
@@ -348,13 +373,14 @@ steps:
   # clinical mining updates:
   pts_drug_warning:
     depends_on:
-      - pis_drug
+      - pis_chembl
   pts_chembl_molecule:
     depends_on:
+      - pis_chembl
       - pis_drug
   pts_drug_mechanism_of_action:
     depends_on:
-      - pis_drug
+      - pis_chembl
       - pts_pre_target
   pts_drug_molecule:
     depends_on:
@@ -376,6 +402,11 @@ steps:
       - pts_drug_mechanism_of_action
   pts_target_prioritisation:
     depends_on:
+      - pts_target
+      - pts_target_tractability
+      - pts_target_safety_event
+      - pts_chemical_probes
+      - pts_homology
       - pts_drug_molecule
       - pts_drug_mechanism_of_action
       - pis_target_prioritisation
@@ -417,6 +448,9 @@ steps:
     ppp_only: false
     depends_on:
       - pts_association
+      - pts_target
+      - pts_disease
+      - pts_target_tractability
 
   pts_release_metrics:
     depends_on:
@@ -434,15 +468,38 @@ steps:
     depends_on:
       - pts_pre_target
       - pts_reactome
-      - pts_target_safety
-      - pts_target_gene_essentiality
+
+  # Steps extracted from pts_target
+  pts_transcript:
+    depends_on:
+      - pts_pre_target
+  pts_target_safety_event:
+    depends_on:
+      - pts_pharmacogenetics
+      - pts_target
       - pts_disease
+  pts_target_tractability:
+    depends_on:
+      - pts_target
+  pts_homology:
+    depends_on:
+      - pts_target
+
+  pts_target_view:
+    depends_on:
+      - pts_target
+      - pts_homology
+      - pts_target_tractability
+      - pts_target_safety_event
+      - pts_chemical_probes
+      - pts_transcript
 
   pts_search_facet:
     depends_on:
       - pts_disease
       - pts_go
       - pts_target
+      - pts_target_tractability
       - pts_reactome
 
   pts_interaction:

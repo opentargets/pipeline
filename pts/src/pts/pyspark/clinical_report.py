@@ -7,26 +7,72 @@ from functools import lru_cache
 import pdfplumber
 import polars as pl
 import torch
-from clinical_mining.data_sources.aact import extract_clinical_report as extract_aact_clinical_report
-from clinical_mining.data_sources.aact.llm_extractor import parse_batch_results
-from clinical_mining.data_sources.chembl.drug_warnings import (
+from clinical_mining.dataset import ClinicalReport
+from clinical_mining.provider.aact import extract_clinical_report as extract_aact_clinical_report
+from clinical_mining.provider.aact.llm_extractor import parse_batch_results
+from clinical_mining.provider.chembl.drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
-from clinical_mining.data_sources.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
-from clinical_mining.data_sources.ema import extract_clinical_report as extract_ema_clinical_report
-from clinical_mining.data_sources.pmda import extract_clinical_report as extract_pmda_clinical_report
-from clinical_mining.data_sources.pmda import parse_pmda_approvals
-from clinical_mining.data_sources.ttd import extract_clinical_report as extract_ttd_clinical_report
-from clinical_mining.data_sources.ttd import extract_indication as extract_ttd_indication
-from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalSource, ClinicalStageCategory
+from clinical_mining.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
+from clinical_mining.provider.ema import extract_clinical_report as extract_ema_clinical_report
+from clinical_mining.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
+from clinical_mining.provider.pmda import parse_pmda_approvals
+from clinical_mining.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
+from clinical_mining.provider.ttd import extract_indication as extract_ttd_indication
+from clinical_mining.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
 from clinical_mining.utils.polars_helpers import filter_df, union_dfs
 from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
+from pts.postgres import read_dump_tables
 from pts.transformers.utils import update_quality_flag
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
+
+CHEMBL_SCHEMA_NAME = 'public'
+
+CHEMBL_TABLES = {
+    'drug_indication': ['drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'],
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name'],
+    'drug_warning': [
+        'warning_id',
+        'molregno',
+        'warning_type',
+        'warning_year',
+        'warning_country',
+        'warning_class',
+        'efo_id',
+        'efo_term',
+        'efo_id_for_warning_class',
+    ],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+
+CHEMBL_ORDER_BY = {
+    'indication_refs': ['drugind_id', 'ref_type', 'ref_id', 'ref_url'],
+    'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
+}
+"""Reads collected into published arrays, ordered by their whole projection."""
+
+AACT_SCHEMA_NAME = 'ctgov'
+
+AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+
+AACT_TABLES = {
+    'studies': [
+        'nct_id', 'overall_status', 'phase', 'study_type', 'start_date', 'why_stopped', 'number_of_arms',
+        'official_title',
+    ],
+    'interventions': ['nct_id', 'intervention_type', 'name'],
+    'conditions': ['nct_id', 'downcase_name'],
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'designs': ['nct_id', 'primary_purpose'],
+    'brief_summaries': ['nct_id', 'description'],
+}
+
+AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
 
 class ClinicalReportFlags(StrEnum):
@@ -35,6 +81,7 @@ class ClinicalReportFlags(StrEnum):
     INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
     NO_DISEASE = 'NO_DISEASE'
     NO_DRUGS = 'NO_DRUGS'
+    SAFETY_REPORT = 'SAFETY_REPORT'
 
 
 def clinical_report(
@@ -50,59 +97,40 @@ def clinical_report(
         properties: Dictionary containing Spark properties
     """
     logger.info(f'source paths: {source}')
-    spark = spark_session()
+    chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
+    # The restores use no Spark, so the session starts after them rather than
+    # sitting idle. No `scratch_root`: a pyspark step gets no `Config`, and
+    # /mnt/disks/work is not mounted on the Dataproc master.
+    logger.info(f'restoring chembl tables from {source["chembl"]}')
+    chembl_tables = read_dump_tables(
+        str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY
+    )
+    chembl_indication = chembl_tables['drug_indication']
+    chembl_indication_references = chembl_tables['indication_refs']
+    chembl_molecule_dictionary = chembl_tables['molecule_dictionary']
+    chembl_drug_warning = chembl_tables['drug_warning']
+    chembl_drug_warning_references = chembl_tables['warning_refs']
+
+    logger.info(f'restoring aact tables from {source["aact"]}')
+    aact_tables = read_dump_tables(
+        str(source['aact']),
+        AACT_TABLES,
+        schema_name=AACT_SCHEMA_NAME,
+        archive_member=AACT_ARCHIVE_MEMBER,
+        order_by=AACT_ORDER_BY,
+    )
+    aact_studies = aact_tables['studies']
+    aact_interventions = aact_tables['interventions']
+    aact_conditions = aact_tables['conditions']
+    aact_study_references = aact_tables['study_references']
+    aact_designs = aact_tables['designs']
+    aact_summaries = aact_tables['brief_summaries']
+
+    spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
-    chembl_curation = pl.read_parquet(source['chembl_curation']) if 'chembl_curation' in source else None
-    aact_studies = pl.read_parquet(source['aact_studies']).select(
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
-    )
-    aact_interventions = pl.read_parquet(source['aact_interventions']).select(
-        'nct_id',
-        'intervention_type',
-        'name',
-    )
-    aact_conditions = pl.read_parquet(source['aact_conditions']).select('nct_id', 'downcase_name')
-    aact_study_references = pl.read_parquet(source['aact_study_references']).select('nct_id', 'pmid', 'reference_type')
-    aact_designs = pl.read_parquet(source['aact_designs']).select('nct_id', 'primary_purpose')
-    aact_summaries = pl.read_parquet(source['aact_summaries']).select('nct_id', 'description')
-    chembl_indication = pl.read_parquet(source['chembl_indication']).select(
-        'drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'
-    )
-    chembl_indication_references = pl.read_parquet(source['chembl_indication_references']).select(
-        'drugind_id', 'ref_type', 'ref_id', 'ref_url'
-    )
-    chembl_molecule_dictionary = pl.read_parquet(source['chembl_molecule_dictionary']).select(
-        'molregno', 'chembl_id', 'pref_name'
-    )
-    chembl_drug_warning = pl.read_parquet(source['chembl_drug_warning']).select(
-        'warning_id',
-        'molregno',
-        'warning_type',
-        'warning_year',
-        'warning_country',
-        'warning_class',
-        'efo_id',
-        'efo_term',
-        'efo_id_for_warning_class',
-    )
-    chembl_drug_warning_references = pl.read_parquet(source['chembl_drug_warning_references']).select(
-        'warning_id', 'ref_type', 'ref_id', 'ref_url'
-    )
     llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
-    llm_indications = llm_batch_results.select(
-        'id',
-        pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug').unique()).alias('drugs'),
-        pl.col('primary_indications').list.eval(pl.element().struct.field('name').unique()).alias('diseases'),
-    )
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -113,8 +141,15 @@ def clinical_report(
         interventions=aact_interventions,
         conditions=aact_conditions,
         additional_metadata=[aact_study_references, aact_designs, aact_summaries],
-        aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
-        llm_extraction_df=llm_indications,
+        aggregation_specs={
+            'study_references': {
+                'group_by': 'nct_id',
+                'alias': 'literature',
+                'struct': {'id': 'pmid', 'type': 'reference_type'},
+                'agg': 'unique',
+            }
+        },
+        llm_extractions=llm_batch_results.df,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
     if aact_stop_reasons.height > 0:
@@ -169,17 +204,18 @@ def clinical_report(
             ner_batch_size=int(settings['ner_batch_size']),
             ner_cache_path=source['ner_cache_path'],
         )
-        .pipe(validate_disease, disease_index=pl.read_parquet(source['disease']))
+        .pipe(validate_disease, disease_index=scan_dataset(source['disease']).select('id', 'obsoleteTerms').collect())
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
+        .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.select('id', 'drug_intent'))
+        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.df.select('id', 'drug_intent'))
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
     logger.info(f'destination paths: {destination}')
-    output.df.write_parquet(destination['output'], mkdir=True)
+    write_dataset(output.df, destination['output'])
 
 
 def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:
@@ -187,7 +223,8 @@ def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> Cl
 
     Args:
         reports: ClinicalReport object with mapped entities
-        disease_index: Polars DataFrame with disease index
+        disease_index: disease index, projected to the only columns used here: `id` and
+            `obsoleteTerms`. The caller pushes that projection into the read.
 
     Returns:
         ClinicalReport object with validated disease entities
@@ -245,7 +282,8 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
             reports.df
             .with_columns(
                 drugs_count=pl.col('drugs').list.len(),
-                diseases_count=pl.col('diseases').list.len(),
+                # when diseases list is null, it is replaced with empty list
+                diseases_count=pl.col('diseases').fill_null([]).list.len(),
             )
             .with_columns(
                 # Building blocks for the report description
@@ -257,6 +295,8 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 .then(pl.col('drugs').list.first().struct.field('drugFromSource').str.to_titlecase())
                 .otherwise(pl.concat_str(pl.col('drugs_count').cast(pl.String), pl.lit(' molecules'))),
                 _disease_part=pl
+                .when(pl.col('diseases_count') == 0)
+                .then(pl.lit(None, dtype=pl.String))
                 .when(pl.col('diseases_count') == 1)
                 .then(pl.col('diseases').list.first().struct.field('diseaseFromSource').str.to_titlecase())
                 .otherwise(pl.concat_str(pl.col('diseases_count').cast(pl.String), pl.lit(' diseases'))),
@@ -265,6 +305,15 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                 title=pl
                 .when(pl.col('trialOfficialTitle').is_not_null())
                 .then(pl.col('trialOfficialTitle'))
+                .when(pl.col('diseases_count') == 0)
+                .then(
+                    pl.concat_str(
+                        pl.lit('Report in '),
+                        pl.col('_stage'),
+                        pl.lit(' stage for '),
+                        pl.col('_drug_part'),
+                    )
+                )
                 .otherwise(
                     pl.concat_str(
                         pl.lit('Report in '),
@@ -273,7 +322,6 @@ def create_title(reports: ClinicalReport) -> ClinicalReport:
                         pl.col('_drug_part'),
                         pl.lit(' and '),
                         pl.col('_disease_part'),
-                        ignore_nulls=True,
                     )
                 )
             )
@@ -444,7 +492,7 @@ def flag_indirect_primary_purpose(
         reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
         llm_drug_intent_condition = (
             # Flagging should only act on AACT reports
-            (pl.col('source') == ClinicalSource.AACT.value) &
+            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value) &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
             # or when LLM was not able to infer the intent (null)
             ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())
@@ -484,6 +532,17 @@ def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
             df=reports.df,
             flag_condition=pl.col('drugs').is_null(),
             flag_text=ClinicalReportFlags.NO_DRUGS.value,
+        )
+    )
+
+
+def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
+    """Flag SAFETY-type reports (clinical_mining#57, informational, not a failure)."""
+    return ClinicalReport(
+        df=update_quality_flag(
+            df=reports.df,
+            flag_condition=pl.col('type').eq(ClinicalReportType.SAFETY.value),
+            flag_text=ClinicalReportFlags.SAFETY_REPORT.value,
         )
     )
 

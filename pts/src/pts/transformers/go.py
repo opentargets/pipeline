@@ -10,6 +10,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
+from pts.transformers.utils.dataset import write_dataset
 
 
 def _non_obsolete_ids(graph) -> set[str]:
@@ -109,4 +110,4 @@ def go(
     df = pl.DataFrame(rows, schema=go_schema)
 
     logger.info('writing dataframe')
-    df.write_parquet(destination)
+    write_dataset(df, destination)

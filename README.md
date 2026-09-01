@@ -27,6 +27,10 @@ Refer to each project's README.md for instructions on how to run it.
 
 ## Development
 
+> [!IMPORTANT]
+> If using Visual Studio Code, remember to install recommended extensions, and to
+> open the workspace file `pipeline.code-workspace` instead of the root folder!
+
 | Make Target  | Description                                     |
 | ------------ | ----------------------------------------------- |
 | `make dev`   | Install dev dependencies and pre-commit hook.   |
@@ -60,6 +64,13 @@ last commit's sha. After confirmation, it will create and push that tag, which w
 trigger the [`tag.yaml`](.github/workflows/tag.yaml) workflow to run checks, build
 and publish the image.
 
+> [!NOTE]
+> The package's `pyproject.toml` version must match the branch you're on: an
+> `rc`/`final` version (e.g. `26.9.0rc3`) only builds from `main`, while a `dev`
+> version (e.g. `26.9.0.dev0`) only builds from any other branch. `make build`
+> fails otherwise — bump to a `dev` version on feature branches with
+> `uv --directory <package> version <next-dev-version>`.
+
 
 #### Open a PR
 
@@ -78,6 +89,12 @@ commit, and push. Then you can open a PR against `main`.
 
 ### Tag format
 
+#### Some notes on the commit messages:
+* We do not use conventional commits anymore (see the naming conventions for reasons).
+* When a commit relates to a specific package, the commit message must start with
+    the package name (e.g. `pis: add new input data source`). This is not enforced.
+
+#### Tagging
 As this repository contains multiple Python packages, the tags are a bit different than
 the usual `v<version>` format:
 

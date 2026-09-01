@@ -27,3 +27,6 @@ work
 
 # airflow logs
 logs
+
+# holds the generated airflow api/jwt secrets; seeded from .env.example
+orchestration/.env

@@ -75,7 +75,7 @@ class TestProcessStudy:
         assert row['gwasDiseases'].to_list() == [None]
 
     def test_qtl_columns_are_renamed(self, study: pl.LazyFrame) -> None:
-        """geneId and biosampleId must be renamed to qtlGeneId and qtlBiosampleId."""  # noqa: D403
+        """geneId and biosampleId must be renamed to qtlGeneId and qtlBiosampleId."""
         result = process_study(study).collect()
         assert isinstance(result, pl.DataFrame)
         assert 'qtlGeneId' in result.columns

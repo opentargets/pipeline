@@ -4,8 +4,34 @@ from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
+from pyspark.sql import Column
 
 from pts.pyspark.common.session import Session
+
+TRIAL_OUTCOME_REFERENCE_TYPES = ('result', 'derived')
+
+
+def _result_literature(trial_literature: Column) -> Column:
+    """Flatten `trialLiterature` structs to the PMIDs that report the trial's outcome.
+
+    Background citations are dropped, as are entries with no PMID. A report left with
+    nothing yields null rather than an empty array.
+
+    Args:
+        trial_literature: `array<struct<id: string, type: string>>` column, or null.
+
+    Returns:
+        `array<string>` of PMIDs, or null when nothing survives the filter.
+    """
+    pmids = f.transform(
+        f.filter(
+            trial_literature,
+            lambda x: f.lower(x.getField('type')).isin(*TRIAL_OUTCOME_REFERENCE_TYPES)
+            & x.getField('id').isNotNull(),
+        ),
+        lambda x: x.getField('id'),
+    )
+    return f.when(f.size(pmids) > 0, pmids).otherwise(f.lit(None))
 
 
 def clinical_precedence(
@@ -55,7 +81,7 @@ def clinical_precedence(
         clinical_report_df
         .withColumnRenamed('id', 'clinicalReportId')
         .withColumn('studyStartDate', f.col('trialStartDate').cast('string'))
-        .withColumn('literature', f.col('trialLiterature'))
+        .withColumn('literature', _result_literature(f.col('trialLiterature')))
         .withColumn('_disease', f.explode_outer('diseases'))
         .withColumn('diseaseFromSource', f.col('_disease.diseaseFromSource'))
         .withColumn('diseaseFromSourceMappedId', f.col('_disease.diseaseId'))
