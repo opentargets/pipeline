@@ -218,7 +218,8 @@ steps:
       step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
       # The test set is pinned across releases rather than resampled per run, so
       # models stay comparable. `step.test_size` is ignored when this is set.
-      step.predefined_test_parquet_path: 'gs://genetics-portal-dev-analysis/yt4/training_set_split/output/test'
+      # pis_l2g_predefined_test_for_split stages it into the release input directory.
+      step.predefined_test_parquet_path: '{{release_uri}}/input/l2g/predefined_test_for_split'
       # OUTPUTS
       step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
       step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
