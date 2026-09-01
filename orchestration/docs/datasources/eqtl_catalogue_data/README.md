@@ -2,8 +2,8 @@
 
 This document was updated on 2026-09-01.
 
-This datasource is currently fixed under the [eQTL Catalogue Release 7 - June 2024](https://www.ebi.ac.uk/eqtl/Release_notes/#:~:text=eQTL%20Catalogue%20release%207%20%2D%20June%202024) for public release
-This datasource is currently fixed under the [eQTL Catalogue Release 8](https://www.ebi.ac.uk/eqtl/Release_notes/#:~:text=eQTL%20Catalogue%20r8%20pre%2Drelease%20%2D%20January%202026) for ppp release
+This datasource is currently fixed under the [eQTL Catalogue Release 7 - June 2024](https://www.ebi.ac.uk/eqtl/Release_notes/#:~:text=eQTL%20Catalogue%20release%207%20%2D%20June%202024) for the public release.
+This datasource is currently fixed under the [eQTL Catalogue Release 8](https://www.ebi.ac.uk/eqtl/Release_notes/#:~:text=eQTL%20Catalogue%20r8%20pre%2Drelease%20%2D%20January%202026) for the PPP release.
 
 Data source comes from the `https://www.ebi.ac.uk/eqtl/`
 
