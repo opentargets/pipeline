@@ -21,7 +21,7 @@ run_name: "sz/platform-2605-1"
 # Pipeline package versions
 pis_version: "26.9.0.dev0.refactor-target.671c87e"
 pts_version: "26.9.0.dev0.refactor-target.2538485"
-gentropy_version: "3.3.0-rc.1"
+gentropy_version: "3.4.0-rc.1"
 vep_version: "release_115.2"
 spark_nlp_version: "6.1.5"
 
