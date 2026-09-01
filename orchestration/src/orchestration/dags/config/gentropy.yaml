@@ -210,13 +210,15 @@ steps:
     params:
       step: locus_to_gene_train_test_split
       step.session.write_mode: overwrite
-      step.test_size: 0.15
       +step.session.extended_spark_conf: >-
         {spark.sql.autoBroadcastJoinThreshold:'-1'}
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
       step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
+      # The test set is pinned across releases rather than resampled per run, so
+      # models stay comparable. `step.test_size` is ignored when this is set.
+      step.predefined_test_parquet_path: 'gs://genetics-portal-dev-analysis/yt4/training_set_split/output/test'
       # OUTPUTS
       step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
       step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
