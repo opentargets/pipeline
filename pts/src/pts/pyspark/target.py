@@ -267,9 +267,10 @@ def _build_gene_code(df: DataFrame) -> DataFrame:
     Returns:
         DataFrame with [id, canonicalTranscript{id, chromosome, start, end, strand}].
     """
+    tags = f.split(f.regexp_extract(f.col('_c8'), r'tag=([^;]*)', 1), ',')
     return (
         df
-        .filter((f.col('_c2') == 'transcript') & f.col('_c8').contains('Ensembl_canonical'))
+        .filter((f.col('_c2') == 'transcript') & f.array_contains(tags, 'Ensembl_canonical'))
         .select(
             f.regexp_extract(f.col('_c8'), r'gene_id=(.*?);', 1).alias('gene_id_raw'),
             f.regexp_extract(f.col('_c8'), r'transcript_id=(.*?);', 1).alias('transcript_id_raw'),
