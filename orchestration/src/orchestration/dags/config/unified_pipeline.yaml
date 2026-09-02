@@ -95,6 +95,7 @@ steps:
   pis_interaction:
   pis_heritability:
   pis_l2g:
+  pis_l2g_predefined_test_for_split:
   pis_literature:
   pis_molqtl:
   pis_molqtl_ppp:
@@ -570,12 +571,15 @@ steps:
       - gentropy_colocalisation
       - gentropy_variant
       - gentropy_enhancer_to_gene
-  gentropy_l2g_training:
+      - pts_interaction
+  gentropy_l2g_train_test_split:
     depends_on:
       - pis_l2g
-      - pts_interaction
+      - pis_l2g_predefined_test_for_split
       - gentropy_l2g_feature_matrix
-      - pts_interaction
+  gentropy_l2g_training:
+    depends_on:
+      - gentropy_l2g_train_test_split
   gentropy_l2g_prediction:
     depends_on:
       - gentropy_l2g_training
