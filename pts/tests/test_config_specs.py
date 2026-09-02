@@ -43,14 +43,7 @@ def _registry() -> TaskRegistry:
     return registry
 
 
-DISPATCH_KNOWN_BROKEN = {
-    # pre-existing on main: `vep_view` is a polars transformer
-    # (`pts/src/pts/transformers/vep_view.py`) but the step declares it as a pyspark
-    # job, so the step would die with a ModuleNotFoundError. It is unreachable today
-    # -- no DAG step references `pts_vep_view` -- and fixing it flips the step from
-    # dataproc to GCE, which is a routing change this test has no business making.
-    ('vep_view', 'pyspark generate vep view'),
-}
+DISPATCH_KNOWN_BROKEN: set[tuple[str,str]] = set()
 """Tasks whose ``transformer``/``pyspark`` module is known not to resolve.
 
 Each entry is an ``xfail(strict=True)``, so fixing one turns into a test failure

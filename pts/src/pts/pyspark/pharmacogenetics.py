@@ -60,15 +60,17 @@ def pharmacogenetics(
     moa_df = spark.load_data(source['drug_mechanism_of_action'])
 
     logger.info('overwrite phenotypeText column with parsed phenotypes')
-    annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
+    # Collect texts that appear in ClinPGx but not yet in the phenotypes lookup.
+    # A text present in the lookup is considered parsed, even if its phenotypeText
+    # is [] (empty extraction is valid).
     unparsed_texts = (
-        annotated_pgx_df
-        .filter(f.col('phenotypeText').isNull())
-        .select('genotypeAnnotationText')
-        .distinct()
-        .toPandas()['genotypeAnnotationText']
-        .to_list()
+        pgx_df.select('genotypeAnnotationText').distinct().join(
+            pgx_phenotypes_df.select('genotypeAnnotationText').distinct(),
+            on='genotypeAnnotationText',
+            how='left_anti')
+        .toPandas()['genotypeAnnotationText'].to_list()
     )
+    annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
     if len(unparsed_texts) == 0:
         logger.info('all phenotypes have been parsed')
     else:
@@ -281,7 +283,7 @@ def update_phenotypes_lut(
     extracted_phenotypes_df: DataFrame,
 ) -> DataFrame:
     """Adds the new phenotypes to the extracted phenotypes table."""
-    return extracted_phenotypes_df.unionByName(new_phenotypes_df)
+    return extracted_phenotypes_df.unionByName(new_phenotypes_df).distinct()
 
 
 def annotate_phenotype(pgx_evidence_df: DataFrame, extracted_phenotypes_df: DataFrame) -> DataFrame:

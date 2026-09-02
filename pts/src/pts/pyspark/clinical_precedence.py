@@ -80,7 +80,9 @@ def clinical_precedence(
     exploded_cr = (
         clinical_report_df
         .withColumnRenamed('id', 'clinicalReportId')
-        .withColumn('studyStartDate', f.col('trialStartDate').cast('string'))
+        .withColumns(
+            {'studyStartDate': f.col('trialStartDate').cast('string'), 'evidenceDate': f.col('year').cast('string')}
+        )
         .withColumn('literature', _result_literature(f.col('trialLiterature')))
         .withColumn('_disease', f.explode_outer('diseases'))
         .withColumn('diseaseFromSource', f.col('_disease.diseaseFromSource'))
@@ -106,6 +108,7 @@ def clinical_precedence(
             'trialWhyStopped',
             'trialStopReasonCategories',
             'studyStartDate',
+            'evidenceDate',
             'literature',
             'diseaseFromSource',
             'diseaseFromSourceMappedId',

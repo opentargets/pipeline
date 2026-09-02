@@ -16,25 +16,13 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "do/platform-2608-3"
+run_name: "sz/platform-2605-1"
 
 # Pipeline package versions
-#
-# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline
-# (and .../vep for vep_version), not git refs. A tag that does not exist there fails at
-# container pull — after the VM is up, the disk is attached and the step is being
-# billed. Every tag set here was confirmed present in Artifact Registry first.
-pis_version: "26.9.0rc13"
-pts_version: "26.9.0rc31"
-# No leading `v` here: this value is used both ways and each consumer adds what it
-# needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
-# while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
-# gentropy:v3.4.0-dev.8` is a 404 while `:3.4.0-dev.8` resolves.
-gentropy_version: "3.4.0-dev.8"
-# Built by opentargets/vep-image; the GitHub release and the registry image are
-# published separately, so the tag existing in one does not mean it exists in the
-# other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
-vep_version: "release_116.1"
+pis_version: "26.9.0.dev0.refactor-target.671c87e"
+pts_version: "26.9.0.dev0.refactor-target.2538485"
+gentropy_version: "3.3.0-rc.1"
+vep_version: "release_115.2"
 spark_nlp_version: "6.1.5"
 
 # Dependency graph
@@ -107,6 +95,7 @@ steps:
   pis_interaction:
   pis_heritability:
   pis_l2g:
+  pis_l2g_predefined_test_for_split:
   pis_literature:
   pis_molqtl:
   pis_molqtl_ppp:
@@ -537,6 +526,11 @@ steps:
       - gentropy_biosample
       - pts_target
 
+  pts_vep_view:
+    depends_on:
+      - gentropy_l2g_prediction
+
+
   # GENTROPY STEPS
   gentropy_biosample:
     depends_on:
@@ -582,10 +576,11 @@ steps:
       - gentropy_colocalisation
       - gentropy_variant
       - gentropy_enhancer_to_gene
+      - pts_interaction
   gentropy_l2g_train_test_split:
     depends_on:
       - pis_l2g
-      - pts_interaction
+      - pis_l2g_predefined_test_for_split
       - gentropy_l2g_feature_matrix
   gentropy_l2g_training:
     depends_on:

@@ -38,7 +38,7 @@ class Evidence:
 
     # Columns we consider for dating evidence:
     EVIDENCE_DATE_COLUMNS: list[str] = field(
-        default_factory=lambda: ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
+        default_factory=lambda: ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate', 'evidenceDate']
     )
 
     def __post_init__(self: Evidence) -> None:

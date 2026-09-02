@@ -97,7 +97,7 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
         orphanet_disorder_id = f'Orphanet_{orphanet_disorder_id}'
         parsed_disorder: dict[str, object] = {
             'diseaseFromSource': _text(disorder, 'Name'),
-            'diseaseFromSourceId': 'Orphanet_' + orphanet_disorder_id,
+            'diseaseFromSourceId': orphanet_disorder_id,
             'type': _text(disorder, 'DisorderType/Name'),
         }
 

@@ -2005,7 +2005,7 @@ wheels = [
 
 [[package]]
 name = "ontoma"
-version = "2.5.3"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "loguru" },
@@ -2014,9 +2014,9 @@ dependencies = [
     { name = "pyspark" },
     { name = "spark-nlp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/ae/43af8b369c88977ca5ce952849c1de4294fd0ea3dc43e63f8fee48d44ab7/ontoma-2.5.3.tar.gz", hash = "sha256:97ca03fe317b5f34fd4abbf28d0ceb31c077bfe22583db98e769a8a008125ae1", size = 28648, upload-time = "2026-08-20T15:51:46.591Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/ae/3038e7267a3262704d0985814b281709fb5853bdc135ee8491e9a2eea455/ontoma-2.6.0.tar.gz", hash = "sha256:85c85a300ad8aaa91dc2b9b5aafa95c9618f83b6c91241bbd68fc3d6737f4da4", size = 28643, upload-time = "2026-09-02T16:06:42.413Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/44/a716aedd29096eb3367931c7571a8a4c6383a6c89c40aad2e4e644164127/ontoma-2.5.3-py3-none-any.whl", hash = "sha256:0921c50c46e140d4e9177a9f8c96227d00a6c3da3cdc2c33ac82d0626a68b9fa", size = 40498, upload-time = "2026-08-20T15:51:45.672Z" },
+    { url = "https://files.pythonhosted.org/packages/81/89/f832621783ffc29c58e3dd8aee37c0637f5107f44655f1ccb6a6c143e9f1/ontoma-2.6.0-py3-none-any.whl", hash = "sha256:16920da5a9f988243c91a002f31080281b26a5b05c1986f04a69d38851013b5a", size = 40485, upload-time = "2026-09-02T16:06:41.551Z" },
 ]
 
 [package.optional-dependencies]
@@ -2504,7 +2504,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.9.0rc31"
+version = "26.9.0rc37"
 source = { editable = "." }
 dependencies = [
     { name = "clinical-mining" },
@@ -2561,7 +2561,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "obonet", specifier = ">=1.3.0" },
-    { name = "ontoma", specifier = ">=2.5.3" },
+    { name = "ontoma", specifier = ">=2.6.0" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
