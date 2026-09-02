@@ -254,12 +254,12 @@ class TestEvidence:
 class TestResolveEvidenceDate:
     """Tests for Evidence.resolve_evidence_date."""
 
-    # (publicationDate, curationDate, studyStartDate)
+    # (publicationDate, curationDate, studyStartDate, evidenceDate)
     DATE_DATASET = [
-        ('2020-01-01', '2021-01-01', '2022-01-01'),  # all present, min = '2020-01-01'
-        (None, '2019-06-01', '2021-01-01'),  # publicationDate null, min = '2019-06-01'
-        ('2023-01-01', None, '2021-01-01'),  # curationDate null, min = '2021-01-01'
-        (None, None, None),  # all null → null
+        ('2020-01-01', '2021-01-01', '2022-01-01', '2019-01-01'),  # existing evidenceDate is earliest
+        (None, '2019-06-01', '2021-01-01', '2022-01-01'),  # another date is earlier than existing evidenceDate
+        ('2023-01-01', None, '2021-01-01', None),  # curationDate null, min = '2021-01-01'
+        (None, None, None, '2018-01-01'),  # existing evidenceDate must be preserved
     ]
 
     @pytest.fixture(autouse=True)
@@ -268,7 +268,7 @@ class TestResolveEvidenceDate:
         self.evidence_with_dates = Evidence(
             spark.createDataFrame(
                 self.DATE_DATASET,
-                'publicationDate STRING, curationDate STRING, studyStartDate STRING',
+                'publicationDate STRING, curationDate STRING, studyStartDate STRING, evidenceDate STRING',
             )
         )
         self.evidence_without_dates = Evidence(spark.createDataFrame([('t1',), ('t2',)], 'targetId STRING'))
@@ -284,10 +284,10 @@ class TestResolveEvidenceDate:
     def test_all_dates_present_picks_minimum(self: TestResolveEvidenceDate) -> None:
         """When all date columns are non-null, the earliest date is selected."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        assert (
-            result.filter((f.col('publicationDate') == '2020-01-01') & (f.col('evidenceDate') != '2020-01-01')).count()
-            == 0
-        )
+        assert result.filter(
+            (f.col('publicationDate') == '2020-01-01')
+            & (f.col('evidenceDate') != '2019-01-01')
+        ).count() == 0
 
     def test_null_date_column_ignored(self: TestResolveEvidenceDate) -> None:
         """Null date columns do not propagate null to evidenceDate when other dates are available."""
@@ -313,18 +313,18 @@ class TestResolveEvidenceDate:
             == 0
         )
 
-    def test_all_null_returns_null(self: TestResolveEvidenceDate) -> None:
-        """When all date columns are null, evidenceDate is null."""
+
+    def test_existing_evidence_date_is_included(self: TestResolveEvidenceDate) -> None:
+        """An existing evidenceDate participates in minimum-date selection."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        assert (
-            result.filter(
-                f.col('publicationDate').isNull()
-                & f.col('curationDate').isNull()
-                & f.col('studyStartDate').isNull()
-                & f.col('evidenceDate').isNotNull()
-            ).count()
-            == 0
-        )
+
+        earliest_existing = result.filter(f.col('publicationDate') == '2020-01-01').select('evidenceDate').first()
+        earlier_candidate = result.filter(f.col('curationDate') == '2019-06-01').select('evidenceDate').first()
+
+        assert earliest_existing is not None
+        assert earlier_candidate is not None
+        assert earliest_existing.evidenceDate == '2019-01-01'
+        assert earlier_candidate.evidenceDate == '2019-06-01'
 
     def test_no_date_columns_returns_null(self: TestResolveEvidenceDate) -> None:
         """When the DataFrame has no date columns, evidenceDate is null for all rows."""
