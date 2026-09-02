@@ -730,7 +730,7 @@ steps:
         - IBDverse
       do:
         - name: copy_many molqtl ${each} study
-          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
+          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/pub_date_patched_study_index/*.parquet
           destination: input/molqtl/study/otar2077/${each}
 
         - name: copy_many molqtl ${each} credible sets
