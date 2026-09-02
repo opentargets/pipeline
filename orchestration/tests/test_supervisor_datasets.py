@@ -126,11 +126,11 @@ class TestAgainstTheRealConfigs:
 
         Unlike the release-dataset totals above, this count is actually sensitive to
         the recursion: deleting it drops every step's task list back to its own,
-        un-recursed tasks, and the total falls from 262 to 232 — the 30 tasks that
+        un-recursed tasks, and the total falls from 263 to 233 — the 30 tasks that
         live only inside `foreach:`/`do:` blocks. Confirmed by re-running
         `_raw_destinations` with the recursion removed, against the same configs.
 
-        Both halves were re-measured when main merged in on 2026-08-25 (257/229/28
+        Both halves were re-measured when main merged in on 2026-09-02 (262/232/30
         before). Updating the pinned total alone would be worthless: the number only
         means something while the gap it implies has been checked, since a total that
         matches a recursion-free count would pass this test while proving the
@@ -140,4 +140,4 @@ class TestAgainstTheRealConfigs:
         total = sum(
             len(_raw_destinations(tasks)) for cfg in configs.values() for tasks in cfg.get('steps', {}).values()
         )
-        assert total == 262, f'expected 262 raw destination declarations across both configs, got {total}'
+        assert total == 263, f'expected 263 raw destination declarations across both configs, got {total}'

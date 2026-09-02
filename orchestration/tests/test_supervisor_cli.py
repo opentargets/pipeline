@@ -643,7 +643,7 @@ class TestRenderDiff:
 
 
 class TestDiffLoadersAgainstTheRealConfig:
-    """Measured against both configs and `unified_pipeline.yaml` on 2026-08-25."""
+    """Measured against both configs and `unified_pipeline.yaml` on 2026-09-02."""
 
     def test_loads_pis_and_pts_only(self) -> None:
         """Gentropy is deliberately excluded; its config is not `{stage}/config.yaml`-shaped."""
@@ -651,7 +651,7 @@ class TestDiffLoadersAgainstTheRealConfig:
 
     def test_loads_every_declared_step(self) -> None:
         steps = unified_pipeline_steps()
-        assert len(steps) == 131
+        assert len(steps) == 134
         assert 'pts_disease' in steps
 
     def test_loads_the_configured_run_name(self) -> None:
@@ -687,8 +687,8 @@ class TestDiffLoadersAgainstTheRealConfig:
             _EmptyBucket(), 'run', _EmptyBucket(), 'release', unified_pipeline_steps(), stage_configs()
         )
         assert diffs == []
-        assert len(skipped.stages_without_config) == 12
-        assert len(skipped.steps_without_datasets) == 62
+        assert len(skipped.stages_without_config) == 13
+        assert len(skipped.steps_without_datasets) == 64
         assert len(skipped.datasets_absent_from_both) == 71
         assert skipped.undeclared_in_buckets == []
 
