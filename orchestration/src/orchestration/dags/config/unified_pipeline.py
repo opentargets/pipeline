@@ -70,6 +70,11 @@ class UnifiedPipelineConfig:
         self.pts.config['log_level'] = 'INFO'
         self.pts.config['pool_size'] = 32
 
+        # PTS records these as provenance, so they must describe the file PIS fetched.
+        # PIS owns the value because it is the side that chooses which file to download.
+        for shared_version in ('string_version',):
+            self.pts.config['scratchpad'][shared_version] = self.pis.config['scratchpad'][shared_version]
+
         if self.is_ppp:
             self.pts = self.pts.overwrite(config_path / 'ppp' / 'pts.override.yaml')
         """The internal configuration for PTS steps, with PPP-specific overrides."""
