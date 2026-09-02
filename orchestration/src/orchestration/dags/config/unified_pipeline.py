@@ -70,6 +70,14 @@ class UnifiedPipelineConfig:
         self.pts.config['log_level'] = 'INFO'
         self.pts.config['pool_size'] = 32
 
+        # PIS picks the STRING file, PTS stamps the version into interaction_evidence as
+        # database_version. Left independent the two can disagree, and the release then
+        # misreports which version it contains. An exception, not a pattern -- moving input
+        # versions to unified_pipeline.yaml would scatter them away from pis/config.yaml,
+        # which owns them.
+        for shared_version in ('string_version',):
+            self.pts.config['scratchpad'][shared_version] = self.pis.config['scratchpad'][shared_version]
+
         if self.is_ppp:
             self.pts = self.pts.overwrite(config_path / 'ppp' / 'pts.override.yaml')
         """The internal configuration for PTS steps, with PPP-specific overrides."""
