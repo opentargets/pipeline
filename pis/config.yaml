@@ -560,13 +560,8 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/current_release/id_mapping/database_mappings/ensembl.tsv
       destination: input/interaction/rna_central_ensembl.tsv
 
-    - name: find_latest string interactions
-      source: gs://otar001-core/stringInteractions/*v${string_version}*.txt.gz
-      scratchpad_key: latest_string_interactions
     - name: copy string interactions
-      requires:
-        - find_latest string interactions
-      source: ${latest_string_interactions}
+      source: gs://otar001-core/stringInteractions/9606.protein.links.full_w_homology.v${string_version}.txt.gz
       destination: input/interaction/string-interactions.txt.gz
   ##################################################################################################
 
