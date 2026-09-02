@@ -20,6 +20,7 @@ scratchpad:
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
   literature_lut_version: '2026.08'
+  l2g_test_split_version: '2026-09-02'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -704,7 +705,7 @@ steps:
   # release input directory as `step.predefined_test_parquet_path`.
   l2g_predefined_test_for_split:
     - name: copy_many l2g predefined test set for the train/test split
-      sources: gs://genetics-portal-dev-analysis/yt4/training_set_split/output/test/*.parquet
+      sources: gs://otar001-core/l2g/trainTestSplit/${l2g_test_split_version}/test/*.parquet
       destination: input/l2g/predefined_test_for_split
   ##################################################################################################
 
