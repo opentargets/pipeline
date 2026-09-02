@@ -571,11 +571,11 @@ steps:
       - gentropy_colocalisation
       - gentropy_variant
       - gentropy_enhancer_to_gene
+      - pts_interaction
   gentropy_l2g_train_test_split:
     depends_on:
       - pis_l2g
       - pis_l2g_predefined_test_for_split
-      - pts_interaction
       - gentropy_l2g_feature_matrix
   gentropy_l2g_training:
     depends_on:
