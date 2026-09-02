@@ -1924,7 +1924,7 @@ steps:
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view
-      transformer: release_metrics
+      transformer: vep_view
       source:
         credible_set: output/credible_set
         study_table: output/study
