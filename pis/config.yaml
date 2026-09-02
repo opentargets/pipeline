@@ -20,6 +20,7 @@ scratchpad:
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
   literature_lut_version: '2026.08'
+  l2g_gold_standard_version: '2025-06-25'
   l2g_test_split_version: '2026-09-02'
 
 steps:
@@ -695,7 +696,7 @@ steps:
   #: L2G STEP :#####################################################################################
   l2g:
     - name: copy_many l2g gold standard
-      sources: gs://genetics-portal-dev-analysis/yt4/2506_release/training_set/20250625_gentropy_paper_v1.json/*.json
+      sources: gs://otar001-core/l2g/goldStandard/${l2g_gold_standard_version}/*.json
       destination: input/l2g/gold_standard.json
   ##################################################################################################
 
