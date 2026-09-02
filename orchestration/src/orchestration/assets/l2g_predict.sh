@@ -15,6 +15,9 @@ set -euo pipefail
 # Templated variables (defined in runnable_spec.script_variables)
 readonly L2G_TRAINING_VERSION="${l2g_training_version}"
 readonly FEATURE_MATRIX_PATH="${feature_matrix_path}"
+# clusters.yaml sets the release-wide parquet codec (#31) as a Dataproc cluster
+# property, which never reaches this step -- it runs on a Google Batch VM. Without
+# the codec below, the collected output/l2g_prediction ships spark's default snappy.
 #########################################################################################
 HYDRA_FULL_ERROR=1 gentropy \
   step=locus_to_gene \
@@ -27,5 +30,5 @@ HYDRA_FULL_ERROR=1 gentropy \
   step.hf_hub_repo_id="opentargets/locus_to_gene_${L2G_TRAINING_VERSION}" \
   step.credible_set_path="${INPUT_PARTITION}" \
   step.feature_matrix_path="${FEATURE_MATRIX_PATH}" \
-  "+step.session.extended_spark_conf={spark.jars:https://storage.googleapis.com/hadoop-lib/gcs/gcs-connector-hadoop3-latest.jar}" \
+  "+step.session.extended_spark_conf={spark.jars:https://storage.googleapis.com/hadoop-lib/gcs/gcs-connector-hadoop3-latest.jar, spark.sql.parquet.compression.codec:zstd}" \
   step.predictions_path="${OUTPUT_PARTITION}"
