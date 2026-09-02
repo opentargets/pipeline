@@ -526,6 +526,11 @@ steps:
       - gentropy_biosample
       - pts_target
 
+  pts_vep_view:
+    depends_on:
+      - gentropy_l2g_prediction
+
+
   # GENTROPY STEPS
   gentropy_biosample:
     depends_on:

@@ -1923,8 +1923,8 @@ steps:
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:
-    - name: pyspark generate vep view
-      pyspark: vep_view
+    - name: transform vep view
+      transformer: release_metrics
       source:
         credible_set: output/credible_set
         study_table: output/study
@@ -1935,8 +1935,6 @@ steps:
         vep_data_all: intermediate/vep_view
         vep_data_gwas: intermediate/vep_view_gwas
         vep_data_qtl: intermediate/vep_view_qtl
-      properties:
-        spark.driver.memory: 16g
   ##################################################################################################
 
   #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
