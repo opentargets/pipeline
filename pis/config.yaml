@@ -701,9 +701,6 @@ steps:
   ##################################################################################################
 
   #: L2G_PREDEFINED_TEST_FOR_SPLIT STEP :###########################################################
-  # The held-out test set is pinned rather than resampled per release, so that L2G models stay
-  # comparable across releases. Gentropy's locus_to_gene_train_test_split step reads it from the
-  # release input directory as `step.predefined_test_parquet_path`.
   l2g_predefined_test_for_split:
     - name: copy_many l2g predefined test set for the train/test split
       sources: gs://otar001-core/l2g/trainTestSplit/${l2g_test_split_version}/test/*.parquet
