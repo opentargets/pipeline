@@ -70,6 +70,7 @@ AACT_TABLES = {
     'study_references': ['nct_id', 'pmid', 'reference_type'],
     'designs': ['nct_id', 'primary_purpose'],
     'brief_summaries': ['nct_id', 'description'],
+    'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
 }
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
@@ -126,6 +127,9 @@ def clinical_report(
     aact_study_references = aact_tables['study_references']
     aact_designs = aact_tables['designs']
     aact_summaries = aact_tables['brief_summaries']
+    aact_lead_sponsors = aact_tables['sponsors'].filter(
+        pl.col('lead_or_collaborator') == 'lead'
+    )
 
     spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
@@ -140,14 +144,28 @@ def clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
         conditions=aact_conditions,
-        additional_metadata=[aact_study_references, aact_designs, aact_summaries],
+        additional_metadata=[
+            aact_study_references,
+            aact_designs,
+            aact_summaries,
+            aact_lead_sponsors,
+        ],
         aggregation_specs={
             'study_references': {
                 'group_by': 'nct_id',
                 'alias': 'literature',
                 'struct': {'id': 'pmid', 'type': 'reference_type'},
                 'agg': 'unique',
-            }
+            },
+            'sponsor': {
+                'group_by': 'nct_id',
+                'alias': 'sponsor',
+                'struct': {
+                    'agencyClass': 'agency_class',
+                    'name': 'name',
+                },
+                'agg': 'first',
+            },
         },
         llm_extractions=llm_batch_results.df,
     )
