@@ -54,6 +54,39 @@ if [ -z "${OBSERVER_ISSUE:-}" ]; then
   exit 0
 fi
 
+# observer_run.env is machine-local, is not in version control, and survives VM
+# restarts, so it carries the previous run's identity into the next one unless
+# someone remembers to edit it. That happened on do/platform-2609-1: the file
+# still said 4505 / do/platform-2608-3, so the observer reported the new run's
+# progress onto the finished run's issue and diffed the wrong bucket.
+#
+# OBSERVER_ISSUE cannot be checked against anything -- no artefact of a run knows
+# its issue number. OBSERVER_RUN can: it must equal `run_name` in the DAG config
+# this same checkout is serving. The two are edited together, so validating the
+# one that is checkable catches a stale file in practice.
+#
+# Refuse rather than skip quietly. Silence is the observer's healthy state, so a
+# quiet skip is indistinguishable from a well-behaved run -- which is why this
+# went unnoticed until someone read the comments on the wrong issue.
+DAG_CONFIG=/opt/orchestration/src/orchestration/dags/config/unified_pipeline.yaml
+if [ -n "${OBSERVER_RUN:-}" ] && [ -r "$DAG_CONFIG" ]; then
+  # sed rather than a yaml parser: this runs from cron, before `uv run` has
+  # built anything. Strip the key, then a trailing comment, then trailing
+  # whitespace, then one layer of quotes of either style -- in that order, so a
+  # value followed by spaces still loses its closing quote. An unreadable or
+  # unparseable value leaves CONFIGURED_RUN empty and skips the check below:
+  # this guard exists to catch a known-wrong file, not to gate on its own
+  # ability to read yaml.
+  CONFIGURED_RUN=$(sed -n 's/^run_name:[[:space:]]*//p' "$DAG_CONFIG" | head -1 \
+    | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//')
+  if [ -n "$CONFIGURED_RUN" ] && [ "$OBSERVER_RUN" != "$CONFIGURED_RUN" ]; then
+    echo "$(date -u -Iseconds) observer_run.env is stale: OBSERVER_RUN=${OBSERVER_RUN} but the DAG is configured for ${CONFIGURED_RUN}." >&2
+    echo "  Refusing to comment -- OBSERVER_ISSUE=${OBSERVER_ISSUE} is probably the previous run's issue too." >&2
+    echo "  Fix both in ${RUN_ENV_FILE}, then this resumes on the next wakeup." >&2
+    exit 1
+  fi
+fi
+
 ARGS=(observe --issue "$OBSERVER_ISSUE")
 if [ -n "${OBSERVER_RUN:-}" ] && [ -n "${OBSERVER_REFERENCE:-}" ]; then
   ARGS+=(--run "$OBSERVER_RUN" --reference "$OBSERVER_REFERENCE")
