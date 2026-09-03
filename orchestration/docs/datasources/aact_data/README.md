@@ -80,9 +80,11 @@ key hashes the `rendered prompt`, the `system prompt text`, the `model name` and
 `JSON schema` the response is validated against, so editing any one of them
 re-extracts exactly the affected trials and nothing else.
 
-Failures are cached alongside successes and retried after 30 days. Without
-that, every run would re-attempt the same permanently failing trials forever,
-and the cost of doing so would not show up anywhere.
+Only results are cached. A trial the model failed on has no row, so it is
+indistinguishable from one never attempted and the next run tries it again.
+Nothing tracks failures, retry counts or how long ago something was tried: this
+dag runs a few times a year, and re-attempting a few hundred stubborn trials on
+each run is cheaper than the bookkeeping needed to remember not to.
 
 Work is sharded, and each shard is written to `cache/trial_extraction/staging/`
 as it completes. Rerunning the dag against the same `aact_version` picks those
