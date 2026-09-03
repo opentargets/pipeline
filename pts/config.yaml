@@ -798,7 +798,6 @@ steps:
       service_tier: flex
       concurrency: 50
       shard_size: 2000
-      retry_errors_after_days: 30
       publications:
         # see PublicationsSpec — this fetches abstracts for every trial, not
         # only cache misses, so it needs its own cache before a full run
