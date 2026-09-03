@@ -20,7 +20,7 @@ nodes:
       max_task_count: 40000
       generator_specs:
         generator_options:
-          collected_loci_path: '{output_path}/study_locus_lb_clumped'
+          collected_loci_path: '{output_path}/study_locus_lb_clumped_20260802'
           manifest_output_path: '{output_path}/finemapping_manifest.csv'
           output_path: '{output_path}/credible_set_datasets'
           #!WARNING: DO NOT CHANGE THE DATE for the log_path, as it is used to back reference the already fine-mapped loci.
@@ -33,12 +33,12 @@ nodes:
     google_batch:
       job:
         task_group:
-          parallelism: 40000
+          parallelism: 1000
           task_environments:
             environments: [] # populated at runtime by BatchIndexOperator
           task_config:
             max_retry_count: 1
-            max_run_duration: "7200s"
+            max_run_duration: '7200s'
             instance_resource_spec:
               cpu_milli: 4000
               memory_mib: 25000

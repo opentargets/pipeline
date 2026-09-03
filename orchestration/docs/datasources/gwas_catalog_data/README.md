@@ -415,7 +415,6 @@ DAG contains 1 step:
 
 The step scans `gs://gwas_catalog_inputs/harmonised_summary_statistics` for per-study subdirectories and runs the gentropy [heritability_estimate](https://opentargets.github.io/gentropy/python_api/steps/heritability_estimate/) step on each study, using the study index to resolve the LD ancestry and a custom LD score panel. Studies whose output directory already exists are skipped automatically. The results are saved under `gs://gwas_catalog_sumstats_susie/heritability_estimates/` and include SNP heritability (h²), standard error, genomic inflation factor (λGC), LDSC intercept, and the LD ancestry used. These metrics are used downstream as quality filters when selecting representative studies for genetic correlation.
 
-
 ### Credible set qc
 
 The final credible sets are collected in the `gs://gwas_catalog_sumstats_susie/credible_set_clean/` (dated directory)
@@ -476,3 +475,12 @@ To adjust the parameters for google batch infrastructure refer to the `google_ba
 - [chore: 2026/05 GCSS susie and credible set qc run](https://github.com/opentargets/issues/issues/4335)
 
 - [feat(heritability_estimates): added LDSC based heritability estimates to the `gwas_catalog_sumstats_susie` bucket](https://github.com/opentargets/issues/issues/4136)
+
+### 2026-09-01
+
+- [chore: 2026/09 GWAS Catalog data sync](https://github.com/opentargets/issues/issues/4425)
+- [chore: 2026/09 GWAS Catalog harmonisation](https://github.com/opentargets/issues/issues/4428)
+- [chore: 2026/09 GWAS Catalog manual curation update](https://github.com/opentargets/issues/issues/4427)
+- [chore: 2026/09 GCCA & GCCS pics run](https://github.com/opentargets/issues/issues/4430)
+- [chore: 2026/09 GCSS susie and credible set qc run](https://github.com/opentargets/issues/issues/4429)
+- [chore: 2026/09 GWAS Catalog heritability estimate](https://github.com/opentargets/issues/issues/4432)
