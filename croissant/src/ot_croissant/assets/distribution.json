@@ -474,7 +474,7 @@
     "description": "Target essentiality assessments based on dependencies exhibited when knocking-out genes in cancer cellular models using CRISPR screenings as reported in by the Cancer DepMap Project. Gene effects below -1 can be considered dependencies"
   },
   {
-    "id": "chemical_probes",
+    "id": "chemical_probe",
     "nice_name": "Target - chemical probes",
     "tags": [
       "Target"

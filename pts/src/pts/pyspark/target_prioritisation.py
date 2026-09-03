@@ -27,7 +27,7 @@ def target_prioritisation(
             - targets: Target parquet
             - tractability: target_tractability parquet (output/target_tractability)
             - target_safety_event: target_safety_event parquet (output/target_safety_event)
-            - chemical_probes: chemical_probes parquet (output/chemical_probes)
+            - chemical_probes: chemical_probes parquet (output/chemical_probe)
             - homology: homology parquet (output/homology)
             - mouse_phenotypes: Mouse phenotype parquet
             - molecule: Drug molecule parquet
