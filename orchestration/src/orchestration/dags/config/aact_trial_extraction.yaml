@@ -26,4 +26,4 @@ steps:
     # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
     # key itself never appears in config or in code.
     gce_secret_files:
-      openai-api-key: /var/run/secrets/openai-api-key
+      openai-token: /var/run/secrets/openai-api-key
