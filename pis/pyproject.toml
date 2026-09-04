@@ -29,7 +29,6 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["pgserver: starts a real postgres server (deselect with '-m \"not pgserver\"')"]
 
 [tool.ruff]
 extend = "../ruff.toml"
