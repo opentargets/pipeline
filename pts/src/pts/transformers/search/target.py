@@ -120,10 +120,17 @@ def build_target_index(
         )
     )
 
+    # Variant labels are joined onto the association aggregate BEFORE that aggregate is joined
+    # onto targets -- not onto targets directly. `ranked` has a row only for targets that appear
+    # in an association, so a target with variants but no association must NOT receive variant
+    # labels; that is what the pyspark original's `assocs_with_labels.join(variant_labels_df,
+    # ...)` followed by `targets.join(assocs_with_variants, ...)` chain does, and what this
+    # mirrors.
+    ranked_with_variants = ranked.join(variant_labels_by_target(variants), on='targetId', how='left')
+
     frame = (
         targets.with_columns(_hgnc_identifiers().alias('hgncIds'))
-        .join(ranked, on='targetId', how='left')
-        .join(variant_labels_by_target(variants), on='targetId', how='left')
+        .join(ranked_with_variants, on='targetId', how='left')
         .with_columns(
             pl.col('disease_labels').fill_null(EMPTY_LIST),
             pl.col('disease_labels_25').fill_null(EMPTY_LIST),

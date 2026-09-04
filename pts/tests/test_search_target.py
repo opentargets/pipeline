@@ -229,3 +229,21 @@ def test_target_with_no_associations_falls_back_to_the_default_multiplier() -> N
     result = build_target_index(**_inputs(associations=associations)).collect()
 
     assert result['multiplier'][0] == 0.01
+
+
+def test_target_with_variants_but_no_associations_gets_no_variant_terms() -> None:
+    """46,072 of 78,733 targets on the real release have variants but no association. The
+    pyspark original joins variant labels onto the association aggregate BEFORE joining that
+    aggregate onto targets, so a target absent from `associations` never receives variant
+    labels, even though it has variants of its own -- joining variant labels onto `targets`
+    directly would give it terms spark never did."""
+    associations = pl.LazyFrame(
+        {'associationId': [], 'targetId': [], 'diseaseId': [], 'score': []},
+        schema={'associationId': pl.String, 'targetId': pl.String, 'diseaseId': pl.String, 'score': pl.Float64},
+    )
+
+    result = build_target_index(**_inputs(associations=associations)).collect()
+
+    assert result['terms'][0].to_list() == []
+    assert result['terms25'][0].to_list() == []
+    assert result['terms5'][0].to_list() == []
