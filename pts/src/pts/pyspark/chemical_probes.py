@@ -185,9 +185,21 @@ def convert_stringified_array_to_array(col_name: str) -> Column:
     return f.split(f.translate(col_name, "[]'", ''), ', ').cast(t.ArrayType(t.StringType()))
 
 
-def replace_dash(col_name: str) -> Column:
-    """Converts to null those values that only contain `-`."""
-    return f.when(f.col(col_name).cast(t.StringType()) != '-', f.col(col_name))
+MISSING_VALUE_TOKENS = ('-', 'nan')
+
+
+def replace_missing_placeholder(col_name: str) -> Column:
+    """Converts to null values that only encode "missing" as a placeholder token.
+
+    Upstream leaves `control_name` blank for probes without a designated control
+    compound. Pandas reads a blank Excel cell as a float NaN, and since production
+    runs pyspark with Arrow disabled (row-wise pandas-to-Spark schema inference),
+    that NaN crosses over as the literal string "NaN" -- Java's
+    `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
+    placeholder token seen in the same column.
+    """
+    value = f.lower(f.col(col_name).cast(t.StringType()))
+    return f.when(~value.isin(*MISSING_VALUE_TOKENS), f.col(col_name))
 
 
 def process_scores(col_name: str) -> Column:
@@ -234,7 +246,7 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
                     f.array(f.lit('High-quality chemical probes')),
                 )
             ).alias('datasourceId'),
-            replace_dash('control_name').alias('control'),
+            replace_missing_placeholder('control_name').alias('control'),
         )
     )
 

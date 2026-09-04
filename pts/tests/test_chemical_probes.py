@@ -10,6 +10,7 @@ from pts.pyspark.chemical_probes import (
     _resolve_targets,
     collapse_cols_data_in_array,
     process_probes_targets_data,
+    replace_missing_placeholder,
 )
 
 # ---------------------------------------------------------------------------
@@ -194,6 +195,44 @@ def test_resolve_targets_multiple_probes_same_target(spark):
     result = _resolve_targets(evidence, lut)
     assert result.count() == 2
     assert result.filter('targetId = "ENSG00000001"').count() == 2
+
+
+# ---------------------------------------------------------------------------
+# replace_missing_placeholder
+# ---------------------------------------------------------------------------
+
+
+def test_replace_missing_placeholder_nulls_dash(spark):
+    """The source-authored '-' placeholder becomes a real null."""
+    df = spark.createDataFrame([('-',)], ['control_name'])
+    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    assert result.first().control is None
+
+
+def test_replace_missing_placeholder_nulls_stringified_nan(spark):
+    """The 'NaN' string that a blank cell becomes crossing into Spark is nulled too.
+
+    Regression test: with Arrow disabled, a blank `control_name` cell reaches Spark
+    as the literal string "NaN" rather than a null, so ~83% of chemical_probes rows
+    shipped with the text "NaN" in their control column instead of a real null.
+    """
+    df = spark.createDataFrame([('NaN',), ('nan',), ('NAN',)], ['control_name'])
+    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    assert [r.control for r in result.collect()] == [None, None, None]
+
+
+def test_replace_missing_placeholder_keeps_real_values(spark):
+    """A genuine control compound name passes through unchanged."""
+    df = spark.createDataFrame([('BI-6953',)], ['control_name'])
+    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    assert result.first().control == 'BI-6953'
+
+
+def test_replace_missing_placeholder_keeps_existing_null(spark):
+    """A column value that is already a real null stays null."""
+    df = spark.createDataFrame([(None,)], StructType([StructField('control_name', StringType())]))
+    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    assert result.first().control is None
 
 
 # ---------------------------------------------------------------------------
