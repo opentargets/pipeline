@@ -102,7 +102,8 @@ def test_tier_keeps_only_rows_within_the_rank_limit() -> None:
 
 def test_spark_tier_drops_null_lists_the_way_collect_list_does() -> None:
     """`collect_list` never collects a null, so a row whose labels are null contributes
-    nothing -- it does not null the whole aggregate."""
+    nothing -- it does not null the whole aggregate. `tier` ports this via
+    `list.explode(keep_nulls=False)`, which drops a null list rather than propagating it."""
     frame = pl.DataFrame(
         {'g': ['t'] * 2, 'r': [1, 2], 'v': [['a'], None]},
         schema={'g': pl.String, 'r': pl.Int64, 'v': LIST_STR},

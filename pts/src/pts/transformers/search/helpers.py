@@ -79,9 +79,11 @@ def tier(values: str, rank: str, limit: int) -> pl.Expr:
     Ports `array_distinct(flatten(collect_list(when(rank <= limit, values))))`, for use inside
     a `group_by(...).agg(...)`.
 
-    The leading `drop_nulls` is `collect_list`'s null-dropping: a row whose label list is null
-    contributes nothing rather than nulling the aggregate. The result is `[]`, never null, when
-    no row falls inside the limit -- the equivalence bar treats those as different values.
+    `keep_nulls=False` on the explode is `collect_list`'s null-dropping: a row whose label list
+    is null contributes nothing rather than nulling the aggregate. The trailing `drop_nulls`
+    removes any null string elements that survive inside an otherwise non-null list, mirroring
+    spark's final `filter(t -> isnotnull(t))`. The result is `[]`, never null, when no row falls
+    inside the limit -- the equivalence bar treats those as different values.
 
     Args:
         values: name of the `List(String)` column to aggregate.
@@ -94,7 +96,6 @@ def tier(values: str, rank: str, limit: int) -> pl.Expr:
     return (
         pl.col(values)
         .filter(pl.col(rank) <= limit)
-        .drop_nulls()
         .list.explode(keep_nulls=False, empty_as_null=False)
         .unique(maintain_order=True)
         .drop_nulls()
