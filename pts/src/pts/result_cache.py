@@ -9,10 +9,11 @@ This module keeps their results in a cache keyed by a hash of the exact input
 that produced them, so a run only pays for what is genuinely new.
 
 Keying on the input rather than on the record id is the point. Trial text gets
-revised upstream, and prompts, schemas and models change on our side. A key
-derived from all of those turns every such change into a cache miss, which is
-what stops a stale result being served forever after a prompt edit — the
-failure worth designing against, because nothing about it looks wrong.
+revised upstream, and prompts and schemas change on our side. A key derived
+from those turns every such change into a cache miss, which is what stops a
+stale result being served forever after a prompt edit — the failure worth
+designing against, because nothing about it looks wrong. Operational choices
+such as the model and system instructions are deliberately not cache identity.
 
 Layout under ``cache_uri``::
 
@@ -56,9 +57,10 @@ METADATA_SCHEMA: dict[str, Any] = {
 def cache_key(*parts: str) -> str:
     """Return a stable hash of everything that influenced a result.
 
-    Pass every input that would invalidate the result if it changed: the record
-    text, the prompt version, the output schema version, the model name.
-    Anything left out becomes a silent source of stale hits.
+    Pass the values that define the result's identity, in a fixed order. For
+    LLM extraction this is the rendered trial prompt and output schema. The
+    model and system instructions are intentionally excluded by the caller:
+    changing either must not invalidate existing accepted results.
 
     Args:
         *parts: The values to hash, in a fixed order.
