@@ -263,21 +263,19 @@ def test_string_proteins_source_database_is_string(spark):
 
 def _interaction_key_df(spark, species_a='9606', species_b='9606'):
     """Minimal DataFrame carrying every _INTERACTION_KEY_COLS column."""
-    return spark.createDataFrame(
-        [
-            Row(
-                sourceDatabase='intact',
-                targetA='ENSG00000001',
-                intA='P11111',
-                intABiologicalRole='role-a',
-                targetB='ENSG00000002',
-                intB='P22222',
-                intBBiologicalRole='role-b',
-                speciesA=Row(taxonId=species_a),
-                speciesB=Row(taxonId=species_b),
-            )
-        ]
-    )
+    return spark.createDataFrame([
+        Row(
+            sourceDatabase='intact',
+            targetA='ENSG00000001',
+            intA='P11111',
+            intABiologicalRole='role-a',
+            targetB='ENSG00000002',
+            intB='P22222',
+            intBBiologicalRole='role-b',
+            speciesA=Row(taxonId=species_a),
+            speciesB=Row(taxonId=species_b),
+        )
+    ])
 
 
 def test_interaction_id_is_long(spark):
@@ -287,16 +285,6 @@ def test_interaction_id_is_long(spark):
 
 
 def test_interaction_id_distinguishes_species(spark):
-    id_human = (
-        _interaction_key_df(spark, species_a='9606')
-        .withColumn('i', _interaction_id_expr())
-        .head()
-        .i
-    )
-    id_mouse = (
-        _interaction_key_df(spark, species_a='10090')
-        .withColumn('i', _interaction_id_expr())
-        .head()
-        .i
-    )
+    id_human = _interaction_key_df(spark, species_a='9606').withColumn('i', _interaction_id_expr()).head().i
+    id_mouse = _interaction_key_df(spark, species_a='10090').withColumn('i', _interaction_id_expr()).head().i
     assert id_human != id_mouse

@@ -114,7 +114,7 @@ def _build_homologues(df: DataFrame) -> DataFrame:
         .agg(f.collect_list('homologue').alias('homologues'))
         .select(
             f.col('targetId').alias('id'),
-            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)').alias('homologues')
+            f.expr('array_sort(homologues, (x, y) -> x.priority - y.priority)').alias('homologues'),
         )
     )
 
@@ -234,8 +234,9 @@ def _build_transcripts(df: DataFrame) -> DataFrame:
         .withColumn('uniprotIsoformId', f.element_at(f.col('uniprotIsoformIds'), 1))
         .withColumn(
             'isUniprotReviewed',
-            f.when(f.col('uniprotSwissprotIds').isNotNull(), f.lit(True))
-            .when(f.col('uniprotTremblIds').isNotNull(), f.lit(False)),
+            f.when(f.col('uniprotSwissprotIds').isNotNull(), f.lit(True)).when(
+                f.col('uniprotTremblIds').isNotNull(), f.lit(False)
+            ),
         )
         .select(
             'targetId',
@@ -253,13 +254,9 @@ def _build_transcripts(df: DataFrame) -> DataFrame:
         )
     )
 
-    agg = (
-        per_transcript
-        .groupBy('targetId')
-        .agg(
-            f.collect_list('transcriptId').alias('transcriptIds'),
-            f.collect_list('transcript').alias('transcripts'),
-        )
+    agg = per_transcript.groupBy('targetId').agg(
+        f.collect_list('transcriptId').alias('transcriptIds'),
+        f.collect_list('transcript').alias('transcripts'),
     )
 
     canonical = df.filter(f.col('isEnsemblCanonical'))

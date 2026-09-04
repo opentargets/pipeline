@@ -21,10 +21,15 @@ from pts.pyspark.gene_essentiality import (
 TARGET_SCHEMA = StructType([
     StructField('id', StringType()),
     StructField('approvedSymbol', StringType()),
-    StructField('proteinIds', ArrayType(StructType([
-        StructField('id', StringType()),
-        StructField('source', StringType()),
-    ]))),
+    StructField(
+        'proteinIds',
+        ArrayType(
+            StructType([
+                StructField('id', StringType()),
+                StructField('source', StringType()),
+            ])
+        ),
+    ),
 ])
 
 ESSENTIALITY_SCHEMA = StructType([
@@ -80,9 +85,7 @@ def test_resolve_target_ids_output_columns(spark):
     essentiality = spark.createDataFrame(
         [Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
     )
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA
-    )
+    target = spark.createDataFrame([Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     assert set(result.columns) == {'targetId', 'isEssential', 'depMapEssentiality'}
@@ -93,9 +96,7 @@ def test_resolve_target_ids_resolves_symbol_to_ensg(spark):
     essentiality = spark.createDataFrame(
         [Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
     )
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA
-    )
+    target = spark.createDataFrame([Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     row = result.first()
@@ -108,9 +109,7 @@ def test_resolve_target_ids_drops_unresolvable_rows(spark):
     essentiality = spark.createDataFrame(
         [Row(targetSymbol='UNKNOWN_SYMBOL', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
     )
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA
-    )
+    target = spark.createDataFrame([Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     assert result.count() == 0
@@ -127,9 +126,7 @@ def test_resolve_target_ids_resolves_symbol_for_non_coding_gene(spark):
     essentiality = spark.createDataFrame(
         [Row(targetSymbol='MIR122', isEssential=True, depMapEssentiality=[])], ESSENTIALITY_SCHEMA
     )
-    target = spark.createDataFrame(
-        [Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None)], TARGET_SCHEMA
-    )
+    target = spark.createDataFrame([Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None)], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     assert result.count() == 1
@@ -140,13 +137,14 @@ def test_resolve_target_ids_resolves_symbol_for_non_coding_gene(spark):
 
 def test_resolve_target_ids_merges_multiple_entries_per_target(spark):
     """Multiple essentiality rows resolving to the same target are merged into one row."""
-    essentiality = spark.createDataFrame([
-        Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=['a']),
-        Row(targetSymbol='GENE1', isEssential=False, depMapEssentiality=['b']),
-    ], ESSENTIALITY_SCHEMA)
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA
+    essentiality = spark.createDataFrame(
+        [
+            Row(targetSymbol='GENE1', isEssential=True, depMapEssentiality=['a']),
+            Row(targetSymbol='GENE1', isEssential=False, depMapEssentiality=['b']),
+        ],
+        ESSENTIALITY_SCHEMA,
     )
+    target = spark.createDataFrame([Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[])], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_target_ids(essentiality, lut)
     assert result.count() == 1

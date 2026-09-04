@@ -25,10 +25,9 @@ class AactTrialExtractionConfig:
     does — load each application's own config and point its ``release_uri`` at
     the run's destination — for the two steps this pipeline needs.
 
-    The destination is ``gs://aact_data/<aact_version>``, keyed on the AACT
-    archive rather than on a platform release. The two are on different clocks:
-    this pipeline pins its own archive and may run ahead, while a release pins
-    whichever archive it consumes and several releases can share one.
+    The destination is ``gs://aact_data/<aact_version>``. The preprocessing and
+    release DAGs use the same archive version; the release consumes the exact
+    archive and extraction published here.
     """
 
     def __init__(self) -> None:
@@ -59,9 +58,7 @@ class AactTrialExtractionConfig:
         self.pis = AppConfig.from_file(file_path=config_path.parents[4] / 'pis' / 'config.yaml')
         """The internal configuration for PIS steps."""
 
-        # pis/config.yaml pins the archive the *release* consumes. This pipeline
-        # runs on its own schedule and may be ahead of it, so the step runs
-        # against this pipeline's version instead.
+        # The preprocessing DAG owns the archive version for this run.
         self.pis.config['scratchpad']['aact_version'] = self.aact_version
         self.pis.config['release_uri'] = self.snapshot_uri
         self.pis.config['work_path'] = '/mnt/disks/work'

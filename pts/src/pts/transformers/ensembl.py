@@ -85,10 +85,6 @@ def ensembl(
     logger.debug(f'transformed data written into {t.absolute}')
 
     logger.debug(f'writing dataset to {destination}')
-    frame = (
-        pl
-        .read_ndjson(t.absolute, schema=schema_ndjson)
-        .filter(pl.col('chromosome').is_in(INCLUDED_CHROMOSOMES))
-    )
+    frame = pl.read_ndjson(t.absolute, schema=schema_ndjson).filter(pl.col('chromosome').is_in(INCLUDED_CHROMOSOMES))
     write_dataset(frame, destination)
     logger.info('transformation complete')

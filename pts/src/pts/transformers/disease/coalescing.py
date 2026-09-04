@@ -256,7 +256,7 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
                 # A cycle or self-reference names no live term, so following it
                 # would only rotate the pointer.  Leave it as it stands.
                 cycled = True
-                loop = path[path.index(nxt):]
+                loop = path[path.index(nxt) :]
                 cycles.setdefault(frozenset(loop), ' -> '.join([*loop, nxt]))
                 break
             seen.add(nxt)
@@ -277,10 +277,7 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     # chase, naming an id the graph lacks belongs to the source ontology.  A
     # term naming itself is counted with the cycles rather than here.
     landing = [
-        resolved.get(target, target)
-        for source, found in targets.items()
-        for target in found
-        if target != source
+        resolved.get(target, target) for source, found in targets.items() for target in found if target != source
     ]
     dangling = sum(1 for target in landing if target in known and target not in live)
     unknown = sum(1 for target in landing if target not in known)
@@ -372,13 +369,9 @@ def _ancestor_lookup(e: pl.DataFrame, of_interest: set[str]) -> dict[str, set[st
     candidates is far cheaper than closing the whole graph.
     """
     parents: dict[str, list[str]] = defaultdict(list)
-    is_a = (
-        e
-        .filter(pl.col('pred') == 'is_a')
-        .select(
-            child=pl.col('sub').str.split('/').list.last(),
-            parent=pl.col('obj').str.split('/').list.last(),
-        )
+    is_a = e.filter(pl.col('pred') == 'is_a').select(
+        child=pl.col('sub').str.split('/').list.last(),
+        parent=pl.col('obj').str.split('/').list.last(),
     )
     for child, parent in is_a.iter_rows():
         parents[child].append(parent)
@@ -501,11 +494,7 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
         .select('short_id', 'target')
         .unique()
     )
-    candidates = [
-        (a, b)
-        for a, b in direct.iter_rows()
-        if a != b and prefix_of[a] != prefix_of[b]
-    ]
+    candidates = [(a, b) for a, b in direct.iter_rows() if a != b and prefix_of[a] != prefix_of[b]]
 
     # --- arm 2: shared fine-grained cross-reference, corroborated by a name --
     shared = (
@@ -529,9 +518,7 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
         named = [(a, b) for a, b in shared_pairs if names_of.get(a, set()) & names_of.get(b, set())]
         ancestors_of = _ancestor_lookup(e, {t for pair in named for t in pair})
         candidates += [
-            (a, b)
-            for a, b in named
-            if b not in ancestors_of.get(a, set()) and a not in ancestors_of.get(b, set())
+            (a, b) for a, b in named if b not in ancestors_of.get(a, set()) and a not in ancestors_of.get(b, set())
         ]
 
     if not candidates:

@@ -17,7 +17,7 @@ import hashlib
 import json
 from importlib import import_module, resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
 import polars as pl
 from clinical_mining.provider.aact import extract_clinical_report
@@ -31,10 +31,8 @@ from otter.task.task_reporter import report
 from otter.util.errors import TaskValidationError
 from pydantic import BaseModel
 
+from pts.postgres import read_dump_tables
 from pts.result_cache import cache_key, cached_map
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 DEFAULT_SYSTEM_PROMPT = ('clinical_mining.prompts', 'aact_llm.txt')
 """Packaged system prompt, versioned with the pinned ``clinical-mining`` dependency."""
@@ -45,6 +43,27 @@ TRIAL_FIELDS = {
     'trialDetailedDescription': 'Detailed Description',
 }
 """Report columns rendered into each prompt, and the labels they get."""
+
+AACT_SCHEMA_NAME = 'ctgov'
+AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+AACT_TABLES = {
+    'studies': [
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
+        'official_title',
+    ],
+    'interventions': ['nct_id', 'intervention_type', 'name'],
+    'conditions': ['nct_id', 'downcase_name'],
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'brief_summaries': ['nct_id', 'description'],
+    'detailed_descriptions': ['nct_id', 'description'],
+}
+AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
 
 class PublicationsSpec(BaseModel):
@@ -67,9 +86,7 @@ class LlmExtractSpec(Spec):
     """Configuration fields for the llm_extract task."""
 
     source: dict[str, str]
-    """AACT tables, as exported by the ``postgres_export`` task. Keys:
-        ``studies``, ``interventions``, ``conditions``, ``study_references``,
-        ``brief_summaries``, and optionally ``detailed_descriptions``."""
+    """AACT dump archive. The task restores the required tables inline."""
     destination: dict[str, str]
     """Where to publish. Keys: ``prompts``, ``extraction``."""
     cache_uri: str
@@ -119,11 +136,6 @@ class LlmExtract(Task):
         self.spec: LlmExtractSpec
         self.stats: dict[str, Any] = {}
 
-    def _read(self, key: str, columns: Sequence[str]) -> pl.DataFrame:
-        """Read one exported AACT table."""
-        handle = StorageHandle(self.spec.source[key], config=self.context.config)
-        return pl.read_parquet(handle.absolute).select(*columns)
-
     def _system_prompt(self) -> str:
         """Return the system prompt text, from config if overridden and from the package otherwise."""
         if self.spec.system_prompt:
@@ -140,17 +152,21 @@ class LlmExtract(Task):
         disease and molecule indexes, none of which is needed — or available —
         here.
         """
-        additional = [
-            self._read('study_references', ('nct_id', 'pmid', 'reference_type')),
-            self._read('brief_summaries', ('nct_id', 'description')),
-        ]
-        if 'detailed_descriptions' in self.spec.source:
-            additional.append(self._read('detailed_descriptions', ('nct_id', 'description')))
+        logger.info(f'restoring AACT tables from {self.spec.source["aact"]}')
+        tables = read_dump_tables(
+            str(self.spec.source['aact']),
+            AACT_TABLES,
+            schema_name=AACT_SCHEMA_NAME,
+            archive_member=AACT_ARCHIVE_MEMBER,
+            order_by=AACT_ORDER_BY,
+            scratch_root=self.context.config.work_path,
+        )
+        additional = [tables['study_references'], tables['brief_summaries'], tables['detailed_descriptions']]
 
         report = extract_clinical_report(
-            studies=self._read('studies', ('nct_id', 'study_type', 'phase', 'official_title')),
-            interventions=self._read('interventions', ('nct_id', 'intervention_type', 'name')),
-            conditions=self._read('conditions', ('nct_id', 'downcase_name')),
+            studies=tables['studies'].select('nct_id', 'study_type', 'phase', 'official_title'),
+            interventions=tables['interventions'],
+            conditions=tables['conditions'],
             additional_metadata=additional,
             aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
         )
@@ -166,14 +182,19 @@ class LlmExtract(Task):
         prompts = build_prompts(report, trial_fields=TRIAL_FIELDS, publications_map=publications)
 
         system_digest = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()
-        return pl.DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String}).with_columns(
-            prompt_sha256=pl.col('prompt').map_elements(
-                lambda p: hashlib.sha256(p.encode('utf-8')).hexdigest(), return_dtype=pl.String
-            ),
-        ).with_columns(
-            cache_key=pl.col('prompt_sha256').map_elements(
-                lambda d: cache_key(self.spec.model, system_digest, schema_digest, d), return_dtype=pl.String
-            ),
+        return (
+            pl
+            .DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String})
+            .with_columns(
+                prompt_sha256=pl.col('prompt').map_elements(
+                    lambda p: hashlib.sha256(p.encode('utf-8')).hexdigest(), return_dtype=pl.String
+                ),
+            )
+            .with_columns(
+                cache_key=pl.col('prompt_sha256').map_elements(
+                    lambda d: cache_key(self.spec.model, system_digest, schema_digest, d), return_dtype=pl.String
+                ),
+            )
         )
 
     def _extract(self, shard: pl.DataFrame, system_prompt_path: str) -> pl.DataFrame:

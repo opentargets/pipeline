@@ -26,8 +26,7 @@ def _result_literature(trial_literature: Column) -> Column:
     pmids = f.transform(
         f.filter(
             trial_literature,
-            lambda x: f.lower(x.getField('type')).isin(*TRIAL_OUTCOME_REFERENCE_TYPES)
-            & x.getField('id').isNotNull(),
+            lambda x: f.lower(x.getField('type')).isin(*TRIAL_OUTCOME_REFERENCE_TYPES) & x.getField('id').isNotNull(),
         ),
         lambda x: x.getField('id'),
     )
@@ -80,9 +79,10 @@ def clinical_precedence(
     exploded_cr = (
         clinical_report_df
         .withColumnRenamed('id', 'clinicalReportId')
-        .withColumns(
-            {'studyStartDate': f.col('trialStartDate').cast('string'), 'evidenceDate': f.col('year').cast('string')}
-        )
+        .withColumns({
+            'studyStartDate': f.col('trialStartDate').cast('string'),
+            'evidenceDate': f.col('year').cast('string'),
+        })
         .withColumn('literature', _result_literature(f.col('trialLiterature')))
         .withColumn('_disease', f.explode_outer('diseases'))
         .withColumn('diseaseFromSource', f.col('_disease.diseaseFromSource'))
