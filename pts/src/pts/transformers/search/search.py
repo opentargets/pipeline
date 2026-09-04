@@ -7,6 +7,18 @@ prefixes and ngrams for each entity type.
 This step is a SINGLE task, and its name in `config.yaml` decides where it runs: a PTS step
 goes to Dataproc if and only if one of its tasks is NAMED `pyspark …`. Renaming the task is
 what moves this whole step onto a plain GCE VM -- do not reintroduce that prefix.
+
+A retry is NOT idempotent, unlike the pyspark job it replaces. The pyspark job wrote each view
+with `.mode('overwrite')`, so re-running it after a partial failure silently replaced whatever
+was there. `write_dataset` refuses to write into an occupied destination instead (see its
+docstring), so a `search` step that fails part-way through its five writes will fail its retry
+too, with an `already exists` error, until the destinations it already wrote are removed. This
+is deliberate: a loud refusal beats silently leaving a previous run's parts in place for a
+consumer glob to read as current data. It is not special to `search` -- every polars transformer
+in this package writes through `write_dataset` and inherits the same refusal. Note also that
+`Transform._prepare_dirs` (`pts/tasks/transform.py`) only clears destinations when running
+locally (`not self.context.config.release_uri`); in a real release it does nothing, so this
+refusal is exactly what protects production, not a local-only detail.
 """
 
 from __future__ import annotations
@@ -35,6 +47,26 @@ from pts.transformers.search.study import build_study_index
 from pts.transformers.search.target import build_target_index
 from pts.transformers.search.variant import build_variant_index
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+
+
+def _evidence_with_drug_associations(pattern: str) -> pl.LazyFrame:
+    """Union the evidence datasets, guaranteeing a `drugId` column exists.
+
+    `scan_datasets` unions with `pl.concat(how='diagonal_relaxed')`, so `drugId` survives the
+    union only if at least one evidence dataset carries it. On the current release 846,042 rows
+    do, but a future release whose evidence datasets carry no drug evidence at all would
+    otherwise raise `ColumnNotFoundError` here instead of yielding empty drug associations.
+
+    Args:
+        pattern: dataset glob forwarded to `scan_datasets`, e.g. `.../evidence_*`.
+
+    Returns:
+        LazyFrame with `drugId`, `targetId`, `diseaseId`.
+    """
+    evidence = scan_datasets(pattern)
+    if 'drugId' not in evidence.collect_schema():
+        evidence = evidence.with_columns(pl.lit(None, dtype=pl.String).alias('drugId'))
+    return evidence.select('drugId', 'targetId', 'diseaseId')
 
 
 def _drugs_with_mechanisms(drug_raw: pl.LazyFrame, mechanism: pl.LazyFrame, indication: pl.LazyFrame) -> pl.LazyFrame:
@@ -86,8 +118,9 @@ def search(
     studies = scan_dataset(source['studies']).select(
         'studyId', 'traitFromSource', 'pubmedId', 'publicationFirstAuthor', 'diseaseIds', 'nSamples', 'geneId'
     )
-    # Most evidence datasets carry no `drugId`; the union null-fills it.
-    evidence = scan_datasets(source['evidence']).select('drugId', 'targetId', 'diseaseId')
+    # Most evidence datasets carry no `drugId`; the union null-fills it, and is guaranteed to
+    # exist even if NO evidence dataset carries one -- see `_evidence_with_drug_associations`.
+    evidence = _evidence_with_drug_associations(source['evidence'])
 
     logger.info('building lookup tables')
     d_lut = disease_lut(diseases)

@@ -40,7 +40,11 @@ def resolve_ta_labels(diseases: pl.LazyFrame) -> pl.LazyFrame:
         .rename({'therapeuticAreas': 'therapeuticAreaId'})
         .join(area_names, on='therapeuticAreaId', how='inner')
         .group_by('diseaseId')
-        .agg(pl.col('therapeuticAreaLabel').unique().alias('therapeutic_labels'))
+        # Order-preserving: `therapeutic_labels` reaches the disease index's `category` column
+        # directly (disease.py passes it through with no `flatten_cat` or explode in between),
+        # so unlike every other array field here its element order is not mediated away before
+        # it reaches the output. See the ordering rule in `helpers.py`.
+        .agg(pl.col('therapeuticAreaLabel').unique(maintain_order=True).alias('therapeutic_labels'))
     )
     return diseases.join(labels, on='diseaseId', how='left')
 
@@ -200,6 +204,35 @@ def scored_drug_associations(from_evidence: pl.LazyFrame, scores: pl.LazyFrame) 
     )
 
 
+def drug_labels_by_association(scored_drugs: pl.LazyFrame, dr_lut: pl.LazyFrame) -> pl.LazyFrame:
+    """Aggregate drug labels per association.
+
+    Shared by the disease and target index builders, which otherwise ported the same 11 lines
+    twice. Only the aggregate moves here -- the join that feeds it back onto disease/target rows
+    differs legitimately and stays in each caller: `disease.py` uses a `full` join with
+    `coalesce=True` (faithful to spark line 198), `target.py` uses a `left` join (faithful to
+    spark line 387, and required to preserve one document per target).
+
+    Args:
+        scored_drugs: output of `scored_drug_associations`.
+        dr_lut: `drugId` and `drug_labels`.
+
+    Returns:
+        LazyFrame with `associationId` and `drug_labels`.
+    """
+    return (
+        scored_drugs.join(dr_lut, on='drugId', how='inner')
+        .group_by('associationId')
+        .agg(
+            pl.col('drug_labels')
+            .drop_nulls()
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .alias('drug_labels')
+        )
+    )
+
+
 def drug_associations(scored: pl.LazyFrame, total: int) -> pl.LazyFrame:
     """Aggregate scored drug associations per drug.
 
@@ -213,6 +246,9 @@ def drug_associations(scored: pl.LazyFrame, total: int) -> pl.LazyFrame:
     return scored.group_by('drugId').agg(
         pl.col('targetId').unique().alias('targetIds'),
         pl.col('diseaseId').unique().alias('diseaseIds'),
+        # `meanScore` is computed and carried all the way to the drug index frame, but nothing
+        # downstream reads it. Deliberately kept -- faithful to the pyspark original, which also
+        # computed it unused.
         pl.col('score').mean().alias('meanScore'),
         (pl.len().cast(pl.Float64) / pl.lit(float(total))).alias('drug_relevance'),
     )

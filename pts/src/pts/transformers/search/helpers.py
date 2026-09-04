@@ -15,6 +15,15 @@ LIST_STR = pl.List(pl.String)
 #: An empty `List(String)` literal. Used as a default and as the null-fill in `flatten_cat`.
 EMPTY_LIST = pl.lit([], dtype=LIST_STR)
 
+#: The `unique()` split across this package, spelled out because nothing else states it and one
+#: implementer already drew the wrong analogy from it: use `unique(maintain_order=True)` where
+#: the spark original is `array_distinct` (which keeps first occurrence), and bare `unique()`
+#: where it is `collect_set` (which spark itself leaves in an arbitrary order). The one deliberate
+#: exception is `drug.py`'s `indicationLabels` aggregate: spark line 525 there is a `collect_set`,
+#: so a bare `unique()` would be the faithful port, but it uses `maintain_order=True` for
+#: consistency with its neighbours. That is harmless -- the value passes through `flatten_cat`
+#: into `terms`, which is compared by set equality, not by order.
+
 #: The four synonym fields on `disease.synonyms`, in the order the pyspark job merged them.
 #: Defined here rather than in each consumer so the disease LUT and the disease index cannot
 #: drift apart on which flavours they include.

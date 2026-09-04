@@ -101,6 +101,27 @@ def test_search_writes_all_five_views_with_the_release_schema(tmp_path: Path) ->
         assert frame.height == 1
 
 
+def test_search_completes_when_no_evidence_dataset_carries_a_drug_id(tmp_path: Path) -> None:
+    """`scan_datasets` unions the evidence datasets with `how='diagonal_relaxed'`, so `drugId`
+    survives only if at least one of them carries it. A future release whose evidence datasets
+    carry no drug evidence at all must not raise `ColumnNotFoundError` -- it should still
+    complete and yield empty drug associations."""
+    root = tmp_path / 'output'
+    source = _build_release(root)
+    for name in ('evidence_a', 'evidence_b'):
+        pl.DataFrame([{'targetId': 'T1', 'diseaseId': 'D1'}]).write_parquet(root / name / '00000000.parquet')
+
+    destination = {name: str(tmp_path / 'view' / f'search_{name}') for name in
+                   ('diseases', 'targets', 'drugs', 'variants', 'studies')}
+
+    search(source, destination, None, None)
+
+    for path in destination.values():
+        frame = pl.read_parquet(Path(path) / '**' / '*.parquet')
+        assert frame.columns == RELEASE_COLUMNS
+        assert frame.height == 1
+
+
 def test_search_emits_one_document_per_source_entity(tmp_path: Path) -> None:
     """The invariant that holds on the real release: 45,896 / 78,733 / 19,170 / 8,173,485 /
     4,074,292 documents for the same number of source rows."""

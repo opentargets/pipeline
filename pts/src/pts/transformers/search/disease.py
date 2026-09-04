@@ -13,6 +13,7 @@ from pts.transformers.search.helpers import (
     synonym_field,
     tier,
 )
+from pts.transformers.search.lookups import drug_labels_by_association
 from pts.transformers.search.ranks import partitioned_rank
 
 _TOP50 = 50
@@ -47,17 +48,7 @@ def build_disease_index(
     Returns:
         Search index LazyFrame, one row per disease.
     """
-    drug_by_association = (
-        scored_drugs.join(dr_lut, on='drugId', how='inner')
-        .group_by('associationId')
-        .agg(
-            pl.col('drug_labels')
-            .drop_nulls()
-            .list.explode(keep_nulls=False, empty_as_null=False)
-            .unique(maintain_order=True)
-            .alias('drug_labels')
-        )
-    )
+    drug_by_association = drug_labels_by_association(scored_drugs, dr_lut)
 
     studies_by_disease = (
         studies.select('studyId', 'diseaseIds')

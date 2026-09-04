@@ -12,6 +12,7 @@ from pts.transformers.search.helpers import (
     search_index,
     tier,
 )
+from pts.transformers.search.lookups import drug_labels_by_association
 from pts.transformers.search.ranks import partitioned_rank
 from pts.transformers.search.variant import variant_labels
 
@@ -107,17 +108,7 @@ def build_target_index(
     Returns:
         Search index LazyFrame, one row per target.
     """
-    drug_by_association = (
-        scored_drugs.join(dr_lut, on='drugId', how='inner')
-        .group_by('associationId')
-        .agg(
-            pl.col('drug_labels')
-            .drop_nulls()
-            .list.explode(keep_nulls=False, empty_as_null=False)
-            .unique(maintain_order=True)
-            .alias('drug_labels')
-        )
-    )
+    drug_by_association = drug_labels_by_association(scored_drugs, dr_lut)
 
     ranked = (
         associations.join(drug_by_association, on='associationId', how='left')
@@ -147,6 +138,14 @@ def build_target_index(
     frame = (
         targets.with_columns(_hgnc_identifiers().alias('hgncIds'))
         .join(ranked_with_variants, on='targetId', how='left')
+        # Belt-and-braces: every one of these columns feeds only into a `flatten_cat` call in
+        # `search_index` below, and `flatten_cat` already null-fills each of its inputs (see
+        # `helpers.py`) -- so a target with no match in `ranked_with_variants` would get an empty
+        # `terms`/`terms25`/`terms5` list either way. Kept for defence in depth rather than
+        # removed, since this branch is validated against the release and a behaviour-neutral
+        # deletion is not worth the risk. `disease.py` and `drug.py` fill some but not all of
+        # their equivalent columns; that inconsistency is inherited from which columns the
+        # pyspark original happened to `coalesce`, not a meaningful distinction.
         .with_columns(
             pl.col('disease_labels').fill_null(EMPTY_LIST),
             pl.col('disease_labels_25').fill_null(EMPTY_LIST),
