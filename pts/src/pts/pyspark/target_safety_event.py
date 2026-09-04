@@ -263,6 +263,10 @@ def process_brennan(brennan_df: DataFrame) -> DataFrame:
     """Loads and processes the Brennan input JSON prepared by the Target Safety team."""
     return (
         brennan_df
+        # A handful of records have no curated EFO term, encoded upstream as an
+        # empty string rather than a JSON null -- normalise it so it behaves like
+        # every other source's genuinely missing eventId.
+        .withColumn('eventId', f.when(f.trim(f.col('eventId')) != '', f.trim(f.col('eventId'))))
         .withColumn(
             'effects',
             f.array(

@@ -130,12 +130,11 @@ def _build_homology(
         f.array(*[f.lit(t) for t in tax_ids]).alias('whitelist'),
     ).filter(f.array_contains(f.col('whitelist'), f.col('taxonomy_id')))
 
+    name = f.col('name')
+    name_is_missing = name.isNull() | (f.trim(name) == '')
     gene_dict_mapped = gene_dict.select(
         f.col('id').alias('homology_gene_stable_id'),
-        f
-        .when(f.col('name').isNotNull() & (f.col('name') != ''), f.col('name'))
-        .otherwise(f.col('id'))
-        .alias('targetGeneSymbol'),
+        f.when(~name_is_missing, f.trim(name)).otherwise(f.col('id')).alias('targetGeneSymbol'),
     )
 
     reference = 'homo_sapiens'
@@ -184,7 +183,12 @@ def _build_homology(
             f.col('name').alias('speciesName'),
             f.col('homology_type').alias('homologyType'),
             f.col('homology_gene_stable_id').alias('targetGeneId'),
-            f.col('is_high_confidence').alias('isHighConfidence'),
+            # The raw Ensembl Compara TSV encodes a missing confidence flag as the
+            # literal text "NULL", which the CSV reader has no reason to treat as
+            # a real null -- normalise it explicitly rather than shipping "NULL"
+            # as if it were a value.
+            f.when(f.col('is_high_confidence') != 'NULL', f.col('is_high_confidence'))
+            .alias('isHighConfidence'),
             f.col('targetGeneSymbol'),
             f.col('identity').cast(DoubleType()).alias('queryPercentageIdentity'),
             f.col('homology_identity').cast(DoubleType()).alias('targetPercentageIdentity'),
