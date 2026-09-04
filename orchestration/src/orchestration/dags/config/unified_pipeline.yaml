@@ -28,7 +28,7 @@ spark_nlp_version: "6.1.5"
 # Ingested dataset versions
 #
 # The AACT archive and preprocessing snapshot consumed by this release.
-aact_version: '2026-08-01'
+aact_version: '2026-08-25'
 
 # Dependency graph
 # ----------------

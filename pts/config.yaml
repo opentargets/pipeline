@@ -790,7 +790,7 @@ steps:
       # shards the last attempt finished instead of paying for them again
       snapshot: '{{snapshot}}'
       model: gpt-5-nano-2025-08-07
-      service_tier: flex
+      service_tier: auto
       concurrency: 50
       shard_size: 2000
       publications:

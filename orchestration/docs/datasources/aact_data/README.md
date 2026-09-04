@@ -28,11 +28,11 @@ gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
 gs://aact_data/cache/trial_extraction/         # the extraction cache, shared across versions
 ```
 
-The cache sits outside the version directory on purpose. It is keyed on a hash
-of the rendered prompt and output schema, so a trial whose text did not change
-between two monthly archives has to be a cache hit — and it cannot be one if
-the cache is filed under the version. The model and system instructions are
-operational choices and are not part of the key.
+The cache sits outside the version directory on purpose. It is keyed on the
+trial ID and output schema, so an accepted extraction is reused across AACT
+snapshots and does not depend on volatile publication data. The rendered
+prompt hash is retained as audit metadata. The model and system instructions
+are operational choices and are not part of the key.
 
 ## Preprocessing
 
@@ -70,9 +70,9 @@ primary indications and background conditions, and the investigated, comparator
 and supportive drugs, each with synonyms and dosages.
 
 Only trials that are not already in the cache are sent to the model. The cache
-key hashes the `rendered prompt` and the `JSON schema` the response is validated
-against. Changing the model or system instructions therefore does not
-re-extract accepted results; changing the prompt or schema does.
+key hashes the `trial ID` and the `JSON schema` the response is validated
+against. Changing AACT text, publications, the model or system instructions
+therefore does not re-extract accepted results; changing the schema does.
 
 Only results are cached. A trial the model failed on has no row, so it is
 indistinguishable from one never attempted and the next run tries it again.
@@ -90,7 +90,7 @@ Earlier OpenAI Batch API output can be imported once by setting the optional
 `legacy_batch_results` field on `llm_extract` to a directory containing the
 `*_output.jsonl` files. Set `legacy_import_only: true` for the first run. The
 task parses valid responses, matches them to the current prompts, and seeds the
-shared cache using the current prompt-and-schema keys without making API calls.
+shared cache using the current trial-and-schema keys without making API calls.
 Rate-limited, malformed, and unmatched responses remain cache misses. Inspect
 the migration counts, then remove both migration fields and run the DAG
 normally; only the remaining misses are sent to the configured model.
@@ -121,9 +121,9 @@ rather than being combined with partially populated AACT data.
 
 ### 2026-09-04
 
-- Reuse earlier Batch API results by optionally seeding the content-addressed
-  cache; cache identity is the rendered prompt and output schema, not the model
-  or system instructions.
+- Reuse earlier Batch API results by optionally seeding the cache; cache
+  identity is the trial ID and output schema, not prompt text, publications,
+  the model or system instructions.
 - Exclude AACT trials without successful extraction from the clinical report.
 
 ### 2026-08-06
