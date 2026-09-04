@@ -222,6 +222,17 @@ def test_replace_missing_placeholder_nulls_stringified_nan(spark):
     assert [r.control for r in result.collect()] == [None, None, None]
 
 
+def test_replace_missing_placeholder_nulls_padded_token(spark):
+    """A placeholder token with stray whitespace is still recognised as missing.
+
+    Regression test: the comparison didn't trim before checking against the
+    known tokens, so e.g. "NaN " or " -" would have slipped through undetected.
+    """
+    df = spark.createDataFrame([(' NaN ',), ('- ',)], ['control_name'])
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert [r.control for r in result.collect()] == [None, None]
+
+
 def test_replace_missing_placeholder_keeps_real_values(spark):
     """A genuine control compound name passes through unchanged."""
     df = spark.createDataFrame([('BI-6953',)], ['control_name'])

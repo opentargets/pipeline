@@ -263,6 +263,26 @@ def test_homology_keeps_real_gene_symbol(spark):
     assert row.targetGeneSymbol == 'Trp53'
 
 
+def test_homology_trims_a_real_gene_symbol(spark):
+    """A real gene symbol with stray leading/trailing whitespace is trimmed, not just checked.
+
+    Regression test: name_is_missing checked f.trim(name) but the true branch
+    returned the untrimmed name, so a padded value would keep its whitespace.
+    """
+    result = _single_pair_setup(spark, _mouse_pair_row(), gene_name=' Trp53 ')
+    row = result.first()
+    assert row is not None
+    assert row.targetGeneSymbol == 'Trp53'
+
+
+def test_homology_normalises_whitespace_only_gene_symbol(spark):
+    """A whitespace-only name is treated the same as an empty one."""
+    result = _single_pair_setup(spark, _mouse_pair_row(), gene_name='   ')
+    row = result.first()
+    assert row is not None
+    assert row.targetGeneSymbol == 'ENSMUSG0001'
+
+
 # ---------------------------------------------------------------------------
 # _resolve_homology
 # ---------------------------------------------------------------------------

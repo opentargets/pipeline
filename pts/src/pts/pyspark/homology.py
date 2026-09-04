@@ -140,7 +140,7 @@ def _build_homology(
     )
     gene_dict_mapped = gene_dict.select(
         f.col('id').alias('homology_gene_stable_id'),
-        f.when(~name_is_missing, name).otherwise(f.col('id')).alias('targetGeneSymbol'),
+        f.when(~name_is_missing, f.trim(name)).otherwise(f.col('id')).alias('targetGeneSymbol'),
     )
 
     reference = 'homo_sapiens'

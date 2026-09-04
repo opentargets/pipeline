@@ -198,7 +198,7 @@ def replace_missing_placeholder(col: Column) -> Column:
     `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
     placeholder token seen in the same column.
     """
-    value = f.lower(col.cast(t.StringType()))
+    value = f.lower(f.trim(col.cast(t.StringType())))
     return f.when(~value.isin(*MISSING_VALUE_TOKENS), col)
 
 
