@@ -5,23 +5,28 @@ makes it repeatable — it builds one prompt per trial, asks
 :py:mod:`pts.result_cache` for the ones that have not been extracted yet, and
 publishes the result as a typed parquet the release can read directly.
 
-Cache invalidation is derived, never declared. The key hashes the trial prompt,
-the system prompt text and the JSON schema the model is held to, so editing any
-of them re-extracts exactly the affected trials with nothing to remember to
-bump. That is the whole reason there is no ``prompt_version`` setting here.
+Cache invalidation is derived, never declared. The key hashes the trial prompt
+and the JSON schema the model is held to. The model and system instructions are
+operational choices and intentionally do not invalidate accepted results.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
 from typing import Any, Self
 
 import polars as pl
 from clinical_mining.provider.aact import extract_clinical_report
-from clinical_mining.provider.aact.llm_extractor import build_prompts, fetch_publications, sample_report
+from clinical_mining.provider.aact.llm_extractor import (
+    build_prompts,
+    fetch_publications,
+    parse_batch_results,
+    sample_report,
+)
 from clinical_mining.workflows.llm import run_extraction
 from loguru import logger
 from otter.manifest.model import Artifact
@@ -32,7 +37,7 @@ from otter.util.errors import TaskValidationError
 from pydantic import BaseModel
 
 from pts.postgres import read_dump_tables
-from pts.result_cache import cache_key, cached_map
+from pts.result_cache import METADATA_SCHEMA, cache_key, cached_map, read_cache, write_cache
 
 DEFAULT_SYSTEM_PROMPT = ('clinical_mining.prompts', 'aact_llm.txt')
 """Packaged system prompt, versioned with the pinned ``clinical-mining`` dependency."""
@@ -100,14 +105,14 @@ class LlmExtractSpec(Spec):
     openai_key_path: str = '/var/run/secrets/openai-api-key'
     """Path the OpenAI key is mounted at, injected from Secret Manager by the
         DAG. Never put the key itself in config."""
-    model: str = 'gpt-4.1-mini'
-    """OpenAI model. Part of the cache key."""
+    model: str = 'gpt-5-nano-2025-08-07'
+    """OpenAI model. Not part of the cache key."""
     model_class: str = 'clinical_mining.schemas.ClinicalReportExtractionSchema'
     """Dotted path to the pydantic model the response is validated against. Its
         JSON schema is part of the cache key."""
     system_prompt: str | None = None
     """Path to a system prompt overriding the packaged one, relative to the
-        release root. Its contents are part of the cache key."""
+        release root. Its contents are not part of the cache key."""
     service_tier: str = 'flex'
     """OpenAI service tier. ``flex`` is roughly half price for higher latency,
         with an automatic fallback to standard when flex capacity runs out."""
@@ -122,6 +127,10 @@ class LlmExtractSpec(Spec):
     """Extract a random sample only. For dry runs; leave unset in production."""
     publications: PublicationsSpec = PublicationsSpec()
     """Europe PMC enrichment."""
+    legacy_batch_results: str | None = None
+    """Optional one-off directory of legacy OpenAI Batch API results to seed the cache."""
+    legacy_import_only: bool = False
+    """Seed legacy results and stop before making any new API calls."""
 
 
 class LlmExtract(Task):
@@ -152,9 +161,10 @@ class LlmExtract(Task):
         disease and molecule indexes, none of which is needed — or available —
         here.
         """
-        logger.info(f'restoring AACT tables from {self.spec.source["aact"]}')
+        archive = StorageHandle(str(self.spec.source['aact']), config=self.context.config).absolute
+        logger.info(f'restoring AACT tables from {archive}')
         tables = read_dump_tables(
-            str(self.spec.source['aact']),
+            archive,
             AACT_TABLES,
             schema_name=AACT_SCHEMA_NAME,
             archive_member=AACT_ARCHIVE_MEMBER,
@@ -172,7 +182,7 @@ class LlmExtract(Task):
         )
         return sample_report(report.df, self.spec.sample_size)
 
-    def _build_prompts(self, report: pl.DataFrame, system_prompt: str, schema_digest: str) -> pl.DataFrame:
+    def _build_prompts(self, report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
         """Render one prompt per trial and derive its cache key."""
         publications = fetch_publications(
             report,
@@ -181,7 +191,6 @@ class LlmExtract(Task):
         )
         prompts = build_prompts(report, trial_fields=TRIAL_FIELDS, publications_map=publications)
 
-        system_digest = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()
         return (
             pl
             .DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String})
@@ -192,7 +201,7 @@ class LlmExtract(Task):
             )
             .with_columns(
                 cache_key=pl.col('prompt_sha256').map_elements(
-                    lambda d: cache_key(self.spec.model, system_digest, schema_digest, d), return_dtype=pl.String
+                    lambda d: cache_key(d, schema_digest), return_dtype=pl.String
                 ),
             )
         )
@@ -242,8 +251,20 @@ class LlmExtract(Task):
         ).hexdigest()
 
         report = self._trial_report()
-        prompts = self._build_prompts(report, system_prompt, schema_digest)
+        prompts = self._build_prompts(report, schema_digest)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
+
+        if self.spec.legacy_batch_results:
+            imported = self._seed_legacy_cache(prompts)
+            if self.spec.legacy_import_only:
+                self.stats = {
+                    'trials': report.height,
+                    'prompts': prompts.height,
+                    'extracted': imported,
+                    'failed': prompts.height - imported,
+                }
+                logger.info(f'legacy cache import complete: {self.stats}')
+                return self
 
         # run_extraction reads the system prompt off disk, so give it a local copy
         system_prompt_path = f'{self.context.config.work_path}/.scratch/system_prompt.txt'
@@ -264,12 +285,50 @@ class LlmExtract(Task):
             'trials': report.height,
             'prompts': prompts.height,
             'extracted': published.height,
-            'failed': extractions.height - published.height,
+            'failed': prompts.height - published.height,
         }
         logger.info(f'extraction complete: {self.stats}')
 
         self._publish(prompts, published)
         return self
+
+    def _seed_legacy_cache(self, prompts: pl.DataFrame) -> int:
+        """Import legacy Batch API results using the current prompt-derived keys.
+
+        This compatibility path is deliberately opt-in and intended for one
+        migration run. Failed and malformed legacy records remain absent from
+        the cache, so the normal extraction loop retries them.
+        """
+        legacy_path = self.spec.legacy_batch_results
+        assert legacy_path is not None
+        logger.info(f'importing legacy AACT batch results from {legacy_path}')
+        legacy = parse_batch_results(legacy_path).df
+        if legacy.is_empty():
+            logger.warning('legacy batch results contained no valid extractions')
+            return 0
+
+        # A trial may occur in more than one historical batch. Keep the last
+        # parsed occurrence deterministically; the cache has one value per key.
+        legacy = legacy.unique(subset='id', keep='last')
+        imported = legacy.join(prompts.select('id', 'cache_key', 'prompt_sha256'), on='id', how='inner').unique(
+            subset='cache_key', keep='last'
+        )
+        if imported.is_empty():
+            logger.warning('no legacy extractions matched the current AACT prompts')
+            return 0
+
+        existing = read_cache(self.spec.cache_uri, self.context.config)
+        combined = pl.concat([existing, imported], how='diagonal_relaxed')
+        combined = combined.with_columns(
+            computed_at=pl.coalesce([
+                pl.col('computed_at'),
+                pl.lit(datetime.now(UTC)).cast(METADATA_SCHEMA['computed_at']),
+            ])
+        )
+        combined = combined.sort('computed_at', descending=True).unique(subset='cache_key', keep='first')
+        write_cache(combined, self.spec.cache_uri, self.context.config, self.spec.snapshot)
+        logger.info(f'seeded {imported.height} legacy extractions into the cache')
+        return imported.height
 
     def _publish(self, prompts: pl.DataFrame, extractions: pl.DataFrame) -> None:
         """Write the prompts and the extractions."""
