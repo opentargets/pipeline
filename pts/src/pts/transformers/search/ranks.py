@@ -23,6 +23,10 @@ def partitioned_rank(score: pl.Expr, *, by: str | list[str], descending: bool) -
     Nulls are mapped onto a sentinel that sorts where spark puts them, so the returned rank is
     never null and a `rank <= N` filter keeps the same rows spark kept.
 
+    The `Float64` cast can also silently merge distinct large integers once they exceed 2**53
+    (e.g. `2**60` and `2**60 + 1` round to the same float) -- harmless for this step's callers,
+    whose scores are already a float (`transcriptScore`) or a small count (`credibleSetCount`).
+
     Args:
         score: the ordering expression. Cast to `Float64` internally.
         by: partition column(s).

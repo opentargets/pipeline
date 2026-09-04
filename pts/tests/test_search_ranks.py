@@ -18,6 +18,17 @@ def test_partitioned_rank_gives_tied_scores_the_same_rank_and_skips_the_next() -
     assert result['r'].to_list() == [1, 2, 2]
 
 
+def test_partitioned_rank_skips_the_rank_after_a_tie() -> None:
+    """A tie followed by a non-tied value is the only shape that distinguishes `min` rank from
+    `dense` rank. `min` skips the ranks consumed by the tie (1, 2, 2, 4); `dense` would give the
+    last row `3` instead."""
+    frame = pl.DataFrame({'g': ['x'] * 4, 's': [5.0, 1.0, 1.0, 0.0]})
+
+    result = frame.with_columns(partitioned_rank(pl.col('s'), by='g', descending=True).alias('r'))
+
+    assert result['r'].to_list() == [1, 2, 2, 4]
+
+
 def test_partitioned_rank_is_independent_per_partition() -> None:
     frame = pl.DataFrame({'g': ['x', 'x', 'y'], 's': [5.0, 1.0, 3.0]})
 
