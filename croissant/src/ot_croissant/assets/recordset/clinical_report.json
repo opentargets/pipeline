@@ -112,6 +112,18 @@
     "description": "Primary purpose of the clinical trial (e.g. Treatment, Prevention)"
   },
   {
+    "id": "trialSponsor",
+    "description": "Lead sponsor associated with the clinical trial"
+  },
+  {
+    "id": "trialSponsor/agencyClass",
+    "description": "Classification of the lead trial sponsor (e.g. INDUSTRY, NIH, OTHER)"
+  },
+  {
+    "id": "trialSponsor/name",
+    "description": "Name of the lead sponsor associated with the clinical trial"
+  },
+  {
     "id": "trialStartDate",
     "description": "Start date of the clinical trial"
   },
