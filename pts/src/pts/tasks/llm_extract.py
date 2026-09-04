@@ -270,7 +270,7 @@ class LlmExtract(Task):
         # run_extraction reads the system prompt off disk, so give it a local copy
         system_prompt_path = f'{self.context.config.work_path}/.scratch/system_prompt.txt'
         Path(system_prompt_path).parent.mkdir(parents=True, exist_ok=True)
-        StorageHandle(system_prompt_path, config=self.context.config).write_text(system_prompt)
+        StorageHandle(system_prompt_path, config=self.context.config, force_local=True).write_text(system_prompt)
 
         extractions = cached_map(
             records=prompts,
