@@ -242,42 +242,56 @@ class TestValuesThatMustBeFiltered:
         result = absorb_obsolete_content(df)
         assert _synonyms_of(result, 'A', EXACT) == ['a exact', 'shared', 'b label', 'c label']
 
-    def test_an_obsoletion_prefixed_label_is_not_donated(self) -> None:
+    def test_an_obsoletion_prefixed_label_donates_the_name_without_the_marker(self) -> None:
         df = _make_df(
             _make_node('A', synonyms=[_synonym(EXACT, 'a exact')]),
             _make_node('B', lbl='obsolete anaemia of chronic disease', deprecated=True, replaced_by=['A']),
         )
         result = absorb_obsolete_content(df)
+        assert _synonyms_of(result, 'A', EXACT) == ['a exact', 'anaemia of chronic disease']
+
+    def test_an_obsoletion_prefixed_synonym_is_stripped_too(self) -> None:
+        df = _make_df(
+            _make_node('A', synonyms=[_synonym(EXACT, 'a exact')]),
+            _make_node(
+                'B',
+                lbl='b label',
+                deprecated=True,
+                replaced_by=['A'],
+                synonyms=[_synonym(EXACT, 'obsolete early infantile epileptic encephalopathy')],
+            ),
+        )
+        result = absorb_obsolete_content(df)
+        assert _synonyms_of(result, 'A', EXACT) == [
+            'a exact',
+            'early infantile epileptic encephalopathy',
+            'b label',
+        ]
+
+    def test_an_underscore_separated_marker_is_stripped(self) -> None:
+        # EFO writes the marker as 'obsolete_<name>' rather than 'obsolete <name>'.
+        df = _make_df(
+            _make_node('A', synonyms=[_synonym(EXACT, 'a exact')]),
+            _make_node('B', lbl='obsolete_joint disease', deprecated=True, replaced_by=['A']),
+        )
+        result = absorb_obsolete_content(df)
+        assert _synonyms_of(result, 'A', EXACT) == ['a exact', 'joint disease']
+
+    def test_a_stripped_name_the_survivor_already_holds_is_not_repeated(self) -> None:
+        df = _make_df(
+            _make_node('A', synonyms=[_synonym(EXACT, 'Joint Disease')]),
+            _make_node('B', lbl='obsolete_joint disease', deprecated=True, replaced_by=['A']),
+        )
+        result = absorb_obsolete_content(df)
+        assert _synonyms_of(result, 'A', EXACT) == ['Joint Disease']
+
+    def test_a_stripped_name_matching_the_survivors_own_name_is_not_donated(self) -> None:
+        df = _make_df(
+            _make_node('A', lbl='joint disease', synonyms=[_synonym(EXACT, 'a exact')]),
+            _make_node('B', lbl='obsolete_joint disease', deprecated=True, replaced_by=['A']),
+        )
+        result = absorb_obsolete_content(df)
         assert _synonyms_of(result, 'A', EXACT) == ['a exact']
-
-    def test_an_obsoletion_prefixed_synonym_is_not_donated(self) -> None:
-        df = _make_df(
-            _make_node('A', synonyms=[_synonym(EXACT, 'a exact')]),
-            _make_node(
-                'B',
-                lbl='b label',
-                deprecated=True,
-                replaced_by=['A'],
-                synonyms=[_synonym(EXACT, 'OBSOLETE. use A')],
-            ),
-        )
-        result = absorb_obsolete_content(df)
-        assert _synonyms_of(result, 'A', EXACT) == ['a exact', 'b label']
-
-    def test_an_underscore_separated_obsoletion_marker_is_not_donated(self) -> None:
-        # GO writes the marker as 'obsolete_<name>' rather than 'obsolete <name>'.
-        df = _make_df(
-            _make_node('A', synonyms=[_synonym(EXACT, 'a exact')]),
-            _make_node(
-                'B',
-                lbl='b label',
-                deprecated=True,
-                replaced_by=['A'],
-                synonyms=[_synonym(EXACT, 'obsolete_inflammation')],
-            ),
-        )
-        result = absorb_obsolete_content(df)
-        assert _synonyms_of(result, 'A', EXACT) == ['a exact', 'b label']
 
     def test_the_bare_word_obsolete_is_not_donated(self) -> None:
         df = _make_df(

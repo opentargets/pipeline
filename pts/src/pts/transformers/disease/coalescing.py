@@ -46,12 +46,12 @@ _MERGE_PREFIXES = frozenset({'efo', 'mondo', 'hp', 'orphanet', 'oba'})
 _SYNONYM_PREDICATES = ('hasExactSynonym', 'hasRelatedSynonym', 'hasNarrowSynonym', 'hasBroadSynonym')
 _EXACT_SYNONYM = 'hasExactSynonym'
 
-# OBO Foundry marks an obsoleted class by prefixing its label with 'obsolete' and
-# its synonyms with 'OBSOLETE'.  The separator varies -- a space in EFO labels, a
-# full stop in MONDO synonyms, an underscore in GO's 'obsolete_inflammation' --
-# so anything but another alphanumeric ends the marker.  That keeps a term which
-# merely starts with the same letters, such as 'obsoletion syndrome'.
-_OBSOLETION_MARKER = r'(?i)^obsolete([^a-z0-9]|$)'
+# OBO Foundry marks an obsoleted class by prefixing its label with 'obsolete'.
+# The separator varies -- a space in MONDO, an underscore in EFO's
+# 'obsolete_joint disease' -- so anything but another alphanumeric ends the
+# marker, along with any space following it.  Requiring that separator keeps a
+# term which merely starts with the same letters, such as 'obsoletion syndrome'.
+_OBSOLETION_MARKER = r'(?i)^obsolete([^a-z0-9]\s*|$)'
 
 # A cross-reference shared by more terms than this is a hub, not an identity.
 _MAX_XREF_FANOUT = 40
@@ -360,8 +360,12 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
       same pointers.
     - A donor that is not a CLASS, or a target that ``n_clean`` will not keep,
       is skipped: nothing should reach the index through a row the index drops.
-    - A value that is only a restatement of the survivor's own name, or that
-      carries the OBO obsoletion marker, is dropped rather than published.
+    - A value that is only a restatement of the survivor's own name is dropped
+      rather than published, as is one already held in the same category,
+      compared case-folded.
+
+    The OBO obsoletion marker is stripped from a value rather than disqualifying
+    it: it annotates a name instead of forming part of one.
 
     Args:
         n: Node DataFrame whose IAO_0100001 pointers have already been resolved.
@@ -455,10 +459,16 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
         .concat([donated_synonyms, donated_labels])
         .sort(['donor', 'slot', 'position'])
         .with_columns(val=pl.col('val').str.replace_all('\n', '').str.strip_chars())
+        # The marker is a curation annotation wrapped around a name, not part of
+        # the name: 'obsolete_joint disease' is how the ontology says that
+        # 'joint disease' was retired.  Strip it and keep the name -- dropping
+        # the whole value would lose the only record of what the term was
+        # called.  A value that is nothing but the marker strips to empty and
+        # falls out below.
+        .with_columns(val=pl.col('val').str.replace(_OBSOLETION_MARKER, '').str.strip_chars())
         .filter(
             pl.col('val').is_not_null(),
             pl.col('val') != '',
-            ~pl.col('val').str.contains(_OBSOLETION_MARKER),
         )
         .join(live, on='target', how='left')
         .with_columns(folded=pl.col('val').str.to_lowercase())
