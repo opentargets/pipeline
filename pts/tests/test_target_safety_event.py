@@ -186,6 +186,22 @@ def test_process_brennan_normalises_empty_string_event_id(spark):
     assert out.eventId is None
 
 
+def test_process_brennan_normalises_whitespace_only_event_id(spark):
+    """A whitespace-only eventId is treated the same as an empty string."""
+    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='  ')], BRENNAN_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.eventId is None
+
+
+def test_process_brennan_trims_a_real_event_id(spark):
+    """A real eventId with stray leading/trailing whitespace is trimmed, not just checked."""
+    result = process_brennan(spark.createDataFrame([_brennan_row(event_id=' EFO_0009836 ')], BRENNAN_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.eventId == 'EFO_0009836'
+
+
 def test_process_brennan_keeps_real_event_id(spark):
     """A genuine curated EFO term passes through unchanged."""
     result = process_brennan(spark.createDataFrame([_brennan_row(event_id='EFO_0009836')], BRENNAN_SCHEMA))
