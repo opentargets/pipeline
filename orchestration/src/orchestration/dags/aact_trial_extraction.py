@@ -30,7 +30,7 @@ from airflow.sdk import DAG, chain, task_group
 from orchestration.dags.config.aact_trial_extraction import AactTrialExtractionConfig
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
 from orchestration.operators.gcs import UploadStringOperator
-from orchestration.utils import resource_name, to_yaml
+from orchestration.utils import resource_name, strhash, to_yaml
 from orchestration.utils.common import shared_dag_args
 from orchestration.utils.labels import Labels
 
@@ -43,6 +43,7 @@ with DAG(
     default_args=shared_dag_args,
     catchup=False,
     schedule=None,
+    user_defined_filters={'strhash': strhash},
     tags=['aact_trial_extraction', 'preprocessing'],
 ) as dag:
     logger = logging.getLogger(__name__)
