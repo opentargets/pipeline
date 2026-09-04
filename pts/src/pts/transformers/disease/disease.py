@@ -9,6 +9,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
 from pts.transformers.disease.coalescing import (
+    absorb_obsolete_content,
     annotate_name_duplicates,
     annotate_xref_duplicates,
     remap_edges,
@@ -51,6 +52,13 @@ def disease(
     e = remap_edges(e, n)
     n = resolve_replacement_chains(annotate_xref_duplicates(n, e))
     e = remap_edges(e, n)
+
+    # Only once every merge is settled: move each obsolete term's synonyms and
+    # label onto the term that replaces it, so the names a merged-away term
+    # answered to survive the n_clean filter below.  Running this any earlier
+    # would feed the donated names back into annotate_xref_duplicates, which
+    # matches on exact synonyms.
+    n = absorb_obsolete_content(n)
 
     # clean the nodes
     n_clean = (

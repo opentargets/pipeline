@@ -22,6 +22,14 @@ from pts.transformers.disease.ontology_ids import (
 
 _IAO_REPLACED_BY = 'http://purl.obolibrary.org/obo/IAO_0100001'
 _BPV_DTYPE = pl.List(pl.Struct({'pred': pl.String(), 'val': pl.String()}))
+_SYNONYM_DTYPE = pl.List(
+    pl.Struct({
+        'pred': pl.String(),
+        'synonymType': pl.String(),
+        'val': pl.String(),
+        'xrefs': pl.List(pl.String()),
+    })
+)
 _ONTOLOGY_WEIGHTS = pl.DataFrame(
     [('efo', 1), ('mondo', 2), ('oba', 3), ('orphanet', 4), ('hp', 100)],
     schema=['prefix', 'prefix_rank'],
@@ -32,6 +40,18 @@ _ONTOLOGY_WEIGHTS = pl.DataFrame(
 # GO and MP are deliberately absent: a biological process and a mouse phenotype
 # are not a duplicate of a disease even when they share a reference and a name.
 _MERGE_PREFIXES = frozenset({'efo', 'mondo', 'hp', 'orphanet', 'oba'})
+
+# The synonym predicates the disease index keeps, and the one an obsolete term's
+# own label is donated as.
+_SYNONYM_PREDICATES = ('hasExactSynonym', 'hasRelatedSynonym', 'hasNarrowSynonym', 'hasBroadSynonym')
+_EXACT_SYNONYM = 'hasExactSynonym'
+
+# OBO Foundry marks an obsoleted class by prefixing its label with 'obsolete' and
+# its synonyms with 'OBSOLETE'.  The separator varies -- a space in EFO labels, a
+# full stop in MONDO synonyms, an underscore in GO's 'obsolete_inflammation' --
+# so anything but another alphanumeric ends the marker.  That keeps a term which
+# merely starts with the same letters, such as 'obsoletion syndrome'.
+_OBSOLETION_MARKER = r'(?i)^obsolete([^a-z0-9]|$)'
 
 # A cross-reference shared by more terms than this is a hub, not an identity.
 _MAX_XREF_FANOUT = 40
@@ -308,6 +328,184 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
                 )
             ),
         )
+    )
+
+
+def _folded(val: pl.Expr) -> pl.Expr:
+    """Normalise a name the way the index build does, then case-fold it for comparison."""
+    return val.str.replace_all('\n', '').str.strip_chars().str.to_lowercase()
+
+
+def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
+    """Hand every obsolete term's synonyms and label to the term that replaces it.
+
+    ``n_clean`` drops a term the moment it is deprecated, whether the source
+    ontology obsoleted it or one of the rules above superseded it.  Its
+    identifiers survive that -- the obsolete-term rollup keeps them -- but the
+    names it answered to do not, so a search for a merged-away term finds
+    nothing.  This moves those names onto the survivor before the drop, keeping
+    each synonym in its own category and adding the obsolete term's own label to
+    the survivor's exact synonyms.
+
+    Run this *after* both coalescing rules and their chain resolution, never
+    between them: ``annotate_xref_duplicates`` matches on ``name_bags``, which
+    reads exact synonyms, so donating earlier would let one merge widen the next.
+    By this point every pointer that can name a live term already does, so a
+    chain donates from each of its links.
+
+    Three kinds of pointer are refused, matching the decisions made elsewhere:
+
+    - A term naming two *different* replacements has no single successor, so it
+      donates to neither.  ``resolve_replacement_chains`` declines to follow the
+      same pointers.
+    - A donor that is not a CLASS, or a target that ``n_clean`` will not keep,
+      is skipped: nothing should reach the index through a row the index drops.
+    - A value that is only a restatement of the survivor's own name, or that
+      carries the OBO obsoletion marker, is dropped rather than published.
+
+    Args:
+        n: Node DataFrame whose IAO_0100001 pointers have already been resolved.
+
+    Returns:
+        DataFrame with the same shape and schema as ``n``.
+    """
+    pointers = (
+        n
+        .filter(pl.col('type') == 'CLASS')
+        .unnest('meta')
+        .explode('basicPropertyValues')
+        .unnest('basicPropertyValues')
+        .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
+        .select(donor=pl.col('id'), target=pl.col('val'))
+        .unique()
+    )
+    if pointers.is_empty():
+        return n
+
+    # A term repeating one pointer still names a single successor; two different
+    # pointers is a curation decision to leave alone.
+    ambiguous = pointers.filter(pl.len().over('donor') > 1)
+    if ambiguous.height:
+        donors = ambiguous.get_column('donor').n_unique()
+        logger.info(f'{donors} obsolete terms name more than one replacement, so they donate no synonyms')
+
+    live = n.filter(
+        pl.col('type') == 'CLASS',
+        ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
+    ).select(target=pl.col('id'), target_lbl=pl.col('lbl'))
+
+    donations = (
+        pointers
+        .filter(pl.len().over('donor') == 1)
+        .join(live, on='target', how='inner')
+        .join(
+            n.select(donor=pl.col('id'), donor_lbl=pl.col('lbl'), synonyms=pl.col('meta').struct['synonyms']),
+            on='donor',
+            how='inner',
+        )
+        .sort('donor')
+    )
+    if donations.is_empty():
+        return n
+
+    # Each donor offers its own synonyms first, then its label, so the survivor's
+    # list grows in a stable order no matter how many terms merged into it.
+    donated_synonyms = (
+        donations
+        .select('target', 'donor', 'synonyms')
+        .explode('synonyms')
+        .filter(pl.col('synonyms').struct['pred'].is_in(_SYNONYM_PREDICATES))
+        .select(
+            'target',
+            'donor',
+            pred=pl.col('synonyms').struct['pred'],
+            val=pl.col('synonyms').struct['val'],
+            slot=pl.lit(0, dtype=pl.UInt32),
+        )
+        .with_columns(position=pl.int_range(pl.len()).over('donor').cast(pl.UInt32))
+    )
+    donated_labels = donations.select(
+        'target',
+        'donor',
+        pred=pl.lit(_EXACT_SYNONYM),
+        val=pl.col('donor_lbl'),
+        slot=pl.lit(1, dtype=pl.UInt32),
+        position=pl.lit(0, dtype=pl.UInt32),
+    )
+
+    # Compare on the same normalised, case-folded form the index build uses, so a
+    # value that only differs in case or whitespace is not published twice.
+    seen = (
+        n
+        .select(target=pl.col('id'), synonyms=pl.col('meta').struct['synonyms'])
+        .explode('synonyms')
+        .filter(pl.col('synonyms').struct['pred'].is_in(_SYNONYM_PREDICATES))
+        .select(
+            'target',
+            pred=pl.col('synonyms').struct['pred'],
+            folded=_folded(pl.col('synonyms').struct['val']),
+        )
+        .drop_nulls('folded')
+        .unique()
+        .with_columns(already_held=pl.lit(True))
+    )
+
+    additions = (
+        pl
+        .concat([donated_synonyms, donated_labels])
+        .sort(['donor', 'slot', 'position'])
+        .with_columns(val=pl.col('val').str.replace_all('\n', '').str.strip_chars())
+        .filter(
+            pl.col('val').is_not_null(),
+            pl.col('val') != '',
+            ~pl.col('val').str.contains(_OBSOLETION_MARKER),
+        )
+        .join(live, on='target', how='left')
+        .with_columns(folded=pl.col('val').str.to_lowercase())
+        .filter(pl.col('folded') != _folded(pl.col('target_lbl')).fill_null(''))
+        .join(seen, on=['target', 'pred', 'folded'], how='left')
+        .filter(pl.col('already_held').is_null())
+        .unique(subset=['target', 'pred', 'folded'], keep='first', maintain_order=True)
+        .select(
+            'target',
+            entry=pl.struct(
+                pred=pl.col('pred'),
+                synonymType=pl.lit(None, dtype=pl.String),
+                val=pl.col('val'),
+                xrefs=pl.lit([], dtype=pl.List(pl.String)),
+            ),
+        )
+        .group_by('target', maintain_order=True)
+        .agg(pl.col('entry').alias('donated'))
+    )
+    if additions.is_empty():
+        return n
+
+    logger.debug(f'{additions.height} terms absorbed synonyms from the terms they replace')
+
+    return (
+        n
+        .join(additions, left_on='id', right_on='target', how='left', maintain_order='left')
+        .with_columns(
+            meta=pl.col('meta').struct.with_fields(
+                # A term that carries no synonyms at all has a null list rather
+                # than an empty one, and concatenating onto null yields null --
+                # which would drop the donation instead of making it the whole
+                # list.  Same guard _supersede uses on basicPropertyValues.
+                synonyms=pl
+                .when(pl.col('donated').is_not_null())
+                .then(
+                    pl
+                    .col('meta')
+                    .struct.field('synonyms')
+                    .fill_null(pl.Series([[]], dtype=_SYNONYM_DTYPE))
+                    .list.concat(pl.col('donated'))
+                )
+                .otherwise(pl.col('meta').struct.field('synonyms')),
+            )
+        )
+        .drop('donated')
+        .select(n.columns)
     )
 
 
