@@ -5,9 +5,9 @@ makes it repeatable — it builds one prompt per trial, asks
 :py:mod:`pts.result_cache` for the ones that have not been extracted yet, and
 publishes the result as a typed parquet the release can read directly.
 
-Cache invalidation is derived, never declared. The key hashes the trial prompt
-and the JSON schema the model is held to. The model and system instructions are
-operational choices and intentionally do not invalidate accepted results.
+Cache identity is the trial ID and the JSON schema the model is held to. The
+prompt hash is retained as audit metadata, but prompt text, publications, the
+model and system instructions do not invalidate an accepted extraction.
 """
 
 from __future__ import annotations
@@ -81,8 +81,9 @@ class PublicationsSpec(BaseModel):
             that missed the cache, because the abstract is part of the prompt and
             so part of the cache key. It is the one part of this step that does
             not get cheaper as the cache fills. Give it its own
-            :py:func:`pts.result_cache.cached_map` keyed on pmid before turning it on
-            for a full run."""
+        :py:func:`pts.result_cache.cached_map` keyed on pmid before turning it on
+        for a full run. Publication data is not part of the extraction cache
+        identity."""
     max_publications: int = 1
     """Abstracts per trial."""
 
@@ -200,8 +201,8 @@ class LlmExtract(Task):
                 ),
             )
             .with_columns(
-                cache_key=pl.col('prompt_sha256').map_elements(
-                    lambda d: cache_key(d, schema_digest), return_dtype=pl.String
+                cache_key=pl.col('id').map_elements(
+                    lambda trial_id: cache_key(trial_id, schema_digest), return_dtype=pl.String
                 ),
             )
         )
@@ -293,7 +294,7 @@ class LlmExtract(Task):
         return self
 
     def _seed_legacy_cache(self, prompts: pl.DataFrame) -> int:
-        """Import legacy Batch API results using the current prompt-derived keys.
+        """Import legacy Batch API results using the current trial/schema keys.
 
         This compatibility path is deliberately opt-in and intended for one
         migration run. Failed and malformed legacy records remain absent from
