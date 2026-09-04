@@ -300,3 +300,31 @@ def test_scan_datasets_requires_a_glob(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='is not a glob'):
         scan_datasets(str(tmp_path / 'plain'))
+
+
+def test_scan_datasets_ignores_directories_with_no_data_files(tmp_path: Path) -> None:
+    """The name glob may match a directory that carries no data at all.
+
+    Matching is done against data FILES, not directory names (see `scan_datasets`' docstring:
+    the GCS backend's glob only matches objects, so a bare directory never matches there), so an
+    empty directory produces no file matches and is silently skipped rather than raising or
+    contributing an empty frame.
+    """
+    _write_parts(tmp_path / 'evidence_a', pl.DataFrame({'targetId': ['t1']}))
+    (tmp_path / 'evidence_b').mkdir()
+
+    frame = scan_datasets(str(tmp_path / 'evidence_*')).collect()
+
+    assert frame['targetId'].to_list() == ['t1']
+
+
+def test_scan_datasets_ignores_success_markers_and_crc_sidecars(tmp_path: Path) -> None:
+    """A spark `_SUCCESS` marker and a `.parquet.crc` sidecar must not become phantom datasets."""
+    directory = tmp_path / 'evidence_a'
+    _write_parts(directory, pl.DataFrame({'targetId': ['t1']}))
+    (directory / '_SUCCESS').touch()
+    (directory / '.00000000.parquet.crc').touch()
+
+    frame = scan_datasets(str(tmp_path / 'evidence_*')).collect()
+
+    assert frame['targetId'].to_list() == ['t1']

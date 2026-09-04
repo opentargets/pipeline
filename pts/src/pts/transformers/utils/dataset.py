@@ -144,9 +144,19 @@ def scan_datasets(
     dataset-level counterpart: the glob selects DIRECTORIES (`output/evidence_*`), and every
     matched directory is read and concatenated.
 
-    Schemas are unioned rather than required to match. Most evidence datasets carry no
-    `drugId` column at all, and the pyspark job relied on `mergeSchema=True` to null-fill it;
-    `missing_columns='insert'` is the polars equivalent.
+    Globs for the format's DATA FILES rather than the directories themselves, then derives each
+    match's parent as the dataset directory. Globbing directory names directly would be simpler,
+    but otter's GCS backend implements glob as `bucket.list_blobs(match_glob=...)`, which matches
+    OBJECT names -- and a directory is not an object, so that approach returns zero hits on GCS,
+    the only backend this runs against in production. Globbing the per-format data files
+    (`_GLOBS[format]`) works identically on both backends, and, being the same suffix-anchored
+    pattern `scan_dataset` itself uses, already excludes a spark `_SUCCESS` marker or a
+    `.parquet.crc` sidecar rather than treating them as phantom datasets.
+
+    Schemas are unioned rather than required to match, via `pl.concat(..., how='diagonal_relaxed')`:
+    a column missing from some frames is null-filled and differing dtypes are relaxed to a common
+    supertype. Most evidence datasets carry no `drugId` column at all, and the pyspark job relied
+    on `mergeSchema=True` for the same effect.
 
     Raises rather than returning an empty frame when nothing matches: an empty evidence frame
     would silently strip every drug from the disease index instead of failing the step.
@@ -160,9 +170,13 @@ def scan_datasets(
         LazyFrame of every matched dataset, vertically concatenated with a unioned schema.
 
     Raises:
-        ValueError: if `pattern` has no glob, if the glob is not in the last segment, or if
-            it matches no datasets.
+        ValueError: for an unrecognised `format`, if `pattern` has no glob, if the glob is not
+            in the last segment, or if it matches no datasets.
     """
+    if format not in _GLOBS:
+        msg = f'unrecognised format {format!r} for {pattern!r}, expected one of {sorted(_GLOBS)}'
+        raise ValueError(msg)
+
     parent, _, name_glob = pattern.rpartition('/')
     if not any(char in name_glob for char in '*?['):
         msg = f'{pattern!r} is not a glob; use scan_dataset for a single dataset'
@@ -171,7 +185,8 @@ def scan_datasets(
         msg = f'{pattern!r} globs above the dataset name; only the last segment may be a glob'
         raise ValueError(msg)
 
-    directories = sorted(StorageHandle(parent).glob(name_glob))
+    files = StorageHandle(parent).glob(f'{name_glob}/{_GLOBS[format]}')
+    directories = sorted({file.rsplit('/', 1)[0] for file in files})
     if not directories:
         msg = f'{pattern!r} matched no datasets'
         raise ValueError(msg)
