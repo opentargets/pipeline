@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import polars as pl
 from clinical_mining.provider.aact import extract_clinical_report
@@ -28,6 +29,7 @@ from clinical_mining.provider.aact.llm_extractor import (
     parse_batch_results,
     sample_report,
 )
+from clinical_mining.workflows import llm as llm_workflow
 from clinical_mining.workflows.llm import run_extraction
 from loguru import logger
 from otter.manifest.model import Artifact
@@ -381,5 +383,52 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
     a short-lived worker thread gives it a thread-local loop without changing
     either library's public API.
     """
+    def run_with_full_schema_inference() -> pl.DataFrame | None:
+        # clinical-mining's default inference samples only the first 100 model
+        # responses. Later validated nested values can then disagree with that
+        # inferred schema, losing the whole shard before cached_map can stage it.
+        original = llm_workflow._extractions_to_df
+
+        def to_df(extractions: Sequence[BaseModel]) -> pl.DataFrame:
+            return _models_to_dataframe(extractions)
+
+        workflow = cast(Any, llm_workflow)
+        workflow._extractions_to_df = to_df
+        try:
+            return run_extraction(**kwargs)
+        finally:
+            workflow._extractions_to_df = original
+
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
-        return executor.submit(run_extraction, **kwargs).result()
+        return executor.submit(run_with_full_schema_inference).result()
+
+
+def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:
+    """Convert validated model results without losing a whole shard on one row.
+
+    Full inference handles nullable fields that only become populated late in a
+    shard. The row-wise fallback protects the checkpoint boundary if a model
+    response still exposes a value Polars cannot combine with its neighbours.
+    """
+    if not extractions:
+        return pl.DataFrame()
+
+    rows = [extraction.model_dump() for extraction in extractions]
+    try:
+        return pl.from_dicts(rows, infer_schema_length=None)
+    except pl.exceptions.PolarsError as error:
+        logger.warning(
+            f'could not combine {len(rows)} extractions at once: {error}; '
+            'falling back to row-wise conversion'
+        )
+
+    converted: list[pl.DataFrame] = []
+    for row in rows:
+        try:
+            converted.append(pl.from_dicts([row], infer_schema_length=None))
+        except pl.exceptions.PolarsError as error:
+            logger.error(f'dropping one validated extraction during dataframe conversion: {error}')
+
+    if not converted:
+        return pl.DataFrame()
+    return pl.concat(converted, how='diagonal_relaxed')
