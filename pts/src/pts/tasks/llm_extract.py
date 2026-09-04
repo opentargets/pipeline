@@ -393,11 +393,34 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
             return _models_to_dataframe(extractions)
 
         workflow = cast(Any, llm_workflow)
+        original_client_factory = workflow.AsyncOpenAI
+        original_asyncio_run = workflow.asyncio.run
+        clients: list[Any] = []
+
+        def create_client(*args: Any, **client_kwargs: Any) -> Any:
+            client = original_client_factory(*args, **client_kwargs)
+            clients.append(client)
+            return client
+
+        def run_and_close_client(coroutine: Any) -> Any:
+            async def run_with_cleanup() -> Any:
+                try:
+                    return await coroutine
+                finally:
+                    for client in clients:
+                        await client.close()
+
+            return original_asyncio_run(run_with_cleanup())
+
         workflow._extractions_to_df = to_df
+        workflow.AsyncOpenAI = create_client
+        workflow.asyncio.run = run_and_close_client
         try:
             return run_extraction(**kwargs)
         finally:
             workflow._extractions_to_df = original
+            workflow.AsyncOpenAI = original_client_factory
+            workflow.asyncio.run = original_asyncio_run
 
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
         return executor.submit(run_with_full_schema_inference).result()
