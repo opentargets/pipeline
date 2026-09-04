@@ -15,6 +15,7 @@ from pts.pyspark.target_safety_event import (
     _harmonize_safety_evidence,
     clean_phenotype_to_describe_safety_event,
     process_adverse_events,
+    process_brennan,
     process_toxcast,
 )
 
@@ -74,6 +75,38 @@ ADVERSE_EVENTS_SCHEMA = StructType([
     StructField('uberonCode', StringType()),
     StructField('url', StringType()),
 ])
+
+BRENNAN_SCHEMA = StructType([
+    StructField('id', StringType()),
+    StructField('event', StringType()),
+    StructField('eventId', StringType()),
+    StructField('datasource', StringType()),
+    StructField('literature', StringType()),
+    StructField('url', StringType()),
+    StructField('effects', StructType([
+        StructField('direction', StringType()),
+        StructField('dosing', StringType()),
+    ])),
+    StructField('studies', ArrayType(StructType([
+        StructField('description', StringType()),
+        StructField('name', StringType()),
+        StructField('type', StringType()),
+    ]))),
+    StructField('biosamples', ArrayType(StructType([
+        StructField('tissueLabel', StringType()),
+    ]))),
+])
+
+
+def _brennan_row(*, event_id):
+    return Row(
+        id='ENSG00000082701', event='Mitochondrial toxicity', eventId=event_id,
+        datasource='Brennan et al. (2024)', literature='38773351', url=None,
+        effects=Row(direction='Activation', dosing=None),
+        studies=[Row(description=None, name=None, type='clinical')],
+        biosamples=None,
+    )
+
 
 TOXCAST_SCHEMA = StructType([
     StructField('assay_component_endpoint_name', StringType()),
@@ -139,6 +172,26 @@ def test_process_toxcast_maps_columns(spark):
     assert out.targetFromSourceId == 'ESR1'
     assert out.event == 'cell proliferation'
     assert out.datasource == 'ToxCast'
+
+
+def test_process_brennan_normalises_empty_string_event_id(spark):
+    """An empty-string eventId (no curated EFO term) becomes a real null.
+
+    Regression test: 5 target_safety_event rows shipped eventId as "" instead of
+    a null, inside a column that every other source already nulls correctly.
+    """
+    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='')], BRENNAN_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.eventId is None
+
+
+def test_process_brennan_keeps_real_event_id(spark):
+    """A genuine curated EFO term passes through unchanged."""
+    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='EFO_0009836')], BRENNAN_SCHEMA))
+    out = result.first()
+    assert out is not None
+    assert out.eventId == 'EFO_0009836'
 
 
 def test_clean_phenotype_maps_toxicity_to_drug_toxicity(spark):
