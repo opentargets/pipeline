@@ -40,6 +40,12 @@ def resolve_ta_labels(diseases: pl.LazyFrame) -> pl.LazyFrame:
         .rename({'therapeuticAreas': 'therapeuticAreaId'})
         .join(area_names, on='therapeuticAreaId', how='inner')
         .group_by('diseaseId')
+        # Bare `unique()` is deliberate: spark's `resolveTALabels` used `collect_set`
+        # (search.py:139), so this order was never defined upstream. It is the one array field
+        # whose order reaches the output unmediated -- disease.py passes `therapeutic_labels`
+        # straight to `category_col`, with no `flatten_cat` or explode in between -- which makes
+        # it LOOK like the order should be pinned. It should not: there is no spark order to be
+        # faithful to, and `category` is compared by set equality. See the rule in `helpers.py`.
         .agg(pl.col('therapeuticAreaLabel').unique().alias('therapeutic_labels'))
     )
     return diseases.join(labels, on='diseaseId', how='left')
