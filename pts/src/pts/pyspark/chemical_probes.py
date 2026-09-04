@@ -248,8 +248,7 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
             .read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
             # Probes that do not have an associated target are marked with "-"
             .query("gene_name != '-'")
-            .reset_index()
-            [PROBES_TARGETS_COLUMNS]
+            .reset_index()[PROBES_TARGETS_COLUMNS]
         )
         .filter(f.col('organism') == 'Homo sapiens')
         .withColumn(

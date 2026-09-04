@@ -1154,14 +1154,10 @@ def _build_genetic_constraints(df: DataFrame) -> DataFrame:
     # 18,256 carry a rank, so the column never reaches 9. Computing it locally
     # keeps upperRank, upperBin and upperBin6 on one denominator.
     w = Window.orderBy(f.col('`lof.oe_ci.upper_rank`').cast(IntegerType()))
-    lof_bins = (
-        filtered
-        .filter(f.col('`lof.oe_ci.upper_rank`') != 'NA')
-        .select(
-            'gene_id',
-            (f.ntile(10).over(w) - 1).alias('lof_upper_bin'),
-            (f.ntile(6).over(w) - 1).alias('lof_upper_bin6'),
-        )
+    lof_bins = filtered.filter(f.col('`lof.oe_ci.upper_rank`') != 'NA').select(
+        'gene_id',
+        (f.ntile(10).over(w) - 1).alias('lof_upper_bin'),
+        (f.ntile(6).over(w) - 1).alias('lof_upper_bin6'),
     )
     filtered = filtered.join(lof_bins, 'gene_id', 'left_outer')
 

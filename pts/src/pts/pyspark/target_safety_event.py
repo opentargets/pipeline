@@ -502,21 +502,18 @@ def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
         DataFrame with columns ``ensgId`` and ``name``
         (``array<str>`` of protein accessions and approved symbol).
     """
-    return (
-        target_df
-        .select(
-            f.col('id').alias('ensgId'),
-            # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
-            # microRNAs) since they have no protein product. flatten(array(...))
-            # returns NULL for the whole array if any element is NULL, which would
-            # silently drop approvedSymbol too -- safe_array_union coalesces each
-            # side to an empty array first, so non-coding targets still resolve by
-            # symbol.
-            safe_array_union(
-                f.col('proteinIds.id'),
-                f.array(f.col('approvedSymbol')),
-            ).alias('name'),
-        )
+    return target_df.select(
+        f.col('id').alias('ensgId'),
+        # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+        # microRNAs) since they have no protein product. flatten(array(...))
+        # returns NULL for the whole array if any element is NULL, which would
+        # silently drop approvedSymbol too -- safe_array_union coalesces each
+        # side to an empty array first, so non-coding targets still resolve by
+        # symbol.
+        safe_array_union(
+            f.col('proteinIds.id'),
+            f.array(f.col('approvedSymbol')),
+        ).alias('name'),
     )
 
 
@@ -555,12 +552,9 @@ def _build_target_safety_events(
     )
 
     # Remap obsolete EFO terms to their current equivalents
-    disease_mapping = (
-        diseases_df
-        .select(
-            f.col('id').alias('diseaseId'),
-            f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm'),
-        )
+    disease_mapping = diseases_df.select(
+        f.col('id').alias('diseaseId'),
+        f.explode(f.col('obsoleteTerms')).alias('obsoleteTerm'),
     )
 
     remapped = (
@@ -576,18 +570,14 @@ def _build_target_safety_events(
     # supplied directly by a source), which a plain null check would miss.
     valid_targets = ensg_lookup.select(f.col('ensgId').alias('id'))
 
-    return (
-        remapped
-        .join(f.broadcast(valid_targets), 'id', 'left_semi')
-        .select(
-            f.col('id').alias('targetId'),
-            'event',
-            'eventId',
-            'effects',
-            'biosamples',
-            'datasource',
-            'literature',
-            'url',
-            'studies',
-        )
+    return remapped.join(f.broadcast(valid_targets), 'id', 'left_semi').select(
+        f.col('id').alias('targetId'),
+        'event',
+        'eventId',
+        'effects',
+        'biosamples',
+        'datasource',
+        'literature',
+        'url',
+        'studies',
     )

@@ -1,34 +1,27 @@
 # AACT
 
-This document was updated on 2026-08-06.
+This document was updated on 2026-09-04.
 
 AACT (Aggregate Analysis of ClinicalTrials.gov) is published as a monthly
 PostgreSQL archive by CTTI, fetched from
 `https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/<version>`.
 
-Two versions are pinned, independently and on purpose. They are different
-things that happen to share a value: one names a CTTI archive, the other names
-an `aact_data` snapshot built from it.
+The AACT archive version is the single pin used by both the preprocessing and
+release DAGs. The preprocessing DAG publishes the exact archive it processed,
+and the release copies that archive and its extraction from the same snapshot.
 
 | Pinned in | Names |
 | --- | --- |
-| `aact_version` in `config/aact_trial_extraction.yaml` | the raw CTTI archive this dag downloads and extracts |
-| `aact_data_version` in `config/unified_pipeline.yaml` | the `aact_data` snapshot a release reads |
+| `aact_version` in the preprocessing config | the raw CTTI archive downloaded and processed |
+| `aact_version` in `unified_pipeline.yaml` | the same archive and `aact_data` snapshot consumed by the release |
 
-The release pin sits with the rest of the release's version pins, next to
-`pis_version` and `gentropy_version`, because it is a property of the release
-rather than of the tool. `pis/config.yaml` carries defaults for both so the
-steps still run standalone, and each dag overrides the one it owns.
-
-This dag can therefore run ahead of any release. Extracting each archive as it
-is published keeps the cache warm and makes the next release cheap, and does not
-move a release onto it. A release moves only when someone bumps its own pin.
+The release pin sits with the other release input pins. `pis/config.yaml`
+carries the default so the steps still run standalone.
 
 Derived data is stored under `gs://aact_data` with the following structure:
 
 ```{bash}
 gs://aact_data/<aact_version>/input/           # the raw CTTI archive
-gs://aact_data/<aact_version>/tables/          # AACT tables exported as parquet
 gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
@@ -46,14 +39,15 @@ under the version.
 
 The **aact_trial_extraction.py** dag contains the following steps:
 
-1. `pis_aact_tables` — downloads the monthly archive, restores it into a
-   throwaway postgres server, and exports the tables as parquet.
+1. `pis_aact` — downloads the monthly archive to `input/aact.zip`.
 2. `pts_aact_trial_extraction` — builds one prompt per trial and sends the ones
-   that are not already in the cache to the OpenAI Responses API.
+   that are not already in the cache to the OpenAI Responses API. It restores
+   and reads the required AACT tables inline through the shared PTS PostgreSQL
+   reader.
 
 As in `unified_pipeline`, a step is named `{stage}_{step}`: the stage is the
 application that runs it, and the step itself is defined in that application's
-own config file, so `pis_aact_tables` runs the `aact_tables` step from
+own config file, so `pis_aact` runs the `aact` step from
 `pis/config.yaml`. The dependency graph is declared in
 `config/aact_trial_extraction.yaml`.
 
@@ -61,10 +55,9 @@ Each step runs on its own short-lived GCE VM and the VM is deleted afterwards.
 The dag does no diffing: it is already incremental where it matters, because
 the extraction only sends the model the trials that are not in its cache.
 
-The output datasets are:
-
-- [x] AACT tables under `gs://aact_data/<aact_version>/tables/`
-- [x] Trial extraction under `gs://aact_data/<aact_version>/extraction/`
+The output dataset is the trial extraction under
+`gs://aact_data/<aact_version>/extraction/`. The raw input archive is retained
+under `gs://aact_data/<aact_version>/input/aact.zip`.
 
 The OpenAI key is fetched from Secret Manager onto the VM and mounted into the
 container; it never appears in configuration or in code.
@@ -92,22 +85,20 @@ shards back up rather than paying for the same API calls twice.
 
 ## Consumers
 
-`unified_pipeline` reads both outputs through PIS `copy_many` tasks that name
-the version literally:
+`unified_pipeline` copies the raw input and extraction through PIS tasks that
+name the shared version literally:
 
-- the `clinical_report` step copies `tables/`
-- the `drug` step copies `extraction/`, which `pts.chembl_molecule` mines for
+- the `clinical_report` step copies `input/aact.zip` and `extraction/`, which
+  `pts.clinical_report` reads inline and
+- the `drug` step consumes `extraction/`, which `pts.chembl_molecule` mines for
   drug synonyms and `pts.clinical_report` uses for indications and drug intent
 
 There is no Airflow dependency between this dag and `unified_pipeline`. Moving a
-release onto a newer AACT archive means making sure this dag has extracted it,
-then bumping `aact_data_version` in `config/unified_pipeline.yaml` — the same
-way every other ingested datasource works here.
+release onto a newer AACT archive means changing the shared `aact_version` pin
+and ensuring the preprocessing DAG has published that snapshot first.
 
-If those two pins disagree in the direction that matters — a release asking for
-an archive nobody extracted — the release fails on its first `copy_many`,
-because `gs://aact_data/<version>/` does not exist. The opposite case, this dag
-being ahead of the release, is normal and does nothing.
+If the release asks for an archive nobody processed, its PIS copy fails because
+`gs://aact_data/<version>/` does not exist.
 
 Note that a release can legitimately contain trials with no extraction row: a
 trial the model answered negatively still produces a row, so a missing row means

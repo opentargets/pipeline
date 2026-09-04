@@ -77,9 +77,7 @@ def test_no_consumer_reads_the_parent_of_a_named_dataset() -> None:
     _sources(config, sources)
 
     offenders = [
-        f'{source!r} is the parent of {named_parents[source]}'
-        for source in set(sources)
-        if source in named_parents
+        f'{source!r} is the parent of {named_parents[source]}' for source in set(sources) if source in named_parents
     ]
     assert not offenders, (
         'a source reads the bare parent of a named dataset, so it will find only '

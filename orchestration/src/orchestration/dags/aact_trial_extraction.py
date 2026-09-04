@@ -1,9 +1,8 @@
 """DAG that extracts structured drug and disease evidence from AACT clinical trials.
 
-This runs outside the release. It restores the pinned AACT monthly archive,
-exports the tables it needs, and asks an LLM to read every trial it has not read
-before, publishing the result to ``gs://aact_data/<aact_version>`` for
-``unified_pipeline`` to copy in.
+This runs outside the release. It downloads the pinned AACT monthly archive and
+asks an LLM to read every trial it has not read before, publishing the result to
+``gs://aact_data/<aact_version>`` for ``unified_pipeline`` to copy in.
 
 The handoff to the release is the same one every ingestion pipeline here uses:
 a version-pinned path that a human names in ``pis/config.yaml``. There is no

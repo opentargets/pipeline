@@ -9,7 +9,6 @@ import polars as pl
 import torch
 from clinical_mining.dataset import ClinicalReport
 from clinical_mining.provider.aact import extract_clinical_report as extract_aact_clinical_report
-from clinical_mining.provider.aact.llm_extractor import parse_batch_results
 from clinical_mining.provider.chembl.drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
@@ -62,7 +61,13 @@ AACT_ARCHIVE_MEMBER = 'postgres.dmp'
 
 AACT_TABLES = {
     'studies': [
-        'nct_id', 'overall_status', 'phase', 'study_type', 'start_date', 'why_stopped', 'number_of_arms',
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
         'official_title',
     ],
     'interventions': ['nct_id', 'intervention_type', 'name'],
@@ -130,7 +135,7 @@ def clinical_report(
     spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
     disease_index_spark = spark.read.parquet(source['disease'])
-    llm_batch_results = parse_batch_results(source['trial_extraction_batch_results'])
+    llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
     pmda_pdf_handler = StorageHandle(source['pmda'])
@@ -149,7 +154,7 @@ def clinical_report(
                 'agg': 'unique',
             }
         },
-        llm_extractions=llm_batch_results.df,
+        llm_extractions=llm_extractions,
     )
     aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
     if aact_stop_reasons.height > 0:
@@ -210,7 +215,7 @@ def clinical_report(
         .pipe(flag_null_drugs)
         .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_batch_results.df.select('id', 'drug_intent'))
+        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_extractions.select('id', 'drug_intent'))
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
@@ -492,7 +497,8 @@ def flag_indirect_primary_purpose(
         reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
         llm_drug_intent_condition = (
             # Flagging should only act on AACT reports
-            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value) &
+            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
+            &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
             # or when LLM was not able to infer the intent (null)
             ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())

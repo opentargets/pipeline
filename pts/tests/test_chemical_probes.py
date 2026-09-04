@@ -19,10 +19,15 @@ from pts.pyspark.chemical_probes import (
 TARGET_SCHEMA = StructType([
     StructField('id', StringType()),
     StructField('approvedSymbol', StringType()),
-    StructField('proteinIds', ArrayType(StructType([
-        StructField('id', StringType()),
-        StructField('source', StringType()),
-    ]))),
+    StructField(
+        'proteinIds',
+        ArrayType(
+            StructType([
+                StructField('id', StringType()),
+                StructField('source', StringType()),
+            ])
+        ),
+    ),
 ])
 
 EVIDENCE_SCHEMA = StructType([
@@ -160,9 +165,7 @@ def test_resolve_targets_resolves_symbol_for_non_coding_gene(spark):
     dropping this probe.
     """
     evidence = spark.createDataFrame([_evidence_row('MIR122')], EVIDENCE_SCHEMA)
-    target = spark.createDataFrame(
-        [Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None)], TARGET_SCHEMA
-    )
+    target = spark.createDataFrame([Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None)], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
     assert result.count() == 1
@@ -185,10 +188,13 @@ def test_resolve_targets_retains_target_from_source_id(spark):
 
 def test_resolve_targets_multiple_probes_same_target(spark):
     """Multiple probes for the same target each produce their own row."""
-    evidence = spark.createDataFrame([
-        _evidence_row('GENE1', compound='probe_a'),
-        _evidence_row('GENE1', compound='probe_b'),
-    ], EVIDENCE_SCHEMA)
+    evidence = spark.createDataFrame(
+        [
+            _evidence_row('GENE1', compound='probe_a'),
+            _evidence_row('GENE1', compound='probe_b'),
+        ],
+        EVIDENCE_SCHEMA,
+    )
     target = spark.createDataFrame([_target_row('ENSG00000001', 'GENE1')], TARGET_SCHEMA)
     lut = _build_ensg_lookup(target)
     result = _resolve_targets(evidence, lut)
@@ -237,8 +243,7 @@ def _probes_sheet_df(spark, memberships):
         DataFrame with one row, ``pdid`` plus every one-hot datasource column.
     """
     schema = StructType(
-        [StructField('pdid', StringType())]
-        + [StructField(c, DoubleType()) for c in PROBES_SHEET_DATASOURCE_COLUMNS]
+        [StructField('pdid', StringType())] + [StructField(c, DoubleType()) for c in PROBES_SHEET_DATASOURCE_COLUMNS]
     )
     row = [1.0 if c in memberships else None for c in PROBES_SHEET_DATASOURCE_COLUMNS]
     return spark.createDataFrame([['PD000001', *row]], schema)
@@ -352,6 +357,4 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
         spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
 
     assert 'covalent' not in df.columns
-    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
-        'only the row without a gene_name should be dropped'
-    )
+    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], 'only the row without a gene_name should be dropped'

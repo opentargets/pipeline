@@ -27,16 +27,14 @@ MECHANISM_SCHEMA = {
 
 @pytest.fixture
 def tables() -> dict:
-    drug_mechanism = pl.DataFrame(
-        {
-            'mec_id': [100, 101],
-            'record_id': [1000, 1001],
-            'molregno': [1, 3],
-            'mechanism_of_action': ['Inhibits enzyme X', 'Blocks receptor'],
-            'tid': [20, 21],
-            'action_type': ['INHIBITOR', 'ANTAGONIST'],
-        }
-    )
+    drug_mechanism = pl.DataFrame({
+        'mec_id': [100, 101],
+        'record_id': [1000, 1001],
+        'molregno': [1, 3],
+        'mechanism_of_action': ['Inhibits enzyme X', 'Blocks receptor'],
+        'tid': [20, 21],
+        'action_type': ['INHIBITOR', 'ANTAGONIST'],
+    })
     mechanism_refs = pl.DataFrame({
         'mecref_id': [1, 2],
         'mec_id': [100, 100],
@@ -194,14 +192,22 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -217,14 +223,22 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Dopamine D2 receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'references': refs, 'targetName': 'D2',
-                'targetType': 'single protein', 'targets': ['ENSG2'],
+                'mechanismOfAction': 'Dopamine D2 receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'references': refs,
+                'targetName': 'D2',
+                'targetType': 'single protein',
+                'targets': ['ENSG2'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -242,14 +256,22 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)

@@ -32,21 +32,30 @@ ENSEMBL_SCHEMA = StructType([
     StructField('id', StringType()),
     StructField(
         'transcripts',
-        ArrayType(StructType([
-            StructField('id', StringType()),
-            StructField('uniprot_swissprot', ArrayType(StringType())),
-            StructField('uniprot_trembl', ArrayType(StringType())),
-            StructField('uniprot_isoform', ArrayType(StringType())),
-            StructField('alphafold', ArrayType(StringType())),
-        ])),
+        ArrayType(
+            StructType([
+                StructField('id', StringType()),
+                StructField('uniprot_swissprot', ArrayType(StringType())),
+                StructField('uniprot_trembl', ArrayType(StringType())),
+                StructField('uniprot_isoform', ArrayType(StringType())),
+                StructField('alphafold', ArrayType(StringType())),
+            ])
+        ),
     ),
 ])
 
 
 def _gff(chrom, feature, start, end, strand, attrs):
     return Row(
-        _c0=chrom, _c1='HAVANA', _c2=feature,
-        _c3=str(start), _c4=str(end), _c5='.', _c6=strand, _c7='.', _c8=attrs,
+        _c0=chrom,
+        _c1='HAVANA',
+        _c2=feature,
+        _c3=str(start),
+        _c4=str(end),
+        _c5='.',
+        _c6=strand,
+        _c7='.',
+        _c8=attrs,
     )
 
 
@@ -65,10 +74,7 @@ _TX_ATTRS = (
     'transcript_type=protein_coding;protein_id=ENSP00000493376.2;'
     'tag=Ensembl_canonical,GENCODE_Primary,MANE_Select,appris_principal_1'
 )
-_NC_ATTRS = (
-    'gene_id=ENSG00000290825.3;transcript_id=ENST00000832824.1;'
-    'transcript_type=lncRNA;tag=basic'
-)
+_NC_ATTRS = 'gene_id=ENSG00000290825.3;transcript_id=ENST00000832824.1;transcript_type=lncRNA;tag=basic'
 _EXON_ATTRS_A = 'transcript_id=ENST00000641515.2;exon_id=ENSE00003899065.1'
 _EXON_ATTRS_B = 'transcript_id=ENST00000641515.2;exon_id=ENSE00001234567.2'
 
@@ -244,6 +250,7 @@ def _flags_for(spark, tags: list[str]) -> list:
         StructType([StructField('tags', ArrayType(StringType()))]),
     )
     import pyspark.sql.functions as f
+
     row = tags_col_df.select(_build_flags(f.col('tags')).alias('flags')).first()
     assert row is not None
     return row.flags
@@ -338,9 +345,14 @@ def test_parse_exons_exon_struct_fields(spark):
 
 def test_build_uniprot_lut_keeps_swissprot_and_trembl_separate(spark):
     """Swiss-Prot and TrEMBL IDs pass through as distinct columns, not merged."""
-    data = [Row(id='ENSG00000001', transcripts=[
-        _ensembl_tx('ENST00000001', uniprot_swissprot=['P12345'], uniprot_trembl=['A0A001']),
-    ])]
+    data = [
+        Row(
+            id='ENSG00000001',
+            transcripts=[
+                _ensembl_tx('ENST00000001', uniprot_swissprot=['P12345'], uniprot_trembl=['A0A001']),
+            ],
+        )
+    ]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000001"').first()
     assert row is not None
@@ -350,9 +362,14 @@ def test_build_uniprot_lut_keeps_swissprot_and_trembl_separate(spark):
 
 def test_build_uniprot_lut_handles_null_trembl(spark):
     """Null uniprot_trembl does not cause an error and stays null (not an empty array)."""
-    data = [Row(id='ENSG00000002', transcripts=[
-        _ensembl_tx('ENST00000002', uniprot_swissprot=['P99999'], uniprot_trembl=None),
-    ])]
+    data = [
+        Row(
+            id='ENSG00000002',
+            transcripts=[
+                _ensembl_tx('ENST00000002', uniprot_swissprot=['P99999'], uniprot_trembl=None),
+            ],
+        )
+    ]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000002"').first()
     assert row is not None
@@ -362,9 +379,14 @@ def test_build_uniprot_lut_handles_null_trembl(spark):
 
 def test_build_uniprot_lut_propagates_isoform_and_alphafold(spark):
     """uniprotIsoformIds/alphafoldIds pass through untouched from the Ensembl parquet."""
-    data = [Row(id='ENSG00000005', transcripts=[
-        _ensembl_tx('ENST00000005', uniprot_isoform=['P12345-2'], alphafold=['AF-P12345-F1']),
-    ])]
+    data = [
+        Row(
+            id='ENSG00000005',
+            transcripts=[
+                _ensembl_tx('ENST00000005', uniprot_isoform=['P12345-2'], alphafold=['AF-P12345-F1']),
+            ],
+        )
+    ]
     result = _build_uniprot_lut(spark.createDataFrame(data, ENSEMBL_SCHEMA))
     row = result.filter('transcriptId = "ENST00000005"').first()
     assert row is not None
@@ -380,10 +402,22 @@ def test_build_uniprot_lut_propagates_isoform_and_alphafold(spark):
 def test_join_and_finalise_output_schema(spark):
     """Output contains exactly the expected columns."""
     expected_cols = {
-        'targetId', 'transcriptId', 'biotype', 'proteinId',
-        'uniprotSwissprotIds', 'uniprotTremblIds', 'uniprotIsoformIds', 'alphafoldIds',
-        'isEnsemblCanonical', 'chromosome', 'start', 'end', 'strand',
-        'transcriptionStartSite', 'flags', 'exons',
+        'targetId',
+        'transcriptId',
+        'biotype',
+        'proteinId',
+        'uniprotSwissprotIds',
+        'uniprotTremblIds',
+        'uniprotIsoformIds',
+        'alphafoldIds',
+        'isEnsemblCanonical',
+        'chromosome',
+        'start',
+        'end',
+        'strand',
+        'transcriptionStartSite',
+        'flags',
+        'exons',
     }
     gff_rows = [_gff('chr1', 'transcript', 65419, 71585, '+', _TX_ATTRS)]
     gff = _parse_gff3(spark.createDataFrame(gff_rows, GFF3_SCHEMA))
@@ -391,9 +425,14 @@ def test_join_and_finalise_output_schema(spark):
     exon_rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
     exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
 
-    ensembl_data = [Row(id='ENSG00000186092', transcripts=[
-        _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
-    ])]
+    ensembl_data = [
+        Row(
+            id='ENSG00000186092',
+            transcripts=[
+                _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
+            ],
+        )
+    ]
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
     result = _join_and_finalise(gff, exons, uniprot)
@@ -413,9 +452,14 @@ def test_join_and_finalise_publishes_strand_as_integer(spark):
     exon_rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
     exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
 
-    ensembl_data = [Row(id='ENSG00000186092', transcripts=[
-        _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
-    ])]
+    ensembl_data = [
+        Row(
+            id='ENSG00000186092',
+            transcripts=[
+                _ensembl_tx('ENST00000641515', uniprot_swissprot=['A0A2U3U0J3'], uniprot_trembl=None),
+            ],
+        )
+    ]
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
     result = _join_and_finalise(gff, exons, uniprot)
@@ -442,15 +486,20 @@ def test_join_and_finalise_propagates_uniprot_ids(spark):
     exon_rows = [_gff('chr1', 'exon', 65419, 65433, '+', _EXON_ATTRS_A)]
     exons = _parse_exons(spark.createDataFrame(exon_rows, GFF3_SCHEMA))
 
-    ensembl_data = [Row(id='ENSG00000186092', transcripts=[
-        _ensembl_tx(
-            'ENST00000641515',
-            uniprot_swissprot=['A0A2U3U0J3'],
-            uniprot_trembl=None,
-            uniprot_isoform=['A0A2U3U0J3-2'],
-            alphafold=['AF-A0A2U3U0J3-F1'],
-        ),
-    ])]
+    ensembl_data = [
+        Row(
+            id='ENSG00000186092',
+            transcripts=[
+                _ensembl_tx(
+                    'ENST00000641515',
+                    uniprot_swissprot=['A0A2U3U0J3'],
+                    uniprot_trembl=None,
+                    uniprot_isoform=['A0A2U3U0J3-2'],
+                    alphafold=['AF-A0A2U3U0J3-F1'],
+                ),
+            ],
+        )
+    ]
     uniprot = _build_uniprot_lut(spark.createDataFrame(ensembl_data, ENSEMBL_SCHEMA))
 
     row = _join_and_finalise(gff, exons, uniprot).first()

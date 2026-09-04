@@ -284,10 +284,10 @@ class TestResolveEvidenceDate:
     def test_all_dates_present_picks_minimum(self: TestResolveEvidenceDate) -> None:
         """When all date columns are non-null, the earliest date is selected."""
         result = self.evidence_with_dates.resolve_evidence_date().df
-        assert result.filter(
-            (f.col('publicationDate') == '2020-01-01')
-            & (f.col('evidenceDate') != '2019-01-01')
-        ).count() == 0
+        assert (
+            result.filter((f.col('publicationDate') == '2020-01-01') & (f.col('evidenceDate') != '2019-01-01')).count()
+            == 0
+        )
 
     def test_null_date_column_ignored(self: TestResolveEvidenceDate) -> None:
         """Null date columns do not propagate null to evidenceDate when other dates are available."""
@@ -312,7 +312,6 @@ class TestResolveEvidenceDate:
             ).count()
             == 0
         )
-
 
     def test_existing_evidence_date_is_included(self: TestResolveEvidenceDate) -> None:
         """An existing evidenceDate participates in minimum-date selection."""
