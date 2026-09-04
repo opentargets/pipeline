@@ -89,26 +89,39 @@ def build_target_index(
     associations: pl.LazyFrame,
     d_lut: pl.LazyFrame,
     variants: pl.LazyFrame,
+    scored_drugs: pl.LazyFrame,
+    dr_lut: pl.LazyFrame,
 ) -> pl.LazyFrame:
     """Build the search index for targets.
 
     Ports `Transformers.Implicits.setIdAndSelectFromTargets`.
-
-    Takes no drug lookup: in the job this replaces, the guard `'drugId' in associations.columns`
-    is always False, so target documents carry NO drug terms. Reproduced deliberately so the
-    port is provably faithful; the fix lands in its own commit.
 
     Args:
         targets: target frame.
         associations: output of `association_scores`.
         d_lut: `diseaseId` and `disease_labels`.
         variants: variant frame.
+        scored_drugs: output of `scored_drug_associations`.
+        dr_lut: `drugId` and `drug_labels`.
 
     Returns:
         Search index LazyFrame, one row per target.
     """
+    drug_by_association = (
+        scored_drugs.join(dr_lut, on='drugId', how='inner')
+        .group_by('associationId')
+        .agg(
+            pl.col('drug_labels')
+            .drop_nulls()
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .alias('drug_labels')
+        )
+    )
+
     ranked = (
-        associations.with_columns(partitioned_rank(pl.col('score'), by='targetId', descending=True).alias('rank'))
+        associations.join(drug_by_association, on='associationId', how='left')
+        .with_columns(partitioned_rank(pl.col('score'), by='targetId', descending=True).alias('rank'))
         .filter(pl.col('rank') <= _TOP50)
         .join(d_lut, on='diseaseId', how='inner')
         .group_by('targetId')
@@ -116,6 +129,9 @@ def build_target_index(
             tier('disease_labels', 'rank', _TOP50).alias('disease_labels'),
             tier('disease_labels', 'rank', _TOP25).alias('disease_labels_25'),
             tier('disease_labels', 'rank', _TOP5).alias('disease_labels_5'),
+            tier('drug_labels', 'rank', _TOP50).alias('drug_labels'),
+            tier('drug_labels', 'rank', _TOP25).alias('drug_labels_25'),
+            tier('drug_labels', 'rank', _TOP5).alias('drug_labels_5'),
             pl.col('score').mean().alias('target_relevance'),
         )
     )
@@ -138,6 +154,9 @@ def build_target_index(
             pl.col('variant_labels').fill_null(EMPTY_LIST),
             pl.col('variant_labels_25').fill_null(EMPTY_LIST),
             pl.col('variant_labels_5').fill_null(EMPTY_LIST),
+            pl.col('drug_labels').fill_null(EMPTY_LIST),
+            pl.col('drug_labels_25').fill_null(EMPTY_LIST),
+            pl.col('drug_labels_5').fill_null(EMPTY_LIST),
         )
     )
 
@@ -168,9 +187,9 @@ def build_target_index(
             as_list(pl.col('approvedName')),
             as_list(pl.col('approvedSymbol')),
         ),
-        terms_col=flatten_cat(pl.col('disease_labels'), pl.col('variant_labels')),
-        terms25_col=flatten_cat(pl.col('disease_labels_25'), pl.col('variant_labels_25')),
-        terms5_col=flatten_cat(pl.col('disease_labels_5'), pl.col('variant_labels_5')),
+        terms_col=flatten_cat(pl.col('disease_labels'), pl.col('drug_labels'), pl.col('variant_labels')),
+        terms25_col=flatten_cat(pl.col('disease_labels_25'), pl.col('drug_labels_25'), pl.col('variant_labels_25')),
+        terms5_col=flatten_cat(pl.col('disease_labels_5'), pl.col('drug_labels_5'), pl.col('variant_labels_5')),
         multiplier_col=pl.when(pl.col('target_relevance').is_not_null())
         .then(pl.col('target_relevance').log1p() + 1.0)
         .otherwise(0.01),

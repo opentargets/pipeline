@@ -112,7 +112,7 @@ def search(
     )
 
     logger.info('building search index for targets')
-    write_dataset(build_target_index(targets, scores, d_lut, variants), destination['targets'])
+    write_dataset(build_target_index(targets, scores, d_lut, variants, scored_drugs, dr_lut), destination['targets'])
 
     logger.info('building search index for drugs')
     write_dataset(

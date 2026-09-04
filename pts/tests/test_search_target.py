@@ -68,6 +68,13 @@ def _inputs(**overrides):
             schema={'diseaseId': pl.String, 'disease_labels': LIST_STR},
         ),
         'variants': pl.LazyFrame([_variant()], schema=VARIANT_SCHEMA),
+        'scored_drugs': pl.LazyFrame(
+            {'associationId': ['D1-T1'], 'drugId': ['CH1'], 'targetId': ['T1'], 'diseaseId': ['D1'], 'score': [0.8]}
+        ),
+        'dr_lut': pl.LazyFrame(
+            {'drugId': ['CH1'], 'drug_labels': [['aspirin']]},
+            schema={'drugId': pl.String, 'drug_labels': LIST_STR},
+        ),
     }
     base.update(overrides)
     return base
@@ -121,12 +128,31 @@ def test_target_terms_hold_disease_and_variant_labels() -> None:
     assert '1_100_A_G' in terms
 
 
-def test_target_terms_carry_no_drug_labels_matching_the_current_release() -> None:
-    """Pins the CURRENT behaviour so the port is provably faithful. Task 12 changes this
-    deliberately, in its own commit, with a measured delta."""
+def test_target_terms_now_carry_drug_labels() -> None:
+    """The fix. Before this, `'drugId' in associations.columns` was always False, so the
+    else-branch fired and EGFR's 19,016 terms contained no drug at all."""
     result = build_target_index(**_inputs()).collect()
 
+    assert 'aspirin' in result['terms'][0].to_list()
+    assert 'aspirin' in result['terms5'][0].to_list()
+
+
+def test_target_with_no_drug_evidence_still_gets_empty_drug_terms_not_null() -> None:
+    scored_drugs = pl.LazyFrame(
+        {'associationId': [], 'drugId': [], 'targetId': [], 'diseaseId': [], 'score': []},
+        schema={
+            'associationId': pl.String,
+            'drugId': pl.String,
+            'targetId': pl.String,
+            'diseaseId': pl.String,
+            'score': pl.Float64,
+        },
+    )
+
+    result = build_target_index(**_inputs(scored_drugs=scored_drugs)).collect()
+
     assert result.height == 1
+    assert 'asthma' in result['terms'][0].to_list()
 
 
 def test_variant_labels_by_target_keeps_only_the_top_ranked_variants() -> None:
