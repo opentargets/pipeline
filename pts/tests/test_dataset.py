@@ -9,7 +9,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -263,3 +263,40 @@ def test_round_trip(tmp_path: Path) -> None:
     write_dataset(frame, path)
 
     assert scan_dataset(path).collect().sort('a').equals(frame.sort('a'))
+
+
+def test_scan_datasets_reads_every_matching_dataset(tmp_path: Path) -> None:
+    _write_parts(tmp_path / 'evidence_a', pl.DataFrame({'targetId': ['t1']}))
+    _write_parts(tmp_path / 'evidence_b', pl.DataFrame({'targetId': ['t2']}))
+    _write_parts(tmp_path / 'other', pl.DataFrame({'targetId': ['t3']}))
+
+    frame = scan_datasets(str(tmp_path / 'evidence_*')).collect()
+
+    assert sorted(frame['targetId'].to_list()) == ['t1', 't2']
+
+
+def test_scan_datasets_unions_differing_schemas(tmp_path: Path) -> None:
+    """Most evidence datasets have no `drugId`; spark's mergeSchema null-filled them."""
+    _write_parts(tmp_path / 'evidence_a', pl.DataFrame({'targetId': ['t1'], 'drugId': ['d1']}))
+    _write_parts(tmp_path / 'evidence_b', pl.DataFrame({'targetId': ['t2']}))
+
+    frame = scan_datasets(str(tmp_path / 'evidence_*')).select('targetId', 'drugId').collect()
+
+    assert sorted(zip(frame['targetId'], frame['drugId'], strict=True)) == [('t1', 'd1'), ('t2', None)]
+
+
+def test_scan_datasets_raises_when_the_glob_matches_nothing(tmp_path: Path) -> None:
+    """A mistyped pattern must fail loudly, not yield an empty frame.
+
+    An empty evidence frame would silently strip every drug from the disease index rather
+    than erroring, so this is the difference between a loud failure and a bad release.
+    """
+    with pytest.raises(ValueError, match='matched no datasets'):
+        scan_datasets(str(tmp_path / 'nothing_*'))
+
+
+def test_scan_datasets_requires_a_glob(tmp_path: Path) -> None:
+    _write_parts(tmp_path / 'plain', pl.DataFrame({'a': [1]}))
+
+    with pytest.raises(ValueError, match='is not a glob'):
+        scan_datasets(str(tmp_path / 'plain'))
