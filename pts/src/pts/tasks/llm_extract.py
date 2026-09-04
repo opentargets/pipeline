@@ -442,7 +442,8 @@ def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:
         return pl.from_dicts(rows, infer_schema_length=None)
     except pl.exceptions.PolarsError as error:
         logger.warning(
-            f'could not combine {len(rows)} extractions at once: {error}; falling back to row-wise conversion'
+            f'could not combine {len(rows)} extractions at once: {error}; '
+            'falling back to row-wise conversion'
         )
 
     converted: list[pl.DataFrame] = []
