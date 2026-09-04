@@ -29,9 +29,10 @@ gs://aact_data/cache/trial_extraction/         # the extraction cache, shared ac
 ```
 
 The cache sits outside the version directory on purpose. It is keyed on a hash
-of the prompt, so a trial whose text did not change between two monthly
-archives has to be a cache hit — and it cannot be one if the cache is filed
-under the version.
+of the rendered prompt and output schema, so a trial whose text did not change
+between two monthly archives has to be a cache hit — and it cannot be one if
+the cache is filed under the version. The model and system instructions are
+operational choices and are not part of the key.
 
 ## Preprocessing
 
@@ -60,7 +61,7 @@ The output dataset is the trial extraction under
 under `gs://aact_data/<aact_version>/input/aact.zip`.
 
 The OpenAI key is fetched from Secret Manager onto the VM and mounted into the
-container; it never appears in configuration or in code.
+container.
 
 ## Processing description
 
@@ -69,9 +70,9 @@ primary indications and background conditions, and the investigated, comparator
 and supportive drugs, each with synonyms and dosages.
 
 Only trials that are not already in the cache are sent to the model. The cache
-key hashes the `rendered prompt`, the `system prompt text`, the `model name` and the
-`JSON schema` the response is validated against, so editing any one of them
-re-extracts exactly the affected trials and nothing else.
+key hashes the `rendered prompt` and the `JSON schema` the response is validated
+against. Changing the model or system instructions therefore does not
+re-extract accepted results; changing the prompt or schema does.
 
 Only results are cached. A trial the model failed on has no row, so it is
 indistinguishable from one never attempted and the next run tries it again.
@@ -82,6 +83,17 @@ each run is cheaper than the bookkeeping needed to remember not to.
 Work is sharded, and each shard is written to `cache/trial_extraction/staging/`
 as it completes. Rerunning the dag against the same `aact_version` picks those
 shards back up rather than paying for the same API calls twice.
+
+### Importing earlier Batch API results
+
+Earlier OpenAI Batch API output can be imported once by setting the optional
+`legacy_batch_results` field on `llm_extract` to a directory containing the
+`*_output.jsonl` files. Set `legacy_import_only: true` for the first run. The
+task parses valid responses, matches them to the current prompts, and seeds the
+shared cache using the current prompt-and-schema keys without making API calls.
+Rate-limited, malformed, and unmatched responses remain cache misses. Inspect
+the migration counts, then remove both migration fields and run the DAG
+normally; only the remaining misses are sent to the configured model.
 
 ## Consumers
 
@@ -100,13 +112,19 @@ and ensuring the preprocessing DAG has published that snapshot first.
 If the release asks for an archive nobody processed, its PIS copy fails because
 `gs://aact_data/<version>/` does not exist.
 
-Note that a release can legitimately contain trials with no extraction row: a
-trial the model answered negatively still produces a row, so a missing row means
-the extraction never succeeded for it. `pts.clinical_report` warns about the
-coverage gap rather than failing — a slightly thinner extraction is not a reason
-to stop a release.
+Only AACT trials with a successful extraction row are included in the clinical
+report. A trial the model answered negatively still produces a row, so a
+missing row means the extraction never succeeded and the trial is excluded
+rather than being combined with partially populated AACT data.
 
 ## Changelog
+
+### 2026-09-04
+
+- Reuse earlier Batch API results by optionally seeding the content-addressed
+  cache; cache identity is the rendered prompt and output schema, not the model
+  or system instructions.
+- Exclude AACT trials without successful extraction from the clinical report.
 
 ### 2026-08-06
 
