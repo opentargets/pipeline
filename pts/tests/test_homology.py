@@ -34,6 +34,59 @@ ORTHOLOG_SCHEMA = StructType([
 ])
 
 
+HOMOLOGY_DICT_SCHEMA = StructType([
+    StructField('#name', StringType()),
+    StructField('species', StringType()),
+    StructField('taxonomy_id', StringType()),
+])
+
+CODING_PROTEINS_SCHEMA = StructType([
+    StructField('gene_stable_id', StringType()),
+    StructField('protein_stable_id', StringType()),
+    StructField('species', StringType()),
+    StructField('identity', DoubleType()),
+    StructField('homology_type', StringType()),
+    StructField('homology_gene_stable_id', StringType()),
+    StructField('homology_protein_stable_id', StringType()),
+    StructField('homology_species', StringType()),
+    StructField('homology_identity', DoubleType()),
+    StructField('dn', DoubleType()),
+    StructField('ds', DoubleType()),
+    StructField('goc_score', DoubleType()),
+    StructField('wga_coverage', DoubleType()),
+    StructField('is_high_confidence', StringType()),
+    StructField('homology_id', StringType()),
+])
+
+GENE_DICT_SCHEMA = StructType([
+    StructField('id', StringType()),
+    StructField('name', StringType()),
+])
+
+
+def _mouse_pair_row(**kwargs):
+    """A single homo_sapiens/mouse coding-protein homology row, whitelisted by default."""
+    defaults = {
+        'gene_stable_id': 'ENSG0001',
+        'protein_stable_id': 'P001',
+        'species': 'homo_sapiens',
+        'identity': 100.0,
+        'homology_type': 'ortholog_one2one',
+        'homology_gene_stable_id': 'ENSMUSG0001',
+        'homology_protein_stable_id': 'P002',
+        'homology_species': 'mus_musculus',
+        'homology_identity': 88.0,
+        'dn': None,
+        'ds': None,
+        'goc_score': None,
+        'wga_coverage': None,
+        'is_high_confidence': '1',
+        'homology_id': 'h001',
+    }
+    defaults.update(kwargs)
+    return Row(**defaults)
+
+
 def _ortholog_row(**kwargs):
     defaults = {
         'id': 'ENSG1',
@@ -154,6 +207,60 @@ def test_homology_whitelist_filtering(spark):
     species_ids = {r.speciesId for r in rows}
     assert '10090' in species_ids
     assert '10116' not in species_ids
+
+
+def _single_pair_setup(spark, coding_proteins_row, gene_name):
+    """Minimal whitelisted mouse pair plus a one-row gene dictionary, for isolated checks."""
+    homology_dict_df = spark.createDataFrame(
+        [Row(**{'#name': 'mus_musculus', 'species': 'mus_musculus', 'taxonomy_id': '10090'})],
+        HOMOLOGY_DICT_SCHEMA,
+    )
+    coding_proteins_df = spark.createDataFrame([coding_proteins_row], CODING_PROTEINS_SCHEMA)
+    gene_dict_df = spark.createDataFrame([Row(id='ENSMUSG0001', name=gene_name)], GENE_DICT_SCHEMA)
+    return _build_homology(homology_dict_df, coding_proteins_df, gene_dict_df, ['10090-mus_musculus'])
+
+
+def test_homology_normalises_stringified_null_confidence(spark):
+    """The raw TSV's literal "NULL" text for is_high_confidence becomes a real null.
+
+    Regression test: the upstream Ensembl Compara TSV writes a missing confidence
+    flag as the text "NULL", which the CSV reader has no reason to treat as a null
+    on its own -- shipping the literal string in ~93% of homology rows.
+    """
+    result = _single_pair_setup(spark, _mouse_pair_row(is_high_confidence='NULL'), gene_name='Trp53')
+    row = result.first()
+    assert row is not None
+    assert row.isHighConfidence is None
+
+
+def test_homology_keeps_real_confidence_flag(spark):
+    """A genuine "1"/"0" confidence flag passes through unchanged."""
+    result = _single_pair_setup(spark, _mouse_pair_row(is_high_confidence='1'), gene_name='Trp53')
+    row = result.first()
+    assert row is not None
+    assert row.isHighConfidence == '1'
+
+
+def test_homology_normalises_placeholder_gene_symbol(spark):
+    """A gene-dictionary name of "Nil"/"nan"/"na" falls back to the stable ID, like a real null does.
+
+    Regression test: 14 Drosophila melanogaster homology rows shipped the literal
+    text "Nil", "nan" or "na" as targetGeneSymbol instead of falling back to the
+    gene's stable ID the way a genuinely missing/empty name already does.
+    """
+    for placeholder in ('Nil', 'nan', 'na', 'NAN'):
+        result = _single_pair_setup(spark, _mouse_pair_row(), gene_name=placeholder)
+        row = result.first()
+        assert row is not None
+        assert row.targetGeneSymbol == 'ENSMUSG0001', f'placeholder {placeholder!r} leaked through'
+
+
+def test_homology_keeps_real_gene_symbol(spark):
+    """A genuine gene symbol is not affected by the placeholder-token check."""
+    result = _single_pair_setup(spark, _mouse_pair_row(), gene_name='Trp53')
+    row = result.first()
+    assert row is not None
+    assert row.targetGeneSymbol == 'Trp53'
 
 
 # ---------------------------------------------------------------------------
