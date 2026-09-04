@@ -40,11 +40,7 @@ def resolve_ta_labels(diseases: pl.LazyFrame) -> pl.LazyFrame:
         .rename({'therapeuticAreas': 'therapeuticAreaId'})
         .join(area_names, on='therapeuticAreaId', how='inner')
         .group_by('diseaseId')
-        # Order-preserving: `therapeutic_labels` reaches the disease index's `category` column
-        # directly (disease.py passes it through with no `flatten_cat` or explode in between),
-        # so unlike every other array field here its element order is not mediated away before
-        # it reaches the output. See the ordering rule in `helpers.py`.
-        .agg(pl.col('therapeuticAreaLabel').unique(maintain_order=True).alias('therapeutic_labels'))
+        .agg(pl.col('therapeuticAreaLabel').unique().alias('therapeutic_labels'))
     )
     return diseases.join(labels, on='diseaseId', how='left')
 

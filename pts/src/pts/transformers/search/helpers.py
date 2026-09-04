@@ -16,13 +16,24 @@ LIST_STR = pl.List(pl.String)
 EMPTY_LIST = pl.lit([], dtype=LIST_STR)
 
 #: The `unique()` split across this package, spelled out because nothing else states it and one
-#: implementer already drew the wrong analogy from it: use `unique(maintain_order=True)` where
-#: the spark original is `array_distinct` (which keeps first occurrence), and bare `unique()`
-#: where it is `collect_set` (which spark itself leaves in an arbitrary order). The one deliberate
-#: exception is `drug.py`'s `indicationLabels` aggregate: spark line 525 there is a `collect_set`,
-#: so a bare `unique()` would be the faithful port, but it uses `maintain_order=True` for
-#: consistency with its neighbours. That is harmless -- the value passes through `flatten_cat`
-#: into `terms`, which is compared by set equality, not by order.
+#: implementer already drew the wrong analogy from it, and an external reviewer read one of the
+#: two exceptions below as a bug on the strength of that same wrong analogy:
+#:
+#: * Spark `array_distinct` keeps first occurrence -> port it as `unique(maintain_order=True)`.
+#: * Spark `collect_set` is itself arbitrary -> a bare `unique()` is the faithful port, REGARDLESS
+#:   of where the result ends up. Order is not something to preserve if spark never defined one.
+#:
+#: Two sites depart from that mapping, in opposite directions, and neither is a bug:
+#:
+#: * `drug.py`'s `indicationLabels` aggregate is a `collect_set` port (spark line 525) that uses
+#:   `maintain_order=True` anyway, for consistency with its neighbours. Harmless: the value passes
+#:   through `flatten_cat` into `terms`, which is compared by set equality, not by order.
+#: * `lookups.py`'s `resolve_ta_labels` is also a `collect_set` port (spark `search.py:139`) and
+#:   correctly stays a bare `unique()`, even though its `therapeutic_labels` reaches the disease
+#:   index's `category` column directly, with no `flatten_cat` or explode in between to absorb the
+#:   order. That directness makes it LOOK like the one array field whose order should be pinned --
+#:   it is not: spark's own `category` order was never defined, so `maintain_order=True` there
+#:   would just substitute one arbitrary order for another, not add fidelity.
 
 #: The four synonym fields on `disease.synonyms`, in the order the pyspark job merged them.
 #: Defined here rather than in each consumer so the disease LUT and the disease index cannot
