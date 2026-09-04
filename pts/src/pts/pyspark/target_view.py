@@ -172,7 +172,7 @@ def _build_chemical_probes(df: DataFrame) -> DataFrame:
     """Group chemical probe rows by target into the old ``chemicalProbes`` array.
 
     Args:
-        df: output/chemical_probes, one row per (targetId, probe).
+        df: output/chemical_probe, one row per (targetId, probe).
 
     Returns:
         DataFrame with [id, chemicalProbes[{targetFromSourceId, id,

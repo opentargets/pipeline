@@ -281,7 +281,7 @@ steps:
         drugs_csv: input/target/chemicalprobes/probes_links.csv
         chembl_molecule: intermediate/chembl_molecule
         target: output/target
-      destination: output/chemical_probes
+      destination: output/chemical_probe
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
@@ -490,7 +490,7 @@ steps:
         homology: output/homology
         target_tractability: output/target_tractability
         target_safety_event: output/target_safety_event
-        chemical_probes: output/chemical_probes
+        chemical_probes: output/chemical_probe
         transcript: output/transcript
       destination: view/target_view
   ##################################################################################################
@@ -765,7 +765,7 @@ steps:
       transformer: drug_molecule
       source:
         molecule: intermediate/chembl_molecule
-        chemical_probes: output/chemical_probes
+        chemical_probes: output/chemical_probe
         mechanism_of_action: output/drug_mechanism_of_action
         clinical_report: output/clinical_report
         disease: output/disease
@@ -833,7 +833,7 @@ steps:
         targets: output/target
         tractability: output/target_tractability
         target_safety_event: output/target_safety_event
-        chemical_probes: output/chemical_probes
+        chemical_probes: output/chemical_probe
         homology: output/homology
         mouse_phenotypes: output/mouse_phenotype
         molecule: output/drug_molecule
