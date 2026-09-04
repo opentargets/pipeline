@@ -8,12 +8,10 @@ almost nothing changes.
 This module keeps their results in a cache keyed by a hash of the exact input
 that produced them, so a run only pays for what is genuinely new.
 
-Keying on the input rather than on the record id is the point. Trial text gets
-revised upstream, and prompts and schemas change on our side. A key derived
-from those turns every such change into a cache miss, which is what stops a
-stale result being served forever after a prompt edit — the failure worth
-designing against, because nothing about it looks wrong. Operational choices
-such as the model and system instructions are deliberately not cache identity.
+For LLM extraction, cache identity is deliberately scoped to the record ID and
+output schema. This allows accepted results to survive changes to trial text,
+publications, models and system instructions. Callers may retain input hashes
+as audit metadata, but those hashes are not necessarily cache identity.
 
 Layout under ``cache_uri``::
 
@@ -58,9 +56,8 @@ def cache_key(*parts: str) -> str:
     """Return a stable hash of everything that influenced a result.
 
     Pass the values that define the result's identity, in a fixed order. For
-    LLM extraction this is the rendered trial prompt and output schema. The
-    model and system instructions are intentionally excluded by the caller:
-    changing either must not invalidate existing accepted results.
+    LLM extraction this is the trial ID and output schema. The model, system
+    instructions and rendered prompt are intentionally excluded by the caller.
 
     Args:
         *parts: The values to hash, in a fixed order.
