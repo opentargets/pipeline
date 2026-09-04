@@ -211,8 +211,60 @@ def disease(
         .agg(pl.col('val').alias('obsoleteXRefs'))
     )
 
-    # join obsolete term list and obsolete xref list to the ids of the entities that
-    # make them obsolete
+    # Get the synonyms for all the obsolete terms, keyed by predicate so each
+    # category can be unioned into the matching category on the surviving term.
+    obsolete_synonym_rename_mapping = {
+        'hasExactSynonym': 'obsoleteExactSynonyms',
+        'hasRelatedSynonym': 'obsoleteRelatedSynonyms',
+        'hasNarrowSynonym': 'obsoleteNarrowSynonyms',
+        'hasBroadSynonym': 'obsoleteBroadSynonyms',
+    }
+    obsolete_synonym_columns = list(obsolete_synonym_rename_mapping.values())
+    obsolete_synonyms = (
+        n
+        .unnest('meta')
+        .select(pl.col('id'), pl.col('synonyms'))
+        .join(obsolete_ids, on='id')
+        .explode('synonyms')
+        .filter(
+            pl.col('synonyms').struct['pred'].is_in(synonym_predicates),
+        )
+        .unnest('synonyms')
+        .with_columns(
+            val=pl.col('val').str.replace_all('\n', '').str.strip_chars(),
+        )
+        .group_by([
+            'code',
+            'pred',
+        ])
+        .agg(pl.col('val').drop_nulls().unique())
+        .pivot(
+            values='val',
+            index='code',
+            columns='pred',  # ty:ignore[unknown-argument]
+            aggregate_function='first',
+        )  # ty:ignore[missing-argument]
+        .with_columns(
+            **{k: pl.col(k).fill_null([]) for k in synonym_predicates},
+        )
+        .rename(obsolete_synonym_rename_mapping)
+        .select(['code', *obsolete_synonym_columns])
+    )
+
+    # Get the names of all the obsolete terms, to be added to the surviving
+    # term's exactSynonyms.
+    obsolete_names = (
+        n
+        .unnest('meta')
+        .select(pl.col('id'), pl.col('lbl'))
+        .join(obsolete_ids, on='id')
+        .group_by('code')
+        .agg(pl.col('lbl').drop_nulls().unique().alias('obsoleteNames'))
+    )
+
+    # join obsolete term list, obsolete xref list, obsolete synonyms and
+    # obsolete names to the ids of the entities that make them obsolete, then
+    # union the obsolete synonyms/names into the surviving term's own synonyms
     n_obsolete_terms = (
         n_synonyms
         .join(
@@ -225,10 +277,35 @@ def disease(
             on='code',
             how='left',
         )
+        .join(
+            obsolete_synonyms,
+            on='code',
+            how='left',
+        )
+        .join(
+            obsolete_names,
+            on='code',
+            how='left',
+        )
         .with_columns(
             obsoleteTerms=pl.col('obsoleteTerms').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
             obsoleteXRefs=pl.col('obsoleteXRefs').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
+            **{
+                k: pl.col(k).fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
+                for k in obsolete_synonym_columns
+            },
+            obsoleteNames=pl.col('obsoleteNames').fill_null(pl.Series([[]], dtype=pl.List(pl.String))),
         )
+        .with_columns(
+            exactSynonyms=pl.col('exactSynonyms')
+            .list.concat(pl.col('obsoleteExactSynonyms'))
+            .list.concat(pl.col('obsoleteNames'))
+            .list.unique(),
+            relatedSynonyms=pl.col('relatedSynonyms').list.concat(pl.col('obsoleteRelatedSynonyms')).list.unique(),
+            narrowSynonyms=pl.col('narrowSynonyms').list.concat(pl.col('obsoleteNarrowSynonyms')).list.unique(),
+            broadSynonyms=pl.col('broadSynonyms').list.concat(pl.col('obsoleteBroadSynonyms')).list.unique(),
+        )
+        .drop(*obsolete_synonym_columns, 'obsoleteNames')
     )
 
     # get children by exploding the parents column, making it the new id and
