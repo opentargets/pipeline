@@ -314,6 +314,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             and all the parents will be created if they don't exist. Inside the docker container,
             they will be mounted under the root directory.
         machine_type: Machine type to use for the instance (default e2-standard-2).
+        boot_disk_size_gb: Size of the boot disk in GB (default 10).
         work_disk_size_gb: If present, a second disk with the specified size in GB will be
             attached to the instance besides the boot disk, to be used by the workload. The disk will
             be formatted with ext4 and mounted under `/mnt/disks/work`. The instance will have write
@@ -350,6 +351,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         container_files: dict[str, str] | None = None,
         container_secret_files: dict[str, str] | None = None,
         machine_type: str = 'n1-standard-16',
+        boot_disk_size_gb: int = 10,
         work_disk_size_gb: int = 0,
         gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
@@ -370,6 +372,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.container_files = container_files or {}
         self.container_secret_files = container_secret_files or {}
         self.machine_type = machine_type
+        self.boot_disk_size_gb = boot_disk_size_gb
         self.gcp_conn_id = gcp_conn_id
         self.impersonation_chain = impersonation_chain
         self.work_disk_size_gb = work_disk_size_gb
@@ -489,7 +492,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         The instance includes:
 
         - A COS image as the boot disk.
-        - A work disk if `work_disk_size_gb` is set, otherwise just the 10GB default boot disk.
+        - A boot disk of `boot_disk_size_gb` GB.
+        - A work disk if `work_disk_size_gb` is set.
         - Labels for the instance.
         - The startup script.
         - Network configuration.
@@ -499,6 +503,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             auto_delete=True,
             boot=True,
             initialize_params=compute_v1.AttachedDiskInitializeParams(
+                disk_size_gb=self.boot_disk_size_gb,
                 disk_type=f'zones/{self.zone}/diskTypes/pd-ssd',
                 labels=self.labels,
                 source_image='projects/cos-cloud/global/images/cos-113-18244-151-50',
