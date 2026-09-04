@@ -258,18 +258,17 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
         .createDataFrame(
             pd
             .read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
-            # Probes that do not have an associated target are marked with "-"
-            .query("gene_name != '-'")
+            # Probes that do not have an associated target are marked with "-",
+            # but a genuinely blank cell reads as NaN, not the string "-" --
+            # gene_name != '-' alone lets those rows through (NaN != anything).
+            .query("gene_name.notnull() and gene_name != '-'")
             .reset_index()
             [PROBES_TARGETS_COLUMNS]
         )
         .filter(f.col('organism') == 'Homo sapiens')
         .withColumn(
             'mechanismOfAction',
-            f.when(
-                f.col('action') != '-',
-                f.split(f.col('action'), ';'),
-            ),
+            f.split(replace_missing_placeholder(f.col('action')), ';'),
         )
         .select(
             'pdid',
