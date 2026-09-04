@@ -241,18 +241,22 @@ def test_homology_keeps_real_confidence_flag(spark):
     assert row.isHighConfidence == '1'
 
 
-def test_homology_normalises_placeholder_gene_symbol(spark):
-    """A gene-dictionary name of "Nil"/"nan"/"na" falls back to the stable ID, like a real null does.
+def test_homology_keeps_genuine_symbols_that_look_like_null_tokens(spark):
+    """"na", "nan" and "Nil" are real FlyBase gene symbols, not placeholder tokens.
 
-    Regression test: 14 Drosophila melanogaster homology rows shipped the literal
-    text "Nil", "nan" or "na" as targetGeneSymbol instead of falling back to the
-    gene's stable ID the way a genuinely missing/empty name already does.
+    Regression test: an earlier version of this fix treated these three values as
+    fake nulls and replaced them with the gene's stable ID. They are not -- "na"
+    is *narrow abdomen* (FBgn0002917, the fly NALCN ortholog), "nan" is
+    *nanchung* (FBgn0036414, the fly TRPV1/2/4/5/6 ortholog), and "Nil" is
+    *Nilkantha* (FBgn0039421), all confirmed against FlyBase. Case-insensitive
+    token matching against a small "looks like missing data" vocabulary is not
+    safe here because it collides with real gene nomenclature.
     """
-    for placeholder in ('Nil', 'nan', 'na', 'NAN'):
-        result = _single_pair_setup(spark, _mouse_pair_row(), gene_name=placeholder)
+    for real_symbol in ('na', 'nan', 'Nil'):
+        result = _single_pair_setup(spark, _mouse_pair_row(), gene_name=real_symbol)
         row = result.first()
         assert row is not None
-        assert row.targetGeneSymbol == 'ENSMUSG0001', f'placeholder {placeholder!r} leaked through'
+        assert row.targetGeneSymbol == real_symbol, f'genuine symbol {real_symbol!r} was wrongly replaced'
 
 
 def test_homology_keeps_real_gene_symbol(spark):

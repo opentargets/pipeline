@@ -130,14 +130,8 @@ def _build_homology(
         f.array(*[f.lit(t) for t in tax_ids]).alias('whitelist'),
     ).filter(f.array_contains(f.col('whitelist'), f.col('taxonomy_id')))
 
-    # A handful of gene symbols in the upstream dictionary (all Drosophila
-    # melanogaster so far) are the literal text "Nil", "nan" or "na" rather than a
-    # real symbol or a null -- fall back to the stable ID for those the same way
-    # a genuinely missing/empty name already does.
     name = f.col('name')
-    name_is_missing = (
-        name.isNull() | (f.trim(name) == '') | (f.lower(f.trim(name)).isin('nil', 'nan', 'na'))
-    )
+    name_is_missing = name.isNull() | (f.trim(name) == '')
     gene_dict_mapped = gene_dict.select(
         f.col('id').alias('homology_gene_stable_id'),
         f.when(~name_is_missing, f.trim(name)).otherwise(f.col('id')).alias('targetGeneSymbol'),
