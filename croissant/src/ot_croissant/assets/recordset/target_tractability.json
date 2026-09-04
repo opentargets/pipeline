@@ -1,16 +1,19 @@
 [
   {
     "id": "category",
-    "description": "Identifier of the tractability bucket assessed (e.g. clinical phase, structural evidence source)"
+    "description": "Identifier of the tractability bucket assessed (e.g. clinical phase, structural evidence source)",
+    "isPrimaryKey": true
   },
   {
     "id": "modality",
-    "description": "Drug modality the tractability assessment applies to (e.g. Small molecule, Antibody)"
+    "description": "Drug modality the tractability assessment applies to (e.g. Small molecule, Antibody)",
+    "isPrimaryKey": true
   },
   {
     "id": "targetId",
     "description": "Ensembl gene identifier of the assessed target [bioregistry:ensembl]",
-    "foreign_key": "target/id"
+    "foreign_key": "target/id",
+    "isPrimaryKey": true
   },
   {
     "id": "value",

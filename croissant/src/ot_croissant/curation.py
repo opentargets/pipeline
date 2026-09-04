@@ -101,6 +101,10 @@ class RecordsetCuration:
             self._cache[dataset] = {e['id']: RecordsetFieldAnnotation.model_validate(e) for e in entries}
         return self._cache[dataset]
 
+    def primary_key_fields(self, dataset: str) -> set[str]:
+        """Return the field paths curated as primary key components for *dataset*."""
+        return {field_path for field_path, ann in self._load_dataset(dataset).items() if ann.is_primary_key}
+
     def get_field(
         self,
         distribution_id: str,

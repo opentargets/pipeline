@@ -25,7 +25,8 @@
   },
   {
     "id": "datasource",
-    "description": "Data source reporting the safety event"
+    "description": "Data source reporting the safety event",
+    "isPrimaryKey": true
   },
   {
     "id": "effects",
@@ -41,15 +42,18 @@
   },
   {
     "id": "event",
-    "description": "Safety event associated with the target"
+    "description": "Safety event associated with the target",
+    "isPrimaryKey": true
   },
   {
     "id": "eventId",
-    "description": "Unique identifier for the safety event"
+    "description": "Unique identifier for the safety event",
+    "isPrimaryKey": true
   },
   {
     "id": "literature",
-    "description": "Literature references for the safety event"
+    "description": "Literature references for the safety event",
+    "isPrimaryKey": true
   },
   {
     "id": "studies",
@@ -70,10 +74,12 @@
   {
     "id": "targetId",
     "description": "Ensembl gene identifier of the target the safety event was reported on [bioregistry:ensembl]",
-    "foreign_key": "target/id"
+    "foreign_key": "target/id",
+    "isPrimaryKey": true
   },
   {
     "id": "url",
-    "description": "URL linking to more details on the safety event"
+    "description": "URL linking to more details on the safety event",
+    "isPrimaryKey": true
   }
 ]
