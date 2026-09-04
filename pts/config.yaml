@@ -792,7 +792,7 @@ steps:
       model: gpt-5-nano-2025-08-07
       service_tier: auto
       concurrency: 50
-      shard_size: 2000
+      shard_size: 500
       publications:
         # see PublicationsSpec — this fetches abstracts for every trial, not
         # only cache misses, so it needs its own cache before a full run
