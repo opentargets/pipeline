@@ -1,6 +1,7 @@
 """Tests for the chemical_probes module."""
 
 import pandas as pd
+import pyspark.sql.functions as f
 from pyspark.sql import Row
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
@@ -205,7 +206,7 @@ def test_resolve_targets_multiple_probes_same_target(spark):
 def test_replace_missing_placeholder_nulls_dash(spark):
     """The source-authored '-' placeholder becomes a real null."""
     df = spark.createDataFrame([('-',)], ['control_name'])
-    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
     assert result.first().control is None
 
 
@@ -217,21 +218,21 @@ def test_replace_missing_placeholder_nulls_stringified_nan(spark):
     shipped with the text "NaN" in their control column instead of a real null.
     """
     df = spark.createDataFrame([('NaN',), ('nan',), ('NAN',)], ['control_name'])
-    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
     assert [r.control for r in result.collect()] == [None, None, None]
 
 
 def test_replace_missing_placeholder_keeps_real_values(spark):
     """A genuine control compound name passes through unchanged."""
     df = spark.createDataFrame([('BI-6953',)], ['control_name'])
-    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
     assert result.first().control == 'BI-6953'
 
 
 def test_replace_missing_placeholder_keeps_existing_null(spark):
     """A column value that is already a real null stays null."""
     df = spark.createDataFrame([(None,)], StructType([StructField('control_name', StringType())]))
-    result = df.select(replace_missing_placeholder('control_name').alias('control'))
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
     assert result.first().control is None
 
 

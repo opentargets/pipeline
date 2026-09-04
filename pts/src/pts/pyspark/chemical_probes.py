@@ -188,7 +188,7 @@ def convert_stringified_array_to_array(col_name: str) -> Column:
 MISSING_VALUE_TOKENS = ('-', 'nan')
 
 
-def replace_missing_placeholder(col_name: str) -> Column:
+def replace_missing_placeholder(col: Column) -> Column:
     """Converts to null values that only encode "missing" as a placeholder token.
 
     Upstream leaves `control_name` blank for probes without a designated control
@@ -198,8 +198,8 @@ def replace_missing_placeholder(col_name: str) -> Column:
     `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
     placeholder token seen in the same column.
     """
-    value = f.lower(f.col(col_name).cast(t.StringType()))
-    return f.when(~value.isin(*MISSING_VALUE_TOKENS), f.col(col_name))
+    value = f.lower(col.cast(t.StringType()))
+    return f.when(~value.isin(*MISSING_VALUE_TOKENS), col)
 
 
 def process_scores(col_name: str) -> Column:
@@ -246,7 +246,7 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
                     f.array(f.lit('High-quality chemical probes')),
                 )
             ).alias('datasourceId'),
-            replace_missing_placeholder('control_name').alias('control'),
+            replace_missing_placeholder(f.col('control_name')).alias('control'),
         )
     )
 
