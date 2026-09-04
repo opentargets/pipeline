@@ -2019,8 +2019,8 @@ steps:
 
   #: SEARCH STEP :##################################################################################
   search:
-    - name: pyspark search
-      pyspark: search
+    - name: transform search
+      transformer: search
       source:
         association: output/association_overall_indirect
         drug: output/drug_molecule
