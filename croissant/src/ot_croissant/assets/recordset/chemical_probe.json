@@ -5,7 +5,8 @@
   },
   {
     "id": "drugFromSourceId",
-    "description": "Probe identifier from the source, used to cross-reference drug information"
+    "description": "Probe identifier from the source, used to cross-reference drug information",
+    "isPrimaryKey": true
   },
   {
     "id": "drugId",
@@ -47,7 +48,8 @@
   {
     "id": "targetId",
     "description": "Ensembl gene identifier of the target, resolved from targetFromSourceId via output/target [bioregistry:ensembl]",
-    "foreign_key": "target/id"
+    "foreign_key": "target/id",
+    "isPrimaryKey": true
   },
   {
     "id": "urls",

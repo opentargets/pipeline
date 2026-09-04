@@ -75,6 +75,11 @@
     "description": "Short name of the method used to detect the interaction"
   },
   {
+    "id": "interactionId",
+    "description": "Identifier of the molecular interaction this evidence supports",
+    "foreign_key": "interaction/interactionId"
+  },
+  {
     "id": "interactionIdentifier",
     "description": "Unique identifier for the interaction evidence entry at the source",
     "isPrimaryKey": true
