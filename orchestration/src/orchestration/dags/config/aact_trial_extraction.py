@@ -45,6 +45,8 @@ class AactTrialExtractionConfig:
         """Machine type for both steps. The extraction is IO bound, not CPU bound."""
         self.disk_size: int = conf.get('disk_size')
         """Work disk size in GB. Sized for the AACT archive plus its restore."""
+        self.boot_disk_size: int = conf.get('boot_disk_size')
+        """Boot disk size in GB. Sized for the PIS and PTS container images."""
 
         self.snapshot_uri = f'{self.bucket}/{self.aact_version}'
         """Where this run writes.

@@ -11,6 +11,7 @@ pts_version: '26.9.0.dev0.aacttest.1'
 
 # Each step runs on its own machine, sized for the AACT archive plus its restore
 machine_type: 'n1-standard-8'
+boot_disk_size: 50
 disk_size: 150
 
 # Dependency graph

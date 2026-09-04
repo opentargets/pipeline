@@ -90,6 +90,7 @@ with DAG(
                 container_files={config_uri: '/config.yaml'},
                 container_secret_files=step_definition.get('gce_secret_files'),
                 machine_type=config.machine_type,
+                boot_disk_size_gb=config.boot_disk_size,
                 work_disk_size_gb=config.disk_size,
                 deferrable=True,
             )
