@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
@@ -221,7 +222,7 @@ class LlmExtract(Task):
             # and returns None, so never hand it exactly one
             prompts = prompts * 2
 
-        extracted = run_extraction(
+        extracted = _run_extraction_in_thread(
             prompts=prompts,
             model_class=self.spec.model_class,
             system_prompt_path=system_prompt_path,
@@ -370,3 +371,15 @@ def _import_class(dotted_path: str) -> type[BaseModel]:
     """Import a pydantic model class from a dotted module path."""
     module_path, class_name = dotted_path.rsplit('.', 1)
     return getattr(import_module(module_path), class_name)
+
+
+def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
+    """Call clinical-mining outside Otter's already-running event loop.
+
+    Otter invokes task methods from an asyncio loop, while the synchronous
+    clinical-mining entry point owns its loop via ``asyncio.run``. Running it in
+    a short-lived worker thread gives it a thread-local loop without changing
+    either library's public API.
+    """
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
+        return executor.submit(run_extraction, **kwargs).result()

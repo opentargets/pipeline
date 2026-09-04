@@ -7,7 +7,7 @@ bucket: 'gs://aact_data'
 
 # Pipeline package versions
 pis_version: '26.9.0.dev0.aacttest.1'
-pts_version: '26.9.0.dev0.aacttest.3'
+pts_version: '26.9.0.dev0.aacttest.4'
 
 # Each step runs on its own machine, sized for the AACT archive plus its restore
 machine_type: 'n1-standard-8'
