@@ -28,6 +28,7 @@ steps:
         - FAILED_GC_LAMBDA_CHECK
         - NO_OT_CURATION
         - CASE_CASE_STUDY_DESIGN
+        - DEPRECATED_PROJECT
       # INPUTS
       step.study_index_path:
         # GWAS
@@ -57,7 +58,10 @@ steps:
       step.session.write_mode: overwrite
       step.session.output_partitions: 200 # 200 Needed for parallelization of predictions
       step.invalid_qc_reasons:
-        - DUPLICATED_STUDYLOCUS_ID
+        # DUPLICATED_STUDYLOCUS_ID is deliberately absent: it flags the
+        # duplicate copies of a studyLocusId without checking that the copy
+        # it defers to survives, so a collision whose other member is
+        # excluded for any other reason loses every copy.
         - AMBIGUOUS_STUDY
         - MISSING_STUDY
         - NO_GENOMIC_LOCATION_FLAG
