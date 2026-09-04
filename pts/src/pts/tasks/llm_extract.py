@@ -383,6 +383,7 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
     a short-lived worker thread gives it a thread-local loop without changing
     either library's public API.
     """
+
     def run_with_full_schema_inference() -> pl.DataFrame | None:
         # clinical-mining's default inference samples only the first 100 model
         # responses. Later validated nested values can then disagree with that
@@ -441,8 +442,7 @@ def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:
         return pl.from_dicts(rows, infer_schema_length=None)
     except pl.exceptions.PolarsError as error:
         logger.warning(
-            f'could not combine {len(rows)} extractions at once: {error}; '
-            'falling back to row-wise conversion'
+            f'could not combine {len(rows)} extractions at once: {error}; falling back to row-wise conversion'
         )
 
     converted: list[pl.DataFrame] = []

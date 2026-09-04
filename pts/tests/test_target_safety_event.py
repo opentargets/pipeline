@@ -103,25 +103,42 @@ BRENNAN_SCHEMA = StructType([
     StructField('datasource', StringType()),
     StructField('literature', StringType()),
     StructField('url', StringType()),
-    StructField('effects', StructType([
-        StructField('direction', StringType()),
-        StructField('dosing', StringType()),
-    ])),
-    StructField('studies', ArrayType(StructType([
-        StructField('description', StringType()),
-        StructField('name', StringType()),
-        StructField('type', StringType()),
-    ]))),
-    StructField('biosamples', ArrayType(StructType([
-        StructField('tissueLabel', StringType()),
-    ]))),
+    StructField(
+        'effects',
+        StructType([
+            StructField('direction', StringType()),
+            StructField('dosing', StringType()),
+        ]),
+    ),
+    StructField(
+        'studies',
+        ArrayType(
+            StructType([
+                StructField('description', StringType()),
+                StructField('name', StringType()),
+                StructField('type', StringType()),
+            ])
+        ),
+    ),
+    StructField(
+        'biosamples',
+        ArrayType(
+            StructType([
+                StructField('tissueLabel', StringType()),
+            ])
+        ),
+    ),
 ])
 
 
 def _brennan_row(*, event_id):
     return Row(
-        id='ENSG00000082701', event='Mitochondrial toxicity', eventId=event_id,
-        datasource='Brennan et al. (2024)', literature='38773351', url=None,
+        id='ENSG00000082701',
+        event='Mitochondrial toxicity',
+        eventId=event_id,
+        datasource='Brennan et al. (2024)',
+        literature='38773351',
+        url=None,
         effects=Row(direction='Activation', dosing=None),
         studies=[Row(description=None, name=None, type='clinical')],
         biosamples=None,

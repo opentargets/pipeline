@@ -22,9 +22,7 @@ def test_run_extraction_closes_async_client_before_loop_shutdown(
     def create_client(**kwargs: object) -> _FakeClient:
         return client
 
-    async def fake_run_async(
-        *args: object, **kwargs: object
-    ) -> tuple[list[object], list[object]]:
+    async def fake_run_async(*args: object, **kwargs: object) -> tuple[list[object], list[object]]:
         return [], []
 
     monkeypatch.setattr(llm_workflow, 'AsyncOpenAI', create_client)

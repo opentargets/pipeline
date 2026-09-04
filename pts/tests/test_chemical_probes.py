@@ -408,9 +408,7 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
         spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
 
     assert 'covalent' not in df.columns
-    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
-        'only the row without a gene_name should be dropped'
-    )
+    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], 'only the row without a gene_name should be dropped'
 
 
 def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
