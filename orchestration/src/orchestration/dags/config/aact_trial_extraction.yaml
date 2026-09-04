@@ -17,11 +17,11 @@ disk_size: 150
 # ----------------
 # Follows same standards as in unified_pipeline
 steps:
-  pis_aact_tables:
+  pis_aact:
 
   pts_aact_trial_extraction:
     depends_on:
-      - pis_aact_tables
+      - pis_aact
     # Fetched from Secret Manager onto the VM and mounted into the container at
     # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
     # key itself never appears in config or in code.

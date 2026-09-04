@@ -90,21 +90,16 @@ def _parse_gff3(df: DataFrame) -> DataFrame:
             f.coalesce(f.array_contains(tags, 'Ensembl_canonical'), f.lit(False)).alias('isEnsemblCanonical'),
             tags.alias('_tags'),
         )
-        .withColumn('chromosome',
-            f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw'))
-        )
+        .withColumn('chromosome', f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw')))
         .filter(
             f.col('chromosome').isin(INCLUDE_CHROMOSOMES)
             & f.col('targetId').startswith('ENSG')
             & f.col('transcriptId').startswith('ENST')
         )
-        .withColumn('proteinId',
-            f.when(f.col('_proteinId_raw') != '', f.col('_proteinId_raw'))
-        )
-        .withColumn('transcriptionStartSite',
-            f.when(f.col('strand') == 1, f.col('start'))
-            .otherwise(f.col('end'))
-            .cast(IntegerType())
+        .withColumn('proteinId', f.when(f.col('_proteinId_raw') != '', f.col('_proteinId_raw')))
+        .withColumn(
+            'transcriptionStartSite',
+            f.when(f.col('strand') == 1, f.col('start')).otherwise(f.col('end')).cast(IntegerType()),
         )
         .withColumn('flags', _build_flags(f.col('_tags')))
         .drop('_chrom_raw', '_proteinId_raw', '_tags')
@@ -124,24 +119,26 @@ def _build_flags(tags_col: Column) -> Column:
     Returns:
         Array column of ``{label: str, value: str}`` structs.
     """
-    static = f.array_compact(f.array(
-        f.when(
-            f.array_contains(tags_col, 'MANE_Select'),
-            f.struct(f.lit('mane').alias('label'), f.lit('select').alias('value')),
-        ),
-        f.when(
-            f.array_contains(tags_col, 'MANE_Plus_Clinical'),
-            f.struct(f.lit('mane').alias('label'), f.lit('plus_clinical').alias('value')),
-        ),
-        f.when(
-            f.array_contains(tags_col, 'GENCODE_Primary'),
-            f.struct(f.lit('gencode_primary').alias('label'), f.lit('true').alias('value')),
-        ),
-        f.when(
-            f.array_contains(tags_col, 'Ensembl_canonical'),
-            f.struct(f.lit('ensembl_canonical').alias('label'), f.lit('true').alias('value')),
-        ),
-    ))
+    static = f.array_compact(
+        f.array(
+            f.when(
+                f.array_contains(tags_col, 'MANE_Select'),
+                f.struct(f.lit('mane').alias('label'), f.lit('select').alias('value')),
+            ),
+            f.when(
+                f.array_contains(tags_col, 'MANE_Plus_Clinical'),
+                f.struct(f.lit('mane').alias('label'), f.lit('plus_clinical').alias('value')),
+            ),
+            f.when(
+                f.array_contains(tags_col, 'GENCODE_Primary'),
+                f.struct(f.lit('gencode_primary').alias('label'), f.lit('true').alias('value')),
+            ),
+            f.when(
+                f.array_contains(tags_col, 'Ensembl_canonical'),
+                f.struct(f.lit('ensembl_canonical').alias('label'), f.lit('true').alias('value')),
+            ),
+        )
+    )
 
     # APPRIS tags carry the tier in the tag name itself: appris_principal_1, appris_alternative_2, ...
     appris = f.transform(
@@ -182,9 +179,7 @@ def _parse_exons(df: DataFrame) -> DataFrame:
             f.col('_c4').cast(LongType()).alias('end'),
             gff3_strand(f.col('_c6')).alias('strand'),
         )
-        .withColumn('chromosome',
-            f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw'))
-        )
+        .withColumn('chromosome', f.when(f.col('_chrom_raw') == 'M', 'MT').otherwise(f.col('_chrom_raw')))
         .filter(
             f.col('chromosome').isin(INCLUDE_CHROMOSOMES)
             & f.col('transcriptId').startswith('ENST')
@@ -193,20 +188,16 @@ def _parse_exons(df: DataFrame) -> DataFrame:
         .drop('_chrom_raw')
     )
 
-    return (
-        exons
-        .groupBy('transcriptId')
-        .agg(
-            f.collect_list(
-                f.struct(
-                    f.col('exonId'),
-                    f.col('chromosome'),
-                    f.col('start'),
-                    f.col('end'),
-                    f.col('strand'),
-                )
-            ).alias('exons')
-        )
+    return exons.groupBy('transcriptId').agg(
+        f.collect_list(
+            f.struct(
+                f.col('exonId'),
+                f.col('chromosome'),
+                f.col('start'),
+                f.col('end'),
+                f.col('strand'),
+            )
+        ).alias('exons')
     )
 
 
@@ -227,17 +218,13 @@ def _build_uniprot_lut(ensembl_df: DataFrame) -> DataFrame:
         ``uniprotSwissprotIds``, ``uniprotTremblIds``, ``uniprotIsoformIds``,
         and ``alphafoldIds``.
     """
-    return (
-        ensembl_df
-        .select(f.col('id').alias('targetId'), f.explode('transcripts').alias('tx'))
-        .select(
-            f.col('targetId'),
-            f.col('tx.id').alias('transcriptId'),
-            f.col('tx.uniprot_swissprot').alias('uniprotSwissprotIds'),
-            f.col('tx.uniprot_trembl').alias('uniprotTremblIds'),
-            f.col('tx.uniprot_isoform').alias('uniprotIsoformIds'),
-            f.col('tx.alphafold').alias('alphafoldIds'),
-        )
+    return ensembl_df.select(f.col('id').alias('targetId'), f.explode('transcripts').alias('tx')).select(
+        f.col('targetId'),
+        f.col('tx.id').alias('transcriptId'),
+        f.col('tx.uniprot_swissprot').alias('uniprotSwissprotIds'),
+        f.col('tx.uniprot_trembl').alias('uniprotTremblIds'),
+        f.col('tx.uniprot_isoform').alias('uniprotIsoformIds'),
+        f.col('tx.alphafold').alias('alphafoldIds'),
     )
 
 

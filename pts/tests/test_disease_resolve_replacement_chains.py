@@ -213,15 +213,17 @@ class TestStructure:
         assert resolve_replacement_chains(df).schema == df.schema
 
     def test_other_predicates_are_untouched(self, df: pl.DataFrame) -> None:
-        bpv = resolve_replacement_chains(df).filter(pl.col('id') == _url('A'))['meta'].struct[
-            'basicPropertyValues'
-        ][0]
+        bpv = resolve_replacement_chains(df).filter(pl.col('id') == _url('A'))['meta'].struct['basicPropertyValues'][0]
         assert {'pred': OTHER_PRED, 'val': 'keep me'} in bpv.to_list()
 
     def test_node_without_pointers_is_untouched(self, df: pl.DataFrame) -> None:
-        assert resolve_replacement_chains(df).filter(pl.col('id') == _url('LIVE'))['meta'].struct[
-            'basicPropertyValues'
-        ][0].to_list() == []
+        assert (
+            resolve_replacement_chains(df)
+            .filter(pl.col('id') == _url('LIVE'))['meta']
+            .struct['basicPropertyValues'][0]
+            .to_list()
+            == []
+        )
 
     def test_no_chains_returns_input_unchanged(self) -> None:
         df = _make_df(

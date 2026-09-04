@@ -109,15 +109,29 @@ class TestDeduplicateWarnings:
         ref = [{'id': '22941581', 'source': 'PubMed', 'url': 'http://europepmc.org/abstract/MED/22941581'}]
         data = [
             {
-                'chemblIds': ['CHEMBL479'], 'toxicityClass': 'cardiotoxicity', 'country': 'Worldwide',
-                'description': 'Cardiac arrythmias', 'id': 3961, 'references': ref, 'warningType': 'Withdrawn',
-                'year': 2005, 'efoTerm': 'cardiac arrhythmia', 'efoId': 'EFO:0004269',
+                'chemblIds': ['CHEMBL479'],
+                'toxicityClass': 'cardiotoxicity',
+                'country': 'Worldwide',
+                'description': 'Cardiac arrythmias',
+                'id': 3961,
+                'references': ref,
+                'warningType': 'Withdrawn',
+                'year': 2005,
+                'efoTerm': 'cardiac arrhythmia',
+                'efoId': 'EFO:0004269',
                 'efoIdForWarningClass': 'EFO:1001482',
             },
             {
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'toxicityClass': 'cardiotoxicity', 'country': 'Worldwide',
-                'description': 'Cardiac arrythmias', 'id': 4517, 'references': ref, 'warningType': 'Withdrawn',
-                'year': 2005, 'efoTerm': 'cardiac arrhythmia', 'efoId': 'EFO:0004269',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'toxicityClass': 'cardiotoxicity',
+                'country': 'Worldwide',
+                'description': 'Cardiac arrythmias',
+                'id': 4517,
+                'references': ref,
+                'warningType': 'Withdrawn',
+                'year': 2005,
+                'efoTerm': 'cardiac arrhythmia',
+                'efoId': 'EFO:0004269',
                 'efoIdForWarningClass': 'EFO:1001482',
             },
         ]
@@ -134,15 +148,30 @@ class TestDeduplicateWarnings:
         """Two genuinely different warnings on the same drug must both survive."""
         data = [
             {
-                'chemblIds': ['CHEMBL479'], 'toxicityClass': 'cardiotoxicity', 'country': 'Worldwide',
-                'description': 'Cardiac arrythmias', 'id': 3961, 'references': [], 'warningType': 'Withdrawn',
-                'year': 2005, 'efoTerm': 'cardiac arrhythmia', 'efoId': 'EFO:0004269',
+                'chemblIds': ['CHEMBL479'],
+                'toxicityClass': 'cardiotoxicity',
+                'country': 'Worldwide',
+                'description': 'Cardiac arrythmias',
+                'id': 3961,
+                'references': [],
+                'warningType': 'Withdrawn',
+                'year': 2005,
+                'efoTerm': 'cardiac arrhythmia',
+                'efoId': 'EFO:0004269',
                 'efoIdForWarningClass': 'EFO:1001482',
             },
             {
-                'chemblIds': ['CHEMBL479'], 'toxicityClass': None, 'country': 'United States',
-                'description': None, 'id': 100, 'references': [], 'warningType': 'Black Box Warning',
-                'year': None, 'efoTerm': None, 'efoId': None, 'efoIdForWarningClass': None,
+                'chemblIds': ['CHEMBL479'],
+                'toxicityClass': None,
+                'country': 'United States',
+                'description': None,
+                'id': 100,
+                'references': [],
+                'warningType': 'Black Box Warning',
+                'year': None,
+                'efoTerm': None,
+                'efoId': None,
+                'efoIdForWarningClass': None,
             },
         ]
         df = pl.DataFrame(data, schema=WARNING_SCHEMA)
@@ -157,15 +186,29 @@ class TestDeduplicateWarnings:
         ref = [{'id': '22941581', 'source': 'PubMed', 'url': 'http://europepmc.org/abstract/MED/22941581'}]
         data = [
             {
-                'chemblIds': ['CHEMBL479'], 'toxicityClass': 'cardiotoxicity', 'country': 'Worldwide',
-                'description': 'Cardiac arrythmias', 'id': 3961, 'references': ref, 'warningType': 'Withdrawn',
-                'year': 2005, 'efoTerm': 'cardiac arrhythmia', 'efoId': 'EFO:0004269',
+                'chemblIds': ['CHEMBL479'],
+                'toxicityClass': 'cardiotoxicity',
+                'country': 'Worldwide',
+                'description': 'Cardiac arrythmias',
+                'id': 3961,
+                'references': ref,
+                'warningType': 'Withdrawn',
+                'year': 2005,
+                'efoTerm': 'cardiac arrhythmia',
+                'efoId': 'EFO:0004269',
                 'efoIdForWarningClass': 'EFO:1001482',
             },
             {
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'toxicityClass': 'cardiotoxicity', 'country': 'Worldwide',
-                'description': 'Cardiac arrythmias', 'id': 4517, 'references': ref, 'warningType': 'Withdrawn',
-                'year': 2005, 'efoTerm': 'cardiac arrhythmia', 'efoId': 'EFO:0004269',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'toxicityClass': 'cardiotoxicity',
+                'country': 'Worldwide',
+                'description': 'Cardiac arrythmias',
+                'id': 4517,
+                'references': ref,
+                'warningType': 'Withdrawn',
+                'year': 2005,
+                'efoTerm': 'cardiac arrhythmia',
+                'efoId': 'EFO:0004269',
                 'efoIdForWarningClass': 'EFO:1001482',
             },
         ]
@@ -208,9 +251,9 @@ class TestOrderIsDeterministic:
 
         for seed in (1, 2, 3):
             shuffled = {
-                'warnings': tables['warnings'].sample(fraction=1.0, shuffle=True, seed=seed).sort(
-                    ORDER_BY['drug_warning']
-                ),
+                'warnings': tables['warnings']
+                .sample(fraction=1.0, shuffle=True, seed=seed)
+                .sort(ORDER_BY['drug_warning']),
                 'refs': tables['refs'].sample(fraction=1.0, shuffle=True, seed=seed).sort(ORDER_BY['warning_refs']),
                 'molecules': tables['molecules'].sample(fraction=1.0, shuffle=True, seed=seed),
                 'hierarchy': tables['hierarchy'].sample(fraction=1.0, shuffle=True, seed=seed),

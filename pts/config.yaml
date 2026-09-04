@@ -781,12 +781,7 @@ steps:
   aact_trial_extraction:
     - name: llm_extract aact trials
       source:
-        studies: tables/studies.parquet
-        interventions: tables/interventions.parquet
-        conditions: tables/conditions.parquet
-        study_references: tables/study_references.parquet
-        brief_summaries: tables/brief_summaries.parquet
-        detailed_descriptions: tables/detailed_descriptions.parquet
+        aact: input/aact.zip
       destination:
         prompts: prompts/prompts.parquet
         extraction: extraction/extractions.parquet

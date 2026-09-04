@@ -769,9 +769,7 @@ def interaction(
     # repartitioned here so its cached frame is read in parallel by all three actions.
     logger.info('Transforming STRING interactions')
     string_interactions_df = (
-        _generate_interactions(string_proteins, string_mapping)
-        .filter(f.col('evidences.evidence_score') > 0)
-        .cache()
+        _generate_interactions(string_proteins, string_mapping).filter(f.col('evidences.evidence_score') > 0).cache()
     )
 
     logger.info('Transforming IntAct interactions')

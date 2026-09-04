@@ -5,7 +5,6 @@ pool_size: 4
 
 scratchpad:
   aact_version: '2026-08-25'
-  aact_data_version: '2026-08-01'
   chembl_version: '37'
   efo_version: '3.93.0'
   ensembl_version: '116'
@@ -160,86 +159,20 @@ steps:
       destination: input/chembl/chembl.tar.gz
   ##################################################################################################
 
-  #: AACT_TABLES STEP :#############################################################################
-  # Restores the monthly AACT archive and exports the tables as parquet.
-  # This step is run by the `aact_trial_extraction` DAG, which publishes the
-  # result to `gs://aact_data/${aact_version}/tables` for releases to consume.
-  aact_tables:
+  #: AACT STEP :###################################################################################
+  # The preprocessing DAG downloads this archive; PTS reads it directly.
+  aact:
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
-      destination: input/aact_${aact_version}.zip
-
-    - name: postgres_export aact tables
-      requires:
-        - copy aact dump
-      source: input/aact_${aact_version}.zip
-      schema_name: ctgov
-      tables:
-        - table: studies
-          destination: tables/studies.parquet
-          columns: [nct_id, overall_status, phase, study_type, start_date, why_stopped, number_of_arms, official_title]
-        - table: interventions
-          destination: tables/interventions.parquet
-          columns: [nct_id, intervention_type, name]
-        - table: conditions
-          destination: tables/conditions.parquet
-          columns: [nct_id, downcase_name]
-        - table: study_references
-          destination: tables/study_references.parquet
-          columns: [nct_id, pmid, reference_type]
-        - table: designs
-          destination: tables/designs.parquet
-          columns: [nct_id, primary_purpose]
-        - table: brief_summaries
-          destination: tables/brief_summaries.parquet
-          columns: [nct_id, description]
-        - table: detailed_descriptions
-          destination: tables/detailed_descriptions.parquet
-          columns: [nct_id, description]
+      destination: input/aact.zip
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
-    # AACT comes from the aact_trial_extraction DAG.
-    - name: copy_many aact tables
-      sources: gs://aact_data/${aact_data_version}/tables/*.parquet
-      destination: input/clinical_report/aact
-
-    - name: copy chembl dump
-      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
-      destination: input/drug/chembl_${chembl_version}.tar.gz
-
-    - name: postgres_export chembl tables
-      requires:
-        - copy chembl dump
-      source: input/drug/chembl_${chembl_version}.tar.gz
-      tables:
-        # note the two `refs` tables are named differently in chembl and in the
-        # release, because that is what pts already reads
-        - table: drug_indication
-          destination: input/clinical_report/chembl/drug_indication.parquet
-          columns: [drugind_id, molregno, max_phase_for_ind, efo_id, efo_term]
-        - table: indication_refs
-          destination: input/clinical_report/chembl/drug_indication_refs.parquet
-          columns: [drugind_id, ref_type, ref_id, ref_url]
-        - table: drug_warning
-          destination: input/clinical_report/chembl/drug_warning.parquet
-          columns:
-            - warning_id
-            - molregno
-            - warning_type
-            - warning_year
-            - warning_country
-            - warning_class
-            - efo_id
-            - efo_term
-            - efo_id_for_warning_class
-        - table: warning_refs
-          destination: input/clinical_report/chembl/drug_warning_refs.parquet
-          columns: [warning_id, ref_type, ref_id, ref_url]
-        - table: molecule_dictionary
-          destination: input/clinical_report/chembl/molecule_dictionary.parquet
-          columns: [molregno, chembl_id, pref_name]
+    # Consume the exact archive processed by the AACT preprocessing DAG.
+    - name: copy aact dump
+      source: gs://aact_data/${aact_version}/input/aact.zip
+      destination: input/clinical_report/aact.zip
 
     # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
@@ -282,7 +215,7 @@ steps:
 
     # AACT clinical-trial LLM extraction, produced by the extraction DAG.
     - name: copy_many aact trial extraction
-      sources: gs://aact_data/${aact_data_version}/extraction/*.parquet
+      sources: gs://aact_data/${aact_version}/extraction/*.parquet
       destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 

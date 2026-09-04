@@ -864,9 +864,7 @@ def _brava_sample_size_lookup(s4_df: DataFrame, s5_df: DataFrame) -> DataFrame:
                 [
                     contributions.withColumn('Ancestry Group', f.col('Ancestry')),
                     contributions.withColumn('Ancestry Group', f.lit('ALL')),
-                    contributions.filter(f.col('Ancestry') != 'EUR').withColumn(
-                        'Ancestry Group', f.lit('non_EUR')
-                    ),
+                    contributions.filter(f.col('Ancestry') != 'EUR').withColumn('Ancestry Group', f.lit('non_EUR')),
                 ],
             )
             .groupBy('Phenotype ID', 'Ancestry Group')

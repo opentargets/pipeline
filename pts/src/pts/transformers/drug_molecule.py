@@ -43,10 +43,8 @@ def _stage_rank(stage: pl.Expr) -> pl.Expr:
 
     A lower rank is a more advanced stage. Unrecognised and null stages rank as UNKNOWN.
     """
-    return (
-        stage
-        .replace(STAGE_FOR_MAX_MAPPING)
-        .replace_strict(CATEGORY_RANKS_STR, default=_DEFAULT_STAGE_RANK_VALUE, return_dtype=pl.Int64)
+    return stage.replace(STAGE_FOR_MAX_MAPPING).replace_strict(
+        CATEGORY_RANKS_STR, default=_DEFAULT_STAGE_RANK_VALUE, return_dtype=pl.Int64
     )
 
 
@@ -224,18 +222,14 @@ def _is_drug() -> pl.Expr:
 
 def _describe() -> pl.Expr:
     """Build the human-readable description from the drug type, stage and indications."""
-    return (
-        pl
-        .struct('drugType', 'maximumClinicalStage', 'indications')
-        .map_elements(
-            lambda row: _generate_description(
-                row['drugType'],
-                row['maximumClinicalStage'],
-                [i['maxClinicalStage'] for i in row['indications'] or []],
-                [i['efoName'] for i in row['indications'] or []],
-            ),
-            return_dtype=pl.String,
-        )
+    return pl.struct('drugType', 'maximumClinicalStage', 'indications').map_elements(
+        lambda row: _generate_description(
+            row['drugType'],
+            row['maximumClinicalStage'],
+            [i['maxClinicalStage'] for i in row['indications'] or []],
+            [i['efoName'] for i in row['indications'] or []],
+        ),
+        return_dtype=pl.String,
     )
 
 
@@ -317,13 +311,11 @@ def _process_clinical_report_indications(
         .sort(_INDICATION_SORT)
         .group_by(pl.col('drugId').alias('id'), maintain_order=True)
         .agg(
-            pl
-            .struct(
+            pl.struct(
                 pl.col('diseaseId').alias('disease'),
                 pl.col('efoName'),
                 pl.col('maxClinicalStage'),
-            )
-            .alias('indications')
+            ).alias('indications')
         )
     )
 
