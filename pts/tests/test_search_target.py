@@ -152,7 +152,8 @@ def test_target_with_no_drug_evidence_still_gets_empty_drug_terms_not_null() -> 
     result = build_target_index(**_inputs(scored_drugs=scored_drugs)).collect()
 
     assert result.height == 1
-    assert 'asthma' in result['terms'][0].to_list()
+    # The full set, not just a subset check -- so a leaked drug label (e.g. 'aspirin') fails it.
+    assert set(result['terms'][0].to_list()) == {'asthma', '1_100_A_G', 'chr1_100_A_G', 'hgvs1', 'x1', 'rs1'}
 
 
 def test_variant_labels_by_target_keeps_only_the_top_ranked_variants() -> None:

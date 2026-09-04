@@ -109,9 +109,27 @@ def test_drug_prefixes_swap_trials_for_the_mechanism_of_action() -> None:
 
 
 def test_drug_terms_merge_diseases_targets_indications_areas_and_children() -> None:
-    terms = build_drug_index(**_inputs()).collect()['terms'][0].to_list()
+    drugs = pl.LazyFrame([_drug(indications=['D2'])], schema=DRUG_SCHEMA)
+    d_lut = pl.LazyFrame(
+        {
+            'diseaseId': ['D1', 'D2'],
+            'disease_labels': [['asthma'], ['eczema']],
+            'disease_name': ['asthma', 'eczema'],
+            'therapeutic_labels': [['respiratory'], ['skin']],
+        },
+        schema={
+            'diseaseId': pl.String,
+            'disease_labels': LIST_STR,
+            'disease_name': pl.String,
+            'therapeutic_labels': LIST_STR,
+        },
+    )
 
-    assert set(terms) == {'asthma', 'EGFR', 'respiratory', 'CH2'}
+    terms = build_drug_index(**_inputs(drugs=drugs, d_lut=d_lut)).collect()['terms'][0].to_list()
+
+    # `drug_assocs.diseaseIds` (D1) drives disease_labels/therapeutic_labels; `drugs.indications`
+    # (D2) is a separate join and must resolve to its own, distinct label.
+    assert set(terms) == {'asthma', 'EGFR', 'respiratory', 'eczema', 'CH2'}
 
 
 def test_drug_terms25_and_terms5_are_empty_matching_the_release() -> None:
@@ -155,7 +173,7 @@ def test_cross_reference_ids_are_flattened_deduplicated_and_sorted() -> None:
 
     keywords = build_drug_index(**_inputs(drugs=drugs)).collect()['keywords'][0].to_list()
 
-    assert {'x', 'y', 'z'} <= set(keywords)
+    assert [k for k in keywords if k in {'x', 'y', 'z'}] == ['x', 'y', 'z']
 
 
 def test_drug_index_emits_exactly_one_document_per_drug() -> None:
