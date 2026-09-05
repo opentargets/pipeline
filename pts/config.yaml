@@ -755,7 +755,7 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
-        aact_trial_extraction: input/clinical_report/aact_trial_extraction/*.parquet
+        aact_trial_extraction: input/clinical_report/aact_trial_extraction
       destination: intermediate/chembl_molecule
   ##################################################################################################
 
@@ -811,7 +811,7 @@ steps:
         chembl: input/chembl/chembl.tar.gz
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
-        trial_extraction: input/clinical_report/aact_trial_extraction/*.parquet
+        trial_extraction: input/clinical_report/aact_trial_extraction
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
         output: output/clinical_report
