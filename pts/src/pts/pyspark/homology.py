@@ -187,8 +187,7 @@ def _build_homology(
             # literal text "NULL", which the CSV reader has no reason to treat as
             # a real null -- normalise it explicitly rather than shipping "NULL"
             # as if it were a value.
-            f.when(f.col('is_high_confidence') != 'NULL', f.col('is_high_confidence'))
-            .alias('isHighConfidence'),
+            f.when(f.col('is_high_confidence') != 'NULL', f.col('is_high_confidence')).alias('isHighConfidence'),
             f.col('targetGeneSymbol'),
             f.col('identity').cast(DoubleType()).alias('queryPercentageIdentity'),
             f.col('homology_identity').cast(DoubleType()).alias('targetPercentageIdentity'),

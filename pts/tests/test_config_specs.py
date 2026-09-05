@@ -43,7 +43,7 @@ def _registry() -> TaskRegistry:
     return registry
 
 
-DISPATCH_KNOWN_BROKEN: set[tuple[str,str]] = set()
+DISPATCH_KNOWN_BROKEN: set[tuple[str, str]] = set()
 """Tasks whose ``transformer``/``pyspark`` module is known not to resolve.
 
 Each entry is an ``xfail(strict=True)``, so fixing one turns into a test failure

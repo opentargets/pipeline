@@ -372,7 +372,12 @@ CONSTRAINT_METRICS = [
     for kind in ('syn', 'mis')
     for field in ('z_score', 'exp', 'obs', 'oe', 'oe_ci.lower', 'oe_ci.upper')
 ] + [
-    'lof.pLI', 'lof.exp', 'lof.obs', 'lof.oe', 'lof.oe_ci.lower', 'lof.oe_ci.upper',
+    'lof.pLI',
+    'lof.exp',
+    'lof.obs',
+    'lof.oe',
+    'lof.oe_ci.lower',
+    'lof.oe_ci.upper',
     'lof.oe_ci.upper_bin_decile',
 ]
 
@@ -402,9 +407,7 @@ def _lof_bins(spark, ranked_count: int, unranked_count: int):
     ranked = [_constraint_row(f'ENSG{i:011d}', str(i)) for i in range(1, ranked_count + 1)]
     unranked = [_constraint_row(f'ENSGNA{i:09d}', 'NA') for i in range(unranked_count)]
 
-    result = _build_genetic_constraints(
-        spark.createDataFrame(ranked + unranked, CONSTRAINT_BIN_SCHEMA)
-    )
+    result = _build_genetic_constraints(spark.createDataFrame(ranked + unranked, CONSTRAINT_BIN_SCHEMA))
 
     bins = {}
     for row in result.collect():
@@ -945,17 +948,22 @@ class TestProteinClassification:
 # what these tests pin, not just the two functions separately.
 # ---------------------------------------------------------------------------
 
-GENE_CODE_GFF3_SCHEMA = StructType([
-    StructField(f'_c{i}', StringType()) for i in range(9)
-])
+GENE_CODE_GFF3_SCHEMA = StructType([StructField(f'_c{i}', StringType()) for i in range(9)])
 
 _CT_ATTRS = 'gene_id=ENSG00000141510.16;transcript_id=ENST00000269305.9;tag=Ensembl_canonical'
 
 
 def _gene_code_row(chrom='chr17', start=7661779, end=7687538, strand='-', attrs=_CT_ATTRS):
     return Row(
-        _c0=chrom, _c1='HAVANA', _c2='transcript',
-        _c3=str(start), _c4=str(end), _c5='.', _c6=strand, _c7='.', _c8=attrs,
+        _c0=chrom,
+        _c1='HAVANA',
+        _c2='transcript',
+        _c3=str(start),
+        _c4=str(end),
+        _c5='.',
+        _c6=strand,
+        _c7='.',
+        _c8=attrs,
     )
 
 
@@ -987,16 +995,27 @@ def _with_canonical_transcript(spark, strand, start=100, end=200):
     """One gene row carrying a canonicalTranscript struct, or null when strand is None."""
     schema = StructType([
         StructField('id', StringType()),
-        StructField('canonicalTranscript', StructType([
-            StructField('id', StringType()),
-            StructField('chromosome', StringType()),
-            StructField('start', LongType()),
-            StructField('end', LongType()),
-            StructField('strand', IntegerType()),
-        ])),
+        StructField(
+            'canonicalTranscript',
+            StructType([
+                StructField('id', StringType()),
+                StructField('chromosome', StringType()),
+                StructField('start', LongType()),
+                StructField('end', LongType()),
+                StructField('strand', IntegerType()),
+            ]),
+        ),
     ])
-    ct = None if strand == 'MISSING' else Row(
-        id='ENST1', chromosome='17', start=start, end=end, strand=strand,
+    ct = (
+        None
+        if strand == 'MISSING'
+        else Row(
+            id='ENST1',
+            chromosome='17',
+            start=start,
+            end=end,
+            strand=strand,
+        )
     )
     return spark.createDataFrame([Row(id='ENSG1', canonicalTranscript=ct)], schema)
 
@@ -1045,7 +1064,9 @@ def test_gene_code_and_tss_agree_on_the_strand_encoding(spark):
     rows = [
         _gene_code_row(strand='+', start=7661779, end=7687538),
         _gene_code_row(
-            strand='-', start=1000, end=2000,
+            strand='-',
+            start=1000,
+            end=2000,
             attrs=_CT_ATTRS.replace('ENSG00000141510', 'ENSG00000000001'),
         ),
     ]

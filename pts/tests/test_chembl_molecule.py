@@ -397,8 +397,12 @@ class TestOrderIsDeterministic:
         return {
             'molecule_dictionary': molecule_dictionary,
             'compound_structures': pl.DataFrame(
-                schema={'molregno': pl.Int64, 'canonical_smiles': pl.Utf8,
-                        'standard_inchi_key': pl.Utf8, 'molfile': pl.Utf8}
+                schema={
+                    'molregno': pl.Int64,
+                    'canonical_smiles': pl.Utf8,
+                    'standard_inchi_key': pl.Utf8,
+                    'molfile': pl.Utf8,
+                }
             ),
             'molecule_hierarchy': pl.DataFrame(
                 [(1, 1), *[(child, 1) for child in order]],
@@ -424,10 +428,7 @@ class TestOrderIsDeterministic:
 
     def test_child_order_does_not_depend_on_row_order(self):
         """Element order inside the published `childChemblIds` array."""
-        results = [
-            rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds']
-            for p in self._permutations()
-        ]
+        results = [rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds'] for p in self._permutations()]
         assert results[0] == sorted(results[0])
         assert all(r == results[0] for r in results), 'childChemblIds varied with input row order'
 

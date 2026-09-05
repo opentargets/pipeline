@@ -383,15 +383,20 @@ class TestStructure:
         )
         df = df.with_columns(
             meta=pl.col('meta').struct.with_fields(
-                basicPropertyValues=pl.when(pl.col('id') == _url('MONDO_001'))
+                basicPropertyValues=pl
+                .when(pl.col('id') == _url('MONDO_001'))
                 .then(pl.lit([{'pred': 'http://example.org/other', 'val': 'kept'}]))
                 .otherwise(pl.col('meta').struct['basicPropertyValues'])
             )
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
-        preds = [entry['pred'] for entry in result.filter(pl.col('id') == _url('MONDO_001'))['meta'].struct[
-            'basicPropertyValues'
-        ][0].to_list()]
+        preds = [
+            entry['pred']
+            for entry in result
+            .filter(pl.col('id') == _url('MONDO_001'))['meta']
+            .struct['basicPropertyValues'][0]
+            .to_list()
+        ]
         assert 'http://example.org/other' in preds
         assert _IAO_REPLACED_BY in preds
 

@@ -262,11 +262,7 @@ def gff3_strand(col: Column) -> Column:
         IntegerType column holding 1, -1, or null. Only exact ``+`` and ``-``
         map; whitespace-padded or otherwise unexpected input becomes null.
     """
-    return (
-        f.when(col == '+', f.lit(1))
-        .when(col == '-', f.lit(-1))
-        .cast(IntegerType())
-    )
+    return f.when(col == '+', f.lit(1)).when(col == '-', f.lit(-1)).cast(IntegerType())
 
 
 def safe_array_union(*cols: Column) -> Column:

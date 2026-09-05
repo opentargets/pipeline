@@ -64,11 +64,14 @@ def pharmacogenetics(
     # A text present in the lookup is considered parsed, even if its phenotypeText
     # is [] (empty extraction is valid).
     unparsed_texts = (
-        pgx_df.select('genotypeAnnotationText').distinct().join(
-            pgx_phenotypes_df.select('genotypeAnnotationText').distinct(),
-            on='genotypeAnnotationText',
-            how='left_anti')
-        .toPandas()['genotypeAnnotationText'].to_list()
+        pgx_df
+        .select('genotypeAnnotationText')
+        .distinct()
+        .join(
+            pgx_phenotypes_df.select('genotypeAnnotationText').distinct(), on='genotypeAnnotationText', how='left_anti'
+        )
+        .toPandas()['genotypeAnnotationText']
+        .to_list()
     )
     annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
     if len(unparsed_texts) == 0:
@@ -99,9 +102,7 @@ def pharmacogenetics(
         )
         updated_phenotypes_df = update_phenotypes_lut(new_phenotypes_df, pgx_phenotypes_df)
         logger.info(f'save updated phenotypes to {destination["phenotypes"]}')
-        StorageHandle(destination['phenotypes']).write_text(
-            updated_phenotypes_df.toPandas().to_json(orient='records')
-        )
+        StorageHandle(destination['phenotypes']).write_text(updated_phenotypes_df.toPandas().to_json(orient='records'))
         annotated_pgx_df = annotate_phenotype(pgx_df, updated_phenotypes_df)
 
     logger.info('parse variantId')
@@ -237,8 +238,7 @@ def parse_phenotypes(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # future_to_text maps each Future back to its input text (genotypeAnnotationText)
             future_to_text = {
-                executor.submit(parse_phenotype_with_gpt, text, openai_client): text
-                for text in texts_to_parse
+                executor.submit(parse_phenotype_with_gpt, text, openai_client): text for text in texts_to_parse
             }
             # as_completed yields futures in completion order (fastest first)
             for i, future in enumerate(as_completed(future_to_text), 1):

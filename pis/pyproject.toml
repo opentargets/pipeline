@@ -8,6 +8,7 @@ requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 
 dependencies = [
+  "elasticsearch>=7.17.12",
   "jq>=1.11.0",
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",

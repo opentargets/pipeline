@@ -30,11 +30,23 @@ class TestSparkStringToBoolean:
     @pytest.mark.parametrize(
         ('value', 'expected'),
         [
-            ('Y', True), ('y', True), ('T', True), ('true', True), ('TRUE', True),
-            ('yes', True), ('1', True), (' Y ', True),
-            ('N', False), ('n', False), ('F', False), ('false', False),
-            ('no', False), ('0', False),
-            ('maybe', None), ('', None), (None, None),
+            ('Y', True),
+            ('y', True),
+            ('T', True),
+            ('true', True),
+            ('TRUE', True),
+            ('yes', True),
+            ('1', True),
+            (' Y ', True),
+            ('N', False),
+            ('n', False),
+            ('F', False),
+            ('false', False),
+            ('no', False),
+            ('0', False),
+            ('maybe', None),
+            ('', None),
+            (None, None),
         ],
     )
     def test_matches_spark(self, value: str | None, expected: bool | None) -> None:

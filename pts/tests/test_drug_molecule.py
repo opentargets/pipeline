@@ -161,9 +161,7 @@ def mechanism_df():
 @pytest.fixture
 def drug_index_result(molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df):
     """The drug index shared across the TestProcessDrugIndex cases."""
-    return process_drug_index(
-        molecule_df.lazy(), chemical_probes_df, mechanism_df, clinical_report_df, disease_df
-    )
+    return process_drug_index(molecule_df.lazy(), chemical_probes_df, mechanism_df, clinical_report_df, disease_df)
 
 
 def _by_id(frame: pl.DataFrame, column: str) -> dict:
@@ -271,9 +269,7 @@ class TestProcessClinicalReportIndications:
             schema=CLINICAL_REPORT_SCHEMA,
             orient='row',
         )
-        disease = pl.DataFrame(
-            [{'id': 'EFO_0001', 'name': '\xa0Disease X\xa0'}], schema=DISEASE_SCHEMA, orient='row'
-        )
+        disease = pl.DataFrame([{'id': 'EFO_0001', 'name': '\xa0Disease X\xa0'}], schema=DISEASE_SCHEMA, orient='row')
         rows = _by_id(_process_clinical_report_indications(reports, disease), 'indications')
         assert rows['CHEMBL_X'][0]['efoName'] == '\xa0disease x\xa0'
 
@@ -299,15 +295,12 @@ class TestGenerateDescription:
     def test_approved_drug_single_indication(self):
         result = _generate_description('Small molecule', 'APPROVAL', ['APPROVAL'], ['rheumatoid arthritis'])
         assert result == (
-            'Small molecule drug with a maximum clinical stage of Approval, '
-            'with an approval for rheumatoid arthritis.'
+            'Small molecule drug with a maximum clinical stage of Approval, with an approval for rheumatoid arthritis.'
         )
 
     def test_phase_3_drug(self):
         result = _generate_description('Antibody', 'PHASE_3', ['PHASE_3'], ['breast cancer'])
-        assert result == (
-            'Antibody drug with a maximum clinical stage of Phase 3, with 1 investigational indication.'
-        )
+        assert result == ('Antibody drug with a maximum clinical stage of Phase 3, with 1 investigational indication.')
 
     def test_multiple_approved_indications(self):
         result = _generate_description(
@@ -334,9 +327,7 @@ class TestGenerateDescription:
 
     def test_duplicate_indications_are_counted_once(self):
         """Repeated (stage, label) pairs count once."""
-        result = _generate_description(
-            'Small molecule', 'PHASE_2', ['PHASE_2', 'PHASE_2'], ['disease a', 'disease a']
-        )
+        result = _generate_description('Small molecule', 'PHASE_2', ['PHASE_2', 'PHASE_2'], ['disease a', 'disease a'])
         assert 'with 1 investigational indication.' in result
 
     def test_none_drug_type(self):

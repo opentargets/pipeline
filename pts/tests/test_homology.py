@@ -242,7 +242,7 @@ def test_homology_keeps_real_confidence_flag(spark):
 
 
 def test_homology_keeps_genuine_symbols_that_look_like_null_tokens(spark):
-    """"na", "nan" and "Nil" are real FlyBase gene symbols, not placeholder tokens.
+    """ "na", "nan" and "Nil" are real FlyBase gene symbols, not placeholder tokens.
 
     Regression test: an earlier version of this fix treated these three values as
     fake nulls and replaced them with the gene's stable ID. They are not -- "na"
