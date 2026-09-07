@@ -5,22 +5,23 @@
   },
   {
     "id": "intA",
-    "description": "Identifier for target A in source",
-    "isPrimaryKey": true
+    "description": "Identifier for target A in source"
   },
   {
     "id": "intABiologicalRole",
-    "description": "Biological role of target A in the interaction",
-    "isPrimaryKey": true
+    "description": "Biological role of target A in the interaction"
   },
   {
     "id": "intB",
-    "description": "Identifier for target B in source",
-    "isPrimaryKey": true
+    "description": "Identifier for target B in source"
   },
   {
     "id": "intBBiologicalRole",
-    "description": "Biological role of target B in the interaction",
+    "description": "Biological role of target B in the interaction"
+  },
+  {
+    "id": "interactionId",
+    "description": "Unique identifier of the molecular interaction",
     "isPrimaryKey": true
   },
   {
@@ -29,8 +30,7 @@
   },
   {
     "id": "sourceDatabase",
-    "description": "Source database reporting the molecular interaction",
-    "isPrimaryKey": true
+    "description": "Source database reporting the molecular interaction"
   },
   {
     "id": "speciesA",
@@ -67,13 +67,11 @@
   {
     "id": "targetA",
     "description": "Open Targets target identifier of the first molecule (target A) in the interaction [bioregistry:ensembl]",
-    "foreign_key": "target/id",
-    "isPrimaryKey": true
+    "foreign_key": "target/id"
   },
   {
     "id": "targetB",
     "description": "Open Targets target identifier of the second molecule (target B) in the interaction [bioregistry:ensembl]",
-    "foreign_key": "target/id",
-    "isPrimaryKey": true
+    "foreign_key": "target/id"
   }
 ]

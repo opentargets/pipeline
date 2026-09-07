@@ -28,6 +28,7 @@ steps:
         - FAILED_GC_LAMBDA_CHECK
         - NO_OT_CURATION
         - CASE_CASE_STUDY_DESIGN
+        - DEPRECATED_PROJECT
       # INPUTS
       step.study_index_path:
         # GWAS

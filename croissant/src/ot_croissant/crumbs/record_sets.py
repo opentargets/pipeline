@@ -14,6 +14,10 @@ from ot_croissant.constants import TYPE_DICT
 from ot_croissant.curation import DistributionCuration, RecordsetCuration
 
 SNAKE_CASE_WARNING = "column '{field_name}' is snake_case, camelCase is expected"
+MISSING_KEY_WARNING = (
+    "[{dataset}]: primary key component(s) '{fields}' are curated but absent "
+    'from the schema, the declared key is incomplete'
+)
 
 
 def _warn_if_snake_case(field_name: str) -> None:
@@ -78,6 +82,14 @@ class PlatformOutputRecordSets:
 
         # Collect primary key field IDs from recordset curation:
         recordset_curation = RecordsetCuration()
+
+        # A curated key component that no longer exists in the schema is dropped
+        # silently by the comprehension below, quietly weakening the declared key.
+        # Surface it, the same way a missing description is surfaced.
+        curated_key = recordset_curation.primary_key_fields(self.DISTRIBUTION_ID)
+        if absent := sorted(curated_key - {field.name for field in schema}):
+            logger.warning(MISSING_KEY_WARNING.format(dataset=self.DISTRIBUTION_ID, fields=', '.join(absent)))
+
         primary_key = [
             f'{self.DISTRIBUTION_ID}/{field.name}'
             for field in schema

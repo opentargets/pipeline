@@ -1,6 +1,7 @@
 """Tests for the chemical_probes module."""
 
 import pandas as pd
+import pyspark.sql.functions as f
 from pyspark.sql import Row
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
@@ -10,6 +11,7 @@ from pts.pyspark.chemical_probes import (
     _resolve_targets,
     collapse_cols_data_in_array,
     process_probes_targets_data,
+    replace_missing_placeholder,
 )
 
 # ---------------------------------------------------------------------------
@@ -197,6 +199,55 @@ def test_resolve_targets_multiple_probes_same_target(spark):
 
 
 # ---------------------------------------------------------------------------
+# replace_missing_placeholder
+# ---------------------------------------------------------------------------
+
+
+def test_replace_missing_placeholder_nulls_dash(spark):
+    """The source-authored '-' placeholder becomes a real null."""
+    df = spark.createDataFrame([('-',)], ['control_name'])
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert result.first().control is None
+
+
+def test_replace_missing_placeholder_nulls_stringified_nan(spark):
+    """The 'NaN' string that a blank cell becomes crossing into Spark is nulled too.
+
+    Regression test: with Arrow disabled, a blank `control_name` cell reaches Spark
+    as the literal string "NaN" rather than a null, so ~83% of chemical_probes rows
+    shipped with the text "NaN" in their control column instead of a real null.
+    """
+    df = spark.createDataFrame([('NaN',), ('nan',), ('NAN',)], ['control_name'])
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert [r.control for r in result.collect()] == [None, None, None]
+
+
+def test_replace_missing_placeholder_nulls_padded_token(spark):
+    """A placeholder token with stray whitespace is still recognised as missing.
+
+    Regression test: the comparison didn't trim before checking against the
+    known tokens, so e.g. "NaN " or " -" would have slipped through undetected.
+    """
+    df = spark.createDataFrame([(' NaN ',), ('- ',)], ['control_name'])
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert [r.control for r in result.collect()] == [None, None]
+
+
+def test_replace_missing_placeholder_keeps_real_values(spark):
+    """A genuine control compound name passes through unchanged."""
+    df = spark.createDataFrame([('BI-6953',)], ['control_name'])
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert result.first().control == 'BI-6953'
+
+
+def test_replace_missing_placeholder_keeps_existing_null(spark):
+    """A column value that is already a real null stays null."""
+    df = spark.createDataFrame([(None,)], StructType([StructField('control_name', StringType())]))
+    result = df.select(replace_missing_placeholder(f.col('control_name')).alias('control'))
+    assert result.first().control is None
+
+
+# ---------------------------------------------------------------------------
 # collapse_cols_data_in_array / PROBES_SETS
 # ---------------------------------------------------------------------------
 
@@ -355,3 +406,43 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
     assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
         'only the row without a gene_name should be dropped'
     )
+
+
+def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
+    """A blank action cell doesn't become a fake single-element ["NaN"] mechanismOfAction.
+
+    Regression test: with Arrow disabled, a blank `action` cell reaches Spark as
+    the literal string "NaN" -- the same pandas-to-Spark path as `control_name`
+    -- and f.split("NaN", ';') previously produced ["NaN"] instead of a real
+    null. Affected ~30% of chemical_probes rows in production.
+    """
+    xlsx = _probes_targets_xlsx(
+        tmp_path / 'probes.xlsx',
+        extra_columns={'action': [None, 'inhibitor;agonist', '-']},
+    )
+
+    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
+    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
+    try:
+        df = process_probes_targets_data(spark, str(xlsx))
+        rows = {r.pdid: r.mechanismOfAction for r in df.collect()}
+    finally:
+        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+
+    assert rows['PD-1'] is None, 'a blank action cell must not survive as ["NaN"]'
+    assert rows['PD-2'] == ['inhibitor', 'agonist']
+
+
+def test_probes_targets_drops_blank_gene_name(spark, tmp_path):
+    """A genuinely blank gene_name cell is dropped, same as the literal '-'.
+
+    Regression test: gene_name != '-' alone doesn't filter out a blank cell,
+    because pandas reads it as NaN and NaN != '-' is True in pandas, so the row
+    survived the query() it was meant to be excluded by.
+    """
+    xlsx = _probes_targets_xlsx(
+        tmp_path / 'probes.xlsx',
+        extra_columns={'gene_name': ['BRD4', None, '-']},
+    )
+    df = process_probes_targets_data(spark, str(xlsx))
+    assert sorted(r.pdid for r in df.collect()) == ['PD-1']

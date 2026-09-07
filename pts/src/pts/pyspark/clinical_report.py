@@ -62,7 +62,13 @@ AACT_ARCHIVE_MEMBER = 'postgres.dmp'
 
 AACT_TABLES = {
     'studies': [
-        'nct_id', 'overall_status', 'phase', 'study_type', 'start_date', 'why_stopped', 'number_of_arms',
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
         'official_title',
     ],
     'interventions': ['nct_id', 'intervention_type', 'name'],
@@ -70,9 +76,13 @@ AACT_TABLES = {
     'study_references': ['nct_id', 'pmid', 'reference_type'],
     'designs': ['nct_id', 'primary_purpose'],
     'brief_summaries': ['nct_id', 'description'],
+    'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
 }
 
-AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+AACT_ORDER_BY = {
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'sponsors': ['nct_id', 'agency_class', 'name'],
+}
 
 
 class ClinicalReportFlags(StrEnum):
@@ -126,6 +136,7 @@ def clinical_report(
     aact_study_references = aact_tables['study_references']
     aact_designs = aact_tables['designs']
     aact_summaries = aact_tables['brief_summaries']
+    aact_lead_sponsors = aact_tables['sponsors'].filter(pl.col('lead_or_collaborator') == 'lead')
 
     spark = spark_session()
     molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
@@ -140,14 +151,28 @@ def clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
         conditions=aact_conditions,
-        additional_metadata=[aact_study_references, aact_designs, aact_summaries],
+        additional_metadata=[
+            aact_study_references,
+            aact_designs,
+            aact_summaries,
+            aact_lead_sponsors,
+        ],
         aggregation_specs={
             'study_references': {
                 'group_by': 'nct_id',
                 'alias': 'literature',
                 'struct': {'id': 'pmid', 'type': 'reference_type'},
                 'agg': 'unique',
-            }
+            },
+            'sponsor': {
+                'group_by': 'nct_id',
+                'alias': 'sponsor',
+                'struct': {
+                    'agencyClass': 'agency_class',
+                    'name': 'name',
+                },
+                'agg': 'first',
+            },
         },
         llm_extractions=llm_batch_results.df,
     )
@@ -492,7 +517,8 @@ def flag_indirect_primary_purpose(
         reports_df = reports.df.join(llm_drug_intent, on='id', how='left')
         llm_drug_intent_condition = (
             # Flagging should only act on AACT reports
-            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value) &
+            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
+            &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
             # or when LLM was not able to infer the intent (null)
             ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())

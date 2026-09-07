@@ -2,7 +2,8 @@
   {
     "id": "targetId",
     "description": "Ensembl gene identifier of the query target [bioregistry:ensembl]",
-    "foreign_key": "target/id"
+    "foreign_key": "target/id",
+    "isPrimaryKey": true
   },
   {
     "id": "homologyType",
@@ -30,7 +31,8 @@
   },
   {
     "id": "targetGeneId",
-    "description": "Target gene ID of the homologue"
+    "description": "Target gene ID of the homologue",
+    "isPrimaryKey": true
   },
   {
     "id": "targetGeneSymbol",
