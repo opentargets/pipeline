@@ -276,6 +276,11 @@ steps:
                   HF_TOKEN:
                     secret_id: hfhub-key
             max_retry_count: 2
+            # exit_codes is what makes max_retry_count do anything: Batch retries only
+            # codes a lifecycle policy names, defaulting to the reserved 50001-50005, so
+            # an application failure (exit 1) was never retried. Listing codes replaces
+            # that default rather than adding to it, hence the reserved ones repeated.
+            exit_codes: [1, 50001, 50002, 50003, 50004, 50005]
             max_run_duration: '1h'
             instance_resource_spec:
               cpu_milli: 2000
