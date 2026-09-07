@@ -25,6 +25,11 @@ gentropy_version: "3.4.0-rc.2"
 vep_version: "release_115.2"
 spark_nlp_version: "6.1.5"
 
+# Ingested dataset versions
+#
+# The AACT archive and preprocessing snapshot consumed by this release.
+aact_version: '2026-08-25'
+
 # Dependency graph
 # ----------------
 # The following section defines the dependencies between the different steps in

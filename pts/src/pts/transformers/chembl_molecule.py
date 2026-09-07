@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from clinical_mining.provider.aact.llm_extractor import parse_batch_results
 from loguru import logger
 from otter.config.model import Config
 
@@ -42,7 +41,7 @@ def chembl_molecule(
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
             - drugbank: DrugBank-to-ChEMBL id mapping (tab-separated, ``.csv.gz``).
-            - aact_extraction_batch_results: (optional) OpenAI batch output for
+            - aact_trial_extraction: (optional) extracted AACT trial results for
               clinical-trial synonym mining; when present, AACT synonyms are
               appended to the molecules.
         destination: Path to write the output parquet file.
@@ -56,9 +55,9 @@ def chembl_molecule(
     drugbank_lookup = scan_dataset(str(source['drugbank']), format='tsv', has_header=True).collect()
 
     aact_batch = None
-    if 'aact_extraction_batch_results' in source:
-        logger.info(f'Reading AACT batch results from {source["aact_extraction_batch_results"]}')
-        aact_batch = parse_batch_results(str(source['aact_extraction_batch_results'])).df
+    if 'aact_trial_extraction' in source:
+        logger.info(f'Reading AACT extraction from {source["aact_trial_extraction"]}')
+        aact_batch = scan_dataset(str(source['aact_trial_extraction'])).collect()
 
     logger.info('Processing molecules')
     output_df = process_molecules(
@@ -90,8 +89,7 @@ def process_molecules(
         molecule_hierarchy: Raw ChEMBL molecule_hierarchy table.
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
-        aact_batch: (optional) Parsed AACT batch extractions, as returned by
-            :func:`clinical_mining.provider.aact.llm_extractor.parse_batch_results`.
+        aact_batch: (optional) AACT extraction rows read from Parquet.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.
