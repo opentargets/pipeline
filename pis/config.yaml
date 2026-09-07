@@ -12,7 +12,7 @@ scratchpad:
   depmap_version: '2026Q1'
   hpo_version: '2026-06-23'
   mondo_version: '2026-08-04'
-  ot_curation: '26.08.1'
+  ot_curation: '26.08.2'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
   gtex_version: '11'
