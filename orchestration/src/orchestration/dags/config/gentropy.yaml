@@ -143,17 +143,9 @@ steps:
       job:
         task_group:
           parallelism: 500 # Max number of VEP tasks run at a time in parallel on all machines.
-          # One task per machine, not two. Two co-resident VEP processes read the
-          # remote-mounted cache (gs://vep_cache_data) concurrently and put the VM
-          # under sustained page-cache pressure: the serial console repeats
-          # "systemd-journald: Under memory pressure, flushing caches" while both
-          # tasks stop producing output entirely. That is the opentargets/issues#4513
-          # signature, and it reproduced on a freshly created VM in do/platform-2609-2,
-          # so it is not a bad machine. It is not input size either -- the partitions
-          # are 52 KB at the median and 210 KB at the largest.
-          #
-          # Raising memory_mib would not help: the reservation is 2 x 2000 MiB against
-          # an n1-standard-4's 15 GB, so the pressure is page cache, not heap.
+          # 1, not 2: two co-resident VEP processes reading the remote-mounted cache
+          # put the VM under page-cache pressure until both stop making progress
+          # (opentargets/issues#4513). memory_mib is the wrong knob -- it is not heap.
           task_count_per_node: 1 # Number of tasks running at the same time on a single machine.
           task_environments:
             # Populated at runtime by BatchIndexOperator with dictionaries
