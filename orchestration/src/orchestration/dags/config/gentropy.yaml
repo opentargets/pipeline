@@ -143,7 +143,10 @@ steps:
       job:
         task_group:
           parallelism: 500 # Max number of VEP tasks run at a time in parallel on all machines.
-          task_count_per_node: 2 # Number of tasks running at the same time on a single machine.
+          # 1, not 2: two co-resident VEP processes reading the remote-mounted cache
+          # put the VM under page-cache pressure until both stop making progress
+          # (opentargets/issues#4513). memory_mib is the wrong knob -- it is not heap.
+          task_count_per_node: 1 # Number of tasks running at the same time on a single machine.
           task_environments:
             # Populated at runtime by BatchIndexOperator with dictionaries
             # containing $INPUT_FILE and $OUTPUT_FILE
