@@ -291,8 +291,8 @@ steps:
               entrypoint: /usr/bin/bash
               script_file: l2g_predict.sh
               script_variables:
-                l2g_training_version: '{{l2g_training_version}}'
                 feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+                model_path: '{{release_uri}}/etc/model/locus_to_gene_model'
         allocation:
           instance:
             machine_type: n1-standard-2
