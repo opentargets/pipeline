@@ -73,6 +73,16 @@ def l2g_train(
 
     predefined = scan_dataset(source['predefined_test']).collect()
     train, test = split.derive_splits(annotated.lazy(), predefined.lazy())
+    # Polars joins leave their output order unspecified (`maintain_order=None`), and every path
+    # into `derive_splits` ends in one, so the same inputs come back in a different row order from
+    # run to run -- observed three orders in three calls within a single process. Everything below
+    # this line is positional: XGBoost's `subsample` draws its rows by POSITION, and
+    # `build_background` samples the background by position too. Sorting on the natural key, which
+    # is unique here, is what makes the fitted model and the SHAP background reproducible from the
+    # seeds `metrics.json` records; without it `random_state` and `shapBackgroundSeed` pin a draw
+    # over rows that are not the same rows.
+    train = train.sort('studyLocusId', 'geneId')
+    test = test.sort('studyLocusId', 'geneId')
     logger.info(f'split: {train.height} train rows, {test.height} test rows')
 
     stats = split.split_stats(annotated.height, predefined.height, train, test)
@@ -90,6 +100,8 @@ def l2g_train(
     held_out = l2g_model.evaluate(fitted, x_test, y_test)
     logger.info(f'held-out metrics: {held_out}')
 
+    # Sorted, because both partitions are: `vertical` preserves each frame's order, so the refit
+    # below and the positional background draw further down both see a deterministic row order.
     labelled = pl.concat([train, test], how='vertical')
     if settings.get('train_on_full_dataset'):
         # Evaluation above is complete and is not affected by this refit; the saved model simply
