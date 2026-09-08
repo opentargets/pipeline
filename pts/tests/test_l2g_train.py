@@ -141,6 +141,42 @@ def test_l2g_train_background_has_the_configured_shape(workspace) -> None:
     assert background.height == 10
 
 
+def test_l2g_train_is_reproducible_across_runs(workspace) -> None:
+    """Two runs from one fixture must produce the same model and the same SHAP background.
+
+    `derive_splits` ends in polars joins, which leave their output order unspecified, so the rows
+    reaching the fit arrive in a different order from run to run unless something imposes one.
+    Both things that follow are POSITIONAL: XGBoost's `subsample` draws rows by position, and
+    `build_background` draws the background by position. Without the sort in `l2g_train` the two
+    saved models score the same rows differently and the two backgrounds differ, while
+    `metrics.json` goes on recording `shapBackgroundSeed` as though the draw were reproducible.
+
+    Asserted on the SAVED artifacts, not on in-memory frames, because those artifacts are what the
+    release ships and what `l2g_predict` reads back.
+    """
+    # `subsample` is what makes the FIT positional, so it has to be below 1.0 here as it is in
+    # production; `SETTINGS`'s three-key hyperparameter block leaves it at XGBoost's default of
+    # 1.0, under which every row is used and the row order cannot reach the model.
+    settings = dict(SETTINGS) | {
+        'hyperparameters': {'n_estimators': 20, 'max_depth': 3, 'random_state': 777, 'subsample': 0.8}
+    }
+    first = _destination(workspace / 'first')
+    second = _destination(workspace / 'second')
+    l2g_train(_source(workspace), first, dict(settings), None)
+    l2g_train(_source(workspace), second, dict(settings), None)
+
+    background_first = pl.read_parquet(first['background'])
+    background_second = pl.read_parquet(second['background'])
+    assert background_first.equals(background_second), 'the SHAP background is not reproducible'
+
+    # Scored on one fixed matrix, so any difference is the model's and not the ordering of the
+    # rows it is asked about.
+    scored = to_matrix(scan_dataset(first['test_split']).collect(), FEATURES)
+    proba_first = load_model(first['model']).predict_proba(scored)[:, 1]
+    proba_second = load_model(second['model']).predict_proba(scored)[:, 1]
+    np.testing.assert_array_equal(proba_first, proba_second, err_msg='the fitted model is not reproducible')
+
+
 @pytest.fixture
 def leak_sensitive_workspace(tmp_path):
     """A fixture on which a refit-before-evaluate leak is impossible to miss.
