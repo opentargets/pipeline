@@ -2007,7 +2007,8 @@ steps:
         features_list: *l2g_features
         l2g_threshold: 0.05
         explain_predictions: true
-        shap_background_size: 100
+        # No `shap_background_size` here on purpose: the masker is sized from the background
+        # parquet the training task wrote, so the size is set once, above.
   ##################################################################################################
 
   #: VEP_VIEW STEP :################################################################################

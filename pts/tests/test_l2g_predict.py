@@ -72,6 +72,45 @@ def workspace(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def multi_gene_workspace(tmp_path):
+    """Twelve loci carrying four genes each, staged in descending key order.
+
+    Written descending on BOTH key components so no assertion about ordering can pass by accident
+    on the order the parts happen to be read in: every row has to move for the output to come out
+    sorted. Everything else matches `workspace` -- all rows GWAS and protein-coding, so the row
+    set is the whole matrix and only the order is under test.
+    """
+    rng = np.random.default_rng(0)
+    pairs = [(f'sl{i:02d}', f'ENSG{g:011d}') for i in reversed(range(12)) for g in reversed(range(4))]
+    n = len(pairs)
+
+    matrix = pl.DataFrame(
+        {
+            'studyLocusId': [locus for locus, _ in pairs],
+            'geneId': [gene for _, gene in pairs],
+            'isProteinCoding': [1] * n,
+            **{name: rng.random(n) for name in FEATURES},
+        }
+    )
+    (tmp_path / 'fm').mkdir()
+    matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
+
+    credible = pl.DataFrame({
+        'studyLocusId': [f'sl{i:02d}' for i in reversed(range(12))],
+        'studyType': ['gwas'] * 12,
+    })
+    (tmp_path / 'cs').mkdir()
+    credible.write_parquet(tmp_path / 'cs' / 'part-0.parquet')
+
+    x = rng.random((80, len(FEATURES))).astype(np.float32)
+    y = (rng.random(80) > 0.5).astype(np.int32)
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 5, 'max_depth': 2})
+    save_model(model, str(tmp_path / 'classifier.skops'))
+    pl.DataFrame(x[:10], schema=list(FEATURES)).write_parquet(tmp_path / 'background.parquet')
+    return tmp_path
+
+
 def _source(workspace) -> dict[str, str]:
     return {
         'feature_matrix': str(workspace / 'fm'),
@@ -85,9 +124,9 @@ SETTINGS = {
     'features_list': list(FEATURES),
     'l2g_threshold': 0.0,
     'explain_predictions': True,
-    'shap_background_size': 10,
     'shap_workers': 1,
 }
+"""No `shap_background_size`: the masker is sized from the background parquet, as in production."""
 
 
 def test_l2g_predict_excludes_non_gwas_and_non_protein_coding_rows(workspace) -> None:
@@ -100,24 +139,40 @@ def test_l2g_predict_excludes_non_gwas_and_non_protein_coding_rows(workspace) ->
 
 
 def test_l2g_predict_applies_the_threshold(workspace) -> None:
-    # An empty prediction set is a real production outcome, so this pins whatever
-    # `write_dataset` actually does with a zero-row frame. Determine that behaviour and
-    # assert it explicitly -- either a readable zero-row dataset or no part files at all.
-    # Do NOT weaken the test by choosing a threshold that keeps rows.
+    """An empty prediction set is a real production outcome, so pin exactly what it produces.
+
+    `write_dataset` sinks through `pl.PartitionBy`, which writes one part even for a zero-row
+    frame, so the dataset is a single readable `00000000.parquet` carrying the full schema and no
+    rows -- not an empty directory, and not a missing one. Asserted directly rather than
+    accommodated with a branch: a consumer globbing `*.parquet` sees a schema either way, and if
+    that ever changes this should fail rather than quietly accept the new behaviour.
+    """
     destination = str(workspace / 'out')
     l2g_predict(_source(workspace), destination, {**SETTINGS, 'l2g_threshold': 1.1}, None)
     parts = sorted(Path(destination).glob('*.parquet'))
-    if parts:
-        assert pl.read_parquet(parts).height == 0
-    else:
-        assert Path(destination).exists()
+    assert [part.name for part in parts] == ['00000000.parquet']
+    empty = pl.read_parquet(parts)
+    assert empty.height == 0
+    assert empty.columns == ['studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue']
 
 
-def test_l2g_predict_output_is_sorted_by_key(workspace) -> None:
-    destination = str(workspace / 'out')
-    l2g_predict(_source(workspace), destination, dict(SETTINGS), None)
+def test_l2g_predict_output_is_sorted_by_key(multi_gene_workspace) -> None:
+    """The full `(studyLocusId, geneId)` key, on a fixture where the second component matters.
+
+    With one gene per locus -- as in `workspace` -- an implementation that sorted on
+    `studyLocusId` alone would satisfy this while violating the ordering the transformer
+    declares, so the fixture gives every locus several genes and the assertion compares the
+    key TUPLES.
+    """
+    destination = str(multi_gene_workspace / 'out')
+    l2g_predict(_source(multi_gene_workspace), destination, dict(SETTINGS), None)
     out = pl.read_parquet(f'{destination}/*.parquet')
-    assert out['studyLocusId'].to_list() == sorted(out['studyLocusId'].to_list())
+
+    genes_per_locus = out.group_by('studyLocusId').len()['len']
+    assert int(genes_per_locus.min()) > 1, 'fixture no longer exercises the geneId component'
+
+    keys = out.select('studyLocusId', 'geneId').rows()
+    assert keys == sorted(keys)
 
 
 def test_l2g_predict_writes_one_feature_entry_per_feature(workspace) -> None:

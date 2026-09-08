@@ -20,12 +20,29 @@ CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""
 
 
-def _l2g_train_settings() -> dict[str, Any]:
+def _settings(name: str) -> dict[str, Any]:
     config = yaml.safe_load(CONFIG_PATH.read_text())
     tasks = config['steps']['l2g']
-    (task,) = [task for task in tasks if task.get('name') == 'transform l2g_train']
+    (task,) = [task for task in tasks if task.get('name') == name]
     return task['settings']
+
+
+def _l2g_train_settings() -> dict[str, Any]:
+    return _settings('transform l2g_train')
 
 
 def test_config_hyperparameters_match_the_model_default() -> None:
     assert _l2g_train_settings()['hyperparameters'] == DEFAULT_HYPERPARAMETERS
+
+
+def test_the_shap_background_size_is_configured_exactly_once() -> None:
+    """Only training may set it; prediction sizes its masker from the background it loads.
+
+    Configured in both places, the two can disagree with nothing to notice: raise training's to
+    1000 and leave prediction's at 100 and `Independent` would use 100 of the 1000 rows while
+    `metrics.json` recorded 1000 -- the silently-truncated background this port exists to remove.
+    Unlike `features_list`, which a YAML anchor keeps in step, there is nothing structural to bind
+    two copies of a scalar, so the guard is that the second copy must not exist.
+    """
+    assert 'shap_background_size' in _l2g_train_settings()
+    assert 'shap_background_size' not in _settings('transform l2g_predict')
