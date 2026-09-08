@@ -244,3 +244,57 @@ def test_l2g_train_held_out_metrics_do_not_depend_on_train_on_full_dataset(leak_
     proba_full = load_model(destination_full['model']).predict_proba(test_matrix)[:, 1]
     proba_partial = load_model(destination_partial['model']).predict_proba(test_matrix)[:, 1]
     assert not np.allclose(proba_full, proba_partial)
+
+
+def test_l2g_train_leaves_no_local_gs_tree_for_a_cloud_destination(workspace, tmp_path, monkeypatch) -> None:
+    """Every declared destination must survive being a `gs://…` URI, which in production they are.
+
+    `release_uri` is set in production, so otter resolves each relative destination in
+    `config.yaml` to a bucket URI before this transformer runs. POSIX collapses `gs://` to `gs:/`,
+    so any writer built on `pathlib` -- `Path(...).write_text`, `Path(...).parent.mkdir`,
+    `sio.dump` -- silently deposits the artifact under the working directory instead. The step
+    still reports success, and `l2g_predict` reads the model back from the same collapsed path in
+    the same directory, so nothing downstream notices that the release has no classifier, no
+    `metrics.json` and no split statistics.
+
+    The cloud boundary is stubbed rather than reached: what is asserted is that the writers route
+    through `StorageHandle` (and, for the background, through polars' own cloud-aware writer with
+    `mkdir=True`), and that not one byte lands in a local directory named `gs:`.
+    """
+    written: dict[str, object] = {}
+    parquet_calls: list[tuple[str, dict]] = []
+
+    class _Handle:
+        def __init__(self, location: str) -> None:
+            self.location = location
+
+        def write(self, data: bytes) -> None:
+            written[self.location] = data
+
+        def write_text(self, data: str, encoding: str = 'utf-8') -> None:
+            written[self.location] = data
+
+    def _fake_write_parquet(self, path, **kwargs):  # a stand-in for the polars method
+        parquet_calls.append((path, kwargs))
+
+    monkeypatch.setattr('pts.transformers.l2g_train.StorageHandle', _Handle)
+    monkeypatch.setattr('pts.transformers.l2g.model.StorageHandle', _Handle)
+    monkeypatch.setattr('pts.transformers.l2g_train.write_dataset', lambda frame, path: None)
+    monkeypatch.setattr(pl.DataFrame, 'write_parquet', _fake_write_parquet)
+    monkeypatch.chdir(tmp_path)
+
+    base = 'gs://a-release-bucket/a-run'
+    destination = {
+        'model': f'{base}/etc/model/locus_to_gene_model/classifier.skops',
+        'background': f'{base}/etc/model/locus_to_gene_model/shap_background.parquet',
+        'metrics': f'{base}/etc/model/locus_to_gene_model/metrics.json',
+        'train_split': f'{base}/intermediate/l2g_train',
+        'test_split': f'{base}/intermediate/l2g_test',
+        'split_stats': f'{base}/intermediate/l2g_train_test_split_stats.json',
+    }
+
+    l2g_train(_source(workspace), destination, dict(SETTINGS), None)
+
+    assert set(written) == {destination['split_stats'], destination['model'], destination['metrics']}
+    assert parquet_calls == [(destination['background'], {'mkdir': True})]
+    assert not (tmp_path / 'gs:').exists(), 'an artifact was written to a local gs:/ tree'

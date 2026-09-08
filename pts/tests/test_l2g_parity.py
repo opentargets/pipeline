@@ -1,12 +1,18 @@
 """Fixed-model parity against a published release.
 
-The sharpest available test of the migration: take the release's OWN classifier, run it through
-this polars path over the release's own feature matrix, and require the scores back. Because the
-model is held fixed, any difference is the migration's doing and not the retraining's.
+The sharpest available test of the migration: take the release's OWN classifier, run the SHIPPED
+`l2g_predict` over the release's own feature matrix, and require the scores back. Because the model
+is held fixed, any difference is the migration's doing and not the retraining's.
+
+The fixture calls `l2g_predict` rather than re-implementing its preparation. An earlier version
+hand-rolled the scan, the `isProteinCoding` filter and the GWAS semi-join, and consequently
+certified a copy of the code: deleting the protein-coding filter from `l2g_predict`, or changing
+its threshold comparison, left all three tests passing.
 
 Row-level SHAP parity is deliberately NOT asserted. Each of gentropy's 1000 Batch tasks drew its
 own unseeded background, so `shapBaseValue` varies across the baseline's own partitions -- 0.0381
-to 0.0668 in 26.09-1. Re-running gentropy would not reproduce it either.
+to 0.0668 in 26.09-1. Re-running gentropy would not reproduce it either. `explain_predictions` is
+therefore off, which is also what keeps this affordable.
 
 Gated on an environment variable because it reads a multi-gigabyte GCS dataset:
 
@@ -18,8 +24,8 @@ import os
 import polars as pl
 import pytest
 
-from pts.transformers.l2g.features import FEATURES, impute_and_cast
-from pts.transformers.l2g.model import load_model, to_matrix
+from pts.transformers.l2g.features import FEATURES
+from pts.transformers.l2g_predict import l2g_predict
 
 RUN = os.environ.get('L2G_PARITY_RUN')
 BUCKET = os.environ.get('L2G_PARITY_BUCKET', 'gs://open-targets-pipeline-runs')
@@ -32,33 +38,32 @@ pytestmark = [
 
 @pytest.fixture(scope='module')
 def scored(tmp_path_factory) -> pl.DataFrame:
-    """Score the release's feature matrix with the release's own model."""
+    """Run the shipped `l2g_predict` over the release's feature matrix and its own model.
+
+    No local staging: `load_model` reads its bytes through otter's storage abstraction, so the
+    model is loaded straight from the release bucket. The threshold is the production 0.05, so the
+    row set this produces is exactly what the released run should have produced.
+    """
     base = f'{BUCKET}/{RUN}'
-    local_model = tmp_path_factory.mktemp('model') / 'classifier.skops'
-    import gcsfs
-
-    gcsfs.GCSFileSystem().get(
-        f'{base}/etc/model/locus_to_gene_model/classifier.skops'.removeprefix('gs://'),
-        str(local_model),
+    destination = str(tmp_path_factory.mktemp('parity') / 'l2g_prediction')
+    l2g_predict(
+        {
+            'feature_matrix': f'{base}/intermediate/l2g_feature_matrix',
+            'credible_set': f'{base}/output/credible_set',
+            'model': f'{base}/etc/model/locus_to_gene_model/classifier.skops',
+            'background': f'{base}/etc/model/locus_to_gene_model/shap_background.parquet',
+        },
+        destination,
+        {
+            'features_list': list(FEATURES),
+            'l2g_threshold': 0.05,
+            'explain_predictions': False,
+            'shap_background_size': 100,
+        },
+        None,
     )
-    model = load_model(str(local_model))
-
-    gwas = (
-        pl.scan_parquet(f'{base}/output/credible_set/*.parquet')
-        .filter(pl.col('studyType') == 'gwas')
-        .select('studyLocusId')
-        .unique()
-    )
-    prepared = impute_and_cast(
-        pl.scan_parquet(f'{base}/intermediate/l2g_feature_matrix/*.parquet')
-        .filter(pl.col('isProteinCoding') == 1)
-        .join(gwas, on='studyLocusId', how='semi'),
-        list(FEATURES),
-    ).collect()
-
-    matrix = to_matrix(prepared, list(FEATURES))
-    return prepared.select('studyLocusId', 'geneId').with_columns(
-        pl.Series('score', model.predict_proba(matrix)[:, 1])
+    return pl.read_parquet(
+        f'{destination}/*.parquet', columns=['studyLocusId', 'geneId', 'score']
     )
 
 

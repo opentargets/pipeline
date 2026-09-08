@@ -13,12 +13,12 @@ things gentropy does are deliberately absent:
 """
 
 import json
-from pathlib import Path
 from typing import Any
 
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.l2g import explain, gold_standard, split
 from pts.transformers.l2g import model as l2g_model
@@ -27,14 +27,19 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
 def _write_json(document: dict[str, Any], path: str) -> None:
-    """Write a JSON document, creating the parent directory.
+    """Write a JSON document through otter's storage abstraction.
+
+    Deliberately NOT `pathlib`. In production `release_uri` is set, so otter resolves every
+    relative destination in `config.yaml` into a `gs://…` URI before this transformer sees it.
+    POSIX collapses that scheme to `gs:/` and a `Path(...).write_text` lands the document on the
+    container's local disk, silently, while the step still reports success. `StorageHandle`
+    speaks both schemes, and its filesystem backend creates the parent directory itself.
 
     Args:
         document: the object to serialise.
-        path: destination file.
+        path: destination file, local or `gs://`.
     """
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(document, indent=2))
+    StorageHandle(path).write_text(json.dumps(document, indent=2))
 
 
 def l2g_train(
@@ -95,8 +100,11 @@ def l2g_train(
         )
 
     background = explain.build_background(labelled, features, background_size, background_seed)
-    Path(destination['background']).parent.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame(background, schema=features).write_parquet(destination['background'])
+    # Deliberately NOT write_dataset: a single named release artifact, not a dataset of parts --
+    # the same trade `release_metrics` makes for `metrics.parquet`. `mkdir=True` creates the
+    # parent locally and is inert on a cloud URI, which polars writes natively; a
+    # `Path(...).parent.mkdir` here would instead manufacture a stray local `gs:/…` tree.
+    pl.DataFrame(background, schema=features).write_parquet(destination['background'], mkdir=True)
 
     l2g_model.save_model(fitted, destination['model'])
     _write_json(
