@@ -143,8 +143,8 @@ l2g:
       test_split: intermediate/l2g_test_split
       split_stats: intermediate/l2g_train_test_split_stats.json
     settings:
-      hyperparameters: ${l2g_hyperparameters}
-      features_list: ${l2g_features}
+      features_list: &l2g_features [eQtlColocClppMaximum, ...]   # 31 names, order load-bearing
+      hyperparameters: {n_estimators: 300, max_depth: 5, ...}
       train_on_full_dataset: true
       shap_background_size: 100
       shap_background_seed: 42
@@ -160,16 +160,20 @@ l2g:
       background: etc/model/locus_to_gene_model/shap_background.parquet
     destination: output/l2g_prediction
     settings:
-      features_list: ${l2g_features}
+      features_list: *l2g_features
       l2g_threshold: 0.05
       explain_predictions: true
 ```
 
-`l2g_features` and `l2g_hyperparameters` live in the `scratchpad:` block at the top of
-`pts/config.yaml` so each is written once and interpolated into both tasks. `l2g_features` is the
-31-name list from `LocusToGeneConfig.features_list` in gentropy, copied verbatim **in order** — the
-order is load-bearing twice over: it is the column order the model was fitted on, and it is the
-order of the `features` array in the output.
+The feature list is shared between the two tasks by a **YAML anchor and alias**, not by the
+scratchpad. Otter's `Scratchpad` is `string.Template` substitution, so a `${...}` sentinel can only
+ever produce a string — a list would arrive as `"['eQtlColocClppMaximum', ...]"`. Anchors are
+resolved by `yaml.safe_load` before otter sees the document, so a real list arrives.
+
+The list is the 31 names from `LocusToGeneConfig.features_list` in gentropy, copied verbatim **in
+order**. The order is load-bearing twice over: it is the column order the model was fitted on, and
+it is the order of the `features` array in the output. The anchor is what stops the two tasks
+drifting apart.
 
 One config step is one Airflow task on one VM. Because no task is named `pyspark …`, PTS step
 routing (`orchestration/src/orchestration/models/pts_step.py`) sends it to a plain GCE VM rather
