@@ -8,8 +8,9 @@ import polars as pl
 import pytest
 
 from pts.transformers.l2g.features import FEATURES
-from pts.transformers.l2g.model import load_model
+from pts.transformers.l2g.model import load_model, to_matrix
 from pts.transformers.l2g_train import l2g_train
+from pts.transformers.utils.dataset import scan_dataset
 
 
 @pytest.fixture
@@ -138,3 +139,108 @@ def test_l2g_train_background_has_the_configured_shape(workspace) -> None:
     background = pl.read_parquet(destination['background'])
     assert background.columns == list(FEATURES)
     assert background.height == 10
+
+
+@pytest.fixture
+def leak_sensitive_workspace(tmp_path):
+    """A fixture on which a refit-before-evaluate leak is impossible to miss.
+
+    `workspace` above cannot detect that leak: every positive row in it lands on one of only
+    two gene ids, and the pinned test set uses those same two genes as its positives, so
+    `derive_splits`'s contamination rule (drop any locus that shares a gene with a test
+    positive) strips EVERY positive row out of training. With zero positives to learn from,
+    the model is already degenerate before a leak has a chance to matter, and held-out metrics
+    come out identical whether or not the leak happens.
+
+    Here, train and test are given disjoint gene pools -- the eight test loci each carry a gene
+    id that appears nowhere else -- so contamination cannot touch training at all, and training
+    keeps its own positives. A model that then also sees the test rows during fitting can
+    memorise them outright (perfect metrics); a model that never saw them cannot, on features
+    that carry no real signal. That gap is what makes the leak observable.
+    """
+    rng = np.random.default_rng(1)
+
+    n_train = 40
+    train_loci = [f'trainloc{i}' for i in range(n_train)]
+    train_genes = [f'ENSGTRAIN{i % 8:07d}' for i in range(n_train)]
+    train_labels = ['positive' if i % 4 == 0 else 'negative' for i in range(n_train)]
+
+    n_test = 8
+    test_loci = [f'testloc{i}' for i in range(n_test)]
+    test_genes = [f'ENSGTEST{i:08d}' for i in range(n_test)]  # unique per test locus
+    test_labels = ['positive' if i % 4 == 0 else 'negative' for i in range(n_test)]
+
+    loci = train_loci + test_loci
+    genes = train_genes + test_genes
+    labels = train_labels + test_labels
+    n = len(loci)
+
+    matrix = pl.DataFrame(
+        {
+            'studyLocusId': loci,
+            'geneId': genes,
+            'isProteinCoding': [1] * n,
+            **{name: rng.random(n) for name in FEATURES},
+        }
+    )
+    (tmp_path / 'fm').mkdir()
+    matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
+
+    credible = pl.DataFrame({
+        'studyLocusId': loci,
+        'variantId': [f'1_{i}_A_G' for i in range(n)],
+        'studyId': [f'GCST{i}' for i in range(n)],
+        'studyType': ['gwas'] * n,
+    })
+    (tmp_path / 'cs').mkdir()
+    credible.write_parquet(tmp_path / 'cs' / 'part-0.parquet')
+
+    gold = pl.DataFrame({
+        'studyLocusId': loci,
+        'geneId': genes,
+        'diseaseIds': [['EFO_1']] * n,
+        'variantId': [f'1_{i}_A_G' for i in range(n)],
+        'studyId': [f'GCST{i}' for i in range(n)],
+        'goldStandardSet': labels,
+    })
+    (tmp_path / 'gs').mkdir()
+    gold.write_ndjson(tmp_path / 'gs' / 'part-0.json')
+
+    pinned = pl.DataFrame({
+        'studyLocusId': test_loci,
+        'geneId': test_genes,
+        'goldStandardSet': test_labels,
+    })
+    (tmp_path / 'pt').mkdir()
+    pinned.write_parquet(tmp_path / 'pt' / 'part-0.parquet')
+
+    return tmp_path
+
+
+def test_l2g_train_held_out_metrics_do_not_depend_on_train_on_full_dataset(leak_sensitive_workspace) -> None:
+    """The refit must run strictly after `evaluate`, so it can never touch the reported metrics.
+
+    Reordering them would still leave `heldOut` with the same seven keys -- every assertion above
+    would keep passing -- but the numbers would be computed on data the model had just trained on.
+    This pins the invariant directly instead of guessing a threshold: run once with
+    `train_on_full_dataset: True` and once `False`, from the same fixture, and require the held-out
+    blocks to match exactly. A reordering shifts the `True` run's numbers and this fails.
+    """
+    workspace = leak_sensitive_workspace
+    settings = dict(SETTINGS) | {'hyperparameters': {'n_estimators': 50, 'max_depth': 6, 'random_state': 777}}
+    destination_full = _destination(workspace / 'full')
+    destination_partial = _destination(workspace / 'partial')
+
+    l2g_train(_source(workspace), destination_full, dict(settings), None)
+    l2g_train(_source(workspace), destination_partial, dict(settings) | {'train_on_full_dataset': False}, None)
+
+    metrics_full = json.loads(Path(destination_full['metrics']).read_text())
+    metrics_partial = json.loads(Path(destination_partial['metrics']).read_text())
+    assert metrics_full['heldOut'] == metrics_partial['heldOut']
+
+    # And the flag is not silently inert: it does change what gets SAVED, even though it must
+    # never change what gets REPORTED. Same test rows, two differently-trained models.
+    test_matrix = to_matrix(scan_dataset(destination_full['test_split']).collect(), FEATURES)
+    proba_full = load_model(destination_full['model']).predict_proba(test_matrix)[:, 1]
+    proba_partial = load_model(destination_partial['model']).predict_proba(test_matrix)[:, 1]
+    assert not np.allclose(proba_full, proba_partial)
