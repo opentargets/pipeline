@@ -5,9 +5,18 @@ The sharpest available test of the migration: take the release's OWN classifier,
 is held fixed, any difference is the migration's doing and not the retraining's.
 
 The fixture calls `l2g_predict` rather than re-implementing its preparation. An earlier version
-hand-rolled the scan, the `isProteinCoding` filter and the GWAS semi-join, and consequently
-certified a copy of the code: deleting the protein-coding filter from `l2g_predict`, or changing
-its threshold comparison, left all three tests passing.
+hand-rolled the scan, the `isProteinCoding` filter and the GWAS semi-join, and so certified a copy
+of the code rather than the code.
+
+What this gate certifies, precisely: the shipped `l2g_predict`'s filters, its scoring and its
+output assembly, against a dataset a real release published. Drop the `isProteinCoding` filter or
+the GWAS restriction and the row-set test fails on the extra rows.
+
+What it cannot certify: the boundary comparison at the threshold. No released row scores exactly
+0.05 in float64, so `>=` and `>` produce byte-identical output here and no gate over released data
+could tell them apart. That mutation is covered instead by
+`test_l2g_predict.py::test_l2g_predict_keeps_a_row_scoring_exactly_at_the_threshold`, which derives
+its threshold from a score the model actually produced.
 
 Row-level SHAP parity is deliberately NOT asserted. Each of gentropy's 1000 Batch tasks drew its
 own unseeded background, so `shapBaseValue` varies across the baseline's own partitions -- 0.0381
