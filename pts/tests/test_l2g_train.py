@@ -178,6 +178,42 @@ def test_l2g_train_is_reproducible_across_runs(workspace) -> None:
 
 
 @pytest.fixture
+def duplicate_key_workspace(workspace):
+    """`workspace`, plus one curated row that gives a training locus two labels for one gene.
+
+    The only way a `(studyLocusId, geneId)` pair survives `annotate` twice is for the rows to
+    differ in some other column, since it deduplicates on the whole row. Two curated rows agreeing
+    on `(studyId, variantId, geneId)` and disagreeing on `goldStandardSet` do exactly that: the
+    join fans the single feature-matrix row out to two, identical but for the label. `sl10` is
+    used because it survives the contamination anti-join, so the duplicate lands in the TRAIN
+    split rather than being filtered away before the check can see it.
+    """
+    gold = pl.read_ndjson(workspace / 'gs' / 'part-0.json')
+    flipped = gold.filter(pl.col('studyLocusId') == 'sl10').with_columns(
+        pl.lit('positive').alias('goldStandardSet')
+    )
+    assert flipped.height == 1, 'fixture no longer has exactly one sl10 row to flip'
+    assert gold.filter(pl.col('studyLocusId') == 'sl10')['goldStandardSet'][0] == 'negative'
+    pl.concat([gold, flipped]).write_ndjson(workspace / 'gs' / 'part-0.json')
+    return workspace
+
+
+def test_l2g_train_refuses_a_split_whose_key_repeats(duplicate_key_workspace) -> None:
+    """A repeated key would silently undo the sort, so the run must fail instead.
+
+    The sort is a total order only while `(studyLocusId, geneId)` is unique -- polars' `sort` is
+    not tie-stable, and `maintain_order=True` would not help, because it stabilises against the
+    input order and the input order is the unspecified thing. Tied rows would go back to the
+    arbitrary order the joins produced, and the positional draws downstream would go back to
+    varying between runs, with `metrics.json` still recording its seeds and
+    `test_l2g_train_is_reproducible_across_runs` still passing on its key-unique fixture. Nothing
+    would show, which is why this raises rather than warns.
+    """
+    with pytest.raises(ValueError, match=r'the train split repeats 1 .* pair'):
+        l2g_train(_source(duplicate_key_workspace), _destination(duplicate_key_workspace), dict(SETTINGS), None)
+
+
+@pytest.fixture
 def leak_sensitive_workspace(tmp_path):
     """A fixture on which a refit-before-evaluate leak is impossible to miss.
 

@@ -42,6 +42,46 @@ def _write_json(document: dict[str, Any], path: str) -> None:
     StorageHandle(path).write_text(json.dumps(document, indent=2))
 
 
+SORT_KEY: tuple[str, ...] = ('studyLocusId', 'geneId')
+"""The natural key the splits are ordered on, which is only an order if it is unique."""
+
+
+def require_unique_key(frame: pl.DataFrame, partition: str) -> None:
+    """Refuse a split whose natural key repeats, because the sort would not order it.
+
+    The sort on `SORT_KEY` is what makes training reproducible, and it is a TOTAL order only
+    while the key is unique. Polars' `sort` is not tie-stable, and `maintain_order=True` would
+    not help: it stabilises against the INPUT order, which is exactly the thing the joins in
+    `derive_splits` leave unspecified. So a repeated pair puts the tied rows back in an arbitrary
+    relative order and the positional draws below -- `subsample` and the SHAP background -- go
+    back to varying between runs.
+
+    That failure is invisible from the outside: `metrics.json` still records its seeds, the
+    reproducibility test still passes on a key-unique fixture, and the only symptom is a
+    different model every release with nothing to say why. A failed run is much the better
+    outcome, so this raises.
+
+    Args:
+        frame: a train or test partition.
+        partition: which one, for the message.
+
+    Raises:
+        ValueError: if any `SORT_KEY` pair occurs more than once.
+    """
+    keys = frame.select(SORT_KEY)
+    duplicated = keys.filter(keys.is_duplicated()).unique(maintain_order=True)
+    if duplicated.height:
+        examples = duplicated.head(5).rows()
+        msg = (
+            f'the {partition} split repeats {duplicated.height} {SORT_KEY} pair(s), e.g. {examples}. '
+            'Training sorts on that key to stay reproducible, and the sort is only an order while '
+            'the key is unique -- tied rows would be left in the arbitrary order the joins in '
+            'derive_splits produced, and the model and SHAP background would vary between runs '
+            'again. Deduplicate the gold standard, or widen the key here and in the sort.'
+        )
+        raise ValueError(msg)
+
+
 def l2g_train(
     source: dict[str, str],
     destination: dict[str, str],
@@ -80,9 +120,12 @@ def l2g_train(
     # `build_background` samples the background by position too. Sorting on the natural key, which
     # is unique here, is what makes the fitted model and the SHAP background reproducible from the
     # seeds `metrics.json` records; without it `random_state` and `shapBackgroundSeed` pin a draw
-    # over rows that are not the same rows.
-    train = train.sort('studyLocusId', 'geneId')
-    test = test.sort('studyLocusId', 'geneId')
+    # over rows that are not the same rows. `require_unique_key` then refuses the run if that
+    # uniqueness ever stops holding, since the sort would silently stop being an order.
+    train = train.sort(SORT_KEY)
+    test = test.sort(SORT_KEY)
+    require_unique_key(train, 'train')
+    require_unique_key(test, 'test')
     logger.info(f'split: {train.height} train rows, {test.height} test rows')
 
     stats = split.split_stats(annotated.height, predefined.height, train, test)
