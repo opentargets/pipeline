@@ -82,11 +82,12 @@ is under 5 vCPU-hours of SHAP plus ~12 s of scoring. A single VM is the right sh
 ### SHAP is already not reproducible
 
 Each Batch task draws its own unseeded `sample(n=1_000)` from the Hub-hosted training data, so the
-background — and therefore `shapBaseValue` — differs per output partition. Six parts of
-`platform-2609-1` carry base values of 0.0381, 0.0451, 0.0534, 0.0572, 0.0623 and 0.0668, a 1.75×
-spread across partitions of one dataset. Row-for-row SHAP parity with 26.09-2 is unachievable even
-by re-running gentropy, so it is not an acceptance criterion. One fixed seeded background for the
-whole run replaces this, yielding a single `shapBaseValue`.
+background — and therefore `shapBaseValue` — differs per output partition. Measured across **all
+200 partitions** of `platform-2609-1`: **200 distinct base values spanning 0.028042 to 0.137713, a
+4.91× spread** within a single released dataset. (An earlier six-partition sample suggested 1.75×;
+the full population is far worse.) Row-for-row SHAP parity with 26.09-2 is unachievable even by
+re-running gentropy, so it is not an acceptance criterion. One fixed seeded background for the
+whole run replaces this, yielding a single `shapBaseValue` — confirmed on a real prediction run.
 
 ### The OTG-curation gold-standard branch is dead code
 
@@ -388,6 +389,23 @@ Against the recurring list in `CLAUDE.md`, each of which has produced a real def
 
 4. **Retrained-model metrics** are written to `metrics.json` for information. They are not an
    acceptance gate, since the retrained model legitimately differs from 26.09-2's.
+
+## Result of the full-scale parity gate
+
+Run on 2026-09-08 against `do/platform-2609-1`, using that release's own `classifier.skops` over
+its own feature matrix — all 200 partitions, not a sample. 20,015,785 rows survived the GWAS and
+protein-coding filters; scoring and comparison took 632 s, of which 603 s was the GCS scan.
+
+| gate | result | |
+| --- | --- | --- |
+| Scores match the published column | all 3,219,816 published rows found; `max \|Δ\| = 1.192e-07`, mean `6.655e-11`, **zero rows above 1e-6** | PASS |
+| Row set at threshold matches | 3,219,816 against 3,219,816; zero only-ours, zero only-published | PASS |
+| Baseline's own base value is not constant | 200 distinct values, 0.028042–0.137713, ratio 4.91× | PASS |
+
+The training half, which this gate cannot reach because it holds the model fixed, is covered
+separately: the chain reproduces all fourteen of the release's recorded split statistics exactly,
+and a model retrained by this port scores 0.933660 against the released model's 0.933736 on the
+same held-out set.
 
 ## Out of scope
 
