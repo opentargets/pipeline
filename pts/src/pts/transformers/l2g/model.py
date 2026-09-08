@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+import skops.io as sio
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -20,14 +21,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-
-# `xgboost` must be imported (and so initialize its bundled OpenMP runtime) before `skops.io` --
-# `skops.io` pulls in sklearn's compiled tree/SGD extensions, and if those load their own OpenMP
-# copy first, the process later segfaults inside `XGBClassifier.fit`/`predict` on macOS. Keep this
-# import above `skops.io` even though it breaks alphabetical order.
-from xgboost import XGBClassifier  # isort: skip
-
-import skops.io as sio
+from xgboost import XGBClassifier
 
 from pts.transformers.l2g.gold_standard import LABEL_COLUMN
 
