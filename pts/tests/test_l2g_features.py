@@ -7,10 +7,47 @@ from pts.transformers.l2g.features import FEATURES, impute_and_cast
 
 
 def test_features_has_31_names_in_fitted_order() -> None:
+    """The whole tuple, spelled out, because the order IS the contract.
+
+    Asserting the count, the uniqueness and the two ends leaves the 29 names between them free to
+    be transposed, and a transposition is exactly the failure that matters: the classifier would
+    be handed one feature's values under another's name, silently, with no schema to catch it.
+    """
+    assert FEATURES == (
+        'eQtlColocClppMaximum',
+        'pQtlColocClppMaximum',
+        'sQtlColocClppMaximum',
+        'eQtlColocH4Maximum',
+        'pQtlColocH4Maximum',
+        'sQtlColocH4Maximum',
+        'eQtlColocClppMaximumNeighbourhood',
+        'pQtlColocClppMaximumNeighbourhood',
+        'sQtlColocClppMaximumNeighbourhood',
+        'eQtlColocH4MaximumNeighbourhood',
+        'pQtlColocH4MaximumNeighbourhood',
+        'sQtlColocH4MaximumNeighbourhood',
+        'distanceSentinelFootprint',
+        'distanceSentinelFootprintNeighbourhood',
+        'distanceFootprintMean',
+        'distanceFootprintMeanNeighbourhood',
+        'distanceTssMean',
+        'distanceTssMeanNeighbourhood',
+        'distanceSentinelTss',
+        'distanceSentinelTssNeighbourhood',
+        'vepMaximum',
+        'vepMaximumNeighbourhood',
+        'vepMean',
+        'vepMeanNeighbourhood',
+        'e2gMean',
+        'e2gMeanNeighbourhood',
+        'geneCount500kb',
+        'proteinGeneCount500kb',
+        'credibleSetConfidence',
+        'transPQtlColocH4Maximum',
+        'transPQtlColocH4MaximumNeighbourhood',
+    )
     assert len(FEATURES) == 31
     assert len(set(FEATURES)) == 31
-    assert FEATURES[0] == 'eQtlColocClppMaximum'
-    assert FEATURES[-1] == 'transPQtlColocH4MaximumNeighbourhood'
 
 
 def test_impute_and_cast_fills_gene_counts_with_the_locus_mean() -> None:

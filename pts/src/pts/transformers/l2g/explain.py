@@ -10,8 +10,9 @@ rows/s/process at 100, 32 rows/s/process at 1000. The spread at 100 is machine l
 approach; 181 is the figure production ships and the one to size against.
 
 Second, one background serves the whole run. gentropy draws an unseeded sample inside each of its
-1000 Batch tasks, so `shapBaseValue` varies across output partitions -- 0.0381 to 0.0668 in
-26.09-1. One seeded background gives one base value.
+1000 Batch tasks, so `shapBaseValue` varies across output partitions: measured across all 200
+partitions of `do/platform-2609-1`, 200 distinct base values from 0.028042 to 0.137713, a 4.91x
+spread within a single released dataset. One seeded background gives one base value.
 """
 
 import math

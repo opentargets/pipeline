@@ -19,8 +19,9 @@ could tell them apart. That mutation is covered instead by
 its threshold from a score the model actually produced.
 
 Row-level SHAP parity is deliberately NOT asserted. Each of gentropy's 1000 Batch tasks drew its
-own unseeded background, so `shapBaseValue` varies across the baseline's own partitions -- 0.0381
-to 0.0668 in 26.09-1. Re-running gentropy would not reproduce it either. `explain_predictions` is
+own unseeded background, so `shapBaseValue` varies across the baseline's own partitions: across
+all 200 partitions of `do/platform-2609-1`, 200 distinct base values from 0.028042 to 0.137713, a
+4.91x spread. Re-running gentropy would not reproduce it either. `explain_predictions` is
 therefore off, which is also what keeps this affordable.
 
 Gated on an environment variable because it reads a multi-gigabyte GCS dataset:
@@ -103,4 +104,7 @@ def test_the_baselines_own_base_value_is_not_constant() -> None:
         f'{BUCKET}/{RUN}/output/l2g_prediction/*.parquet', columns=['shapBaseValue']
     )['shapBaseValue'].unique()
     assert values.len() > 1, 'baseline base value is constant; revisit the SHAP parity decision'
+    # Loose on purpose. The measured spread on `do/platform-2609-1` is 4.91x, but that number is
+    # one release's; the proposition under test is only that the baseline's base value is not
+    # usable as a reference, and 1.5x already establishes that on any release.
     assert float(values.max()) / float(values.min()) > 1.5
