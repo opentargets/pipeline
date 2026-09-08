@@ -1,10 +1,12 @@
 """Tests for SHAP background construction and the explainer pool."""
 
+import math
+
 import numpy as np
 import polars as pl
 import pytest
 
-from pts.transformers.l2g.explain import build_background, explain
+from pts.transformers.l2g.explain import MAX_CHUNK_ROWS, MIN_CHUNK_ROWS, _chunk_size, build_background, explain
 from pts.transformers.l2g.model import DEFAULT_HYPERPARAMETERS, fit
 
 
@@ -46,6 +48,30 @@ def test_build_background_uses_the_requested_feature_order() -> None:
     assert build_background(frame, ['b', 'a'], 1, 42).tolist() == [[2.0, 1.0]]
 
 
+def test_chunk_size_gives_every_worker_several_chunks_at_production_scale() -> None:
+    size = _chunk_size(3_219_816, 32)
+    chunk_count = math.ceil(3_219_816 / size)
+    assert chunk_count / 32 >= 8
+    assert chunk_count > 32
+
+
+def test_chunk_size_avoids_a_single_chunk_at_the_scale_that_caused_the_regression() -> None:
+    size = _chunk_size(38_738, 6)
+    assert math.ceil(38_738 / size) > 1
+
+
+def test_chunk_size_clamps_a_tiny_row_count_to_the_floor() -> None:
+    assert _chunk_size(10, 32) == MIN_CHUNK_ROWS
+
+
+def test_chunk_size_clamps_a_huge_row_count_to_the_cap() -> None:
+    assert _chunk_size(100_000_000, 1) == MAX_CHUNK_ROWS
+
+
+def test_chunk_size_does_not_divide_by_zero_for_zero_rows() -> None:
+    assert _chunk_size(0, 32) == MAX_CHUNK_ROWS
+
+
 def test_explain_returns_one_shap_value_per_cell(model_and_data) -> None:
     model, x = model_and_data
     _, values = explain(model, x[:20], x[:10], max_samples=10, workers=1)
@@ -70,6 +96,13 @@ def test_explain_across_workers_matches_a_single_worker(model_and_data) -> None:
     _, single = explain(model, x[:20], x[:10], max_samples=10, workers=1, chunk_size=5)
     _, parallel = explain(model, x[:20], x[:10], max_samples=10, workers=2, chunk_size=5)
     np.testing.assert_allclose(single, parallel, rtol=1e-6, atol=1e-9)
+
+
+def test_explain_adaptive_chunk_size_matches_an_explicit_one(model_and_data) -> None:
+    model, x = model_and_data
+    _, explicit = explain(model, x[:20], x[:10], max_samples=10, workers=1, chunk_size=3)
+    _, adaptive = explain(model, x[:20], x[:10], max_samples=10, workers=1)
+    np.testing.assert_allclose(explicit, adaptive, rtol=1e-6, atol=1e-9)
 
 
 def test_explain_handles_an_empty_matrix(model_and_data) -> None:
