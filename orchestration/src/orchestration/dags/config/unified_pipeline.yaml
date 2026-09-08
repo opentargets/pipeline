@@ -528,8 +528,14 @@ steps:
 
   pts_vep_view:
     depends_on:
-      - gentropy_l2g_prediction
+      - pts_l2g
 
+  pts_l2g:
+    machine_type: n1-highmem-32
+    depends_on:
+      - gentropy_l2g_feature_matrix
+      - pis_l2g
+      - pis_l2g_predefined_test_for_split
 
   # GENTROPY STEPS
   gentropy_biosample:
@@ -577,17 +583,6 @@ steps:
       - gentropy_variant
       - gentropy_enhancer_to_gene
       - pts_interaction
-  gentropy_l2g_train_test_split:
-    depends_on:
-      - pis_l2g
-      - pis_l2g_predefined_test_for_split
-      - gentropy_l2g_feature_matrix
-  gentropy_l2g_training:
-    depends_on:
-      - gentropy_l2g_train_test_split
-  gentropy_l2g_prediction:
-    depends_on:
-      - gentropy_l2g_training
   gentropy_l2g_evidence:
     depends_on:
-      - gentropy_l2g_prediction
+      - pts_l2g
