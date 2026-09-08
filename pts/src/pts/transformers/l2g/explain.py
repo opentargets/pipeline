@@ -13,6 +13,8 @@ Second, one background serves the whole run. gentropy draws an unseeded sample i
 26.09-1. One seeded background gives one base value.
 """
 
+import math
+import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
@@ -24,6 +26,10 @@ import shap.maskers
 
 _EXPLAINER: Any = None
 """Per-worker explainer, built once in the pool initialiser."""
+
+DEFAULT_CHUNKS_PER_WORKER = 8
+MIN_CHUNK_ROWS = 1_000
+MAX_CHUNK_ROWS = 50_000
 
 
 def build_background(
@@ -48,6 +54,22 @@ def build_background(
         return matrix
     rng = np.random.default_rng(seed)
     return matrix[rng.choice(matrix.shape[0], size, replace=False)]
+
+
+def _chunk_size(n_rows: int, workers: int, *, per_worker: int = DEFAULT_CHUNKS_PER_WORKER) -> int:
+    """Rows per unit of work, sized so every worker gets several chunks.
+
+    A chunk count below the worker count caps the speedup at the chunk count no matter how many
+    cores the machine has, because a chunk cannot be split. Aiming for several chunks each also
+    absorbs the uneven tail: 65 chunks over 32 workers has a makespan of 3 chunk-times against
+    an ideal 2.03, wasting 48% of the wall clock, while 258 chunks over 32 wastes 12%.
+
+    The floor keeps per-chunk process overhead small relative to the work -- at roughly 180
+    rows/s a 1,000-row chunk is several seconds of computation. The cap bounds peak memory.
+    """
+    if n_rows <= 0:
+        return MAX_CHUNK_ROWS
+    return max(MIN_CHUNK_ROWS, min(MAX_CHUNK_ROWS, math.ceil(n_rows / (workers * per_worker))))
 
 
 def _initialise(model: Any, background: np.ndarray, max_samples: int) -> None:
@@ -87,7 +109,7 @@ def explain(
     *,
     max_samples: int,
     workers: int | None = None,
-    chunk_size: int = 50_000,
+    chunk_size: int | None = None,
 ) -> tuple[float, np.ndarray]:
     """Compute SHAP values for every row, in parallel.
 
@@ -96,8 +118,8 @@ def explain(
         matrix: rows to explain, in fitted feature order.
         background: the background array from `build_background`.
         max_samples: background rows the masker may use.
-        workers: process count; defaults to the pool's own default.
-        chunk_size: rows per unit of work.
+        workers: process count; defaults to `os.cpu_count()`.
+        chunk_size: rows per unit of work; defaults to `_chunk_size` of the matrix and worker count.
 
     Returns:
         `(base_value, shap_values)` where `shap_values` has the shape of `matrix`.
@@ -108,13 +130,17 @@ def explain(
     if matrix.shape[0] == 0:
         return base_value, np.empty_like(matrix)
 
+    resolved_workers = workers or os.cpu_count() or 1
+    if chunk_size is None:
+        chunk_size = _chunk_size(matrix.shape[0], resolved_workers)
+
     chunks = [matrix[i : i + chunk_size] for i in range(0, matrix.shape[0], chunk_size)]
 
-    if workers == 1:
+    if resolved_workers == 1:
         return base_value, np.vstack([_explain_chunk(chunk) for chunk in chunks])
 
     with ProcessPoolExecutor(
-        max_workers=workers,
+        max_workers=resolved_workers,
         initializer=_initialise,
         initargs=(model, background, max_samples),
     ) as pool:
