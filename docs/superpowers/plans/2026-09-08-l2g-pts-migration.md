@@ -65,11 +65,28 @@
 In `pts/pyproject.toml`, add to `[project].dependencies`:
 
 ```toml
-  "xgboost>=3.4.1",
-  "shap>=0.52.0",
+  "xgboost>=3.2.0",
+  "shap>=0.51.0",
   "scikit-learn>=1.7.0",
   "skops>=0.11.0",
 ```
+
+Also add a `[tool.uv]` table immediately before the existing `[[tool.uv.index]]`:
+
+```toml
+[tool.uv]
+environments = ["sys_platform != 'darwin' or platform_machine != 'x86_64'"]
+```
+
+Without it the lock is unsatisfiable: on x86_64 macOS *only*, `shap` requires `numba<0.63`,
+`numba` caps `numpy<2.4`, and pts requires `numpy>=2.4.4`. Excluding that one platform is the
+narrowest fix -- a broader `linux + darwin-arm64` allowlist also drops the Windows-only packages
+from the lock. Nothing in use is on an Intel Mac: production is `python:3.11-slim` on linux.
+
+The floors are deliberately NOT the newest releases. uv forks both by Python version -- xgboost
+3.2.0 / shap 0.51.0 below 3.12, 3.4.1 / 0.52.0 at or above it -- so a `>=3.4.1` floor would force
+pts off Python 3.11 and off its production base image for no gain. `shap.maskers.Independent`
+takes `max_samples` in 0.51, which is all this code needs from it.
 
 - [ ] **Step 2: Lock and install**
 
