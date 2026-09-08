@@ -27,6 +27,10 @@ dependencies = [
   "networkx>=3.6.1",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
+  "xgboost>=3.2.0",
+  "shap>=0.51.0",
+  "scikit-learn>=1.7.0",
+  "skops>=0.11.0",
 ]
 
 [dependency-groups]
