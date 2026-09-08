@@ -1921,6 +1921,80 @@ steps:
       destination: view/association_otf
   ##################################################################################################
 
+  #: L2G STEP :#####################################################################################
+  l2g:
+    - name: transform l2g_train
+      transformer: l2g_train
+      source:
+        feature_matrix: intermediate/l2g_feature_matrix
+        credible_set: output/credible_set
+        gold_standard: input/l2g/gold_standard.json
+        predefined_test: input/l2g/predefined_test_for_split
+      destination:
+        model: etc/model/locus_to_gene_model/classifier.skops
+        background: etc/model/locus_to_gene_model/shap_background.parquet
+        metrics: etc/model/locus_to_gene_model/metrics.json
+        train_split: intermediate/l2g_train_split
+        test_split: intermediate/l2g_test_split
+        split_stats: intermediate/l2g_train_test_split_stats.json
+      settings:
+        # Anchored, not a scratchpad sentinel: otter's Scratchpad is string.Template
+        # substitution, so `${...}` can only ever produce a string. The order is the
+        # order the model is fitted on and the order of the output `features` array.
+        features_list: &l2g_features
+          - eQtlColocClppMaximum
+          - pQtlColocClppMaximum
+          - sQtlColocClppMaximum
+          - eQtlColocH4Maximum
+          - pQtlColocH4Maximum
+          - sQtlColocH4Maximum
+          - eQtlColocClppMaximumNeighbourhood
+          - pQtlColocClppMaximumNeighbourhood
+          - sQtlColocClppMaximumNeighbourhood
+          - eQtlColocH4MaximumNeighbourhood
+          - pQtlColocH4MaximumNeighbourhood
+          - sQtlColocH4MaximumNeighbourhood
+          - distanceSentinelFootprint
+          - distanceSentinelFootprintNeighbourhood
+          - distanceFootprintMean
+          - distanceFootprintMeanNeighbourhood
+          - distanceTssMean
+          - distanceTssMeanNeighbourhood
+          - distanceSentinelTss
+          - distanceSentinelTssNeighbourhood
+          - vepMaximum
+          - vepMaximumNeighbourhood
+          - vepMean
+          - vepMeanNeighbourhood
+          - e2gMean
+          - e2gMeanNeighbourhood
+          - geneCount500kb
+          - proteinGeneCount500kb
+          - credibleSetConfidence
+          - transPQtlColocH4Maximum
+          - transPQtlColocH4MaximumNeighbourhood
+        # Read off the 26.09-2 classifier.skops. n_estimators, gamma and max_delta_step
+        # are in neither gentropy nor this repo; do not "restore" them from gentropy's config.
+        hyperparameters:
+          objective: binary:logistic
+          eval_metric: aucpr
+          random_state: 777
+          n_estimators: 300
+          max_depth: 5
+          min_child_weight: 10
+          eta: 0.05
+          subsample: 0.8
+          colsample_bytree: 0.8
+          reg_alpha: 1
+          reg_lambda: 1.0
+          scale_pos_weight: 0.8
+          gamma: 0
+          max_delta_step: 1
+        train_on_full_dataset: true
+        shap_background_size: 100
+        shap_background_seed: 42
+  ##################################################################################################
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view
