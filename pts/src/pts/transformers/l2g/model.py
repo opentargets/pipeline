@@ -87,7 +87,16 @@ def fit(x: np.ndarray, y: np.ndarray, hyperparameters: dict[str, Any]) -> XGBCla
 
 
 def evaluate(model: XGBClassifier, x: np.ndarray, y: np.ndarray) -> dict[str, float]:
-    """Evaluate a fitted model, reporting the six metrics gentropy reports.
+    """Evaluate a fitted model, reporting the six metrics gentropy reports plus one it should.
+
+    `averagePrecision` is computed exactly as gentropy's `L2GTrainer.evaluate` computes it -- from
+    the hard 0/1 predictions, not from scores -- purely so it stays comparable with the average
+    precision values already recorded from earlier runs (e.g. in W&B). Average precision
+    conventionally takes continuous scores rather than hard labels; `averagePrecisionFromScores`
+    reports that conventional form. On the real 26.09-2 test split, with the released model, the two
+    differ by roughly 0.15 (0.781 vs 0.934) -- they must never be conflated, or a future edit that
+    silently redefines `averagePrecision` would read as a 15-point model improvement instead of a
+    formula change.
 
     Args:
         model: a fitted classifier.
@@ -103,7 +112,8 @@ def evaluate(model: XGBClassifier, x: np.ndarray, y: np.ndarray) -> dict[str, fl
         'areaUnderROC': float(roc_auc_score(y, probabilities[:, 1], average='weighted')),
         'accuracy': float(accuracy_score(y, predicted)),
         'weightedPrecision': float(precision_score(y, predicted, average='weighted', zero_division=0)),
-        'averagePrecision': float(average_precision_score(y, probabilities[:, 1], average='weighted')),
+        'averagePrecision': float(average_precision_score(y, predicted, average='weighted')),
+        'averagePrecisionFromScores': float(average_precision_score(y, probabilities[:, 1], average='weighted')),
         'weightedRecall': float(recall_score(y, predicted, average='weighted', zero_division=0)),
         'f1': float(f1_score(y, predicted, average='weighted', zero_division=0)),
     }

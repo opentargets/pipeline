@@ -24,6 +24,17 @@ def separable() -> tuple[np.ndarray, np.ndarray]:
     return x, y
 
 
+@pytest.fixture
+def overlapping() -> tuple[np.ndarray, np.ndarray]:
+    """Features carry no real signal, so the model does not perfectly separate the classes --
+    unlike `separable`, where every metric collapses to 1.0 regardless of formula.
+    """
+    rng = np.random.default_rng(1)
+    x = rng.normal(0.0, 1.0, (200, 2)).astype(np.float32)
+    y = (rng.random(200) < 0.5).astype(np.int32)
+    return x, y
+
+
 def test_default_hyperparameters_match_the_released_model() -> None:
     assert DEFAULT_HYPERPARAMETERS['n_estimators'] == 300
     assert DEFAULT_HYPERPARAMETERS['random_state'] == 777
@@ -56,10 +67,11 @@ def test_fit_is_deterministic_for_a_fixed_seed(separable) -> None:
     x, y = separable
     first = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
     second = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    assert first.get_params()['random_state'] == 777
     np.testing.assert_array_equal(first.predict_proba(x), second.predict_proba(x))
 
 
-def test_evaluate_reports_the_six_gentropy_metrics(separable) -> None:
+def test_evaluate_reports_the_seven_metrics(separable) -> None:
     x, y = separable
     model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
     metrics = evaluate(model, x, y)
@@ -68,10 +80,18 @@ def test_evaluate_reports_the_six_gentropy_metrics(separable) -> None:
         'accuracy',
         'weightedPrecision',
         'averagePrecision',
+        'averagePrecisionFromScores',
         'weightedRecall',
         'f1',
     }
     assert metrics['accuracy'] == pytest.approx(1.0)
+
+
+def test_average_precision_and_average_precision_from_scores_differ(overlapping) -> None:
+    x, y = overlapping
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    metrics = evaluate(model, x, y)
+    assert metrics['averagePrecision'] != metrics['averagePrecisionFromScores']
 
 
 def test_save_and_load_round_trip(separable, tmp_path) -> None:
