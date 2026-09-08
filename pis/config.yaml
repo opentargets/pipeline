@@ -159,12 +159,19 @@ steps:
       destination: input/chembl/chembl.tar.gz
   ##################################################################################################
 
-  #: CLINICAL_REPORT STEP :#########################################################################
-  clinical_report:
-    # The chembl dump has its own `chembl` step rather than living here: it feeds
-    # several pts steps, not just clinical_report, and each depends on `pis_chembl`.
+  #: AACT STEP :###################################################################################
+  # The preprocessing DAG downloads this archive; PTS reads it directly.
+  aact:
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/aact.zip
+  ##################################################################################################
+
+  #: CLINICAL_REPORT STEP :#########################################################################
+  clinical_report:
+    # Consume the exact archive processed by the AACT preprocessing DAG.
+    - name: copy aact dump
+      source: gs://aact_data/${aact_version}/input/aact.zip
       destination: input/clinical_report/aact.zip
 
     # TODO: move other clinical report files to team bucket
@@ -206,12 +213,10 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
 
-    # AACT clinical-trial batch extraction — a standalone source consumed by
-    # chembl_molecule (and clinical_report). Downloaded in the drug step so
-    # chembl_molecule's existing pis_drug dependency covers it.
-    - name: copy_many aact extraction batch results
-      sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
-      destination: input/clinical_report/aact_extraction_batch_results
+    # AACT clinical-trial LLM extraction, produced by the extraction DAG.
+    - name: copy_many aact trial extraction
+      sources: gs://aact_data/${aact_version}/extraction/*.parquet
+      destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
