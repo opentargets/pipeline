@@ -250,8 +250,13 @@ New dependencies for `pts`: `xgboost`, `shap`, `scikit-learn`, `skops`.
    - test = annotated rows inner-joined to `predefined_test` on `(studyLocusId, geneId)`;
    - labels encoded `negative → 0`, `positive → 1`, tolerating already-encoded integers.
 7. Fit `XGBClassifier` on train with the configured hyperparameters.
-8. Evaluate once on test: `areaUnderROC`, `accuracy`, `weightedPrecision`, `averagePrecision`,
-   `weightedRecall`, `f1` — the same six metrics gentropy reports, from scikit-learn.
+8. Evaluate once on test, reporting seven metrics from scikit-learn: the six gentropy reports —
+   `areaUnderROC`, `accuracy`, `weightedPrecision`, `averagePrecision`, `weightedRecall`, `f1` —
+   plus `averagePrecisionFromScores`. `averagePrecision` keeps gentropy's formula, computed from
+   the hard 0/1 predictions, so it stays comparable with values already recorded from earlier
+   runs; `averagePrecisionFromScores` is the conventional form, computed from the continuous
+   scores. On the real 26.09-2 test split with the released model the two differ by roughly 0.15
+   (0.781 vs 0.934), so they must never be conflated.
 9. Refit on `train + test` (`train_on_full_dataset: true`), matching what produced the 26.09-2 model.
    Reported metrics come from step 8 and are unaffected.
 10. Build the SHAP background: a seeded sample of `train + test` of the configured size. Write it.
@@ -381,7 +386,8 @@ Against the recurring list in `CLAUDE.md`, each of which has produced a real def
 
 2. **SHAP distributional agreement.** Per-feature SHAP distributions and the mean-|SHAP| feature
    ranking must agree with the baseline. Per-row equality is explicitly not required, and the single
-   consistent `shapBaseValue` is recorded as an intended improvement over the current 1.75× spread.
+   consistent `shapBaseValue` is recorded as an intended improvement over the current 4.91× spread
+   (see “SHAP is already not reproducible” above).
 
 3. **Unit tests** per module on small fixtures: gold-standard parsing and its rejection of the
    unported OTG format, the contamination anti-join, label encoding, imputation, feature ordering,

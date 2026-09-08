@@ -20,7 +20,15 @@ CURATED_COLUMNS: tuple[str, ...] = (
     'geneId',
     'goldStandardSet',
 )
-"""The columns `L2GGoldStandard` declares as mandatory, in schema order."""
+"""The columns `L2GGoldStandard` declares as mandatory, in schema order.
+
+Deliberately NOT including `traitFromSourceMappedId`, which gentropy's schema also allows and
+today's curated file does not carry. A future file that did carry it would have it dropped here,
+and two curated rows differing only in that column would then collapse in `annotate`'s `unique`.
+gentropy's `n_unique_positive_gene_disease_pairs` split statistic exists precisely to count that
+column, and is absent from `split_stats` for the same reason -- add the column here and add the
+statistic there together, or neither.
+"""
 
 OTG_CURATION_COLUMNS: frozenset[str] = frozenset({
     'association_info',
