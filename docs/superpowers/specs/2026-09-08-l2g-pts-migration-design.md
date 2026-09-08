@@ -130,8 +130,23 @@ neither appears in the croissant distribution. They are handoffs, not products.
 ### Fixed-model parity is achievable exactly
 
 Loading 26.09-2's own `classifier.skops`, applying the imputation and float32 cast in polars, and
-scoring gave **max |Δ| = 0.000e+00** against the published `score` column on the overlapping rows of
-a two-partition sample. The float32 → float64 widening on write is exact.
+scoring gave **max |Δ| = 0.000e+00** against the published `score` column on the 56 overlapping rows
+of a two-partition sample.
+
+**That figure was too optimistic, and the acceptance criterion must not be exact equality.** Running
+the assembled `l2g_predict` over the same released model and a larger slice — 212,847 rows scored,
+38,738 above threshold — matched the published dataset on **every** row, but with **max |Δ| =
+1.192e-07** on 184 of them. That value is exactly one float32 ULP.
+
+It is not non-determinism on our side: XGBoost's prediction here is bit-identical across repeat runs
+and across `n_jobs` of 1, 2 and the default. It is not the locus-mean imputation either — both
+gene-count columns are null-free in this data, so that path never fires. It is almost certainly the
+prediction kernel differing by a ULP between the XGBoost version gentropy's image pinned and the
+3.2.0 this ships. The 56-row sample simply contained no affected row.
+
+So the gate is `max |Δ| < 1e-6`, not equality, and the row set at threshold must match exactly — it
+did, 38,738 of 38,738. A tolerance of zero would fail on a difference far below the resolution of
+the 0.05 threshold it feeds.
 
 ## Architecture
 
@@ -352,7 +367,16 @@ Against the recurring list in `CLAUDE.md`, each of which has produced a real def
    - the row set at `score >= 0.05` equal to the published 3,219,816 rows.
 
    This isolates the migration from the retraining and is the sharpest test available. Demonstrated
-   at max |Δ| = 0 on a two-partition sample during design.
+   at max |Δ| = 0 on a two-partition sample during design; that sample was too small to contain an
+   affected row. Measured against `do/platform-2609-1` (the reference run used by the harness --
+   `2609-2` has no `output/l2g_prediction` to compare against) over two feature-matrix partitions:
+   212,847 rows scored, 38,738 above the 0.05 threshold, 38,738 of 38,738 matched the published row
+   set exactly, and max |Δ| = 1.192e-07 on the score (184 rows above 1e-9). That value is exactly one
+   float32 ULP -- ruled out as this migration's non-determinism by measurement (XGBoost's
+   `predict_proba` is bit-identical here across repeat runs and across `n_jobs` of 1, 2 and default,
+   and both gene-count columns are null-free in this data, so the locus-mean imputation never fires)
+   and attributed instead to the XGBoost prediction kernel differing by one ULP between the version
+   gentropy's image pinned and the one this ships. Wall clock not recorded for this sample.
 
 2. **SHAP distributional agreement.** Per-feature SHAP distributions and the mean-|SHAP| feature
    ranking must agree with the baseline. Per-row equality is explicitly not required, and the single
