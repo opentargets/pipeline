@@ -28,6 +28,10 @@ dependencies = [
   "clinical-mining",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
+  "xgboost>=3.2.0",
+  "shap>=0.51.0",
+  "scikit-learn>=1.7.0",
+  "skops>=0.11.0",
 ]
 
 [dependency-groups]
@@ -36,6 +40,9 @@ test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1", "pytest
 
 [project.optional-dependencies]
 baseline_expression = ["pandas<3", "scanpy>=1.10.0", "cellex"]
+
+[tool.uv]
+environments = ["sys_platform != 'darwin' or platform_machine != 'x86_64'"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
