@@ -5,8 +5,9 @@ Two things about this are deliberate and easy to get wrong.
 First, the masker is constructed explicitly with `max_samples`. Passing a bare array as `data=`
 lets `shap` wrap it in an `Independent` masker whose default `max_samples` is 100, which silently
 discards most of a larger background -- that is exactly what gentropy does, so its 1000-row sample
-has always been a 100-row background. Cost is linear in the size actually used: 317 rows/s/process
-at 100, 32 rows/s/process at 1000.
+has always been a 100-row background. Cost is linear in the size actually used: 181-317
+rows/s/process at 100, 32 rows/s/process at 1000. The spread at 100 is machine load, not the
+approach; 181 is the figure production ships and the one to size against.
 
 Second, one background serves the whole run. gentropy draws an unseeded sample inside each of its
 1000 Batch tasks, so `shapBaseValue` varies across output partitions -- 0.0381 to 0.0668 in
@@ -14,6 +15,7 @@ Second, one background serves the whole run. gentropy draws an unseeded sample i
 """
 
 import math
+import multiprocessing
 import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -113,6 +115,12 @@ def explain(
 ) -> tuple[float, np.ndarray]:
     """Compute SHAP values for every row, in parallel.
 
+    The pool is forced onto the `spawn` start method; see the `ProcessPoolExecutor` below. A
+    consequence for callers: under `spawn` each worker re-imports the caller's `__main__`, so an
+    ad-hoc script that calls this at module scope needs an `if __name__ == "__main__":` guard or
+    it will recurse. Production is safe -- otter's console script carries its own guard -- but an
+    unguarded script does not, and diagnosing it costs more time than the guard.
+
     Args:
         model: the fitted classifier.
         matrix: rows to explain, in fitted feature order.
@@ -124,6 +132,9 @@ def explain(
     Returns:
         `(base_value, shap_values)` where `shap_values` has the shape of `matrix`.
     """
+    # The parent's own explainer is built solely to read `expected_value`, and is retained
+    # deliberately: under `spawn` it is not a fork hazard, and obtaining the base value any other
+    # way would mean restructuring this function to save a few milliseconds.
     _initialise(model, background, max_samples)
     base_value = float(_EXPLAINER.expected_value)
 
@@ -139,8 +150,18 @@ def explain(
     if resolved_workers == 1:
         return base_value, np.vstack([_explain_chunk(chunk) for chunk in chunks])
 
+    # `spawn` is pinned rather than left to the platform default, which is spawn on macOS but
+    # FORK on Linux -- and production is `python:3.11-slim`. By this point the parent has already
+    # run `predict_proba` over the whole matrix and built a `TreeExplainer`, both heavy OpenMP
+    # regions; forking a live OpenMP runtime and then entering a parallel region in the child is
+    # the classic hang, and no PTS step sets `execution_timeout`, so a hung pool runs until a
+    # human notices. Every test and every verification of this path has run on macOS, i.e. under
+    # spawn, so this also makes production execute the only configuration that has been exercised.
+    # The cost is one module re-import per worker: the model and background already travel through
+    # `initargs`, so nothing else has to be re-derived.
     with ProcessPoolExecutor(
         max_workers=resolved_workers,
+        mp_context=multiprocessing.get_context('spawn'),
         initializer=_initialise,
         initargs=(model, background, max_samples),
     ) as pool:

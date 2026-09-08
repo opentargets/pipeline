@@ -91,7 +91,13 @@ def annotate(
     )
 
     matched = (
-        keyed.join(gold_standard, on=['studyId', 'variantId', 'geneId'], how='inner')
+        # The gold standard's own `studyLocusId` is dropped before the join, as gentropy does
+        # (`L2GGoldStandard.build_feature_matrix` broadcasts `self.df.drop("studyLocusId", ...)`).
+        # Kept, it would arrive as `studyLocusId_right` and the `unique` below would see it: two
+        # curated rows agreeing on (studyId, variantId, geneId, goldStandardSet) but assigned to
+        # different credible sets would survive as two identical-looking training rows, inflating
+        # the fit, the split and every split statistic. Today's curation file has no such pair.
+        keyed.join(gold_standard.drop('studyLocusId'), on=['studyId', 'variantId', 'geneId'], how='inner')
         .filter(pl.col('isProteinCoding') == 1)
         .drop('studyId', 'variantId', 'isProteinCoding')
         .unique(maintain_order=True)

@@ -111,3 +111,61 @@ def test_save_model_rejects_a_path_that_is_not_skops(tmp_path) -> None:
 def test_missingness_counts_null_and_zero_as_missing() -> None:
     frame = pl.DataFrame({'a': [0.0, 1.0, 2.0, 3.0], 'b': [1.0, 1.0, 1.0, 1.0]})
     assert missingness(frame, ['a', 'b']) == {'a': 0.25, 'b': 0.0}
+
+
+@pytest.fixture
+def recording_storage(monkeypatch):
+    """Replace `StorageHandle` in `model` with a recorder, and hand back what it recorded.
+
+    Lets the `gs://` path be exercised without a bucket: the point of the tests below is which
+    abstraction the bytes travel through, not that GCS accepts them.
+    """
+    store: dict[str, bytes] = {}
+
+    class _Handle:
+        def __init__(self, location: str) -> None:
+            self.location = location
+
+        def write(self, data: bytes) -> None:
+            store[self.location] = data
+
+        def read(self) -> tuple[bytes, None]:
+            return store[self.location], None
+
+    monkeypatch.setattr('pts.transformers.l2g.model.StorageHandle', _Handle)
+    return store
+
+
+def test_save_model_writes_a_cloud_uri_through_storage_handle(
+    separable, tmp_path, monkeypatch, recording_storage
+) -> None:
+    """`pathlib` collapses `gs://` to `gs:/` and writes to local disk without complaining.
+
+    In production every destination arrives resolved against `release_uri`, so it is a `gs://…`
+    URI. A `sio.dump(model, path)` there leaves the model beside the container's working
+    directory, the release ships without a classifier, and the step still goes green because the
+    prediction task reads the same collapsed local path back. This fails if that returns.
+    """
+    x, y = separable
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    uri = 'gs://a-release-bucket/etc/model/locus_to_gene_model/classifier.skops'
+    monkeypatch.chdir(tmp_path)
+
+    save_model(model, uri)
+
+    assert list(recording_storage) == [uri]
+    assert not (tmp_path / 'gs:').exists(), 'the model was written to a local gs:/ tree'
+
+
+def test_load_model_reads_a_cloud_uri_through_storage_handle(
+    separable, tmp_path, monkeypatch, recording_storage
+) -> None:
+    """The symmetric read, so `l2g_predict` can load a model that only exists in the bucket."""
+    x, y = separable
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    uri = 'gs://a-release-bucket/etc/model/locus_to_gene_model/classifier.skops'
+    monkeypatch.chdir(tmp_path)
+    save_model(model, uri)
+
+    np.testing.assert_array_equal(load_model(uri).predict_proba(x), model.predict_proba(x))
+    assert not (tmp_path / 'gs:').exists()

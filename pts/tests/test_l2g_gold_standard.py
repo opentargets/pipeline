@@ -81,9 +81,18 @@ def test_annotate_drops_non_protein_coding_rows() -> None:
     assert out.height == 0
 
 
-def test_annotate_deduplicates_identical_rows() -> None:
+def test_annotate_deduplicates_rows_differing_only_in_the_gold_standards_own_study_locus() -> None:
+    """The gold standard's `studyLocusId` must not reach the join, or the dedup cannot see past it.
+
+    The two curated rows below agree on everything the annotated matrix carries -- study, variant,
+    gene and label -- and differ only in which credible set the curator assigned them to. That
+    column is not part of the output, so keeping it on the gold-standard side of the join emits
+    `studyLocusId_right`, the `unique` treats the two rows as distinct, and the fit sees the same
+    training row twice. Giving both rows the SAME `studyLocusId` makes the divergence
+    unobservable, which is why this fixture does not.
+    """
     gold = pl.LazyFrame({
-        'studyLocusId': ['sl1', 'sl1'],
+        'studyLocusId': ['sl1', 'sl9'],
         'variantId': ['1_1_A_G', '1_1_A_G'],
         'studyId': ['GCST1', 'GCST1'],
         'geneId': ['g1', 'g1'],

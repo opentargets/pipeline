@@ -145,4 +145,7 @@ def test_the_two_config_tasks_share_one_feature_list() -> None:
     train = tasks['transform l2g_train']['settings']['features_list']
     predict = tasks['transform l2g_predict']['settings']['features_list']
     assert train == predict
+    # And against `FEATURES`, not just against each other: two copies that drift together would
+    # still agree while `features.py` went on claiming to define the order the model was fitted on.
+    assert train == list(FEATURES)
     assert len(train) == 31

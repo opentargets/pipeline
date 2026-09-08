@@ -2,9 +2,10 @@
 
 Replaces the predict mode of gentropy's `LocusToGeneStep`, which ran as 1000 Google Batch tasks.
 Each of those started a Spark job on two vCPUs and re-read the ENTIRE feature matrix -- only the
-credible-set side was partitioned -- to emit roughly 3,200 rows. The measured work is ~12 s of
-scoring for all 61.2M rows plus ~2.8 process-hours of SHAP for the 3.2M that survive the
-threshold, so it fits on one VM with room to spare.
+credible-set side was partitioned -- to emit roughly 3,200 rows. The measured work is ~4 s of
+scoring: the GWAS semi-join and the protein-coding filter run first, so 20.0M of the 61.2M rows
+are scored, at 5.0M rows/s. SHAP then costs 2.8-4.9 process-hours for the 3.2M rows that survive
+the threshold -- size against the slow end. It fits on one VM with room to spare.
 
 Unlike gentropy this never drops the features and re-joins the matrix to get them back: they are
 already on the frame that produced the score.
@@ -49,7 +50,7 @@ def build_output(
         features: feature names, in fitted order.
 
     Returns:
-        A DataFrame of `OUTPUT_COLUMNS`.
+        A DataFrame of `OUTPUT_COLUMNS`, in that order.
     """
     values = pl.DataFrame(matrix, schema=[(name, pl.Float32) for name in features])
     shap_schema = [(f'shap_{name}', pl.Float32) for name in features]
@@ -75,7 +76,10 @@ def build_output(
             for name in features
         ).alias('features'),
         pl.lit(base_value, dtype=pl.Float32).alias('shapBaseValue'),
-    )
+        # Re-selected by name so the declared contract is enforced rather than merely documented:
+        # rename or reorder an expression above and this raises instead of shipping a drifted
+        # schema into `gentropy_l2g_evidence`, which reads this dataset with an imposed schema.
+    ).select(OUTPUT_COLUMNS)
 
 
 def l2g_predict(

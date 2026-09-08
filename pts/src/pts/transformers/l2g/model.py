@@ -7,12 +7,12 @@ a 100-tree model where the released one has 300. They live here so that never ha
 """
 
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
 import skops.io as sio
+from otter.storage.synchronous.handle import StorageHandle
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -122,9 +122,15 @@ def evaluate(model: XGBClassifier, x: np.ndarray, y: np.ndarray) -> dict[str, fl
 def save_model(model: Any, path: str) -> None:
     """Persist a fitted model in the skops format, at the path the release expects.
 
+    Serialises to bytes and writes through otter's storage abstraction rather than handing
+    `skops` a path. `sio.dump` is `pathlib`-backed, and in production the destination is a
+    `gs://…` URI that POSIX collapses to `gs:/`, so the model would land on the container's local
+    disk while the step reported success -- and the prediction task, running in the same working
+    directory, would read that local copy back and hide it.
+
     Args:
         model: the fitted classifier.
-        path: destination, which must end in `.skops`.
+        path: destination, local or `gs://`, which must end in `.skops`.
 
     Raises:
         ValueError: if `path` does not end in `.skops`.
@@ -132,24 +138,28 @@ def save_model(model: Any, path: str) -> None:
     if not path.endswith('.skops'):
         msg = f'model path must end with .skops, got {path!r}'
         raise ValueError(msg)
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    sio.dump(model, path)
+    StorageHandle(path).write(sio.dumps(model))
 
 
 def load_model(path: str) -> XGBClassifier:
     """Load a model persisted by `save_model`.
 
-    `skops` refuses unknown types unless they are named as trusted, so the file's own reported
+    The symmetric read: the bytes come through `StorageHandle`, so a model stored in the release
+    bucket loads from its `gs://` URI instead of from whatever `gs:/…` tree happens to sit under
+    the current working directory.
+
+    `skops` refuses unknown types unless they are named as trusted, so the payload's own reported
     types are passed through. That is safe here because the file is written by this pipeline into
     the release it is read back from.
 
     Args:
-        path: a `.skops` file.
+        path: a `.skops` file, local or `gs://`.
 
     Returns:
         The classifier.
     """
-    return sio.load(path, trusted=sio.get_untrusted_types(file=path))
+    blob, _ = StorageHandle(path).read()
+    return sio.loads(blob, trusted=sio.get_untrusted_types(data=blob))
 
 
 def missingness(frame: pl.DataFrame, features: Sequence[str]) -> dict[str, float]:
