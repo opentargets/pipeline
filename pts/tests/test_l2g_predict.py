@@ -149,3 +149,26 @@ def test_the_two_config_tasks_share_one_feature_list() -> None:
     # still agree while `features.py` went on claiming to define the order the model was fitted on.
     assert train == list(FEATURES)
     assert len(train) == 31
+
+
+def test_l2g_predict_keeps_a_row_scoring_exactly_at_the_threshold(workspace) -> None:
+    """The comparison is `>=`, and no gate over a released dataset can observe that.
+
+    Flipping it to `>` leaves the parity gate passing, because no released row scores exactly at
+    0.05 in float64 -- so the boundary has to be tested where the threshold can be derived from
+    the data instead of imposed on it. Score everything, take a score the model actually produced,
+    then re-run with that value as the threshold: under `>=` the row survives, under `>` it does
+    not. No floating-point engineering is needed, because the two numbers are the same object.
+    """
+    settings = {**SETTINGS, 'explain_predictions': False}
+    everything = str(workspace / 'everything')
+    l2g_predict(_source(workspace), everything, dict(settings), None)
+    scores = pl.read_parquet(f'{everything}/*.parquet')['score']
+    boundary = float(scores.min())
+
+    at_boundary = str(workspace / 'at_boundary')
+    l2g_predict(_source(workspace), at_boundary, {**settings, 'l2g_threshold': boundary}, None)
+    kept = pl.read_parquet(f'{at_boundary}/*.parquet')
+
+    assert boundary in kept['score'].to_list(), 'the row scoring exactly at the threshold was dropped'
+    assert kept.height == scores.len()
