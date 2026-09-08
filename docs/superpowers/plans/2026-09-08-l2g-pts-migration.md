@@ -260,9 +260,11 @@ def impute_and_cast(
         msg = f'feature matrix is missing {missing}'
         raise ValueError(msg)
 
-    imputed = frame.with_columns(
+    cast = frame.with_columns(pl.col(name).cast(pl.Float32).alias(name) for name in features)
+
+    imputed = cast.with_columns(
         pl.col(name)
-        .fill_null(pl.col(name).cast(pl.Float64).mean().over('studyLocusId'))
+        .fill_null(pl.col(name).cast(pl.Float64).mean().over('studyLocusId').cast(pl.Float32))
         .alias(name)
         for name in LOCUS_MEAN_IMPUTED
         if name in available
@@ -271,7 +273,7 @@ def impute_and_cast(
     return imputed.select(
         *FIXED_COLUMNS,
         *keep,
-        *(pl.col(name).cast(pl.Float32).fill_null(0.0).alias(name) for name in features),
+        *(pl.col(name).fill_null(0.0).alias(name) for name in features),
     )
 ```
 
@@ -1370,7 +1372,9 @@ Create `pts/tests/test_l2g_train.py`:
 """End-to-end test for the l2g_train transformer, on tiny local fixtures."""
 
 import json
+from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -1382,7 +1386,7 @@ from pts.transformers.l2g_train import l2g_train
 @pytest.fixture
 def workspace(tmp_path):
     """Write a feature matrix, credible set, gold standard and pinned test set to disk."""
-    rng = __import__('numpy').random.default_rng(0)
+    rng = np.random.default_rng(0)
     loci = [f'sl{i}' for i in range(40)]
     genes = [f'ENSG{i % 8:011d}' for i in range(40)]
 
@@ -1462,8 +1466,7 @@ def test_l2g_train_writes_every_declared_artifact(workspace) -> None:
     destination = _destination(workspace)
     l2g_train(_source(workspace), destination, dict(SETTINGS), None)
     for key, path in destination.items():
-        assert (workspace / 'out').exists(), key
-        assert pl.Path(path).exists() if hasattr(pl, 'Path') else True
+        assert Path(path).exists(), f'{key} was not written to {path}'
 
 
 def test_l2g_train_writes_a_loadable_model(workspace) -> None:
@@ -1750,9 +1753,12 @@ Create `pts/tests/test_l2g_predict.py`:
 ```python
 """Tests for the l2g_predict transformer and its output assembly."""
 
+from pathlib import Path
+
 import numpy as np
 import polars as pl
 import pytest
+import yaml
 
 from pts.transformers.l2g.features import FEATURES
 from pts.transformers.l2g.model import DEFAULT_HYPERPARAMETERS, fit, save_model
@@ -1847,10 +1853,17 @@ def test_l2g_predict_excludes_non_gwas_and_non_protein_coding_rows(workspace) ->
 
 
 def test_l2g_predict_applies_the_threshold(workspace) -> None:
+    # An empty prediction set is a real production outcome, so this pins whatever
+    # `write_dataset` actually does with a zero-row frame. Determine that behaviour and
+    # assert it explicitly -- either a readable zero-row dataset or no part files at all.
+    # Do NOT weaken the test by choosing a threshold that keeps rows.
     destination = str(workspace / 'out')
     l2g_predict(_source(workspace), destination, {**SETTINGS, 'l2g_threshold': 1.1}, None)
-    out = pl.read_parquet(f'{destination}/*.parquet')
-    assert out.height == 0
+    parts = sorted(Path(destination).glob('*.parquet'))
+    if parts:
+        assert pl.read_parquet(parts).height == 0
+    else:
+        assert Path(destination).exists()
 
 
 def test_l2g_predict_output_is_sorted_by_key(workspace) -> None:
@@ -1872,6 +1885,20 @@ def test_l2g_predict_without_explanations_leaves_shap_null(workspace) -> None:
     l2g_predict(_source(workspace), destination, {**SETTINGS, 'explain_predictions': False}, None)
     out = pl.read_parquet(f'{destination}/*.parquet')
     assert out['shapBaseValue'].is_null().all()
+    # Null, not NaN: the flag says no explanation was computed, and every downstream
+    # consumer reads those as different values.
+    first = out['features'][0]
+    assert all(entry['shapValue'] is None for entry in first)
+
+
+def test_the_two_config_tasks_share_one_feature_list() -> None:
+    """The alias must survive yamlfmt: a drifted copy would fit and score on different orders."""
+    config = yaml.safe_load(Path(__file__).parents[1].joinpath('config.yaml').read_text())
+    tasks = {task['name']: task for task in config['steps']['l2g']}
+    train = tasks['transform l2g_train']['settings']['features_list']
+    predict = tasks['transform l2g_predict']['settings']['features_list']
+    assert train == predict
+    assert len(train) == 31
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1915,7 +1942,7 @@ OUTPUT_COLUMNS = ('studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue'
 def build_output(
     keys: pl.DataFrame,
     matrix: np.ndarray,
-    shap_values: np.ndarray,
+    shap_values: np.ndarray | None,
     base_value: float | None,
     features: Sequence[str],
 ) -> pl.DataFrame:
@@ -1928,7 +1955,8 @@ def build_output(
     Args:
         keys: `studyLocusId`, `geneId` and `score`, one row per prediction.
         matrix: the feature values behind those rows, in fitted order.
-        shap_values: SHAP values with the shape of `matrix`, or an all-null stand-in.
+        shap_values: SHAP values with the shape of `matrix`, or None when explanations are off,
+            in which case every `shapValue` is null.
         base_value: the model's expected value, or None when explanations are off.
         features: feature names, in fitted order.
 
@@ -1936,8 +1964,13 @@ def build_output(
         A DataFrame of `OUTPUT_COLUMNS`.
     """
     values = pl.DataFrame(matrix, schema=[(name, pl.Float32) for name in features])
-    shaps = pl.DataFrame(
-        shap_values, schema=[(f'shap_{name}', pl.Float32) for name in features]
+    shap_schema = [(f'shap_{name}', pl.Float32) for name in features]
+    shaps = (
+        pl.DataFrame(shap_values, schema=shap_schema)
+        if shap_values is not None
+        else pl.DataFrame(
+            {name: [None] * values.height for name, _ in shap_schema}, schema=shap_schema
+        )
     )
     wide = pl.concat([keys, values, shaps], how='horizontal')
 
@@ -2014,7 +2047,9 @@ def l2g_predict(
             workers=workers,
         )
     else:
-        base_value, shap_values = None, np.full(matrix.shape, np.nan, dtype=np.float32)
+        # Null, not NaN. The flag says no explanation was computed, which is a different
+        # statement from "the explanation is not a number", and consumers read them differently.
+        base_value, shap_values = None, None
 
     output = build_output(keys, matrix, shap_values, base_value, features).sort(
         'studyLocusId', 'geneId'
@@ -2109,6 +2144,14 @@ Replace the `gentropy_l2g_train_test_split`, `gentropy_l2g_training` and `gentro
 
 `gentropy_l2g_feature_matrix` keeps its own `depends_on` unchanged. Move `pts_l2g` into the PTS block of the file so the steps stay grouped by stage.
 
+**`pts_vep_view` also depends on the step being deleted** (`unified_pipeline.yaml:531`). Repoint it, or the DAG cannot build:
+
+```yaml
+  pts_vep_view:
+    depends_on:
+      - pts_l2g
+```
+
 - [ ] **Step 4: Remove the stale wiring in `unified_pipeline.py`**
 
 Delete these three entries from `gentropy_step_outputs` (around lines 371–380):
@@ -2134,8 +2177,8 @@ And delete the `l2g_training_version` scratchpad entry (line 90):
 
 - [ ] **Step 5: Verify no reference survives**
 
-Run: `grep -rn "l2g_training\|l2g_prediction\|l2g_train_test_split\|l2g_predict.sh" orchestration/src`
-Expected: no matches (`gentropy_l2g_evidence`'s own `step.evidence_output_path` entry stays and does not match these strings)
+Run: `grep -rn --include='*.py' --include='*.yaml' --include='*.sh' "gentropy_l2g_training\|gentropy_l2g_prediction\|gentropy_l2g_train_test_split\|l2g_predict.sh\|l2g_training_version" orchestration/src`
+Expected: no matches. Restrict to those extensions: stale `__pycache__/*.pyc` files in the tree still contain the old strings and are not evidence of a live reference.
 
 - [ ] **Step 6: Run the orchestration suite**
 
