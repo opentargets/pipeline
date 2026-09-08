@@ -1993,6 +1993,21 @@ steps:
         train_on_full_dataset: true
         shap_background_size: 100
         shap_background_seed: 42
+    - name: transform l2g_predict
+      requires:
+        - transform l2g_train
+      transformer: l2g_predict
+      source:
+        feature_matrix: intermediate/l2g_feature_matrix
+        credible_set: output/credible_set
+        model: etc/model/locus_to_gene_model/classifier.skops
+        background: etc/model/locus_to_gene_model/shap_background.parquet
+      destination: output/l2g_prediction
+      settings:
+        features_list: *l2g_features
+        l2g_threshold: 0.05
+        explain_predictions: true
+        shap_background_size: 100
   ##################################################################################################
 
   #: VEP_VIEW STEP :################################################################################
