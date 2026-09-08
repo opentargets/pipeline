@@ -50,8 +50,6 @@ clusters:
     secret_map:
       # this results in /var/run/secrets/hfhub-key.json with {"HF_TOKEN": "hfhub-key_value"} as content
       HF_TOKEN: hfhub-key
-      # this results in /var/run/secrets/wandb-key.json with {"WANDB_API_KEY": "wandb-key_value"} as content
-      WANDB_API_KEY: wandb-key
 
   gentropy_colocalisation:
     image_version: '2.2'
