@@ -90,7 +90,10 @@ takes `max_samples` in 0.51, which is all this code needs from it.
 
 - [ ] **Step 2: Lock and install**
 
-Run from `pts/`: `uv lock` then `uv sync --all-extras --dev`
+Run from `pts/`: `uv lock` then `uv sync --frozen --all-groups --all-extras`
+
+That is the repo's own convention (`Makefile:45`, `common.mk:25`). `--dev` alone drops the
+`test` dependency-group and uninstalls pytest.
 Expected: `uv.lock` updated, install succeeds.
 
 - [ ] **Step 3: Write the failing test**

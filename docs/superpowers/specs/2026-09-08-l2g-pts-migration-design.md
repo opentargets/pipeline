@@ -40,8 +40,21 @@ and `model_output="probability"` — the same algorithm gentropy uses:
 
 | background size | rows/s/process | 3.22M rows | wall clock on 32 vCPU |
 | --- | --- | --- | --- |
-| 100 | 317 | 2.8 process-hours | ~6 min |
+| 100 | 181-317 | 2.8-4.9 process-hours | ~6-10 min |
 | 1000 | 32 | 28 process-hours | ~53 min |
+
+The range at background 100 is measurement spread, not uncertainty about the approach. 317
+rows/s was measured on an idle machine with xgboost 3.4.1 / shap 0.52.0; 181 rows/s on the same
+rows and the same background under concurrent load with xgboost 3.2.0 / shap 0.51.0, which is
+what production ships (see the dependency note below). A controlled same-rows comparison put the
+library-version difference itself at ~6% -- 181 against 193 rows/s -- so the spread is machine
+load, not the versions. Size the step against the slow end.
+
+Production pins xgboost 3.2.0 and shap 0.51.0 rather than the newest releases: uv forks both by
+Python version, and requiring the newer ones would push pts off Python 3.11 and off its
+`python:3.11-slim` base image. The older pair loads the released `classifier.skops` and
+reproduces the published scores at max |delta| = 0, and `shap.maskers.Independent` takes
+`max_samples` in 0.51, which is all this design needs from it.
 
 `predict_proba` runs at 5.0M rows/s, so scoring the entire 61.2M-row matrix costs ~12 s. XGBoost's
 native `Booster.predict(pred_contribs=True)` does all 3.22M rows in 11.5 s but produces log-odds
@@ -55,7 +68,7 @@ margin contributions rather than probability-space SHAP values, so it is not use
 a `shap.maskers.Independent` masker whose default `max_samples` is 100. The remaining 900 rows are
 discarded silently. gentropy pins `shap>=0.50.0`, so every released run has used 100.
 
-Consequence: the cost to match current behaviour is the 2.8 process-hour row, not the 28 one. The
+Consequence: the cost to match current behaviour is the 2.8-4.9 process-hour row, not the 28 one. The
 design makes the background size an explicit setting so it can never again be decided by a library
 default.
 
@@ -64,7 +77,7 @@ default.
 Each of the 1000 Batch tasks runs a full Spark job on an `n1-standard-2`, reads the *entire* 2.5 GB
 feature matrix (only the credible-set side is partitioned), and produces roughly 3,200 output rows.
 Against a `max_run_duration` of 1 h that is an envelope of up to 2,000 vCPU-hours. The measured work
-is ~3 vCPU-hours of SHAP plus ~12 s of scoring. A single VM is the right shape.
+is under 5 vCPU-hours of SHAP plus ~12 s of scoring. A single VM is the right shape.
 
 ### SHAP is already not reproducible
 
@@ -265,8 +278,11 @@ default the installed `shap` happens to carry.
 Rows are chunked across a `ProcessPoolExecutor`; each worker constructs its explainer once in the
 pool initialiser. `check_additivity=False`, as gentropy does.
 
-Default `shap_background_size: 100` reproduces current behaviour at ~6 min on 32 vCPU. Raising it to
-1000 is a one-line change costing ~53 min.
+Default `shap_background_size: 100` reproduces current behaviour at ~6-10 min on 32 vCPU. Raising it
+to 1000 is a one-line change costing ~53 min.
+
+Chunk rows so there are several chunks per worker, not one: a chunk count below the worker count
+caps the speedup at the chunk count regardless of how many cores the VM has.
 
 ### Sizing
 
