@@ -531,18 +531,29 @@ steps:
       - pts_l2g
 
   pts_l2g:
-    # Measured on the real 26.09-2 inputs, not estimated. n2d-standard-32 runs the step in
-    # 23m12s against n1-highmem-32's 39m40s -- n2d cores are ~1.6x faster per core at
-    # interventional TreeSHAP, which is 98% of the step.
+    # Measured on the real 26.09-2 inputs, not estimated. Whole-step wall clock:
+    #   n1-highmem-32   39m40s
+    #   n2d-standard-32 23m12s   (n2d cores are ~1.6x faster at interventional TreeSHAP)
+    #   n2d-standard-64 16m06s   <- this
+    #
+    # 64 cores is only 1.44x faster for 1.39x the core-time, because the step is
+    # memory-bandwidth-bound: utilisation falls from 81% to 67% and total CPU consumed RISES
+    # 15.6% for identical work. But the absolute difference is ~4.8 vCPU-hours per run, so
+    # paying it for seven minutes of wall clock is worth it. Do not read the ratio as a reason
+    # to go back to 32 without looking at the absolute.
+    #
+    # Scaling further is not the lever: past this point cores mostly stall on memory. The only
+    # large win left is algorithmic -- xgboost's native pred_contribs is ~200x faster but emits
+    # log-odds margin contributions rather than probability-space SHAP values.
     #
     # Do NOT "right-size" this to a highcpu shape. Peak RSS is 28.2 GB, transient, during the
     # polars scan and join of the 5.5 GB of parquet inputs -- SHAP itself sits at a flat
     # ~12.7 GB. A 32 GB shape leaves under 4 GB for the OS, page cache and 32 spawning workers,
-    # and thrashes. 128 GB is ~4.5x the measured peak.
+    # and thrashes. The 64-core shape's 256 GB is ~9x the measured peak.
     #
     # Memory also scales with shap_workers: the pool spawns rather than forks (see
     # l2g/explain.py), so every worker loads its own copy of xgboost, shap and sklearn.
-    machine_type: n2d-standard-32
+    machine_type: n2d-standard-64
     depends_on:
       - gentropy_l2g_feature_matrix
       - pis_l2g
