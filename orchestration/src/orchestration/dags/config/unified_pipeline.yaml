@@ -531,7 +531,18 @@ steps:
       - pts_l2g
 
   pts_l2g:
-    machine_type: n1-highmem-32
+    # Measured on the real 26.09-2 inputs, not estimated. n2d-standard-32 runs the step in
+    # 23m12s against n1-highmem-32's 39m40s -- n2d cores are ~1.6x faster per core at
+    # interventional TreeSHAP, which is 98% of the step.
+    #
+    # Do NOT "right-size" this to a highcpu shape. Peak RSS is 28.2 GB, transient, during the
+    # polars scan and join of the 5.5 GB of parquet inputs -- SHAP itself sits at a flat
+    # ~12.7 GB. A 32 GB shape leaves under 4 GB for the OS, page cache and 32 spawning workers,
+    # and thrashes. 128 GB is ~4.5x the measured peak.
+    #
+    # Memory also scales with shap_workers: the pool spawns rather than forks (see
+    # l2g/explain.py), so every worker loads its own copy of xgboost, shap and sklearn.
+    machine_type: n2d-standard-32
     depends_on:
       - gentropy_l2g_feature_matrix
       - pis_l2g
