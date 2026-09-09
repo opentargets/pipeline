@@ -1,5 +1,12 @@
 """Pytest configuration and shared fixtures for PTS tests."""
 
+# Imported first, before any test module. See pts/transformers/l2g/__init__.py: sklearn and
+# xgboost each ship their own LLVM OpenMP runtime on macOS, and whichever loads first wins.
+# The l2g package guard only helps once that package is imported, so a test module importing
+# skops at its top would still lose the race and die with SIGSEGV at first fit. This makes the
+# ordering hold for the whole suite whatever the collection order.
+import xgboost  # noqa: F401  # isort: skip
+
 import pytest
 from pyspark.sql import SparkSession
 
