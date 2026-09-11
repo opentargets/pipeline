@@ -7,9 +7,9 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
+from pts.transformers.parquet_helpers import discover_dataset_paths
 from pts.transformers.release_metrics import (
     _build_run_id,
-    _discover_dataset_paths,
     _emit_association_metrics,
     _emit_evidence_failed_metrics,
     _emit_evidence_metrics,
@@ -240,11 +240,11 @@ def test_discover_dataset_paths_recovers_missing_directory_markers(monkeypatch) 
         return []
 
     monkeypatch.setattr(
-        'pts.transformers.release_metrics._expand_storage_glob',
+        'pts.transformers.parquet_helpers._expand_storage_glob',
         fake_expand_storage_glob,
     )
 
-    discovered = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)
+    discovered = discover_dataset_paths(release_uri, ['/output/*/'], config=config)
 
     assert set(discovered) == {'/output/disease', '/output/go', '/output/target'}
 
@@ -264,12 +264,12 @@ def test_discover_dataset_paths_scope_trailing_slash_equivalent(monkeypatch) -> 
         return []
 
     monkeypatch.setattr(
-        'pts.transformers.release_metrics._expand_storage_glob',
+        'pts.transformers.parquet_helpers._expand_storage_glob',
         fake_expand_storage_glob,
     )
 
-    discovered_without_slash = _discover_dataset_paths(release_uri, ['/output/*'], config=config)
-    discovered_with_slash = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)
+    discovered_without_slash = discover_dataset_paths(release_uri, ['/output/*'], config=config)
+    discovered_with_slash = discover_dataset_paths(release_uri, ['/output/*/'], config=config)
 
     assert discovered_without_slash == discovered_with_slash
     assert set(discovered_without_slash) == {'/output/disease', '/output/target'}

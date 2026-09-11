@@ -12,8 +12,12 @@ import polars as pl
 from huggingface_hub import HfApi
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
+from pts.transformers.parquet_helpers import (
+    count_parquet_rows,
+    discover_dataset_paths,
+    to_parquet_glob,
+)
 from pts.transformers.utils import load_spark_schema_as_polars
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -291,121 +295,6 @@ def _build_run_id(ot_release: str) -> str:
     return f'{run_release_normalised}-{release_timestamp}'
 
 
-def _to_parquet_glob(path: str | Path) -> str:
-    """Normalize a dataset path to a parquet glob consumable by Polars."""
-    path_str = str(path)
-    if '.parquet' in path_str:
-        return path_str
-    return f'{path_str.rstrip("/")}/*.parquet'
-
-
-def _to_release_relative_path(
-    path: str,
-    release_uri: str,
-) -> str:
-    """Convert an absolute dataset path into a release-relative path key."""
-    release_root = release_uri.rstrip('/')
-    if path.startswith(release_root):
-        relative = path[len(release_root) :]
-    else:
-        relative = path
-
-    relative = relative.rstrip('/')
-    if not relative.startswith('/'):
-        relative = f'/{relative}'
-    return relative
-
-
-def _build_absolute_scope_pattern(
-    release_uri: str,
-    scope: str,
-) -> str:
-    """Build an absolute storage glob pattern from release URI and scope."""
-    scope_path = scope if scope.startswith('/') else f'/{scope}'
-    return f'{release_uri.rstrip("/")}{scope_path}'
-
-
-def _scope_to_parquet_file_glob(scope: str) -> str:
-    """Convert a dataset scope into a parquet-file scope for robust discovery."""
-    normalized = scope.rstrip('/')
-    if normalized.endswith('.parquet'):
-        return normalized
-    return f'{normalized}/*.parquet'
-
-
-def _dataset_path_from_parquet_file(path: str) -> str:
-    """Return the dataset directory path for a parquet file URI/path."""
-    return path.rsplit('/', maxsplit=1)[0]
-
-
-def _has_glob_wildcards(path_pattern: str) -> bool:
-    """Return whether a path pattern contains glob wildcards."""
-    return any(char in path_pattern for char in '*?[')
-
-
-def _expand_storage_glob(
-    path_pattern: str,
-    config: Config,
-) -> list[str]:
-    """Expand a storage glob pattern into concrete dataset paths.
-
-    Example:
-        path_pattern='gs://bucket/release/output/*/*.parquet'
-        -> root='gs://bucket/release/output'
-        -> glob pattern='*/*.parquet'
-        -> returns e.g.
-           [
-               'gs://bucket/release/output/disease/part-00000.parquet',
-               'gs://bucket/release/output/target/part-00000.parquet',
-           ]
-    If no wildcards are present, returns [path_pattern] unchanged.
-    """
-    wildcard_positions = [
-        idx
-        for idx in (
-            path_pattern.find('*'),
-            path_pattern.find('?'),
-            path_pattern.find('['),
-        )
-        if idx != -1
-    ]
-    if not wildcard_positions:
-        return [path_pattern]
-
-    first_wildcard = min(wildcard_positions)
-    slash_idx = path_pattern.rfind('/', 0, first_wildcard)
-    if slash_idx == -1:
-        msg = f'Invalid scope pattern: {path_pattern}'
-        raise ValueError(msg)
-
-    root = path_pattern[:slash_idx]
-    pattern = path_pattern[slash_idx + 1 :]
-    return sorted(StorageHandle(root, config=config).glob(pattern))
-
-
-def _discover_dataset_paths(
-    release_uri: str,
-    scope_globs: list[str],
-    config: Config,
-) -> dict[str, str]:
-    """Discover datasets from configured scopes and key them by release-relative path."""
-    discovered: dict[str, str] = {}
-    for scope in scope_globs:
-        abs_pattern = _build_absolute_scope_pattern(release_uri, scope)
-        if not _has_glob_wildcards(scope):
-            for match in _expand_storage_glob(abs_pattern, config):
-                dataset_path = _dataset_path_from_parquet_file(match) if '.parquet' in match else match.rstrip('/')
-                relative = _to_release_relative_path(dataset_path, release_uri)
-                discovered[relative] = dataset_path
-
-        abs_parquet_pattern = _build_absolute_scope_pattern(release_uri, _scope_to_parquet_file_glob(scope))
-        for parquet_file in _expand_storage_glob(abs_parquet_pattern, config):
-            dataset_path = _dataset_path_from_parquet_file(parquet_file)
-            relative = _to_release_relative_path(dataset_path, release_uri)
-            discovered[relative] = dataset_path
-    return discovered
-
-
 def _resolve_metric_lists(
     discovered_dataset_paths: dict[str, str],
     rich_dataset_whitelist: list[str],
@@ -467,11 +356,6 @@ def _read_associations_minimal(path: str) -> pl.DataFrame:
 def _load_parquet_dataset(path: str) -> pl.DataFrame:
     """Read a dataset parquet path (or directory) eagerly into a dataframe."""
     return scan_dataset(path).collect()
-
-
-def _count_parquet_rows(path: str) -> int:
-    """Count rows from a parquet dataset lazily without loading full data."""
-    return int(scan_dataset(path).select(pl.len()).collect().item())
 
 
 def _single_discovered_path(
@@ -628,7 +512,7 @@ def _compute_metrics(
     rich_patterns = list(settings.get('rich_dataset_whitelist', []))
     evidence_schema = load_spark_schema_as_polars('evidence.json')
 
-    discovered = _discover_dataset_paths(data_root_uri, scope_globs, config)
+    discovered = discover_dataset_paths(data_root_uri, scope_globs, config)
     rich_dataset_list, minimal_dataset_list = _resolve_metric_lists(discovered, rich_patterns)
 
     metric_frames: list[pl.DataFrame] = []
@@ -636,7 +520,7 @@ def _compute_metrics(
 
     if any(fnmatch(dataset, EVIDENCE_OUTPUT_PATTERN) for dataset in rich_dataset_list):
         evidence_paths = [
-            _to_parquet_glob(path) for rel, path in discovered.items() if fnmatch(rel, EVIDENCE_OUTPUT_PATTERN)
+            to_parquet_glob(path) for rel, path in discovered.items() if fnmatch(rel, EVIDENCE_OUTPUT_PATTERN)
         ]
         if evidence_paths:
             evidence = _read_evidence_with_canonical_schema_from_paths(evidence_paths, evidence_schema)
@@ -647,7 +531,7 @@ def _compute_metrics(
 
     if any(fnmatch(dataset, EVIDENCE_EXCLUDED_PATTERN) for dataset in rich_dataset_list):
         evidence_failed_paths = [
-            _to_parquet_glob(path) for rel, path in discovered.items() if fnmatch(rel, EVIDENCE_EXCLUDED_PATTERN)
+            to_parquet_glob(path) for rel, path in discovered.items() if fnmatch(rel, EVIDENCE_EXCLUDED_PATTERN)
         ]
         if evidence_failed_paths:
             evidence_failed = _read_evidence_with_canonical_schema_from_paths(evidence_failed_paths, evidence_schema)
@@ -667,12 +551,12 @@ def _compute_metrics(
             continue
 
         if rel_path == '/output/association_by_datasource_direct':
-            df = _read_associations_minimal(_to_parquet_glob(dataset_path))
+            df = _read_associations_minimal(to_parquet_glob(dataset_path))
             metric_frames.extend(_emit_association_metrics(df, 'Direct'))
             continue
 
         if rel_path == '/output/association_by_datasource_indirect':
-            df = _read_associations_minimal(_to_parquet_glob(dataset_path))
+            df = _read_associations_minimal(to_parquet_glob(dataset_path))
             metric_frames.extend(_emit_association_metrics(df, 'Indirect'))
             continue
 
@@ -686,7 +570,7 @@ def _compute_metrics(
             metric_frames.append(_document_count_by(datasource_view, 'datasourceId', f'{prefix}ByDatasource'))
 
     for rel_path in generic_minimal:
-        total = _count_parquet_rows(discovered[rel_path])
+        total = count_parquet_rows(discovered[rel_path])
         metric_frames.append(_document_total_value(total, f'{_metric_prefix(rel_path)}TotalCount'))
 
     logger.info(
