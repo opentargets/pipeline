@@ -458,6 +458,33 @@ steps:
       - pts_association
       - pts_clinical_target
 
+  # Profiles whatever exists under output/ when it runs, so it has to run last: an early run
+  # reports a partial release and, because an unreadable dataset is skipped with a warning rather
+  # than failing, it reports it as a complete one. The list below is every terminal step in this
+  # file -- everything else is upstream of one of them -- which is what makes it the whole DAG.
+  # A new step that nothing else depends on has to be added here too, or it will not be profiled.
+  pts_dataset_metrics:
+    depends_on:
+      - pts_association_otf
+      - pts_association_timeseries_view
+      - pts_clinical_indication
+      - pts_coding_variant
+      - pts_literature_entity_lut
+      - pts_literature_vector
+      - pts_mouse_phenotype
+      - pts_openfda
+      - pts_release_metrics
+      - pts_search
+      - pts_search_ebi
+      - pts_search_facet
+      - pts_so
+      - pts_target_gene_essentiality
+      - pts_target_prioritisation
+      - pts_target_view
+      - pts_vep_view
+    depends_on_ppp:
+      - pts_otar
+
   pts_otar:
     ppp_only: true
     depends_on:
