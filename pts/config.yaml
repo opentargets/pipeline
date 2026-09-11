@@ -2017,6 +2017,64 @@ steps:
         hf_data_dir: metrics
   ##################################################################################################
 
+  #: DATASET_METRICS STEP :#########################################################################
+  # Profiles every output dataset for the metrics page: size, partitions and row count for all of
+  # them, plus the breakdowns configured below. Every expression here names a real column, and a
+  # column that goes away fails the step rather than silently dropping its metric.
+  dataset_metrics:
+    - name: transform dataset_metrics
+      transformer: dataset_metrics
+      source: {}
+      destination:
+        json: dataset_metrics.json
+      settings:
+        metric_scopes:
+          - /output/*
+        datasets:
+          study:
+            groupings:
+              studyType: "studyType"
+              datasource: "projectId"
+          credible_set:
+            groupings:
+              studyType: "studyType"
+          variant:
+            groupings:
+              consequence: "mostSevereConsequenceId"
+          colocalisation:
+            groupings:
+              studyTypePair: "concat('gwas-', rightStudyType)"
+          drug_molecule:
+            groupings:
+              clinicalStage: "maximumClinicalStage"
+          clinical_report:
+            groupings:
+              clinicalStage: "clinicalStage"
+          disease:
+            groupings:
+              therapeuticArea: "therapeuticAreas"
+          l2g_prediction:
+            filter_counts:
+              - name: prioritised_genes
+                filter: "score > 0.5"
+                distinct: geneId
+          association_by_datasource_direct:
+            groupings:
+              datasource: "aggregationValue"
+          association_by_datasource_indirect:
+            groupings:
+              datasource: "aggregationValue"
+          association_by_datatype_direct:
+            groupings:
+              datatype: "aggregationValue"
+          association_by_datatype_indirect:
+            groupings:
+              datatype: "aggregationValue"
+          evidence_*:
+            groupings:
+              datatype: "datatypeId"
+  ##################################################################################################
+
   #: SEARCH STEP :##################################################################################
   search:
     - name: transform search
