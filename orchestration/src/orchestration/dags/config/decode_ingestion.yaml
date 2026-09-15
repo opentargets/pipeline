@@ -5,14 +5,14 @@ environment_specs:
       data_bucket: gs://decode_data
       input_bucket: gs://decode_inputs
       gnomad_bucket: gs://gnomad_data_2
-      gentropy_ref: '3.3.0-dev.67'
+      gentropy_ref: '3.4.0-dev.11'
       molecular_complex_version: '2026-01-09'
   - name: Test
     vars:
       data_bucket: gs://ot_orchestration/test/decode_data
       input_bucket: gs://ot_orchestration/test/decode_inputs
       gnomad_bucket: gs://gnomad_data_2
-      gentropy_ref: '3.3.0-dev.67'
+      gentropy_ref: '3.4.0-dev.11'
       molecular_complex_version: '2026-01-09'
 
 env: Prod
@@ -132,6 +132,8 @@ nodes:
   #     step.session.add_s3_connector: true
 
   - id: smp_harmonisation
+    # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
+    execution_timeout_seconds: 14400  # 4h
     prerequisites:
       - molecular_complex
       - smp_manifest_generation
@@ -161,6 +163,8 @@ nodes:
 
 
   - id: smp_qc
+    # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
+    execution_timeout_seconds: 14400  # 4h
     prerequisites:
       - smp_harmonisation
     params:
@@ -272,6 +276,8 @@ nodes:
   #     step.session.add_s3_connector: true
 
   - id: raw_harmonisation
+    # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
+    execution_timeout_seconds: 14400  # 4h
     prerequisites:
       - molecular_complex
       - raw_manifest_generation
@@ -301,6 +307,8 @@ nodes:
       step.session.write_mode: overwrite
 
   - id: raw_qc
+    # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
+    execution_timeout_seconds: 14400  # 4h
     prerequisites:
       - raw_harmonisation
     params:

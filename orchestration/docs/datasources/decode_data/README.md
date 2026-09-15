@@ -93,6 +93,8 @@ The dag definition also contains `manifest_generation` and `ingestion` steps tha
 
 The dataproc infrastructure and individual step parameters are configured in `decode_ingestion.yaml`.
 
+The `harmonisation` and `qc` steps of both branches carry `execution_timeout_seconds: 14400` (4h). Airflow does not kill a task that is merely slow, and a stalled harmonisation on 2026-07-02 accrued roughly £1,000 before it was noticed. The downstream `wbc`, `ldc` and `pics` steps operate on KiB-MiB and are left unbounded.
+
 > [!NOTE]
 > S3 credentials for the `manifest_generation` and `ingestion` steps are stored in the GCP Secret Manager `decode` secret, which the cluster init action writes to `/var/run/secrets/decode`. Those steps read them via `step.session.add_s3_connector: true` and `step.session.s3_configuration_path: /var/run/secrets/decode`.
 
@@ -153,8 +155,36 @@ This is acceptable because the deCODE study is well powered — it includes rare
 
 Window-based clumping retains only the lead variants and does not collect the surrounding locus. The locus expansion is performed later by PICS (using reference LD as described above), so collecting it during clumping would be redundant. We use the same window size as the deCODE publication (±1Mb) to stay consistent with the source study.
 
+### Enhanced Flexibility Mode protects shuffle, not cache
+
+`dataproc:efm.spark.shuffle=primary-worker` pins **shuffle files** to the fixed primary pool, which is why secondary workers can autoscale freely. It does **not** protect Spark **cache blocks**: those live on whichever executor computed them, including autoscaled preemptible secondaries. A persist-heavy job therefore loses cached partitions on every scale-down and recomputes them, which generates more shuffle and triggers more scale-up.
+
+This is why the harmonisation step in gentropy no longer caches its intermediates ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)) rather than the cluster being configured to tolerate the caching. `gracefulDecommissionTimeout` on the `otg-decode-efm` policy is nonetheless raised from `0s` to `120s`, so in-flight tasks are not killed mid-stage on scale-down.
+
+The autoscaling policy is a live GCP resource and is **not** defined in this repository — the DAG only references it by name. To inspect or change it:
+
+```{bash}
+gcloud dataproc autoscaling-policies export otg-decode-efm \
+  --region=europe-west1 --project=open-targets-genetics-dev --destination=policy.yaml
+# edit, then
+gcloud dataproc autoscaling-policies import otg-decode-efm \
+  --region=europe-west1 --project=open-targets-genetics-dev --source=policy.yaml
+```
+
+### Shuffle partitions stay at 16000
+
+Raising `spark.sql.shuffle.partitions` above 16000 was proposed as the main tuning lever, and was deliberately **not** applied. Neither dominant shuffle responds to it: harmonisation clusters by `studyId`, whose cardinality (~4,961) caps the number of non-empty partitions, and the write repartitions by the same key. A higher count adds empty tasks without shrinking per-task work. A test in `test_dag_validation.py` locks the value so it is not raised by habit.
+
 ## Changelog
 
 ### 2026-06-30
 
 * [Inclusion of the `deCODE` ingestion dag](https://github.com/opentargets/issues/issues/4140)
+
+### 2026-09-15
+
+* Bumped `gentropy_ref` to `3.4.0-dev.11`, which carries the deCODE duplication fixes and the single-pass, cache-free harmonisation ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)).
+* Added a 4h `execution_timeout` to the `harmonisation` and `qc` steps of both branches.
+* Raised `gracefulDecommissionTimeout` on `otg-decode-efm` from `0s` to `120s`.
+* Copied the `target/` index into the Test bucket so `pqtl_to_study` can run there.
+* Prepared for the rerun that resolves the duplicated credible sets in [opentargets/issues#4481](https://github.com/opentargets/issues/issues/4481).

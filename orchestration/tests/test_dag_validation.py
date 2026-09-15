@@ -1,6 +1,10 @@
 """Try to parse and validate the DAGs."""
 
+from datetime import timedelta
+
 from airflow.models import DagBag
+
+from orchestration.utils import read_yaml_config
 
 
 def test_no_import_errors(dag_bag: DagBag) -> None:
@@ -86,3 +90,57 @@ def test_staged_jar_tasks_retry(dag_bag: DagBag) -> None:
     """
     for task in _stage_jar_tasks(dag_bag):
         assert task.retries > 0, f'{task.task_id} would take down the PTS stage on one hiccup'
+
+
+def test_decode_heavy_tasks_have_execution_timeout(dag_bag: DagBag) -> None:
+    """The deCODE harmonisation and qc tasks must be time-bounded.
+
+    A harmonisation run stalled for hours on 2026-07-02 and accrued ~£1k before
+    anyone noticed. Airflow will not kill a task that is merely slow, so these
+    tasks need an explicit ceiling. The downstream clumping and fine-mapping
+    tasks operate on KiB-MiB and have never stalled, so they are left alone.
+    """
+    dag = dag_bag.dags['decode_ingestion']
+    tasks = {t.task_id: t for t in dag.tasks}
+    heavy = ['smp_harmonisation', 'smp_qc', 'raw_harmonisation', 'raw_qc']
+
+    for task_id in heavy:
+        assert task_id in tasks, f'{task_id} missing from the decode dag'
+        timeout = tasks[task_id].execution_timeout
+        assert timeout is not None, f'{task_id} has no execution_timeout'
+        assert timeout == timedelta(hours=4), f'{task_id} timeout is {timeout}'
+
+
+def _decode_config() -> dict:
+    """Load the deCODE config the way the dag itself loads it."""
+    from orchestration.utils import find_environment_vars
+
+    path = 'src/orchestration/dags/config/decode_ingestion.yaml'
+    raw = read_yaml_config(path)
+    sentinels = find_environment_vars(raw['environment_specs'], raw['env'])
+    return read_yaml_config(path, sentinels)
+
+
+def test_decode_environments_pin_the_same_gentropy_ref() -> None:
+    """Prod and Test must run identical gentropy code.
+
+    The point of a Test run is to predict the Prod run. A ref that has drifted
+    between the two makes the Test result meaningless.
+    """
+    raw = read_yaml_config('src/orchestration/dags/config/decode_ingestion.yaml')
+    refs = {spec['name']: spec['vars']['gentropy_ref'] for spec in raw['environment_specs']}
+    assert len(set(refs.values())) == 1, f'gentropy_ref differs between environments: {refs}'
+
+
+def test_decode_keeps_sixteen_thousand_shuffle_partitions() -> None:
+    """Shuffle partitions are deliberately not raised above 16000.
+
+    Raising this was proposed, but the two dominant shuffles do not respond to
+    it: the harmonisation clusters by studyId, whose cardinality (~4961) caps
+    the number of non-empty partitions, and the write repartitions by the same
+    key. A higher count only adds empty tasks. Locked here so the reasoning is
+    not lost and the value is not raised by habit.
+    """
+    config = _decode_config()
+    partitions = config['dataproc']['cluster_config']['properties']['spark:spark.sql.shuffle.partitions']
+    assert partitions == '16000', f'shuffle partitions changed to {partitions}; see docstring'

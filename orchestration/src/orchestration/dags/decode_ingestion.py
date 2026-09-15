@@ -1,5 +1,6 @@
 """Airflow DAG to ingest and harmonize deCODE proteomics summary statistics data."""
 
+from datetime import timedelta
 from pathlib import Path
 
 from airflow.models.dag import DAG
@@ -25,10 +26,12 @@ with DAG(
 ) as dag:
     tasks = {}
     for step in config['nodes']:
+        timeout_seconds = step.get('execution_timeout_seconds')
         task = submit_gentropy_step(
             cluster_name=config['dataproc']['cluster_name'],
             step_name=step['id'],
             params=step['params'],
+            execution_timeout=timedelta(seconds=timeout_seconds) if timeout_seconds else None,
         )
         tasks[step['id']] = task
     chain_dependencies(nodes=config['nodes'], tasks_or_task_groups=tasks)
