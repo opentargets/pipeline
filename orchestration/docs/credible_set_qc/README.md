@@ -11,7 +11,6 @@ Credible set qc is a set of operations performed on the `StudyLocus` datasets or
 The dag contains following steps:
 
 - qc of credible sets coming from `gwas_catalog_sumstats_susie` bucket
-- qc of credible sets coming from `ukb_ppp_eur_data` bucket
 
 > [!NOTE]
 > The outputs of the steps are contained in the target bucket with prefix _credible_set_clean_.

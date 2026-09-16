@@ -117,7 +117,7 @@ The output of finemapping can be found under the:
 
 ### Credible set qc
 
-After the finemapping is performed, the qc dag is run. For more detail see [credible set qc dag](../../credible_set_qc/README.md).
+After the finemapping is performed, the qc dag is run.
 
 The credible sets that pass the qc are collected in the `gs://ukb_ppp_eur_data/credible_set_clean/`.
 
@@ -142,3 +142,7 @@ To adjust the parameters for google batch infrastructure refer to the `google_ba
 
 - chore: harmonised summary statistics were moved from `gs://ukb_ppp_eur_data/harmonised_summary_statistics` to `gs://ukb_ppp_eur_inputs/harmonised_summary_statistics`. Summary statistics are now in the archive bucket (cold storage).
 - chore: removal of 2024-10-21 credible sets due to data duplication.
+
+### 2026-09-16
+
+- chore: moved the qc step from `credible_set_qc` dag to ukb_ppp_eur_finemapping dag.

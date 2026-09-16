@@ -2,13 +2,14 @@
 
 from pathlib import Path
 
-from airflow.sdk import DAG, chain
+from airflow.sdk import DAG
 
 from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
 from orchestration.operators.batch import BatchIndexOperator, BatchJobOperator
 from orchestration.types import Environment, EnvironmentSpec
-from orchestration.utils import find_environment_vars, find_node_in_config, read_yaml_config
+from orchestration.utils import chain_dependencies, find_environment_vars, read_yaml_config
 from orchestration.utils.common import shared_dag_args, shared_dag_kwargs
+from orchestration.utils.dataproc import generate_dataproc_task_chain, submit_gentropy_step
 
 SOURCE_CONFIG_FILE_PATH = Path(__file__).parent / 'config' / 'ukb_ppp_eur_finemapping.yaml'
 config = read_yaml_config(SOURCE_CONFIG_FILE_PATH)
@@ -23,23 +24,33 @@ with DAG(
     default_args=shared_dag_args,
     **shared_dag_kwargs,
 ) as dag:
-    index_config = find_node_in_config(config['nodes'], 'generate_finemapping_index')
-    job_config = find_node_in_config(config['nodes'], 'finemapping_batch_job')
+    tasks = {}
+    for step in config['nodes']:
+        match step['id']:
+            case 'generate_finemapping_index':
+                batch_index = BatchIndexOperator(
+                    task_id=step['id'],
+                    batch_index_specs=BatchIndexOperatorSpec(**step['google_batch_index_specs']),
+                )
+                task = batch_index
+            case 'finemapping_batch_job':
+                finemapping_job = BatchJobOperator.partial(
+                    task_id=step['id'],
+                    job_name='susie-finemapping',
+                    batch_job_spec=BatchJobOperatorSpec(**step['google_batch']),
+                ).expand(batch_index_row=batch_index.output)
+                task = finemapping_job
 
-    if index_config:
-        batch_index = BatchIndexOperator(
-            task_id=index_config['id'],
-            batch_index_specs=BatchIndexOperatorSpec(**index_config['google_batch_index_specs']),
-        )
+            case _:
+                task = submit_gentropy_step(
+                    cluster_name=config['dataproc']['cluster_name'],
+                    step_name=step['id'],
+                    params=step['params'],
+                )
+                generate_dataproc_task_chain(tasks=[task], **config['dataproc'])
 
-    if job_config:
-        finemapping_job = BatchJobOperator.partial(
-            task_id=job_config['id'],
-            job_name='susie-finemapping',
-            batch_job_spec=BatchJobOperatorSpec(**job_config['google_batch']),
-        ).expand(batch_index_row=batch_index.output)
-
-        chain(batch_index, finemapping_job)
+        tasks[step['id']] = task
+    chain_dependencies(nodes=config['nodes'], tasks_or_task_groups=tasks)
 
 
 if __name__ == '__main__':
