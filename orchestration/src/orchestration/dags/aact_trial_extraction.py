@@ -26,6 +26,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from airflow.sdk import DAG, chain, task_group
+from airflow.task.trigger_rule import TriggerRule
 
 from orchestration.dags.config.aact_trial_extraction import AactTrialExtractionConfig
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
@@ -98,6 +99,8 @@ with DAG(
             t = DeleteInstanceOperator(
                 task_id=f'delete_vm_{step_name}',
                 resource_id=vm_name,
+                trigger_rule=TriggerRule.NONE_SKIPPED,
+                execution_timeout=300
             )
 
             chain(u, r, t)
