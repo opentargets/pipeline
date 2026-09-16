@@ -1,10 +1,8 @@
 ---
 # Sentinel values are substituted textually before the YAML is parsed, so every
-# value here must be a string even when the target field is an int or null.
-# Placeholders for ints and for the nullable autoscaling policy are left
-# unquoted at the use site so the substituted text keeps its natural YAML type;
-# quoting `null` would yield the string "null" and Dataproc would look for a
-# policy of that name.
+# value here is a string. Placeholders at the use site are quoted, which keeps
+# the pre-substitution file valid and meaningful YAML; the integer fields are
+# coerced from string by the CustomClusterConfig pydantic model.
 environment_specs:
   - name: Prod
     vars:
@@ -30,11 +28,12 @@ environment_specs:
       molecular_complex_version: '2026-01-09'
       # The Test inputs are a 3-study (smp) / 6-study (raw) subset, so the
       # production cluster would cost ~USD 40/h to do minutes of work, most of
-      # it spent provisioning 30 TB of SSD. No autoscaling policy: otg-decode-efm
-      # pins primaries to min=max=15 and would override num_workers. Note the
-      # gnomAD variant_direction join does NOT shrink with the study subset, so
-      # this is deliberately not a toy cluster.
-      cluster_autoscaling_policy: 'null'
+      # it spent provisioning 30 TB of SSD. otg-decode-test mirrors the EFM
+      # shape of otg-decode-efm at small scale: primaries fixed at min=max=4 so
+      # they can hold shuffle, secondaries pure compute autoscaling 0-8. Note
+      # the gnomAD variant_direction join does NOT shrink with the study subset,
+      # so this is deliberately not a toy cluster.
+      cluster_autoscaling_policy: otg-decode-test
       cluster_num_workers: '4'
       cluster_master_machine_type: n2-standard-8
       cluster_worker_machine_type: n2-standard-16
@@ -60,14 +59,14 @@ dataproc:
     # transitions): 15 x 2048 GB = 30 TB gross, ~27 TB usable at 90% health
     # threshold, target peak utilisation ~50%.
     #
-    # Under Test the policy is null, which also means no secondary workers, so
-    # the secondary_* settings below are inert there.
-    autoscaling_policy: {cluster_autoscaling_policy}
+    # Under Test, otg-decode-test applies the same shape at min=max=4 primary
+    # and 0-8 secondary.
+    autoscaling_policy: '{cluster_autoscaling_policy}'
     worker_machine_type: '{cluster_worker_machine_type}'
     master_machine_type: '{cluster_master_machine_type}'
-    num_workers: {cluster_num_workers}
+    num_workers: '{cluster_num_workers}'
     num_masters: 1
-    worker_disk_size: {cluster_worker_disk_size}
+    worker_disk_size: '{cluster_worker_disk_size}'
     worker_disk_type: '{cluster_worker_disk_type}'
     secondary_worker_machine_type: n2-standard-16
     # Secondaries hold no shuffle under EFM; a small disk is sufficient for OS

@@ -183,20 +183,24 @@ Test drops to 200, because hashing a 3-study subset into 16000 buckets is pure s
 
 | | Prod | Test |
 |---|---|---|
-| autoscaling policy | `otg-decode-efm` | none |
+| autoscaling policy | `otg-decode-efm` | `otg-decode-test` |
 | primary workers | 15 × `n2-standard-16` | 4 × `n2-standard-16` |
 | primary disk | 2048 GB `pd-ssd` | 500 GB `pd-balanced` |
 | master | `n2-standard-16` | `n2-standard-8` |
 | `shuffle.partitions` | 16000 | 200 |
 
-Test deliberately sets **no** autoscaling policy: `otg-decode-efm` pins primaries to `min=max=15` and would override `num_workers`, and with no policy there are no secondary workers either (so the `secondary_*` settings are inert in Test).
+Each environment has its **own** autoscaling policy. An autoscaling policy governs the primary worker count, so pointing Test at `otg-decode-efm` would silently override the smaller `num_workers` — that policy pins `min=max=15` — and hand a Test run the production cluster anyway.
+
+`otg-decode-test` mirrors the EFM shape of `otg-decode-efm` at small scale: primaries fixed at `min=max=4` so they can hold shuffle, secondaries pure compute autoscaling `0-8`, `gracefulDecommissionTimeout: 120s`.
 
 Test is not sized as a toy cluster, because the gnomAD `variant_direction` join does **not** shrink with the study subset — the reference is read and shuffled in full regardless of how few studies are being harmonised.
+
+Neither policy is defined in this repository; both are live GCP resources referenced by name. See the export/import commands above.
 
 > [!IMPORTANT]
 > `env:` in the config selects the environment for every run of the dag. Check it before triggering: with `env: Prod` a run reads `gs://decode_inputs` and overwrites `gs://decode_data`.
 
-Sentinels are substituted textually before the YAML is parsed, so every value in `environment_specs` must be quoted as a string even where the target field is an integer. At the use site, integer and nullable placeholders are left **unquoted** so the substituted text keeps its natural YAML type — quoting the autoscaling policy would produce the string `"null"` and Dataproc would look for a policy of that name.
+Sentinels are substituted textually **before** the YAML is parsed, so every value in `environment_specs` is a string and every placeholder at the use site is quoted. Quoting keeps the pre-substitution file valid and meaningful YAML — an unquoted `{placeholder}` parses as a nested mapping rather than a scalar — and the integer cluster fields are coerced from string by the `CustomClusterConfig` pydantic model. A test asserts that coercion and builds the cluster spec for both environments, so a value that failed to convert would fail in CI rather than at cluster creation.
 
 ## Changelog
 

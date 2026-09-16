@@ -173,15 +173,47 @@ def test_decode_test_cluster_is_smaller_than_prod() -> None:
     """The Test cluster must not provision the production cluster.
 
     Test inputs are a 3-study subset; the Prod cluster is 15 workers with 30 TB
-    of SSD behind a policy that pins min=max=15. Running that for minutes of
-    work is the mistake this guards.
+    of SSD. Running that for minutes of work is the mistake this guards.
     """
     prod = _decode_config('Prod')['dataproc']['cluster_config']
     test = _decode_config('Test')['dataproc']['cluster_config']
 
     assert int(test['num_workers']) < int(prod['num_workers'])
     assert int(test['worker_disk_size']) < int(prod['worker_disk_size'])
-    # otg-decode-efm pins primaries to min=max=15 and would override num_workers
-    assert test['autoscaling_policy'] is None, (
-        f'Test must not use an autoscaling policy, got {test["autoscaling_policy"]!r}'
-    )
+
+
+def test_decode_test_uses_its_own_autoscaling_policy() -> None:
+    """Test must not borrow the production autoscaling policy.
+
+    An autoscaling policy governs the primary worker count, so reusing
+    otg-decode-efm (which pins min=max=15) would silently override the smaller
+    num_workers and hand a Test run the production cluster anyway. The policies
+    themselves live in GCP, not in this repo, so only the reference is checked.
+    """
+    prod = _decode_config('Prod')['dataproc']['cluster_config']['autoscaling_policy']
+    test = _decode_config('Test')['dataproc']['cluster_config']['autoscaling_policy']
+
+    assert test, 'Test must declare an autoscaling policy'
+    assert test != prod, f'Test reuses the production policy {prod!r}'
+
+
+def test_decode_cluster_worker_counts_are_integers() -> None:
+    """Sizing sentinels must survive substitution as usable values.
+
+    Sentinels are replaced textually before the YAML is parsed, so a quoted
+    placeholder yields a string. The cluster model coerces it, and this asserts
+    that contract rather than trusting it -- a silently unconverted value would
+    surface only at cluster creation.
+    """
+    from orchestration.operators.dataproc import CustomClusterConfig
+
+    for env in ('Prod', 'Test'):
+        cc = dict(_decode_config(env)['dataproc']['cluster_config'])
+        cc.setdefault('service_account', None)
+        cc.setdefault('internal_ip_only', False)
+        model = CustomClusterConfig(**cc)
+        assert isinstance(model.num_workers, int), f'{env} num_workers not coerced'
+        assert isinstance(model.worker_disk_size, int), f'{env} worker_disk_size not coerced'
+        assert isinstance(model.autoscaling_policy, str), f'{env} policy not a string'
+        # proves the config is actually buildable into a Dataproc cluster spec
+        model.create_cluster()
