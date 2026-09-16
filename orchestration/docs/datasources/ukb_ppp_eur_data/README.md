@@ -117,7 +117,8 @@ The output of finemapping can be found under the:
 
 ### Credible set qc
 
-After the finemapping is performed, the qc dag is run.
+After the finemapping is performed, the qc and individual locus collection is run via
+the dataproc cluster job.
 
 The credible sets that pass the qc are collected in the `gs://ukb_ppp_eur_data/credible_set_clean/`.
 
