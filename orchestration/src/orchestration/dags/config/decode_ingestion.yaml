@@ -1,4 +1,10 @@
 ---
+# Sentinel values are substituted textually before the YAML is parsed, so every
+# value here must be a string even when the target field is an int or null.
+# Placeholders for ints and for the nullable autoscaling policy are left
+# unquoted at the use site so the substituted text keeps its natural YAML type;
+# quoting `null` would yield the string "null" and Dataproc would look for a
+# policy of that name.
 environment_specs:
   - name: Prod
     vars:
@@ -7,6 +13,14 @@ environment_specs:
       gnomad_bucket: gs://gnomad_data_2
       gentropy_ref: '3.4.0-dev.11'
       molecular_complex_version: '2026-01-09'
+      # Sized for the full 6 TiB per branch; see the cluster comments below.
+      cluster_autoscaling_policy: otg-decode-efm
+      cluster_num_workers: '15'
+      cluster_master_machine_type: n2-standard-16
+      cluster_worker_machine_type: n2-standard-16
+      cluster_worker_disk_size: '2048'
+      cluster_worker_disk_type: pd-ssd
+      cluster_shuffle_partitions: '16000'
   - name: Test
     vars:
       data_bucket: gs://ot_orchestration/test/decode_data
@@ -14,13 +28,29 @@ environment_specs:
       gnomad_bucket: gs://gnomad_data_2
       gentropy_ref: '3.4.0-dev.11'
       molecular_complex_version: '2026-01-09'
+      # The Test inputs are a 3-study (smp) / 6-study (raw) subset, so the
+      # production cluster would cost ~USD 40/h to do minutes of work, most of
+      # it spent provisioning 30 TB of SSD. No autoscaling policy: otg-decode-efm
+      # pins primaries to min=max=15 and would override num_workers. Note the
+      # gnomAD variant_direction join does NOT shrink with the study subset, so
+      # this is deliberately not a toy cluster.
+      cluster_autoscaling_policy: 'null'
+      cluster_num_workers: '4'
+      cluster_master_machine_type: n2-standard-8
+      cluster_worker_machine_type: n2-standard-16
+      cluster_worker_disk_size: '500'
+      cluster_worker_disk_type: pd-balanced
+      cluster_shuffle_partitions: '200'
 
-env: Prod
+env: Test
 
 dataproc:
   cluster_name: otg-decode
   cluster_config:
     project_id: open-targets-genetics-dev
+    # Sizing is environment-scoped (see environment_specs) so a Test run does
+    # not provision the production cluster. Under Prod:
+    #
     # Enhanced Flexibility Mode: shuffle files pinned to a fixed primary pool
     # via the `dataproc:efm.spark.shuffle=primary-worker` property (set below).
     # Secondary workers stay pure-compute and can autoscale/decommission freely
@@ -29,13 +59,16 @@ dataproc:
     # stalled-run peak (~10.5 TB stage 23, ~15 TB concurrent across stage
     # transitions): 15 x 2048 GB = 30 TB gross, ~27 TB usable at 90% health
     # threshold, target peak utilisation ~50%.
-    autoscaling_policy: otg-decode-efm
-    worker_machine_type: n2-standard-16
-    master_machine_type: n2-standard-16
-    num_workers: 15
+    #
+    # Under Test the policy is null, which also means no secondary workers, so
+    # the secondary_* settings below are inert there.
+    autoscaling_policy: {cluster_autoscaling_policy}
+    worker_machine_type: '{cluster_worker_machine_type}'
+    master_machine_type: '{cluster_master_machine_type}'
+    num_workers: {cluster_num_workers}
     num_masters: 1
-    worker_disk_size: 2048
-    worker_disk_type: 'pd-ssd'
+    worker_disk_size: {cluster_worker_disk_size}
+    worker_disk_type: '{cluster_worker_disk_type}'
     secondary_worker_machine_type: n2-standard-16
     # Secondaries hold no shuffle under EFM; a small disk is sufficient for OS
     # and container working directories.
@@ -63,8 +96,11 @@ dataproc:
       # Initial shuffle-partition count. AQE (coalescePartitions.enabled=true
       # + advisoryPartitionSizeInBytes=256MB) treats this as a ceiling and
       # adapts down per stage — safe for both shuffle-heavy harmonisation/qc
-      # stages and the small-data ldc/pics stages.
-      'spark:spark.sql.shuffle.partitions': '16000'
+      # stages and the small-data ldc/pics stages. Prod stays at 16000: the two
+      # dominant shuffles are bounded by studyId cardinality (~4961), not by
+      # this value, so raising it only adds empty tasks. Test drops to 200,
+      # since hashing 3 studies into 16000 buckets is pure scheduling overhead.
+      'spark:spark.sql.shuffle.partitions': '{cluster_shuffle_partitions}'
       # EFM docs recommendation: 1 GB input partition size for Spark SQL,
       # reduces task launch overhead when reading large parquet inputs.
       'spark:spark.sql.files.maxPartitionBytes': '1g'

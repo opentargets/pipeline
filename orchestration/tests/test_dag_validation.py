@@ -111,14 +111,20 @@ def test_decode_heavy_tasks_have_execution_timeout(dag_bag: DagBag) -> None:
         assert timeout == timedelta(hours=4), f'{task_id} timeout is {timeout}'
 
 
-def _decode_config() -> dict:
-    """Load the deCODE config the way the dag itself loads it."""
+DECODE_CONFIG_PATH = 'src/orchestration/dags/config/decode_ingestion.yaml'
+
+
+def _decode_config(env: str | None = None) -> dict:
+    """Resolve the deCODE config for an environment.
+
+    Defaults to whichever environment the dag would use, so the value under
+    test is the value that would actually run.
+    """
     from orchestration.utils import find_environment_vars
 
-    path = 'src/orchestration/dags/config/decode_ingestion.yaml'
-    raw = read_yaml_config(path)
-    sentinels = find_environment_vars(raw['environment_specs'], raw['env'])
-    return read_yaml_config(path, sentinels)
+    raw = read_yaml_config(DECODE_CONFIG_PATH)
+    sentinels = find_environment_vars(raw['environment_specs'], env or raw['env'])
+    return read_yaml_config(DECODE_CONFIG_PATH, sentinels)
 
 
 def test_decode_environments_pin_the_same_gentropy_ref() -> None:
@@ -127,20 +133,55 @@ def test_decode_environments_pin_the_same_gentropy_ref() -> None:
     The point of a Test run is to predict the Prod run. A ref that has drifted
     between the two makes the Test result meaningless.
     """
-    raw = read_yaml_config('src/orchestration/dags/config/decode_ingestion.yaml')
+    raw = read_yaml_config(DECODE_CONFIG_PATH)
     refs = {spec['name']: spec['vars']['gentropy_ref'] for spec in raw['environment_specs']}
     assert len(set(refs.values())) == 1, f'gentropy_ref differs between environments: {refs}'
 
 
-def test_decode_keeps_sixteen_thousand_shuffle_partitions() -> None:
-    """Shuffle partitions are deliberately not raised above 16000.
+def test_decode_prod_keeps_sixteen_thousand_shuffle_partitions() -> None:
+    """Prod shuffle partitions are deliberately not raised above 16000.
 
     Raising this was proposed, but the two dominant shuffles do not respond to
     it: the harmonisation clusters by studyId, whose cardinality (~4961) caps
     the number of non-empty partitions, and the write repartitions by the same
-    key. A higher count only adds empty tasks. Locked here so the reasoning is
-    not lost and the value is not raised by habit.
+    key. A higher count only adds empty tasks. Asserted against Prod explicitly
+    so that flipping the active environment cannot quietly retire the decision.
     """
-    config = _decode_config()
+    config = _decode_config('Prod')
     partitions = config['dataproc']['cluster_config']['properties']['spark:spark.sql.shuffle.partitions']
     assert partitions == '16000', f'shuffle partitions changed to {partitions}; see docstring'
+
+
+def test_decode_test_environment_never_writes_to_production() -> None:
+    """A Test run must not touch the production buckets.
+
+    The cluster sizing is environment-scoped, so Test and Prod now differ in
+    more than paths. The expensive mistake is not a wrong machine type, it is a
+    Test run that overwrites gs://decode_data, so assert the paths directly.
+    """
+    config = _decode_config('Test')
+    production = ('gs://decode_data', 'gs://decode_inputs')
+    for node in config['nodes']:
+        for key, value in node['params'].items():
+            if not isinstance(value, str):
+                continue
+            for prefix in production:
+                assert not value.startswith(prefix), f'{node["id"]}.{key} points at production: {value}'
+
+
+def test_decode_test_cluster_is_smaller_than_prod() -> None:
+    """The Test cluster must not provision the production cluster.
+
+    Test inputs are a 3-study subset; the Prod cluster is 15 workers with 30 TB
+    of SSD behind a policy that pins min=max=15. Running that for minutes of
+    work is the mistake this guards.
+    """
+    prod = _decode_config('Prod')['dataproc']['cluster_config']
+    test = _decode_config('Test')['dataproc']['cluster_config']
+
+    assert int(test['num_workers']) < int(prod['num_workers'])
+    assert int(test['worker_disk_size']) < int(prod['worker_disk_size'])
+    # otg-decode-efm pins primaries to min=max=15 and would override num_workers
+    assert test['autoscaling_policy'] is None, (
+        f'Test must not use an autoscaling policy, got {test["autoscaling_policy"]!r}'
+    )

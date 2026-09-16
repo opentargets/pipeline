@@ -171,9 +171,32 @@ gcloud dataproc autoscaling-policies import otg-decode-efm \
   --region=europe-west1 --project=open-targets-genetics-dev --source=policy.yaml
 ```
 
-### Shuffle partitions stay at 16000
+### Shuffle partitions stay at 16000 in Prod
 
-Raising `spark.sql.shuffle.partitions` above 16000 was proposed as the main tuning lever, and was deliberately **not** applied. Neither dominant shuffle responds to it: harmonisation clusters by `studyId`, whose cardinality (~4,961) caps the number of non-empty partitions, and the write repartitions by the same key. A higher count adds empty tasks without shrinking per-task work. A test in `test_dag_validation.py` locks the value so it is not raised by habit.
+Raising `spark.sql.shuffle.partitions` above 16000 was proposed as the main tuning lever, and was deliberately **not** applied. Neither dominant shuffle responds to it: harmonisation clusters by `studyId`, whose cardinality (~4,961) caps the number of non-empty partitions, and the write repartitions by the same key. A higher count adds empty tasks without shrinking per-task work. A test in `test_dag_validation.py` asserts the Prod value so the decision is not retired by habit — or by flipping the active environment.
+
+Test drops to 200, because hashing a 3-study subset into 16000 buckets is pure scheduling overhead.
+
+### Cluster sizing is environment-scoped
+
+`environment_specs` carries the cluster sizing as well as the bucket paths, so a Test run does not provision the production cluster:
+
+| | Prod | Test |
+|---|---|---|
+| autoscaling policy | `otg-decode-efm` | none |
+| primary workers | 15 × `n2-standard-16` | 4 × `n2-standard-16` |
+| primary disk | 2048 GB `pd-ssd` | 500 GB `pd-balanced` |
+| master | `n2-standard-16` | `n2-standard-8` |
+| `shuffle.partitions` | 16000 | 200 |
+
+Test deliberately sets **no** autoscaling policy: `otg-decode-efm` pins primaries to `min=max=15` and would override `num_workers`, and with no policy there are no secondary workers either (so the `secondary_*` settings are inert in Test).
+
+Test is not sized as a toy cluster, because the gnomAD `variant_direction` join does **not** shrink with the study subset — the reference is read and shuffled in full regardless of how few studies are being harmonised.
+
+> [!IMPORTANT]
+> `env:` in the config selects the environment for every run of the dag. Check it before triggering: with `env: Prod` a run reads `gs://decode_inputs` and overwrites `gs://decode_data`.
+
+Sentinels are substituted textually before the YAML is parsed, so every value in `environment_specs` must be quoted as a string even where the target field is an integer. At the use site, integer and nullable placeholders are left **unquoted** so the substituted text keeps its natural YAML type — quoting the autoscaling policy would produce the string `"null"` and Dataproc would look for a policy of that name.
 
 ## Changelog
 
