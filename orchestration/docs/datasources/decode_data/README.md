@@ -159,7 +159,18 @@ Window-based clumping retains only the lead variants and does not collect the su
 
 `dataproc:efm.spark.shuffle=primary-worker` pins **shuffle files** to the fixed primary pool, which is why secondary workers can autoscale freely. It does **not** protect Spark **cache blocks**: those live on whichever executor computed them, including autoscaled preemptible secondaries. A persist-heavy job therefore loses cached partitions on every scale-down and recomputes them, which generates more shuffle and triggers more scale-up.
 
-This is why the harmonisation step in gentropy no longer caches its intermediates ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)) rather than the cluster being configured to tolerate the caching. `gracefulDecommissionTimeout` on the `otg-decode-efm` policy is nonetheless raised from `0s` to `120s`, so in-flight tasks are not killed mid-stage on scale-down.
+This is why the harmonisation step in gentropy no longer caches its intermediates ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)) rather than the cluster being configured to tolerate the caching.
+
+> [!CAUTION]
+> `gracefulDecommissionTimeout` **must be `0s`** on any policy used with `dataproc:efm.spark.shuffle=primary-worker`. Dataproc rejects cluster creation outright otherwise:
+>
+> ```
+> InvalidArgument: 400 When Spark primary worker shuffle is enabled
+> (dataproc:efm.spark.shuffle=primary-worker), the graceful decommissioning
+> timeout must be 0. See SPARK-30873 for more information.
+> ```
+>
+> The `0s` is therefore a requirement, not an oversight to be "fixed". Raising it to `120s` was attempted and broke cluster creation for both policies; both are back at `0s`. Per the same error message, secondary workers can be removed with no graceful decommissioning and in-progress tasks are simply retried — so there is nothing to protect here, and the recompute-on-decommission concern has to be addressed in the job (by not caching), which is what gentropy#1292 does.
 
 The autoscaling policy is a live GCP resource and is **not** defined in this repository — the DAG only references it by name. To inspect or change it:
 
@@ -191,7 +202,7 @@ Test drops to 200, because hashing a 3-study subset into 16000 buckets is pure s
 
 Each environment has its **own** autoscaling policy. An autoscaling policy governs the primary worker count, so pointing Test at `otg-decode-efm` would silently override the smaller `num_workers` — that policy pins `min=max=15` — and hand a Test run the production cluster anyway.
 
-`otg-decode-test` mirrors the EFM shape of `otg-decode-efm` at small scale: primaries fixed at `min=max=4` so they can hold shuffle, secondaries pure compute autoscaling `0-8`, `gracefulDecommissionTimeout: 120s`.
+`otg-decode-test` mirrors the EFM shape of `otg-decode-efm` at small scale: primaries fixed at `min=max=4` so they can hold shuffle, secondaries pure compute autoscaling `0-8`, and `gracefulDecommissionTimeout: 0s` as EFM requires (see the caution above).
 
 Test is not sized as a toy cluster, because the gnomAD `variant_direction` join does **not** shrink with the study subset — the reference is read and shuffled in full regardless of how few studies are being harmonised.
 
@@ -212,6 +223,7 @@ Sentinels are substituted textually **before** the YAML is parsed, so every valu
 
 * Bumped `gentropy_ref` to `3.4.0-dev.11`, which carries the deCODE duplication fixes and the single-pass, cache-free harmonisation ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)).
 * Added a 4h `execution_timeout` to the `harmonisation` and `qc` steps of both branches.
-* Raised `gracefulDecommissionTimeout` on `otg-decode-efm` from `0s` to `120s`.
+* Created the `otg-decode-test` autoscaling policy (primaries `min=max=4`, secondaries `0-8`) so a Test run does not provision the production cluster.
+* Reverted an attempt to raise `gracefulDecommissionTimeout` from `0s` to `120s` on `otg-decode-efm`: EFM primary-worker shuffle requires `0s` and Dataproc rejects cluster creation otherwise.
 * Copied the `target/` index into the Test bucket so `pqtl_to_study` can run there.
 * Prepared for the rerun that resolves the duplicated credible sets in [opentargets/issues#4481](https://github.com/opentargets/issues/issues/4481).
