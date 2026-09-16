@@ -9,14 +9,21 @@ environment_specs:
       data_bucket: gs://decode_data
       input_bucket: gs://decode_inputs
       gnomad_bucket: gs://gnomad_data_2
-      gentropy_ref: '3.4.0-dev.11'
+      gentropy_ref: '3.4.0-dev.15'
       molecular_complex_version: '2026-01-09'
-      # Sized for the full 6 TiB per branch; see the cluster comments below.
+      # Primary disk holds all shuffle under EFM. 15 x 1024 GB gives 14.0 TiB
+      # gross and 12.6 TiB before YARN's 90% local-dir check marks a node
+      # unhealthy and releases its containers.
+      #
+      # A run at this size failed on 2026-09-16 carrying 12.40 TiB of shuffle
+      # plus 9.59 TiB of spill. The spill was the avoidable part: see
+      # maxPartitionBytes and executor.cores below. With those set, the same
+      # 1024 GB completed the smp branch.
       cluster_autoscaling_policy: otg-decode-efm
       cluster_num_workers: '15'
       cluster_master_machine_type: n2-standard-16
       cluster_worker_machine_type: n2-standard-16
-      cluster_worker_disk_size: '2048'
+      cluster_worker_disk_size: '1024'
       cluster_worker_disk_type: pd-ssd
       cluster_shuffle_partitions: '16000'
   - name: Test
@@ -24,15 +31,15 @@ environment_specs:
       data_bucket: gs://ot_orchestration/test/decode_data
       input_bucket: gs://ot_orchestration/test/decode_inputs
       gnomad_bucket: gs://gnomad_data_2
-      gentropy_ref: '3.4.0-dev.11'
+      gentropy_ref: '3.4.0-dev.15'
       molecular_complex_version: '2026-01-09'
       # The Test inputs are a 3-study (smp) / 6-study (raw) subset, so the
       # production cluster would cost ~USD 40/h to do minutes of work, most of
       # it spent provisioning 30 TB of SSD. otg-decode-test mirrors the EFM
       # shape of otg-decode-efm at small scale: primaries fixed at min=max=4 so
-      # they can hold shuffle, secondaries pure compute autoscaling 0-8. Note
-      # the gnomAD variant_direction join does NOT shrink with the study subset,
-      # so this is deliberately not a toy cluster.
+      # they can hold shuffle, secondaries pure compute autoscaling 0-8. It
+      # keeps 16-vCPU workers because the gnomAD variant_direction join stays
+      # full size whatever the study subset.
       cluster_autoscaling_policy: otg-decode-test
       cluster_num_workers: '4'
       cluster_master_machine_type: n2-standard-8
@@ -41,23 +48,20 @@ environment_specs:
       cluster_worker_disk_type: pd-balanced
       cluster_shuffle_partitions: '200'
 
-env: Test
+env: Prod
 
 dataproc:
   cluster_name: otg-decode
   cluster_config:
     project_id: open-targets-genetics-dev
-    # Sizing is environment-scoped (see environment_specs) so a Test run does
-    # not provision the production cluster. Under Prod:
+    # Sizing is environment-scoped (see environment_specs) so a Test run gets
+    # its own smaller cluster. Under Prod:
     #
     # Enhanced Flexibility Mode: shuffle files pinned to a fixed primary pool
     # via the `dataproc:efm.spark.shuffle=primary-worker` property (set below).
     # Secondary workers stay pure-compute and can autoscale/decommission freely
     # without shuffle loss. Uses the existing otg-decode-efm policy (min=max=15
-    # primary, 0-50 secondary). Primary disk sized against the 2026-07-02
-    # stalled-run peak (~10.5 TB stage 23, ~15 TB concurrent across stage
-    # transitions): 15 x 2048 GB = 30 TB gross, ~27 TB usable at 90% health
-    # threshold, target peak utilisation ~50%.
+    # primary, 0-50 secondary). Primary disk sizing is in environment_specs.
     #
     # Under Test, otg-decode-test applies the same shape at min=max=4 primary
     # and 0-8 secondary.
@@ -95,14 +99,22 @@ dataproc:
       # Initial shuffle-partition count. AQE (coalescePartitions.enabled=true
       # + advisoryPartitionSizeInBytes=256MB) treats this as a ceiling and
       # adapts down per stage — safe for both shuffle-heavy harmonisation/qc
-      # stages and the small-data ldc/pics stages. Prod stays at 16000: the two
-      # dominant shuffles are bounded by studyId cardinality (~4961), not by
-      # this value, so raising it only adds empty tasks. Test drops to 200,
-      # since hashing 3 studies into 16000 buckets is pure scheduling overhead.
+      # stages and the small-data ldc/pics stages. Prod stays at 16000: both
+      # dominant shuffles are bounded by studyId cardinality (~4961), so raising
+      # this only adds empty tasks. Test drops to 200, since hashing 3 studies
+      # into 16000 buckets is pure scheduling overhead.
       'spark:spark.sql.shuffle.partitions': '{cluster_shuffle_partitions}'
-      # EFM docs recommendation: 1 GB input partition size for Spark SQL,
-      # reduces task launch overhead when reading large parquet inputs.
-      'spark:spark.sql.files.maxPartitionBytes': '1g'
+      # Input partition size. The EFM docs suggest 1g, which gave stage 7 of the
+      # 2026-09-16 run only 6700 tasks for 3.16 TiB of input -- 495 MB each,
+      # against ~2 GB of execution memory per task. That stage spilled 5.12 TiB.
+      # 100m puts roughly 50 MB of input in each task, so the shuffle-write sort
+      # stays well inside the budget, at the cost of ~10x the task count.
+      'spark:spark.sql.files.maxPartitionBytes': '100m'
+      # 8 cores against a 27426 MB heap left each task ~2 GB of execution memory
+      # (27426 * 0.6 / 8), and the spill messages landed at exactly 1984 MiB.
+      # 4 cores doubles that to ~4 GB. YARN packs more executors per node, so
+      # total cores stay the same.
+      'spark:spark.executor.cores': '4'
       'spark:spark.task.maxFailures': '20'
       'spark:spark.stage.maxConsecutiveAttempts': '10'
       'spark:spark.sql.adaptive.enabled': 'true'
@@ -114,44 +126,43 @@ dataproc:
       'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
 
 nodes:
-
   ########################## Molecular complex ingestion ######################
   # As some of the aptamers link to protein complexes, instead of individual proteins,
   # we need to bring the full set of proteins and explode them to get all mapped genes
 
-  - id: molecular_complex
-    kind: Task
-    prerequisites: []
-    params:
-      step: molecular_complex_ingestion
-      # Input
+  # - id: molecular_complex
+  #   kind: Task
+  #   prerequisites: []
+  #   params:
+  #     step: molecular_complex_ingestion
+  #     # Input
 
-      step.predicted_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606_predicted.tsv'
-      step.experimental_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606.tsv'
-      # Output
-      step.output_path: '{data_bucket}/molecular_complex/'
-      # Session
-      step.session.write_mode: overwrite
+  #     step.predicted_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606_predicted.tsv'
+  #     step.experimental_complex_tab_path: 'https://ftp.ebi.ac.uk/pub/databases/intact/complex/{molecular_complex_version}/complextab/9606.tsv'
+  #     # Output
+  #     step.output_path: '{data_bucket}/molecular_complex/'
+  #     # Session
+  #     step.session.write_mode: overwrite
   ##############################################################################
 
   ########################### SMP ##############################################
   # The steps below result in processing of normalised summary statistics (SMP)
   ##############################################################################
-  - id: smp_manifest_generation
-    kind: Task
-    prerequisites: []
-    # - molecular_complex
-    params:
-      step: decode_manifest_generation
-      # Input
-      step.bucket_name: 'largescaleplasma-2023'
-      step.prefix: "final_somascan_smp/"
-      # Output
-      step.output_path: '{data_bucket}/smp/manifest/'
-      # Session
-      step.session.write_mode: overwrite
-      step.session.s3_configuration_path: '/var/run/secrets/decode'
-      step.session.add_s3_connector: true
+  # - id: smp_manifest_generation
+  #   kind: Task
+  #   prerequisites: []
+  #   # - molecular_complex
+  #   params:
+  #     step: decode_manifest_generation
+  #     # Input
+  #     step.bucket_name: 'largescaleplasma-2023'
+  #     step.prefix: "final_somascan_smp/"
+  #     # Output
+  #     step.output_path: '{data_bucket}/smp/manifest/'
+  #     # Session
+  #     step.session.write_mode: overwrite
+  #     step.session.s3_configuration_path: '/var/run/secrets/decode'
+  #     step.session.add_s3_connector: true
 
   # - id: smp_ingestion
   #   prerequisites:
@@ -168,11 +179,11 @@ nodes:
 
   - id: smp_harmonisation
     # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
-    execution_timeout_seconds: 14400  # 4h
-    prerequisites:
-      - molecular_complex
-      - smp_manifest_generation
-      # - smp_ingestion
+    execution_timeout_seconds: 14400 # 4h
+    prerequisites: []
+    # - molecular_complex
+    # - smp_manifest_generation
+    # - smp_ingestion
     params:
       step: decode_summary_statistics_harmonisation
       # Input
@@ -196,10 +207,9 @@ nodes:
       # Session
       step.session.write_mode: overwrite
 
-
   - id: smp_qc
     # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
-    execution_timeout_seconds: 14400  # 4h
+    execution_timeout_seconds: 14400 # 4h
     prerequisites:
       - smp_harmonisation
     params:
@@ -214,7 +224,6 @@ nodes:
       step.pval_threshold: 5e-8
       # Session
       step.session.write_mode: overwrite
-
 
   - id: smp_wbc
     prerequisites:
@@ -275,26 +284,24 @@ nodes:
       step.session.write_mode: overwrite
   # #############################################################################
 
-
   # ############################## RAW ##########################################
   # # The steps below result in processing of non-normalized summary statistics (RAW)
   # #############################################################################
-  - id: raw_manifest_generation
-    kind: Task
-    prerequisites:
-      - molecular_complex
-    params:
-      step: decode_manifest_generation
-      # Input
-      step.bucket_name: 'largescaleplasma-2023'
-      step.prefix: "final_somascan_raw/"
-      # Output
-      step.output_path: '{data_bucket}/raw/manifest/'
-      # Session
-      step.session.write_mode: overwrite
-      step.session.s3_configuration_path: '/var/run/secrets/decode'
-      step.session.add_s3_connector: true
-
+  # - id: raw_manifest_generation
+  #   kind: Task
+  #   prerequisites:
+  #     - molecular_complex
+  #   params:
+  #     step: decode_manifest_generation
+  #     # Input
+  #     step.bucket_name: 'largescaleplasma-2023'
+  #     step.prefix: "final_somascan_raw/"
+  #     # Output
+  #     step.output_path: '{data_bucket}/raw/manifest/'
+  #     # Session
+  #     step.session.write_mode: overwrite
+  #     step.session.s3_configuration_path: '/var/run/secrets/decode'
+  #     step.session.add_s3_connector: true
 
   # - id: raw_ingestion
   #   prerequisites:
@@ -312,10 +319,10 @@ nodes:
 
   - id: raw_harmonisation
     # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
-    execution_timeout_seconds: 14400  # 4h
+    execution_timeout_seconds: 14400 # 4h
     prerequisites:
-      - molecular_complex
-      - raw_manifest_generation
+      # - molecular_complex
+      # - raw_manifest_generation
       - smp_harmonisation
       # - raw_ingestion
     params:
@@ -343,7 +350,7 @@ nodes:
 
   - id: raw_qc
     # Airflow does not kill a merely-slow task; a stall here once cost ~GBP 1k.
-    execution_timeout_seconds: 14400  # 4h
+    execution_timeout_seconds: 14400 # 4h
     prerequisites:
       - raw_harmonisation
     params:

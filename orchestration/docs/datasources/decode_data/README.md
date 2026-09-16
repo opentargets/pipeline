@@ -1,6 +1,6 @@
 # deCODE proteomics
 
-This document was updated on 2026-06-30.
+This document was updated on 2026-09-17.
 
 Data source comes from the [deCODE Genetics summary data](https://www.decode.com/summarydata/). The data source is linked to 2 publications:
 
@@ -76,11 +76,11 @@ The output datasets are:
 
 ### decode_ingestion dag
 
-The **decode_ingestion.py** dag runs the deCODE ingestion pipeline on the `otg-decode` dataproc cluster. The pipeline runs twice in parallel — once for the sample-median-protein-normalised (`smp`) and once for the non-normalised (`raw`) summary statistics — sharing a single `molecular_complex` step.
+The **decode_ingestion.py** dag runs the deCODE ingestion pipeline on the `otg-decode` dataproc cluster. It runs once for the sample-median-protein-normalised (`smp`) summary statistics and once for the non-normalised (`raw`) ones. The two branches are serialised — `raw_harmonisation` waits on `smp_harmonisation` — so they share the cluster in sequence rather than competing for it.
 
 ![decode_ingestion](decode_ingestion.svg)
 
-The `molecular_complex` step is shared by both branches. Each branch then runs the following processing steps:
+Each branch runs the following processing steps:
 
 1. **harmonisation** — builds the `pQTLStudyIndex` and harmonises the raw summary statistics (schema alignment, MAC/sample-size filtering, allele flipping against gnomAD EUR allele frequencies, EAF inference, and ATGC validation).
 2. **qc** — computes `SummaryStatisticsQC` metrics and annotates the pQTL study index.
@@ -89,7 +89,17 @@ The `molecular_complex` step is shared by both branches. Each branch then runs t
 5. **pics** — PICS fine-mapping to produce credible sets.
 6. **pqtl_to_study** — transforms the pQTL study index into the canonical `StudyIndex`, mapping protein IDs to up-to-date target gene IDs.
 
-The dag definition also contains `manifest_generation` and `ingestion` steps that list and fetch the raw data from the deCODE S3 bucket. These are the steps that originally seeded `gs://decode_inputs` (run via notebook). See the caution above before running them — the data is already ingested and re-running them is costly.
+The dag definition also contains `molecular_complex`, `manifest_generation` and `ingestion` steps, **all commented out**. Their outputs are already materialised under `gs://decode_data`, so they are external inputs to a run rather than part of it:
+
+| step | output it would regenerate | why it is disabled |
+|---|---|---|
+| `molecular_complex` | `{data_bucket}/molecular_complex/` | Complex Portal version is pinned; the existing output matches it |
+| `manifest_generation` | `{data_bucket}/{smp,raw}/manifest/` | the S3 listing still matches, and this is one of the two steps that need the `decode` secret |
+| `ingestion` | `gs://decode_inputs/raw_summary_statistics/` | re-downloads the full dataset from S3; see the caution above |
+
+With `manifest_generation` and `ingestion` out, a run needs only GCS access. A run on 2026-09-16 confirmed why that matters: with them enabled, both failed with `InvalidAccessKeyId` (HTTP 403) against `s3a://largescaleplasma-2023`.
+
+Re-enable any of them by uncommenting the node **and** restoring the matching entry in the dependent step's `prerequisites`.
 
 The dataproc infrastructure and individual step parameters are configured in `decode_ingestion.yaml`.
 
@@ -155,11 +165,11 @@ This is acceptable because the deCODE study is well powered — it includes rare
 
 Window-based clumping retains only the lead variants and does not collect the surrounding locus. The locus expansion is performed later by PICS (using reference LD as described above), so collecting it during clumping would be redundant. We use the same window size as the deCODE publication (±1Mb) to stay consistent with the source study.
 
-### Enhanced Flexibility Mode protects shuffle, not cache
+### Enhanced Flexibility Mode protects shuffle files only
 
-`dataproc:efm.spark.shuffle=primary-worker` pins **shuffle files** to the fixed primary pool, which is why secondary workers can autoscale freely. It does **not** protect Spark **cache blocks**: those live on whichever executor computed them, including autoscaled preemptible secondaries. A persist-heavy job therefore loses cached partitions on every scale-down and recomputes them, which generates more shuffle and triggers more scale-up.
+`dataproc:efm.spark.shuffle=primary-worker` pins **shuffle files** to the fixed primary pool, which is why secondary workers can autoscale freely. Spark **cache blocks** fall outside that protection: they live on whichever executor computed them, including autoscaled preemptible secondaries. A persist-heavy job therefore loses cached partitions on every scale-down and recomputes them, which generates more shuffle and triggers more scale-up.
 
-This is why the harmonisation step in gentropy no longer caches its intermediates ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)) rather than the cluster being configured to tolerate the caching.
+This is why the harmonisation step in gentropy streams its intermediates instead of caching them ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)) — the job is the level this belongs at.
 
 > [!CAUTION]
 > `gracefulDecommissionTimeout` **must be `0s`** on any policy used with `dataproc:efm.spark.shuffle=primary-worker`. Dataproc rejects cluster creation outright otherwise:
@@ -170,9 +180,9 @@ This is why the harmonisation step in gentropy no longer caches its intermediate
 > timeout must be 0. See SPARK-30873 for more information.
 > ```
 >
-> The `0s` is therefore a requirement, not an oversight to be "fixed". Raising it to `120s` was attempted and broke cluster creation for both policies; both are back at `0s`. Per the same error message, secondary workers can be removed with no graceful decommissioning and in-progress tasks are simply retried — so there is nothing to protect here, and the recompute-on-decommission concern has to be addressed in the job (by not caching), which is what gentropy#1292 does.
+> The `0s` is a requirement of EFM. Raising it to `120s` was attempted and broke cluster creation for both policies; both are back at `0s`. Per the same error message, secondary workers can be removed with no graceful decommissioning and in-progress tasks are simply retried, so the protection is redundant here. The recompute-on-decommission concern belongs in the job, which gentropy#1292 addresses by streaming instead of caching.
 
-The autoscaling policy is a live GCP resource and is **not** defined in this repository — the DAG only references it by name. To inspect or change it:
+The autoscaling policy is a live GCP resource that lives in GCP rather than this repository — the DAG references it by name. To inspect or change it:
 
 ```{bash}
 gcloud dataproc autoscaling-policies export otg-decode-efm \
@@ -184,19 +194,47 @@ gcloud dataproc autoscaling-policies import otg-decode-efm \
 
 ### Shuffle partitions stay at 16000 in Prod
 
-Raising `spark.sql.shuffle.partitions` above 16000 was proposed as the main tuning lever, and was deliberately **not** applied. Neither dominant shuffle responds to it: harmonisation clusters by `studyId`, whose cardinality (~4,961) caps the number of non-empty partitions, and the write repartitions by the same key. A higher count adds empty tasks without shrinking per-task work. A test in `test_dag_validation.py` asserts the Prod value so the decision is not retired by habit — or by flipping the active environment.
+Raising `spark.sql.shuffle.partitions` above 16000 was proposed as the main tuning lever, and the value stays at 16000. Both dominant shuffles are bounded elsewhere: harmonisation clusters by `studyId`, whose cardinality (~4,961) caps the number of non-empty partitions. A higher count adds empty tasks while per-task work stays the same. A test in `test_dag_validation.py` asserts the Prod value, so the decision survives habit and environment flips.
 
 Test drops to 200, because hashing a 3-study subset into 16000 buckets is pure scheduling overhead.
 
+### Spill is what fills the primary disks
+
+Under EFM every shuffle byte lands on the 15 primaries, so their local dirs are the binding constraint. The 2026-09-16 event log (`application_1789581202859_0002`) gives the split:
+
+| stage | tasks | shuffle write | disk spill | input read | operation |
+|---:|---:|---:|---:|---:|---|
+| 7 | 6,700 | 6.33 TiB | **5.12 TiB** | 3.16 TiB | sumstats side of the gnomAD join |
+| 8 | 258 | 45.8 GiB | – | 33.7 GiB | `variant_direction` side |
+| 20 | 16,000 | 6.03 TiB | **4.48 TiB** | – | `repartition("studyId")` |
+| | | **12.40 TiB** | **9.59 TiB** | | |
+
+The 12.40 TiB of shuffle is the data itself, and shrinks only with an algorithm change. The 9.59 TiB of spill was avoidable, and it is what pushed five primaries past YARN's 90% local-dir threshold, at which point YARN marks the node unhealthy and releases its containers — surfacing to Spark as `Exit status: -100, Container released on a *lost* node`.
+
+Two settings caused it, and both are now tuned:
+
+* `spark.sql.files.maxPartitionBytes` was `1g`, the value the EFM docs suggest. That gave stage 7 only 6,700 tasks for 3.16 TiB of input — 495 MB each. Now `100m`.
+* `spark.executor.cores` was unset, so Dataproc derived 8 cores against a 27,426 MB heap. Execution memory is `27426 × 0.6 ÷ 8 ≈ 2 GB` per task, and the spill messages landed at exactly `1984.0 MiB`. Now `4`, which doubles it. Total cores stay the same — YARN packs more executors per node.
+
+With those applied the same 15 × 1024 GB completed the `smp` branch.
+
+> [!TIP]
+> When a run dies on disk, read the event log rather than resizing. It is at
+> `gs://dataproc-temp-<region>-<project-number>-<suffix>/<cluster-uuid>/spark-job-history/`,
+> and `SparkListenerStageCompleted` events carry per-stage `shuffle.write.bytesWritten`
+> and `diskBytesSpilled`. The plan's `Statistics(sizeInBytes=...)` is a logical estimate
+> of uncompressed row-format size and runs several times larger than the bytes actually
+> written. Size disk from the written bytes.
+
 ### Cluster sizing is environment-scoped
 
-`environment_specs` carries the cluster sizing as well as the bucket paths, so a Test run does not provision the production cluster:
+`environment_specs` carries the cluster sizing as well as the bucket paths, so a Test run provisions its own smaller cluster:
 
 | | Prod | Test |
 |---|---|---|
 | autoscaling policy | `otg-decode-efm` | `otg-decode-test` |
 | primary workers | 15 × `n2-standard-16` | 4 × `n2-standard-16` |
-| primary disk | 2048 GB `pd-ssd` | 500 GB `pd-balanced` |
+| primary disk | 1024 GB `pd-ssd` | 500 GB `pd-balanced` |
 | master | `n2-standard-16` | `n2-standard-8` |
 | `shuffle.partitions` | 16000 | 200 |
 
@@ -204,7 +242,7 @@ Each environment has its **own** autoscaling policy. An autoscaling policy gover
 
 `otg-decode-test` mirrors the EFM shape of `otg-decode-efm` at small scale: primaries fixed at `min=max=4` so they can hold shuffle, secondaries pure compute autoscaling `0-8`, and `gracefulDecommissionTimeout: 0s` as EFM requires (see the caution above).
 
-Test is not sized as a toy cluster, because the gnomAD `variant_direction` join does **not** shrink with the study subset — the reference is read and shuffled in full regardless of how few studies are being harmonised.
+Test keeps 16-vCPU workers because the gnomAD `variant_direction` join stays full size whatever the study subset — the reference is read and shuffled in full regardless of how few studies are harmonised.
 
 Neither policy is defined in this repository; both are live GCP resources referenced by name. See the export/import commands above.
 
@@ -223,7 +261,22 @@ Sentinels are substituted textually **before** the YAML is parsed, so every valu
 
 * Bumped `gentropy_ref` to `3.4.0-dev.11`, which carries the deCODE duplication fixes and the single-pass, cache-free harmonisation ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)).
 * Added a 4h `execution_timeout` to the `harmonisation` and `qc` steps of both branches.
-* Created the `otg-decode-test` autoscaling policy (primaries `min=max=4`, secondaries `0-8`) so a Test run does not provision the production cluster.
+* Created the `otg-decode-test` autoscaling policy (primaries `min=max=4`, secondaries `0-8`) so a Test run provisions its own smaller cluster.
 * Reverted an attempt to raise `gracefulDecommissionTimeout` from `0s` to `120s` on `otg-decode-efm`: EFM primary-worker shuffle requires `0s` and Dataproc rejects cluster creation otherwise.
 * Copied the `target/` index into the Test bucket so `pqtl_to_study` can run there.
 * Prepared for the rerun that resolves the duplicated credible sets in [opentargets/issues#4481](https://github.com/opentargets/issues/issues/4481).
+
+### 2026-09-17
+
+* Bumped `gentropy_ref` to `3.4.0-dev.15`, which adds the unresolved-target drop in `to_study` and removes a redundant shuffle and sort from the harmonisation write path.
+* Set `spark.sql.files.maxPartitionBytes` to `100m` and `spark.executor.cores` to `4`, which together removed the disk spill that had been evicting primary workers. See [Spill is what fills the primary disks](#spill-is-what-fills-the-primary-disks).
+* Disabled the `molecular_complex` and `manifest_generation` steps; their outputs are already materialised, and leaving them out keeps a run clear of the `decode` S3 credentials.
+* Ran the `smp` branch to completion against production. **[opentargets/issues#4481](https://github.com/opentargets/issues/issues/4481) is resolved**:
+
+  | dataset | rows | distinct | duplicates |
+  |---|---:|---:|---|
+  | `smp/pqtl_study` | 4,961 | 4,961 studyId | 0 |
+  | `smp/study` | 4,993 | 4,934 studyId | 0 duplicated `(studyId, geneId)`, 0 null `geneId` |
+  | `smp/credible_set` | 46,336 | 46,336 studyLocusId | 0 |
+
+  Before the rerun these were 4,961/4,960, 48 duplicated `(studyId, geneId)` pairs with 35 null `geneId` rows, and 4 duplicated `studyLocusId`. The multi-row studyIds that remain in `study` are the intended one-row-per-target explosion for multi-target aptamers.
