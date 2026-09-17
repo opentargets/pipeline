@@ -1,0 +1,30 @@
+---
+# The AACT monthly archive this pipeline extracts
+aact_version: '2026-08-25'
+
+# Where snapshots and the extraction cache live
+bucket: 'gs://aact_data'
+
+# Pipeline package versions
+pis_version: '26.9.0.dev0.aacttest.1'
+pts_version: '26.9.0.dev0.aacttest.5'
+
+# Each step runs on its own machine, sized for the AACT archive plus its restore
+machine_type: 'n1-standard-8'
+boot_disk_size: 50
+disk_size: 150
+
+# Dependency graph
+# ----------------
+# Follows same standards as in unified_pipeline
+steps:
+  pis_aact:
+
+  pts_aact_trial_extraction:
+    depends_on:
+      - pis_aact
+    # Fetched from Secret Manager onto the VM and mounted into the container at
+    # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
+    # key itself never appears in config or in code.
+    gce_secret_files:
+      openai-token: /var/run/secrets/openai-api-key

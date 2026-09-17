@@ -755,7 +755,7 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
-        aact_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
+        aact_trial_extraction: input/clinical_report/aact_trial_extraction
       destination: intermediate/chembl_molecule
   ##################################################################################################
 
@@ -774,6 +774,31 @@ steps:
         excluded: excluded/drug_molecule_failed_report
   ##################################################################################################
 
+  #: AACT_TRIAL_EXTRACTION STEP :##################################################################
+  # Not part of a release. The `aact_trial_extraction` DAG runs this step with
+  # release_uri pointed at gs://aact_data/${aact_version}, so every path below
+  # resolves inside that snapshot, except for the cache
+  aact_trial_extraction:
+    - name: llm_extract aact trials
+      source:
+        aact: input/aact.zip
+      destination:
+        prompts: prompts/prompts.parquet
+        extraction: extraction/extractions.parquet
+      cache_uri: gs://aact_data/cache/trial_extraction
+      # the AACT version, so a rerun against the same archive resumes from the
+      # shards the last attempt finished instead of paying for them again
+      snapshot: '{{snapshot}}'
+      model: gpt-5-nano-2025-08-07
+      service_tier: auto
+      concurrency: 75
+      shard_size: 200
+      publications:
+        # see PublicationsSpec — this fetches abstracts for every trial, not
+        # only cache misses, so it needs its own cache before a full run
+        enabled: false
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#######################################################################
   clinical_report:
     - name: pyspark clinical_report
@@ -786,7 +811,7 @@ steps:
         chembl: input/chembl/chembl.tar.gz
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
-        trial_extraction_batch_results: input/clinical_report/aact_extraction_batch_results
+        trial_extraction: input/clinical_report/aact_trial_extraction
         ner_cache_path: input/clinical_report/ner_cache.parquet
       destination:
         output: output/clinical_report

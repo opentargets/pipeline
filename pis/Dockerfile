@@ -6,4 +6,5 @@ COPY . /app
 
 RUN uv sync --frozen
 
+
 ENTRYPOINT ["uv", "run", "pis"]
