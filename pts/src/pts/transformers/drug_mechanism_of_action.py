@@ -136,6 +136,7 @@ def process_mechanism_of_action(
         .join(references, on='id', how='full', coalesce=True, maintain_order='left_right')
         .join(target, on='target_chembl_id', how='full', coalesce=True, maintain_order='left_right')
         .with_columns(pl.col('references').fill_null([]))
+        # `parentChemblId` is kept for _consolidate_duplicate_references and dropped there.
         .drop('mechanism_refs', 'record_id', 'target_chembl_id', 'id')
         .filter(
             pl.col('mechanismOfAction').is_not_null()
@@ -264,7 +265,7 @@ def _chembl_target(
 
 
 def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
-    """Consolidate mechanism rows that are identical for the same drug.
+    """Consolidate mechanism rows that are identical **for the same drug**.
 
     ChEMBL propagates the mechanism for their child/salt molecules in
     ``_metadata.all_molecule_chembl_ids`` to include the parent. When the parent has
@@ -272,6 +273,14 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     by ``chemblIds`` (and the per-molecule ``id``, already dropped). This step avoids the
     duplication on the mechanism for the parent once the data is exploded
     by ``chemblId`` downstream.
+
+    ``parentChemblId`` is in the grouping key, and is what confines the merge to one
+    drug. The rest of the key is display information -- mechanism, action type, target --
+    which every drug in a pharmacological class shares, so without the anchor a whole
+    class merges into one row and each of its drugs publishes the class's references
+    rather than its own. The anchor is the *parent*, not the molecule, so that sibling
+    salts of one drug still merge, which is what the step exists to do. It is internal,
+    and dropped on the way out.
 
     ``chemblIds`` and ``references`` are deduplicated at different granularities, which is
     deliberate: ``chemblIds`` is flattened and then distinct-ed element by element, while
@@ -281,6 +290,7 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     data, so it is preserved rather than tidied up.
     """
     key_cols = [c for c in df.columns if c not in ('references', 'chemblIds')]
+    output_cols = [c for c in df.columns if c != 'parentChemblId']
     return (
         df
         .group_by(key_cols, maintain_order=True)
@@ -296,5 +306,5 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
             .list.explode(keep_nulls=False, empty_as_null=False)
             .alias('references'),
         )
-        .select(df.columns)
+        .select(output_cols)
     )
