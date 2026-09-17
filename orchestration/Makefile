@@ -114,8 +114,9 @@ upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
 	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
 
-upload-decode-bucket-readme: ## Upload decode_data readme to the bucket
+upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/decode_data gs://decode_data/docs
+	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
 
 update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
