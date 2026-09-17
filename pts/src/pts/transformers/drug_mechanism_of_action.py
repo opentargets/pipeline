@@ -274,16 +274,13 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     duplication on the mechanism for the parent once the data is exploded
     by ``chemblId`` downstream.
 
-    ``parentChemblId`` is in the grouping key and is what confines the merge to one
-    drug. Without it the key is the display fields alone -- mechanism, action type and
-    target -- which every drug in a class shares, so all 17 B-raf inhibitors collapsed
-    into a single row and vemurafenib's published references became the union of the
-    class, sorafenib's and regorafenib's FDA labels included. Measured over chembl_37,
-    the 26.09 input: 6,092 rows become 1,751, and 5,065 of the 5,814 drugs that have a
-    reference pick up one belonging to a different drug, inflating the published
-    (drug, reference) pairs from 11,251 to 197,711. The anchor is the *parent* rather than
-    the molecule so that sibling salts of one drug still merge, which is the whole point
-    of the step. It is internal, and dropped on the way out.
+    ``parentChemblId`` is in the grouping key, and is what confines the merge to one
+    drug. The rest of the key is display information -- mechanism, action type, target --
+    which every drug in a pharmacological class shares, so without the anchor a whole
+    class merges into one row and each of its drugs publishes the class's references
+    rather than its own. The anchor is the *parent*, not the molecule, so that sibling
+    salts of one drug still merge, which is what the step exists to do. It is internal,
+    and dropped on the way out.
 
     ``chemblIds`` and ``references`` are deduplicated at different granularities, which is
     deliberate: ``chemblIds`` is flattened and then distinct-ed element by element, while

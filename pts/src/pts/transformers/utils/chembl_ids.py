@@ -18,12 +18,10 @@ def add_parent_chembl_ids(
     its parent, deduplicated, so a record attached to a salt is also found under the
     parent drug. A molecule that is its own parent yields a single id.
 
-    Also returns `parentChemblId`, the parent's ChEMBL id (the molecule's own when it
-    is its own parent, or when the hierarchy has no row for it). It is the stable
-    identity of the drug behind a record, which `chemblIds` is not: a record on the
-    parent and the same record rolled up from a salt carry different `chemblIds`.
-    Callers that deduplicate records need it to tell "the same drug twice" from "two
-    drugs that happen to look alike". It is internal, and no caller publishes it.
+    Also returns `parentChemblId`, the stable identity of the drug behind a record,
+    which `chemblIds` is not: a record on the parent and the same record rolled up from
+    a salt carry different `chemblIds`. Callers deduplicating records need it to tell
+    "the same drug twice" from "two drugs that look alike". Internal, never published.
 
     Args:
         rows: Raw ChEMBL table with `key` and `molregno` columns.
@@ -58,7 +56,7 @@ def add_parent_chembl_ids(
             .list.unique(maintain_order=True)
             .alias('chemblIds'),
             # coalesce, not `parent_chembl_id`: a molecule missing from the hierarchy
-            # would otherwise anchor on null, and every such record would group together.
+            # would anchor on null, and every such record would then group together.
             pl.coalesce('parent_chembl_id', 'chembl_id').alias('parentChemblId'),
         )
     )

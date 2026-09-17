@@ -156,11 +156,10 @@ class TestProcessMechanismOfAction:
 class TestCrossDrugReferenceCrosstalk:
     """Two unrelated drugs sharing a mechanism must not pool their references.
 
-    The end-to-end guard on https://github.com/opentargets/issues/issues/4478. The
-    unit tests below build their own frame and so cannot see the real defect, which
-    was that the frame reaching the consolidation carried no drug identity at all:
-    every column that distinguished the two drugs had been dropped, so the grouping
-    key was the display fields alone and every B-raf inhibitor collapsed into one.
+    Goes through `process_mechanism_of_action` on purpose. The unit tests below build
+    their own frame, so they cannot see a defect that lives in the column set: if
+    nothing identifying the drug survives into the consolidation, the grouping key is
+    display information alone and a whole pharmacological class merges into one row.
     """
 
     @pytest.fixture
@@ -270,9 +269,9 @@ class TestConsolidateDuplicateReferences:
         assert sorted(rows[0]['chemblIds']) == ['CHEMBL1200916', 'CHEMBL479']
 
     def test_the_drug_anchor_does_not_reach_the_output(self) -> None:
-        """`parentChemblId` groups the rows and is then dropped: it is not a published field.
+        """`parentChemblId` groups the rows and is then dropped.
 
-        A new output column needs a croissant recordset entry, and this one is internal.
+        It is internal: a new published column would need a croissant recordset entry.
         """
         df = pl.DataFrame(
             [
@@ -294,28 +293,24 @@ class TestConsolidateDuplicateReferences:
     def test_unrelated_drugs_sharing_a_mechanism_are_not_merged(self) -> None:
         """Two different drugs with the same mechanism and target stay two rows.
 
-        Reproduces the vemurafenib/sorafenib case behind
-        https://github.com/opentargets/issues/issues/4478 being over-applied: both are
-        B-raf inhibitors against the same target, so every column except `chemblIds`
-        and `references` is identical, and a grouping key built from the display fields
-        alone collapses them into one drug.
+        Same class, same target, so every column except `chemblIds`, `parentChemblId`
+        and `references` is identical -- a key built from the display fields alone
+        would collapse them into one drug.
         """
-        vemurafenib_refs = [{'source': 'FDA', 'ids': ['202429'], 'urls': ['zelboraf']}]
-        sorafenib_refs = [{'source': 'FDA', 'ids': ['021923'], 'urls': ['nexavar']}]
+        drug_a_refs = [{'source': 'FDA', 'ids': ['label-a'], 'urls': ['url-a']}]
+        drug_b_refs = [{'source': 'FDA', 'ids': ['label-b'], 'urls': ['url-b']}]
         data = [
             {
-                'mechanismOfAction': 'Serine/threonine-protein kinase B-raf inhibitor',
-                'actionType': 'INHIBITOR', 'chemblIds': ['CHEMBL1229517'],
-                'parentChemblId': 'CHEMBL1229517', 'references': vemurafenib_refs,
-                'targetName': 'Serine/threonine-protein kinase B-raf',
-                'targetType': 'single protein', 'targets': ['ENSG00000157764'],
+                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_A'], 'parentChemblId': 'CHEMBL_A',
+                'references': drug_a_refs, 'targetName': 'Enzyme X',
+                'targetType': 'single protein', 'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serine/threonine-protein kinase B-raf inhibitor',
-                'actionType': 'INHIBITOR', 'chemblIds': ['CHEMBL1200485', 'CHEMBL1336'],
-                'parentChemblId': 'CHEMBL1336', 'references': sorafenib_refs,
-                'targetName': 'Serine/threonine-protein kinase B-raf',
-                'targetType': 'single protein', 'targets': ['ENSG00000157764'],
+                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_B_SALT', 'CHEMBL_B'], 'parentChemblId': 'CHEMBL_B',
+                'references': drug_b_refs, 'targetName': 'Enzyme X',
+                'targetType': 'single protein', 'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -327,31 +322,26 @@ class TestConsolidateDuplicateReferences:
             r['drugId']: r
             for r in result.explode('chemblIds').rename({'chemblIds': 'drugId'}).to_dicts()
         }
-        assert by_drug['CHEMBL1229517']['references'] == vemurafenib_refs
-        assert by_drug['CHEMBL1336']['references'] == sorafenib_refs
-        assert by_drug['CHEMBL1200485']['references'] == sorafenib_refs
+        assert by_drug['CHEMBL_A']['references'] == drug_a_refs
+        assert by_drug['CHEMBL_B']['references'] == drug_b_refs
+        assert by_drug['CHEMBL_B_SALT']['references'] == drug_b_refs
 
     def test_one_drug_does_not_inherit_another_s_references(self) -> None:
-        """The published symptom: a foreign reference must never appear under a drug.
-
-        Vemurafenib's page showed sorafenib's FDA label because the two rows merged.
-        """
+        """A drug must never carry a reference belonging to a different drug."""
         data = [
             {
-                'mechanismOfAction': 'Serine/threonine-protein kinase B-raf inhibitor',
-                'actionType': 'INHIBITOR', 'chemblIds': ['CHEMBL1229517'],
-                'parentChemblId': 'CHEMBL1229517',
-                'references': [{'source': 'FDA', 'ids': ['202429'], 'urls': ['zelboraf']}],
-                'targetName': 'Serine/threonine-protein kinase B-raf',
-                'targetType': 'single protein', 'targets': ['ENSG00000157764'],
+                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_A'], 'parentChemblId': 'CHEMBL_A',
+                'references': [{'source': 'FDA', 'ids': ['label-a'], 'urls': ['url-a']}],
+                'targetName': 'Enzyme X',
+                'targetType': 'single protein', 'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serine/threonine-protein kinase B-raf inhibitor',
-                'actionType': 'INHIBITOR', 'chemblIds': ['CHEMBL1336'],
-                'parentChemblId': 'CHEMBL1336',
-                'references': [{'source': 'FDA', 'ids': ['021923'], 'urls': ['nexavar']}],
-                'targetName': 'Serine/threonine-protein kinase B-raf',
-                'targetType': 'single protein', 'targets': ['ENSG00000157764'],
+                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_B'], 'parentChemblId': 'CHEMBL_B',
+                'references': [{'source': 'FDA', 'ids': ['label-b'], 'urls': ['url-b']}],
+                'targetName': 'Enzyme X',
+                'targetType': 'single protein', 'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -363,8 +353,8 @@ class TestConsolidateDuplicateReferences:
             for r in exploded.to_dicts()
         }
 
-        assert urls['CHEMBL1229517'] == ['zelboraf']
-        assert urls['CHEMBL1336'] == ['nexavar']
+        assert urls['CHEMBL_A'] == ['url-a']
+        assert urls['CHEMBL_B'] == ['url-b']
 
     def test_two_salts_of_the_same_parent_are_merged(self) -> None:
         """The anchor is the parent, so sibling salts still collapse onto one row."""
