@@ -1,0 +1,166 @@
+"""Score every GWAS credible-set/gene pair and explain the survivors.
+
+Replaces the predict mode of gentropy's `LocusToGeneStep`, which ran as 1000 Google Batch tasks.
+Each of those started a Spark job on two vCPUs and re-read the ENTIRE feature matrix -- only the
+credible-set side was partitioned -- to emit roughly 3,200 rows. The measured work is ~4 s of
+scoring: the GWAS semi-join and the protein-coding filter run first, so 20.0M of the 61.2M rows
+are scored, at 5.0M rows/s. SHAP then costs 2.8-4.9 process-hours for the 3.2M rows that survive
+the threshold -- size against the slow end. It fits on one VM with room to spare.
+
+Unlike gentropy this never drops the features and re-joins the matrix to get them back: they are
+already on the frame that produced the score.
+"""
+
+import os
+from collections.abc import Sequence
+from typing import Any
+
+import numpy as np
+import polars as pl
+from loguru import logger
+from otter.config.model import Config
+
+from pts.transformers.l2g import explain as l2g_explain
+from pts.transformers.l2g import model as l2g_model
+from pts.transformers.l2g.features import FEATURES, impute_and_cast
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
+
+OUTPUT_COLUMNS = ('studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue')
+
+
+def build_output(
+    keys: pl.DataFrame,
+    matrix: np.ndarray,
+    shap_values: np.ndarray | None,
+    base_value: float | None,
+    features: Sequence[str],
+) -> pl.DataFrame:
+    """Assemble the release schema from the scored keys and their explanations.
+
+    The `features` array carries one struct per feature, in fitted order. Types are pinned here
+    rather than left to inference: `gentropy_l2g_evidence` reads this dataset with an imposed
+    schema, so a drift would be coerced silently instead of raised.
+
+    Args:
+        keys: `studyLocusId`, `geneId` and `score`, one row per prediction.
+        matrix: the feature values behind those rows, in fitted order.
+        shap_values: SHAP values with the shape of `matrix`, or None when explanations are off,
+            in which case every `shapValue` is null.
+        base_value: the model's expected value, or None when explanations are off.
+        features: feature names, in fitted order.
+
+    Returns:
+        A DataFrame of `OUTPUT_COLUMNS`, in that order.
+    """
+    # `matrix` is the IMPUTED matrix, so `value` is the number the model was actually handed.
+    # gentropy differs here: it rebuilds this payload by re-joining the RAW feature matrix
+    # (`add_features(self.feature_matrix)`), so a null feature would be published as null there
+    # and as 0.0 here. The divergence is deliberate and kept -- publishing a `value` that does not
+    # correspond to the `shapValue` beside it is incoherent -- and it is also unreachable on this
+    # data: all 31 features are null-free across all 200 partitions of the real matrix, and the
+    # published payload carries no nulls either, so the two paths agree on every released row.
+    values = pl.DataFrame(matrix, schema=[(name, pl.Float32) for name in features])
+    shap_schema = [(f'shap_{name}', pl.Float32) for name in features]
+    shaps = (
+        pl.DataFrame(shap_values, schema=shap_schema)
+        if shap_values is not None
+        else pl.DataFrame(
+            {name: [None] * values.height for name, _ in shap_schema}, schema=shap_schema
+        )
+    )
+    wide = pl.concat([keys, values, shaps], how='horizontal')
+
+    return wide.select(
+        pl.col('studyLocusId').cast(pl.String),
+        pl.col('geneId').cast(pl.String),
+        pl.col('score').cast(pl.Float64),
+        pl.concat_list(
+            pl.struct(
+                pl.lit(name, dtype=pl.String).alias('name'),
+                pl.col(name).cast(pl.Float32).alias('value'),
+                pl.col(f'shap_{name}').cast(pl.Float32).alias('shapValue'),
+            )
+            for name in features
+        ).alias('features'),
+        pl.lit(base_value, dtype=pl.Float32).alias('shapBaseValue'),
+        # Re-selected by name so the declared contract is enforced rather than merely documented.
+        # The two drifts are caught differently: renaming or dropping an expression above raises
+        # here, because the name is then absent; reordering them is silently corrected back to
+        # `OUTPUT_COLUMNS`. Either way `gentropy_l2g_evidence`, which reads this dataset with an
+        # imposed schema, cannot be handed a drifted one.
+    ).select(OUTPUT_COLUMNS)
+
+
+def l2g_predict(
+    source: dict[str, str],
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Score the feature matrix, explain the survivors and write the release dataset.
+
+    Args:
+        source: keys `feature_matrix`, `credible_set`, `model`, `background`.
+        destination: the output dataset directory.
+        settings: keys `features_list`, `l2g_threshold`, `explain_predictions`, and optionally
+            `shap_workers`. The background size is not settable here; it is whatever training
+            wrote.
+        config: otter config; unused, accepted for interface compatibility.
+    """
+    features = list(settings.get('features_list') or FEATURES)
+    threshold = float(settings['l2g_threshold'])
+
+    gwas_loci = (
+        scan_dataset(source['credible_set'])
+        .filter(pl.col('studyType') == 'gwas')
+        .select('studyLocusId')
+        .unique()
+    )
+
+    logger.info('preparing the prediction matrix')
+    prepared = impute_and_cast(
+        scan_dataset(source['feature_matrix'])
+        .filter(pl.col('isProteinCoding') == 1)
+        .join(gwas_loci, on='studyLocusId', how='semi'),
+        features,
+    ).collect()
+
+    model = l2g_model.load_model(source['model'])
+    matrix = l2g_model.to_matrix(prepared, features)
+    logger.info(f'scoring {matrix.shape[0]} rows')
+    scores = model.predict_proba(matrix)[:, 1] if matrix.shape[0] else np.empty(0, dtype=np.float32)
+
+    keep = scores >= threshold
+    keys = prepared.select('studyLocusId', 'geneId').filter(pl.Series(keep)).with_columns(
+        pl.Series('score', scores[keep])
+    )
+    matrix = matrix[keep]
+    logger.info(f'{keys.height} rows at or above the {threshold} threshold')
+
+    if settings.get('explain_predictions'):
+        background = pl.read_parquet(source['background']).select(features).to_numpy().astype(np.float32)
+        workers = settings.get('shap_workers') or os.cpu_count()
+        logger.info(f'explaining {matrix.shape[0]} rows on {workers} workers')
+        base_value, shap_values = l2g_explain.explain(
+            model,
+            matrix,
+            background,
+            # Taken from the background that was actually loaded, NOT from a second
+            # `shap_background_size` setting on this task. The parquet training wrote already
+            # encodes the decision, and a size configured twice is a size that can disagree with
+            # itself: raise training's to 1000, forget this one, and the masker would quietly use
+            # 100 of the 1000 rows while `metrics.json` recorded 1000 -- which is precisely the
+            # silently-truncated background this port exists to remove.
+            max_samples=background.shape[0],
+            workers=workers,
+        )
+    else:
+        # Null, not NaN. The flag says no explanation was computed, which is a different
+        # statement from "the explanation is not a number", and consumers read them differently.
+        base_value, shap_values = None, None
+
+    output = build_output(keys, matrix, shap_values, base_value, features).sort(
+        'studyLocusId', 'geneId'
+    )
+    write_dataset(output, destination)
+    logger.info('prediction complete')

@@ -368,16 +368,6 @@ with DAG(
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
             },
-            'gentropy_l2g_train_test_split': {
-                'step.train_parquet_path': gsp('gentropy_l2g_train_test_split', 'step.train_parquet_path'),
-                'step.test_parquet_path': gsp('gentropy_l2g_train_test_split', 'step.test_parquet_path'),
-            },
-            'gentropy_l2g_training': {
-                'step.model_path': gsp('gentropy_l2g_training', 'step.model_path'),
-            },
-            'gentropy_l2g_prediction': {
-                'step.predictions_path': gsp('gentropy_l2g_prediction', 'step.predictions_path'),
-            },
             'gentropy_l2g_evidence': {
                 'step.evidence_output_path': gsp('gentropy_l2g_evidence', 'step.evidence_output_path'),
             },
