@@ -18,6 +18,11 @@ def add_parent_chembl_ids(
     its parent, deduplicated, so a record attached to a salt is also found under the
     parent drug. A molecule that is its own parent yields a single id.
 
+    Also returns `parentChemblId`, the stable identity of the drug behind a record,
+    which `chemblIds` is not: a record on the parent and the same record rolled up from
+    a salt carry different `chemblIds`. Callers deduplicating records need it to tell
+    "the same drug twice" from "two drugs that look alike". Internal, never published.
+
     Args:
         rows: Raw ChEMBL table with `key` and `molregno` columns.
         molecules: Raw ChEMBL molecule_dictionary table.
@@ -26,7 +31,7 @@ def add_parent_chembl_ids(
             (e.g. `warning_id` or `mec_id`).
 
     Returns:
-        DataFrame with `key` and `chemblIds` columns.
+        DataFrame with `key`, `chemblIds` and `parentChemblId` columns.
     """
     # `maintain_order='left'` throughout: a polars join makes no promise about row
     # order by default, and the caller's row order is what ends up deciding the
@@ -50,5 +55,8 @@ def add_parent_chembl_ids(
             .list.drop_nulls()
             .list.unique(maintain_order=True)
             .alias('chemblIds'),
+            # coalesce, not `parent_chembl_id`: a molecule missing from the hierarchy
+            # would anchor on null, and every such record would then group together.
+            pl.coalesce('parent_chembl_id', 'chembl_id').alias('parentChemblId'),
         )
     )
