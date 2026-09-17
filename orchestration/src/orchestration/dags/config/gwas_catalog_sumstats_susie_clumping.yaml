@@ -18,7 +18,7 @@ dataproc:
     worker_disk_type: pd-ssd
     worker_disk_size: 1024
     metadata:
-      GENTROPY_REF: a2ccc1d6f2ca0e7233799dbec485a99c8b1beb41
+      GENTROPY_REF: v3.4.0-rc.3
     properties:
       'spark:spark.sql.adaptive.enabled': 'true'
       'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
