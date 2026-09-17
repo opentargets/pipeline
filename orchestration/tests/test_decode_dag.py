@@ -4,8 +4,6 @@ from datetime import timedelta
 
 from airflow.models import DagBag
 
-DECODE_CONFIG_PATH = 'src/orchestration/dags/config/decode_ingestion.yaml'
-
 
 def test_decode_heavy_tasks_have_execution_timeout(dag_bag: DagBag) -> None:
     """The deCODE harmonisation tasks must be time-bounded."""

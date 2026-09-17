@@ -265,7 +265,7 @@ nodes:
       # Input
       step.manifest_path: '{data_bucket}/raw/manifest/'
       # Output
-      step.raw_summary_statistics_path: '{data_bucket}/raw_summary_statistics/raw/'
+      step.raw_summary_statistics_path: '{input_bucket}/raw_summary_statistics/raw/'
       # Session
       step.session.write_mode: overwrite
       step.session.s3_configuration_path: '/var/run/secrets/decode'

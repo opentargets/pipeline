@@ -223,7 +223,7 @@ Test keeps 16-vCPU workers because the gnomAD `variant_direction` dataset stays 
 ### 2026-09-15
 
 * Bumped `gentropy_ref` to `3.4.0-dev.11`, which carries the deCODE duplication fixes and the single-pass, cache-free harmonisation ([gentropy#1292](https://github.com/opentargets/gentropy/pull/1292)).
-* Added a 4h `execution_timeout` to the `harmonisation` and `qc` steps of both branches.
+* Added a 4h `execution_timeout` to the `harmonisation` steps of both branches.
 * Created the `otg-decode-test` autoscaling policy (primaries `min=max=4`, secondaries `0-8`) so a Test run provisions its own smaller cluster.
 * Reverted an attempt to raise `gracefulDecommissionTimeout` from `0s` to `120s` on `otg-decode-efm`: EFM primary-worker shuffle requires `0s` and Dataproc rejects cluster creation otherwise.
 * Copied the `target/` index into the Test bucket so `pqtl_to_study` can run there.
