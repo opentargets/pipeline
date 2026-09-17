@@ -13,7 +13,7 @@ dataproc:
   cluster_config:
     project_id: open-targets-genetics-dev
     metadata:
-      GENTROPY_REF: a2ccc1d6f2ca0e7233799dbec485a99c8b1beb41
+      GENTROPY_REF: v3.4.0-rc.3
     num_workers: 10
     worker_machine_type: n1-highmem-16
     worker_disk_type: pd-ssd
