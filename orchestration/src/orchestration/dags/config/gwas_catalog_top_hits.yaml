@@ -15,7 +15,7 @@ dataproc:
     project_id: open-targets-genetics-dev
     autoscaling_policy: otg-gwascatalog-tophit
     metadata:
-      GENTROPY_REF: a2ccc1d6f2ca0e7233799dbec485a99c8b1beb41
+      GENTROPY_REF: v3.4.0-rc.3
     init_actions_uris:
       - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
 
