@@ -452,6 +452,10 @@ def process_genes_and_health_gene_burden(
         [_process_gnh_additive(st9_df), _process_gnh_meta(st13_df), _process_gnh_recessive(st15_df)],
     )
 
+    # Some source rows encode a missing effect size as the string "NaN", which casting to double turns
+    # into a float NaN rather than a null. Normalise to null so beta/oddsRatio behave as missing.
+    gh_df = gh_df.withColumn('effect', f.when(f.isnan('effect'), f.lit(None)).otherwise(f.col('effect')))
+
     # WARNING: some meta-analysis p-values underflow to 0.0 (inf LOG10P). Substitute the minimum non-zero
     # p-value so they pass validation instead of being dropped.
     gh_df = _substitute_zero_pvalues(gh_df, 'pValue', 'Genes & Health')
@@ -960,6 +964,9 @@ def process_brava_gene_burden(
             .withColumn('BETA Burden', f.col('BETA Burden').cast('double'))
             .withColumn('SE Burden', f.col('SE Burden').cast('double'))
         )
+        # SKAT/SKAT-O rows report no effect size; the source encodes this as the string "NaN", which the
+        # cast above turns into a float NaN rather than a null. Normalise to null so it behaves as missing.
+        df = df.withColumn('BETA Burden', f.when(f.isnan('BETA Burden'), f.lit(None)).otherwise(f.col('BETA Burden')))
         df = _substitute_zero_pvalues(df, 'Pvalue', 'BRaVa')
 
         ancestry_group = f.col('meta analyzed')
