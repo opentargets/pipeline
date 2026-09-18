@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -70,7 +71,8 @@ class Session:
                 # so base is empty there; locally we need Ivy resolution.
                 'spark.jars.packages': ','.join([
                     'com.google.cloud.bigdataoss:gcs-connector:hadoop3-2.2.21',
-                    'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.5',
+                    # Match the Python dependency resolved from OnToma's requirements.
+                    f'com.johnsnowlabs.nlp:spark-nlp_2.12:{version("spark-nlp")}',
                 ]),
                 'spark.sql.adaptive.enabled': 'true',
                 'spark.sql.adaptive.coalescePartitions.enabled': 'true',
