@@ -6,7 +6,7 @@ import asyncio
 import datetime
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from functools import cached_property
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -25,7 +25,9 @@ from google.api_core.extended_operation import ExtendedOperation
 from google.cloud import compute_v1, logging_v2
 from google.cloud import logging as google_logging
 from google.cloud.compute_v1 import types
+from google.cloud.logging_v2.client import _add_defaults_to_filter
 from google.cloud.logging_v2.services.logging_service_v2 import LoggingServiceV2AsyncClient
+from google.cloud.logging_v2.types import ListLogEntriesRequest, LogEntry
 
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.labels import Labels
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
 CONTAINER_NAME = 'workload_container'
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
+LOGGING_RETRY_MAX_WAIT = 600
 
 # WARNING
 # After any change in deferrable operators, you must restart the airflow triggerer
@@ -101,18 +104,41 @@ def _backoff(request_interval: float) -> float:
     return min(request_interval * random.uniform(2, 2.5), LOGGING_REQUEST_MAX_INTERVAL)
 
 
+class _RetryBudget:
+    """One backoff schedule and one deadline, shared by every request of a paged read.
+
+    A budget per request would let a read of many pages wait LOGGING_RETRY_MAX_WAIT on
+    each of them, and would drop the interval back to the minimum on every page, so a
+    quota under sustained pressure would never see the backoff grow.
+    """
+
+    def __init__(self, log: Logger) -> None:
+        self.log = log
+        self.interval = LOGGING_REQUEST_INTERVAL
+        self.deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
+
+    def run(self, call: Callable[[], Any]) -> Any:
+        """Call something, backing off while the logging api is rate-limiting us.
+
+        Gives up once the budget is spent, so a quota that never recovers raises rather
+        than waiting forever, which is indistinguishable from a hung task.
+        """
+        while True:
+            try:
+                return call()
+            except ResourceExhausted:
+                if time.monotonic() + self.interval > self.deadline:
+                    raise
+                self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', self.interval)
+                time.sleep(self.interval)
+                self.interval = _backoff(self.interval)
+
+
 class RateLimitedLoggingClient(logging_v2.Client):
-    """Client for the Google Cloud Logging service with rate limiting.
+    """Client for the Google Cloud Logging service that backs off when rate-limited.
 
-    This client will wait for a minimum interval between requests to avoid
-    hitting the rate limits of the Google Cloud Logging service.
-
-    We are hitting logging API rate limits when we are trying to list log entries
-    to copy them to the airflow logs, as there are numerous concurrent requests
-    when running all of PIS steps in parallel.
-
-    This may delay the logs from being copied to the Airflow logs for steps with
-    a large number of log entries, but it will prevent the rate limit errors.
+    The read quota is 60 requests a minute per project, and steps copy their logs as
+    they finish, so a burst of steps finishing together exhausts it.
     """
 
     def __init__(
@@ -123,27 +149,51 @@ class RateLimitedLoggingClient(logging_v2.Client):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.log = log
-        self.request_interval = LOGGING_REQUEST_INTERVAL
 
-    def list_entries(self, *args, **kwargs):
-        """List log entries and retries request that get rate-limited."""
-        entries = None
+    def list_entries(
+        self,
+        *,
+        resource_names: Sequence[str] | None = None,
+        filter_: str | None = None,
+        order_by: str | None = None,
+        page_size: int | None = None,
+        page_token: str | None = None,
+        max_results: int | None = None,
+    ) -> Iterator[LogEntry]:
+        """Yield log entries, retrying any page the logging api rate-limits.
+
+        The base client hands back a generator that fetches the next page as it is
+        consumed. A generator that raises is closed, so a retry wrapped around its
+        `next()` cannot resume it -- it sees StopIteration and silently drops the rest
+        of the log. Page explicitly instead: the page token is ours, so a rate-limited
+        request can simply be made again.
+
+        Entries are the raw `LogEntry` protos rather than the base client's parsed
+        entries, so read `entry.json_payload`, as `CloudLoggingAsyncHook` already does.
+        """
+        if max_results is not None:
+            raise NotImplementedError('max_results is not supported')
+
+        request = ListLogEntriesRequest(
+            resource_names=list(resource_names) if resource_names else [f'projects/{self.project}'],
+            filter=_add_defaults_to_filter(filter_),
+            order_by=order_by,
+            page_size=page_size,
+            page_token=page_token,
+        )
+        budget = _RetryBudget(self.log)
+        list_log_entries = self.logging_api._gapic_api.list_log_entries
 
         while True:
-            try:
-                entries = super().list_entries(*args, **kwargs)
-                self.request_interval = _backoff(self.request_interval)
-                break
-            except ResourceExhausted:
-                self.log.warning(
-                    'Rate limit for logging api exceeded, waiting for %d seconds',
-                    self.request_interval,
-                )
-                time.sleep(self.request_interval)
-                self.request_interval *= 2
-
-        self.request_interval = LOGGING_REQUEST_INTERVAL
-        return entries
+            # the generated method fetches one page and wraps it in a pager whose
+            # attributes delegate to it. Reading them takes nothing further off the
+            # wire; only iterating the pager would, and that is the lazy fetch this
+            # method exists to avoid.
+            page = budget.run(lambda: list_log_entries(request=request))
+            yield from page.entries
+            if not page.next_page_token:
+                return
+            request.page_token = page.next_page_token
 
 
 class CloudLoggingHook(GoogleBaseHook):
@@ -243,6 +293,12 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
         query = rf'resource.type="gce_instance" labels.instance_name="{instance_name}" timestamp>"{timestamp}" jsonPayload.message=~"startup-script[\w\\\":\s]*exit status [0-9]+"'  # noqa: E501
         log_pages = None
 
+        # This retry has no deadline, unlike the one in RateLimitedLoggingClient, and
+        # that asymmetry is deliberate. Copying logs is presentation, so giving up there
+        # costs a log. This call is how the step's outcome is read, so giving up here
+        # fails a step whose work has already succeeded -- the very failure the retry is
+        # meant to prevent. The read quota is per minute and always recovers, so waiting
+        # is the cheaper wrong answer. The deferral is what bounds this in the end.
         while True:
             try:
                 log_pages = await client.list_log_entries(
@@ -605,7 +661,21 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.log.info(f'created vm {self.instance_name}')
 
     def copy_machine_logs(self) -> None:
-        """Copy logs from the machine to the Airflow logs."""
+        """Copy logs from the machine to the Airflow logs.
+
+        Mirroring logs is presentation, so it never decides the outcome of a step. The
+        logs stay in Cloud Logging either way.
+        """
+        try:
+            self._copy_machine_logs()
+        except Exception as e:
+            self.log.warning(
+                'could not copy the logs for %s, they are still in cloud logging: %s',
+                self.instance_name,
+                ' '.join(str(e).split()),
+            )
+
+    def _copy_machine_logs(self) -> None:
         client = self.logging_hook.get_conn()
         query = f'resource.type="gce_instance" jsonPayload.instance.name="{self.instance_name}" jsonPayload.container.name="/{CONTAINER_NAME}"'  # noqa: E501
         entries = client.list_entries(
@@ -614,7 +684,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             page_size=1000,
         )
         for entry in entries:
-            self.log.info(entry.payload.get('message', 'Empty log message'))
+            payload = entry.json_payload or {}
+            self.log.info(payload.get('message', 'Empty log message'))  # ty:ignore[unresolved-attribute]
 
     def poke(self, context: Context) -> bool:
         """Check if the instance is still running in a synchronous way."""
