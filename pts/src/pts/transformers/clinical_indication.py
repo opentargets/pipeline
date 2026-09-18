@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from clinical_mining.dataset import ClinicalIndication
 from loguru import logger
+from mira.dataset import ClinicalIndication
 from otter.config.model import Config
 
 from pts.transformers.utils.dataset import scan_dataset, write_dataset

@@ -1,8 +1,8 @@
 import polars as pl
 import pytest
-from clinical_mining.dataset import ClinicalReport
-from clinical_mining.provider.aact.clinical_report import replace_with_llm_indications
-from clinical_mining.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
+from mira.dataset import ClinicalReport
+from mira.provider.aact.clinical_report import replace_with_llm_indications
+from mira.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
 
 from pts.pyspark.clinical_report import (
     ClinicalReportFlags,
@@ -198,7 +198,7 @@ def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
 
 
 def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
-    """`clinical_report` must hand the extraction to clinical_mining unprojected."""
+    """`clinical_report` must hand the extraction to Mira unprojected."""
     studies = pl.DataFrame({
         'nct_id': ['NCT0001'],
         'diseaseFromSource': ['from-aact'],
