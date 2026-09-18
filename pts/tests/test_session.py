@@ -45,20 +45,26 @@ def test_merge_jars_packages():
     assert Session._merge_jars_packages('a:1, b:2 ', ' b:2 , c:3') == 'a:1,b:2,c:3'
 
 
-def test_session_local_config_contains_sparknlp_and_gcs():
+@pytest.mark.parametrize('installed_version', ['6.1.5', '6.2.0'])
+def test_session_local_config_contains_sparknlp_and_gcs(monkeypatch, installed_version):
+    def package_version(package):
+        assert package == 'spark-nlp'
+        return installed_version
+
+    monkeypatch.setattr('pts.pyspark.common.session.version', package_version)
     # Pure config test via _effective_properties (isolated from JVM global SparkConf)
     s = Session.__new__(Session)
     s.is_dataproc = False
     eff = s._effective_properties({})
     jars = eff.get('spark.jars.packages')
     assert jars is not None and 'gcs-connector' in jars
-    assert 'spark-nlp_2.12:6.1.5' in jars
+    assert f'com.johnsnowlabs.nlp:spark-nlp_2.12:{installed_version}' in jars.split(',')
     # caller-supplied jars are merged, not dropped
     eff2 = s._effective_properties({'spark.jars.packages': 'my.org:custom:1.0'})
     jars2 = eff2.get('spark.jars.packages')
     assert jars2 is not None and 'my.org:custom:1.0' in jars2
     assert 'gcs-connector' in jars2
-    assert 'spark-nlp_2.12:6.1.5' in jars2
+    assert f'com.johnsnowlabs.nlp:spark-nlp_2.12:{installed_version}' in jars2.split(',')
 
 
 def test_session_dataproc_does_not_force_jars():
