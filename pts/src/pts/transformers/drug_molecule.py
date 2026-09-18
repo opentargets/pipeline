@@ -10,12 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
-from clinical_mining.dataset.clinical_indication import (
+from loguru import logger
+from mira.dataset.clinical_indication import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
     ClinicalStageCategory,
 )
-from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
