@@ -654,6 +654,14 @@ steps:
     - name: copy_many finngen-UKBB-MVP credible sets
       sources: gs://finngen_ukb_mvp_meta_data/credible_sets/*.parquet
       destination: input/gwas/credible_set/finngen_ukb_mvp
+
+    - name: copy_many sle_map credible sets
+      source: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260911T102031Z/output/credible_set_patched/*.parquet
+      destination: input/molqtl/credible_set/sle_map
+
+    - name: copy_many sle_map study
+      source: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260911T102031Z/output/study/*.parquet
+      destination: input/molqtl/study/sle_map
   ##################################################################################################
 
   #: HERITABILITY STEP :############################################################################
