@@ -203,13 +203,12 @@ steps:
       - pis_literature
       - pts_target
       - pts_disease
-  pts_evidence_postprocess_gwas_credible_sets:
+  pts_gwas_evidence:
     depends_on:
-      - gentropy_l2g_evidence
+      - gentropy_l2g_prediction
       - pis_literature
       - pts_disease
       - pts_target
-      - pis_literature
   pts_evidence_postprocess_expression_atlas:
     depends_on:
       - pis_evidence_expression_atlas
@@ -430,7 +429,7 @@ steps:
     depends_on:
       - pts_evidence_postprocess_impc
       - pts_evidence_postprocess_europepmc
-      - pts_evidence_postprocess_gwas_credible_sets
+      - pts_gwas_evidence
       - pts_evidence_postprocess_expression_atlas
       - pts_evidence_postprocess_cancer_biomarkers
       - pts_evidence_postprocess_clinical_precedence
@@ -601,6 +600,3 @@ steps:
   gentropy_l2g_prediction:
     depends_on:
       - gentropy_l2g_training
-  gentropy_l2g_evidence:
-    depends_on:
-      - gentropy_l2g_prediction

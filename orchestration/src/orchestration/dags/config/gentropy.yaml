@@ -303,18 +303,6 @@ steps:
         destination_prefix: '{{release_uri}}/output/l2g_prediction'
         file_glob: '**.parquet'
 
-  l2g_evidence:
-    params:
-      step: locus_to_gene_evidence
-      step.session.write_mode: overwrite
-      step.locus_to_gene_threshold: 0.05
-      # INPUTS
-      step.credible_set_path: '{{release_uri}}/output/credible_set'
-      step.locus_to_gene_predictions_path: '{{release_uri}}/output/l2g_prediction/*'
-      step.study_index_path: '{{release_uri}}/output/study'
-      # OUTPUTS
-      step.evidence_output_path: '{{release_uri}}/intermediate/evidence/l2g_evidence'
-
   enhancer_to_gene:
     params:
       step: interval_e2g
