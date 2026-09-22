@@ -996,22 +996,21 @@ steps:
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
-  evidence_postprocess_gwas_credible_sets:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+  gwas_evidence:
+    - name: transform gwas_evidence
+      transformer: gwas_evidence
       source:
-        evidence_path: intermediate/evidence/l2g_evidence
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        l2g_predictions: output/l2g_prediction
+        credible_set: output/credible_set
+        study_index: output/study
+        disease: output/disease
+        target: output/target
+        literature: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gwas_credible_sets
         evidence: output/evidence_gwas_credible_sets
+        failed_evidence: excluded/evidence/gwas_credible_sets
       settings:
-        partition_count: 3
-        evidence_format: parquet
-        score_expression: resourceScore
-        datasource_id: gwas_credible_sets
+        locus_to_gene_threshold: 0.05
         unique_fields:
           - targetId
           - targetFromSourceId
