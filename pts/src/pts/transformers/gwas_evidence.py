@@ -22,6 +22,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.evidence import GwasCredibleSetEvidenceSchema
 from pts.transformers.evidence import (
     assign_evidence_identifier,
     build_disease_lut,
@@ -104,7 +105,7 @@ def gwas_evidence(
     invalid = processed.filter(pl.col('qualityControls').list.len() > 0)
 
     logger.info(f'Writing {valid.height} valid and {invalid.height} invalid GWAS evidence records')
-    write_dataset(valid, str(destination['evidence']))
+    write_dataset(valid, str(destination['evidence']), schema=GwasCredibleSetEvidenceSchema)
     write_dataset(invalid, str(destination['failed_evidence']))
 
 
