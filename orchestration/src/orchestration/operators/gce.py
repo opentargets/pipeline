@@ -6,7 +6,7 @@ import asyncio
 import datetime
 import random
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from functools import cached_property
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -104,36 +104,6 @@ def _backoff(request_interval: float) -> float:
     return min(request_interval * random.uniform(2, 2.5), LOGGING_REQUEST_MAX_INTERVAL)
 
 
-class _RetryBudget:
-    """One backoff schedule and one deadline, shared by every request of a paged read.
-
-    A budget per request would let a read of many pages wait LOGGING_RETRY_MAX_WAIT on
-    each of them, and would drop the interval back to the minimum on every page, so a
-    quota under sustained pressure would never see the backoff grow.
-    """
-
-    def __init__(self, log: Logger) -> None:
-        self.log = log
-        self.interval = LOGGING_REQUEST_INTERVAL
-        self.deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
-
-    def run(self, call: Callable[[], Any]) -> Any:
-        """Call something, backing off while the logging api is rate-limiting us.
-
-        Gives up once the budget is spent, so a quota that never recovers raises rather
-        than waiting forever, which is indistinguishable from a hung task.
-        """
-        while True:
-            try:
-                return call()
-            except ResourceExhausted:
-                if time.monotonic() + self.interval > self.deadline:
-                    raise
-                self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', self.interval)
-                time.sleep(self.interval)
-                self.interval = _backoff(self.interval)
-
-
 class RateLimitedLoggingClient(logging_v2.Client):
     """Client for the Google Cloud Logging service that backs off when rate-limited.
 
@@ -162,11 +132,9 @@ class RateLimitedLoggingClient(logging_v2.Client):
     ) -> Iterator[LogEntry]:
         """Yield log entries, retrying any page the logging api rate-limits.
 
-        The base client hands back a generator that fetches the next page as it is
-        consumed. A generator that raises is closed, so a retry wrapped around its
-        `next()` cannot resume it -- it sees StopIteration and silently drops the rest
-        of the log. Page explicitly instead: the page token is ours, so a rate-limited
-        request can simply be made again.
+        Pages explicitly by token rather than iterating the base client's generator: a
+        generator that raises is closed, so a retry around its `next()` cannot resume
+        it and silently drops the rest of the log.
 
         Entries are the raw `LogEntry` protos rather than the base client's parsed
         entries, so read `entry.json_payload`, as `CloudLoggingAsyncHook` already does.
@@ -181,15 +149,30 @@ class RateLimitedLoggingClient(logging_v2.Client):
             page_size=page_size,
             page_token=page_token,
         )
-        budget = _RetryBudget(self.log)
         list_log_entries = self.logging_api._gapic_api.list_log_entries
 
+        # One interval and one deadline for the whole read, not per page: the backoff
+        # keeps growing across pages, and a slow quota gets one LOGGING_RETRY_MAX_WAIT
+        # budget rather than one per page.
+        interval = LOGGING_REQUEST_INTERVAL
+        deadline = time.monotonic() + LOGGING_RETRY_MAX_WAIT
+
+        def fetch_page(req: ListLogEntriesRequest) -> Any:
+            nonlocal interval
+            while True:
+                try:
+                    # attribute access on the returned pager fetches nothing further;
+                    # only iterating it would.
+                    return list_log_entries(request=req)
+                except ResourceExhausted:
+                    if time.monotonic() + interval > deadline:
+                        raise
+                    self.log.warning('rate limit for logging api exceeded, waiting for %d seconds', interval)
+                    time.sleep(interval)
+                    interval = _backoff(interval)
+
         while True:
-            # the generated method fetches one page and wraps it in a pager whose
-            # attributes delegate to it. Reading them takes nothing further off the
-            # wire; only iterating the pager would, and that is the lazy fetch this
-            # method exists to avoid.
-            page = budget.run(lambda: list_log_entries(request=request))
+            page = fetch_page(request)
             yield from page.entries
             if not page.next_page_token:
                 return
@@ -293,12 +276,10 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
         query = rf'resource.type="gce_instance" labels.instance_name="{instance_name}" timestamp>"{timestamp}" jsonPayload.message=~"startup-script[\w\\\":\s]*exit status [0-9]+"'  # noqa: E501
         log_pages = None
 
-        # This retry has no deadline, unlike the one in RateLimitedLoggingClient, and
-        # that asymmetry is deliberate. Copying logs is presentation, so giving up there
-        # costs a log. This call is how the step's outcome is read, so giving up here
-        # fails a step whose work has already succeeded -- the very failure the retry is
-        # meant to prevent. The read quota is per minute and always recovers, so waiting
-        # is the cheaper wrong answer. The deferral is what bounds this in the end.
+        # Deliberately unbounded, unlike RateLimitedLoggingClient's retry: this call is
+        # how a step's outcome is read, so giving up here fails a step whose work has
+        # already succeeded. The read quota is per minute and always recovers, so
+        # waiting is the cheaper wrong answer; the deferral timeout is what bounds it.
         while True:
             try:
                 log_pages = await client.list_log_entries(
@@ -669,6 +650,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         try:
             self._copy_machine_logs()
         except Exception as e:
+            # TODO: this also swallows bugs in the paging code itself, not just quota
+            # errors -- revisit narrowing this or surfacing it through monitoring.
             self.log.warning(
                 'could not copy the logs for %s, they are still in cloud logging: %s',
                 self.instance_name,

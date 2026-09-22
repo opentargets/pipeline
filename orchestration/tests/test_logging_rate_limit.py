@@ -116,14 +116,7 @@ def _paged_api(pages: list[list[str]], fail_on: set[int]):
 
 
 def test_a_rate_limited_later_page_is_retried() -> None:
-    """The quota is hit while paging, not on the first request.
-
-    The caller pages through a whole step's log, which is where the quota is actually
-    reached. A retry wrapped around the base client's generator cannot help: a
-    generator that raises is closed, so the retry sees StopIteration and hands back a
-    truncated log with no error at all. Only re-requesting the page by its token
-    resumes the read, which is why the client pages explicitly.
-    """
+    """A page other than the first can be rate-limited, and must still be retried by token."""
     api, requested = _paged_api([['a', 'b'], ['c', 'd'], ['e']], fail_on={1})
     client, log = _client(api)
 
