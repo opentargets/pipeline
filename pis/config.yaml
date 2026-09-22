@@ -15,7 +15,7 @@ scratchpad:
   ot_curation: '26.09.1'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
-  gtex_version: '11'
+  gtex_version: '10'
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
@@ -30,7 +30,6 @@ scratchpad:
   aopwiki_version: '2023-01-20'
   toxcast_version: '2021-08-17'
   hpa_subcellular_version: '2021-08-19'
-  encore_version: '2024-11-12'
   validation_lab_version: '2024-11-12'
   l2g_gold_standard_version: '2025-06-25'
   l2g_test_split_version: '2026-09-02'
@@ -522,9 +521,9 @@ steps:
       destination: input/evidence/validation_lab.json.gz
 
     # Encore => Get latest evidence.
-    - name: copy encore
-      source: gs://otar013-ppp/encore/encore-${encore_version}.json.gz
-      destination: input/evidence/encore.json.gz
+    - name: copy_many encore
+      sources: gs://otar013-ppp/encore/encore_2026-06-23/*.parquet
+      destination: input/evidence/encore
 
     # OT_crispr => generate evience.
     - name: spreadsheet_download otar crispr study spreadsheet
@@ -781,6 +780,14 @@ steps:
     - name: copy_many eQTL Catalogue r8 credible sets
       sources: gs://eqtl_catalogue_data/r8/credible_set/*.parquet
       destination: input/molqtl/credible_set/eqtl_catalogue/r8
+
+    - name: copy_many molqtl deCODE proteomics study
+      sources: gs://decode_data/smp/study/*.parquet
+      destination: input/molqtl/study/deCODE_proteomics
+
+    - name: copy_many molqtl deCODE proteomics credible sets
+      sources: gs://decode_data/smp/credible_set/*.parquet
+      destination: input/molqtl/credible_set/deCODE_proteomics
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
