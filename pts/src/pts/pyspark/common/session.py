@@ -37,17 +37,18 @@ class Session:
 
     @staticmethod
     def _merge_jars_packages(base: str | None, extra: str | None) -> str | None:
-        """Merge two ``spark.jars.packages`` comma-lists, deduping preserving order."""
+        """Merge Maven coordinates, with caller-supplied versions taking precedence."""
         if not base and not extra:
             return None
-        seen: set[str] = set()
-        merged: list[str] = []
+
+        merged: dict[tuple[str, ...], str] = {}
         for part in ((base or '') + ',' + (extra or '')).split(','):
-            p = part.strip()
-            if p and p not in seen:
-                seen.add(p)
-                merged.append(p)
-        return ','.join(merged) if merged else None
+            coordinate = part.strip()
+            if coordinate:
+                components = coordinate.split(':')
+                key = tuple(components[:2]) if len(components) >= 3 else (coordinate,)
+                merged[key] = coordinate
+        return ','.join(merged.values()) if merged else None
 
     def _effective_properties(self, properties: dict[str, str] | None = None) -> dict[str, str]:
         """Return the merged Spark properties without touching JVM global state.
@@ -66,9 +67,7 @@ class Session:
                 'spark.driver.maxResultSize': '0',
                 'spark.debug.maxToStringFields': '2000',
                 'spark.sql.broadcastTimeout': '3000',
-                # google cloud storage connector + Spark NLP (required by OnToma for local runs).
-                # On Dataproc the jar is provided via ``spark.jars``
-                # so base is empty there; locally we need Ivy resolution.
+                # Local Spark resolves the GCS connector and OnToma's Spark NLP jar via Ivy.
                 'spark.jars.packages': ','.join([
                     'com.google.cloud.bigdataoss:gcs-connector:hadoop3-2.2.21',
                     # Match the Python dependency resolved from OnToma's requirements.
@@ -98,9 +97,7 @@ class Session:
         # jars are not dropped and duplicates are avoided.
         jars_key = 'spark.jars.packages'
         if jars_key in base_properties or jars_key in properties:
-            merged = self._merge_jars_packages(
-                base_properties.get(jars_key), properties.get(jars_key)
-            )
+            merged = self._merge_jars_packages(base_properties.get(jars_key), properties.get(jars_key))
             effective_properties = {**base_properties, **properties}
             if merged:
                 effective_properties[jars_key] = merged

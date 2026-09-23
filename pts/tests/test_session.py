@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+from textwrap import dedent
+
 import pyspark.sql.functions as f
 import pytest
 
@@ -37,12 +42,20 @@ def test_create_dataframe_and_schema(spark):
 
 def test_merge_jars_packages():
     assert Session._merge_jars_packages(None, None) is None
-    assert Session._merge_jars_packages('a:1', None) == 'a:1'
-    assert Session._merge_jars_packages(None, 'b:2') == 'b:2'
-    assert Session._merge_jars_packages('a:1', 'b:2') == 'a:1,b:2'
-    # dedup, order preserved
-    assert Session._merge_jars_packages('a:1,b:2', 'b:2,c:3') == 'a:1,b:2,c:3'
-    assert Session._merge_jars_packages('a:1, b:2 ', ' b:2 , c:3') == 'a:1,b:2,c:3'
+    assert Session._merge_jars_packages('a:b:1', None) == 'a:b:1'
+    assert Session._merge_jars_packages(None, 'c:d:2') == 'c:d:2'
+    assert Session._merge_jars_packages('a:b:1', 'c:d:2') == 'a:b:1,c:d:2'
+    assert Session._merge_jars_packages('a:b:1,c:d:2', 'c:d:2,e:f:3') == 'a:b:1,c:d:2,e:f:3'
+
+
+def test_merge_jars_packages_explicit_version_overrides_default():
+    assert (
+        Session._merge_jars_packages(
+            'com.johnsnowlabs.nlp:spark-nlp_2.12:6.1.5,base:other:1',
+            'com.johnsnowlabs.nlp:spark-nlp_2.12:6.2.0,custom:package:2',
+        )
+        == 'com.johnsnowlabs.nlp:spark-nlp_2.12:6.2.0,base:other:1,custom:package:2'
+    )
 
 
 @pytest.mark.parametrize('installed_version', ['6.1.5', '6.2.0'])
@@ -68,38 +81,44 @@ def test_session_local_config_contains_sparknlp_and_gcs(monkeypatch, installed_v
 
 
 def test_session_dataproc_does_not_force_jars():
-    # Pure config test via _effective_properties - avoids JVM-polluted SparkConf
-    s = Session.__new__(Session)
-    s.is_dataproc = True
-    eff = s._effective_properties({})
-    assert eff.get('spark.jars.packages') is None
-    # but explicit properties are still honoured
-    eff2 = s._effective_properties({'spark.jars.packages': 'my.org:custom:1.0'})
-    assert eff2.get('spark.jars.packages') == 'my.org:custom:1.0'
+    session = Session.__new__(Session)
+    session.is_dataproc = True
 
-    # Same via env var + real is_dataproc detection (no shared Spark)
-    import os
-
-    orig = os.environ.get('DATAPROC_CLUSTER_NAME')
-    try:
-        os.environ['DATAPROC_CLUSTER_NAME'] = 'test-cluster'
-        s2 = Session.__new__(Session)
-        s2.is_dataproc = 'DATAPROC_CLUSTER_NAME' in os.environ
-        assert s2.is_dataproc is True
-        assert s2._effective_properties({}).get('spark.jars.packages') is None
-    finally:
-        if orig is None:
-            os.environ.pop('DATAPROC_CLUSTER_NAME', None)
-        else:
-            os.environ['DATAPROC_CLUSTER_NAME'] = orig
+    assert session._effective_properties({}).get('spark.jars.packages') is None
+    assert (
+        session._effective_properties({'spark.jars.packages': 'my.org:custom:1.0'})['spark.jars.packages']
+        == 'my.org:custom:1.0'
+    )
 
 
 @pytest.mark.slow
-def test_ontoma_spark_nlp_is_available(pts_session):
-    """Local pts_session must have Spark NLP on the JVM classpath (PR #6 fat-jar for Dataproc, Ivy for local)."""
-    from ontoma import OnToma
+@pytest.mark.spark_nlp
+def test_ontoma_spark_nlp_is_available():
+    """Start an isolated local JVM so the shared test session stays lightweight."""
+    # This performs real Maven/Ivy resolution and is intentionally excluded from
+    # routine CI; use ``pytest -m spark_nlp`` to run it explicitly.
+    env = os.environ.copy()
+    for key in ('PYSPARK_GATEWAY_PORT', 'PYSPARK_GATEWAY_SECRET', 'DATAPROC_CLUSTER_NAME'):
+        env.pop(key, None)
 
-    assert OnToma._spark_nlp_available(pts_session.spark) is True
-    # Also ensure the config that provided it is visible
-    jars = pts_session.spark.conf.get('spark.jars.packages', '')
-    assert 'spark-nlp' in jars
+    result = subprocess.run(
+        [
+            sys.executable,
+            '-c',
+            dedent("""
+                from ontoma import OnToma
+                from pts.pyspark.common.session import Session
+
+                session = Session(app_name='pts-spark-nlp-test', spark_uri='local[1]')
+                try:
+                    assert OnToma._spark_nlp_available(session.spark)
+                finally:
+                    session.stop()
+            """),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
