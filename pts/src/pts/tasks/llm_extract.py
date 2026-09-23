@@ -1,6 +1,6 @@
 """Task that extracts structured drug and disease evidence from clinical trials with an LLM.
 
-The extraction itself lives in ``clinical_mining``; this task is the part that
+The extraction itself lives in ``mira``; this task is the part that
 makes it repeatable — it builds one prompt per trial, asks
 :py:mod:`pts.result_cache` for the ones that have not been extracted yet, and
 publishes the result as a typed parquet the release can read directly.
@@ -22,16 +22,16 @@ from pathlib import Path
 from typing import Any, Self, cast
 
 import polars as pl
-from clinical_mining.provider.aact import extract_clinical_report
-from clinical_mining.provider.aact.llm_extractor import (
+from loguru import logger
+from mira.provider.aact import extract_clinical_report
+from mira.provider.aact.llm_extractor import (
     build_prompts,
     fetch_publications,
     parse_batch_results,
     sample_report,
 )
-from clinical_mining.workflows import llm as llm_workflow
-from clinical_mining.workflows.llm import run_extraction
-from loguru import logger
+from mira.workflows import llm as llm_workflow
+from mira.workflows.llm import run_extraction
 from otter.manifest.model import Artifact
 from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
@@ -42,8 +42,8 @@ from pydantic import BaseModel
 from pts.postgres import read_dump_tables
 from pts.result_cache import METADATA_SCHEMA, cache_key, cached_map, read_cache, write_cache
 
-DEFAULT_SYSTEM_PROMPT = ('clinical_mining.prompts', 'aact_llm.txt')
-"""Packaged system prompt, versioned with the pinned ``clinical-mining`` dependency."""
+DEFAULT_SYSTEM_PROMPT = ('mira.prompts', 'aact_llm.txt')
+"""Packaged system prompt, versioned with the pinned ``mira`` dependency."""
 
 TRIAL_FIELDS = {
     'trialOfficialTitle': 'Official Title',
@@ -72,6 +72,12 @@ AACT_TABLES = {
     'detailed_descriptions': ['nct_id', 'description'],
 }
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+
+
+def _additional_metadata(tables: dict[str, pl.DataFrame]) -> list[pl.DataFrame]:
+    """Prepare AACT metadata frames without colliding description columns."""
+    detailed_descriptions = tables['detailed_descriptions'].rename({'description': 'detailed_description'})
+    return [tables['study_references'], tables['brief_summaries'], detailed_descriptions]
 
 
 class PublicationsSpec(BaseModel):
@@ -111,7 +117,7 @@ class LlmExtractSpec(Spec):
         DAG. Never put the key itself in config."""
     model: str = 'gpt-5-nano-2025-08-07'
     """OpenAI model. Not part of the cache key."""
-    model_class: str = 'clinical_mining.schemas.ClinicalReportExtractionSchema'
+    model_class: str = 'mira.schemas.ClinicalReportExtractionSchema'
     """Dotted path to the pydantic model the response is validated against. Its
         JSON schema is part of the cache key."""
     system_prompt: str | None = None
@@ -175,7 +181,7 @@ class LlmExtract(Task):
             order_by=AACT_ORDER_BY,
             scratch_root=self.context.config.work_path,
         )
-        additional = [tables['study_references'], tables['brief_summaries'], tables['detailed_descriptions']]
+        additional = _additional_metadata(tables)
 
         report = extract_clinical_report(
             studies=tables['studies'].select('nct_id', 'study_type', 'phase', 'official_title'),
@@ -376,16 +382,16 @@ def _import_class(dotted_path: str) -> type[BaseModel]:
 
 
 def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
-    """Call clinical-mining outside Otter's already-running event loop.
+    """Call Mira outside Otter's already-running event loop.
 
     Otter invokes task methods from an asyncio loop, while the synchronous
-    clinical-mining entry point owns its loop via ``asyncio.run``. Running it in
+    Mira's entry point owns its loop via ``asyncio.run``. Running it in
     a short-lived worker thread gives it a thread-local loop without changing
     either library's public API.
     """
 
     def run_with_full_schema_inference() -> pl.DataFrame | None:
-        # clinical-mining's default inference samples only the first 100 model
+        # Mira's default inference samples only the first 100 model
         # responses. Later validated nested values can then disagree with that
         # inferred schema, losing the whole shard before cached_map can stage it.
         original = llm_workflow._extractions_to_df

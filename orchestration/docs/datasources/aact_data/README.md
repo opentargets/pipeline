@@ -119,6 +119,10 @@ rather than being combined with partially populated AACT data.
 
 ## Changelog
 
+### 2026-09-23
+
+- Include AACT detailed descriptions in prompts under their intended field name.
+
 ### 2026-09-04
 
 - Reuse earlier Batch API results by optionally seeding the cache; cache
