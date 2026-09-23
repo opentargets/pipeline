@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from airflow.sdk import BaseOperator, TriggerRule
@@ -38,6 +39,7 @@ def create_cluster(cluster_name: str, cluster_config: CustomClusterConfig) -> Cr
         cluster_name=cluster_name,
         cluster_config=cluster_config,
         labels=Labels(project=GCP_PROJECT_GENETICS),
+        deferrable=True,
     )
 
 
@@ -56,6 +58,7 @@ def delete_cluster(cluster_name: str) -> DeleteClusterOperator:
         cluster_name=cluster_name,
         region=GCP_REGION,
         trigger_rule=TriggerRule.ALL_SUCCESS,
+        deferrable=True,
     )
 
 
@@ -63,6 +66,7 @@ def submit_gentropy_step(
     cluster_name: str,
     step_name: str,
     params: dict[str, Any] | None = None,
+    execution_timeout: timedelta | None = None,
 ) -> SubmitJobOperator:
     """Submit a PySpark job from a gentropy step to execute a specific CLI step.
 
@@ -71,6 +75,10 @@ def submit_gentropy_step(
         step_name (str): Name of the step to execute, should be in format `step: 'step_name'`.
         params (dict[str, Any] | None): Parameters to pass to the gentropy step.
             The keys should be in format `*step*:key`.
+        execution_timeout (timedelta | None): Kill the task if it runs longer than this.
+            Defaults to None, meaning the task may run indefinitely. Airflow does not
+            time out a task that is merely slow, so set this on steps where a stall is
+            expensive.
 
 
     Returns:
@@ -109,6 +117,8 @@ def submit_gentropy_step(
         step_name=step_name,
         py_spark_job=job,
         labels=labels,
+        deferrable=True,
+        execution_timeout=execution_timeout,
     )
 
 

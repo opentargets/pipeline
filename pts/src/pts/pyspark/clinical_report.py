@@ -7,21 +7,19 @@ from functools import lru_cache
 import pdfplumber
 import polars as pl
 import torch
-from clinical_mining.dataset import ClinicalReport
-from clinical_mining.provider.aact import extract_clinical_report as extract_aact_clinical_report
-from clinical_mining.provider.chembl.drug_warnings import (
-    extract_clinical_report as extract_drug_warning_clinical_report,
-)
-from clinical_mining.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
-from clinical_mining.provider.ema import extract_clinical_report as extract_ema_clinical_report
-from clinical_mining.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
-from clinical_mining.provider.pmda import parse_pmda_approvals
-from clinical_mining.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
-from clinical_mining.provider.ttd import extract_indication as extract_ttd_indication
-from clinical_mining.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
-from clinical_mining.utils.polars_helpers import filter_df, union_dfs
-from clinical_mining.utils.spark_helpers import spark_session
 from loguru import logger
+from mira.dataset import ClinicalReport
+from mira.provider.aact import extract_clinical_report as extract_aact_clinical_report
+from mira.provider.chembl.drug_warnings import extract_clinical_report as extract_drug_warning_clinical_report
+from mira.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
+from mira.provider.ema import extract_clinical_report as extract_ema_clinical_report
+from mira.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
+from mira.provider.pmda import parse_pmda_approvals
+from mira.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
+from mira.provider.ttd import extract_indication as extract_ttd_indication
+from mira.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
+from mira.utils.polars_helpers import filter_df, union_dfs
+from mira.utils.spark_helpers import spark_session
 from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
@@ -559,7 +557,7 @@ def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
 
 
 def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
-    """Flag SAFETY-type reports (clinical_mining#57, informational, not a failure)."""
+    """Flag SAFETY-type reports (mira#57, informational, not a failure)."""
     return ClinicalReport(
         df=update_quality_flag(
             df=reports.df,
