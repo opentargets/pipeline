@@ -127,7 +127,11 @@ class GwasCredibleSetEvidenceSchema(pa.DataFrameModel):
     targetId: str = pa.Field(
         str_matches=_ENSEMBL_GENE_ID,
         description='Open Targets target identifier',
-        metadata={'foreign_key': 'target/id'},
+        # 'ensembl' extracted from target.json's own `id` field description
+        # ("...[bioregistry:ensembl]") -- croissant has no first-class slot for this, so it's
+        # embedded in description text there. diseaseId/studyLocusId's FK targets (disease.json,
+        # credible_set.json) carry no such tag, since neither has a single applicable registry.
+        metadata={'foreign_key': 'target/id', 'bioregistry': 'ensembl'},
     )
     id: str = pa.Field(
         str_matches=_SHA1_HEX,
