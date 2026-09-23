@@ -74,12 +74,6 @@ AACT_TABLES = {
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
 
-def _additional_metadata(tables: dict[str, pl.DataFrame]) -> list[pl.DataFrame]:
-    """Prepare AACT metadata frames without colliding description columns."""
-    detailed_descriptions = tables['detailed_descriptions'].rename({'description': 'detailed_description'})
-    return [tables['study_references'], tables['brief_summaries'], detailed_descriptions]
-
-
 class PublicationsSpec(BaseModel):
     """Whether to enrich prompts with Europe PMC abstracts."""
 
@@ -181,13 +175,16 @@ class LlmExtract(Task):
             order_by=AACT_ORDER_BY,
             scratch_root=self.context.config.work_path,
         )
-        additional = _additional_metadata(tables)
 
         report = extract_clinical_report(
             studies=tables['studies'].select('nct_id', 'study_type', 'phase', 'official_title'),
             interventions=tables['interventions'],
             conditions=tables['conditions'],
-            additional_metadata=additional,
+            additional_metadata=[
+                tables['study_references'],
+                tables['brief_summaries'],
+                tables['detailed_descriptions'].rename({'description': 'detailed_description'}),
+            ],
             aggregation_specs={'pmid': {'group_by': 'nct_id', 'alias': 'literature'}},
         )
         return sample_report(report.df, self.spec.sample_size)

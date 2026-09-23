@@ -162,6 +162,54 @@ class TestResume:
 
         assert sorted(first.computed) == ['k3', 'k4']
 
+    def test_multiple_failed_attempts_preserve_every_finished_shard(self, cache_uri):
+        def fail_after_one_shard(recorder):
+            def compute(shard):
+                if recorder.calls:
+                    raise RuntimeError('shard failed')
+                return recorder(shard)
+
+            return compute
+
+        first = Recorder()
+        with pytest.raises(RuntimeError):
+            cached_map(
+                records('k1', 'k2', 'k3', 'k4', 'k5', 'k6'),
+                fail_after_one_shard(first),
+                cache_uri,
+                None,
+                'run1',
+                'snap1',
+                shard_size=2,
+            )
+
+        second = Recorder()
+        with pytest.raises(RuntimeError):
+            cached_map(
+                records('k1', 'k2', 'k3', 'k4', 'k5', 'k6'),
+                fail_after_one_shard(second),
+                cache_uri,
+                None,
+                'run1',
+                'snap1',
+                shard_size=2,
+            )
+
+        third = Recorder()
+        cached_map(
+            records('k1', 'k2', 'k3', 'k4', 'k5', 'k6'),
+            third,
+            cache_uri,
+            None,
+            'run1',
+            'snap1',
+            shard_size=2,
+        )
+
+        assert first.computed == ['k1', 'k2']
+        assert second.computed == ['k3', 'k4']
+        assert third.computed == ['k5', 'k6']
+
     def test_a_different_run_id_starts_clean(self, cache_uri):
         def explode(shard):
             raise RuntimeError('shard failed')

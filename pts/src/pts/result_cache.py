@@ -129,19 +129,19 @@ def write_cache(rows: pl.DataFrame, cache_uri: str, config: Config, timestamp: s
     return timestamp
 
 
-def _read_shards(staging_uri: str, config: Config) -> pl.DataFrame:
-    """Read whatever shards a previous attempt of this run already finished."""
+def _read_shards(staging_uri: str, config: Config) -> tuple[pl.DataFrame, int]:
+    """Read finished shards and return the next unused shard number."""
     try:
         paths = sorted(StorageHandle(staging_uri, config=config).glob('shard-*.parquet'))
     except NotFoundError:
-        return pl.DataFrame()
+        return pl.DataFrame(), 0
 
     if not paths:
-        return pl.DataFrame()
+        return pl.DataFrame(), 0
 
     shards = pl.concat([_read_parquet(p, config=config) for p in paths], how='diagonal_relaxed')
     logger.info(f'resuming: {shards.height} rows recovered from {len(paths)} staged shards')
-    return shards
+    return shards, len(paths)
 
 
 def cached_map(
@@ -187,7 +187,7 @@ def cached_map(
     cached = read_cache(cache_uri, config)
 
     staging_uri = f'{cache_uri}/staging/{run_id}'
-    staged = _read_shards(staging_uri, config)
+    staged, next_shard_no = _read_shards(staging_uri, config)
 
     done = cached.select('cache_key')
     if not staged.is_empty():
@@ -198,7 +198,7 @@ def cached_map(
     logger.info(f'{wanted.height} records requested, {known} already known, {todo.height} to compute')
 
     fresh = [staged] if not staged.is_empty() else []
-    for shard_no, offset in enumerate(range(0, todo.height, shard_size)):
+    for shard_no, offset in enumerate(range(0, todo.height, shard_size), start=next_shard_no):
         shard = todo.slice(offset, shard_size)
         logger.info(f'computing shard {shard_no} ({shard.height} records)')
 
