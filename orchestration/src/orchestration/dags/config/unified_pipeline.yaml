@@ -585,7 +585,7 @@ steps:
   gentropy_variant:
     depends_on:
       - gentropy_variant_annotation
-  gentropy_pathway_ingestion:
+  gentropy_pathway:
     depends_on:
       - pis_pathway
       - pts_target
@@ -595,7 +595,7 @@ steps:
       - gentropy_variant
       - gentropy_enhancer_to_gene
       - pts_interaction
-      - gentropy_pathway_ingestion
+      - gentropy_pathway
   gentropy_l2g_train_test_split:
     depends_on:
       - pis_l2g

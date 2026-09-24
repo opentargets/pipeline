@@ -194,7 +194,7 @@ steps:
       # OUTPUTS
       step.variant_index_path: '{{release_uri}}/output/variant'
 
-  pathway_ingestion:
+  pathway:
     params:
       step: pathway_ingestion
       step.session.write_mode: overwrite

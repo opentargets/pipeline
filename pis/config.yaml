@@ -825,7 +825,7 @@ steps:
 
   #: PATHWAY STEP :#################################################################################
   # Inputs of the l2g pathway enrichment features: a GMT pathway library and the GSEA
-  # disease-pathway catalogue computed on it. gentropy_pathway_ingestion harmonises both.
+  # disease-pathway catalogue computed on it. gentropy_pathway harmonises both.
   pathway:
     - name: copy pathway library
       source: ${pathway_catalogue_uri}/code/merged_gene_sets.gmt
