@@ -2184,7 +2184,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-mira"
-version = "1.0.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -2204,9 +2204,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/f7/904b68d06a6dd54cbef0e6e98bbd5044932527bb8f3579be712d2df9bb6a/opentargets_mira-1.0.0.tar.gz", hash = "sha256:e90b29d92fb0145bc49dfcbdbdef49b80a13c8fe1d89fd331edfbea21ce913de", size = 404673, upload-time = "2026-09-17T08:34:41.124Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/3a/61f1fbf09db4ff5765507ca73e2e6a5b63941723130b1936a7a6d9ace92f/opentargets_mira-1.0.1.tar.gz", hash = "sha256:4f6cce4cbfc0552e857e40e23a0f1fb451761a8a3b57bba37a8f280cff0246f3", size = 416838, upload-time = "2026-09-24T13:43:39.996Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/ed/12f57a8444b613ea14c4e7f2ba7ed32d5563ff9510980098765cd840c0f0/opentargets_mira-1.0.0-py3-none-any.whl", hash = "sha256:4d5b331d7150f7726323c7df6841cd9a23f5ea6255f83e71aaefc69ff3c3c655", size = 66197, upload-time = "2026-09-17T08:34:39.769Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/64/694c75ae5e69290c4266795961a5c863b6301143754cfd786e090bc8ac88/opentargets_mira-1.0.1-py3-none-any.whl", hash = "sha256:3640b5453d5dc6917496c94a9d158088871bdcde5468a9fdb6faee925ec3e967", size = 66366, upload-time = "2026-09-24T13:43:38.327Z" },
 ]
 
 [[package]]
@@ -2711,7 +2711,7 @@ requires-dist = [
     { name = "ontoma", specifier = ">=2.6.0" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.0" },
+    { name = "opentargets-mira", specifier = ">=1.0.1" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "ot-literature", git = "https://github.com/opentargets/ot-literature?tag=0.1.1" },
     { name = "pandas", specifier = ">=2.3.3" },
