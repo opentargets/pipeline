@@ -15,9 +15,11 @@ bumps it, and several releases can share one. If a release ever pins an archive
 that was never extracted, its copy fails on a missing path, which is a better
 outcome than quietly reading the wrong snapshot.
 
-Because the extraction is cached on a hash of the exact prompt, model and output
-schema, rerunning this DAG after a new AACT archive only pays for the trials
-that are genuinely new or whose text changed upstream. See :py:mod:`pts.result_cache`.
+The cache reuses an accepted extraction for the same trial ID and response
+schema. A new AACT archive therefore pays only for new trials and earlier
+failures. Changes to trial text, the model or the system prompt do not invalidate
+accepted results; changing the response schema starts a separate cache.
+See :py:mod:`pts.result_cache`.
 """
 
 from __future__ import annotations

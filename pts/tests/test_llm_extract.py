@@ -1,4 +1,8 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
+from time import sleep
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -71,15 +75,73 @@ class _FakeClient:
         self.closed = True
 
 
+def test_asyncio_proxy_delegates_and_closes_clients_on_its_event_loop() -> None:
+    client = _FakeClient()
+    proxy = llm_extract._AsyncioWithClientCleanup(asyncio, [client])
+
+    async def return_result() -> str:
+        return 'result'
+
+    assert proxy.Semaphore is asyncio.Semaphore
+    assert proxy.gather is asyncio.gather
+    assert proxy.run(return_result()) == 'result'
+    assert client.closed
+
+
+def test_workflow_patches_are_restored_when_extraction_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_to_df = llm_workflow._extractions_to_df
+    original_client_factory = llm_workflow.AsyncOpenAI
+
+    def fail(**kwargs: object) -> None:
+        assert llm_workflow.asyncio is not asyncio
+        raise RuntimeError('extraction failed')
+
+    monkeypatch.setattr(llm_extract, 'run_extraction', fail)
+
+    with pytest.raises(RuntimeError, match='extraction failed'):
+        _run_extraction_in_thread()
+
+    assert llm_workflow._extractions_to_df is original_to_df
+    assert llm_workflow.AsyncOpenAI is original_client_factory
+    assert llm_workflow.asyncio is asyncio
+
+
+def test_workflow_patches_are_serialised(monkeypatch: pytest.MonkeyPatch) -> None:
+    state_lock = Lock()
+    active = 0
+    most_active = 0
+
+    def observe(**kwargs: object) -> pl.DataFrame:
+        nonlocal active, most_active
+        with state_lock:
+            active += 1
+            most_active = max(most_active, active)
+        sleep(0.05)
+        with state_lock:
+            active -= 1
+        return pl.DataFrame()
+
+    monkeypatch.setattr(llm_extract, 'run_extraction', observe)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_run_extraction_in_thread) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert most_active == 1
+
+
 def test_run_extraction_closes_async_client_before_loop_shutdown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     client = _FakeClient()
+    global_asyncio_run = asyncio.run
 
     def create_client(**kwargs: object) -> _FakeClient:
         return client
 
     async def fake_run_async(*args: object, **kwargs: object) -> tuple[list[object], list[object]]:
+        assert asyncio.run is global_asyncio_run
         return [], []
 
     monkeypatch.setattr(llm_workflow, 'AsyncOpenAI', create_client)
@@ -100,6 +162,7 @@ def test_run_extraction_closes_async_client_before_loop_shutdown(
 
     assert result is not None and result.is_empty()
     assert client.closed
+    assert llm_workflow.asyncio is asyncio
 
 
 def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:

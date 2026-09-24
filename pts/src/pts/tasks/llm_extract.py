@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
 from typing import Any, Self, cast
 
 import polars as pl
@@ -73,6 +74,29 @@ AACT_TABLES = {
     'detailed_descriptions': ['nct_id', 'description'],
 }
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+LLM_WORKFLOW_PATCH_LOCK = Lock()
+"""Serialises temporary patches to Mira's module globals."""
+
+
+class _AsyncioWithClientCleanup:
+    """Delegate asyncio within Mira while closing clients on the same event loop."""
+
+    def __init__(self, module: Any, clients: list[Any]) -> None:
+        self._module = module
+        self._clients = clients
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._module, name)
+
+    def run(self, coroutine: Any, **kwargs: Any) -> Any:
+        async def run_with_cleanup() -> Any:
+            try:
+                return await coroutine
+            finally:
+                for client in self._clients:
+                    await client.close()
+
+        return self._module.run(run_with_cleanup(), **kwargs)
 
 
 def _schema_cache_uri(cache_uri: str, schema_digest: str) -> str:
@@ -404,40 +428,31 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
         # Mira's default inference samples only the first 100 model
         # responses. Later validated nested values can then disagree with that
         # inferred schema, losing the whole shard before cached_map can stage it.
-        original = llm_workflow._extractions_to_df
+        with LLM_WORKFLOW_PATCH_LOCK:
+            original = llm_workflow._extractions_to_df
 
-        def to_df(extractions: Sequence[BaseModel]) -> pl.DataFrame:
-            return _models_to_dataframe(extractions)
+            def to_df(extractions: Sequence[BaseModel]) -> pl.DataFrame:
+                return _models_to_dataframe(extractions)
 
-        workflow = cast(Any, llm_workflow)
-        original_client_factory = workflow.AsyncOpenAI
-        original_asyncio_run = workflow.asyncio.run
-        clients: list[Any] = []
+            workflow = cast(Any, llm_workflow)
+            original_client_factory = workflow.AsyncOpenAI
+            original_asyncio = workflow.asyncio
+            clients: list[Any] = []
 
-        def create_client(*args: Any, **client_kwargs: Any) -> Any:
-            client = original_client_factory(*args, **client_kwargs)
-            clients.append(client)
-            return client
+            def create_client(*args: Any, **client_kwargs: Any) -> Any:
+                client = original_client_factory(*args, **client_kwargs)
+                clients.append(client)
+                return client
 
-        def run_and_close_client(coroutine: Any) -> Any:
-            async def run_with_cleanup() -> Any:
-                try:
-                    return await coroutine
-                finally:
-                    for client in clients:
-                        await client.close()
-
-            return original_asyncio_run(run_with_cleanup())
-
-        workflow._extractions_to_df = to_df
-        workflow.AsyncOpenAI = create_client
-        workflow.asyncio.run = run_and_close_client
-        try:
-            return run_extraction(**kwargs)
-        finally:
-            workflow._extractions_to_df = original
-            workflow.AsyncOpenAI = original_client_factory
-            workflow.asyncio.run = original_asyncio_run
+            workflow._extractions_to_df = to_df
+            workflow.AsyncOpenAI = create_client
+            workflow.asyncio = _AsyncioWithClientCleanup(original_asyncio, clients)
+            try:
+                return run_extraction(**kwargs)
+            finally:
+                workflow._extractions_to_df = original
+                workflow.AsyncOpenAI = original_client_factory
+                workflow.asyncio = original_asyncio
 
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
         return executor.submit(run_with_full_schema_inference).result()

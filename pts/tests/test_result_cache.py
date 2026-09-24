@@ -44,10 +44,9 @@ class TestCacheKey:
         assert cache_key('a', 'b') != cache_key('b', 'a')
 
     def test_every_part_changes_the_key(self):
-        base = cache_key('model', 'prompt', 'schema')
-        assert base != cache_key('model2', 'prompt', 'schema')
-        assert base != cache_key('model', 'prompt2', 'schema')
-        assert base != cache_key('model', 'prompt', 'schema2')
+        base = cache_key('NCT001', 'schema-a')
+        assert base != cache_key('NCT002', 'schema-a')
+        assert base != cache_key('NCT001', 'schema-b')
 
     def test_parts_cannot_be_confused_by_concatenation(self):
         # without a separator 'ab' + 'c' and 'a' + 'bc' would collide
