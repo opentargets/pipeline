@@ -28,6 +28,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import DAG, chain, task_group
 from airflow.task.trigger_rule import TriggerRule
 
@@ -62,6 +63,9 @@ with DAG(
     #   u. Upload — the step's config to GCS.
     #   r. Run    — the step in a GCE VM, and wait until it finishes.
     #   t. Delete — the VM.
+    #   e. End    — succeeds only if the run did, so a failed step never
+    #               starts the ones that depend on it. The delete still runs
+    #               either way, so it cannot stand in for this.
     #
     # There is no diffing here. Unlike a release, this pipeline is already
     # incremental where it counts: the extraction only sends the model the
@@ -106,8 +110,15 @@ with DAG(
                 execution_timeout=timedelta(seconds=300),
             )
 
+            e = EmptyOperator(
+                task_id=f'end_{step_name}',
+                trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+            )
+
             chain(u, r, t)
-            steps[step_name] = {'start': u, 'end': t}
+            chain(r, e)
+            chain(t, e)
+            steps[step_name] = {'start': u, 'end': e}
 
         extraction_step(step_name)
 
