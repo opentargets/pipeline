@@ -2507,7 +2507,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.9.1rc1"
+version = "26.9.1rc0"
 source = { editable = "." }
 dependencies = [
     { name = "gcsfs" },
