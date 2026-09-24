@@ -15,7 +15,7 @@ scratchpad:
   ot_curation: '26.09.1'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
-  gtex_version: '10'
+  gtex_version: '11'
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
