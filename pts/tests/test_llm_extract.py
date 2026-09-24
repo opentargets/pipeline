@@ -100,3 +100,26 @@ def test_run_extraction_closes_async_client_before_loop_shutdown(
 
     assert result is not None and result.is_empty()
     assert client.closed
+
+
+def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
+    errors_path = tmp_path / 'errors.jsonl'
+    task = LlmExtract(
+        LlmExtractSpec(
+            name='llm_extract test',
+            source={'aact': str(tmp_path / 'aact.zip')},
+            destination={
+                'prompts': str(tmp_path / 'prompts.parquet'),
+                'extraction': str(tmp_path / 'extractions.parquet'),
+                'errors': str(errors_path),
+            },
+            cache_uri=str(tmp_path / 'cache'),
+            snapshot='snapshot',
+        ),
+        SimpleNamespace(config=None),
+    )
+    task.errors = ['{"id":"nct1"}', '{"id":"nct2"}']
+
+    task._publish(pl.DataFrame({'id': ['nct1']}), pl.DataFrame({'id': ['nct1']}), str(tmp_path / 'cache'))
+
+    assert errors_path.read_text() == '{"id":"nct1"}\n{"id":"nct2"}\n'

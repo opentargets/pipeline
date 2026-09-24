@@ -25,6 +25,7 @@ Derived data is stored under `gs://aact_data` with the following structure:
 gs://aact_data/<aact_version>/input/           # the raw CTTI archive
 gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
+gs://aact_data/<aact_version>/errors/          # diagnostics for failed LLM calls
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
 gs://aact_data/cache/trial_extraction/<schema-digest>/  # extraction cache, shared across AACT versions
 ```

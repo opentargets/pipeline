@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Self, cast
 
 import polars as pl
@@ -102,7 +103,7 @@ class LlmExtractSpec(Spec):
     source: dict[str, str]
     """AACT dump archive. The task restores the required tables inline."""
     destination: dict[str, str]
-    """Where to publish. Keys: ``prompts``, ``extraction``."""
+    """Where to publish. Keys: ``prompts``, ``extraction``, ``errors``."""
     cache_uri: str
     """Root containing one extraction cache per response schema, an absolute
         URI. Must sit outside the dataset version directory so a trial whose
@@ -153,6 +154,7 @@ class LlmExtract(Task):
         super().__init__(spec, context)
         self.spec: LlmExtractSpec
         self.stats: dict[str, Any] = {}
+        self.errors: list[str] = []
 
     def _system_prompt(self) -> str:
         """Return the system prompt text, from config if overridden and from the package otherwise."""
@@ -232,16 +234,21 @@ class LlmExtract(Task):
             # and returns None, so never hand it exactly one
             prompts = prompts * 2
 
-        extracted = _run_extraction_in_thread(
-            prompts=prompts,
-            model_class=self.spec.model_class,
-            system_prompt_path=system_prompt_path,
-            model=self.spec.model,
-            openai_key=Path(self.spec.openai_key_path).read_text(encoding='utf-8').strip(),
-            service_tier=self.spec.service_tier,
-            concurrency=self.spec.concurrency,
-            max_retries=self.spec.max_retries,
-        )
+        with TemporaryDirectory(prefix='llm-extraction-errors-') as errors_dir:
+            extracted = _run_extraction_in_thread(
+                prompts=prompts,
+                model_class=self.spec.model_class,
+                system_prompt_path=system_prompt_path,
+                model=self.spec.model,
+                openai_key=Path(self.spec.openai_key_path).read_text(encoding='utf-8').strip(),
+                service_tier=self.spec.service_tier,
+                concurrency=self.spec.concurrency,
+                max_retries=self.spec.max_retries,
+                errors_dir=errors_dir,
+            )
+            error_path = Path(errors_dir) / 'errors.jsonl'
+            if error_path.exists():
+                self.errors.extend(error_path.read_text(encoding='utf-8').splitlines())
         if extracted is None or extracted.is_empty():
             extracted = pl.DataFrame(schema={'id': pl.String})
 
@@ -340,12 +347,17 @@ class LlmExtract(Task):
         return imported.height
 
     def _publish(self, prompts: pl.DataFrame, extractions: pl.DataFrame, schema_cache_uri: str) -> None:
-        """Write the prompts and the extractions."""
+        """Write the prompts, extractions and diagnostics."""
         artifacts = []
         for key, df in (('prompts', prompts), ('extraction', extractions)):
             handle = StorageHandle(self.spec.destination[key], config=self.context.config)
             df.write_parquet(handle.absolute, compression='zstd')
             artifacts.append(Artifact(source=schema_cache_uri, destination=handle.absolute))
+
+        errors = StorageHandle(self.spec.destination['errors'], config=self.context.config)
+        errors.write_text(''.join(f'{error}\n' for error in self.errors))
+        artifacts.append(Artifact(source=schema_cache_uri, destination=errors.absolute))
+        logger.info(f'wrote {len(self.errors)} extraction diagnostics to {errors.absolute}')
 
         self.artifacts = artifacts
 

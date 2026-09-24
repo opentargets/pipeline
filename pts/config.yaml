@@ -785,6 +785,7 @@ steps:
       destination:
         prompts: prompts/prompts.parquet
         extraction: extraction/extractions.parquet
+        errors: errors/errors.jsonl
       cache_uri: gs://aact_data/cache/trial_extraction
       # the AACT version, so a rerun against the same archive resumes from the
       # shards the last attempt finished instead of paying for them again
