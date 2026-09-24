@@ -86,12 +86,12 @@ class PublicationsSpec(BaseModel):
     """Enrich prompts with abstracts.
 
         .. warning:: This fetches abstracts for *every* trial, not only the ones
-            that missed the cache, because the abstract is part of the prompt and
-            so part of the cache key. It is the one part of this step that does
-            not get cheaper as the cache fills. Give it its own
-        :py:func:`pts.result_cache.cached_map` keyed on pmid before turning it on
-        for a full run. Publication data is not part of the extraction cache
-        identity."""
+            that missed the cache, because prompts are built before the cache
+            lookup. It is the one part of this step that does not get cheaper as
+            the cache fills. Give it its own
+            :py:func:`pts.result_cache.cached_map` keyed on pmid before turning it
+            on for a full run. Publication data is not part of the extraction
+            cache identity."""
     max_publications: int = 1
     """Abstracts per trial."""
 
@@ -110,7 +110,7 @@ class LlmExtractSpec(Spec):
     snapshot: str
     """Name for the cache snapshot this run writes, and for its staging area.
         Reuse it to resume a failed run; change it to start clean. The DAG sets
-        it from the Airflow run id."""
+        it from the AACT version."""
     openai_key_path: str = '/var/run/secrets/openai-api-key'
     """Path the OpenAI key is mounted at, injected from Secret Manager by the
         DAG. Never put the key itself in config."""

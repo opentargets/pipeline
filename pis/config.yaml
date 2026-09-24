@@ -4,7 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-08-25'
+  aact_version: '2026-09-23'
   chembl_version: '37'
   efo_version: '3.93.0'
   ensembl_version: '116'

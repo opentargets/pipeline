@@ -53,7 +53,6 @@ class UnifiedPipelineConfig:
         self.pis.config['log_level'] = 'INFO'
         self.pis.config['pool_size'] = 16
 
-
         if self.is_ppp:
             self.pis = self.pis.overwrite(config_path / 'ppp' / 'pis.override.yaml')
         """The internal configuration for PIS steps, with PPP-specific overrides."""

@@ -23,6 +23,7 @@ that are genuinely new or whose text changed upstream. See :py:mod:`pts.result_c
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from airflow.sdk import DAG, chain, task_group
@@ -100,7 +101,7 @@ with DAG(
                 task_id=f'delete_vm_{step_name}',
                 resource_id=vm_name,
                 trigger_rule=TriggerRule.NONE_SKIPPED,
-                execution_timeout=300
+                execution_timeout=timedelta(seconds=300),
             )
 
             chain(u, r, t)

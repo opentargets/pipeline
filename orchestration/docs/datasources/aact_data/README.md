@@ -1,19 +1,20 @@
 # AACT
 
-This document was updated on 2026-09-04.
+This document was updated on 2026-09-24.
 
-AACT (Aggregate Analysis of ClinicalTrials.gov) is published as a monthly
-PostgreSQL archive by CTTI, fetched from
+AACT (Aggregate Analysis of ClinicalTrials.gov) is published as dated
+PostgreSQL archives by CTTI, fetched from
 `https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/<version>`.
 
-The AACT archive version is the single pin used by both the preprocessing and
-release DAGs. The preprocessing DAG publishes the exact archive it processed,
-and the release copies that archive and its extraction from the same snapshot.
+The same AACT archive version is pinned in both the preprocessing configuration
+and the release input configuration. The preprocessing DAG publishes the exact
+archive it processed, and the release copies that archive and its extraction
+from the same snapshot.
 
 | Pinned in | Names |
 | --- | --- |
-| `aact_version` in the preprocessing config | the raw CTTI archive downloaded and processed |
-| `aact_version` in `unified_pipeline.yaml` | the same archive and `aact_data` snapshot consumed by the release |
+| `aact_version` in `aact_trial_extraction.yaml` | the raw CTTI archive downloaded and processed |
+| `aact_version` in `pis/config.yaml` | the same archive and `aact_data` snapshot consumed by the release |
 
 The release pin sits with the other release input pins. `pis/config.yaml`
 carries the default so the steps still run standalone.
@@ -100,12 +101,12 @@ normally; only the remaining misses are sent to the configured model.
 ## Consumers
 
 `unified_pipeline` copies the raw input and extraction through PIS tasks that
-name the shared version literally:
+use the shared version:
 
-- the `clinical_report` step copies `input/aact.zip` and `extraction/`, which
-  `pts.clinical_report` reads inline and
-- the `drug` step consumes `extraction/`, which `pts.chembl_molecule` mines for
-  drug synonyms and `pts.clinical_report` uses for indications and drug intent
+- the `clinical_report` step copies `input/aact.zip`, which
+  `pts.clinical_report` reads inline, and
+- the `drug` step copies `extraction/`, which `pts.chembl_molecule` mines for
+  drug synonyms and `pts.clinical_report` uses for indications and drug intent.
 
 There is no Airflow dependency between this dag and `unified_pipeline`. Moving a
 release onto a newer AACT archive means changing the shared `aact_version` pin

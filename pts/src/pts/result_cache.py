@@ -5,8 +5,8 @@ LLM call per clinical trial, a model inference pass per free-text field. Running
 them again for every release is waste, because between one release and the next
 almost nothing changes.
 
-This module keeps their results in a cache keyed by a hash of the exact input
-that produced them, so a run only pays for what is genuinely new.
+This module keeps their results in a cache with an identity chosen by its
+caller, so a run only pays for records the caller considers genuinely new.
 
 For LLM extraction, cache identity is deliberately scoped to the record ID and
 output schema. This allows accepted results to survive changes to trial text,

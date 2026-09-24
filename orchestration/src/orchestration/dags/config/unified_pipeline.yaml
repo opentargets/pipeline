@@ -38,7 +38,6 @@ gentropy_version: "3.4.0-rc.2"
 vep_version: "release_116.1"
 spark_nlp_version: "6.1.5"
 
-
 # Dependency graph
 # ----------------
 # The following section defines the dependencies between the different steps in
