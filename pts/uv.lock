@@ -2677,7 +2677,7 @@ requires-dist = [
     { name = "ontoma", specifier = ">=2.6.0" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.0" },
+    { name = "opentargets-mira", specifier = ">=1.0.1" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "ot-literature", git = "https://github.com/opentargets/ot-literature?tag=0.1.1" },
     { name = "pandas", specifier = ">=2.3.3" },
