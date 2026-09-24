@@ -74,6 +74,11 @@ AACT_TABLES = {
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
 
+def _schema_cache_uri(cache_uri: str, schema_digest: str) -> str:
+    """Return the cache namespace for one response schema."""
+    return f'{cache_uri.rstrip("/")}/{schema_digest}'
+
+
 class PublicationsSpec(BaseModel):
     """Whether to enrich prompts with Europe PMC abstracts."""
 
@@ -99,9 +104,9 @@ class LlmExtractSpec(Spec):
     destination: dict[str, str]
     """Where to publish. Keys: ``prompts``, ``extraction``."""
     cache_uri: str
-    """Root of the extraction cache, an absolute URI. Must sit outside the
-        dataset version directory so a trial whose text did not change between
-        two AACT snapshots stays a cache hit."""
+    """Root containing one extraction cache per response schema, an absolute
+        URI. Must sit outside the dataset version directory so a trial whose
+        text did not change between two AACT snapshots stays a cache hit."""
     snapshot: str
     """Name for the cache snapshot this run writes, and for its staging area.
         Reuse it to resume a failed run; change it to start clean. The DAG sets
@@ -256,13 +261,14 @@ class LlmExtract(Task):
         schema_digest = hashlib.sha256(
             json.dumps(model_cls.model_json_schema(by_alias=True), sort_keys=True).encode('utf-8')
         ).hexdigest()
+        schema_cache_uri = _schema_cache_uri(self.spec.cache_uri, schema_digest)
 
         report = self._trial_report()
         prompts = self._build_prompts(report, schema_digest)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
         if self.spec.legacy_batch_results:
-            imported = self._seed_legacy_cache(prompts)
+            imported = self._seed_legacy_cache(prompts, schema_cache_uri)
             if self.spec.legacy_import_only:
                 self.stats = {
                     'trials': report.height,
@@ -281,7 +287,7 @@ class LlmExtract(Task):
         extractions = cached_map(
             records=prompts,
             compute=lambda shard: self._extract(shard, system_prompt_path),
-            cache_uri=self.spec.cache_uri,
+            cache_uri=schema_cache_uri,
             config=self.context.config,
             run_id=self.spec.snapshot,
             timestamp=self.spec.snapshot,
@@ -297,10 +303,10 @@ class LlmExtract(Task):
         }
         logger.info(f'extraction complete: {self.stats}')
 
-        self._publish(prompts, published)
+        self._publish(prompts, published, schema_cache_uri)
         return self
 
-    def _seed_legacy_cache(self, prompts: pl.DataFrame) -> int:
+    def _seed_legacy_cache(self, prompts: pl.DataFrame, schema_cache_uri: str) -> int:
         """Import legacy Batch API results using the current trial/schema keys.
 
         This compatibility path is deliberately opt-in and intended for one
@@ -315,17 +321,12 @@ class LlmExtract(Task):
             logger.warning('legacy batch results contained no valid extractions')
             return 0
 
-        # A trial may occur in more than one historical batch. Keep the last
-        # parsed occurrence deterministically; the cache has one value per key.
-        legacy = legacy.unique(subset='id', keep='last')
-        imported = legacy.join(prompts.select('id', 'cache_key', 'prompt_sha256'), on='id', how='inner').unique(
-            subset='cache_key', keep='last'
-        )
+        imported = legacy.join(prompts.select('id', 'cache_key', 'prompt_sha256'), on='id', how='inner')
         if imported.is_empty():
             logger.warning('no legacy extractions matched the current AACT prompts')
             return 0
 
-        existing = read_cache(self.spec.cache_uri, self.context.config)
+        existing = read_cache(schema_cache_uri, self.context.config)
         combined = pl.concat([existing, imported], how='diagonal_relaxed')
         combined = combined.with_columns(
             computed_at=pl.coalesce([
@@ -334,17 +335,17 @@ class LlmExtract(Task):
             ])
         )
         combined = combined.sort('computed_at', descending=True).unique(subset='cache_key', keep='first')
-        write_cache(combined, self.spec.cache_uri, self.context.config, self.spec.snapshot)
+        write_cache(combined, schema_cache_uri, self.context.config, self.spec.snapshot)
         logger.info(f'seeded {imported.height} legacy extractions into the cache')
         return imported.height
 
-    def _publish(self, prompts: pl.DataFrame, extractions: pl.DataFrame) -> None:
+    def _publish(self, prompts: pl.DataFrame, extractions: pl.DataFrame, schema_cache_uri: str) -> None:
         """Write the prompts and the extractions."""
         artifacts = []
         for key, df in (('prompts', prompts), ('extraction', extractions)):
             handle = StorageHandle(self.spec.destination[key], config=self.context.config)
             df.write_parquet(handle.absolute, compression='zstd')
-            artifacts.append(Artifact(source=self.spec.cache_uri, destination=handle.absolute))
+            artifacts.append(Artifact(source=schema_cache_uri, destination=handle.absolute))
 
         self.artifacts = artifacts
 

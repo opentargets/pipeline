@@ -25,14 +25,15 @@ gs://aact_data/<aact_version>/input/           # the raw CTTI archive
 gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
-gs://aact_data/cache/trial_extraction/         # the extraction cache, shared across versions
+gs://aact_data/cache/trial_extraction/<schema-digest>/  # extraction cache, shared across AACT versions
 ```
 
-The cache sits outside the version directory on purpose. It is keyed on the
-trial ID and output schema, so an accepted extraction is reused across AACT
-snapshots and does not depend on volatile publication data. The rendered
-prompt hash is retained as audit metadata. The model and system instructions
-are operational choices and are not part of the key.
+The cache sits outside the version directory on purpose. Each response schema
+has its own cache directory, named by the SHA-256 digest of its JSON schema.
+Within that directory, rows are keyed on the trial ID and schema digest, so an
+accepted extraction is reused across AACT snapshots. The rendered prompt hash
+is retained as audit metadata. The model and system instructions are
+operational choices and are not part of the key.
 
 ## Preprocessing
 
@@ -80,9 +81,10 @@ Nothing tracks failures, retry counts or how long ago something was tried: this
 dag runs a few times a year, and re-attempting a few hundred stubborn trials on
 each run is cheaper than the bookkeeping needed to remember not to.
 
-Work is sharded, and each shard is written to `cache/trial_extraction/staging/`
-as it completes. Rerunning the dag against the same `aact_version` picks those
-shards back up rather than paying for the same API calls twice.
+Work is sharded, and each shard is written under the current schema cache's
+`staging/` directory as it completes. Rerunning the dag against the same
+`aact_version` picks those shards back up rather than paying for the same API
+calls twice.
 
 ### Importing earlier Batch API results
 
