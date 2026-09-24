@@ -34,6 +34,8 @@ scratchpad:
   validation_lab_version: '2024-11-12'
   l2g_gold_standard_version: '2025-06-25'
   l2g_test_split_version: '2026-09-02'
+  # Not versioned yet: the catalogue is built on release 26.03 and read in place.
+  pathway_catalogue_uri: gs://ot-team/polina/dis-path-catalogue
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -819,6 +821,24 @@ steps:
       sheet_id: 1CV_shXJy1ACM09HZBB_-3Nl6l_dfkrA26elMAF0ttHs
       gid: '72910172'
       destination: input/otar/otar_project_to_efo.csv
+  ##################################################################################################
+
+  #: PATHWAY STEP :#################################################################################
+  # Inputs of the l2g pathway enrichment features: a GMT pathway library and the GSEA
+  # disease-pathway catalogue computed on it. gentropy_pathway_ingestion harmonises both.
+  pathway:
+    - name: copy pathway library
+      source: ${pathway_catalogue_uri}/code/merged_gene_sets.gmt
+      destination: input/pathway/merged_gene_sets.gmt
+
+    # The catalogue is partitioned by diseaseId and gentropy reads the disease back from the
+    # partition folders, so match_path keeps them. copy_many would flatten them away.
+    - name: explode_glob pathway enrichment catalogue
+      glob: ${pathway_catalogue_uri}/full/disease_pathway_catalogue/**/*.parquet
+      do:
+        - name: copy pathway enrichment ${match_path} ${uuid}
+          source: ${uri}
+          destination: input/pathway/disease_pathway_catalogue/${match_path}/${match_stem}.${match_ext}
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
