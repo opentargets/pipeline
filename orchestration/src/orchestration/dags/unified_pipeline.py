@@ -313,7 +313,7 @@ with DAG(
         for cluster_name, steps_in_cluster in pts_clusters.items():
             x = DeleteClusterOperator(
                 task_id=f'cluster_delete_{cluster_name}',
-                cluster_name=cluster_name,
+                cluster_name=resource_name(cluster_name),
                 trigger_rule=TriggerRule.ALL_SUCCESS,
             )
             for step_name in steps_in_cluster:
