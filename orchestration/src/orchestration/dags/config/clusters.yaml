@@ -131,7 +131,7 @@ clusters:
   pts_literature:
     image_version: '2.3'
     num_masters: 1
-    num_workers: 32
+    num_workers: 48
     master_machine_type: n1-standard-8
     master_disk_size: 512
     worker_machine_type: n1-highmem-16
@@ -142,7 +142,7 @@ clusters:
       PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       # Cluster-wide knobs (apply to all 6 pts_literature_* steps).
-      # Sized for the fixed 32xn1-highmem-16 cluster (512 vCPU).
+      # Sized for the fixed 48xn1-highmem-16 cluster (768 vCPU).
       'spark:spark.sql.autoBroadcastJoinThreshold': '134217728'
       'spark:spark.sql.parquet.compression.codec': 'zstd'
       'spark:spark.shuffle.io.maxRetries': '10'
