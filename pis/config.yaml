@@ -30,10 +30,10 @@ scratchpad:
   aopwiki_version: '2023-01-20'
   toxcast_version: '2021-08-17'
   hpa_subcellular_version: '2021-08-19'
-  encore_version: '2024-11-12'
   validation_lab_version: '2024-11-12'
   l2g_gold_standard_version: '2025-06-25'
   l2g_test_split_version: '2026-09-02'
+  encore_version: '2026-09-21'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -516,22 +516,23 @@ steps:
 
   #: EVIDENCE_PPP STEP :############################################################################
   evidence_ppp:
-    # Validation lab => Get latest evidence.
+    # Validation lab => evidence by fixed version:
     - name: copy validation_lab
       source: gs://otar013-ppp/validation_lab/validation_lab-${validation_lab_version}.json.gz
       destination: input/evidence/validation_lab.json.gz
 
-    # Encore => Get latest evidence.
-    - name: copy encore
-      source: gs://otar013-ppp/encore/encore-${encore_version}.json.gz
-      destination: input/evidence/encore.json.gz
+    # Encore => evidence by fixed version:
+    - name: copy_many encore
+      sources: gs://otar013-ppp/encore/encore_${encore_version}/*.parquet
+      destination: input/evidence/encore
 
-    # OT_crispr => generate evience.
+    # OT_crispr => fetch study metadata from spreadsheet:
     - name: spreadsheet_download otar crispr study spreadsheet
       sheet_id: 1eow_rTizGY_Vda0Q-8sFNWCOyFkKRSUen1Em1ysPSiA
       gid: '0'
       destination: input/evidence/ot_crispr/config.csv
 
+    # OT_crispr => fetch all mageck data:
     - name: explode_glob ot_crispr files
       glob: 'gs://otar013-ppp/ot_crispr/input_data_filtered/**/*'
       do:
@@ -773,6 +774,23 @@ steps:
     - name: copy_many eQTL Catalogue r8 credible sets
       sources: gs://eqtl_catalogue_data/r8/credible_set/*.parquet
       destination: input/molqtl/credible_set/eqtl_catalogue/r8
+
+    - name: copy_many molqtl deCODE proteomics study
+      sources: gs://decode_data/smp/study/*.parquet
+      destination: input/molqtl/study/deCODE_proteomics
+
+    - name: copy_many molqtl deCODE proteomics credible sets
+      sources: gs://decode_data/smp/credible_set/*.parquet
+      destination: input/molqtl/credible_set/deCODE_proteomics
+
+    # SLE-map credible set and study table:
+    - name: copy_many sle_map credible sets
+      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/credible_set/*.parquet
+      destination: input/molqtl/credible_set/sle_map
+
+    - name: copy_many sle_map study
+      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/study/*.parquet
+      destination: input/molqtl/study/sle_map
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
