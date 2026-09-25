@@ -93,7 +93,7 @@ clusters:
     idle_delete_ttl: 1800
 
   pts_openfda:
-    image_version: '2.2'
+    image_version: '2.3'
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
@@ -110,7 +110,7 @@ clusters:
       - 'gs://opentargets-pipelines/up/pts/install_dependencies_on_cluster.sh'
 
   pts_association:
-    image_version: '2.2'
+    image_version: '2.3'
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
@@ -129,7 +129,7 @@ clusters:
       - 'gs://opentargets-pipelines/up/pts/install_dependencies_on_cluster.sh'
 
   pts_literature:
-    image_version: '2.2'
+    image_version: '2.3'
     num_masters: 1
     num_workers: 4
     master_machine_type: n1-standard-8
