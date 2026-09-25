@@ -6,9 +6,11 @@ from time import sleep
 from types import SimpleNamespace
 from typing import Any, cast
 
+import mira.provider.aact as aact_provider
 import mira.workflows.llm as llm_workflow
 import polars as pl
 import pytest
+from mira.provider.aact import llm_extractor
 
 from pts.tasks import llm_extract
 from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _run_extraction_in_thread, _schema_cache_uri
@@ -46,8 +48,8 @@ def test_trial_report_passes_detailed_description_to_mira(
 
     monkeypatch.setattr(llm_extract, 'StorageHandle', FakeStorageHandle)
     monkeypatch.setattr(llm_extract, 'read_dump_tables', lambda *args, **kwargs: tables)
-    monkeypatch.setattr(llm_extract, 'extract_clinical_report', fake_extract_clinical_report)
-    monkeypatch.setattr(llm_extract, 'sample_report', lambda report, sample_size: report)
+    monkeypatch.setattr(aact_provider, 'extract_clinical_report', fake_extract_clinical_report)
+    monkeypatch.setattr(llm_extractor, 'sample_report', lambda report, sample_size: report)
 
     task = LlmExtract(
         LlmExtractSpec(
@@ -96,7 +98,7 @@ def test_workflow_patches_are_restored_when_extraction_raises(monkeypatch: pytes
         assert llm_workflow.asyncio is not asyncio
         raise RuntimeError('extraction failed')
 
-    monkeypatch.setattr(llm_extract, 'run_extraction', fail)
+    monkeypatch.setattr(llm_workflow, 'run_extraction', fail)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         _run_extraction_in_thread()
@@ -121,7 +123,7 @@ def test_workflow_patches_are_serialised(monkeypatch: pytest.MonkeyPatch) -> Non
             active -= 1
         return pl.DataFrame()
 
-    monkeypatch.setattr(llm_extract, 'run_extraction', observe)
+    monkeypatch.setattr(llm_workflow, 'run_extraction', observe)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(_run_extraction_in_thread) for _ in range(2)]

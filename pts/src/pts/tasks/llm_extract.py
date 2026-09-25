@@ -25,15 +25,6 @@ from typing import Any, Self, cast
 
 import polars as pl
 from loguru import logger
-from mira.provider.aact import extract_clinical_report
-from mira.provider.aact.llm_extractor import (
-    build_prompts,
-    fetch_publications,
-    parse_batch_results,
-    sample_report,
-)
-from mira.workflows import llm as llm_workflow
-from mira.workflows.llm import run_extraction
 from otter.manifest.model import Artifact
 from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
@@ -196,6 +187,9 @@ class LlmExtract(Task):
         disease and molecule indexes, none of which is needed — or available —
         here.
         """
+        from mira.provider.aact import extract_clinical_report
+        from mira.provider.aact.llm_extractor import sample_report
+
         archive = StorageHandle(str(self.spec.source['aact']), config=self.context.config).absolute
         logger.info(f'restoring AACT tables from {archive}')
         tables = read_dump_tables(
@@ -222,6 +216,8 @@ class LlmExtract(Task):
 
     def _build_prompts(self, report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
         """Render one prompt per trial and derive its cache key."""
+        from mira.provider.aact.llm_extractor import build_prompts, fetch_publications
+
         publications = fetch_publications(
             report,
             max_publications=self.spec.publications.max_publications,
@@ -344,6 +340,8 @@ class LlmExtract(Task):
         migration run. Failed and malformed legacy records remain absent from
         the cache, so the normal extraction loop retries them.
         """
+        from mira.provider.aact.llm_extractor import parse_batch_results
+
         legacy_path = self.spec.legacy_batch_results
         assert legacy_path is not None
         logger.info(f'importing legacy AACT batch results from {legacy_path}')
@@ -423,6 +421,8 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
     a short-lived worker thread gives it a thread-local loop without changing
     either library's public API.
     """
+    from mira.workflows import llm as llm_workflow
+    from mira.workflows.llm import run_extraction
 
     def run_with_full_schema_inference() -> pl.DataFrame | None:
         # Mira's default inference samples only the first 100 model
