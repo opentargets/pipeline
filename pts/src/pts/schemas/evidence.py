@@ -135,6 +135,7 @@ class GwasCredibleSetEvidenceSchema(pa.DataFrameModel):
     )
     id: str = pa.Field(
         str_matches=_SHA1_HEX,
+        unique=True,
         description='Identifer of the disease/target evidence',
         metadata={'primary_key': True},
     )
