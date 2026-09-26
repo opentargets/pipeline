@@ -23,7 +23,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.evidence import GwasCredibleSetEvidenceSchema
-from pts.transformers.evidence import (
+from pts.transformers.evidence.utils import (
     assign_evidence_identifier,
     build_disease_lut,
     build_publication_lut,

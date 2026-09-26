@@ -7,7 +7,7 @@ delegates, writes) and is not unit tested here.
 
 import polars as pl
 
-from pts.transformers.encore_evidence import _process_encore_evidence
+from pts.transformers.evidence.encore_evidence import _process_encore_evidence
 
 UNIQUE_FIELDS = ['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'interactingTargetFromSourceId']
 

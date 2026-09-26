@@ -4,8 +4,8 @@ import hashlib
 
 import polars as pl
 
-from pts.transformers.evidence import flags
-from pts.transformers.evidence.identifiers import assign_evidence_identifier, validate_uniqueness
+from pts.transformers.evidence.utils import flags
+from pts.transformers.evidence.utils.identifiers import assign_evidence_identifier, validate_uniqueness
 
 
 class TestAssignEvidenceIdentifier:

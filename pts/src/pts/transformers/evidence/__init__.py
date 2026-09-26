@@ -1,27 +1,11 @@
-"""Reusable Polars evidence-validation building blocks.
+"""Evidence-postprocess transformers, one module per datasource.
 
-Polars port of `pts.pyspark.evidence_utils` (`evidence.py` + `validation_lut.py`), covering the
-parts every evidence-postprocess step needs: disease/target resolution, uniqueness, dating and
-scoring. Datasource-specific evidence *generation* is not here -- see e.g.
-`pts.transformers.gwas_evidence` for the first consumer.
+Grouped here as the number of evidence datasources migrated from PySpark to Polars grows, rather
+than left as same-named top-level files directly under `pts.transformers`. Shared validation,
+identifier assignment, dating and scoring logic lives in `pts.transformers.evidence.utils`, used by
+every module in this package; each module here only holds what's specific to its own datasource.
+
+`pts/config.yaml` addresses a function here with a dotted `transformer:` name, e.g.
+`transformer: evidence.gwas_evidence` for `pts.transformers.evidence.gwas_evidence`'s
+`gwas_evidence` function -- see `pts.tasks.transform.Transform.load_transformer`.
 """
-
-from pts.transformers.evidence.dating import resolve_evidence_date, resolve_publication_date
-from pts.transformers.evidence.identifiers import assign_evidence_identifier, validate_uniqueness
-from pts.transformers.evidence.luts import build_disease_lut, build_publication_lut, build_target_lut
-from pts.transformers.evidence.scoring import calculate_evidence_score
-from pts.transformers.evidence.validation import validate_datasource, validate_diseases, validate_target
-
-__all__ = [
-    'assign_evidence_identifier',
-    'build_disease_lut',
-    'build_publication_lut',
-    'build_target_lut',
-    'calculate_evidence_score',
-    'resolve_evidence_date',
-    'resolve_publication_date',
-    'validate_datasource',
-    'validate_diseases',
-    'validate_target',
-    'validate_uniqueness',
-]

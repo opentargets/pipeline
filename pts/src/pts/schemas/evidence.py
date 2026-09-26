@@ -1,7 +1,7 @@
 """Pandera schemas validating PTS evidence datasets.
 
 Prototype, currently holding one schema (`GwasCredibleSetEvidenceSchema`) for the frame produced
-by `pts.transformers.gwas_evidence.gwas_evidence`, right before `write_dataset` writes it to
+by `pts.transformers.evidence.gwas_evidence.gwas_evidence`, right before `write_dataset` writes it to
 parquet. Unrelated to the legacy `evidence.json` in this same package, which is a PySpark
 `StructType` dump used by `pts.pyspark.evidence_postprocess`'s other datasources -- that one pins
 raw column types for reading, this one validates values/constraints on an already-built dataset.
@@ -13,7 +13,7 @@ that structure into pandera's own `Field(metadata=...)` instead of inventing new
 same facts, so the two stay easy to cross-check.
 
 Enum values and numeric bounds below are *inferred* from the transformer code
-(`pts.transformers.evidence.*`), not independently confirmed against production data:
+(`pts.transformers.evidence.utils.*`), not independently confirmed against production data:
 
 * `datatypeId`/`datasourceId` are literal constants for this one datasource
   (`gwas_evidence.py:156-157`).
@@ -34,7 +34,7 @@ import pandera.polars as pa
 import polars as pl
 from pandera.polars import PolarsData
 
-#: Mirrors `pts.transformers.evidence.flags` -- kept as a plain tuple here (rather than importing
+#: Mirrors `pts.transformers.evidence.utils.flags` -- kept as a plain tuple here (rather than importing
 #: the module) so this schema documents the vocabulary it checks against without a hard import
 #: dependency; keep in sync with `flags.py` if that vocabulary grows.
 _QUALITY_FLAGS = (
@@ -70,7 +70,7 @@ _ISO_DATE = r'^\d{4}-\d{2}-\d{2}$'
 
 
 class GwasCredibleSetEvidenceSchema(pa.DataFrameModel):
-    """Schema for the `evidence` output of `pts.transformers.gwas_evidence.gwas_evidence`.
+    """Schema for the `evidence` output of `pts.transformers.evidence.gwas_evidence.gwas_evidence`.
 
     Column order below matches the order columns are actually added in `gwas_evidence.py`'s
     pipeline, not the croissant asset's alphabetical listing.

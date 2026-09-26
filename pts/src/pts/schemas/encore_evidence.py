@@ -1,6 +1,6 @@
 """Pandera schema validating PTS ENCORE genetic-interaction evidence.
 
-For the frame produced by `pts.transformers.encore_evidence.encore_evidence`, right before
+For the frame produced by `pts.transformers.evidence.encore_evidence.encore_evidence`, right before
 `write_dataset` writes it to parquet. Field descriptions are copied verbatim from
 `croissant/src/ot_croissant/assets/recordset/evidence_encore.json` -- except `geneticInteractionType`,
 whose croissant entry is spelled `geneInteractionType` (missing "tic"; a real mismatch in that
@@ -63,7 +63,7 @@ _VALIDATION_READOUT_STRUCT = pl.List(
 
 
 class EncoreEvidenceSchema(pa.DataFrameModel):
-    """Schema for the `evidence` output of `pts.transformers.encore_evidence.encore_evidence`."""
+    """Schema for the `evidence` output of `pts.transformers.evidence.encore_evidence.encore_evidence`."""
 
     targetFromSourceId: str = pa.Field(
         description=(

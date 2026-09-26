@@ -1009,7 +1009,7 @@ steps:
   #: EVIDENCE POST PROCESS STEP :###################################################################
   gwas_evidence:
     - name: transform gwas_evidence
-      transformer: gwas_evidence
+      transformer: evidence.gwas_evidence
       source:
         l2g_predictions: output/l2g_prediction
         credible_set: output/credible_set
@@ -1882,7 +1882,7 @@ steps:
 
   evidence_postprocess_encore:
     - name: transform encore_evidence
-      transformer: encore_evidence
+      transformer: evidence.encore_evidence
       source:
         evidence: input/evidence/encore.json.gz
         disease: output/disease

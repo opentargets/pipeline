@@ -2,8 +2,8 @@
 
 import polars as pl
 
-from pts.transformers.evidence import flags
-from pts.transformers.evidence.validation import validate_datasource, validate_diseases, validate_target
+from pts.transformers.evidence.utils import flags
+from pts.transformers.evidence.utils.validation import validate_datasource, validate_diseases, validate_target
 
 
 class TestValidateDiseases:
