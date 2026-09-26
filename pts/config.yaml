@@ -59,6 +59,17 @@ steps:
       destination: output/reactome
   ##################################################################################################
 
+  #: BIOSAMPLE STEP :###############################################################################
+  biosample:
+    - name: transform biosample
+      transformer: biosample
+      source:
+        cell_ontology: input/biosample/cl.json
+        uberon: input/biosample/uberon.json
+        efo: input/biosample/efo.json
+      destination: output/biosample
+  ##################################################################################################
+
   #: EXPRESSION STEP :##############################################################################
   baseline_expression_dice:
     - name: pyspark baseline expression harmonise dice
