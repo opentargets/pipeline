@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from pts.transformers.evidence.luts import build_disease_lut, build_publication_lut, build_target_lut
+from pts.transformers.evidence.utils.luts import build_disease_lut, build_publication_lut, build_target_lut
 
 
 def rows(df: pl.DataFrame) -> list[dict]:

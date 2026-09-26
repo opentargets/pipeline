@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from pts.transformers.evidence.dating import resolve_evidence_date, resolve_publication_date
+from pts.transformers.evidence.utils.dating import resolve_evidence_date, resolve_publication_date
 
 
 class TestResolvePublicationDate:

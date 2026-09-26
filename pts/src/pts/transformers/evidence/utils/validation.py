@@ -6,7 +6,7 @@ Polars port of the `validate_diseases`/`validate_target`/`validate_datasource` m
 
 import polars as pl
 
-from pts.transformers.evidence import flags
+from pts.transformers.evidence.utils import flags
 from pts.transformers.utils.quality_flags import update_quality_flag
 
 

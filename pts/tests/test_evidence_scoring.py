@@ -2,8 +2,8 @@
 
 import polars as pl
 
-from pts.transformers.evidence import flags
-from pts.transformers.evidence.scoring import calculate_evidence_score
+from pts.transformers.evidence.utils import flags
+from pts.transformers.evidence.utils.scoring import calculate_evidence_score
 
 
 class TestCalculateEvidenceScore:

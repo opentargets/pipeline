@@ -2,8 +2,8 @@
 
 Polars port of the `encore` datasource of the generic PySpark `evidence_postprocess` step
 (`pts.pyspark.evidence_postprocess`), replacing `evidence_postprocess_encore`'s `pyspark:` task in
-`pts/config.yaml` with a native `transformer:` one. Reuses the same `pts.transformers.evidence`
-building blocks `pts.transformers.gwas_evidence` introduced (disease/target lookup tables,
+`pts/config.yaml` with a native `transformer:` one. Reuses the same `pts.transformers.evidence.utils`
+building blocks `pts.transformers.evidence.gwas_evidence` introduced (disease/target lookup tables,
 validation, identifier assignment, dating, scoring), plus two pieces ENCORE needed that GWAS
 evidence didn't exercise: `validate_datasource` (a hard filter, not a flag) and a real `score_expr`
 (a linear rescale, not a straight column copy).
@@ -27,7 +27,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.encore_evidence import EncoreEvidenceSchema
-from pts.transformers.evidence import (
+from pts.transformers.evidence.utils import (
     assign_evidence_identifier,
     build_disease_lut,
     build_target_lut,

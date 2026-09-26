@@ -7,7 +7,7 @@ Only `_build_raw_evidence` (pure, no I/O) is tested directly, matching the conve
 
 import polars as pl
 
-from pts.transformers.gwas_evidence import _build_raw_evidence
+from pts.transformers.evidence.gwas_evidence import _build_raw_evidence
 
 
 def rows_by_target_and_disease(df: pl.DataFrame) -> dict:

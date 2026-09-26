@@ -8,7 +8,7 @@ computation (a linear rescale, ENCORE evidence) are both just expressions.
 
 import polars as pl
 
-from pts.transformers.evidence import flags
+from pts.transformers.evidence.utils import flags
 from pts.transformers.utils.quality_flags import update_quality_flag
 
 
