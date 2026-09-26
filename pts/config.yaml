@@ -1887,21 +1887,16 @@ steps:
           - statisticalTestTail
 
   evidence_postprocess_encore:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform encore_evidence
+      transformer: encore_evidence
       source:
-        evidence_path: input/evidence/encore
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/encore.json.gz
+        disease: output/disease
+        target: output/target
       destination:
-        failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
+        failed_evidence: excluded/evidence/encore
       settings:
-        partition_count: 1
-        evidence_format: parquet
-        datasource_id: encore
-        score_expression: ABS ( geneticInteractionScore  ) / 16.0
         unique_fields:
           - targetId
           - targetFromSourceId

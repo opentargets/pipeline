@@ -98,7 +98,7 @@ def gwas_evidence(
         .pipe(validate_uniqueness)
         .pipe(resolve_publication_date, publication_lut)
         .pipe(resolve_evidence_date)
-        .pipe(calculate_evidence_score, 'resourceScore')
+        .pipe(calculate_evidence_score, pl.col('resourceScore'))
     )
 
     valid = processed.filter(pl.col('qualityControls').list.len() == 0)
