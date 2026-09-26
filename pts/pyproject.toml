@@ -28,6 +28,7 @@ dependencies = [
   "opentargets-mira>=1.0.0",
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
+  "pandera[polars]>=0.33.1",
 ]
 
 [dependency-groups]
