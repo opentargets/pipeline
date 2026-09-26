@@ -8,6 +8,7 @@ from pts.schemas.serialization import schema_to_dict
 class _Widget(pa.DataFrameModel):
     kind: str = pa.Field(isin=['a', 'b'], description='widget kind', metadata={'primary_key': True})
     tags: list[str] = pa.Field(description='widget tags')
+    note: str | None = pa.Field(nullable=True, description='widget note')
 
     class Config:
         name = 'widget'
@@ -40,3 +41,11 @@ def test_schema_to_dict_merges_column_and_dataframe_metadata() -> None:
     assert dumped['columns']['kind']['metadata'] == {'primary_key': True}
     assert 'metadata' not in dumped['columns']['tags']
     assert dumped['metadata'] == {'owner': 'test'}
+
+
+def test_schema_to_dict_states_nullable_explicitly_even_when_false() -> None:
+    dumped = schema_to_dict(_Widget)
+
+    assert dumped['columns']['kind']['nullable'] is False
+    assert dumped['columns']['tags']['nullable'] is False
+    assert dumped['columns']['note']['nullable'] is True
