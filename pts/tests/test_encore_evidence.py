@@ -1,4 +1,4 @@
-"""Tests for pts.transformers.encore_evidence.
+"""Tests for pts.transformers.evidence.encore_evidence.
 
 Only `_process_encore_evidence` (pure, no I/O) is tested directly, matching the convention in
 `test_gwas_evidence.py`: the top-level `encore_evidence` entrypoint is orchestration (reads,
@@ -44,19 +44,34 @@ class TestProcessEncoreEvidence:
         assert result.height == 1
         assert result.to_dicts()[0]['targetFromSourceId'] == 'CHEK1'
 
-    def test_score_is_a_linear_rescale_of_genetic_interaction_score(self) -> None:
+    def test_score_is_the_absolute_genetic_interaction_score_over_16(self) -> None:
+        """score = ABS(geneticInteractionScore) / 16 -- ABS so a positive (cooperative)
+        interaction scores the same magnitude as the equivalent negative (antagonistic) one.
+        """
         df = pl.DataFrame([
             _raw_row(geneticInteractionScore=-16.0, interactingTargetFromSourceId='A'),
             _raw_row(geneticInteractionScore=-8.0, interactingTargetFromSourceId='B'),
             _raw_row(geneticInteractionScore=0.0, interactingTargetFromSourceId='C'),
-            _raw_row(geneticInteractionScore=-32.0, interactingTargetFromSourceId='D'),
+            _raw_row(
+                geneticInteractionScore=8.0, interactingTargetFromSourceId='E', geneticInteractionType='cooperative'
+            ),
         ])
         disease_lut, target_lut = _luts()
 
         result = _process_encore_evidence(df, disease_lut, target_lut, UNIQUE_FIELDS)
         by_interactor = {r['interactingTargetFromSourceId']: r['score'] for r in result.to_dicts()}
 
-        assert by_interactor == {'A': 1.0, 'B': 0.5, 'C': 0.0, 'D': 1.0}
+        assert by_interactor == {'A': 1.0, 'B': 0.5, 'C': 0.0, 'E': 0.5}
+
+    def test_score_beyond_16_in_magnitude_is_flagged_not_clamped(self) -> None:
+        df = pl.DataFrame([_raw_row(geneticInteractionScore=-32.0)])
+        disease_lut, target_lut = _luts()
+
+        result = _process_encore_evidence(df, disease_lut, target_lut, UNIQUE_FIELDS)
+        row = result.to_dicts()[0]
+
+        assert row['score'] == 2.0
+        assert row['qualityControls'] == ['No valid score']
 
     def test_resolves_disease_and_target_and_flags_unresolved(self) -> None:
         df = pl.DataFrame([

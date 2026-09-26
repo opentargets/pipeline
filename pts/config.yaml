@@ -1884,7 +1884,7 @@ steps:
     - name: transform encore_evidence
       transformer: evidence.encore_evidence
       source:
-        evidence: input/evidence/encore.json.gz
+        evidence: input/evidence/encore
         disease: output/disease
         target: output/target
       destination:
