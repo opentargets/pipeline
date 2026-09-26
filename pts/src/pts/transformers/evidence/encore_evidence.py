@@ -1,22 +1,31 @@
 """Generate and validate ENCORE genetic-interaction evidence.
 
 Polars port of the `encore` datasource of the generic PySpark `evidence_postprocess` step
-(`pts.pyspark.evidence_postprocess`), replacing `evidence_postprocess_encore`'s `pyspark:` task in
+(`pts.pyspark.evidence_postprocess`), replacing `evidence_encore`'s `pyspark:` task in
 `pts/config.yaml` with a native `transformer:` one. Reuses the same `pts.transformers.evidence.utils`
 building blocks `pts.transformers.evidence.gwas_evidence` introduced (disease/target lookup tables,
 validation, identifier assignment, dating, scoring), plus two pieces ENCORE needed that GWAS
 evidence didn't exercise: `validate_datasource` (a hard filter, not a flag) and a real `score_expr`
 (a linear rescale, not a straight column copy).
 
-The `score_expression` still in `pts/config.yaml`'s `evidence_postprocess_encore` block is stale:
-it references `geneticInteractionPValue`, a column the current raw ENCORE export no longer
-provides (only `geneticInteractionScore`, a signed strength/direction statistic, is present) --
-running that expression as written would raise an unresolved-column error, not silently produce
-nulls, since `harmonise_to_schema` only casts types for columns the source dataframe already has,
-it does not add missing target-schema columns. The real formula was reverse-engineered from a real
-input/output pair (`work/input/encore`, `work/output/evidence_encore`) and confirmed with zero
-error across all 112,169 rows joinable between the two: `score = clip(-geneticInteractionScore /
-16, 0, 1)`, i.e. -16 maps to 1.0 and 0 maps to 0.0, clamped outside that range.
+`score_expression: ABS(geneticInteractionScore) / 16.0` here matches the fix landed upstream (see
+`pts/config.yaml` at commit 568b9ceb -- https://github.com/opentargets/pipeline/blob/568b9ceb1578062b6282410fa11a63993eaf42f2/pts/config.yaml),
+confirmed against real data with zero error across all 112,169 joinable rows between a real
+input/output pair (`work/input/evidence/encore`, a backed-up `work/output/evidence_encore_bak`).
+The generic PySpark step's earlier `score_expression` (still what's on `main` as of this writing)
+referenced `geneticInteractionPValue`, a column the current raw ENCORE export no longer provides
+(only `geneticInteractionScore`, a signed strength/direction statistic, is present) -- running that
+expression as written would raise an unresolved-column error, not silently produce nulls, since
+`harmonise_to_schema` only casts types for columns the source dataframe already has, it does not
+add missing target-schema columns. No clamping is applied here, matching
+`calculate_evidence_score`'s own semantics: a score outside `[0, 1]` (e.g. a `geneticInteractionScore`
+whose magnitude exceeds 16 -- none exist in the local sample, but the field's own description
+allows cooperative/positive values a plain negation wouldn't have scored correctly) is flagged
+`NO_VALID_SCORE` and excluded from `evidence`, not silently clamped into validity.
+
+The raw ENCORE export format also changed upstream at that same commit: from `input/evidence/encore.json.gz`
+(gzipped JSON) to `input/evidence/encore` (parquet) -- matched here by reading it as `scan_dataset`'s
+default `parquet` format instead of `ndjson`.
 """
 
 from pathlib import Path
@@ -40,9 +49,8 @@ from pts.transformers.evidence.utils import (
 )
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
-#: `score = clip(-geneticInteractionScore / 16, 0, 1)` -- see module docstring for how this was
-#: derived and verified against real data.
-_SCORE_EXPR = (-pl.col('geneticInteractionScore') / 16.0).clip(0.0, 1.0)
+#: `score = ABS(geneticInteractionScore) / 16.0` -- see module docstring for provenance.
+_SCORE_EXPR = pl.col('geneticInteractionScore').abs() / 16.0
 
 
 def encore_evidence(
@@ -63,7 +71,7 @@ def encore_evidence(
     unique_fields = settings['unique_fields']
 
     logger.info(f'Reading raw ENCORE evidence from {source["evidence"]}')
-    raw_evidence = scan_dataset(str(source['evidence']), format='ndjson').collect()
+    raw_evidence = scan_dataset(str(source['evidence'])).collect()
 
     logger.info(f'Reading disease index from {source["disease"]}')
     disease_lut = build_disease_lut(scan_dataset(str(source['disease'])).select('id', 'obsoleteTerms').collect())
@@ -92,7 +100,7 @@ def _process_encore_evidence(
     """Validate, identify, date and score raw ENCORE evidence.
 
     Pure (no I/O), so it can be exercised directly against an already-loaded frame -- e.g. a real
-    ENCORE export snapshot -- without needing production's `.json.gz` input format.
+    ENCORE export snapshot -- without needing production's parquet input format.
 
     Args:
         raw_evidence: raw ENCORE evidence, as read from the source export.

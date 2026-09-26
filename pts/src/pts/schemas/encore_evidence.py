@@ -163,8 +163,8 @@ class EncoreEvidenceSchema(pa.DataFrameModel):
         """Schema-level metadata, also lifted from the croissant asset."""
 
         name = 'evidence_encore'
-        description = 'ENCORE genetic-interaction evidence (pts_evidence_postprocess_encore step output)'
-        metadata = {'source_step': 'evidence_postprocess_encore', 'datasourceId': 'encore'}
+        description = 'ENCORE genetic-interaction evidence (pts_evidence_encore step output)'
+        metadata = {'source_step': 'evidence_encore', 'datasourceId': 'encore'}
         strict = True
 
     @pa.check('qualityControls')
