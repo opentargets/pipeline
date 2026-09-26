@@ -1881,28 +1881,16 @@ steps:
           - statisticalTestTail
 
   evidence_postprocess_encore:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+    - name: transform encore_evidence
+      transformer: encore_evidence
       source:
-        evidence_path: input/evidence/encore.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/encore.json.gz
+        disease: output/disease
+        target: output/target
       destination:
-        failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
+        failed_evidence: excluded/evidence/encore
       settings:
-        partition_count: 1
-        evidence_format: json
-        datasource_id: encore
-        score_expression: >-
-          CASE
-            WHEN geneticInteractionPValue IS NULL OR isnan(geneticInteractionPValue) THEN NULL
-            WHEN geneticInteractionPValue <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.0,
-              (1.0 - 0.0) * (log10(geneticInteractionPValue) - log10(1.0)) / (log10(0.01) - log10(1.0)) + 0.0
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId

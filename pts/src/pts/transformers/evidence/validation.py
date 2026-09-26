@@ -1,6 +1,6 @@
-"""Disease and target validation for evidence.
+"""Disease, target and datasource validation for evidence.
 
-Polars port of the `validate_diseases`/`validate_target` methods of
+Polars port of the `validate_diseases`/`validate_target`/`validate_datasource` methods of
 `pts.pyspark.evidence_utils.evidence.Evidence`.
 """
 
@@ -50,3 +50,19 @@ def validate_target(
     joined = update_quality_flag(joined, pl.col('targetId').is_null(), flags.INVALID_TARGET)
     joined = update_quality_flag(joined, pl.col('biotype').is_in(excluded_biotypes or []), flags.INVALID_BIOTYPE)
     return joined.drop('biotype')
+
+
+def validate_datasource(df: pl.DataFrame, datasource_id: str) -> pl.DataFrame:
+    """Keep only rows whose `datasourceId` matches `datasource_id`.
+
+    Unlike disease/target validation, this is a hard filter, not a quality flag: rows from another
+    datasource are dropped outright, matching `Evidence.validate_datasource`.
+
+    Args:
+        df: evidence with a `datasourceId` column.
+        datasource_id: the only datasource identifier to keep.
+
+    Returns:
+        `df` filtered to `datasourceId == datasource_id`.
+    """
+    return df.filter(pl.col('datasourceId') == datasource_id)

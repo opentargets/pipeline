@@ -10,7 +10,7 @@ from pts.transformers.evidence.dating import resolve_evidence_date, resolve_publ
 from pts.transformers.evidence.identifiers import assign_evidence_identifier, validate_uniqueness
 from pts.transformers.evidence.luts import build_disease_lut, build_publication_lut, build_target_lut
 from pts.transformers.evidence.scoring import calculate_evidence_score
-from pts.transformers.evidence.validation import validate_diseases, validate_target
+from pts.transformers.evidence.validation import validate_datasource, validate_diseases, validate_target
 
 __all__ = [
     'assign_evidence_identifier',
@@ -20,6 +20,7 @@ __all__ = [
     'calculate_evidence_score',
     'resolve_evidence_date',
     'resolve_publication_date',
+    'validate_datasource',
     'validate_diseases',
     'validate_target',
     'validate_uniqueness',

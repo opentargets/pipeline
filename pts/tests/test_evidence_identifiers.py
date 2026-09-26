@@ -28,6 +28,23 @@ class TestAssignEvidenceIdentifier:
         ids = result['id'].to_list()
         assert ids[0] == ids[1]
 
+    def test_handles_a_list_of_structs_like_encores_disease_cell_lines(self) -> None:
+        """Unlike Spark, Polars refuses to `.cast(String)` a list-of-structs column outright.
+
+        Reproduces a real failure hit against ENCORE evidence, whose `diseaseCellLines` (a
+        `unique_fields` entry) is a `list[struct]`.
+        """
+        cell_line = [{'id': 'SIDM001', 'name': 'A', 'tissue': 'Breast', 'tissueId': 'X'}]
+        df = pl.DataFrame({'a': ['x', 'x'], 'diseaseCellLines': [cell_line, cell_line]})
+
+        result = assign_evidence_identifier(df, ['a', 'diseaseCellLines'])
+
+        ids = result['id'].to_list()
+        assert ids[0] == ids[1]
+        assert ids[0] != assign_evidence_identifier(
+            pl.DataFrame({'a': ['x'], 'diseaseCellLines': [[]]}), ['a', 'diseaseCellLines']
+        )['id'][0]
+
 
 class TestValidateUniqueness:
     def test_flags_all_but_one_row_per_duplicate_id(self) -> None:
@@ -57,6 +74,20 @@ class TestValidateUniqueness:
         df = pl.DataFrame({
             'id': ['1', '1', '2'],
             'literature': [['111'], ['111'], None],
+        })
+        result = validate_uniqueness(df)
+        assert result.filter(pl.col('id') == '2').to_dicts()[0]['qualityControls'] == []
+        flagged = result.filter(pl.col('id') == '1')
+        assert sorted(flagged['qualityControls'].to_list()) == [[], [flags.DUPLICATED]]
+
+    def test_handles_a_list_of_structs_column_like_encores_disease_cell_lines(self) -> None:
+        """Every column feeds the content hash, not just the ones in `unique_fields` -- so a
+        list-of-structs column (e.g. ENCORE's `diseaseCellLines`) must not crash it either.
+        """
+        cell_line = [{'id': 'SIDM001', 'name': 'A', 'tissue': 'Breast', 'tissueId': 'X'}]
+        df = pl.DataFrame({
+            'id': ['1', '1', '2'],
+            'diseaseCellLines': [cell_line, cell_line, None],
         })
         result = validate_uniqueness(df)
         assert result.filter(pl.col('id') == '2').to_dicts()[0]['qualityControls'] == []

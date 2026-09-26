@@ -3,7 +3,7 @@
 import polars as pl
 
 from pts.transformers.evidence import flags
-from pts.transformers.evidence.validation import validate_diseases, validate_target
+from pts.transformers.evidence.validation import validate_datasource, validate_diseases, validate_target
 
 
 class TestValidateDiseases:
@@ -62,3 +62,12 @@ class TestValidateTarget:
         result = validate_target(df, target_lut)
 
         assert result.to_dicts()[0]['qualityControls'] == []
+
+
+class TestValidateDatasource:
+    def test_keeps_only_the_matching_datasource_and_drops_the_rest(self) -> None:
+        df = pl.DataFrame({'datasourceId': ['encore', 'encore', 'other'], 'value': [1, 2, 3]})
+
+        result = validate_datasource(df, 'encore')
+
+        assert result['value'].to_list() == [1, 2]
