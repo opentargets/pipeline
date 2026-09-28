@@ -194,6 +194,18 @@ steps:
       # OUTPUTS
       step.variant_index_path: '{{release_uri}}/output/variant'
 
+  pathway:
+    params:
+      step: pathway_ingestion
+      step.session.write_mode: overwrite
+      # INPUTS
+      step.pathway_library_path: '{{release_uri}}/input/pathway/merged_gene_sets.gmt'
+      step.pathway_enrichment_source_path: '{{release_uri}}/input/pathway/disease_pathway_catalogue'
+      step.target_index_path: '{{release_uri}}/output/target'
+      # OUTPUTS
+      step.pathway_index_path: '{{release_uri}}/intermediate/pathway_index'
+      step.pathway_enrichment_path: '{{release_uri}}/intermediate/pathway_enrichment'
+
   l2g_feature_matrix:
     params:
       step: locus_to_gene_feature_matrix
@@ -207,6 +219,45 @@ steps:
       step.target_index_path: '{{release_uri}}/output/target'
       step.intervals_path: '{{release_uri}}/output/enhancer_to_gene'
       step.gene_interactions_path: '{{release_uri}}/output/interaction'
+      step.pathway_index_path: '{{release_uri}}/intermediate/pathway_index'
+      step.pathway_enrichment_path: '{{release_uri}}/intermediate/pathway_enrichment'
+      # The gentropy default plus the two pathway enrichment features, which are opt-in.
+      # isProteinCoding is kept in the matrix but is not a model feature, see l2g_training.
+      step.features_list:
+        - eQtlColocClppMaximum
+        - pQtlColocClppMaximum
+        - sQtlColocClppMaximum
+        - eQtlColocH4Maximum
+        - pQtlColocH4Maximum
+        - sQtlColocH4Maximum
+        - eQtlColocClppMaximumNeighbourhood
+        - pQtlColocClppMaximumNeighbourhood
+        - sQtlColocClppMaximumNeighbourhood
+        - eQtlColocH4MaximumNeighbourhood
+        - pQtlColocH4MaximumNeighbourhood
+        - sQtlColocH4MaximumNeighbourhood
+        - distanceSentinelFootprint
+        - distanceSentinelFootprintNeighbourhood
+        - distanceFootprintMean
+        - distanceFootprintMeanNeighbourhood
+        - distanceTssMean
+        - distanceTssMeanNeighbourhood
+        - distanceSentinelTss
+        - distanceSentinelTssNeighbourhood
+        - vepMaximum
+        - vepMaximumNeighbourhood
+        - vepMean
+        - vepMeanNeighbourhood
+        - e2gMean
+        - e2gMeanNeighbourhood
+        - geneCount500kb
+        - proteinGeneCount500kb
+        - credibleSetConfidence
+        - isProteinCoding
+        - transPQtlColocH4Maximum
+        - transPQtlColocH4MaximumNeighbourhood
+        - pathwayEnrichment500kb
+        - pathwayEnrichment500kbNeighbourhood
       # OUTPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
 
@@ -228,6 +279,41 @@ steps:
       step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
       step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
       step.split_stats_path: '{{release_uri}}/intermediate/l2g_train_test_split_stats.json'
+      # Must match l2g_training, or the split drops the columns the model is trained on.
+      step.features_list: &l2g_model_features
+        - eQtlColocClppMaximum
+        - pQtlColocClppMaximum
+        - sQtlColocClppMaximum
+        - eQtlColocH4Maximum
+        - pQtlColocH4Maximum
+        - sQtlColocH4Maximum
+        - eQtlColocClppMaximumNeighbourhood
+        - pQtlColocClppMaximumNeighbourhood
+        - sQtlColocClppMaximumNeighbourhood
+        - eQtlColocH4MaximumNeighbourhood
+        - pQtlColocH4MaximumNeighbourhood
+        - sQtlColocH4MaximumNeighbourhood
+        - distanceSentinelFootprint
+        - distanceSentinelFootprintNeighbourhood
+        - distanceFootprintMean
+        - distanceFootprintMeanNeighbourhood
+        - distanceTssMean
+        - distanceTssMeanNeighbourhood
+        - distanceSentinelTss
+        - distanceSentinelTssNeighbourhood
+        - vepMaximum
+        - vepMaximumNeighbourhood
+        - vepMean
+        - vepMeanNeighbourhood
+        - e2gMean
+        - e2gMeanNeighbourhood
+        - geneCount500kb
+        - proteinGeneCount500kb
+        - credibleSetConfidence
+        - transPQtlColocH4Maximum
+        - transPQtlColocH4MaximumNeighbourhood
+        - pathwayEnrichment500kb
+        - pathwayEnrichment500kbNeighbourhood
 
   l2g_training:
     params:
@@ -245,6 +331,9 @@ steps:
       # INPUTS
       step.train_parquet_path: '{{release_uri}}/intermediate/l2g_train_split'
       step.test_parquet_path: '{{release_uri}}/intermediate/l2g_test_split'
+      # The gentropy default plus the two pathway enrichment features. Prediction reads the
+      # list from the model on the hub, so it needs no change.
+      step.features_list: *l2g_model_features
       # OUTPUTS
       step.model_path: '{{release_uri}}/etc/model/locus_to_gene_model/classifier.skops'
       step.hf_credentials_path: '/var/run/secrets/hfhub-key'
