@@ -599,6 +599,7 @@ steps:
       - pts_evidence_postprocess_gene2phenotype
       - pts_evidence_postprocess_orphanet
       - pts_evidence_postprocess_uniprot_variants
+      - pts_evidence_postprocess_uniprot_literature
       - pts_evidence_postprocess_clinical_precedence
   gentropy_l2g_training_set:
     depends_on:
