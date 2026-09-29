@@ -107,7 +107,7 @@ steps:
   pis_go:
   pis_interaction:
   pis_heritability:
-  pis_l2g:
+  pis_l2g_otg_gold_standard:
   pis_l2g_predefined_test_for_split:
   pis_literature:
   pis_molqtl:
@@ -590,11 +590,25 @@ steps:
       - gentropy_variant
       - gentropy_enhancer_to_gene
       - pts_interaction
+  gentropy_l2g_effector_gene_list:
+    depends_on:
+      - pis_l2g_otg_gold_standard
+      - pts_evidence_postprocess_clinvar
+      - pts_evidence_postprocess_panel_app
+      - pts_evidence_postprocess_clingen
+      - pts_evidence_postprocess_gene2phenotype
+      - pts_evidence_postprocess_orphanet
+      - pts_evidence_postprocess_uniprot_variants
+      - pts_evidence_postprocess_clinical_precedence
+  gentropy_l2g_training_set:
+    depends_on:
+      - gentropy_l2g_effector_gene_list
+      - gentropy_l2g_feature_matrix
+      - pts_interaction
   gentropy_l2g_train_test_split:
     depends_on:
-      - pis_l2g
       - pis_l2g_predefined_test_for_split
-      - gentropy_l2g_feature_matrix
+      - gentropy_l2g_training_set
   gentropy_l2g_training:
     depends_on:
       - gentropy_l2g_train_test_split

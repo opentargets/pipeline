@@ -32,7 +32,7 @@ scratchpad:
   hpa_subcellular_version: '2021-08-19'
   encore_version: '2024-11-12'
   validation_lab_version: '2024-11-12'
-  l2g_gold_standard_version: '2025-06-25'
+  l2g_otg_gold_standard_version: '230511'
   l2g_test_split_version: '2026-09-02'
 
 steps:
@@ -665,11 +665,11 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
-  #: L2G STEP :#####################################################################################
-  l2g:
-    - name: copy_many l2g gold standard
-      sources: gs://otar001-core/l2g/goldStandard/${l2g_gold_standard_version}/*.json
-      destination: input/l2g/gold_standard.json
+  #: L2G_OTG_GOLD_STANDARD STEP :###################################################################
+  l2g_otg_gold_standard:
+    - name: copy_many l2g otg gold standard
+      sources: gs://otar001-core/l2g/otgGoldStandard/${l2g_otg_gold_standard_version}/*.json
+      destination: input/l2g/otg_gold_standard.json
   ##################################################################################################
 
   #: L2G_PREDEFINED_TEST_FOR_SPLIT STEP :###########################################################
