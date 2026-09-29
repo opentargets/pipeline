@@ -1,17 +1,5 @@
 ---
 steps:
-  biosample:
-    params:
-      step: biosample_index
-      step.session.write_mode: overwrite
-      step.session.output_partitions: 1
-      # INPUTS
-      step.cell_ontology_input_path: '{{release_uri}}/input/biosample/cl.json'
-      step.uberon_input_path: '{{release_uri}}/input/biosample/uberon.json'
-      step.efo_input_path: '{{release_uri}}/input/biosample/efo.json'
-      # OUTPUTS
-      step.biosample_index_path: '{{release_uri}}/output/biosample'
-
   study:
     params:
       step: study_validation
@@ -302,18 +290,6 @@ steps:
         source_prefix: '{{release_uri}}/intermediate/l2g_prediction'
         destination_prefix: '{{release_uri}}/output/l2g_prediction'
         file_glob: '**.parquet'
-
-  l2g_evidence:
-    params:
-      step: locus_to_gene_evidence
-      step.session.write_mode: overwrite
-      step.locus_to_gene_threshold: 0.05
-      # INPUTS
-      step.credible_set_path: '{{release_uri}}/output/credible_set'
-      step.locus_to_gene_predictions_path: '{{release_uri}}/output/l2g_prediction/*'
-      step.study_index_path: '{{release_uri}}/output/study'
-      # OUTPUTS
-      step.evidence_output_path: '{{release_uri}}/intermediate/evidence/l2g_evidence'
 
   enhancer_to_gene:
     params:

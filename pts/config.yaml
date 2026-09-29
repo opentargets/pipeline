@@ -59,6 +59,17 @@ steps:
       destination: output/reactome
   ##################################################################################################
 
+  #: BIOSAMPLE STEP :###############################################################################
+  biosample:
+    - name: transform biosample
+      transformer: biosample
+      source:
+        cell_ontology: input/biosample/cl.json
+        uberon: input/biosample/uberon.json
+        efo: input/biosample/efo.json
+      destination: output/biosample
+  ##################################################################################################
+
   #: EXPRESSION STEP :##############################################################################
   baseline_expression_dice:
     - name: pyspark baseline expression harmonise dice
@@ -996,22 +1007,21 @@ steps:
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
-  evidence_postprocess_gwas_credible_sets:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+  gwas_evidence:
+    - name: transform gwas_evidence
+      transformer: evidence.gwas_evidence
       source:
-        evidence_path: intermediate/evidence/l2g_evidence
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        l2g_predictions: output/l2g_prediction
+        credible_set: output/credible_set
+        study_index: output/study
+        disease: output/disease
+        target: output/target
+        literature: input/literature/literature_export
       destination:
-        failed_evidence: excluded/evidence/gwas_credible_sets
         evidence: output/evidence_gwas_credible_sets
+        failed_evidence: excluded/evidence/gwas_credible_sets
       settings:
-        partition_count: 3
-        evidence_format: parquet
-        score_expression: resourceScore
-        datasource_id: gwas_credible_sets
+        locus_to_gene_threshold: 0.05
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1870,29 +1880,17 @@ steps:
           - resourceScore
           - statisticalTestTail
 
-  evidence_postprocess_encore:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
+  evidence_encore:
+    - name: transform encore_evidence
+      transformer: evidence.encore_evidence
       source:
-        evidence_path: input/evidence/encore.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/encore
+        disease: output/disease
+        target: output/target
       destination:
-        failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
+        failed_evidence: excluded/evidence/encore
       settings:
-        partition_count: 1
-        evidence_format: json
-        datasource_id: encore
-        score_expression: >-
-          CASE
-            WHEN geneticInteractionPValue IS NULL OR isnan(geneticInteractionPValue) THEN NULL
-            WHEN geneticInteractionPValue <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.0,
-              (1.0 - 0.0) * (log10(geneticInteractionPValue) - log10(1.0)) / (log10(0.01) - log10(1.0)) + 0.0
-            ))
-          END
         unique_fields:
           - targetId
           - targetFromSourceId

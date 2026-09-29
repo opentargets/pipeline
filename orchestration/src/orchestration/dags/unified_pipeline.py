@@ -342,9 +342,6 @@ with DAG(
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
-            'gentropy_biosample': {
-                'step.biosample_index_path': gsp('gentropy_biosample', 'step.biosample_index_path'),
-            },
             'gentropy_study': {
                 'step.valid_study_index_path': gsp('gentropy_study', 'step.valid_study_index_path'),
                 'step.invalid_study_index_path': gsp('gentropy_study', 'step.invalid_study_index_path'),
@@ -377,9 +374,6 @@ with DAG(
             },
             'gentropy_l2g_prediction': {
                 'step.predictions_path': gsp('gentropy_l2g_prediction', 'step.predictions_path'),
-            },
-            'gentropy_l2g_evidence': {
-                'step.evidence_output_path': gsp('gentropy_l2g_evidence', 'step.evidence_output_path'),
             },
             'gentropy_enhancer_to_gene': {
                 'step.valid_output_path': gsp('gentropy_enhancer_to_gene', 'step.valid_output_path'),
