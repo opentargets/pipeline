@@ -32,7 +32,7 @@ scratchpad:
   hpa_subcellular_version: '2021-08-19'
   encore_version: '2024-11-12'
   validation_lab_version: '2024-11-12'
-  l2g_otg_gold_standard_version: '230511'
+  l2g_otg_gold_standard_version: '20260930'
   l2g_test_split_version: '2026-09-02'
 
 steps:
