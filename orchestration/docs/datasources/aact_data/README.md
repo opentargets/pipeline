@@ -23,9 +23,10 @@ Derived data is stored under `gs://aact_data` with the following structure:
 
 ```{bash}
 gs://aact_data/<aact_version>/input/           # the raw CTTI archive
-gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
+gs://aact_data/<aact_version>/prompts/         # the prompt generated for this snapshot
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
 gs://aact_data/<aact_version>/errors/          # diagnostics for failed LLM calls
+gs://aact_data/<aact_version>/analysis/        # cache-wide summary and per-trial flags
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
 gs://aact_data/cache/trial_extraction/<schema-digest>/  # extraction cache, shared across AACT versions
 ```
@@ -48,6 +49,24 @@ The **aact_trial_extraction.py** dag contains the following steps:
    that are not already in the cache to the OpenAI Responses API. It restores
    and reads the required AACT tables inline through the shared PTS PostgreSQL
    reader.
+3. `pts_aact_trial_extraction_analysis` — reads every accepted extraction in
+   the current schema cache and writes `analysis/summary.json`,
+   `analysis/flags.parquet` and one row per cached trial in
+   `analysis/trials.parquet`. The summary reports, separately for each entity
+   field, how often an extracted label does not occur literally in its own
+   `evidence_quote`. Its denominator is the number of entities with quotes;
+   it also reports the share of trials containing that field with at least one
+   such label. Missing quotes are counted separately. The trial table includes
+   field-specific flag counts and changes between cached and current prompt
+   hashes. Other summary statistics include current-snapshot extraction
+   coverage, intent and confidence distributions, and entity-count shapes. A missing
+   extraction cannot be counted from the cache alone; the current snapshot's
+   prompt file supplies that denominator. Name-in-quote checks are literal,
+   case-insensitive substring checks: synonyms and abbreviations can be flagged,
+   and a name appearing in a quote does not establish the claimed clinical role.
+   Historical Batch API prompts sometimes included literature omitted from
+   later regenerated prompt files, so this step does not use those files to
+   determine whether a quote was present in the original model input.
 
 As in `unified_pipeline`, a step is named `{stage}_{step}`: the stage is the
 application that runs it, and the step itself is defined in that application's

@@ -28,3 +28,7 @@ steps:
     # key itself never appears in config or in code.
     gce_secret_files:
       openai-token: /var/run/secrets/openai-api-key
+
+  pts_aact_trial_extraction_analysis:
+    depends_on:
+      - pts_aact_trial_extraction

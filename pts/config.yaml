@@ -798,6 +798,15 @@ steps:
         # see PublicationsSpec — this fetches abstracts for every trial, not
         # only cache misses, so it needs its own cache before a full run
         enabled: false
+  aact_trial_extraction_analysis:
+    - name: trial_extraction_analysis audit cached trials
+      cache_uri: gs://aact_data/cache/trial_extraction
+      model_class: mira.schemas.ClinicalReportExtractionSchema
+      current_prompts: prompts/prompts.parquet
+      destination:
+        summary: analysis/summary.json
+        flags: analysis/flags.parquet
+        trials: analysis/trials.parquet
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
