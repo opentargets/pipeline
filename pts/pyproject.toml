@@ -57,9 +57,11 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-m", "not spark_nlp"]
 markers = [
   "slow: mark a test as slow (deselect with '-m \"not slow\"')",
   "pgserver: starts a real postgres server (deselect with '-m \"not pgserver\"')",
+  "spark_nlp: resolves external Spark NLP JARs through Maven/Ivy",
 ]
 
 [tool.ruff]
