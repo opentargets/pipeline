@@ -7,7 +7,7 @@ bucket: 'gs://aact_data'
 
 # Pipeline package versions
 pis_version: '26.9.0.dev0.aacttest.1'
-pts_version: '26.9.0.dev0.aacttest.6'
+pts_version: '26.9.0.dev0.aacttest.7'
 
 # Each step runs on its own machine, sized for the AACT archive plus its restore
 machine_type: 'n1-standard-8'
@@ -32,3 +32,10 @@ steps:
   pts_aact_trial_extraction_analysis:
     depends_on:
       - pts_aact_trial_extraction
+
+  pts_aact_trial_extraction_judge:
+    depends_on:
+      - pts_aact_trial_extraction_analysis
+    image: pts-with-karenina
+    gce_secret_files:
+      openai-token: /var/run/secrets/openai-api-key

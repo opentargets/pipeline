@@ -13,6 +13,7 @@ model and system instructions do not invalidate an accepted extraction.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -38,7 +39,7 @@ from otter.manifest.model import Artifact
 from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import TaskValidationError
+from otter.util.errors import NotFoundError, TaskValidationError
 from pydantic import BaseModel
 
 from pts.postgres import read_dump_tables
@@ -104,6 +105,11 @@ def _schema_cache_uri(cache_uri: str, schema_digest: str) -> str:
     return f'{cache_uri.rstrip("/")}/{schema_digest}'
 
 
+def _new_extraction_candidates(prompts: pl.DataFrame, cached: pl.DataFrame) -> pl.DataFrame:
+    """Record prompt IDs that lacked an accepted extraction at run start."""
+    return prompts.join(cached.select('cache_key'), on='cache_key', how='anti').select('id', 'prompt_sha256')
+
+
 class PublicationsSpec(BaseModel):
     """Whether to enrich prompts with Europe PMC abstracts."""
 
@@ -127,7 +133,8 @@ class LlmExtractSpec(Spec):
     source: dict[str, str]
     """AACT dump archive. The task restores the required tables inline."""
     destination: dict[str, str]
-    """Where to publish. Keys: ``prompts``, ``extraction``, ``errors``."""
+    """Where to publish. Keys: ``prompts``, ``extraction``, ``errors``;
+    ``trials_needing_extraction`` is optional for a downstream judge."""
     cache_uri: str
     """Root containing one extraction cache per response schema, an absolute
         URI. Must sit outside the dataset version directory so a trial whose
@@ -298,6 +305,22 @@ class LlmExtract(Task):
         prompts = self._build_prompts(report, schema_digest)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
+        # Persist the cohort before the cache is updated. A retry of this
+        # snapshot must judge the same newly attempted trials, even if a prior
+        # attempt already wrote successful rows to the shared cache.
+        if 'trials_needing_extraction' in self.spec.destination:
+            candidates_uri = self.spec.destination['trials_needing_extraction']
+            handle = StorageHandle(candidates_uri, config=self.context.config)
+            try:
+                _ = handle.read()
+            except NotFoundError:
+                known = read_cache(schema_cache_uri, self.context.config)
+                candidates = _new_extraction_candidates(prompts, known)
+                buffer = io.BytesIO()
+                candidates.write_parquet(buffer, compression='zstd')
+                handle.write(buffer.getvalue())
+                logger.info(f'recorded {candidates.height} extraction candidates at {handle.absolute}')
+
         if self.spec.legacy_batch_results:
             imported = self._seed_legacy_cache(prompts, schema_cache_uri)
             if self.spec.legacy_import_only:
@@ -373,6 +396,11 @@ class LlmExtract(Task):
     def _publish(self, prompts: pl.DataFrame, extractions: pl.DataFrame, schema_cache_uri: str) -> None:
         """Write the prompts, extractions and diagnostics."""
         artifacts = []
+        if 'trials_needing_extraction' in self.spec.destination:
+            candidate_handle = StorageHandle(
+                self.spec.destination['trials_needing_extraction'], config=self.context.config
+            )
+            artifacts.append(Artifact(source=schema_cache_uri, destination=candidate_handle.absolute))
         for key, df in (('prompts', prompts), ('extraction', extractions)):
             handle = StorageHandle(self.spec.destination[key], config=self.context.config)
             df.write_parquet(handle.absolute, compression='zstd')

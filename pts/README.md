@@ -47,12 +47,50 @@ docker run \
   ghcr.io/opentargets/pts:latest -h
 ```
 
-To build your own Docker image, run the following command from the root of the
-repository:
+To build your own Docker image, run the following command from the `pts/`
+directory:
 
 ```sh
 docker build -t pts .
 ```
+
+For AACT extraction evaluation, build the image variant with Karenina:
+
+```sh
+docker build --target with-karenina -t pts-with-karenina .
+```
+
+The regular image does not install Karenina. The evaluation image installs the
+`evaluation` optional dependency from `pyproject.toml`; both images use the
+same `uv.lock`. Update the locked dependencies with:
+
+```sh
+uv lock
+```
+
+The shared lock currently resolves OpenAI 2.54.0 because Karenina's LiteLLM
+dependency requires OpenAI below 3. NumPy resolves to 2.4.6. These versions
+are shared by the regular and evaluation images; only the Karenina extra and
+its dependencies are exclusive to the evaluation image.
+
+Karenina is temporarily pinned to the fork commit in `pyproject.toml` while
+the NumPy compatibility change is under review. Update that source and
+regenerate `uv.lock` after the change is merged upstream.
+
+The AACT judge writes `evaluation/summary.json` for counts,
+`evaluation/results.parquet` for one row per sampled trial, and
+`evaluation/findings.jsonl` for one review item per failed criterion. A review
+item includes the suspected error, a suggested fix, a trial-text quote, and a
+boolean indicating whether that quote occurs in the prompt. An empty findings
+file means the sampled trials passed all four criteria; it does not establish
+that the full cache is error-free.
+`results.parquet` also records the judge's recommended `drug_intent` and its
+reason even when the extracted intent passes.
+
+See the [AACT evaluation guide](../orchestration/docs/datasources/aact_data/evaluation.md)
+for the meaning and denominators of both `analysis/summary.json` and
+`evaluation/summary.json`, and how to investigate the resulting flags and
+findings.
 
 
 ## Development

@@ -36,6 +36,7 @@ test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1", "pytest
 
 [project.optional-dependencies]
 baseline_expression = ["pandas<3", "scanpy>=1.10.0", "cellex"]
+evaluation = ["karenina"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -47,6 +48,7 @@ torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.1" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
+karenina = { git = "https://github.com/ireneisdoomed/karenina", rev = "4a8ab3f260567411af5bd4ce4488b4bf0119433f" }
 
 [project.scripts]
 pts = "pts.core:main"

@@ -786,6 +786,7 @@ steps:
         prompts: prompts/prompts.parquet
         extraction: extraction/extractions.parquet
         errors: errors/errors.jsonl
+        trials_needing_extraction: extraction/trials_needing_extraction.parquet
       cache_uri: gs://aact_data/cache/trial_extraction
       # the AACT version, so a rerun against the same archive resumes from the
       # shards the last attempt finished instead of paying for them again
@@ -807,6 +808,22 @@ steps:
         summary: analysis/summary.json
         flags: analysis/flags.parquet
         trials: analysis/trials.parquet
+  aact_trial_extraction_judge:
+    - name: trial_extraction_judge review new trials
+      cache_uri: gs://aact_data/cache/trial_extraction
+      model_class: mira.schemas.ClinicalReportExtractionSchema
+      current_prompts: prompts/prompts.parquet
+      trials_needing_extraction: extraction/trials_needing_extraction.parquet
+      analysis_flags: analysis/flags.parquet
+      judge_cache_uri: gs://aact_data/cache/trial_extraction_judge
+      snapshot: '{{snapshot}}'
+      model: gpt-6-luna
+      sample_size: 100
+      flagged_fraction: 0.5
+      destination:
+        summary: evaluation/summary.json
+        results: evaluation/results.parquet
+        findings: evaluation/findings.jsonl
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################

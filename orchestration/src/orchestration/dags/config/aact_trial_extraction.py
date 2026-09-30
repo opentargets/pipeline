@@ -82,6 +82,7 @@ class AactTrialExtractionConfig:
         self.images = {
             'pis': f'{registry}/pis:{conf.get("pis_version")}',
             'pts': f'{registry}/pts:{conf.get("pts_version")}',
+            'pts-with-karenina': f'{registry}/pts-with-karenina:{conf.get("pts_version")}',
         }
         """The image and tag used to run each stage's steps."""
 
@@ -129,7 +130,7 @@ class AactTrialExtractionConfig:
         }
 
     def step_image(self, step_name: str) -> str:
-        """Return the container image that runs a step.
+        """Return the stage image, or the image selected by the step definition.
 
         Args:
             step_name: The name of the step, in the form ``{stage}_{step}``.
@@ -138,7 +139,8 @@ class AactTrialExtractionConfig:
             str: The image and tag.
         """
         stage, _ = step_name.split('_', 1)
-        return self.images[stage]
+        image = self.step_definition(step_name).get('image', stage)
+        return self.images[image]
 
     def step_env_vars(self, step_name: str) -> dict[str, str]:
         """Return the environment variables a step's container needs.

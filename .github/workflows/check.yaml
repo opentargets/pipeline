@@ -70,16 +70,33 @@ jobs:
 
       - name: Sync dependencies
         working-directory: pts
-        run: uv sync --locked --all-groups --all-extras
+        run: uv sync --locked --all-groups --extra baseline_expression
 
       - name: Run tests
         working-directory: pts
-        run: uv run --frozen pytest -rxs --splits 4 --group ${{ matrix.group }}
+        run: uv run --frozen --extra baseline_expression pytest -rxs --splits 4 --group ${{ matrix.group }}
 
       - name: run ty # better to do it here because we have deps installed
         if: matrix.group == 1
         working-directory: pts
-        run: uv run --frozen ty check --output-format=github
+        run: uv run --frozen --extra baseline_expression ty check --output-format=github
+
+  test-pts-evaluation:
+    needs: matrix
+    if: needs.matrix.outputs.has_pts == 'true'
+    name: Test pts evaluation extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Sync dependencies
+        working-directory: pts
+        run: uv sync --locked --all-groups --extra evaluation
+
+      - name: Run evaluation tests
+        working-directory: pts
+        run: uv run --frozen --extra evaluation pytest -q tests/test_trial_extraction_judge.py tests/test_trial_extraction_analysis.py
 
   test-gate:
     name: Test pts
@@ -88,13 +105,14 @@ jobs:
     # gate reports it under a name that's stable regardless of shard count -
     # and stays green when pts isn't part of this run at all (e.g. a
     # single-package release tag for another package).
-    needs: [matrix, test-pts]
+    needs: [matrix, test-pts, test-pts-evaluation]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
           if [[ "${{ needs.matrix.outputs.has_pts }}" == "true" ]]; then
             [[ "${{ needs.test-pts.result }}" == "success" ]] || exit 1
+            [[ "${{ needs.test-pts-evaluation.result }}" == "success" ]] || exit 1
           fi
 
   lint:
