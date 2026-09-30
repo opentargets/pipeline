@@ -90,6 +90,8 @@ steps:
         - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
       step.study_index_path: '{{release_uri}}/output/study'
       step.target_index_path: '{{release_uri}}/output/target'
+      # Tells measurements from diseases in the GWAS replication check (opentargets/gentropy#1305).
+      step.disease_index_path: '{{release_uri}}/output/disease'
       # OUTPUTS
       step.valid_study_locus_path: '{{release_uri}}/output/credible_set'
       step.invalid_study_locus_path: '{{release_uri}}/excluded/credible_set'
