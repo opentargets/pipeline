@@ -238,6 +238,21 @@ steps:
       # Metrics come from the held-out test set; the saved model is then refit on
       # train + test so it is not deployed having discarded the held-out labels.
       step.train_on_full_dataset: true
+      # XGBoost hyperparameters, pinned in full so a change of gentropy defaults does not
+      # silently change the model. Tuned on the EGL-based training set (26.09 feature matrix,
+      # 30% of positive genes held out): shallower, slower boosting generalises better to unseen
+      # genes and changes the top gene of ~2.5x fewer credible sets when the training set changes.
+      step.hyperparameters.n_estimators: 200
+      step.hyperparameters.max_depth: 4
+      step.hyperparameters.eta: 0.025
+      step.hyperparameters.min_child_weight: 10
+      step.hyperparameters.reg_alpha: 1
+      step.hyperparameters.reg_lambda: 1.0
+      step.hyperparameters.subsample: 0.8
+      step.hyperparameters.colsample_bytree: 0.8
+      step.hyperparameters.scale_pos_weight: 0.8
+      step.hyperparameters.gamma: 0
+      step.hyperparameters.max_delta_step: 1
       step.hf_hub_repo_id: opentargets/locus_to_gene_{{l2g_training_version}}
       step.hf_model_commit_message: 'chore: update model base model for {{l2g_training_version}} run'
       +step.session.extended_spark_conf: >-
