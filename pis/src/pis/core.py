@@ -14,8 +14,6 @@ def main() -> None:
     runner.register_tasks('pis.tasks')
     s = asyncio.run(runner.run())
 
-    print('hi')
-
     if s.manifest.result not in [Result.PENDING, Result.SUCCESS]:
         logger.error(f'step {s.name} failed')
         raise SystemExit(1)
