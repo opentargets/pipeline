@@ -666,8 +666,8 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
-  #: L2G_OTG_GOLD_STANDARD STEP :###################################################################
-  l2g_otg_gold_standard:
+  #: L2G STEP :#####################################################################################
+  l2g:
     - name: copy_many l2g otg gold standard
       sources: gs://otar001-core/l2g/otgGoldStandard/${l2g_otg_gold_standard_version}/*.json
       destination: input/l2g/otg_gold_standard.json

@@ -107,7 +107,7 @@ steps:
   pis_go:
   pis_interaction:
   pis_heritability:
-  pis_l2g_otg_gold_standard:
+  pis_l2g:
   pis_l2g_predefined_test_for_split:
   pis_literature:
   pis_molqtl:
@@ -593,7 +593,7 @@ steps:
       - pts_interaction
   gentropy_l2g_effector_gene_list:
     depends_on:
-      - pis_l2g_otg_gold_standard
+      - pis_l2g
       - pts_evidence_postprocess_clinvar
       - pts_evidence_postprocess_panel_app
       - pts_evidence_postprocess_clingen

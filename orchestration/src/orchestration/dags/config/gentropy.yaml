@@ -230,7 +230,7 @@ steps:
         - '{{release_uri}}/output/evidence_uniprot_variants'
         - '{{release_uri}}/output/evidence_uniprot_literature'
       step.clinical_evidence_path: '{{release_uri}}/output/evidence_clinical_precedence'
-      # Legacy OTG gold standard curation; pis_l2g_otg_gold_standard stages it.
+      # Legacy OTG gold standard curation; pis_l2g stages it.
       step.gold_standard_path: '{{release_uri}}/input/l2g/otg_gold_standard.json'
       # OUTPUTS
       step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
