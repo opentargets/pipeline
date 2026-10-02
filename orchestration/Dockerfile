@@ -1,4 +1,4 @@
-FROM apache/airflow:slim-3.2.1-python3.12
+FROM apache/airflow:slim-3.2.2-python3.12
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -14,9 +14,11 @@ USER airflow
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock README.md ./
 
-# We have to install dependencies like this because uv does not seem to install
-# `psycopg2-binary` properly when using the `--no-install-project` flag.
-RUN uv pip compile pyproject.toml -o requirements.txt && uv pip install -r requirements.txt
+# Install into Airflow's existing environment. Export from the lockfile so the
+# container uses the same dependency versions verified by the project checks.
+RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt && \
+  uv pip install -r requirements.txt && \
+  uv pip check
 
 USER 0
 RUN curl -sSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz" | \

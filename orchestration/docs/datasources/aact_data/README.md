@@ -23,9 +23,12 @@ Derived data is stored under `gs://aact_data` with the following structure:
 
 ```{bash}
 gs://aact_data/<aact_version>/input/           # the raw CTTI archive
-gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
+gs://aact_data/<aact_version>/prompts/         # the prompt generated for this snapshot
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
+gs://aact_data/<aact_version>/extraction/trials_needing_extraction.parquet  # cache misses at snapshot start
 gs://aact_data/<aact_version>/errors/          # diagnostics for failed LLM calls
+gs://aact_data/<aact_version>/analysis/        # cache-wide summary and per-trial flags
+gs://aact_data/<aact_version>/evaluation/      # LLM judge summary and findings
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
 gs://aact_data/cache/trial_extraction/<schema-digest>/  # extraction cache, shared across AACT versions
 ```
@@ -36,6 +39,10 @@ Within that directory, rows are keyed on the trial ID and schema digest, so an
 accepted extraction is reused across AACT snapshots. The rendered prompt hash
 is retained as audit metadata. The model and system instructions are
 operational choices and are not part of the key.
+
+For metric definitions, denominators, and a practical guide to turning the
+analysis and judge outputs into review actions, see [interpreting extraction
+quality checks](evaluation.md).
 
 ## Preprocessing
 
@@ -48,12 +55,59 @@ The **aact_trial_extraction.py** dag contains the following steps:
    that are not already in the cache to the OpenAI Responses API. It restores
    and reads the required AACT tables inline through the shared PTS PostgreSQL
    reader.
+3. `pts_aact_trial_extraction_analysis` — reads every accepted extraction in
+   the current schema cache and writes `analysis/summary.json`,
+   `analysis/flags.parquet` and one row per cached trial in
+   `analysis/trials.parquet`. The summary reports, separately for each entity
+   field, how often an extracted label does not occur literally in its own
+   `evidence_quote`. Its denominator is the number of entities with quotes;
+   it also reports the share of trials containing that field with at least one
+   such label. Missing quotes are counted separately. The trial table includes
+   field-specific flag counts and changes between cached and current prompt
+   hashes. Other summary statistics include current-snapshot extraction
+   coverage, intent and confidence distributions, and entity-count shapes. A missing
+   extraction cannot be counted from the cache alone; the current snapshot's
+   prompt file supplies that denominator. Name-in-quote checks are literal,
+   case-insensitive substring checks: synonyms and abbreviations can be flagged,
+   and a name appearing in a quote does not establish the claimed clinical role.
+   Historical Batch API prompts sometimes included literature omitted from
+   later regenerated prompt files, so this step does not use those files to
+   determine whether a quote was present in the original model input.
+4. `pts_aact_trial_extraction_judge` — selects up to 100 successful extractions
+   from the trials that needed extraction when this snapshot began. The
+   extraction step writes that cohort before updating the shared cache, so a
+   retry of the same snapshot uses the same cohort. The judge requires matching
+   stored and current prompt hashes. It selects up to 50 trials with systematic
+   flags and fills the remaining places with unflagged trials; either group can
+   fill unused places if the other is too small. When no new extraction
+   qualifies, the step samples earlier extractions without a cached verdict
+   for the current prompt, extraction, judge model, and rubric. Karenina uses
+   `gpt-6-luna` to compare the extraction with the trial text for investigated
+   drugs, primary indications, `drug_intent`,
+   and other clinical roles. It writes `evaluation/results.parquet`,
+   `evaluation/summary.json`, and `evaluation/findings.jsonl`. Each finding
+   names the failed criterion, explains the suspected error, suggests a fix,
+   and records whether its source quote occurs in the prompt. The JSONL file
+   has one record per failed criterion and is empty when every criterion
+   passes. Review these findings before changing the extractor: the judge's
+   suggested fixes are hypotheses, not ground truth. The pass rate describes
+   the selected sample, not all trials. `selection_pool` identifies whether
+   it used `trials_needing_extraction` or `previous_unjudged`. If neither pool has eligible
+   records, the step publishes an empty evaluation with `sample_size: 0`.
 
 As in `unified_pipeline`, a step is named `{stage}_{step}`: the stage is the
 application that runs it, and the step itself is defined in that application's
 own config file, so `pis_aact` runs the `aact` step from
 `pis/config.yaml`. The dependency graph is declared in
 `config/aact_trial_extraction.yaml`.
+
+The PTS publish workflow also publishes `pts-with-karenina` with the same
+version tag as `pts`. The judge step selects it with
+`image: pts-with-karenina` in its DAG definition. Other PTS steps continue
+to use the regular `pts` image. Before enabling this DAG version, publish a
+PTS tag containing these changes and update `pts_version` in
+`config/aact_trial_extraction.yaml` to that tag; both image names must exist
+under it.
 
 Each step runs on its own short-lived GCE VM and the VM is deleted afterwards.
 The dag does no diffing: it is already incremental where it matters, because

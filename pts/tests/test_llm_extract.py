@@ -11,16 +11,33 @@ import polars as pl
 import pytest
 
 from pts.tasks import llm_extract
-from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _run_extraction_in_thread, _schema_cache_uri
+from pts.tasks.llm_extract import (
+    LlmExtract,
+    LlmExtractSpec,
+    _new_extraction_candidates,
+    _run_extraction_in_thread,
+    _schema_cache_uri,
+)
 
 
 def test_schema_cache_uri_namespaces_the_cache_by_schema() -> None:
     assert _schema_cache_uri('gs://bucket/cache/', 'schema-digest') == 'gs://bucket/cache/schema-digest'
 
 
-def test_trial_report_passes_detailed_description_to_mira(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_new_extraction_candidates_excludes_accepted_cache_hits() -> None:
+    prompts = pl.DataFrame({
+        'id': ['nct1', 'nct2'],
+        'prompt_sha256': ['first', 'second'],
+        'cache_key': ['key1', 'key2'],
+    })
+    cached = pl.DataFrame({'cache_key': ['key1']})
+
+    candidates = _new_extraction_candidates(prompts, cached)
+
+    assert candidates.to_dicts() == [{'id': 'nct2', 'prompt_sha256': 'second'}]
+
+
+def test_trial_report_passes_detailed_description_to_mira(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tables = {
         'studies': pl.DataFrame({
             'nct_id': ['nct1'],

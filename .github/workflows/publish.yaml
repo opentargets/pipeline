@@ -71,6 +71,18 @@ jobs:
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ inputs.version }}
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ steps.branch-tag.outputs.tag }}
 
+      - id: push-pts-with-karenina-dev
+        if: ${{ !inputs.final && inputs.package == 'pts' }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./pts
+          target: with-karenina
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/pts-with-karenina:${{ inputs.version }}
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/pts-with-karenina:${{ steps.branch-tag.outputs.tag }}
+
       - id: push-final
         if: ${{ inputs.final }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
@@ -84,9 +96,30 @@ jobs:
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ inputs.version }}
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:latest
 
+      - id: push-pts-with-karenina-final
+        if: ${{ inputs.final && inputs.package == 'pts' }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./pts
+          target: with-karenina
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/pts-with-karenina:${{ inputs.version }}
+            ghcr.io/${{ github.repository }}/pts-with-karenina:latest
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/pts-with-karenina:${{ inputs.version }}
+            europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/pts-with-karenina:latest
+
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         if: ${{ inputs.final }}
         with:
           subject-name: ghcr.io/${{ github.repository }}/${{ inputs.package }}
           subject-digest: ${{ steps.push-final.outputs.digest }}
+          push-to-registry: true
+
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: ${{ inputs.final && inputs.package == 'pts' }}
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/pts-with-karenina
+          subject-digest: ${{ steps.push-pts-with-karenina-final.outputs.digest }}
           push-to-registry: true

@@ -7,7 +7,7 @@ bucket: 'gs://aact_data'
 
 # Pipeline package versions
 pis_version: '26.9.0.dev0.aacttest.1'
-pts_version: '26.9.0.dev0.aacttest.6'
+pts_version: '26.9.1rc1.aacttest.1'
 
 # Each step runs on its own machine, sized for the AACT archive plus its restore
 machine_type: 'n1-standard-8'
@@ -26,5 +26,16 @@ steps:
     # Fetched from Secret Manager onto the VM and mounted into the container at
     # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
     # key itself never appears in config or in code.
+    gce_secret_files:
+      openai-token: /var/run/secrets/openai-api-key
+
+  pts_aact_trial_extraction_analysis:
+    depends_on:
+      - pts_aact_trial_extraction
+
+  pts_aact_trial_extraction_judge:
+    depends_on:
+      - pts_aact_trial_extraction_analysis
+    image: pts-with-karenina
     gce_secret_files:
       openai-token: /var/run/secrets/openai-api-key
