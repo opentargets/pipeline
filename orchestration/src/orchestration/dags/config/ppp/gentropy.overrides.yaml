@@ -14,6 +14,7 @@ steps:
         - '{{release_uri}}/input/gwas/study/finngen'
         # molQTL
         - '{{release_uri}}/input/molqtl/study/ukb_ppp_eur'
+        - '{{release_uri}}/input/molqtl/study/sle_map'
         # GWAS_PPP
         - '{{release_uri}}/input/gwas/study/finngen_ukb_mvp'
         # molQTL PPP
@@ -46,6 +47,7 @@ steps:
         - '{{release_uri}}/input/gwas/credible_set/finngen'
         # molQTL
         - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
+        - '{{release_uri}}/input/molqtl/credible_set/sle_map'
         # GWAS_PPP
         - '{{release_uri}}/input/gwas/credible_set/finngen_ukb_mvp'
         # molQTL PPP
