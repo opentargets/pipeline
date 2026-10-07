@@ -26,4 +26,4 @@ class Cooccurrence(Dataset):
         Returns:
             StructType: Schema for the Cooccurrence dataset.
         """
-        return parse_spark_schema("cooccurrence.json")
+        return parse_spark_schema('cooccurrence.json')

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from loguru import logger
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
+from loguru import logger
 
 from pts.pyspark.common.session import Session
 
@@ -14,7 +14,10 @@ if TYPE_CHECKING:
 
 
 class PublicationIdLUT:
-    """Class to parse publication id lookup table downloaded from http://ftp.ebi.ac.uk/pub/databases/pmc/DOI/PMID_PMCID_DOI.csv.gz"""
+    """Class to parse publication id lookup table.
+
+    The table is downloaded from http://ftp.ebi.ac.uk/pub/databases/pmc/DOI/PMID_PMCID_DOI.csv.gz.
+    """
 
     @staticmethod
     def _lut_parser(df: DataFrame) -> DataFrame:
@@ -28,8 +31,10 @@ class PublicationIdLUT:
         """
         return(
             df
-            .select(f.col("PMID").alias("pmid_lut"), f.col("PMCID").alias("pmcid_lut"))
-            .filter(f.col("pmid_lut").isNotNull() & f.col("pmcid_lut").isNotNull() & f.col("pmcid_lut").startswith("PMC"))
+            .select(f.col('PMID').alias('pmid_lut'), f.col('PMCID').alias('pmcid_lut'))
+            .filter(
+                f.col('pmid_lut').isNotNull() & f.col('pmcid_lut').isNotNull() & f.col('pmcid_lut').startswith('PMC')
+            )
             .distinct()
         )
 

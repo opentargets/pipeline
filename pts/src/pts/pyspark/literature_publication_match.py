@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pts.pyspark.literature_utils.dataset.publication import Publication
-from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublication
-from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
 from loguru import logger
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce, maybe_repartition
+from pts.pyspark.literature_utils.dataset.publication import Publication
+from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublication
+from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame

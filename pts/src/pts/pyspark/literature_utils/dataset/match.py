@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from ontoma import OnToma
-from loguru import logger
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
+from loguru import logger
+from ontoma import OnToma
 
+from pts.pyspark.common.session import Session
 from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
-from pts.pyspark.common.session import Session
 
 if TYPE_CHECKING:
     from pyspark.sql.types import StructType
@@ -32,8 +32,8 @@ class Match(Dataset):
         Returns:
             StructType: Schema for the Match dataset.
         """
-        return parse_spark_schema("match.json")
-    
+        return parse_spark_schema('match.json')
+
     def map_labels(
         self: Match,
         session: Session,
@@ -60,9 +60,9 @@ class Match(Dataset):
         logger.info('map labels')
         mapped_matches = label_lut.map_entities(
             df=self.df,
-            result_col_name="entityIds",
+            result_col_name='entityIds',
             entity_col_name=label_col_name,
-            entity_kind="label",
+            entity_kind='label',
             type_col_name=type_col_name,
             include_normalised_entities=True,
             include_entity_source=True
@@ -72,8 +72,8 @@ class Match(Dataset):
         return MatchMapped(
             _df=(
                 mapped_matches
-                .withColumn("mappedId", f.explode_outer(f.array_distinct("entityIds.entityId")))
-                .withColumn("isMapped", f.col("mappedId").isNotNull())
+                .withColumn('mappedId', f.explode_outer(f.array_distinct('entityIds.entityId')))
+                .withColumn('isMapped', f.col('mappedId').isNotNull())
             ),
             _schema=MatchMapped.get_schema()
         )

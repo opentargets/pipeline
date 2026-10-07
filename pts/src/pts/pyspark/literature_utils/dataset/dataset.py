@@ -38,13 +38,13 @@ class Dataset(ABC):
             case DataFrame():
                 pass
             case _:
-                raise TypeError(f"Invalid type for _df: {type(self._df)}")
+                raise TypeError(f'Invalid type for _df: {type(self._df)}')
 
         match self._schema:
             case None | t.StructType():
                 self.validate_schema()
             case _:
-                raise TypeError(f"Invalid type for _schema: {type(self._schema)}")
+                raise TypeError(f'Invalid type for _schema: {type(self._schema)}')
 
     @property
     def df(self: Dataset) -> DataFrame:
@@ -54,7 +54,7 @@ class Dataset(ABC):
             DataFrame: Dataframe included in the Dataset
         """
         return self._df
-    
+
     @df.setter
     def df(self: Dataset, new_df: DataFrame) -> None:
         """Dataframe setter.
@@ -85,8 +85,8 @@ class Dataset(ABC):
         Raises:
                 NotImplementedError: Must be implemented in the child classes
         """
-        raise NotImplementedError("Must be implemented in the child classes")
-    
+        raise NotImplementedError('Must be implemented in the child classes')
+
     def validate_schema(self: Dataset) -> None:
         """Validate DataFrame schema against expected class schema.
 
@@ -99,6 +99,5 @@ class Dataset(ABC):
         # Unexpected fields in dataset
         if discrepancies := compare_struct_schemas(observed_schema, expected_schema):
             raise SchemaValidationError(
-                f"Schema validation failed for {type(self).__name__}", discrepancies
+                f'Schema validation failed for {type(self).__name__}', discrepancies
             )
-    

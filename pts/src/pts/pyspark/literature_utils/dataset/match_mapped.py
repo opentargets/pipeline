@@ -4,19 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from loguru import logger
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pyspark.sql.functions as f
+from loguru import logger
 from pyspark.storagelevel import StorageLevel
 
 from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
-from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.cooccurrence import Cooccurrence
+from pts.pyspark.literature_utils.dataset.dataset import Dataset
 
 if TYPE_CHECKING:
-    from typing import List
-
     from pyspark.sql import Column, DataFrame
     from pyspark.sql.types import StructType
 
@@ -30,9 +28,9 @@ class IdValidReason(Enum):
         DISAMBIGUATED (str): entityId is successfully disambiguated
     """
 
-    ONLY_ID = "Only entityId for the entityLabel"
-    ID_FROM_TRUSTED_SOURCE = "entityId is from a trusted source"
-    DISAMBIGUATED = "entityId is successfully disambiguated"
+    ONLY_ID = 'Only entityId for the entityLabel'
+    ID_FROM_TRUSTED_SOURCE = 'entityId is from a trusted source'
+    DISAMBIGUATED = 'entityId is successfully disambiguated'
 
 
 @dataclass
@@ -42,12 +40,12 @@ class MatchMapped(Dataset):
     This dataset describes mapped matches.
     """
 
-    SECTION_TO_SCORE_CONFIG = [
-        {"score": 10, "section": ["title"]},
-        {"score": 3,  "section": ["abstract"]},
-        {"score": 5,  "section": ["results", "result", "figure", "fig", "table"]},
-        {"score": 2,  "section": ["discussion", "discuss", "conclusion", "concl"]},
-        {"score": 1,  "section": ["introduction", "intro", "case study", "case", "appendix", "methods", "other"]},
+    SECTION_TO_SCORE_CONFIG: ClassVar[list[dict[str, Any]]] = [
+        {'score': 10, 'section': ['title']},
+        {'score': 3,  'section': ['abstract']},
+        {'score': 5,  'section': ['results', 'result', 'figure', 'fig', 'table']},
+        {'score': 2,  'section': ['discussion', 'discuss', 'conclusion', 'concl']},
+        {'score': 1,  'section': ['introduction', 'intro', 'case study', 'case', 'appendix', 'methods', 'other']},
     ]
 
     # Salt buckets for shuffles keyed by (pmid, mappedId) in the disambig
@@ -69,8 +67,8 @@ class MatchMapped(Dataset):
         Returns:
             StructType: Schema for the MatchMapped dataset.
         """
-        return parse_spark_schema("match_mapped.json")
-    
+        return parse_spark_schema('match_mapped.json')
+
     @staticmethod
     def _update_flag(
         flag_column: Column, flag_condition: Column, flag_text: Enum
@@ -92,36 +90,36 @@ class MatchMapped(Dataset):
         ).otherwise(flag_column)
 
     @staticmethod
-    def _identify_valid_ids(df: DataFrame, trusted_sources: List[str]) -> DataFrame:
+    def _identify_valid_ids(df: DataFrame, trusted_sources: list[str]) -> DataFrame:
         """Mark ids as valid based on certain criteria.
 
         Args:
             df (DataFrame): DataFrame containing id and source information.
-            trusted_sources (List[str]): List of trusted sources.
+            trusted_sources (list[str]): List of trusted sources.
 
         Returns:
             DataFrame: DataFrame where valid ids and their reasons are indicated.
         """
         return (
             df
-            .withColumn("validReasons", f.lit(None))
+            .withColumn('validReasons', f.lit(None))
             # mappedId is valid if the id is the only id mapped to the label
             .withColumn(
-                "validReasons", 
+                'validReasons',
                 MatchMapped._update_flag(
-                    f.col("validReasons"),
-                    f.size(f.array_distinct("entityIds.entityId")) == 1,
+                    f.col('validReasons'),
+                    f.size(f.array_distinct('entityIds.entityId')) == 1,
                     IdValidReason.ONLY_ID
                 )
             )
             # mappedId is valid if the mapping is from a trusted source
             .withColumn(
-                "validReasons", 
+                'validReasons',
                 MatchMapped._update_flag(
-                    f.col("validReasons"),
+                    f.col('validReasons'),
                     f.size(
                         f.array_except(
-                            f.col("entityIds.entitySource"), 
+                            f.col('entityIds.entitySource'),
                             f.array(*[f.lit(x) for x in trusted_sources])
                         )
                     ) == 0,
@@ -129,11 +127,11 @@ class MatchMapped(Dataset):
                 )
             )
             .withColumn(
-                "isValid",
-                f.when(f.size("validReasons") > 0, True).otherwise(False)
+                'isValid',
+                f.when(f.size('validReasons') > 0, True).otherwise(False)
             )
         )
-    
+
     @staticmethod
     def _subset_valid_ids(
         df: DataFrame,
@@ -172,9 +170,9 @@ class MatchMapped(Dataset):
         """
         salted_distinct = (
             df
-            .filter(f.col("isValid") == True)
-            .select("pmid", "mappedId")
-            .withColumn("_salt", (f.rand(seed=42) * salt_buckets).cast("int"))
+            .filter(f.col('isValid') == True)  # noqa: E712 (spark Column comparison)
+            .select('pmid', 'mappedId')
+            .withColumn('_salt', (f.rand(seed=42) * salt_buckets).cast('int'))
             .distinct()
             # barrier: prevents Catalyst from merging the two distincts (which
             # would prune the salt and collapse this back to one skewed shuffle)
@@ -182,11 +180,11 @@ class MatchMapped(Dataset):
         )
         return (
             salted_distinct
-            .drop("_salt")
+            .drop('_salt')
             .distinct()
-            .withColumn("isDisambiguous", f.lit(True))
+            .withColumn('isDisambiguous', f.lit(True))
         )
-    
+
     @staticmethod
     def _resolve_ambiguous_mappings(
         df: DataFrame,
@@ -213,45 +211,45 @@ class MatchMapped(Dataset):
             MatchMapped: Dataset with resolved mappings.
         """
         salted_df = df.withColumn(
-            "_salt", (f.rand(seed=42) * salt_buckets).cast("int")
+            '_salt', (f.rand(seed=42) * salt_buckets).cast('int')
         )
         salted_valid_id_df = valid_id_df.withColumn(
-            "_salt", f.explode(f.array(*[f.lit(i) for i in range(salt_buckets)]))
+            '_salt', f.explode(f.array(*[f.lit(i) for i in range(salt_buckets)]))
         )
         return MatchMapped(
             _df=(
                 salted_df
-                .join(salted_valid_id_df, on=["pmid", "mappedId", "_salt"], how="left")
-                .drop("_salt")
-                .withColumn("isDisambiguous", f.coalesce(f.col("isDisambiguous"), f.lit(False)))
+                .join(salted_valid_id_df, on=['pmid', 'mappedId', '_salt'], how='left')
+                .drop('_salt')
+                .withColumn('isDisambiguous', f.coalesce(f.col('isDisambiguous'), f.lit(False)))
                 .withColumn(
-                    "validReasons",
+                    'validReasons',
                     MatchMapped._update_flag(
-                        f.col("validReasons"),
-                        (f.col("isDisambiguous") == True) & (f.col("isValid") == False),
+                        f.col('validReasons'),
+                        (f.col('isDisambiguous') == True) & (f.col('isValid') == False),  # noqa: E712 (spark Column comparison)
                         IdValidReason.DISAMBIGUATED
                     )
                 )
-                .drop("isDisambiguous")
+                .drop('isDisambiguous')
                 .withColumn(
-                    "isValid",
-                    f.when(f.size("validReasons") > 0, True).otherwise(False)
+                    'isValid',
+                    f.when(f.size('validReasons') > 0, True).otherwise(False)
                 )
             ),
             _schema=MatchMapped.get_schema()
         )
-    
-    def disambiguate(self: MatchMapped, trusted_sources: List[str]) -> MatchMapped:
+
+    def disambiguate(self: MatchMapped, trusted_sources: list[str]) -> MatchMapped:
         """Identify and annotate mappings that are valid and disambiguous.
 
         Args:
-            trusted_sources (List[str]): List of trusted sources.
+            trusted_sources (list[str]): List of trusted sources.
 
         Returns:
             MatchMapped: Dataset with disambiguated mappings.
         """
         # only process successfully mapped matches
-        mapped_subset = self.df.filter(f.col("isMapped") == True)
+        mapped_subset = self.df.filter(f.col('isMapped') == True)  # noqa: E712 (spark Column comparison)
 
         logger.info('identify valid ids')
         annotated_df = self._identify_valid_ids(mapped_subset, trusted_sources)
@@ -278,8 +276,8 @@ class MatchMapped(Dataset):
         # go through config from lowest to highest score
         # if section matches pattern, assign score
         for row in reversed(MatchMapped.SECTION_TO_SCORE_CONFIG):
-            pattern = r"\b(" + "|".join(row["section"]) + r")\b"
-            score = f.when(section.rlike(pattern), float(row["score"])).otherwise(score)
+            pattern = r'\b(' + '|'.join(row['section']) + r')\b'
+            score = f.when(section.rlike(pattern), float(row['score'])).otherwise(score)
 
         return score
 
@@ -297,19 +295,19 @@ class MatchMapped(Dataset):
         return Cooccurrence(
             _df=(
                 self.df
-                .filter(f.col("type") == type1)
-                .alias("left")
+                .filter(f.col('type') == type1)
+                .alias('left')
                 .join(
                     (
                         self.df
-                        .filter(f.col("type") == type2)
+                        .filter(f.col('type') == type2)
                         .select(
-                            "pmid", "text", 
-                            "label", "type", 
-                            "startInSentence", "endInSentence", 
-                            "entityLabelNormalised", "mappedId"
+                            'pmid', 'text',
+                            'label', 'type',
+                            'startInSentence', 'endInSentence',
+                            'entityLabelNormalised', 'mappedId'
                         )
-                        .alias("right")
+                        .alias('right')
                     ),
                     on=[
                         (f.col('left.pmid') == f.col('right.pmid')) &
@@ -319,45 +317,45 @@ class MatchMapped(Dataset):
                 )
                 .select(
                     # fields shared between left and right datasets
-                    f.col("left.pmid").alias("pmid"),
-                    f.col("left.pmcid").alias("pmcid"),
-                    f.col("left.pubDate").alias("pubDate"),
-                    f.col("left.date").alias("date"),
-                    f.col("left.year").alias("year"),
-                    f.col("left.month").alias("month"),
-                    f.col("left.day").alias("day"),
-                    f.col("left.organisms").alias("organisms"),
-                    f.col("left.section").alias("section"),
-                    f.col("left.text").alias("text"),
-                    f.col("left.traceSource").alias("traceSource"),
+                    f.col('left.pmid').alias('pmid'),
+                    f.col('left.pmcid').alias('pmcid'),
+                    f.col('left.pubDate').alias('pubDate'),
+                    f.col('left.date').alias('date'),
+                    f.col('left.year').alias('year'),
+                    f.col('left.month').alias('month'),
+                    f.col('left.day').alias('day'),
+                    f.col('left.organisms').alias('organisms'),
+                    f.col('left.section').alias('section'),
+                    f.col('left.text').alias('text'),
+                    f.col('left.traceSource').alias('traceSource'),
                     # fields from left dataset
-                    f.col("left.label").alias("label1"),
-                    f.col("left.type").alias("type1"),
-                    f.col("left.startInSentence").alias("start1"),
-                    f.col("left.endInSentence").alias("end1"),
-                    f.col("left.entityLabelNormalised").alias("entityLabelNormalised1"),
-                    f.col("left.mappedId").alias("mappedId1"),
+                    f.col('left.label').alias('label1'),
+                    f.col('left.type').alias('type1'),
+                    f.col('left.startInSentence').alias('start1'),
+                    f.col('left.endInSentence').alias('end1'),
+                    f.col('left.entityLabelNormalised').alias('entityLabelNormalised1'),
+                    f.col('left.mappedId').alias('mappedId1'),
                     # fields from right dataset
-                    f.col("right.label").alias("label2"),
-                    f.col("right.type").alias("type2"),
-                    f.col("right.startInSentence").alias("start2"),
-                    f.col("right.endInSentence").alias("end2"),
-                    f.col("right.entityLabelNormalised").alias("entityLabelNormalised2"),
-                    f.col("right.mappedId").alias("mappedId2"),
+                    f.col('right.label').alias('label2'),
+                    f.col('right.type').alias('type2'),
+                    f.col('right.startInSentence').alias('start2'),
+                    f.col('right.endInSentence').alias('end2'),
+                    f.col('right.entityLabelNormalised').alias('entityLabelNormalised2'),
+                    f.col('right.mappedId').alias('mappedId2'),
                     # fields dependent on left and right values
-                    f.concat_ws('-', f.col('left.type'), f.col('right.type')).alias("type"),
-                    (f.col("mappedId1").isNotNull() & f.col("mappedId2").isNotNull()).alias("isMapped")
+                    f.concat_ws('-', f.col('left.type'), f.col('right.type')).alias('type'),
+                    (f.col('mappedId1').isNotNull() & f.col('mappedId2').isNotNull()).alias('isMapped')
                 )
                 # assign evidenceScore, given section
-                .withColumn("evidenceScore", self._section_to_score(f.col("section")))
+                .withColumn('evidenceScore', self._section_to_score(f.col('section')))
             ),
             _schema=Cooccurrence.get_schema()
         )
-    
+
     def generate_target_disease_cooccurrences(self: MatchMapped) -> Cooccurrence:
         """Generate target disease cooccurrences.
 
         Returns:
             Cooccurrence: Cooccurrence dataset containing target-disease pairs.
         """
-        return self._generate_pairwise_cooccurrences("GP", "DS")
+        return self._generate_pairwise_cooccurrences('GP', 'DS')
