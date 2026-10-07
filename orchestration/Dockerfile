@@ -16,7 +16,11 @@ COPY pyproject.toml uv.lock README.md ./
 
 # We have to install dependencies like this because uv does not seem to install
 # `psycopg2-binary` properly when using the `--no-install-project` flag.
-RUN uv pip compile pyproject.toml -o requirements.txt && uv pip install -r requirements.txt
+# Export from the lock rather than resolving pyproject afresh: a fresh resolve takes the
+# newest release of every dependency, airflow included, so the image would run versions
+# that neither the lock nor CI have seen.
+RUN uv export --frozen --format requirements.txt --no-dev --no-hashes --no-emit-project -o requirements.txt \
+  && uv pip install -r requirements.txt
 
 USER 0
 RUN curl -sSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz" | \
