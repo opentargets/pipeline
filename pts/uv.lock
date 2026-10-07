@@ -2214,6 +2214,7 @@ requires-dist = [
     { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyarrow", specifier = ">=22.0.0" },
+    { name = "pydantic", specifier = ">=2.13" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyspark", specifier = ">=4.1,<4.2" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
