@@ -1,4 +1,4 @@
-FROM apache/airflow:slim-3.2.1-python3.12
+FROM apache/airflow:slim-3.3.2-python3.12
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
