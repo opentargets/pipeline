@@ -133,7 +133,7 @@ class TestAnnotateNameDuplicates:
             self.result
             .filter(pl.col('id') == superseded_url)
             .unnest('meta')
-            .explode('basicPropertyValues')
+            .explode('basicPropertyValues', empty_as_null=True)
             .unnest('basicPropertyValues')
             .filter(pl.col('pred') == _IAO_REPLACED_BY)['val']
             .to_list()

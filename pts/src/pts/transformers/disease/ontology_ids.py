@@ -65,7 +65,7 @@ def normalised_xrefs(active: pl.DataFrame) -> pl.DataFrame:
     return (
         active
         .select('short_id', pl.col('meta').struct['xrefs'].alias('xrefs'))
-        .explode('xrefs')
+        .explode('xrefs', empty_as_null=True)
         .select('short_id', pl.col('xrefs').struct['val'].alias('val'))
         .filter(pl.col('val').is_not_null(), pl.col('val').str.contains(':'))
         .with_columns(
@@ -98,7 +98,7 @@ def name_bags(active: pl.DataFrame) -> dict[str, set[str]]:
     exact_synonyms = (
         active
         .select('short_id', pl.col('meta').struct['synonyms'].alias('synonyms'))
-        .explode('synonyms')
+        .explode('synonyms', empty_as_null=True)
         .filter(pl.col('synonyms').struct['pred'] == _EXACT_SYNONYM)
         .select('short_id', pl.col('synonyms').struct['val'].alias('val'))
     )

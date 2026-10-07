@@ -248,8 +248,10 @@ def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> Cl
     Returns:
         ClinicalReport object with validated disease entities
     """
-    exploded = reports.df.explode('diseases').unnest('diseases')
-    diseases = disease_index.select(pl.col('id').alias('diseaseId'), 'obsoleteTerms').explode('obsoleteTerms')
+    exploded = reports.df.explode('diseases', empty_as_null=True).unnest('diseases')
+    diseases = disease_index.select(pl.col('id').alias('diseaseId'), 'obsoleteTerms').explode(
+        'obsoleteTerms', empty_as_null=True
+    )
 
     # Find valid IDs (those that exist in diseases dataframe or are null in the first place)
     null_ids = exploded.filter(pl.col('diseaseId').is_null())
@@ -371,8 +373,8 @@ def flag_phase_iv_not_approved(reports: ClinicalReport) -> ClinicalReport:
     """
     exploded = (
         reports.df
-        .explode('drugs')
-        .explode('diseases')
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
         .with_columns([
             pl.col('drugs').struct.field('drugId'),
             pl.col('diseases').struct.field('diseaseId'),
@@ -428,8 +430,8 @@ def flag_unvalidated_indication(
         # INDICATIONS FROM TRIALS REPORTING A SINGLE DISEASE AND DRUG
         (
             reports.df
-            .explode('diseases')
-            .explode('drugs')
+            .explode('diseases', empty_as_null=True)
+            .explode('drugs', empty_as_null=True)
             .unnest('drugs')
             .unnest('diseases')
             .group_by('id')
@@ -441,8 +443,8 @@ def flag_unvalidated_indication(
             )
             .filter((pl.col('diseaseFromSources').list.len() == 1) & (pl.col('drugFromSources').list.len() == 1))
             .select('diseaseIds', 'drugIds')
-            .explode('diseaseIds')
-            .explode('drugIds')
+            .explode('diseaseIds', empty_as_null=True)
+            .explode('drugIds', empty_as_null=True)
             .rename({'diseaseIds': 'diseaseId', 'drugIds': 'drugId'})
             .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
         ),
@@ -450,16 +452,16 @@ def flag_unvalidated_indication(
         (
             reports.df
             .filter(pl.col('clinicalStage').is_in([ClinicalStageCategory.APPROVAL, ClinicalStageCategory.PREAPPROVAL]))
-            .explode('diseases')
-            .explode('drugs')
+            .explode('diseases', empty_as_null=True)
+            .explode('drugs', empty_as_null=True)
             .select(pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
             .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
         ),
         # INDICATIONS FROM OFFICIAL CHEMBL RECORDS
         (
             chembl_indication_report.df
-            .explode('diseases')
-            .explode('drugs')
+            .explode('diseases', empty_as_null=True)
+            .explode('drugs', empty_as_null=True)
             .select(
                 pl.col('diseases').struct.field('diseaseId'),
                 pl.col('drugs').struct.field('drugId'),
@@ -474,8 +476,8 @@ def flag_unvalidated_indication(
     # Flag reports where the drug/disease pair is NOT part of the high confidence set
     flagged_ids = (
         reports.df
-        .explode('diseases')
-        .explode('drugs')
+        .explode('diseases', empty_as_null=True)
+        .explode('drugs', empty_as_null=True)
         .select(pl.col('id'), pl.col('diseases').struct.field('diseaseId'), pl.col('drugs').struct.field('drugId'))
         .filter((pl.col('drugId').is_not_null()) & (pl.col('diseaseId').is_not_null()))
         .join(high_confidence_indications, on=['diseaseId', 'drugId'], how='anti')

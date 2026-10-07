@@ -124,7 +124,7 @@ class TestRemapEdges:
         superseded = (
             annotated_nodes
             .unnest('meta')
-            .explode('basicPropertyValues')
+            .explode('basicPropertyValues', empty_as_null=True)
             .unnest('basicPropertyValues')
             .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
             .to_list()
@@ -136,7 +136,7 @@ class TestRemapEdges:
         superseded = (
             annotated_nodes
             .unnest('meta')
-            .explode('basicPropertyValues')
+            .explode('basicPropertyValues', empty_as_null=True)
             .unnest('basicPropertyValues')
             .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
             .to_list()

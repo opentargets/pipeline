@@ -156,7 +156,7 @@ def process_drug_index(
     has_mechanism = (
         mechanism_of_action
         .select(pl.col('chemblIds').alias('id'))
-        .explode('id')
+        .explode('id', empty_as_null=True)
         # exploding a null or empty list yields a null row, which is not a mechanism
         .drop_nulls()
         .unique()
@@ -254,7 +254,7 @@ def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
     return (
         clinical_report
         .select('drugs', 'clinicalStage')
-        .explode('drugs')
+        .explode('drugs', empty_as_null=True)
         .select(
             pl.col('drugs').struct.field('drugId').alias('id'),
             'clinicalStage',
@@ -286,8 +286,8 @@ def _process_clinical_report_indications(
     exploded = (
         clinical_report
         .select('drugs', 'diseases', 'clinicalStage')
-        .explode('drugs')
-        .explode('diseases')
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
         .select(
             pl.col('drugs').struct.field('drugId'),
             pl.col('diseases').struct.field('diseaseId'),
