@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
 
-from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
+from pts.pyspark.common.utils import parse_spark_schema
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -16,7 +16,7 @@ class EPMCPublication:
     """Class to process publications from Europe PMC."""
 
     # schema specifying desired subset of columns
-    defined_schema = parse_spark_schema('publication.json')
+    defined_schema = parse_spark_schema('literature_publication.json')
 
     @staticmethod
     def _annotate_fulltexts_with_pmid(fulltext: DataFrame, lut: DataFrame) -> DataFrame:

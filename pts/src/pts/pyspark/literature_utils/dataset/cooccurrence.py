@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
+from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 
 if TYPE_CHECKING:
@@ -26,4 +26,4 @@ class Cooccurrence(Dataset):
         Returns:
             StructType: Schema for the Cooccurrence dataset.
         """
-        return parse_spark_schema('cooccurrence.json')
+        return parse_spark_schema('literature_cooccurrence.json')

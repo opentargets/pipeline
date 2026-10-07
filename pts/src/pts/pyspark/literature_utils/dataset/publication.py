@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pyspark.sql.functions as f
 from loguru import logger
 
-from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
+from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match import Match
 
@@ -30,7 +30,7 @@ class Publication(Dataset):
         Returns:
             StructType: Schema for the Publication dataset.
         """
-        return parse_spark_schema('publication.json')
+        return parse_spark_schema('literature_publication.json')
 
     def extract_matches(self: Publication) -> Match:
         """Extract matches information from publications.

@@ -10,7 +10,7 @@ from loguru import logger
 from ontoma import OnToma
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
+from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
 
@@ -32,7 +32,7 @@ class Match(Dataset):
         Returns:
             StructType: Schema for the Match dataset.
         """
-        return parse_spark_schema('match.json')
+        return parse_spark_schema('literature_match.json')
 
     def map_labels(
         self: Match,

@@ -5,11 +5,8 @@ from pyspark.sql import Row
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
-from pts.pyspark.literature_utils.common.schemas import (
-    SchemaValidationError,
-    compare_struct_schemas,
-    parse_spark_schema,
-)
+from pts.pyspark.common.utils import parse_spark_schema
+from pts.pyspark.literature_utils.common.schemas import SchemaValidationError, compare_struct_schemas
 from pts.pyspark.literature_utils.dataset.match_mapped import IdValidReason, MatchMapped
 from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublication
 from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
@@ -23,12 +20,12 @@ def _mapped_df(spark, rows):
 class TestSchemas:
     """Test the packaged schemas and the schema comparison helpers."""
 
-    @pytest.mark.parametrize('name', ['publication.json', 'match.json', 'match_mapped.json', 'cooccurrence.json'])
+    @pytest.mark.parametrize('name', ['publication', 'match', 'match_mapped', 'cooccurrence'])
     def test_packaged_schemas_parse(self, name):
-        assert parse_spark_schema(name).fields
+        assert parse_spark_schema(f'literature_{name}.json').fields
 
     def test_identical_schemas_have_no_issues(self):
-        schema = parse_spark_schema('match_mapped.json')
+        schema = parse_spark_schema('literature_match_mapped.json')
         assert compare_struct_schemas(schema, schema) == {}
 
     def test_flags_unexpected_and_mistyped_columns(self):

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
-import json
 from collections import defaultdict
 
 from pyspark.sql.types import ArrayType, StructType
-
-from pts.pyspark.literature_utils import schemas
 
 
 class SchemaValidationError(Exception):
@@ -37,21 +33,6 @@ class SchemaValidationError(Exception):
             [f'{k}: {",".join(v)}' for k, v in self.errors.items()]
         )
         return f'{self.message}\nErrors:\n  {stringified_errors}'
-
-
-def parse_spark_schema(schema_json: str) -> StructType:
-    """Parse Spark schema from JSON.
-
-    Args:
-        schema_json (str): JSON filename containing Spark schema in the schemas package
-
-    Returns:
-        StructType: Spark schema
-    """
-    core_schema = json.loads(
-        pkg_resources.read_text(schemas, schema_json, encoding='utf-8')
-    )
-    return StructType.fromJson(core_schema)
 
 
 def compare_struct_schemas(

@@ -10,7 +10,7 @@ import pyspark.sql.functions as f
 from loguru import logger
 from pyspark.storagelevel import StorageLevel
 
-from pts.pyspark.literature_utils.common.schemas import parse_spark_schema
+from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.cooccurrence import Cooccurrence
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 
@@ -67,7 +67,7 @@ class MatchMapped(Dataset):
         Returns:
             StructType: Schema for the MatchMapped dataset.
         """
-        return parse_spark_schema('match_mapped.json')
+        return parse_spark_schema('literature_match_mapped.json')
 
     @staticmethod
     def _update_flag(
