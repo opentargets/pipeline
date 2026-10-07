@@ -35,7 +35,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.schemas.encore_evidence import EncoreEvidenceSchema
+from pts.schemas.outputs.encore_evidence import EncoreEvidence
 from pts.transformers.evidence.utils import (
     assign_evidence_identifier,
     build_disease_lut,
@@ -87,7 +87,7 @@ def encore_evidence(
     invalid = processed.filter(pl.col('qualityControls').list.len() > 0)
 
     logger.info(f'Writing {valid.height} valid and {invalid.height} invalid ENCORE evidence records')
-    write_dataset(valid, str(destination['evidence']), schema=EncoreEvidenceSchema)
+    write_dataset(valid, str(destination['evidence']), schema=EncoreEvidence)
     write_dataset(invalid, str(destination['failed_evidence']))
 
 

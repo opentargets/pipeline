@@ -34,8 +34,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.biosample import BiosampleIndexSchema
 from pts.schemas.ontology import edge, node
+from pts.schemas.outputs.biosample import BiosampleIndex
 from pts.transformers.utils.dataset import write_dataset
 
 #: Edge predicates gentropy treats as parent-of relations for biosample (`utils.py`'s `df_parents`
@@ -88,7 +88,7 @@ def biosample(
     merged = _merge_indices([uberon_index, efo_index, cell_ontology_index])
 
     logger.info(f'writing {merged.height} biosample records')
-    write_dataset(merged, str(destination), schema=BiosampleIndexSchema)
+    write_dataset(merged, str(destination), schema=BiosampleIndex)
 
 
 def _extract_ontology_index(path: Path) -> pl.DataFrame:

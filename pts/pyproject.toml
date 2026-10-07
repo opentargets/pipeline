@@ -29,6 +29,7 @@ dependencies = [
   "huggingface-hub>=0.32.4",
   "networkx>=3.6.1",
   "pandera[polars]>=0.33.1",
+  "pydantic>=2.13",
 ]
 
 [dependency-groups]
