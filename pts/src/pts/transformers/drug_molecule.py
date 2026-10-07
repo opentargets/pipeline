@@ -163,13 +163,15 @@ def process_drug_index(
         .with_columns(_hasMechanismOfAction=pl.lit(value=True))
     )
 
+    # `maintain_order='left'` so the `keep='first'` guard below keeps the first molecule row as
+    # read: lazy joins run on the streaming engine, which makes no promise about row order.
     drug = (
         molecule
-        .join(max_phase.lazy(), on='id', how='left')
-        .join(indications.lazy(), on='id', how='left')
-        .join(probe_drug_ids.lazy(), on='id', how='left')
-        .join(probe_xrefs.lazy(), on='id', how='left')
-        .join(has_mechanism.lazy(), on='id', how='left')
+        .join(max_phase.lazy(), on='id', how='left', maintain_order='left')
+        .join(indications.lazy(), on='id', how='left', maintain_order='left')
+        .join(probe_drug_ids.lazy(), on='id', how='left', maintain_order='left')
+        .join(probe_xrefs.lazy(), on='id', how='left', maintain_order='left')
+        .join(has_mechanism.lazy(), on='id', how='left', maintain_order='left')
         .with_columns(crossReferences=_with_probe_xref())
         .filter(_is_drug())
         .collect()
