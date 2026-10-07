@@ -56,11 +56,10 @@ def _read_publications(
 ) -> Publication:
     """Read EPMC publications into a ``Publication`` dataset, in memory.
 
-    Replicates ``EPMCPublication.from_source`` but with a parameterisable
-    date-folder glob and an optional post-read repartition. No intermediate
-    publication parquet is written. The library's underscore-prefixed building
-    blocks are reused intentionally — the only part that must be reimplemented
-    is the read, because the library hardcodes its glob.
+    Reads each publication kind with a parameterisable date-folder glob and an
+    optional post-read repartition, then combines them with the
+    ``EPMCPublication`` building blocks. No intermediate publication parquet is
+    written.
 
     The final publication dataframe is persisted: the downstream pipeline
     triggers several independent actions (write match_valid, write
