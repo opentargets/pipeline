@@ -42,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          prune-cache: true # v9 flipped the default; keep the cache free of pre-built wheels
 
       - name: Sync dependencies
         working-directory: ${{ matrix.package }}
@@ -67,6 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          prune-cache: true # v9 flipped the default; keep the cache free of pre-built wheels
 
       - name: Sync dependencies
         working-directory: pts
@@ -103,6 +107,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          prune-cache: true # v9 flipped the default; keep the cache free of pre-built wheels
       - uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
         with:
           extra-args: --all-files --skip ty # we run ty during test
