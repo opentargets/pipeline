@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from literature.dataset.publication import Publication
-from literature.datasource.epmc.publication import EPMCPublication
-from literature.datasource.epmc.publication_id_lut import PublicationIdLUT
+from pts.pyspark.literature_utils.dataset.publication import Publication
+from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublication
+from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
 from loguru import logger
 from pyspark.sql import functions as f
 
