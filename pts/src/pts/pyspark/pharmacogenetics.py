@@ -62,14 +62,19 @@ def pharmacogenetics(
     logger.info('overwrite phenotypeText column with parsed phenotypes')
     # Collect texts that appear in ClinPGx but not yet in the phenotypes lookup.
     # A text present in the lookup is considered parsed, even if its phenotypeText
-    # is [] (empty extraction is valid).
-    unparsed_texts = (
-        pgx_df.select('genotypeAnnotationText').distinct().join(
+    # is [] (empty extraction is valid). Collected as rows, not through toPandas: pandas 3
+    # turns a null string into NaN, which would be sent to the API as the text "nan".
+    unparsed_texts_df = (
+        pgx_df
+        .select('genotypeAnnotationText')
+        .distinct()
+        .join(
             pgx_phenotypes_df.select('genotypeAnnotationText').distinct(),
             on='genotypeAnnotationText',
-            how='left_anti')
-        .toPandas()['genotypeAnnotationText'].to_list()
+            how='left_anti',
+        )
     )
+    unparsed_texts = [row.genotypeAnnotationText for row in unparsed_texts_df.collect()]
     annotated_pgx_df = annotate_phenotype(pgx_df, pgx_phenotypes_df)
     if len(unparsed_texts) == 0:
         logger.info('all phenotypes have been parsed')
