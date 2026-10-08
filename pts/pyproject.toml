@@ -20,7 +20,6 @@ dependencies = [
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
   "ontoma>=2.6.0",
-  "ot-literature",
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
   "pdfplumber>=0.11.9",
@@ -45,7 +44,6 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
-ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.1" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [project.scripts]
