@@ -36,7 +36,9 @@ gentropy_version: "3.4.0-rc.2"
 # published separately, so the tag existing in one does not mean it exists in the
 # other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
 vep_version: "release_116.1"
-spark_nlp_version: "6.1.5"
+# The Scala 2.13 / Spark 4 fat jar the pts clusters load. Keep it equal to the
+# spark-nlp pin in pts/pyproject.toml: the Python package and the jar must match.
+spark_nlp_version: "7.0.0"
 
 # Dependency graph
 # ----------------
