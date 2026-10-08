@@ -140,12 +140,7 @@ class UnifiedPipelineConfig:
         self.pts_image = f'{pts_image}:{pts_version}'
         """The image and tag used to run PTS steps."""
         self.pts_machine_type = 'n2d-standard-32'
-        """The machine type used to run PTS steps.
-
-        N2D (AMD EPYC) is cheaper per hour than N1 and faster per core, and needs no
-        change to the pd-ssd disks or default NIC that `ComputeEngineRunContainerizedWorkloadSensor`
-        sets up. C3/C3D/C4/N4 would need gVNIC and Hyperdisk support there first.
-        """
+        """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
 
