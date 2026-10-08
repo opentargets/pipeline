@@ -145,11 +145,11 @@ def literature_entity_lut(
 
     logger.info('Reading literature matches')
     matches = spark.read.parquet(source['matches'])
-    logger.info(f'[DIAG] matches partitions: {matches.rdd.getNumPartitions()}')
+    logger.info(f'[DIAG] matches partitions: {matches.rdd.getNumPartitions()}')  # ty:ignore[call-non-callable]
 
     logger.info('Computing relevance scores')
     result = _compute_relevance(matches)
-    logger.info(f'[DIAG] result partitions: {result.rdd.getNumPartitions()}')
+    logger.info(f'[DIAG] result partitions: {result.rdd.getNumPartitions()}')  # ty:ignore[call-non-callable]
 
     partition_count = settings.get('partition_count')
 

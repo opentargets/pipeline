@@ -120,7 +120,7 @@ def literature_embedding(
     t1 = time.time()
     logger.info(f'[DIAG] Regroup + persist: {t1 - t0:.1f}s')
     logger.info(f'[DIAG] Training rows: {row_count:,}')
-    logger.info(f'[DIAG] Training partitions: {training.rdd.getNumPartitions()}')
+    logger.info(f'[DIAG] Training partitions: {training.rdd.getNumPartitions()}')  # ty:ignore[call-non-callable]
 
     term_stats = training.select(f.size('terms').alias('len')).summary('min', 'mean', 'max').collect()
     for row in term_stats:
