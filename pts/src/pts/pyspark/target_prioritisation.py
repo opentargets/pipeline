@@ -255,7 +255,7 @@ def _target_membrane_query(
         parent_child_cousins
         .filter(f.col('Name') == 'Cell membrane')
         .select(f.explode(f.col('toSearch')).alias('termSL'))
-        .rdd.flatMap(lambda x: x)
+        .rdd.flatMap(lambda x: x)  # ty:ignore[call-non-callable]
         .collect()
     )
 
@@ -263,7 +263,7 @@ def _target_membrane_query(
         parent_child_cousins
         .filter(f.col('Name') == 'Secreted')
         .select(f.explode(f.col('toSearch')).alias('termSL'))
-        .rdd.flatMap(lambda x: x)
+        .rdd.flatMap(lambda x: x)  # ty:ignore[call-non-callable]
         .collect()
     )
 

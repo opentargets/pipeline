@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from ontoma import spark_nlp_coordinate
 from pyspark.conf import SparkConf
 from pyspark.sql import SparkSession
 
@@ -37,15 +38,27 @@ class Session:
     def _create_config(self, properties: dict[str, str] | None = None) -> SparkConf:
         if properties is None:
             properties = {}
-        base_properties = {}
+        # Spark 4 turns ANSI mode on by default, which makes invalid casts,
+        # out-of-range array access and arithmetic overflow raise instead of
+        # returning null. Keep the Spark 3 behaviour until the pyspark modules
+        # have been audited for it. The pts clusters set the same property.
+        base_properties = {'spark.sql.ansi.enabled': 'false'}
 
         if not self.is_dataproc:
-            base_properties = {
+            base_properties |= {
                 'spark.driver.maxResultSize': '0',
                 'spark.debug.maxToStringFields': '2000',
                 'spark.sql.broadcastTimeout': '3000',
-                # google cloud storage connector
-                'spark.jars.packages': 'com.google.cloud.bigdataoss:gcs-connector:hadoop3-2.2.21',
+                # google cloud storage connector, the version the Dataproc 3.0 image
+                # ships. Only the shaded jar is self-contained, and spark.jars.packages
+                # cannot select a classifier, so it is fetched by URL.
+                'spark.jars': (
+                    'https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/4.0.4/'
+                    'gcs-connector-4.0.4-shaded.jar'
+                ),
+                # spark-nlp, for the OnToma steps; on Dataproc the clusters load the
+                # staged fat jar instead
+                'spark.jars.packages': spark_nlp_coordinate(),
                 'spark.sql.adaptive.enabled': 'true',
                 'spark.sql.adaptive.coalescePartitions.enabled': 'true',
                 'spark.serializer': 'org.apache.spark.serializer.KryoSerializer',
