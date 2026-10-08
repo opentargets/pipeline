@@ -42,9 +42,11 @@ CURATION_SCHEMA = t.StructType([
 def _excel_sheet_to_spark(spark: Session, path: str, sheet: str) -> DataFrame:
     """Read an Excel sheet into Spark.
 
-    Every cell is read as a string and empty cells become null, so all typing happens downstream
+    Every cell is read as a string and empty cells become null, so all typing happens downstream.
+    pandas 3's `str` dtype cannot hold None, so the frame goes to object first; otherwise the
+    blanks stay NaN and reach Spark as the string "nan".
     """
-    pdf = pd.read_excel(path, sheet_name=sheet, dtype=str).where(lambda x: x.notnull(), None)
+    pdf = pd.read_excel(path, sheet_name=sheet, dtype=str).astype(object).where(lambda x: x.notnull(), None)
     schema = t.StructType([t.StructField(column, t.StringType(), True) for column in pdf.columns])
     return spark.spark.createDataFrame(pdf, schema=schema)
 
@@ -218,10 +220,10 @@ def process_cvdi_gene_burden(
         .merge(cvdi_p_value_cutoff_df, left_on='method_name', right_on='Mask')
         .drop('Mask', axis=1)
         .drop_duplicates()
-        # Dropping rows with no odds ratio or invalid values:
+        # Rows without an odds ratio (every Cauchy combined-test row) are kept with a null oddsRatio,
+        # matching the released evidence. Under pandas 3 astype(str) keeps NaN, so no dropna on it.
         .astype({'OR [95%CI]': str})
-        .dropna(subset=['OR [95%CI]'])
-        # Also filter out rows where Gene ID Ensembl contains non-Ensembl values
+        # Filter out rows where Gene ID Ensembl contains non-Ensembl values
         .query("`Gene ID Ensembl` != 'Gene ID Ensembl' and `Gene ID Ensembl`.notna()")
     )
 
