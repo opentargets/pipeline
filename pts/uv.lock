@@ -2684,7 +2684,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'baseline-expression'", specifier = "<3" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
-    { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
+    { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2,<3" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyspark", specifier = ">=3.5.7" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
