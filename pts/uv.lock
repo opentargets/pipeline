@@ -2150,7 +2150,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-mira"
-version = "1.0.1"
+version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -2170,9 +2170,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/68/3a/61f1fbf09db4ff5765507ca73e2e6a5b63941723130b1936a7a6d9ace92f/opentargets_mira-1.0.1.tar.gz", hash = "sha256:4f6cce4cbfc0552e857e40e23a0f1fb451761a8a3b57bba37a8f280cff0246f3", size = 416838, upload-time = "2026-09-24T13:43:39.996Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/87/e79386859c7f21f480451a85253f70d31faf20acf08fc1240966f6ab44b3/opentargets_mira-1.0.2.tar.gz", hash = "sha256:179202843f3001ac4d5ac8e8b635546b19f828f8c4ec673e1c444edd4d2549ef", size = 417988, upload-time = "2026-10-08T13:05:57.337Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/64/694c75ae5e69290c4266795961a5c863b6301143754cfd786e090bc8ac88/opentargets_mira-1.0.1-py3-none-any.whl", hash = "sha256:3640b5453d5dc6917496c94a9d158088871bdcde5468a9fdb6faee925ec3e967", size = 66366, upload-time = "2026-09-24T13:43:38.327Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/d3/3d96da6871a3208a45e4d3ee38c6ec3d327fc694a021a5b9e77d87b468ef/opentargets_mira-1.0.2-py3-none-any.whl", hash = "sha256:42a48f921c46c64f9eaeb1efa5f45e0438fde7a906f89605ea3d1a7f83053a15", size = 66440, upload-time = "2026-10-08T13:05:55.84Z" },
 ]
 
 [[package]]
@@ -2677,7 +2677,7 @@ requires-dist = [
     { name = "ontoma", specifier = ">=2.6.0" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.1" },
+    { name = "opentargets-mira", specifier = ">=1.0.2" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "ot-literature", git = "https://github.com/opentargets/ot-literature?tag=0.1.1" },
     { name = "pandas", specifier = ">=2.3.3" },
