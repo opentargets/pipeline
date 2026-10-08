@@ -1,6 +1,37 @@
 import pyspark.sql.functions as f
 import pytest
 
+from pts.pyspark.common.session import Session
+
+
+def _config(*, dataproc: bool, properties: dict[str, str] | None = None) -> dict[str, str]:
+    # build the config without starting a JVM
+    session = Session.__new__(Session)
+    session.is_dataproc = dataproc
+    return dict(session._create_config(properties).getAll())
+
+
+@pytest.mark.parametrize('dataproc', [False, True])
+def test_ansi_mode_is_off(dataproc):
+    # Spark 4 defaults it on; pts relies on Spark 3's null-on-error semantics
+    assert _config(dataproc=dataproc)['spark.sql.ansi.enabled'] == 'false'
+
+
+def test_local_session_loads_the_spark_4_jars():
+    conf = _config(dataproc=False)
+    assert conf['spark.jars.packages'].startswith('com.johnsnowlabs.nlp:spark-nlp_2.13:')
+    assert 'gcs-connector-4.' in conf['spark.jars']
+
+
+def test_dataproc_session_leaves_jars_to_the_cluster():
+    conf = _config(dataproc=True)
+    assert 'spark.jars' not in conf
+    assert 'spark.jars.packages' not in conf
+
+
+def test_step_properties_override_the_defaults():
+    assert _config(dataproc=False, properties={'spark.sql.ansi.enabled': 'true'})['spark.sql.ansi.enabled'] == 'true'
+
 
 @pytest.mark.slow
 def test_load_csv_and_replace(tmp_path, pts_session):

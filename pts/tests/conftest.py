@@ -22,6 +22,8 @@ def spark():
         .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
         .config('spark.sql.execution.arrow.pyspark.enabled', 'true')
         .config('spark.sql.shuffle.partitions', '1')
+        # as Session and the pts clusters do: Spark 4 defaults ANSI mode on
+        .config('spark.sql.ansi.enabled', 'false')
         .getOrCreate()
     )
     spark_session.sparkContext.setLogLevel('ERROR')
@@ -37,8 +39,9 @@ def pts_session():
     """
     # Use small resources in CI if desired:
     props = {
-        # example: override any defaults if needed
-        # 'spark.driver.memory': '1g',
+        # no test runs OnToma, so skip resolving spark-nlp and its ~600 MB of
+        # dependencies from Maven Central
+        'spark.jars.packages': '',
     }
 
     s = Session(app_name='pts-test', properties=props)
