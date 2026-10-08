@@ -156,10 +156,16 @@ class UnifiedPipelineConfig:
             Any GCS jar a PTS cluster references (via spark.jars) must have a
             registered upstream source in `staged_jars`, or the DAG fails.
         """
-        spark_nlp_jar = f'spark-nlp-assembly-{spark_nlp_version}.jar'
+        # The pts clusters run Spark 4, so they need the Scala 2.13 build. John Snow
+        # Labs publishes it under the same basename as the Scala 2.12 build, only
+        # in a `scala-2.13/` folder, so the staged copy carries the Scala version in
+        # its name: a 2.12 jar already staged for the same release cannot be
+        # mistaken for it.
+        spark_nlp_src = f'scala-2.13/spark-nlp-assembly-{spark_nlp_version}.jar'
+        spark_nlp_dst = f'spark-nlp-assembly_2.13-{spark_nlp_version}.jar'
         self.staged_jars: dict[str, str] = {
-            f'{self.staged_jar_prefix}{spark_nlp_jar}': (
-                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_jar}'
+            f'{self.staged_jar_prefix}{spark_nlp_dst}': (
+                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_src}'
             ),
         }
         """Registry of jars orchestration stages: staged destination URI -> source URL.
