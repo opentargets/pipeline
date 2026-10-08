@@ -1,0 +1,165 @@
+{
+    "fields": [
+      {
+        "name": "organisms",
+        "type": {
+          "containsNull": true,
+          "elementType": "string",
+          "type": "array"
+        },
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pmcid",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pmid",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pubDate",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "year",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "month",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "day",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "section",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "text",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "traceSource",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "end1",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "label1",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "start1",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "type1",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "entityLabelNormalised1",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "mappedId1",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "end2",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "label2",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "start2",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "type2",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "entityLabelNormalised2",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "mappedId2",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "isMapped",
+        "type": "boolean",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "evidenceScore",
+        "type": "double",
+        "nullable": true,
+        "metadata": {}
+      }
+    ],
+    "type": "struct"
+  }

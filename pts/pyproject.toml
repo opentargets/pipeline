@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.9.1rc2"
+version = "26.9.1rc5"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -12,7 +12,11 @@ dependencies = [
   "opentargets-otter>=26.9.1",
   "pandas>=2.3.3",
   "polars[connectorx]>=1.41.2,<3",
-  "pyspark>=3.5.7",
+  # pts clusters run Spark 3.5 (Dataproc image 2.3) and load the staged spark-nlp jar
+  # (`spark_nlp_version` in orchestration's unified_pipeline.yaml). Dataproc installs pts
+  # unlocked, so these ranges are what keep the python packages in step with the cluster.
+  "pyspark>=3.5.7,<4",
+  "spark-nlp==6.1.5",
   "openai>=2.41.1",
   "openpyxl>=3.1.5",
   "numpy>=2.4.4",
@@ -20,7 +24,6 @@ dependencies = [
   "polars-hash>=0.5.6",
   "torch>=2.10.0",
   "ontoma>=2.6.0",
-  "ot-literature",
   "transformers>=4.40.0,<5.0.0",
   "gcsfs>=2026.2.0",
   "pdfplumber>=0.11.9",
@@ -45,7 +48,6 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
-ot-literature = { git = "https://github.com/opentargets/ot-literature", tag = "0.1.1" }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [project.scripts]

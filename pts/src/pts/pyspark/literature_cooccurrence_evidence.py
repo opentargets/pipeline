@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from literature.dataset.match_mapped import MatchMapped
 from loguru import logger
 
 from pts.pyspark import evidence_epmc
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
+from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
