@@ -220,10 +220,10 @@ def process_cvdi_gene_burden(
         .merge(cvdi_p_value_cutoff_df, left_on='method_name', right_on='Mask')
         .drop('Mask', axis=1)
         .drop_duplicates()
-        # Rows without an odds ratio are kept with a null oddsRatio: the Cauchy combined test reports none.
-        # Under pandas 3, astype(str) keeps NaN, so a dropna here would remove every Cauchy row.
+        # Rows without an odds ratio (every Cauchy combined-test row) are kept with a null oddsRatio,
+        # matching the released evidence. Under pandas 3 astype(str) keeps NaN, so no dropna on it.
         .astype({'OR [95%CI]': str})
-        # Also filter out rows where Gene ID Ensembl contains non-Ensembl values
+        # Filter out rows where Gene ID Ensembl contains non-Ensembl values
         .query("`Gene ID Ensembl` != 'Gene ID Ensembl' and `Gene ID Ensembl`.notna()")
     )
 
