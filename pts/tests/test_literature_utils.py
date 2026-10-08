@@ -73,8 +73,11 @@ class TestMatchMapped:
             ('unknown', 1.0),
             # word boundaries: 'titles' does not match 'title'
             ('titles', 1.0),
-            # the highest-scoring matching section wins
+            # several sections match: the one listed first in SECTION_TO_SCORE_CONFIG wins,
+            # whatever its score (title > abstract > results > discussion > other)
             ('title abstract', 10.0),
+            ('results abstract', 3.0),
+            ('discussion results', 5.0),
         ],
     )
     def test_section_to_score(self, spark, section, score):
