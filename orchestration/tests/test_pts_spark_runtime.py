@@ -38,6 +38,8 @@ def test_pts_clusters_run_spark_4(pts_clusters: dict[str, dict]) -> None:
     """Every pts cluster is on the Spark 4 image; pts pins pyspark to its minor."""
     for name, cluster in pts_clusters.items():
         assert cluster['image_version'].startswith('3.0'), f'{name} is on {cluster["image_version"]}'
+        # the 2.x init action assumes conda; the 3.0 one has its own path
+        assert all('/dataproc-3.0/' in uri for uri in cluster['init_actions_uris']), name
     assert _pts_pin('pyspark') == 'pyspark>=4.1,<4.2'
 
 

@@ -73,7 +73,7 @@ function main() {
     echo "Install package..."
     # install spark-nlp dependencies
     run_with_retry "${python}" -m uv pip install --python "${python}" --no-break-system-packages --upgrade \
-        pandas scipy numpy pyarrow
+        pandas scipy numpy pyarrow fsspec
     run_with_retry "${python}" -m uv pip install --python "${python}" --no-break-system-packages \
         "pts @ git+${REPO_URI}.git@${PTS_REF}#subdirectory=pts"
     # pts pins pyspark to the image's Spark minor; log what was installed, so a
