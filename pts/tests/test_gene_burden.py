@@ -1,8 +1,14 @@
 """Tests for the gene_burden pyspark module."""
 
+from collections.abc import Iterator
+from pathlib import Path
+
+import pandas as pd
+import pytest
 from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import _brava_sample_size_lookup
+from pts.pyspark.common.session import Session
+from pts.pyspark.gene_burden import _brava_sample_size_lookup, _excel_sheet_to_spark, process_cvdi_gene_burden
 
 # Every cell of the BRaVa workbook is read as a string (see `_excel_sheet_to_spark`), so the
 # fixtures below mirror that and leave the casting to the code under test.
@@ -89,3 +95,69 @@ def test_the_lookup_key_is_unique(spark: SparkSession):
     )
 
     assert df.count() == df.select('Phenotype ID', 'Ancestry Group').distinct().count()
+
+
+@pytest.fixture
+def session_without_arrow(pts_session: Session) -> Iterator[Session]:
+    """The shared session as production runs it, with Arrow off.
+
+    The `spark` fixture enables Arrow and both fixtures share one SparkSession. Production sets no
+    Arrow config, and it is the row-wise pandas-to-Spark path that turns a NaN into the string "nan".
+    """
+    arrow = pts_session.spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
+    pts_session.spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
+    try:
+        yield pts_session
+    finally:
+        pts_session.spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+
+
+def test_blank_excel_cells_become_null(session_without_arrow: Session, tmp_path: Path):
+    """Under pandas 3, a `str` column cannot hold None; the blanks must still reach Spark as null, not "nan"."""
+    path = tmp_path / 'sheet.xlsx'
+    pd.DataFrame({'gene': ['A', None], 'value': [None, 1.5]}).to_excel(path, sheet_name='S', index=False)
+
+    rows = _excel_sheet_to_spark(session_without_arrow, str(path), 'S').collect()
+
+    assert [r.asDict() for r in rows] == [{'gene': 'A', 'value': None}, {'gene': None, 'value': '1.5'}]
+
+
+def _cvdi_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Mirror the column hierarchy of CVDI tables ST6 and ST3: one LOF mask plus the Cauchy combined test."""
+    associations = pd.DataFrame(
+        [['Asthma', 'ENSG00000001', 'GENE1', 10.0, '2.5 [1.5; 3.5]', 1e-10, 1e-11]],
+        columns=pd.MultiIndex.from_tuples([
+            ('phenotype', 'Unnamed: 0_level_1', 'Unnamed: 0_level_2'),
+            ('Gene ID Ensembl', 'Unnamed: 1_level_1', 'Unnamed: 1_level_2'),
+            ('Gene', 'Unnamed: 2_level_1', 'Unnamed: 2_level_2'),
+            ('ALL ancestry', 'LOF (MAF<0.1%)', 'cMAC'),
+            ('ALL ancestry', 'LOF (MAF<0.1%)', 'OR [95%CI]'),
+            ('ALL ancestry', 'LOF (MAF<0.1%)', 'Meta P-value'),
+            ('ALL ancestry', 'Cauchy', 'Cauchy P-value'),
+        ]),
+    )
+    cutoffs = pd.DataFrame(
+        [['FDR1%', 'LOF (MAF<0.1%)', 1, 1, 1, 1, 1e-5], [None, 'Cauchy', 1, 1, 1, 1, 1e-5]],
+        columns=pd.MultiIndex.from_tuples([
+            ('Unnamed: 0_level_0', 'Significance cutoff'),
+            ('Unnamed: 1_level_0', 'Mask'),
+            ('UKB', 'P cutoff'),
+            ('AoU', 'P cutoff'),
+            ('MGB', 'P cutoff'),
+            ('META (no correction)', 'P cutoff'),
+            ('META (overlap corrected)', 'P cutoff'),
+        ]),
+    )
+    return associations, cutoffs
+
+
+def test_cvdi_cauchy_associations_are_kept_without_an_odds_ratio(session_without_arrow: Session):
+    """The Cauchy combined test reports no odds ratio; its significant rows are evidence all the same."""
+    associations, cutoffs = _cvdi_frames()
+
+    df = process_cvdi_gene_burden(session_without_arrow, associations, cutoffs)
+    rows = {r.statisticalMethod: r for r in df.collect()}
+
+    assert set(rows) == {'LOF (MAF<0.1%)', 'Cauchy'}
+    assert rows['Cauchy'].oddsRatio is None
+    assert rows['LOF (MAF<0.1%)'].oddsRatio == 2.5
