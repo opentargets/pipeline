@@ -139,7 +139,7 @@ class UnifiedPipelineConfig:
         pts_version = up.get('pts_version')
         self.pts_image = f'{pts_image}:{pts_version}'
         """The image and tag used to run PTS steps."""
-        self.pts_machine_type = 'n1-standard-32'
+        self.pts_machine_type = 'n2d-standard-32'
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
