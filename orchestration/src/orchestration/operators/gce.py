@@ -361,6 +361,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             they will be mounted under the root directory.
         machine_type: Machine type to use for the instance (default e2-standard-2).
         boot_disk_size_gb: Size of the boot disk in GB (default 10).
+        source_image: Boot image (default the newest image in `COS_IMAGE_FAMILY`).
         work_disk_size_gb: If present, a second disk with the specified size in GB will be
             attached to the instance besides the boot disk, to be used by the workload. The disk will
             be formatted with ext4 and mounted under `/mnt/disks/work`. The instance will have write
@@ -398,6 +399,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         container_secret_files: dict[str, str] | None = None,
         machine_type: str = 'n1-standard-16',
         boot_disk_size_gb: int = 10,
+        source_image: str = COS_IMAGE_FAMILY,
         work_disk_size_gb: int = 0,
         gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
@@ -419,6 +421,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.container_secret_files = container_secret_files or {}
         self.machine_type = machine_type
         self.boot_disk_size_gb = boot_disk_size_gb
+        self.source_image = source_image
         self.gcp_conn_id = gcp_conn_id
         self.impersonation_chain = impersonation_chain
         self.work_disk_size_gb = work_disk_size_gb
@@ -552,7 +555,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 disk_size_gb=self.boot_disk_size_gb,
                 disk_type=f'zones/{self.zone}/diskTypes/pd-ssd',
                 labels=self.labels,
-                source_image=COS_IMAGE_FAMILY,
+                source_image=self.source_image,
             ),
         )
 

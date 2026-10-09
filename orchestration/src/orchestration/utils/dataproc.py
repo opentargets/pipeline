@@ -23,7 +23,6 @@ from orchestration.utils.labels import Labels
 
 log: logging.Logger = logging.getLogger(__name__)
 # TODO: Delete all these once they are no longer used here.
-GCP_DATAPROC_IMAGE = '2.2'
 GCP_AUTOSCALING_POLICY = 'otg-etl'
 GCP_EFM_AUTOSCALING_POLICY = 'otg-efm'
 GENTROPY_CLI_SCRIPT = 'gs://genetics_etl_python_playground/initialisation/cli.py'
