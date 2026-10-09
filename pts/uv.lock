@@ -1732,7 +1732,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-mira"
-version = "1.0.3"
+version = "1.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -1752,9 +1752,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/27/a5/b9960dae43e51a7e1013f6876a8ba6c566b776f21a8281a746fe373a9a3a/opentargets_mira-1.0.3.tar.gz", hash = "sha256:4c957c09c71d9dc928f9f462d77a35ccdb842182c95d4d54c1fe99c66b7dcd48", size = 418526, upload-time = "2026-10-09T14:46:08.995Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/73/d0e0d8c1f6a81fafc4f73312fb4b21a858aaff2847b532b37308d087c45d/opentargets_mira-1.0.4.tar.gz", hash = "sha256:d856e8a1c4e8b0507afe623281d36053a1661e479fea7845d32618e2e3944f09", size = 419004, upload-time = "2026-10-09T17:16:18.959Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/b6/5e863031d737a2367d5eea6b09d85965e3aabdba32a01c683c441617f3c8/opentargets_mira-1.0.3-py3-none-any.whl", hash = "sha256:6105a702f49dbcca6e58696c5f776de3ac789b4964167efb6cc27c8083de1e12", size = 66441, upload-time = "2026-10-09T14:46:07.554Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/5a/a18e65cbdde941d7c545b7b26dec57e759bc5f56cf2431bdeb7e73efed2f/opentargets_mira-1.0.4-py3-none-any.whl", hash = "sha256:d870a12e1518646316f2db4776c1a02012cb6bdd70c7ec741351a6b21d54cec2", size = 66614, upload-time = "2026-10-09T17:16:17.418Z" },
 ]
 
 [[package]]
@@ -2188,7 +2188,7 @@ requires-dist = [
     { name = "ontoma", specifier = ">=2.7.1" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.3" },
+    { name = "opentargets-mira", specifier = ">=1.0.4" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
