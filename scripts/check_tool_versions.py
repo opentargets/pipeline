@@ -105,6 +105,12 @@ def installer_versions(found: dict[str, list[tuple[str, str]]]) -> None:
         found['uv'].append((rel(path), m.group(1) or MISSING))
 
 
+def init_action_versions(found: dict[str, list[tuple[str, str]]]) -> None:
+    path = ROOT / 'orchestration' / 'src' / 'orchestration' / 'assets' / 'install_dependencies_on_cluster.sh'
+    m = re.search(r'UV_VERSION=[\'"]?([^\'"\s]+)', path.read_text())
+    found['uv'].append((rel(path), m.group(1) if m else MISSING))
+
+
 def main() -> int:
     found: dict[str, list[tuple[str, str]]] = defaultdict(list)
     pyproject_pins(found)
@@ -113,6 +119,7 @@ def main() -> int:
     setup_uv_versions(found)
     docker_uv_images(found)
     installer_versions(found)
+    init_action_versions(found)
 
     failed = False
     width = max(len(source) for rows in found.values() for source, _ in rows)
