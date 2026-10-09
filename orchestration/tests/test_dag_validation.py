@@ -1,6 +1,11 @@
 """Try to parse and validate the DAGs."""
 
+from typing import cast
+
 from airflow.models import DagBag
+
+from orchestration.operators.dataproc import CreateClusterOperator
+from orchestration.operators.gcs import UploadFileOperator
 
 
 def test_no_import_errors(dag_bag: DagBag) -> None:
@@ -77,6 +82,23 @@ def test_staged_jars_gate_every_step_of_the_clusters_that_use_them(dag_bag: DagB
         cluster_type = task_id.split('create_cluster_')[-1]
         if cluster_type in staged_cluster_types:
             assert task_id in gated, f'{task_id} skips the staging its cluster depends on'
+
+
+def test_pts_init_action_is_uploaded_before_every_pts_cluster(dag_bag: DagBag) -> None:
+    """Every pts step creates its cluster itself, so each create must wait for the upload."""
+    dag = dag_bag.dags['unified_pipeline']
+    upload = cast(UploadFileOperator, dag.get_task('upload_pts_init_action'))
+    assert str(upload.src_path).endswith('assets/install_dependencies_on_cluster.sh')
+    assert str(upload.dst_uri).endswith('/etc/bin/install_dependencies_on_cluster.sh')
+    assert upload.retries
+
+    creates = {t.task_id for t in dag.tasks if t.task_id.startswith('pts_') and '.create_cluster_' in t.task_id}
+    assert creates, 'expected pts steps that create a cluster'
+    assert upload.downstream_task_ids == creates
+    for task_id in creates:
+        cluster_config = cast(dict, cast(CreateClusterOperator, dag.get_task(task_id)).cluster_config)
+        actions = cluster_config['initialization_actions']
+        assert [a['executable_file'] for a in actions] == [str(upload.dst_uri)], task_id
 
 
 def test_staged_jar_tasks_retry(dag_bag: DagBag) -> None:

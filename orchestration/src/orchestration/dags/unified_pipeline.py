@@ -309,6 +309,24 @@ with DAG(
                 for step_name in dataproc_steps:
                     stage.set_downstream(steps[step_name]['create_cluster'])
 
+        # upload the init action the pts clusters run, once, before any of them is created
+        #
+        # A root task for the same reason as the jar staging above. The clusters
+        # read it from this run's prefix, so a cluster always installs pts with the
+        # script of the orchestration version that created it.
+        init_action = UploadFileOperator(
+            task_id='upload_pts_init_action',
+            project_id=GCP_PROJECT_PLATFORM,
+            src_path=config.pts_init_action_source,
+            dst_uri=config.pts_init_action_uri,
+            retries=3,
+            retry_delay=timedelta(minutes=2),
+        )
+        for steps_in_cluster in pts_clusters.values():
+            for step_name in steps_in_cluster:
+                if 'create_cluster' in steps[step_name]:
+                    init_action.set_downstream(steps[step_name]['create_cluster'])
+
         # delete a cluster after its steps have run
         for cluster_name, steps_in_cluster in pts_clusters.items():
             x = DeleteClusterOperator(

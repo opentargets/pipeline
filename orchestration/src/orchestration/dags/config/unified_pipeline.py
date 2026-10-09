@@ -118,6 +118,7 @@ class UnifiedPipelineConfig:
                 # Lets the pts / pts_literature clusters point spark.jars at the
                 # version-pinned Spark-NLP fat jar in the pipelines bucket.
                 'spark_nlp_version': spark_nlp_version,
+                'pts_init_action_uri': self.pts_init_action_uri,
             },
         )
         """The cluster definitions."""
@@ -187,6 +188,16 @@ class UnifiedPipelineConfig:
     def release_uri(self) -> str:
         """GCS URI for this run's output in the pipeline-runs bucket."""
         return self.run.release_uri
+
+    @property
+    def pts_init_action_source(self) -> Path:
+        """Local path of the init action that installs pts on the pts clusters."""
+        return Path(__file__).parents[2] / 'assets' / 'install_dependencies_on_cluster.sh'
+
+    @property
+    def pts_init_action_uri(self) -> str:
+        """GCS URI the DAG uploads the pts init action to, and the pts clusters run it from."""
+        return f'{self.release_uri}/etc/bin/install_dependencies_on_cluster.sh'
 
     @property
     def is_ppp(self) -> bool:
