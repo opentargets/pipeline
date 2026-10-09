@@ -837,8 +837,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "ruff", specifier = ">=0.15.17" },
-    { name = "ty", specifier = ">=0.0.55" },
+    { name = "ruff", specifier = "==0.16.10" },
+    { name = "ty", specifier = "==0.0.85" },
 ]
 test = [{ name = "pytest", specifier = ">=9.0.3" }]
 
