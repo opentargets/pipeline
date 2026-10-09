@@ -29,9 +29,9 @@ pts_version: "26.9.1.dev0.ds-2609-ppp.6cb5bb0"
 # No leading `v` here: this value is used both ways and each consumer adds what it
 # needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
 # while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
-# gentropy:v3.4.0-rc.2` is a 404 while `:3.4.0-rc.2` resolves. Both forms were
-# checked: the image on ghcr and the tag v3.4.0-rc.2 in opentargets/gentropy.
-gentropy_version: "3.4.0-rc.2"
+# gentropy:v3.4.0-rc.2` is a 404 while `:3.4.0-rc.2` resolves.
+# 3.5.0-rc.1 is the first tag with the effector_gene_list and training_set steps.
+gentropy_version: "3.5.0-rc.1"
 # Built by opentargets/vep-image; the GitHub release and the registry image are
 # published separately, so the tag existing in one does not mean it exists in the
 # other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
@@ -568,6 +568,7 @@ steps:
     depends_on:
       - gentropy_study
       - pts_target
+      - pts_disease
   gentropy_colocalisation:
     num_partitions: 200
     depends_on:
@@ -590,11 +591,26 @@ steps:
       - gentropy_variant
       - gentropy_enhancer_to_gene
       - pts_interaction
-  gentropy_l2g_train_test_split:
+  gentropy_l2g_effector_gene_list:
     depends_on:
       - pis_l2g
-      - pis_l2g_predefined_test_for_split
+      - pts_evidence_postprocess_clinvar
+      - pts_evidence_postprocess_panel_app
+      - pts_evidence_postprocess_clingen
+      - pts_evidence_postprocess_gene2phenotype
+      - pts_evidence_postprocess_orphanet
+      - pts_evidence_postprocess_uniprot_variants
+      - pts_evidence_postprocess_uniprot_literature
+      - pts_evidence_postprocess_clinical_precedence
+  gentropy_l2g_training_set:
+    depends_on:
+      - gentropy_l2g_effector_gene_list
       - gentropy_l2g_feature_matrix
+      - pts_interaction
+  gentropy_l2g_train_test_split:
+    depends_on:
+      - pis_l2g_predefined_test_for_split
+      - gentropy_l2g_training_set
   gentropy_l2g_training:
     depends_on:
       - gentropy_l2g_train_test_split
