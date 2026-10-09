@@ -582,11 +582,13 @@ def get_device() -> torch.device:
 
 
 @lru_cache(maxsize=1)
-def _load_model_assets(model_name: str) -> tuple[AutoTokenizer, AutoModelForSequenceClassification, dict[int, str]]:
+def _load_model_assets(model_name: str) -> tuple[PreTrainedTokenizerBase, PreTrainedModel, dict[int, str]]:
     """Load the tokenizer, model, and label mapping — only once, the model is cached."""
     cache_dir = os.environ.get('TRANSFORMERS_CACHE') or os.environ.get('HF_HOME')
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+    if tokenizer is None:
+        raise ValueError(f'{model_name} has no tokenizer')
 
     model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=cache_dir)
     model.to(get_device())
