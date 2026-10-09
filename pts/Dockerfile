@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /uvx /bin/
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends jq git && \
@@ -8,7 +8,7 @@ RUN apt-get update && \
 WORKDIR /app
 COPY . /app
 
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
 # pixeltable-pgserver runs postgres under a non-root account when it detects
 # uid 0, and creates that account with useradd from PostgresServer.__init__ --
@@ -17,4 +17,4 @@ RUN uv sync --frozen
 # race for good. This cannot be caught in CI, which does not run as root.
 RUN useradd -m -s /bin/bash pgserver
 
-ENTRYPOINT ["uv", "run", "pts"]
+ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pts"]
