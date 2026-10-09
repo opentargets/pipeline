@@ -42,6 +42,9 @@ LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 LOGGING_RETRY_MAX_WAIT = 600
 
+# COS LTS family; supported until November 2028.
+COS_IMAGE_FAMILY = 'projects/cos-cloud/global/images/family/cos-133-lts'
+
 # WARNING
 # After any change in deferrable operators, you must restart the airflow triggerer
 # container to apply the changes with:
@@ -543,7 +546,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 disk_size_gb=self.boot_disk_size_gb,
                 disk_type=f'zones/{self.zone}/diskTypes/pd-ssd',
                 labels=self.labels,
-                source_image='projects/cos-cloud/global/images/cos-113-18244-151-50',
+                source_image=COS_IMAGE_FAMILY,
             ),
         )
 
@@ -590,6 +593,11 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                     {
                         'key': 'google-monitoring-enabled',
                         'value': 'true',
+                    },
+                    # keeps the startup-script exit line where ComputeEngineExitCodeTrigger looks for it
+                    {
+                        'key': 'enable-guest-agent-core-plugin',
+                        'value': 'false',
                     },
                     {
                         'key': 'startup-script',

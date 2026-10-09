@@ -184,7 +184,7 @@ def _chembl_mechanism_references(df: pl.DataFrame) -> pl.DataFrame:
     return (
         df
         .select('id', 'mechanism_refs')
-        .explode('mechanism_refs')
+        .explode('mechanism_refs', empty_as_null=True)
         .filter(pl.col('mechanism_refs').is_not_null())
         .unnest('mechanism_refs')
         .group_by('id', 'ref_type', maintain_order=True)
@@ -250,7 +250,7 @@ def _chembl_target(
                 pl.col('uniprot_swissprot').fill_null([]),
             ).alias('uniprotIds'),
         )
-        .explode('uniprotIds')
+        .explode('uniprotIds', empty_as_null=True)
         .rename({'uniprotIds': 'uniprot_id'})
         .drop_nulls('uniprot_id')
     )

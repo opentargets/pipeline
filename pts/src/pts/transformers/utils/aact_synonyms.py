@@ -153,7 +153,7 @@ def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
     return (
         batch
         .select(pl.col('id').alias('nct_id'), roles.alias('entry'))
-        .explode('entry')
+        .explode('entry', empty_as_null=True)
         # a trial with no extracted drugs explodes to a null row rather than to nothing
         .drop_nulls('entry')
         .unnest('entry')
@@ -195,7 +195,7 @@ def _build_chembl_indexes(mol_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFr
                 ),
             ).alias('labels'),
         )
-        .explode('labels')
+        .explode('labels', empty_as_null=True)
         .rename({'labels': 'label'})
         .with_columns(name_norm=_normalize_name(pl.col('label')))
         .filter(pl.col('name_norm').str.len_chars() > 0)
@@ -265,7 +265,9 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
         entry_id=pl.col('nct_id') + pl.lit('\x1f') + pl.col('members').list.sort().list.join('\x1f')
     )
 
-    members = entries.select('entry_id', 'nct_id', pl.col('members').alias('member')).explode('member')
+    members = entries.select('entry_id', 'nct_id', pl.col('members').alias('member')).explode(
+        'member', empty_as_null=True
+    )
 
     resolved = (
         members
@@ -286,14 +288,19 @@ def _anchor_candidates(entries: pl.DataFrame, name_index: pl.DataFrame, parent_c
     anchors = (
         resolved
         .select('entry_id', pl.col('ids').alias('anchor_id'))
-        .explode('anchor_id')
+        .explode('anchor_id', empty_as_null=True)
         # an entry none of whose members resolve to a molecule drops out entirely here
         .drop_nulls('anchor_id')
         .group_by('entry_id')
         .agg(pl.col('anchor_id').unique().alias('anchor_ids'))
     )
 
-    cand = resolved.join(anchors, on='entry_id', how='inner').explode('anchor_ids').rename({'anchor_ids': 'anchor_id'})
+    cand = (
+        resolved
+        .join(anchors, on='entry_id', how='inner')
+        .explode('anchor_ids', empty_as_null=True)
+        .rename({'anchor_ids': 'anchor_id'})
+    )
     cand = cand.filter(~pl.col('ids').list.contains(pl.col('anchor_id')))
 
     pc = parent_child.rename({'id': 'anchor_id', 'related': 'pc_related'})
@@ -509,7 +516,7 @@ def merge_aact_synonyms(mol_combined: pl.DataFrame, aact_df: pl.DataFrame) -> pl
     fresh = (
         merged
         .select('id', 'aact_labels_filled')
-        .explode('aact_labels_filled')
+        .explode('aact_labels_filled', empty_as_null=True)
         .drop_nulls('aact_labels_filled')
         .join(existing_lc, on='id', how='left')
         .filter(~pl.col('existing_lc').list.contains(pl.col('aact_labels_filled').str.to_lowercase()))

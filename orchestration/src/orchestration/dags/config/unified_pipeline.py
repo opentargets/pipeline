@@ -139,7 +139,7 @@ class UnifiedPipelineConfig:
         pts_version = up.get('pts_version')
         self.pts_image = f'{pts_image}:{pts_version}'
         """The image and tag used to run PTS steps."""
-        self.pts_machine_type = 'n1-standard-32'
+        self.pts_machine_type = 'n2d-standard-32'
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
@@ -195,10 +195,19 @@ class UnifiedPipelineConfig:
         }
 
     def pts_env_vars(self, step_name: str) -> dict[str, str]:
-        """Return the environment variables for a PTS step."""
+        """Return the environment variables for a PTS step.
+
+        Polars 2 spills to disk when a query outgrows its memory budget. By default
+        it spills into the OS temp dir, which on these vms is the 10 GB boot disk: a
+        spill fills it and the step can hang instead of failing. Point it at the
+        work disk instead (polars creates the directory), and pin the disk budget
+        explicitly rather than rely on the polars default.
+        """
         return {
             'PTS_STEP': step_name.removeprefix('pts_'),
             'PTS_CONFIG_PATH': '/config.yaml',
+            'POLARS_OOC_SPILL_DIR': f'{self.pts.config["work_path"]}/.polars-spill',
+            'POLARS_OOC_DISK_BUDGET_MB': '64000',
         }
 
     def steps(self, prefix: str = '') -> list[str]:

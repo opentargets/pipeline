@@ -151,12 +151,12 @@ def generate_dataproc_task_chain(
             cluster_config=cc,
         )
         for task in tasks:
-            if not task.get_direct_relatives(upstream=True):
+            if not task.upstream_task_ids:
                 task.set_upstream(create_cluster_task)
     if delete:
         delete_cluster_task = delete_cluster(cluster_name=kwargs['cluster_name'])
         for task in tasks:
-            if not task.get_direct_relatives(upstream=False):
+            if not task.downstream_task_ids:
                 task.set_downstream(delete_cluster_task)
 
     return tasks
