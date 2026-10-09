@@ -45,13 +45,17 @@ def job_spec(environments: EnvironmentRegistrySpec) -> JobSpec:
 
 @pytest.fixture
 def operator(job_spec: JobSpec, environments: EnvironmentRegistrySpec) -> BatchJobOperator:
-    return BatchJobOperator(
+    op = BatchJobOperator(
         task_id='run_gentropy_l2g_prediction',
         job_name='gentropy-l2g-prediction',
         batch_index_row=BatchIndexRow(idx=0, environments=environments),
         batch_job_spec=BatchJobOperatorSpec(job=job_spec),
         labels=Labels({'tool': 'gentropy', 'step': 'gentropy_l2g_prediction'}),
     )
+    # airflow calls this when it loads the dag, and it is where the google provider turns the
+    # job proto into the dict these tests read (since 22.4.0; earlier it did so in __init__)
+    op.prepare_template()
+    return op
 
 
 @pytest.fixture

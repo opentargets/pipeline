@@ -259,7 +259,7 @@ def _process_molecule_synonyms(preprocessed_mols: pl.DataFrame) -> pl.DataFrame:
     synonyms = (
         preprocessed_mols
         .select('id', 'syns')
-        .explode('syns')
+        .explode('syns', empty_as_null=True)
         # A molecule with no molecule_synonyms rows joins to a null `syns` array, which
         # polars' explode keeps as a null row rather than discarding.
         .drop_nulls('syns')

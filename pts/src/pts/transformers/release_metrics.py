@@ -207,7 +207,7 @@ def _quality_control_flag_total_metrics(
     if isinstance(qc_dtype, pl.List):
         qc_counts = (
             df
-            .select(pl.col('qualityControls').explode().alias('qc_flag'))
+            .select(pl.col('qualityControls').explode(empty_as_null=True).alias('qc_flag'))
             .filter(pl.col('qc_flag').is_not_null())
             .group_by('qc_flag')
             .len()
@@ -292,11 +292,8 @@ def _build_run_id(ot_release: str) -> str:
 
 
 def _to_parquet_glob(path: str | Path) -> str:
-    """Normalize a dataset path to a parquet glob consumable by Polars."""
-    path_str = str(path)
-    if '.parquet' in path_str:
-        return path_str
-    return f'{path_str.rstrip("/")}/*.parquet'
+    """Normalize a dataset directory to a parquet glob consumable by Polars."""
+    return f'{str(path).rstrip("/")}/*.parquet'
 
 
 def _to_release_relative_path(

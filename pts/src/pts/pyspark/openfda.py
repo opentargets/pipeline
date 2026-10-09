@@ -511,7 +511,7 @@ def _run_montecarlo(
         .agg(
             f.first('uniq_reports_total').alias('uniq_reports_total'),
             f.collect_list('uniq_report_ids').alias('uniq_reports_combined'),
-            f.collect_list('uniq_report_ids_by_reaction').alias('n_i'),
+            f.array_sort(f.collect_list('uniq_report_ids_by_reaction')).alias('n_i'),
             f.first(f.col(target_stats_col_id)).alias(target_stats_col_id),
         )
         .withColumn(

@@ -53,7 +53,7 @@ def _client(api) -> tuple[RateLimitedLoggingClient, _Log]:
     """
     client = object.__new__(RateLimitedLoggingClient)
     log = _Log()
-    client.log = log
+    client.log = log  # ty:ignore[invalid-assignment]  # a stub, not a full structlog Logger
     client.project = 'a-project'
     gapic = type('_Gapic', (), {'list_log_entries': staticmethod(api)})()
     client._logging_api = type('_Api', (), {'_gapic_api': gapic})()

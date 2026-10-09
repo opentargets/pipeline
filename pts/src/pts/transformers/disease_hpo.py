@@ -46,7 +46,7 @@ def disease_hpo(
     obsolete_terms = (
         n
         .unnest('meta')
-        .explode('basicPropertyValues')
+        .explode('basicPropertyValues', empty_as_null=True)
         .unnest('basicPropertyValues')
         .filter(pl.col('pred') == 'http://www.geneontology.org/formats/oboInOwl#hasAlternativeId')
         .with_columns(
