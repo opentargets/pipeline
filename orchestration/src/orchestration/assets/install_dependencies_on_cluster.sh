@@ -9,7 +9,7 @@ set -x
 PTS_REF=$(/usr/share/google/get_metadata_value attributes/PTS_REF)
 readonly PTS_REF
 readonly REPO_URI="https://github.com/opentargets/pipeline"
-readonly UV_VERSION="0.12.23"
+readonly UV_VERSION="0.12.24"
 DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
 readonly DATAPROC_CLUSTER_NAME
 echo "export DATAPROC_CLUSTER_NAME=${DATAPROC_CLUSTER_NAME}" >> /etc/profile.d/custom_env_vars.sh
@@ -21,13 +21,19 @@ function err() {
 
 function run_with_retry() {
     local -r cmd=("$@")
-    for ((i = 0; i < 3; i++)); do
+    local delay=5
+    for ((i = 0; i < 5; i++)); do
         if "${cmd[@]}"; then
             return 0
         fi
-        sleep 5
+        sleep "${delay}"
+        delay=$((delay * 2))
     done
     err "Failed to run command: ${cmd[*]}"
+}
+
+function fetch_openai_token() {
+    gcloud secrets versions access latest --secret="openai-token" > /var/run/secrets/openai_token
 }
 
 # The interpreter PySpark jobs run under. Dataproc exports it as PYSPARK_PYTHON
@@ -77,7 +83,8 @@ function main() {
     git -C "${src}" remote add origin "${REPO_URI}.git"
     git -C "${src}" sparse-checkout set pts
     run_with_retry git -C "${src}" fetch -q --depth 1 --filter=blob:none origin "${ref}"
-    git -C "${src}" checkout -q FETCH_HEAD
+    # blob:none fetches file contents lazily, during checkout
+    run_with_retry git -C "${src}" checkout -q FETCH_HEAD
     git -C "${src}" log -1 --format='pts source: %H %s'
 
     # pyspark and py4j come from the image's Spark
@@ -97,7 +104,7 @@ function main() {
     echo "Get openai token secret..."
     # add openai token secret
     mkdir -p /var/run/secrets
-    gcloud secrets versions access latest --secret="openai-token" > /var/run/secrets/openai_token
+    run_with_retry fetch_openai_token
     # by name: the 'hadoop' group was gid 112 on the 2.x images, and a new base OS
     # need not keep it
     chown root:hadoop /var/run/secrets/openai_token
