@@ -13,8 +13,7 @@ dependencies = [
   "pandas>=3.0.6",
   "polars[connectorx]>=1.41.2,<3",
   # pts clusters run Spark 4.1 (Dataproc image 3.0) and load the staged Scala 2.13 spark-nlp jar
-  # (`spark_nlp_version` in orchestration's unified_pipeline.yaml). Dataproc installs pts
-  # unlocked, so these ranges are what keep the python packages in step with the cluster.
+  # (`spark_nlp_version` in orchestration's unified_pipeline.yaml).
   "pyspark>=4.1,<4.2",
   "spark-nlp==7.0.0",
   "openai>=2.41.1",

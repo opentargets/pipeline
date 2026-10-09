@@ -9,6 +9,7 @@ set -x
 PTS_REF=$(/usr/share/google/get_metadata_value attributes/PTS_REF)
 readonly PTS_REF
 readonly REPO_URI="https://github.com/opentargets/pipeline"
+readonly UV_VERSION="0.12.23"
 DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
 readonly DATAPROC_CLUSTER_NAME
 echo "export DATAPROC_CLUSTER_NAME=${DATAPROC_CLUSTER_NAME}" >> /etc/profile.d/custom_env_vars.sh
@@ -60,24 +61,38 @@ function main() {
     if ! "${python}" -m pip --version; then
         "${python}" -m ensurepip
     fi
-    run_with_retry "${python}" -m pip install uv
+    run_with_retry "${python}" -m pip install "uv==${UV_VERSION}"
 
     # Temporary: a GitHub HTTP/2 defect makes unauthenticated fetches fail on
     # some git builds -- the ref advertisement returns 200, the pack negotiation
-    # 401. uv shells out to /usr/bin/git, so this covers the install below.
-    # Remove once GitHub resolves it.
+    # 401. Covers the fetch below. Remove once GitHub resolves it.
     # https://github.com/orgs/community/discussions/206581
     git config --system http.version HTTP/1.1
 
+    # PTS_REF is url-encoded (pts%40v...) for the git+ URL it used to go in
+    local ref src
+    ref=$(printf '%b' "${PTS_REF//%/\\x}")
+    src=$(mktemp -d)
+    git -C "${src}" init -q
+    git -C "${src}" remote add origin "${REPO_URI}.git"
+    git -C "${src}" sparse-checkout set pts
+    run_with_retry git -C "${src}" fetch -q --depth 1 --filter=blob:none origin "${ref}"
+    git -C "${src}" checkout -q FETCH_HEAD
+    git -C "${src}" log -1 --format='pts source: %H %s'
+
+    # pyspark and py4j come from the image's Spark
+    "${python}" -m uv export --quiet --project "${src}/pts" --frozen --no-dev --no-emit-project \
+        --format pylock.toml --no-emit-package pyspark --no-emit-package py4j \
+        --output-file "${src}/pylock.toml"
+
     "${python}" -m uv pip uninstall --python "${python}" pts || true
     echo "Install package..."
-    # install spark-nlp dependencies
-    run_with_retry "${python}" -m uv pip install --python "${python}" --no-break-system-packages --upgrade \
-        pandas scipy numpy pyarrow
     run_with_retry "${python}" -m uv pip install --python "${python}" --no-break-system-packages \
-        "pts @ git+${REPO_URI}.git@${PTS_REF}#subdirectory=pts"
-    # pts pins pyspark to the image's Spark minor; log what was installed, so a
-    # mismatch with the image's Spark shows up in the init action output.
+        --preview-features pylock -r "${src}/pylock.toml"
+    run_with_retry "${python}" -m uv pip install --python "${python}" --no-break-system-packages \
+        --no-deps "${src}/pts"
+    # report only: packages the image ships may declare pins the lock does not meet
+    "${python}" -m uv pip check --python "${python}" || true
     "${python}" -c 'import pyspark; print("pyspark", pyspark.__version__, pyspark.__file__)'
     echo "Get openai token secret..."
     # add openai token secret
