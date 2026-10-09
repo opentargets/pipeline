@@ -34,6 +34,6 @@ def update_quality_flag(
             .list.unique()
             .list.sort()
         )
-        .otherwise(pl.col('qualityControls'))
+        .otherwise(pl.col('qualityControls').fill_null([]))
         .alias('qualityControls')
     )

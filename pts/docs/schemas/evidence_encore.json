@@ -1,0 +1,415 @@
+{
+  "name": "evidence_encore",
+  "description": "ENCORE genetic-interaction evidence",
+  "primary_key": [
+    "id"
+  ],
+  "strict": true,
+  "fields": [
+    {
+      "name": "diseaseFromSourceMappedId",
+      "description": "Mapped Open Targets disease identifier",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^[A-Za-z]+_[A-Za-z0-9]+$"
+      }
+    },
+    {
+      "name": "diseaseId",
+      "description": "Open Targets disease identifier",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^[A-Za-z]+_[A-Za-z0-9]+$"
+      },
+      "reference": {
+        "dataset": "disease",
+        "column": "id"
+      }
+    },
+    {
+      "name": "targetId",
+      "description": "Open Targets target identifier",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^ENSG\\d{11}$"
+      },
+      "reference": {
+        "dataset": "target",
+        "column": "id"
+      },
+      "bioregistry": "ensembl"
+    },
+    {
+      "name": "id",
+      "description": "Identifer of the disease/target evidence",
+      "required": true,
+      "primary_key": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^[0-9a-f]{40}$"
+      }
+    },
+    {
+      "name": "qualityControls",
+      "description": "Evidence quality flags",
+      "required": true,
+      "nullable": false,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String",
+          "constraints": {
+            "allowed": [
+              "No valid disease",
+              "No valid target",
+              "Duplicated",
+              "No valid score",
+              "Invalid biotype"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "score",
+      "description": "Score of the evidence reflecting the strength of the disease/target relationship",
+      "required": true,
+      "nullable": false,
+      "type": "Float64",
+      "constraints": {
+        "ge": 0.0,
+        "le": 1.0
+      }
+    },
+    {
+      "name": "datasourceId",
+      "description": "Identifer of the evidence source",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "encore"
+        ]
+      }
+    },
+    {
+      "name": "datatypeId",
+      "description": "Type of the evidence",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "ot_partner"
+        ]
+      }
+    },
+    {
+      "name": "targetFromSourceId",
+      "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "biomarkerList",
+      "description": "List of biomarkers associated with the biological model",
+      "required": true,
+      "nullable": false,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": {
+            "type": "struct",
+            "fields": [
+              {
+                "name": "description",
+                "description": "One biomarker for the model",
+                "nullable": false,
+                "type": "String"
+              },
+              {
+                "name": "name",
+                "description": "Short name of the biomarker",
+                "nullable": false,
+                "type": "String"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "diseaseCellLines",
+      "description": "Cancer cell lines used to generate evidence",
+      "required": true,
+      "nullable": false,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": {
+            "type": "struct",
+            "fields": [
+              {
+                "name": "id",
+                "description": "Cell type identifier in cell ontology or in cell model database",
+                "nullable": false,
+                "type": "String"
+              },
+              {
+                "name": "name",
+                "description": "Name of the cell model",
+                "nullable": false,
+                "type": "String"
+              },
+              {
+                "name": "tissue",
+                "description": "Name of the tissue from which the cells were sampled",
+                "nullable": false,
+                "type": "String"
+              },
+              {
+                "name": "tissueId",
+                "description": "Anatomical identifier of the sampled organ/tissue",
+                "nullable": false,
+                "type": "String",
+                "reference": {
+                  "dataset": "biosample",
+                  "column": "biosampleId"
+                },
+                "bioregistry": "uberon"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "diseaseFromSource",
+      "description": "Disease label from the original source",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "geneticInteractionScore",
+      "description": "The strength of the genetic interaction. Directionality is captured as well: antagonistics < 0 < cooperative",
+      "required": true,
+      "nullable": false,
+      "type": "Float64"
+    },
+    {
+      "name": "geneticInteractionType",
+      "description": "Description of the interaction between the two genes",
+      "required": true,
+      "note": "croissant's own entry for this field is misspelled 'geneInteractionType'",
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "antagonistic",
+          "cooperative"
+        ]
+      }
+    },
+    {
+      "name": "interactingTargetFromSourceId",
+      "description": "Identifer of the interacting target",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "interactingTargetRole",
+      "description": "Role of a target in the genetic interaction test",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "Paralog",
+          "Library",
+          "GIControl",
+          "Anchor"
+        ]
+      }
+    },
+    {
+      "name": "phenotypicConsequenceLogFoldChange",
+      "description": "Log 2 fold change of the cell survival",
+      "required": true,
+      "nullable": false,
+      "type": "Float64"
+    },
+    {
+      "name": "phenotypicConsequencePValue",
+      "description": "P-value of the the cell survival test",
+      "required": true,
+      "nullable": false,
+      "type": "Float64",
+      "constraints": {
+        "ge": 0.0,
+        "le": 1.0
+      }
+    },
+    {
+      "name": "projectId",
+      "description": "The identifer of the project that generated the data",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "releaseDate",
+      "description": "Date of the release of the data in a 'YYYY-MM-DD' format",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      }
+    },
+    {
+      "name": "releaseVersion",
+      "description": "Open Targets data release version",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "statisticalMethod",
+      "description": "Statistical method used to calculate the association",
+      "required": true,
+      "note": "only one method observed in the reference snapshot; loosen if ENCORE adds another",
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "HSA_Z"
+        ]
+      }
+    },
+    {
+      "name": "targetRole",
+      "description": "Role of a target in the genetic interaction test",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "allowed": [
+          "Paralog",
+          "Library",
+          "GIControl",
+          "Anchor"
+        ]
+      }
+    },
+    {
+      "name": "validationReadouts",
+      "description": "List of experimental validation readouts",
+      "required": true,
+      "nullable": false,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": {
+            "type": "struct",
+            "fields": [
+              {
+                "name": "hsaValue",
+                "nullable": false,
+                "type": "Float64"
+              },
+              {
+                "name": "isValidated",
+                "nullable": false,
+                "type": "Boolean"
+              },
+              {
+                "name": "readoutMethodName",
+                "nullable": false,
+                "type": "String"
+              },
+              {
+                "name": "screen",
+                "nullable": false,
+                "type": "String"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "evidenceDate",
+      "description": "Earliest data for the evidence",
+      "required": true,
+      "nullable": false,
+      "type": "String",
+      "constraints": {
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      }
+    }
+  ],
+  "checks": [],
+  "example": {
+    "diseaseFromSourceMappedId": "EFO_0000365",
+    "diseaseId": "EFO_0000365",
+    "targetId": "ENSG00000149554",
+    "id": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d",
+    "qualityControls": [
+      "Duplicated"
+    ],
+    "score": 0.5,
+    "datasourceId": "encore",
+    "datatypeId": "ot_partner",
+    "targetFromSourceId": "CHEK1",
+    "biomarkerList": [
+      {
+        "description": "KRAS mutant",
+        "name": "KRAS"
+      }
+    ],
+    "diseaseCellLines": [
+      {
+        "id": "SIDM00650",
+        "name": "HCT-116",
+        "tissue": "Large Intestine",
+        "tissueId": "UBERON_0000059"
+      }
+    ],
+    "diseaseFromSource": "Colorectal Carcinoma",
+    "geneticInteractionScore": -8.0,
+    "geneticInteractionType": "antagonistic",
+    "interactingTargetFromSourceId": "PARK7",
+    "interactingTargetRole": "Library",
+    "phenotypicConsequenceLogFoldChange": -1.2,
+    "phenotypicConsequencePValue": 0.001,
+    "projectId": "OTAR2062",
+    "releaseDate": "2026-03-31",
+    "releaseVersion": "26.06",
+    "statisticalMethod": "HSA_Z",
+    "targetRole": "Anchor",
+    "validationReadouts": [
+      {
+        "hsaValue": 0.42,
+        "isValidated": true,
+        "readoutMethodName": "CellTiter-Glo",
+        "screen": "combinatorial"
+      }
+    ],
+    "evidenceDate": "2026-03-31"
+  }
+}

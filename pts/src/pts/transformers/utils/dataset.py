@@ -31,6 +31,8 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
+from pts.schemas.dataset import DatasetModel, to_pandera
+
 #: Target size per written part. `pl.PartitionBy` sizes against the IN-MEMORY frame, not the
 #: compressed output, so the resulting file size depends on how well a dataset compresses.
 #: Calibrated against the worst compression ratio observed across the release rather than the
@@ -199,6 +201,7 @@ def write_dataset(
     frame: pl.LazyFrame | pl.DataFrame,
     path: str,
     *,
+    schema: type[DatasetModel] | None = None,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
 ) -> None:
     """Write one dataset as a directory of size-capped zstd parquet parts.
@@ -225,11 +228,23 @@ def write_dataset(
     Args:
         frame: the data to write; a `DataFrame` is made lazy so there is one code path.
         path: destination directory, used as given -- never a parent or a derived path.
+        schema: an optional dataset model (`pts.schemas.dataset.DatasetModel`) to validate
+            `frame` against before writing, through the pandera schema derived from it
+            (`pts.schemas.dataset.to_pandera`). When given, `frame` is COLLECTED (if not already a
+            `DataFrame`) so pandera can run its value-level checks (ranges, patterns, allowed
+            values, nested-field rules, registered checks) -- these need materialised data and
+            cannot run lazily, unlike the dtype/column checks polars can push down. That trades
+            away streaming for this write, so pass a schema only where the frame is already eager
+            (as every current transformer passing one has it) or small enough to hold in memory;
+            a genuinely large `sink_parquet`-only pipeline should validate a sample separately
+            instead of here. All violations are collected before raising (`lazy=True`), rather
+            than failing on the first one found.
         approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
 
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
+        pandera.errors.SchemaErrors: if `schema` is given and `frame` violates it.
     """
     try:
         StorageHandle(path).stat()
@@ -241,6 +256,9 @@ def write_dataset(
             'parts, so writing here would leave the previous run behind. Remove it first.'
         )
         raise ValueError(msg)
+
+    if schema is not None:
+        frame = to_pandera(schema).validate(frame.collect() if isinstance(frame, pl.LazyFrame) else frame, lazy=True)
 
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     lf.sink_parquet(

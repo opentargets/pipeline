@@ -1,0 +1,135 @@
+{
+  "name": "biosample",
+  "description": "Biosample index merged from Cell Ontology, Uberon and EFO",
+  "primary_key": [
+    "biosampleId"
+  ],
+  "strict": true,
+  "fields": [
+    {
+      "name": "biosampleId",
+      "description": "Unique identifier for the biosample",
+      "required": true,
+      "primary_key": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "biosampleName",
+      "description": "Name of the biosample",
+      "required": true,
+      "nullable": false,
+      "type": "String"
+    },
+    {
+      "name": "description",
+      "description": "Description of the biosample",
+      "required": true,
+      "nullable": true,
+      "type": "String"
+    },
+    {
+      "name": "xrefs",
+      "description": "Cross-reference IDs from other ontologies",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    },
+    {
+      "name": "synonyms",
+      "description": "List of synonymous names for the term",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    },
+    {
+      "name": "parents",
+      "description": "Direct parent biosample IDs in the ontology",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    },
+    {
+      "name": "ancestors",
+      "description": "List of ancestor biosample IDs in the ontology",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    },
+    {
+      "name": "children",
+      "description": "Direct child biosample IDs in the ontology",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    },
+    {
+      "name": "descendants",
+      "description": "List of descendant biosample IDs in the ontology",
+      "required": true,
+      "nullable": true,
+      "type": {
+        "type": "list",
+        "element": {
+          "nullable": false,
+          "type": "String"
+        }
+      }
+    }
+  ],
+  "checks": [],
+  "example": {
+    "biosampleId": "UBERON_0002107",
+    "biosampleName": "liver",
+    "description": "An exocrine gland which secretes bile and functions in metabolism.",
+    "xrefs": [
+      "FMA:7197"
+    ],
+    "synonyms": [
+      "iecur"
+    ],
+    "parents": [
+      "UBERON_0002423"
+    ],
+    "ancestors": [
+      "UBERON_0002423",
+      "UBERON_0000062"
+    ],
+    "children": [
+      "UBERON_0001114"
+    ],
+    "descendants": [
+      "UBERON_0001114"
+    ]
+  }
+}
