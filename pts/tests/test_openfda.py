@@ -18,6 +18,7 @@ from pts.pyspark.openfda import (
     _prepare_drug_list,
     _prepare_for_montecarlo,
     _prepare_summary_statistics,
+    _run_montecarlo,
 )
 
 # ---------------------------------------------------------------------------
@@ -400,3 +401,34 @@ def test_montecarlo_filters_null_llr(spark):
     rows = result.collect()
     for r in rows:
         assert r.llr is not None
+
+
+# ---------------------------------------------------------------------------
+# 6. _run_montecarlo
+# ---------------------------------------------------------------------------
+
+
+def test_run_montecarlo_critval_independent_of_row_order(spark):
+    """The critical value does not depend on the order of a drug's reactions."""
+    rows = [
+        Row(
+            chembl_id='CHEMBL1',
+            chembl_id_stats=60,
+            reaction_reactionmeddrapt=f'event{i}',
+            uniq_report_ids_by_reaction=n_i,
+            A=a,
+            B=n_i - a,
+            C=60 - a,
+            D=1000 - 60 - n_i + a,
+            llr=1e9,
+            meddraCode=str(i),
+        )
+        for i, (n_i, a) in enumerate([(400, 30), (150, 15), (90, 10), (40, 5)])
+    ]
+
+    def critval(data):
+        df = spark.createDataFrame(data).coalesce(1)
+        (value,) = {row.critval for row in _run_montecarlo(df, 'chembl_id', 'chembl_id_stats', 0.95, 200).collect()}
+        return value
+
+    assert critval(rows) == critval(rows[::-1])
