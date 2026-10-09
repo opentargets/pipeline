@@ -4,13 +4,13 @@ version = "26.9.1rc7"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 license = { text = "Apache-2.0" }
 
 dependencies = [
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",
-  "pandas>=2.3.3",
+  "pandas>=3.0.6",
   "polars[connectorx]>=1.41.2,<3",
   # pts clusters run Spark 4.1 (Dataproc image 3.0) and load the staged Scala 2.13 spark-nlp jar
   # (`spark_nlp_version` in orchestration's unified_pipeline.yaml). Dataproc installs pts
@@ -38,7 +38,7 @@ dev = ["ruff>=0.15.17", "ty>=0.0.55"]
 test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1", "pytest-split>=0.11.0"]
 
 [project.optional-dependencies]
-baseline_expression = ["pandas<3", "scanpy>=1.10.0", "cellex"]
+baseline_expression = ["scanpy>=1.10.0", "cellex"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
