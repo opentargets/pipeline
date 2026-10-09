@@ -45,6 +45,12 @@ LOGGING_RETRY_MAX_WAIT = 600
 # COS LTS family; supported until November 2028.
 COS_IMAGE_FAMILY = 'projects/cos-cloud/global/images/family/cos-133-lts'
 
+# COS has no gcloud on the host; the startup script runs it from this image.
+GCLOUD_IMAGE = (
+    'gcr.io/google.com/cloudsdktool/google-cloud-cli:588.0.0-alpine'
+    '@sha256:44924be6dcf684d4e76922c5cb015950305e8ded844587f915dbaeefe290f545'
+)
+
 # WARNING
 # After any change in deferrable operators, you must restart the airflow triggerer
 # container to apply the changes with:
@@ -483,10 +489,10 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                     of=${{dest[$d]}}
                     echo "Copying $if to $of ($od)"
                     sudo -u app docker run \
+                        --rm \
                         -v /home/app/"$od":/downloads/"$od" \
-                        --entrypoint gsutil \
-                        voyz/gsutil_wrap:latest \
-                        cp "$if" /downloads/"$of"
+                        {GCLOUD_IMAGE} \
+                        gcloud storage cp "$if" /downloads/"$of"
                 done
             fi
             secret_names=( {secret_names} )
@@ -505,7 +511,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                         sudo -u app docker run \
                             --rm \
                             --network host \
-                            gcr.io/google.com/cloudsdktool/google-cloud-cli:slim \
+                            {GCLOUD_IMAGE} \
                             gcloud secrets versions access latest --secret="$sn" > "$stmp"
                     fi
                     if [ ! -s "$stmp" ]; then
