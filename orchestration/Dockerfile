@@ -11,7 +11,7 @@ RUN apt-get update \
 
 USER airflow
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /bin/uv
 COPY pyproject.toml uv.lock README.md ./
 
 # We have to install dependencies like this because uv does not seem to install
