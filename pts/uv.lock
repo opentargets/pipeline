@@ -1679,7 +1679,7 @@ wheels = [
 
 [[package]]
 name = "ontoma"
-version = "2.7.0"
+version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "loguru" },
@@ -1687,15 +1687,13 @@ dependencies = [
     { name = "pyspark" },
     { name = "spark-nlp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/c3/e8eafcb69720355c9ba1198593e1154471176710ab3bd544be657181250c/ontoma-2.7.0.tar.gz", hash = "sha256:703a92abba13b84decc97f62e039e362a66cfd9e0f2deaa641ca754fa1607d5f", size = 29436, upload-time = "2026-10-07T14:23:09.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/a0/23a1b5484424ab00579d8135590c04924de5ac301216de1a716732154e18/ontoma-2.7.1.tar.gz", hash = "sha256:7e7714e568e44e5d55610d8cefaee8a03d2b1ca14152bed708658d299e863814", size = 29900, upload-time = "2026-10-09T14:58:01.582Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/91/ec4a7f9a18248f598fffb5a22d6c0e8d8f9ffabf0fe2a371823882052e0f/ontoma-2.7.0-py3-none-any.whl", hash = "sha256:b2b80fdfc381a747b133041ff5717886508c7e657e5ce55a1db3d96b1e2bd9c1", size = 41551, upload-time = "2026-10-07T14:23:08.269Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/95/40d20ba607be892192ae76f8734e614e808cb7589cd9097d57637bcb91a8/ontoma-2.7.1-py3-none-any.whl", hash = "sha256:5927ddbac229ac716ef2c1b5e7ef019ad5e0dd47e4fc2bf7ea82b569c28219cb", size = 42156, upload-time = "2026-10-09T14:58:00.287Z" },
 ]
 
 [package.optional-dependencies]
 ner = [
-    { name = "pandas" },
-    { name = "pyarrow" },
     { name = "rapidfuzz" },
     { name = "sentencepiece" },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
@@ -1734,7 +1732,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-mira"
-version = "1.0.2"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -1754,9 +1752,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/87/e79386859c7f21f480451a85253f70d31faf20acf08fc1240966f6ab44b3/opentargets_mira-1.0.2.tar.gz", hash = "sha256:179202843f3001ac4d5ac8e8b635546b19f828f8c4ec673e1c444edd4d2549ef", size = 417988, upload-time = "2026-10-08T13:05:57.337Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/a5/b9960dae43e51a7e1013f6876a8ba6c566b776f21a8281a746fe373a9a3a/opentargets_mira-1.0.3.tar.gz", hash = "sha256:4c957c09c71d9dc928f9f462d77a35ccdb842182c95d4d54c1fe99c66b7dcd48", size = 418526, upload-time = "2026-10-09T14:46:08.995Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/d3/3d96da6871a3208a45e4d3ee38c6ec3d327fc694a021a5b9e77d87b468ef/opentargets_mira-1.0.2-py3-none-any.whl", hash = "sha256:42a48f921c46c64f9eaeb1efa5f45e0438fde7a906f89605ea3d1a7f83053a15", size = 66440, upload-time = "2026-10-08T13:05:55.84Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/b6/5e863031d737a2367d5eea6b09d85965e3aabdba32a01c683c441617f3c8/opentargets_mira-1.0.3-py3-none-any.whl", hash = "sha256:6105a702f49dbcca6e58696c5f776de3ac789b4964167efb6cc27c8083de1e12", size = 66441, upload-time = "2026-10-09T14:46:07.554Z" },
 ]
 
 [[package]]
@@ -2187,10 +2185,10 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "obonet", specifier = ">=1.3.0" },
-    { name = "ontoma", specifier = ">=2.7.0" },
+    { name = "ontoma", specifier = ">=2.7.1" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.2" },
+    { name = "opentargets-mira", specifier = ">=1.0.3" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
