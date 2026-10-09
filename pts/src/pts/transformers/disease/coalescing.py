@@ -224,7 +224,7 @@ def resolve_replacement_chains(n: pl.DataFrame) -> pl.DataFrame:
     pointers = (
         n
         .unnest('meta')
-        .explode('basicPropertyValues')
+        .explode('basicPropertyValues', empty_as_null=True)
         .unnest('basicPropertyValues')
         .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
         .select('id', 'val')
@@ -377,7 +377,7 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
         n
         .filter(pl.col('type') == 'CLASS')
         .unnest('meta')
-        .explode('basicPropertyValues')
+        .explode('basicPropertyValues', empty_as_null=True)
         .unnest('basicPropertyValues')
         .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
         .select(donor=pl.col('id'), target=pl.col('val'))
@@ -417,7 +417,7 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
     donated_synonyms = (
         donations
         .select('target', 'donor', 'synonyms')
-        .explode('synonyms')
+        .explode('synonyms', empty_as_null=True)
         .filter(pl.col('synonyms').struct['pred'].is_in(_SYNONYM_PREDICATES))
         .select(
             'target',
@@ -442,7 +442,7 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
     seen = (
         n
         .select(target=pl.col('id'), synonyms=pl.col('meta').struct['synonyms'])
-        .explode('synonyms')
+        .explode('synonyms', empty_as_null=True)
         .filter(pl.col('synonyms').struct['pred'].is_in(_SYNONYM_PREDICATES))
         .select(
             'target',
@@ -537,7 +537,7 @@ def remap_edges(e: pl.DataFrame, n: pl.DataFrame) -> pl.DataFrame:
     id_remap = (
         n
         .unnest('meta')
-        .explode('basicPropertyValues')
+        .explode('basicPropertyValues', empty_as_null=True)
         .unnest('basicPropertyValues')
         .filter(
             pl.col('deprecated'),

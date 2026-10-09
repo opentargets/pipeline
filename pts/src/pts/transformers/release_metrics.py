@@ -207,7 +207,7 @@ def _quality_control_flag_total_metrics(
     if isinstance(qc_dtype, pl.List):
         qc_counts = (
             df
-            .select(pl.col('qualityControls').explode().alias('qc_flag'))
+            .select(pl.col('qualityControls').explode(empty_as_null=True).alias('qc_flag'))
             .filter(pl.col('qc_flag').is_not_null())
             .group_by('qc_flag')
             .len()

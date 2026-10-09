@@ -172,7 +172,7 @@ class TestDeduplicateWarnings:
         df = pl.DataFrame(data, schema=WARNING_SCHEMA)
 
         result = _deduplicate_warnings(df)
-        exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
+        exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
 
         assert exploded.filter(pl.col('drugId') == 'CHEMBL1200916').height == 1
 

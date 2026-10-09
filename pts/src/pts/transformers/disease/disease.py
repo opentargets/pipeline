@@ -143,7 +143,7 @@ def disease(
     synonym_columns = list(synonym_rename_mapping.values())
     synonyms = (
         n_location_ids['id', 'synonyms']
-        .explode('synonyms')
+        .explode('synonyms', empty_as_null=True)
         .filter(
             pl.col('synonyms').struct['pred'].is_in(synonym_predicates),
         )
@@ -157,11 +157,11 @@ def disease(
         ])
         .agg(pl.col('val').drop_nulls().unique())
         .pivot(
+            on='pred',
             values='val',
             index='id',
-            columns='pred',  # ty:ignore[unknown-argument]
             aggregate_function='first',
-        )  # ty:ignore[missing-argument]
+        )
         .with_columns(
             **{k: pl.col(k).fill_null([]) for k in synonym_predicates},
         )
@@ -182,7 +182,7 @@ def disease(
     obsolete_ids = (
         n
         .unnest('meta')
-        .explode('basicPropertyValues')
+        .explode('basicPropertyValues', empty_as_null=True)
         .unnest('basicPropertyValues')
         .filter(
             pl.col('deprecated'),
@@ -212,7 +212,7 @@ def disease(
         .filter(pl.col('xrefs').is_not_null())
         .select(pl.col('id'), pl.col('xrefs'))
         .join(obsolete_ids, on='id')
-        .explode('xrefs')
+        .explode('xrefs', empty_as_null=True)
         .unnest('xrefs')
         .select(pl.col('code'), pl.col('val'))
         .group_by('code')
@@ -243,7 +243,7 @@ def disease(
     # then aggregating by the old id
     children = (
         n_obsolete_terms
-        .explode('parents')
+        .explode('parents', empty_as_null=True)
         .filter(pl.col('parents').is_not_null())
         .group_by('parents')
         .agg(pl.col('id').alias('children'))
@@ -267,7 +267,7 @@ def disease(
         n_children
         .select(['id', 'parents'])
         .filter(pl.col('parents').is_not_null())
-        .explode('parents')
+        .explode('parents', empty_as_null=True)
         .rename({'parents': 'ancestor'})
     )
     all_ancestors = direct_relationships.select(['id', 'ancestor'])
@@ -285,7 +285,7 @@ def disease(
                 right_on='id',
             )
             .filter(pl.col('parents').is_not_null())
-            .explode('parents')
+            .explode('parents', empty_as_null=True)
             .select(pl.col('id'), pl.col('parents').alias('ancestor'))
         )
 

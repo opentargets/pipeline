@@ -57,7 +57,7 @@ def clinical_target(
     drug_max_stage = (
         # TODO: bring this from drug molecule AND treat phase iv/withdrawal as approval
         reports
-        .explode('drugs')
+        .explode('drugs', empty_as_null=True)
         .unnest('drugs')
         .filter(pl.col('drugId').is_not_null())
         .with_columns(
@@ -76,8 +76,8 @@ def clinical_target(
     )
     moa_lut = (
         moa
-        .explode('targets')
-        .explode('chemblIds')
+        .explode('targets', empty_as_null=True)
+        .explode('chemblIds', empty_as_null=True)
         .select(pl.col('chemblIds').alias('drugId'), pl.col('targets').alias('targetId'))
         .filter(pl.col('drugId').is_not_null())
         .filter(pl.col('targetId').is_not_null())
@@ -85,8 +85,8 @@ def clinical_target(
     )
     clinical_target = (
         reports
-        .explode('drugs')
-        .explode('diseases')
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
         .unnest('drugs')
         .filter(pl.col('drugId').is_not_null())
         .rename({'id': 'reportId'})
