@@ -8,6 +8,6 @@ ADD . /app
 
 # Sync the project into a new environment, using the frozen lockfile
 WORKDIR /app
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
 ENTRYPOINT ["uv", "run", "ot_croissant"]
