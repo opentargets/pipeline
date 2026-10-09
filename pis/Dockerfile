@@ -4,6 +4,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0e
 WORKDIR /app
 COPY . /app
 
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
 ENTRYPOINT ["uv", "run", "pis"]
