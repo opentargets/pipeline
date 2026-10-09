@@ -215,7 +215,8 @@ steps:
 
     # AACT clinical-trial LLM extraction, produced by the extraction DAG.
     - name: copy_many aact trial extraction
-      sources: gs://aact_data/${aact_version}/extraction/*.parquet
+      sources:
+        - gs://aact_data/${aact_version}/extraction/extractions.parquet
       destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
