@@ -1,7 +1,7 @@
 ---
 clusters:
   pts:
-    image_version: '3.0'
+    image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
@@ -29,7 +29,7 @@ clusters:
       - '{{pts_init_action_uri}}'
 
   gentropy:
-    image_version: '2.2'
+    image_version: '{{dataproc_image_version_gentropy}}'
     num_masters: 1
     num_workers: 32
     worker_machine_type: 'n1-highmem-16'
@@ -59,7 +59,7 @@ clusters:
       WANDB_API_KEY: wandb-key
 
   gentropy_colocalisation:
-    image_version: '2.2'
+    image_version: '{{dataproc_image_version_gentropy}}'
     zone: 'europe-west1-b'
     # Fixed non-preemptible primary pool (no autoscaling, no spot secondaries).
     # Spot-worker churn was the dominant failure source at baseline (3,021
@@ -98,7 +98,7 @@ clusters:
     idle_delete_ttl: 1800
 
   pts_openfda:
-    image_version: '3.0'
+    image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
@@ -118,7 +118,7 @@ clusters:
       - '{{pts_init_action_uri}}'
 
   pts_association:
-    image_version: '3.0'
+    image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
@@ -140,7 +140,7 @@ clusters:
       - '{{pts_init_action_uri}}'
 
   pts_literature:
-    image_version: '3.0'
+    image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1
     num_workers: 48
     master_machine_type: n1-standard-8
