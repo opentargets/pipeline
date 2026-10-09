@@ -428,7 +428,7 @@ def test_run_montecarlo_critval_independent_of_row_order(spark):
 
     def critval(data):
         df = spark.createDataFrame(data).coalesce(1)
-        (row,) = _run_montecarlo(df, 'chembl_id', 'chembl_id_stats', 0.95, 200).collect()
-        return row.critval
+        (value,) = {row.critval for row in _run_montecarlo(df, 'chembl_id', 'chembl_id_stats', 0.95, 200).collect()}
+        return value
 
     assert critval(rows) == critval(rows[::-1])
