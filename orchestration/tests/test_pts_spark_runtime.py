@@ -10,6 +10,7 @@ from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 # orchestration/tests/ -> the repository root, which holds the pts package
 PTS_PYPROJECT = Path(__file__).resolve().parents[2] / 'pts' / 'pyproject.toml'
+PTS_LOCK = PTS_PYPROJECT.with_name('uv.lock')
 
 
 @pytest.fixture(scope='module')
@@ -70,8 +71,10 @@ def test_staged_spark_nlp_jar_is_the_scala_2_13_build(config: UnifiedPipelineCon
 def test_spark_nlp_jar_matches_the_pts_python_package(config: UnifiedPipelineConfig) -> None:
     """The jar the clusters load and the spark-nlp the init action installs must be one version.
 
-    The clusters install pts without its lockfile, so the pyproject pin is what they get.
+    The clusters install pts from its lockfile, so the locked version is what they get.
     """
     [dst] = [d for d in config.staged_jars if 'spark-nlp' in d]
     jar_version = Path(dst).stem.rsplit('-', 1)[1]
     assert _pts_pin('spark-nlp') == f'spark-nlp=={jar_version}'
+    locked = tomllib.loads(PTS_LOCK.read_text())['package']
+    assert [p['version'] for p in locked if p['name'] == 'spark-nlp'] == [jar_version]
