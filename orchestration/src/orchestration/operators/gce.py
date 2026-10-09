@@ -594,6 +594,11 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                         'key': 'google-monitoring-enabled',
                         'value': 'true',
                     },
+                    # keeps the startup-script exit line where ComputeEngineExitCodeTrigger looks for it
+                    {
+                        'key': 'enable-guest-agent-core-plugin',
+                        'value': 'false',
+                    },
                     {
                         'key': 'startup-script',
                         'value': self.startup_script(),
