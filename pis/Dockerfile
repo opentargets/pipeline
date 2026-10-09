@@ -6,4 +6,4 @@ COPY . /app
 
 RUN uv sync --frozen --no-dev
 
-ENTRYPOINT ["uv", "run", "pis"]
+ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pis"]

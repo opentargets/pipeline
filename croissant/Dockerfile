@@ -10,4 +10,4 @@ ADD . /app
 WORKDIR /app
 RUN uv sync --frozen --no-dev
 
-ENTRYPOINT ["uv", "run", "ot_croissant"]
+ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "ot_croissant"]
