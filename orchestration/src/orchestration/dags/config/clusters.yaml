@@ -23,12 +23,10 @@ clusters:
       # instead of spark.jars.packages which re-runs Ivy resolution against Maven
       # Central on every spark-submit. See opentargets/issues#4453.
       'spark:spark.jars': 'gs://opentargets-pipelines/up/pts/jars/spark-nlp-assembly_2.13-{{spark_nlp_version}}.jar'
-    # Nothing in this repo uploads the init action: it is copied by hand from
+    # Uploaded into the run by the DAG from
     # orchestration/src/orchestration/assets/install_dependencies_on_cluster.sh.
-    # The 3.0 script lives at its own path so that uploading it cannot change
-    # the 2.3 clusters of a release still running from an older orchestration.
     init_actions_uris:
-      - 'gs://opentargets-pipelines/up/pts/dataproc-3.0/install_dependencies_on_cluster.sh'
+      - '{{pts_init_action_uri}}'
 
   gentropy:
     image_version: '2.2'
@@ -117,7 +115,7 @@ clusters:
       # semantics until the pyspark modules are audited. pts' Session sets it too.
       'spark:spark.sql.ansi.enabled': 'false'
     init_actions_uris:
-      - 'gs://opentargets-pipelines/up/pts/dataproc-3.0/install_dependencies_on_cluster.sh'
+      - '{{pts_init_action_uri}}'
 
   pts_association:
     image_version: '3.0'
@@ -139,7 +137,7 @@ clusters:
       'spark:spark.sql.shuffle.partitions': '2000'
       'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '64MB'
     init_actions_uris:
-      - 'gs://opentargets-pipelines/up/pts/dataproc-3.0/install_dependencies_on_cluster.sh'
+      - '{{pts_init_action_uri}}'
 
   pts_literature:
     image_version: '3.0'
@@ -172,7 +170,7 @@ clusters:
       'spark:spark.sql.adaptive.enabled': 'true'
       'spark:spark.serializer': 'org.apache.spark.serializer.KryoSerializer'
     init_actions_uris:
-      - 'gs://opentargets-pipelines/up/pts/dataproc-3.0/install_dependencies_on_cluster.sh'
+      - '{{pts_init_action_uri}}'
 
 step_job_properties:
   gentropy:
