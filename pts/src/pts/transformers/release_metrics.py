@@ -292,11 +292,8 @@ def _build_run_id(ot_release: str) -> str:
 
 
 def _to_parquet_glob(path: str | Path) -> str:
-    """Normalize a dataset path to a parquet glob consumable by Polars."""
-    path_str = str(path)
-    if '.parquet' in path_str:
-        return path_str
-    return f'{path_str.rstrip("/")}/*.parquet'
+    """Normalize a dataset directory to a parquet glob consumable by Polars."""
+    return f'{str(path).rstrip("/")}/*.parquet'
 
 
 def _to_release_relative_path(
