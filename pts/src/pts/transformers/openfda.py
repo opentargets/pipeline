@@ -24,7 +24,7 @@ def openfda(
         with zip_file.open(filename) as file:
             file_content = file.read()
             df = pl.read_json(file_content, schema=schema)
-            output = df.select('results').explode('results').unnest('results')
+            output = df.select('results').explode('results', empty_as_null=True).unnest('results')
 
             write_dataset(output, destination)
             logger.info('transformation complete')

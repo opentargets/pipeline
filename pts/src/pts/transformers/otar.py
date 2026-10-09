@@ -72,7 +72,7 @@ def _generate_otar_info(
         # that is not in the index, both drop out here
         .join(disease.select(pl.col('id').alias('efo_code'), 'ancestors'), on='efo_code', how='inner')
         .with_columns(ancestor=pl.concat_list('efo_code', 'ancestors'))
-        .explode('ancestor')
+        .explode('ancestor', empty_as_null=True)
         # sorting before the group by is what fixes the element order of the
         # projects lists: the aggregation below collects rows in frame order, and
         # otar_code is unique per project

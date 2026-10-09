@@ -156,20 +156,22 @@ def process_drug_index(
     has_mechanism = (
         mechanism_of_action
         .select(pl.col('chemblIds').alias('id'))
-        .explode('id')
+        .explode('id', empty_as_null=True)
         # exploding a null or empty list yields a null row, which is not a mechanism
         .drop_nulls()
         .unique()
         .with_columns(_hasMechanismOfAction=pl.lit(value=True))
     )
 
+    # `maintain_order='left'` so the `keep='first'` guard below keeps the first molecule row as
+    # read: lazy joins run on the streaming engine, which makes no promise about row order.
     drug = (
         molecule
-        .join(max_phase.lazy(), on='id', how='left')
-        .join(indications.lazy(), on='id', how='left')
-        .join(probe_drug_ids.lazy(), on='id', how='left')
-        .join(probe_xrefs.lazy(), on='id', how='left')
-        .join(has_mechanism.lazy(), on='id', how='left')
+        .join(max_phase.lazy(), on='id', how='left', maintain_order='left')
+        .join(indications.lazy(), on='id', how='left', maintain_order='left')
+        .join(probe_drug_ids.lazy(), on='id', how='left', maintain_order='left')
+        .join(probe_xrefs.lazy(), on='id', how='left', maintain_order='left')
+        .join(has_mechanism.lazy(), on='id', how='left', maintain_order='left')
         .with_columns(crossReferences=_with_probe_xref())
         .filter(_is_drug())
         .collect()
@@ -254,7 +256,7 @@ def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
     return (
         clinical_report
         .select('drugs', 'clinicalStage')
-        .explode('drugs')
+        .explode('drugs', empty_as_null=True)
         .select(
             pl.col('drugs').struct.field('drugId').alias('id'),
             'clinicalStage',
@@ -286,8 +288,8 @@ def _process_clinical_report_indications(
     exploded = (
         clinical_report
         .select('drugs', 'diseases', 'clinicalStage')
-        .explode('drugs')
-        .explode('diseases')
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
         .select(
             pl.col('drugs').struct.field('drugId'),
             pl.col('diseases').struct.field('diseaseId'),

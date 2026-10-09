@@ -51,7 +51,7 @@ def process_credible_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
     return (
         credible_set
         .select('studyLocusId', 'studyId', pl.col('variantId').alias('leadVariantId'), 'locus', 'finemappingMethod')
-        .explode('locus')
+        .explode('locus', empty_as_null=True)
         .unnest('locus')
         .select(
             'studyLocusId',

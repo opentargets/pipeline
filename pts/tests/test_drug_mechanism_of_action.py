@@ -189,7 +189,7 @@ class TestCrossDrugReferenceCrosstalk:
 
     def test_neither_drug_inherits_the_other_s_references(self, shared_mechanism: dict) -> None:
         result = process_mechanism_of_action(**shared_mechanism)
-        exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
+        exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
         urls = {
             r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']})
             for r in exploded.to_dicts()
@@ -200,7 +200,7 @@ class TestCrossDrugReferenceCrosstalk:
     def test_the_parent_of_the_salt_is_unaffected_too(self, shared_mechanism: dict) -> None:
         """CHEMBL2 reaches the mechanism through its salt, and only through its salt."""
         result = process_mechanism_of_action(**shared_mechanism)
-        exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
+        exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
         parent = exploded.filter(pl.col('drugId') == 'CHEMBL2').to_dicts()
         assert len(parent) == 1
         assert sorted({u for ref in parent[0]['references'] for u in ref['urls']}) == ['http://fda/drug-one']
@@ -320,7 +320,7 @@ class TestConsolidateDuplicateReferences:
         assert result.height == 2
         by_drug = {
             r['drugId']: r
-            for r in result.explode('chemblIds').rename({'chemblIds': 'drugId'}).to_dicts()
+            for r in result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'}).to_dicts()
         }
         assert by_drug['CHEMBL_A']['references'] == drug_a_refs
         assert by_drug['CHEMBL_B']['references'] == drug_b_refs
@@ -347,7 +347,7 @@ class TestConsolidateDuplicateReferences:
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
 
         result = _consolidate_duplicate_references(df)
-        exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
+        exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
         urls = {
             r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']})
             for r in exploded.to_dicts()
@@ -426,7 +426,7 @@ class TestConsolidateDuplicateReferences:
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
 
         result = _consolidate_duplicate_references(df)
-        exploded = result.explode('chemblIds').rename({'chemblIds': 'drugId'})
+        exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
 
         assert exploded.filter(pl.col('drugId') == 'CHEMBL1200916').height == 1
 
