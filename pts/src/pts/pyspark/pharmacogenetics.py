@@ -67,6 +67,7 @@ def pharmacogenetics(
     unparsed_texts_df = (
         pgx_df
         .select('genotypeAnnotationText')
+        .where(f.col('genotypeAnnotationText').isNotNull())
         .distinct()
         .join(
             pgx_phenotypes_df.select('genotypeAnnotationText').distinct(),
