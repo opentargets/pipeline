@@ -16,9 +16,7 @@ COPY pyproject.toml uv.lock README.md ./
 
 # We have to install dependencies like this because uv does not seem to install
 # `psycopg2-binary` properly when using the `--no-install-project` flag.
-# Export from the lock rather than resolving pyproject afresh: a fresh resolve takes the
-# newest release of every dependency, airflow included, so the image would run versions
-# that neither the lock nor CI have seen.
+# Install the locked versions.
 RUN uv export --frozen --format requirements.txt --no-dev --no-hashes --no-emit-project -o requirements.txt \
   && uv pip install -r requirements.txt
 
