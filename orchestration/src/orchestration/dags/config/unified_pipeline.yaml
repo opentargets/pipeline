@@ -40,6 +40,14 @@ vep_version: "release_116.1"
 # spark-nlp pin in pts/pyproject.toml: the Python package and the jar must match.
 spark_nlp_version: "7.0.0"
 
+# Boot images, pinned per release. Full Dataproc subminor versions
+# (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
+# and a cos-cloud image name from the cos-133-lts family. gentropy needs 2.2: its hail
+# jar path hardcodes python3.11.
+dataproc_image_version_pts: "3.0.3-debian13"
+dataproc_image_version_gentropy: "2.2.88-debian12"
+cos_image: "cos-133-19999-44-106"
+
 # Dependency graph
 # ----------------
 # The following section defines the dependencies between the different steps in

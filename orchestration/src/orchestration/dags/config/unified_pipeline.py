@@ -109,11 +109,23 @@ class UnifiedPipelineConfig:
                 'load via spark.jars.'
             )
 
+        boot_image_keys = ('dataproc_image_version_pts', 'dataproc_image_version_gentropy', 'cos_image')
+        boot_images = {k: up.get(k) for k in boot_image_keys}
+        if missing := [k for k, v in boot_images.items() if not v]:
+            raise ValueError(
+                f'{", ".join(missing)} missing from unified_pipeline.yaml; every release pins its boot images.'
+            )
+
+        self.cos_image = f'projects/cos-cloud/global/images/{boot_images["cos_image"]}'
+        """The COS image the PIS and PTS vms boot from."""
+
         self.clusters = AppConfig.from_file(
             file_path=config_path / 'clusters.yaml',
             template_context={
                 'pts_version': up.get('pts_version'),
                 'gentropy_version': up.get('gentropy_version'),
+                'dataproc_image_version_pts': boot_images['dataproc_image_version_pts'],
+                'dataproc_image_version_gentropy': boot_images['dataproc_image_version_gentropy'],
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
                 # Lets the pts / pts_literature clusters point spark.jars at the
                 # version-pinned Spark-NLP fat jar in the pipelines bucket.
