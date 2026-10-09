@@ -35,7 +35,7 @@ clean-vm: ## Destroy the Airflow development VM
 
 ### DEVELOPMENT TARGETS ###
 sync:
-	@uv sync --all-groups --all-extras
+	@uv sync --frozen --all-groups --all-extras
 
 test: sync ## Run unit tests
 	@uv run --frozen pytest -rxs
@@ -66,9 +66,9 @@ tunnel: ## Tunnel to the remote AirFlow instance
 ### OTHER TARGETS ###
 
 build-dag-svgs: ## Generate visual representations of Airflow DAGs for documentation purposes
-	@uv sync --all-groups
-	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow db migrate
-	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags reserialize
+	@uv sync --frozen --all-groups
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow db migrate
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags reserialize
 	@$(foreach dag, \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_clumping \
@@ -86,7 +86,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/lof_annotations/lof_curation_ingestion \
 		datasources/foldx_annotations/foldx_ingestion \
 		unified_pipeline/unified_pipeline, \
-		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
+		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 
 upload-eqtl-catalogue-bucket-readme: ## Upload eqtl_catalogue_data readme to the bucket
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data gs://eqtl_catalogue_data/docs
