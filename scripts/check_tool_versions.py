@@ -33,9 +33,6 @@ HOOK_REPOS = {
     'https://github.com/astral-sh/ruff-pre-commit': 'ruff',
     'https://github.com/astral-sh/ty-pre-commit': 'ty',
 }
-# pts/Dockerfile is rewritten by #134; add it once that lands
-UNCHECKED = {'pts/Dockerfile'}
-
 MISSING = '<missing>'
 
 
@@ -98,8 +95,6 @@ def setup_uv_versions(found: dict[str, list[tuple[str, str]]]) -> None:
 
 def docker_uv_images(found: dict[str, list[tuple[str, str]]]) -> None:
     for path in sorted(ROOT.glob('*/Dockerfile')):
-        if rel(path) in UNCHECKED:
-            continue
         for m in re.finditer(r'ghcr\.io/astral-sh/uv:([^\s@]+)(@sha256:[0-9a-f]{64})?', path.read_text()):
             found['uv'].append((rel(path), m.group(1) if m.group(2) else f'{m.group(1)} (no digest)'))
 
