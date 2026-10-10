@@ -9,7 +9,7 @@ Cache identity is the trial ID and the JSON schema the model is held to. The
 prompt hash is retained as audit metadata, but prompt text, publications, the
 model and system instructions do not invalidate an accepted extraction.
 
-The mira-backed work lives in :py:mod:`pts.llm_extraction`, imported in
+The mira-backed work lives in :py:mod:`pts.aact_trial_extraction`, imported in
 :py:meth:`LlmExtract.run`, so registering this task does not import mira.
 """
 
@@ -127,7 +127,7 @@ class LlmExtract(Task):
 
     @report
     def run(self) -> Self:
-        from pts import llm_extraction
+        from pts import aact_trial_extraction
 
         system_prompt = self._system_prompt()
         model_cls = _import_class(self.spec.model_class)
@@ -137,8 +137,8 @@ class LlmExtract(Task):
         schema_cache_uri = _schema_cache_uri(self.spec.cache_uri, schema_digest)
 
         archive = StorageHandle(str(self.spec.source['aact']), config=self.context.config).absolute
-        report = llm_extraction.trial_report(archive, self.context.config.work_path, self.spec.sample_size)
-        prompts = llm_extraction.prompts_for(
+        report = aact_trial_extraction.trial_report(archive, self.context.config.work_path, self.spec.sample_size)
+        prompts = aact_trial_extraction.prompts_for(
             report,
             schema_digest,
             max_publications=self.spec.publications.max_publications,
@@ -147,7 +147,7 @@ class LlmExtract(Task):
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
         if self.spec.legacy_batch_results:
-            imported = llm_extraction.seed_legacy_cache(
+            imported = aact_trial_extraction.seed_legacy_cache(
                 prompts,
                 self.spec.legacy_batch_results,
                 schema_cache_uri,
@@ -171,7 +171,7 @@ class LlmExtract(Task):
 
         extractions = cached_map(
             records=prompts,
-            compute=lambda shard: llm_extraction.extract(shard, self.spec, system_prompt_path, self.errors),
+            compute=lambda shard: aact_trial_extraction.extract(shard, self.spec, system_prompt_path, self.errors),
             cache_uri=schema_cache_uri,
             config=self.context.config,
             run_id=self.spec.snapshot,
