@@ -1736,7 +1736,7 @@ wheels = [
 [[package]]
 name = "opentargets-mira"
 version = "1.0.4"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/opentargets/mira?rev=96b62a0082d660e814f5ea2c03af873239edec31#96b62a0082d660e814f5ea2c03af873239edec31" }
 dependencies = [
     { name = "altair" },
     { name = "biopython" },
@@ -1745,7 +1745,7 @@ dependencies = [
     { name = "httpx" },
     { name = "hydra-core" },
     { name = "loguru" },
-    { name = "ontoma", extra = ["ner"] },
+    { name = "ontoma" },
     { name = "openai" },
     { name = "pandas" },
     { name = "pdfplumber" },
@@ -1755,9 +1755,10 @@ dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/73/d0e0d8c1f6a81fafc4f73312fb4b21a858aaff2847b532b37308d087c45d/opentargets_mira-1.0.4.tar.gz", hash = "sha256:d856e8a1c4e8b0507afe623281d36053a1661e479fea7845d32618e2e3944f09", size = 419004, upload-time = "2026-10-09T17:16:18.959Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/5a/a18e65cbdde941d7c545b7b26dec57e759bc5f56cf2431bdeb7e73efed2f/opentargets_mira-1.0.4-py3-none-any.whl", hash = "sha256:d870a12e1518646316f2db4776c1a02012cb6bdd70c7ec741351a6b21d54cec2", size = 66614, upload-time = "2026-10-09T17:16:17.418Z" },
+
+[package.optional-dependencies]
+ner = [
+    { name = "ontoma", extra = ["ner"] },
 ]
 
 [[package]]
@@ -2165,7 +2166,7 @@ baseline-expression = [
     { name = "scanpy" },
 ]
 nlp = [
-    { name = "opentargets-mira" },
+    { name = "opentargets-mira", extra = ["ner"] },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
     { name = "transformers" },
@@ -2195,8 +2196,8 @@ requires-dist = [
     { name = "ontoma", specifier = ">=2.7.1" },
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "opentargets-mira", specifier = ">=1.0.4" },
-    { name = "opentargets-mira", extras = ["ner"], marker = "extra == 'nlp'", specifier = ">=1.0.4" },
+    { name = "opentargets-mira", git = "https://github.com/opentargets/mira?rev=96b62a0082d660e814f5ea2c03af873239edec31" },
+    { name = "opentargets-mira", extras = ["ner"], marker = "extra == 'nlp'", git = "https://github.com/opentargets/mira?rev=96b62a0082d660e814f5ea2c03af873239edec31" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },

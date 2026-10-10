@@ -54,6 +54,8 @@ explicit = true
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
+# temporary: opentargets/mira#build/ner-extra until mira 1.0.5 is released
+opentargets-mira = { git = "https://github.com/opentargets/mira", rev = "96b62a0082d660e814f5ea2c03af873239edec31" }
 
 [project.scripts]
 pts = "pts.core:main"
