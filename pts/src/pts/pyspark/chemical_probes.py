@@ -15,7 +15,7 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common import Session
-from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
+from pts.pyspark.common.utils import maybe_coalesce, read_bytes, safe_array_union
 
 # Chemical probe data sources. Every entry must be a column of the PROBES sheet of the
 # upstream Probes & Drugs spreadsheet: a name that drifts upstream fails the step with
@@ -214,7 +214,7 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
         .createDataFrame(
             pd
             .read_excel(
-                probes_excel,
+                read_bytes(probes_excel),
                 sheet_name='PROBES',
                 header=0,
                 index_col=0,
@@ -257,7 +257,7 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
         spark
         .createDataFrame(
             pd
-            .read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
+            .read_excel(read_bytes(probes_excel), sheet_name='PROBES TARGETS', header=0, index_col=0)
             # Probes that do not have an associated target are marked with "-",
             # but a genuinely blank cell reads as NaN, not the string "-" --
             # gene_name != '-' alone lets those rows through (NaN != anything).
@@ -285,7 +285,7 @@ def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFram
     """Metadata about the different sources of probes."""
     return (
         spark
-        .createDataFrame(pd.read_excel(probes_excel, sheet_name='COMPOUNDSETS', header=0, index_col=0))
+        .createDataFrame(pd.read_excel(read_bytes(probes_excel), sheet_name='COMPOUNDSETS', header=0, index_col=0))
         .selectExpr('COMPOUNDSET as datasourceId', 'SOURCE_URL as url')
         .filter(f.col('url').startswith('http'))
     )
@@ -294,7 +294,7 @@ def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFram
 def process_targets_xrefs(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Look-up table between the gene symbols and the UniProt IDs."""
     return spark.createDataFrame(
-        pd.read_excel(probes_excel, sheet_name='TARGETS', header=0, index_col=0).reset_index()
+        pd.read_excel(read_bytes(probes_excel), sheet_name='TARGETS', header=0, index_col=0).reset_index()
     ).selectExpr('target as targetFromSource', 'uniprot as targetFromSourceId')
 
 

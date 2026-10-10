@@ -3,9 +3,11 @@ import json
 from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import wraps
+from io import BytesIO
 from typing import Any, TypeVar, cast
 
 import pyspark.sql.functions as f
+from otter.storage.synchronous.handle import StorageHandle
 from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import IntegerType, StructField, StructType
 
@@ -315,3 +317,9 @@ def maybe_repartition(df: DataFrame, n: int | None) -> DataFrame:
     if n:
         return df.repartition(n)
     return df
+
+
+def read_bytes(path: str) -> BytesIO:
+    """Read a whole file, local or remote, through otter's storage layer."""
+    data, _ = StorageHandle(path).read()
+    return BytesIO(data)

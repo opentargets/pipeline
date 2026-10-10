@@ -26,6 +26,7 @@ from mira.provider.aact.llm_extractor import (
 )
 from mira.workflows import llm as llm_workflow
 from mira.workflows.llm import run_extraction
+from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
 from pts.postgres import read_dump_tables
@@ -198,7 +199,9 @@ def seed_legacy_cache(
     the cache, so the normal extraction loop retries them.
     """
     logger.info(f'importing legacy AACT batch results from {legacy_path}')
-    legacy = parse_batch_results(legacy_path).df
+    with TemporaryDirectory(prefix='llm-legacy-batch-') as local:
+        _stage_batch_results(legacy_path, local, config)
+        legacy = parse_batch_results(local).df
     if legacy.is_empty():
         logger.warning('legacy batch results contained no valid extractions')
         return 0
@@ -220,6 +223,20 @@ def seed_legacy_cache(
     write_cache(combined, schema_cache_uri, config, snapshot)
     logger.info(f'seeded {imported.height} legacy extractions into the cache')
     return imported.height
+
+
+def _stage_batch_results(uri: str, local: str, config: Config) -> None:
+    """Copy the ``*_output.jsonl`` files under ``uri`` into ``local``, keeping their relative paths.
+
+    Mira lists and reads them through fsspec, which has no ``gs://`` backend here.
+    """
+    root = StorageHandle(uri, config=config)
+    prefix = root.absolute.rstrip('/')
+    for path in root.glob('**/*_output.jsonl'):
+        data, _ = StorageHandle(path, config=config).read()
+        target = Path(local) / path.removeprefix(prefix).lstrip('/')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
 
 
 def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
