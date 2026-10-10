@@ -185,3 +185,17 @@ def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
     task._publish(pl.DataFrame({'id': ['nct1']}), pl.DataFrame({'id': ['nct1']}), str(tmp_path / 'cache'))
 
     assert errors_path.read_text() == '{"id":"nct1"}\n{"id":"nct2"}\n'
+
+
+def test_legacy_batch_results_are_staged_with_their_relative_paths(tmp_path: Path) -> None:
+    source = tmp_path / 'legacy'
+    (source / 'batch_2').mkdir(parents=True)
+    (source / 'batch_1_output.jsonl').write_text('one')
+    (source / 'batch_2' / 'batch_2_output.jsonl').write_text('two')
+    (source / 'batch_1_input.jsonl').write_text('ignored')
+    staged = tmp_path / 'staged'
+
+    llm_extraction._stage_batch_results(str(source), str(staged), None)
+
+    files = {str(p.relative_to(staged)): p.read_text() for p in staged.rglob('*') if p.is_file()}
+    assert files == {'batch_1_output.jsonl': 'one', 'batch_2/batch_2_output.jsonl': 'two'}

@@ -9,6 +9,7 @@ from pyspark.sql.dataframe import DataFrame
 
 from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import read_bytes
 
 CURATION_SCHEMA = t.StructType([
     t.StructField('projectId', t.StringType(), True),
@@ -46,7 +47,7 @@ def _excel_sheet_to_spark(spark: Session, path: str, sheet: str) -> DataFrame:
     pandas 3's `str` dtype cannot hold None, so the frame goes to object first; otherwise the
     blanks stay NaN and reach Spark as the string "nan".
     """
-    pdf = pd.read_excel(path, sheet_name=sheet, dtype=str).astype(object).where(lambda x: x.notnull(), None)
+    pdf = pd.read_excel(read_bytes(path), sheet_name=sheet, dtype=str).astype(object).where(lambda x: x.notnull(), None)
     schema = t.StructType([t.StructField(column, t.StringType(), True) for column in pdf.columns])
     return spark.spark.createDataFrame(pdf, schema=schema)
 
@@ -74,14 +75,14 @@ def gene_burden(
     finngen_version = settings['finngen_release']
     genebass_df = spark.load_data(source['genebass'])
     cvdi_associations_df = pd.read_excel(
-        source['cvdi'],
+        read_bytes(source['cvdi']),
         sheet_name='ST6',
         skiprows=1,
         header=[0, 1, 2],
         skipfooter=1,
     )[['phenotype', 'Gene ID Ensembl', 'Gene', 'ALL ancestry']]
     cvdi_p_value_cutoff_df = pd.read_excel(
-        source['cvdi'],
+        read_bytes(source['cvdi']),
         sheet_name='ST3',
         skiprows=1,
         header=[0, 1],
