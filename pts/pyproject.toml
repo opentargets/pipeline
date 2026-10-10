@@ -11,7 +11,7 @@ dependencies = [
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",
   "pandas>=3.0.6",
-  "polars[connectorx]>=1.41.2,<3",
+  "polars[connectorx]>=1.41.2",
   # pts clusters run Spark 4.1 (Dataproc image 3.0) and load the staged Scala 2.13 spark-nlp jar
   # (`spark_nlp_version` in orchestration's unified_pipeline.yaml).
   "pyspark>=4.1,<4.2",
@@ -39,7 +39,7 @@ test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-mock>=3.15.1", "pytest
 [project.optional-dependencies]
 baseline_expression = ["scanpy>=1.10.0", "cellex"]
 # driver-only: pts clusters install it on the master alone
-nlp = ["opentargets-mira[ner]>=1.0.4", "torch>=2.10.0", "transformers>=5.0.0,<6.0.0"]
+nlp = ["opentargets-mira[ner]>=1.0.4", "torch>=2.10.0", "transformers>=5.0.0"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

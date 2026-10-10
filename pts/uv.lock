@@ -2198,14 +2198,14 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
-    { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2,<3" },
+    { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyspark", specifier = ">=4.1,<4.2" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
     { name = "setuptools", specifier = ">=80" },
     { name = "spark-nlp", specifier = "==7.0.0" },
     { name = "torch", marker = "extra == 'nlp'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "transformers", marker = "extra == 'nlp'", specifier = ">=5.0.0,<6.0.0" },
+    { name = "transformers", marker = "extra == 'nlp'", specifier = ">=5.0.0" },
 ]
 provides-extras = ["baseline-expression", "nlp"]
 
