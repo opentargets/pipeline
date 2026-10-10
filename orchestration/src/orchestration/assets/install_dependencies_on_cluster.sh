@@ -109,8 +109,11 @@ function main() {
     # report only: packages the image ships may declare pins the lock does not meet
     "${python}" -m uv pip check --python "${python}" || true
     "${python}" -c 'import pyspark; print("pyspark", pyspark.__version__, pyspark.__file__)'
+    # only the driver, on the master, reads the openai token
+    if [[ "${DATAPROC_ROLE}" != "Master" ]]; then
+        return 0
+    fi
     echo "Get openai token secret..."
-    # add openai token secret
     mkdir -p /var/run/secrets
     run_with_retry fetch_openai_token
     # by name: the 'hadoop' group was gid 112 on the 2.x images, and a new base OS
