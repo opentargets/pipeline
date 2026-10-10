@@ -2,9 +2,9 @@
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: ['config:recommended'],
   timezone: 'Europe/London',
-  schedule: ['before 6am on monday'],
+  schedule: ['* 0-5 1-7 * 1'],
   prHourlyLimit: 0,
-  prConcurrentLimit: 10,
+  prConcurrentLimit: 6,
   minimumReleaseAge: '3 days',
   labels: ['dependencies'],
   semanticCommits: 'disabled',
@@ -14,13 +14,19 @@
   'pre-commit': {
     enabled: true,
   },
-  // also bumped by the uv group below
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    schedule: ['at any time'],
+    minimumReleaseAge: null,
+    dependencyDashboardApproval: false,
+  },
+  // also bumped by the tooling group below
   constraints: {
     uv: '0.12.24',
   },
   lockFileMaintenance: {
     enabled: true,
-    schedule: ['before 6am on the first day of the month'],
+    schedule: ['* 0-5 1-7 * 1'],
     commitMessageAction: 'refresh lock file',
   },
   customManagers: [
@@ -68,11 +74,21 @@
       commitMessagePrefix: 'croissant:',
       additionalBranchPrefix: 'croissant-',
     },
+    // lock maintenance covers in-range bumps elsewhere
     {
-      matchFileNames: ['pis/**', 'pts/**', 'orchestration/**', 'croissant/**'],
+      matchManagers: ['pep621'],
+      matchFileNames: ['orchestration/**'],
+      rangeStrategy: 'update-lockfile',
+    },
+    {
+      matchManagers: ['pep621'],
+      matchPackageNames: ['polars', 'pyspark'],
+      rangeStrategy: 'update-lockfile',
+    },
+    {
       matchManagers: ['pep621'],
       matchUpdateTypes: ['minor', 'patch'],
-      matchPackageNames: ['!pandas', '!polars', '!pyspark', '!transformers', '!torch', '!numpy'],
+      matchPackageNames: ['!polars', '!pyspark'],
       groupName: 'non-major dependencies',
       groupSlug: 'non-major',
     },
@@ -81,34 +97,30 @@
       commitMessagePrefix: 'ci:',
     },
     {
-      matchManagers: ['github-actions'],
+      matchManagers: ['github-actions', 'pre-commit'],
       matchUpdateTypes: ['minor', 'patch', 'digest'],
-      groupName: 'github actions',
+      groupName: 'tooling',
     },
     {
-      matchManagers: ['pre-commit'],
-      matchUpdateTypes: ['minor', 'patch'],
-      groupName: 'pre-commit hooks',
-    },
-    {
-      matchPackageNames: ['ruff', 'astral-sh/ruff-pre-commit'],
-      groupName: 'ruff',
-      commitMessagePrefix: 'ci:',
-      additionalBranchPrefix: '',
-    },
-    {
-      matchPackageNames: ['ty', 'astral-sh/ty-pre-commit'],
-      groupName: 'ty',
-      commitMessagePrefix: 'ci:',
-      additionalBranchPrefix: '',
-    },
-    {
-      matchPackageNames: ['uv', 'uv-build', 'astral-sh/uv', 'ghcr.io/astral-sh/uv'],
-      groupName: 'uv',
+      matchPackageNames: [
+        'ruff',
+        'astral-sh/ruff-pre-commit',
+        'ty',
+        'astral-sh/ty-pre-commit',
+        'uv',
+        'uv-build',
+        'astral-sh/uv',
+        'ghcr.io/astral-sh/uv',
+      ],
+      groupName: 'tooling',
       commitMessagePrefix: 'ci:',
       additionalBranchPrefix: '',
       // registry images have no release timestamp to age
       minimumReleaseAge: null,
+    },
+    {
+      matchUpdateTypes: ['major'],
+      dependencyDashboardApproval: true,
     },
     {
       matchDatasources: ['docker'],
