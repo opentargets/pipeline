@@ -1,8 +1,4 @@
-"""Mira-backed implementation of the :py:mod:`pts.tasks.llm_extract` task.
-
-Kept out of :py:mod:`pts.tasks` because otter imports every module there to
-register it, and ``mira`` pulls in torch, transformers and spark with it.
-"""
+"""Mira-backed implementation of the :py:mod:`pts.tasks.llm_extract` task."""
 
 from __future__ import annotations
 
@@ -200,7 +196,8 @@ def seed_legacy_cache(
     """
     logger.info(f'importing legacy AACT batch results from {legacy_path}')
     with TemporaryDirectory(prefix='llm-legacy-batch-') as local:
-        _stage_batch_results(legacy_path, local, config)
+        if not _stage_batch_results(legacy_path, local, config):
+            raise ValueError(f'no *_output.jsonl files found under {legacy_path}')
         legacy = parse_batch_results(local).df
     if legacy.is_empty():
         logger.warning('legacy batch results contained no valid extractions')
@@ -225,18 +222,18 @@ def seed_legacy_cache(
     return imported.height
 
 
-def _stage_batch_results(uri: str, local: str, config: Config) -> None:
-    """Copy the ``*_output.jsonl`` files under ``uri`` into ``local``, keeping their relative paths.
-
-    Mira lists and reads them through fsspec, which has no ``gs://`` backend here.
-    """
+def _stage_batch_results(uri: str, local: str, config: Config) -> int:
+    """Copy the ``*_output.jsonl`` files under ``uri`` into ``local``, keeping their relative paths."""
     root = StorageHandle(uri, config=config)
     prefix = root.absolute.rstrip('/')
+    staged = 0
     for path in root.glob('**/*_output.jsonl'):
         data, _ = StorageHandle(path, config=config).read()
         target = Path(local) / path.removeprefix(prefix).lstrip('/')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        staged += 1
+    return staged
 
 
 def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:

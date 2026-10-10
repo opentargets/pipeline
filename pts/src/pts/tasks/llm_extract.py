@@ -9,8 +9,7 @@ Cache identity is the trial ID and the JSON schema the model is held to. The
 prompt hash is retained as audit metadata, but prompt text, publications, the
 model and system instructions do not invalidate an accepted extraction.
 
-The mira-backed work lives in :py:mod:`pts.aact_trial_extraction`, imported in
-:py:meth:`LlmExtract.run`, so registering this task does not import mira.
+The mira-backed work lives in :py:mod:`pts.aact_trial_extraction`.
 """
 
 from __future__ import annotations
@@ -99,7 +98,8 @@ class LlmExtractSpec(Spec):
     publications: PublicationsSpec = PublicationsSpec()
     """Europe PMC enrichment."""
     legacy_batch_results: str | None = None
-    """Optional one-off directory of legacy OpenAI Batch API results to seed the cache."""
+    """Optional one-off directory of legacy OpenAI Batch API results to seed the cache,
+        relative to the release root."""
     legacy_import_only: bool = False
     """Seed legacy results and stop before making any new API calls."""
 
