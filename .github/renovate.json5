@@ -1,0 +1,154 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  timezone: 'Europe/London',
+  schedule: ['before 6am on monday'],
+  prHourlyLimit: 0,
+  prConcurrentLimit: 10,
+  minimumReleaseAge: '3 days',
+  labels: ['dependencies'],
+  semanticCommits: 'disabled',
+  commitMessageAction: 'update',
+  dependencyDashboard: true,
+  enabledManagers: ['pep621', 'github-actions', 'dockerfile', 'pre-commit', 'custom.regex'],
+  'pre-commit': {
+    enabled: true,
+  },
+  // also bumped by the uv group below
+  constraints: {
+    uv: '0.12.24',
+  },
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ['before 6am on the first day of the month'],
+    commitMessageAction: 'refresh lock file',
+  },
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'uv installer and init action',
+      managerFilePatterns: [
+        '/^orchestration/deployment/startup_user\\.sh$/',
+        '/^orchestration/src/orchestration/assets/install_dependencies_on_cluster\\.sh$/',
+      ],
+      matchStrings: [
+        'astral\\.sh/uv/(?<currentValue>[^/\\s]+)/install\\.sh',
+        'UV_VERSION="(?<currentValue>[^"]+)"',
+      ],
+      depNameTemplate: 'uv',
+      datasourceTemplate: 'pypi',
+    },
+    {
+      customType: 'regex',
+      description: 'uv constraint in this file',
+      managerFilePatterns: ['/^\\.github/renovate\\.json5$/'],
+      matchStrings: ["constraints: \\{\\s+uv: '(?<currentValue>[^']+)'"],
+      depNameTemplate: 'uv',
+      datasourceTemplate: 'pypi',
+    },
+  ],
+  packageRules: [
+    {
+      matchFileNames: ['pis/**'],
+      commitMessagePrefix: 'pis:',
+      additionalBranchPrefix: 'pis-',
+    },
+    {
+      matchFileNames: ['pts/**'],
+      commitMessagePrefix: 'pts:',
+      additionalBranchPrefix: 'pts-',
+    },
+    {
+      matchFileNames: ['orchestration/**'],
+      commitMessagePrefix: 'orchestration:',
+      additionalBranchPrefix: 'orchestration-',
+    },
+    {
+      matchFileNames: ['croissant/**'],
+      commitMessagePrefix: 'croissant:',
+      additionalBranchPrefix: 'croissant-',
+    },
+    {
+      matchFileNames: ['pis/**', 'pts/**', 'orchestration/**', 'croissant/**'],
+      matchManagers: ['pep621'],
+      matchUpdateTypes: ['minor', 'patch'],
+      matchPackageNames: ['!pandas', '!polars', '!pyspark', '!transformers', '!torch', '!numpy'],
+      groupName: 'non-major dependencies',
+      groupSlug: 'non-major',
+    },
+    {
+      matchManagers: ['github-actions', 'pre-commit'],
+      commitMessagePrefix: 'ci:',
+    },
+    {
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      groupName: 'github actions',
+    },
+    {
+      matchManagers: ['pre-commit'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'pre-commit hooks',
+    },
+    {
+      matchPackageNames: ['ruff', 'astral-sh/ruff-pre-commit'],
+      groupName: 'ruff',
+      commitMessagePrefix: 'ci:',
+      additionalBranchPrefix: '',
+    },
+    {
+      matchPackageNames: ['ty', 'astral-sh/ty-pre-commit'],
+      groupName: 'ty',
+      commitMessagePrefix: 'ci:',
+      additionalBranchPrefix: '',
+    },
+    {
+      matchPackageNames: ['uv', 'uv-build', 'astral-sh/uv', 'ghcr.io/astral-sh/uv'],
+      groupName: 'uv',
+      commitMessagePrefix: 'ci:',
+      additionalBranchPrefix: '',
+      // registry images have no release timestamp to age
+      minimumReleaseAge: null,
+    },
+    {
+      matchDatasources: ['docker'],
+      matchPackageNames: ['apache/airflow'],
+      versioning: 'regex:^slim-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-python(?<compatibility>\\d+\\.\\d+)$',
+    },
+    {
+      matchPackageNames: ['apache-airflow', 'apache/airflow'],
+      groupName: 'airflow',
+      dependencyDashboardApproval: true,
+      minimumReleaseAge: null,
+    },
+    // only the lock holds sqlalchemy, oauthlib and deprecated to Airflow's constraints
+    {
+      matchFileNames: ['orchestration/**'],
+      matchUpdateTypes: ['lockFileMaintenance'],
+      enabled: false,
+    },
+    {
+      matchPackageNames: ['python', 'cellex'],
+      enabled: false,
+    },
+    // pinned to the spark_nlp_version jar staged by orchestration
+    {
+      matchPackageNames: ['spark-nlp'],
+      enabled: false,
+    },
+    // Spark 4.1 on the Dataproc 3.0 image
+    {
+      matchFileNames: ['pts/**'],
+      matchPackageNames: ['pyspark'],
+      allowedVersions: '<4.2',
+    },
+    {
+      matchPackageNames: ['transformers'],
+      allowedVersions: '<6',
+    },
+    {
+      matchPackageNames: ['polars'],
+      allowedVersions: '<3',
+    },
+  ],
+}
