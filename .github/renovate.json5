@@ -154,13 +154,5 @@
       matchPackageNames: ['pyspark'],
       allowedVersions: '<4.2',
     },
-    {
-      matchPackageNames: ['transformers'],
-      allowedVersions: '<6',
-    },
-    {
-      matchPackageNames: ['polars'],
-      allowedVersions: '<3',
-    },
   ],
 }
