@@ -8,7 +8,7 @@ RUN apt-get update && \
 WORKDIR /app
 COPY . /app
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra nlp
 
 # pixeltable-pgserver runs postgres under a non-root account when it detects
 # uid 0, and creates that account with useradd from PostgresServer.__init__ --
