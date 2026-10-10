@@ -41,6 +41,10 @@ baseline_expression = ["scanpy>=1.10.0", "cellex"]
 # driver-only: pts clusters install it on the master alone
 nlp = ["opentargets-mira[ner]>=1.0.4", "torch>=2.10.0", "transformers>=5.0.0"]
 
+[tool.uv]
+# moved together with the polars major by Renovate (#146)
+constraint-dependencies = ["polars<3"]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
