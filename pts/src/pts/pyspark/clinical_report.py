@@ -1,9 +1,13 @@
 """Clinical report dataset generation."""
 
-import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
+import huggingface_hub.constants as hf_constants
 import pdfplumber
 import polars as pl
 import torch
@@ -100,6 +104,42 @@ def clinical_report(
         settings: Dictionary containing step variables
         properties: Dictionary containing Spark properties
     """
+    with offline_hf_models(source['models']):
+        _clinical_report(source, destination, settings)
+
+
+@contextmanager
+def offline_hf_models(models_uri: str) -> Generator[Path]:
+    """Serve the Hugging Face models staged under ``models_uri`` from a local hub cache, with the hub offline.
+
+    ``models_uri`` holds ``<org>/<name>/<revision>/<file>``.
+    """
+    with TemporaryDirectory(prefix='hf-hub-') as cache:
+        root = StorageHandle(models_uri)
+        prefix = root.absolute.rstrip('/')
+        paths = list(root.glob('*/*/*/*'))
+        if not paths:
+            raise ValueError(f'no models staged under {models_uri}')
+        for path in paths:
+            org, name, revision, filename = path.removeprefix(prefix).strip('/').split('/')
+            model_dir = Path(cache) / f'models--{org}--{name}'
+            target = model_dir / 'snapshots' / revision / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data, _ = StorageHandle(path).read()
+            target.write_bytes(data)
+            (model_dir / 'refs').mkdir(exist_ok=True)
+            (model_dir / 'refs' / 'main').write_text(revision)
+        logger.info(f'staged hugging face models from {models_uri}: {sorted(p.name for p in Path(cache).iterdir())}')
+
+        previous = hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE
+        hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE = True, cache
+        try:
+            yield Path(cache)
+        finally:
+            hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE = previous
+
+
+def _clinical_report(source: dict[str, str], destination: dict[str, str], settings: dict[str, str]) -> None:
     logger.info(f'source paths: {source}')
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
@@ -584,13 +624,11 @@ def get_device() -> torch.device:
 @lru_cache(maxsize=1)
 def _load_model_assets(model_name: str) -> tuple[PreTrainedTokenizerBase, PreTrainedModel, dict[int, str]]:
     """Load the tokenizer, model, and label mapping — only once, the model is cached."""
-    cache_dir = os.environ.get('TRANSFORMERS_CACHE') or os.environ.get('HF_HOME')
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer is None:
         raise ValueError(f'{model_name} has no tokenizer')
 
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=cache_dir)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name)
     model.to(get_device())
     model.eval()
 

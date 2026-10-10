@@ -814,6 +814,7 @@ steps:
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction: input/clinical_report/aact_trial_extraction
         ner_cache_path: input/clinical_report/ner_cache.parquet
+        models: input/clinical_report/models
       destination:
         output: output/clinical_report
       settings:
