@@ -12,6 +12,9 @@ readonly REPO_URI="https://github.com/opentargets/pipeline"
 readonly UV_VERSION="0.12.24"
 DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
 readonly DATAPROC_CLUSTER_NAME
+# Master or Worker
+DATAPROC_ROLE=$(/usr/share/google/get_metadata_value attributes/dataproc-role)
+readonly DATAPROC_ROLE
 echo "export DATAPROC_CLUSTER_NAME=${DATAPROC_CLUSTER_NAME}" >> /etc/profile.d/custom_env_vars.sh
 
 function err() {
@@ -87,9 +90,14 @@ function main() {
     run_with_retry git -C "${src}" checkout -q FETCH_HEAD
     git -C "${src}" log -1 --format='pts source: %H %s'
 
+    # the driver runs on the master, and only the driver uses torch and the NER models
+    local extras=()
+    if [[ "${DATAPROC_ROLE}" == "Master" ]]; then
+        extras=(--extra nlp)
+    fi
     # pyspark and py4j come from the image's Spark
     "${python}" -m uv export --quiet --project "${src}/pts" --frozen --no-dev --no-emit-project \
-        --format pylock.toml --no-emit-package pyspark --no-emit-package py4j \
+        --format pylock.toml --no-emit-package pyspark --no-emit-package py4j "${extras[@]}" \
         --output-file "${src}/pylock.toml"
 
     "${python}" -m uv pip uninstall --python "${python}" pts || true
