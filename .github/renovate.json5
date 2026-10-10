@@ -9,7 +9,7 @@
   labels: ['dependencies'],
   semanticCommits: 'disabled',
   commitMessageAction: 'update',
-  dependencyDashboard: true,
+  dependencyDashboard: false,
   enabledManagers: ['pep621', 'github-actions', 'dockerfile', 'pre-commit', 'custom.regex'],
   'pre-commit': {
     enabled: true,
@@ -18,7 +18,7 @@
   vulnerabilityAlerts: {
     schedule: ['at any time'],
     minimumReleaseAge: null,
-    dependencyDashboardApproval: false,
+    draftPR: false,
   },
   // also bumped by the tooling group below
   constraints: {
@@ -133,7 +133,8 @@
     },
     {
       matchUpdateTypes: ['major'],
-      dependencyDashboardApproval: true,
+      draftPR: true,
+      addLabels: ['major'],
     },
     {
       matchDatasources: ['docker'],
@@ -143,7 +144,8 @@
     {
       matchPackageNames: ['apache-airflow', 'apache/airflow'],
       groupName: 'airflow',
-      dependencyDashboardApproval: true,
+      draftPR: true,
+      addLabels: ['airflow'],
       minimumReleaseAge: null,
     },
     // only the lock holds sqlalchemy, oauthlib and deprecated to Airflow's constraints
