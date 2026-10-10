@@ -24,8 +24,9 @@ def test_registering_tasks_does_not_import_mira() -> None:
         "TaskRegistry(None, None).register('pts.tasks')\n"
         "print(sorted({m.split('.')[0] for m in sys.modules} & {'mira', 'ontoma', 'torch', 'transformers'}))\n"
     )
-    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, check=True)
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, check=False)
 
+    assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == '[]'
 
 
@@ -195,7 +196,17 @@ def test_legacy_batch_results_are_staged_with_their_relative_paths(tmp_path: Pat
     (source / 'batch_1_input.jsonl').write_text('ignored')
     staged = tmp_path / 'staged'
 
-    aact_trial_extraction._stage_batch_results(str(source), str(staged), None)
+    count = aact_trial_extraction._stage_batch_results(str(source), str(staged), None)
 
     files = {str(p.relative_to(staged)): p.read_text() for p in staged.rglob('*') if p.is_file()}
     assert files == {'batch_1_output.jsonl': 'one', 'batch_2/batch_2_output.jsonl': 'two'}
+    assert count == 2
+
+
+def test_seed_legacy_cache_names_the_configured_path_when_nothing_is_staged(tmp_path: Path) -> None:
+    legacy = tmp_path / 'legacy'
+    legacy.mkdir()
+    prompts = pl.DataFrame(schema={'id': pl.String, 'cache_key': pl.String, 'prompt_sha256': pl.String})
+
+    with pytest.raises(ValueError, match=str(legacy)):
+        aact_trial_extraction.seed_legacy_cache(prompts, str(legacy), str(tmp_path / 'cache'), cast(Any, None), 'snap')
