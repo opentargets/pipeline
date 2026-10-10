@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
@@ -10,8 +12,21 @@ import mira.workflows.llm as llm_workflow
 import polars as pl
 import pytest
 
-from pts.tasks import llm_extract
-from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _run_extraction_in_thread, _schema_cache_uri
+from pts import llm_extraction
+from pts.llm_extraction import _run_extraction_in_thread
+from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _schema_cache_uri
+
+
+def test_registering_tasks_does_not_import_mira() -> None:
+    script = (
+        'import sys\n'
+        'from otter.task.task_registry import TaskRegistry\n'
+        "TaskRegistry(None, None).register('pts.tasks')\n"
+        "print(sorted({m.split('.')[0] for m in sys.modules} & {'mira', 'ontoma', 'torch', 'transformers'}))\n"
+    )
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, check=True)
+
+    assert result.stdout.strip() == '[]'
 
 
 def test_schema_cache_uri_namespaces_the_cache_by_schema() -> None:
@@ -36,31 +51,15 @@ def test_trial_report_passes_detailed_description_to_mira(
     }
     captured: dict[str, Any] = {}
 
-    class FakeStorageHandle:
-        def __init__(self, path: str, **_: object) -> None:
-            self.absolute = path
-
     def fake_extract_clinical_report(**kwargs: object) -> SimpleNamespace:
         captured.update(kwargs)
         return SimpleNamespace(df=pl.DataFrame({'id': ['nct1']}))
 
-    monkeypatch.setattr(llm_extract, 'StorageHandle', FakeStorageHandle)
-    monkeypatch.setattr(llm_extract, 'read_dump_tables', lambda *args, **kwargs: tables)
-    monkeypatch.setattr(llm_extract, 'extract_clinical_report', fake_extract_clinical_report)
-    monkeypatch.setattr(llm_extract, 'sample_report', lambda report, sample_size: report)
+    monkeypatch.setattr(llm_extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
+    monkeypatch.setattr(llm_extraction, 'extract_clinical_report', fake_extract_clinical_report)
+    monkeypatch.setattr(llm_extraction, 'sample_report', lambda report, sample_size: report)
 
-    task = LlmExtract(
-        LlmExtractSpec(
-            name='llm_extract test',
-            source={'aact': str(tmp_path / 'aact.zip')},
-            destination={'prompts': 'prompts.parquet', 'extraction': 'extractions.parquet'},
-            cache_uri='cache',
-            snapshot='snapshot',
-        ),
-        SimpleNamespace(config=SimpleNamespace(work_path=str(tmp_path))),
-    )
-
-    task._trial_report()
+    llm_extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
 
     detailed = cast(list[pl.DataFrame], captured['additional_metadata'])[2]
     assert detailed.columns == ['nct_id', 'detailed_description']
@@ -77,7 +76,7 @@ class _FakeClient:
 
 def test_asyncio_proxy_delegates_and_closes_clients_on_its_event_loop() -> None:
     client = _FakeClient()
-    proxy = llm_extract._AsyncioWithClientCleanup(asyncio, [client])
+    proxy = llm_extraction._AsyncioWithClientCleanup(asyncio, [client])
 
     async def return_result() -> str:
         return 'result'
@@ -96,7 +95,7 @@ def test_workflow_patches_are_restored_when_extraction_raises(monkeypatch: pytes
         assert llm_workflow.asyncio is not asyncio
         raise RuntimeError('extraction failed')
 
-    monkeypatch.setattr(llm_extract, 'run_extraction', fail)
+    monkeypatch.setattr(llm_extraction, 'run_extraction', fail)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         _run_extraction_in_thread()
@@ -121,7 +120,7 @@ def test_workflow_patches_are_serialised(monkeypatch: pytest.MonkeyPatch) -> Non
             active -= 1
         return pl.DataFrame()
 
-    monkeypatch.setattr(llm_extract, 'run_extraction', observe)
+    monkeypatch.setattr(llm_extraction, 'run_extraction', observe)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(_run_extraction_in_thread) for _ in range(2)]
