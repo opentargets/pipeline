@@ -12,6 +12,9 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform == 'darwin'",
 ]
 
+[manifest]
+constraints = [{ name = "polars", specifier = "<3" }]
+
 [[package]]
 name = "adjusttext"
 version = "1.4.0"
