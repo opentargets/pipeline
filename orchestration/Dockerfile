@@ -1,13 +1,4 @@
 FROM apache/airflow:slim-3.3.2-python3.12
-USER root
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Add g++
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends g++ \
-  && apt-get autoremove -yqq --purge \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
 
 USER airflow
 
@@ -16,9 +7,9 @@ COPY pyproject.toml uv.lock README.md ./
 
 # We have to install dependencies like this because uv does not seem to install
 # `psycopg2-binary` properly when using the `--no-install-project` flag.
-# Install the locked versions. The base image ships its own uv earlier on PATH.
+# Install exactly the locked versions, wheels only. The base image ships its own uv earlier on PATH.
 RUN /bin/uv export --frozen --format requirements.txt --no-dev --no-hashes --no-emit-project -o requirements.txt \
-  && /bin/uv pip install -r requirements.txt
+  && /bin/uv pip install --no-deps --only-binary :all: -r requirements.txt
 
 USER 0
 RUN curl -sSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz" | \
