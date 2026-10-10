@@ -19,6 +19,10 @@ scratchpad:
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
+  stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
+  biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
+  biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
+  drugtemist_ner_revision: 8cd97116de5fdc911817166df8cb41a022874b10
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
   cosmic_version: '2025-06-24'
@@ -181,6 +185,58 @@ steps:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
           destination: input/clinical_report/${match_stem}.${match_ext}
+
+    # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
+    - name: explode stop reasons model
+      foreach:
+        - config.json
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy stop reasons model ${each}
+          source: https://huggingface.co/opentargets/clinical_trial_stop_reasons/resolve/${stop_reasons_model_revision}/${each}
+          destination: input/clinical_report/models/opentargets/clinical_trial_stop_reasons/${stop_reasons_model_revision}/${each}
+
+    - name: explode biobert diseases ner model
+      foreach:
+        - config.json
+        - pytorch_model.bin
+        - special_tokens_map.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy biobert diseases ner model ${each}
+          source: https://huggingface.co/alvaroalon2/biobert_diseases_ner/resolve/${biobert_diseases_ner_revision}/${each}
+          destination: input/clinical_report/models/alvaroalon2/biobert_diseases_ner/${biobert_diseases_ner_revision}/${each}
+
+    - name: explode biobert chemical ner model
+      foreach:
+        - config.json
+        - pytorch_model.bin
+        - special_tokens_map.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy biobert chemical ner model ${each}
+          source: https://huggingface.co/alvaroalon2/biobert_chemical_ner/resolve/${biobert_chemical_ner_revision}/${each}
+          destination: input/clinical_report/models/alvaroalon2/biobert_chemical_ner/${biobert_chemical_ner_revision}/${each}
+
+    - name: explode drugtemist ner model
+      foreach:
+        - config.json
+        - merges.txt
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.json
+      do:
+        - name: copy drugtemist ner model ${each}
+          source: https://huggingface.co/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/resolve/${drugtemist_ner_revision}/${each}
+          destination: input/clinical_report/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
