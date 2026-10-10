@@ -27,7 +27,7 @@ dependencies = [
   "pdfplumber>=0.11.9",
   "pixeltable-pgserver>=0.6,<0.7",
   "opentargets-mira>=1.0.5",
-  "huggingface-hub>=0.32.4",
+  "huggingface-hub>=2.0.0",
   "networkx>=3.6.1",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
@@ -53,7 +53,6 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
-torchvision = [{ index = "pytorch-cpu" }]
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [project.scripts]
