@@ -12,8 +12,8 @@ import mira.workflows.llm as llm_workflow
 import polars as pl
 import pytest
 
-from pts import llm_extraction
-from pts.llm_extraction import _run_extraction_in_thread
+from pts import aact_trial_extraction
+from pts.aact_trial_extraction import _run_extraction_in_thread
 from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _schema_cache_uri
 
 
@@ -55,11 +55,11 @@ def test_trial_report_passes_detailed_description_to_mira(
         captured.update(kwargs)
         return SimpleNamespace(df=pl.DataFrame({'id': ['nct1']}))
 
-    monkeypatch.setattr(llm_extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
-    monkeypatch.setattr(llm_extraction, 'extract_clinical_report', fake_extract_clinical_report)
-    monkeypatch.setattr(llm_extraction, 'sample_report', lambda report, sample_size: report)
+    monkeypatch.setattr(aact_trial_extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
+    monkeypatch.setattr(aact_trial_extraction, 'extract_clinical_report', fake_extract_clinical_report)
+    monkeypatch.setattr(aact_trial_extraction, 'sample_report', lambda report, sample_size: report)
 
-    llm_extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
+    aact_trial_extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
 
     detailed = cast(list[pl.DataFrame], captured['additional_metadata'])[2]
     assert detailed.columns == ['nct_id', 'detailed_description']
@@ -76,7 +76,7 @@ class _FakeClient:
 
 def test_asyncio_proxy_delegates_and_closes_clients_on_its_event_loop() -> None:
     client = _FakeClient()
-    proxy = llm_extraction._AsyncioWithClientCleanup(asyncio, [client])
+    proxy = aact_trial_extraction._AsyncioWithClientCleanup(asyncio, [client])
 
     async def return_result() -> str:
         return 'result'
@@ -95,7 +95,7 @@ def test_workflow_patches_are_restored_when_extraction_raises(monkeypatch: pytes
         assert llm_workflow.asyncio is not asyncio
         raise RuntimeError('extraction failed')
 
-    monkeypatch.setattr(llm_extraction, 'run_extraction', fail)
+    monkeypatch.setattr(aact_trial_extraction, 'run_extraction', fail)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         _run_extraction_in_thread()
@@ -120,7 +120,7 @@ def test_workflow_patches_are_serialised(monkeypatch: pytest.MonkeyPatch) -> Non
             active -= 1
         return pl.DataFrame()
 
-    monkeypatch.setattr(llm_extraction, 'run_extraction', observe)
+    monkeypatch.setattr(aact_trial_extraction, 'run_extraction', observe)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(_run_extraction_in_thread) for _ in range(2)]
@@ -195,7 +195,7 @@ def test_legacy_batch_results_are_staged_with_their_relative_paths(tmp_path: Pat
     (source / 'batch_1_input.jsonl').write_text('ignored')
     staged = tmp_path / 'staged'
 
-    llm_extraction._stage_batch_results(str(source), str(staged), None)
+    aact_trial_extraction._stage_batch_results(str(source), str(staged), None)
 
     files = {str(p.relative_to(staged)): p.read_text() for p in staged.rglob('*') if p.is_file()}
     assert files == {'batch_1_output.jsonl': 'one', 'batch_2/batch_2_output.jsonl': 'two'}
