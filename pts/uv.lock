@@ -2152,16 +2152,20 @@ dependencies = [
     { name = "polars", extra = ["connectorx"] },
     { name = "polars-hash" },
     { name = "pyspark" },
+    { name = "setuptools" },
     { name = "spark-nlp" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
-    { name = "transformers" },
 ]
 
 [package.optional-dependencies]
 baseline-expression = [
     { name = "cellex" },
     { name = "scanpy" },
+]
+nlp = [
+    { name = "opentargets-mira" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
@@ -2189,6 +2193,7 @@ requires-dist = [
     { name = "openai", specifier = ">=2.41.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-mira", specifier = ">=1.0.4" },
+    { name = "opentargets-mira", extras = ["ner"], marker = "extra == 'nlp'", specifier = ">=1.0.4" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
@@ -2197,11 +2202,12 @@ requires-dist = [
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyspark", specifier = ">=4.1,<4.2" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
+    { name = "setuptools", specifier = ">=80" },
     { name = "spark-nlp", specifier = "==7.0.0" },
-    { name = "torch", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "transformers", specifier = ">=5.0.0,<6.0.0" },
+    { name = "torch", marker = "extra == 'nlp'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "transformers", marker = "extra == 'nlp'", specifier = ">=5.0.0,<6.0.0" },
 ]
-provides-extras = ["baseline-expression"]
+provides-extras = ["baseline-expression", "nlp"]
 
 [package.metadata.requires-dev]
 dev = [
