@@ -52,6 +52,14 @@
       depNameTemplate: 'uv',
       datasourceTemplate: 'pypi',
     },
+    {
+      customType: 'regex',
+      description: 'polars fence in uv constraint-dependencies',
+      managerFilePatterns: ['/^pts/pyproject\\.toml$/'],
+      matchStrings: ['"(?<depName>polars)(?<currentValue><[^"]+)"'],
+      datasourceTemplate: 'pypi',
+      versioningTemplate: 'pep440',
+    },
   ],
   packageRules: [
     {
@@ -117,6 +125,11 @@
       additionalBranchPrefix: '',
       // registry images have no release timestamp to age
       minimumReleaseAge: null,
+    },
+    {
+      matchFileNames: ['pts/**'],
+      matchPackageNames: ['polars'],
+      groupName: 'polars',
     },
     {
       matchUpdateTypes: ['major'],
