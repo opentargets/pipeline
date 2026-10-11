@@ -596,16 +596,22 @@ def _sum(terms: Column) -> Column:
     return f.aggregate(terms, f.lit(0.0), lambda acc, x: acc + x)
 
 
+def _squared_rank(index: Column) -> Column:
+    """Square of a 0-based array index's 1-based rank, as a double."""
+    rank = (index + 1).cast('double')
+    return rank * rank
+
+
 def _harmonic_sum(scores: Column) -> Column:
     """Sum of the non-null scores, sorted descending, each divided by its squared rank; 0.0 when there are none."""
     ranked = f.sort_array(f.filter(scores, lambda s: s.isNotNull()), asc=False)
-    weighted = f.transform(ranked, lambda s, i: s / ((i + 1) * (i + 1)))
+    weighted = f.transform(ranked, lambda s, i: s / _squared_rank(i))
     return f.coalesce(_sum(weighted), f.lit(0.0))
 
 
 def _max_harmonic_sum(scores: Column) -> Column:
     """Harmonic sum of as many 1.0 scores as there are non-null scores; 0.0 when there are none."""
-    weights = f.transform(f.filter(scores, lambda s: s.isNotNull()), lambda _, i: f.lit(1.0) / ((i + 1) * (i + 1)))
+    weights = f.transform(f.filter(scores, lambda s: s.isNotNull()), lambda _, i: f.lit(1.0) / _squared_rank(i))
     return f.coalesce(_sum(weights), f.lit(0.0))
 
 

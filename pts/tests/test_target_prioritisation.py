@@ -396,3 +396,19 @@ def test_harmonic_sums_match_udfs(spark):
     for row in rows:
         assert _same_double(row.harmonic, _harmonic_sum_reference(row.score))
         assert _same_double(row.max_harmonic, _max_harmonic_sum_reference(row.score))
+
+
+def test_harmonic_sums_match_udfs_beyond_int32_squared_ranks(spark):
+    # ranks above 46,340 overflow an int32 square
+    rng = random.Random(1)
+    scores = [rng.random() for _ in range(70_000)]
+    df = spark.createDataFrame([(scores,)], 'score ARRAY<DOUBLE>')
+
+    row = df.select(
+        _harmonic_sum(f.col('score')).alias('harmonic'),
+        _max_harmonic_sum(f.col('score')).alias('max_harmonic'),
+    ).first()
+
+    assert row is not None
+    assert row.harmonic == _harmonic_sum_reference(scores)
+    assert row.max_harmonic == _max_harmonic_sum_reference(scores)
