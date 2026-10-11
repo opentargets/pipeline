@@ -32,6 +32,7 @@ requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv]
+# until google-cloud-aiplatform drops its litellm<1.86 cap
 override-dependencies = ["litellm>=1.88.6,<1.89"]
 
 [tool.pytest.ini_options]
