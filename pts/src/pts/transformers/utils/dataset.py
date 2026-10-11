@@ -24,10 +24,11 @@ cannot do rather than half-doing it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any, Literal
 
 import polars as pl
+import pyarrow as pa
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
@@ -200,6 +201,7 @@ def write_dataset(
     path: str,
     *,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
+    not_null: Collection[str] = (),
 ) -> None:
     """Write one dataset as a directory of size-capped zstd parquet parts.
 
@@ -227,9 +229,12 @@ def write_dataset(
         path: destination directory, used as given -- never a parent or a derived path.
         approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
+        not_null: top-level columns written as non-nullable in the parquet schema. Writing fails
+            if one of them holds a null.
 
     Raises:
-        ValueError: if anything already exists at `path`, file or directory.
+        ValueError: if anything already exists at `path`, file or directory, or if `not_null`
+            names a column the frame does not have.
     """
     try:
         StorageHandle(path).stat()
@@ -243,7 +248,14 @@ def write_dataset(
         raise ValueError(msg)
 
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    arrow_schema = None
+    if not_null:
+        schema = pl.DataFrame(schema=lf.collect_schema()).to_arrow().schema
+        if missing := set(not_null) - set(schema.names):
+            raise ValueError(f'not_null names columns absent from the frame: {sorted(missing)}')
+        arrow_schema = pa.schema([field.with_nullable(field.name not in not_null) for field in schema])
     lf.sink_parquet(
         pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),
         compression='zstd',
+        arrow_schema=arrow_schema,
     )
