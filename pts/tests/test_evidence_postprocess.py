@@ -374,6 +374,37 @@ class TestCrisprScoreExpression:
 
         assert [r.native for r in rows] == [r.udf for r in rows]
 
+    @pytest.mark.parametrize('score_type', ['INT', 'BIGINT'])
+    def test_integer_score_matches_udf(
+        self: TestCrisprScoreExpression, spark: SparkSession, score_expression: str, score_type: str
+    ) -> None:
+        df = spark.createDataFrame([(v,) for v in range(-10, 151)], f'resourceScore {score_type}')
+        spark.udf.register('linear_rescale_reference', _linear_rescaling)
+
+        rows = df.select(
+            f.expr(score_expression).cast('double').alias('native'),
+            f.expr('linear_rescale_reference(resourceScore, 41.5, 100, 0.415, 1.0)').cast('double').alias('udf'),
+        ).collect()
+
+        assert [r.native for r in rows] == [r.udf for r in rows]
+
+    def test_decimal_score_matches_double_score(
+        self: TestCrisprScoreExpression, spark: SparkSession, score_expression: str
+    ) -> None:
+        rng = random.Random(0)
+        values = [f'{v:.4f}' for v in [rng.uniform(30.0, 110.0) for _ in range(2000)] + [41.5, 77.0, 100.0]]
+        df = spark.createDataFrame([(v,) for v in values], 'value STRING').select(
+            f.col('value').cast('decimal(10,4)').alias('decimal_score'),
+            f.col('value').cast('double').alias('double_score'),
+        )
+
+        rows = df.select(
+            f.expr(score_expression.replace('resourceScore', 'decimal_score')).cast('double').alias('decimal'),
+            f.expr(score_expression.replace('resourceScore', 'double_score')).cast('double').alias('double'),
+        ).collect()
+
+        assert [r.decimal for r in rows] == [r.double for r in rows]
+
     def test_null_and_nan_score_are_null(
         self: TestCrisprScoreExpression, spark: SparkSession, score_expression: str
     ) -> None:

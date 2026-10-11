@@ -1811,7 +1811,7 @@ steps:
           CASE
             WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
             ELSE LEAST(1.0, GREATEST(0.415,
-              (1.0 - 0.415) * (resourceScore - 41.5) / (100 - 41.5) + 0.415
+              (1.0 - 0.415) * (CAST(resourceScore AS DOUBLE) - 41.5) / (100 - 41.5) + 0.415
             ))
           END
         unique_fields:
