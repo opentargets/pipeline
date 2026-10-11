@@ -176,8 +176,6 @@ More information on running Airflow with Docker Compose can be found in the
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 32
     AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: 16
     AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
-    # Also add the following line if you are using CeleryExecutor (by default, LocalExecutor is used).
-    AIRFLOW__CELERY__WORKER_CONCURRENCY: 32
     ```
 
 1. **Additional pip packages**. They can be added to the `requirements.txt` file.
