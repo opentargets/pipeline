@@ -156,6 +156,8 @@ class UnifiedPipelineConfig:
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
+        self.pts_boot_disk_size = 30
+        """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
 
         # Spark-NLP fat jar. Clusters that use OnToma (pts, pts_literature) load
         # it via spark.jars instead of resolving the package from Maven Central
