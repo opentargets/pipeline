@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 import polars as pl
-import pyarrow.parquet as pq
 import pytest
 
 from pts.transformers.interaction import (
     INTACT_SCHEMA,
     aggregate,
+    check_interactions,
     divide,
     explode,
     generate_interactions,
@@ -289,6 +289,14 @@ def test_interaction_id_is_pinned() -> None:
     ]
 
 
+@pytest.mark.parametrize('column', ['interactionId', 'count', 'speciesA', 'speciesB'])
+def test_check_interactions_refuses_nulls(column: str) -> None:
+    df = with_interaction_id(key_frame()).with_columns(count=pl.lit(1, pl.Int64))
+    check_interactions(df)
+    with pytest.raises(ValueError, match=column):
+        check_interactions(df.with_columns(pl.lit(None).cast(df.schema[column]).alias(column)))
+
+
 # ---------------------------------------------------------------------------
 # end to end
 # ---------------------------------------------------------------------------
@@ -357,10 +365,6 @@ def test_interaction_end_to_end(tmp_path: Path) -> None:
     string_scores = evidences.filter(pl.col('interactionResources').struct.field('sourceDatabase') == 'string')
     assert sorted(string_scores['evidenceScore'].to_list()) == [0.1, 0.288]
 
-    schema = pq.read_schema(next((dst / 'interaction').glob('*.parquet')))
-    assert {f.name for f in schema if not f.nullable} == {'interactionId', 'count', 'speciesA', 'speciesB'}
-    schema = pq.read_schema(next((dst / 'interaction_evidence').glob('*.parquet')))
-    assert {f.name for f in schema if not f.nullable} == {'interactionId'}
     assert evidences.columns[:7] == [
         'interactionResources',
         'interactionScore',

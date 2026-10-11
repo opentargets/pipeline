@@ -433,6 +433,17 @@ def evidence(df: pl.DataFrame) -> pl.DataFrame:
     return with_interaction_id(df).drop(DIMENSION_COLUMNS)
 
 
+NOT_NULL_COLUMNS = ['interactionId', 'count', 'speciesA', 'speciesB']
+
+
+def check_interactions(df: pl.DataFrame) -> None:
+    """Raise unless ``interactionId`` is unique and the not-null columns hold no null."""
+    if nulls := [c for c in NOT_NULL_COLUMNS if df[c].null_count()]:
+        raise ValueError(f'interaction has nulls in {nulls}')
+    if df['interactionId'].n_unique() != df.height:
+        raise ValueError('interactionId is not unique')
+
+
 def sort_interactions(df: pl.DataFrame) -> pl.DataFrame:
     """Order interactions by pair, with ``interactionId`` breaking ties."""
     return df.sort('sourceDatabase', 'targetA', 'targetB', 'intA', 'intB', 'interactionId')
@@ -504,8 +515,7 @@ def interaction(
     del intact, string
 
     interactions = sort_interactions(to_camel_case(pl.concat([aggregate(intact_fields), aggregate(string_fields)])))
-    if interactions['interactionId'].n_unique() != interactions.height:
-        raise ValueError('interactionId is not unique')
+    check_interactions(interactions)
     evidences = to_camel_case(
         pl.concat(
             [
@@ -519,11 +529,12 @@ def interaction(
     evidences = sort_evidences(evidences, interactions)
     unmatched_ids = unmatched_ids.sort('intB')
 
+    if evidences['interactionId'].null_count():
+        raise ValueError('interaction_evidence has a null interactionId')
+
     logger.info(f'writing {interactions.height} interactions to {destination["interactions"]}')
-    write_dataset(
-        interactions, destination['interactions'], not_null=['interactionId', 'count', 'speciesA', 'speciesB']
-    )
+    write_dataset(interactions, destination['interactions'])
     logger.info(f'writing {evidences.height} evidences to {destination["interactions_evidence"]}')
-    write_dataset(evidences, destination['interactions_evidence'], not_null=['interactionId'])
+    write_dataset(evidences, destination['interactions_evidence'])
     logger.info(f'writing {unmatched_ids.height} unmatched interactors to {destination["interactions_unmatched"]}')
     write_dataset(unmatched_ids, destination['interactions_unmatched'])

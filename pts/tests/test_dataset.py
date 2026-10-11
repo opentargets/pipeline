@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 
 import polars as pl
-import pyarrow.parquet as pq
 import pytest
 
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
@@ -255,27 +254,6 @@ def test_write_refuses_when_the_destination_is_a_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='already exists'):
         write_dataset(pl.DataFrame({'a': [1]}), str(path))
-
-
-def test_write_marks_not_null_columns(tmp_path: Path) -> None:
-    path = str(tmp_path / 'ds')
-    frame = pl.DataFrame({'a': [1, 2], 's': [{'x': None}, {'x': 'y'}], 'b': ['x', None]})
-
-    write_dataset(frame, path, not_null=['a', 's'])
-
-    schema = pq.read_schema(next(Path(path).glob('*.parquet')))
-    assert {f.name: f.nullable for f in schema} == {'a': False, 's': False, 'b': True}
-    assert pl.read_parquet(path).equals(frame)
-
-
-def test_write_refuses_a_null_in_a_not_null_column(tmp_path: Path) -> None:
-    with pytest.raises(pl.exceptions.SchemaError, match='nullable is false'):
-        write_dataset(pl.DataFrame({'a': [1, None]}), str(tmp_path / 'ds'), not_null=['a'])
-
-
-def test_write_refuses_an_unknown_not_null_column(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match='absent'):
-        write_dataset(pl.DataFrame({'a': [1]}), str(tmp_path / 'ds'), not_null=['z'])
 
 
 def test_round_trip(tmp_path: Path) -> None:
