@@ -17,6 +17,7 @@ from pts.transformers.interaction import (
     get_code,
     interaction,
     interaction_id,
+    snake_to_lower_camel,
     to_camel_case,
     transform_ensembl_protein,
     transform_human_mapping,
@@ -115,6 +116,20 @@ def test_camel_case_renames_nested_structs_without_nulling_them() -> None:
         'hostOrganismTissue': {'fullName': 'liver', 'xrefs': ['a']},
         'participantDetectionMethodA': [{'miIdentifier': 'MI:1', 'shortName': 'x'}],
     }
+
+
+@pytest.mark.parametrize(
+    ('name', 'expected'),
+    [
+        ('score', 'score'),
+        ('evidence_score', 'evidenceScore'),
+        ('interaction_mi_identifier', 'interactionMiIdentifier'),
+        ('participant_detection_method_A', 'participantDetectionMethodA'),
+        ('evidenceScore', 'evidenceScore'),
+    ],
+)
+def test_snake_to_lower_camel(name: str, expected: str) -> None:
+    assert snake_to_lower_camel(name) == expected
 
 
 def test_interactions_handle_a_multi_chunk_frame_with_missing_interactor_b() -> None:
