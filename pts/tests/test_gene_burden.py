@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from pyspark.sql import SparkSession
 
 from pts.pyspark.common.session import Session
@@ -148,6 +149,7 @@ def test_cvdi_cauchy_associations_are_kept_without_an_odds_ratio(pts_session: Se
     assert rows['LOF (MAF<0.1%)'].studyCasesWithQualifyingVariants == 10
 
 
+@pytest.mark.usefixtures('ansi')
 def test_cvdi_survives_text_in_numeric_columns(pts_session: Session):
     """A "-" in a numeric CVDI column must not stop the step; that cell reads as null."""
     associations, cutoffs = _cvdi_frames()

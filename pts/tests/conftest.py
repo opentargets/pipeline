@@ -51,3 +51,17 @@ def pts_session():
     finally:
         # ensure the spark session stops even if tests fail
         s.stop()
+
+
+@pytest.fixture(params=['false', 'true'], ids=['ansi_off', 'ansi_on'])
+def ansi(spark: SparkSession, request: pytest.FixtureRequest):
+    """Run a test with ANSI mode off, as pts runs, and on, as Spark 4 defaults.
+
+    Every session in the run is the same SparkSession, so the setting is put back.
+    """
+    previous = spark.conf.get('spark.sql.ansi.enabled')
+    spark.conf.set('spark.sql.ansi.enabled', request.param)
+    try:
+        yield request.param == 'true'
+    finally:
+        spark.conf.set('spark.sql.ansi.enabled', previous)

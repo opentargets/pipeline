@@ -235,7 +235,7 @@ def process_cvdi_gene_burden(
 
     return (
         pandas_to_spark_strings(spark.spark, associations_df, CVDI_COLUMNS)
-        .withColumns({c: f.col(c).cast(t.DoubleType()) for c in CVDI_NUMERIC_COLUMNS})
+        .withColumns({c: f.col(c).try_cast(t.DoubleType()) for c in CVDI_NUMERIC_COLUMNS})
         .withColumn(
             'resourceScore',
             f.when(f.col('method_name') == f.lit('Cauchy'), f.col('Cauchy P-value')).otherwise(f.col('Meta P-value')),

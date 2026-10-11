@@ -159,7 +159,7 @@ def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destinati
     source_cols = [f'`{e}`' for e in source_cols if ' ' in e]
     return df.withColumn(
         destination_col,
-        f.array([f.when(df[c].cast(t.DoubleType()) == 1, c.replace(r'`', '')) for c in source_cols]),
+        f.array([f.when(df[c].try_cast(t.DoubleType()) == 1, c.replace(r'`', '')) for c in source_cols]),
     ).withColumn(destination_col, f.array_except(f.col(destination_col), f.array(f.lit(None))))
 
 
