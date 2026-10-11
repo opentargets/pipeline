@@ -1993,8 +1993,8 @@ steps:
 
   #: INTERACTION STEP :#############################################################################
   interaction:
-    - name: pyspark interaction
-      pyspark: interaction
+    - name: transform interaction
+      transformer: interaction
       source:
         targets: output/target
         rnacentral: input/interaction/rna_central_ensembl.tsv
@@ -2007,9 +2007,6 @@ steps:
         interactions_evidence: output/interaction_evidence
         interactions_unmatched: excluded/interaction
       settings:
-        partition_count:
-          interactions: 2
-          interactions_evidence: 6
         scorethreshold: 0
         string_version: ${string_version}
   ##################################################################################################
