@@ -60,6 +60,15 @@
       datasourceTemplate: 'pypi',
       versioningTemplate: 'pep440',
     },
+    {
+      customType: 'regex',
+      description: 'gcloud image run by the gce startup script',
+      managerFilePatterns: ['/^orchestration/src/orchestration/operators/gce\\.py$/'],
+      matchStrings: [
+        "'(?<depName>gcr\\.io/google\\.com/cloudsdktool/google-cloud-cli):(?<currentValue>[^'@]+)'\\s*'@(?<currentDigest>sha256:[0-9a-f]{64})'",
+      ],
+      datasourceTemplate: 'docker',
+    },
   ],
   packageRules: [
     {
@@ -127,6 +136,10 @@
       minimumReleaseAge: null,
     },
     {
+      matchPackageNames: ['gcr.io/google.com/cloudsdktool/google-cloud-cli'],
+      minimumReleaseAge: null,
+    },
+    {
       matchFileNames: ['pts/**'],
       matchPackageNames: ['polars'],
       groupName: 'polars',
@@ -148,7 +161,7 @@
       addLabels: ['airflow'],
       minimumReleaseAge: null,
     },
-    // only the lock holds sqlalchemy, oauthlib and deprecated to Airflow's constraints
+    // only the lock holds sqlalchemy and deprecated to Airflow's constraints
     {
       matchFileNames: ['orchestration/**'],
       matchUpdateTypes: ['lockFileMaintenance'],
