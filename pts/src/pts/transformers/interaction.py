@@ -383,12 +383,32 @@ def transform_string(raw: pl.DataFrame, mapping: pl.DataFrame, score_threshold: 
     return interactions.join(evidence, on='_pair', how='inner').drop('_pair')
 
 
+INTACT_REQUIRED_FIELDS = {
+    'interaction.evidence': pl.col('interaction').struct.field('evidence'),
+    'interaction.interaction_score': pl.col('interaction').struct.field('interaction_score'),
+    'interactorA.id': pl.col('interactorA').struct.field('id'),
+    'source_info.source_database': pl.col('source_info').struct.field('source_database'),
+}
+
+
 def transform_intact(raw: pl.DataFrame, mapping: pl.DataFrame) -> pl.DataFrame:
-    """Turn IntAct records into interactions with one row per evidence."""
+    """Turn IntAct records into interactions with one row per evidence.
+
+    Raises:
+        ValueError: if a required field is null in every record, which is how a renamed upstream field reads
+            through the fixed schema, or if no evidence row is left.
+    """
+    raw = raw.rechunk()
+    nulls = raw.select(e.is_null().all().alias(name) for name, e in INTACT_REQUIRED_FIELDS.items())
+    if missing := [name for name, all_null in nulls.row(0, named=True).items() if all_null]:
+        raise ValueError(f'intact fields are null in every record: {missing}')
     interactions = generate_interactions(
         raw, mapping, pl.col('interaction').struct.field('evidence').alias('evidences')
     )
-    return explode(interactions, 'evidences')
+    exploded = explode(interactions, 'evidences')
+    if exploded.is_empty():
+        raise ValueError('intact has no evidence rows')
+    return exploded
 
 
 def unmatched(*frames: pl.DataFrame) -> pl.DataFrame:

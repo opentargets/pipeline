@@ -149,6 +149,35 @@ def test_intact_without_evidence_is_dropped() -> None:
     assert out['intA'].to_list() == ['P1']
 
 
+@pytest.mark.parametrize(
+    ('renamed', 'field'),
+    [
+        ('evidence', 'interaction.evidence'),
+        ('interaction_score', 'interaction.interaction_score'),
+        ('source_database', 'source_info.source_database'),
+    ],
+)
+def test_intact_refuses_a_field_renamed_upstream(tmp_path: Path, renamed: str, field: str) -> None:
+    record = intact_record(interactor('P1'), interactor('P2'), 0.5, [intact_evidence('e1')])
+    for struct in ('interaction', 'source_info'):
+        if renamed in record[struct]:
+            record[struct][f'{renamed}_v2'] = record[struct].pop(renamed)
+    path = tmp_path / 'intact.json'
+    path.write_text(json.dumps(record) + '\n')
+    raw = scan_dataset(str(path), format='ndjson', schema=INTACT_SCHEMA).collect()
+    with pytest.raises(ValueError, match=field):
+        transform_intact(raw, pl.DataFrame(schema={'gene_id': pl.String, 'mapped_id': pl.String}))
+
+
+def test_intact_refuses_to_produce_no_evidence() -> None:
+    df = intact_frame([
+        intact_record(interactor('P1'), interactor('P1'), 0.5, []),
+        intact_record(interactor('P2'), interactor('P2'), 0.5, None),
+    ])
+    with pytest.raises(ValueError, match='no evidence'):
+        transform_intact(df, pl.DataFrame(schema={'gene_id': pl.String, 'mapped_id': pl.String}))
+
+
 def test_ensembl_protein_without_a_match_is_an_empty_string() -> None:
     gtf = pl.DataFrame({
         '_c2': ['CDS', 'CDS', 'exon'],
