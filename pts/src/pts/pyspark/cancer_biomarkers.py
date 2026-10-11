@@ -5,7 +5,7 @@ from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import ArrayType, StringType
 
 from pts.pyspark.common.session import Session
@@ -70,9 +70,6 @@ class CancerBiomarkersEvidenceGenerator:
         self.evidence = None
 
         self.get_variant_id_udf = f.udf(CancerBiomarkersEvidenceGenerator.get_variant_id, StringType())
-        self.zip_alterations_with_type_udf = f.udf(
-            CancerBiomarkersEvidenceGenerator.zip_alterations_with_type, ArrayType(ArrayType(StringType()))
-        )
 
     def process_biomarkers(
         self, biomarkers_df: DataFrame, source_df: DataFrame, disease_df: DataFrame, drugs_df: DataFrame
@@ -108,7 +105,7 @@ class CancerBiomarkersEvidenceGenerator:
             # 1. Zipping both fields - tmp consists of a list of alteration/type tuples
             # 2. tmp is exploded - tmp consists of the alteration/type tuple
             # 3. alteration & alteration_type columns are overwritten with the elements in the tuple
-            .withColumn('tmp', self.zip_alterations_with_type_udf(f.col('alterations'), f.col('alteration_types')))
+            .withColumn('tmp', self.zip_alterations_with_type(f.col('alterations'), f.col('alteration_types')))
             .withColumn('tmp', f.explode(f.col('tmp')))
             .withColumn('alteration_type', f.element_at(f.col('tmp'), 2))
             .withColumn(
@@ -307,17 +304,20 @@ class CancerBiomarkersEvidenceGenerator:
             return
 
     @staticmethod
-    def zip_alterations_with_type(alterations, alteration_type):
-        """Zips in a tuple the combination of the alteration w/ its correspondent type.
+    def zip_alterations_with_type(alterations: Column, alteration_type: Column) -> Column:
+        """Zips in a pair the combination of the alteration w/ its correspondent type.
 
         This function helps disambiguate cases when multiple alterations are reported.
-        By expanding the array of alteration types it accounts for the cases when
+        By cycling the array of alteration types it accounts for the cases when
         several alterations are reported but only one type is given.
 
         Ex.:
         alterations = ['MET:Y1230C', 'Y1235D']
         alteration_type = ['MUT']
-        --> [('MET:Y1230C', 'MUT'), ('Y1235D', 'MUT')].
+        --> [['MET:Y1230C', 'MUT'], ['Y1235D', 'MUT']].
         """
-        alteration_types = alteration_type * len(alterations)
-        return list(zip(alterations, alteration_types, strict=False))
+        n_types = f.size(alteration_type)
+        return f.when(
+            n_types > 0,
+            f.transform(alterations, lambda x, i: f.array(x, f.element_at(alteration_type, i % n_types + 1))),
+        ).otherwise(f.array().cast(ArrayType(ArrayType(StringType()))))
