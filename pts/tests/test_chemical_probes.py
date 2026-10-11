@@ -2,6 +2,7 @@
 
 import pandas as pd
 import pyspark.sql.functions as f
+import pytest
 from pyspark.sql import Row
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
@@ -10,6 +11,7 @@ from pts.pyspark.chemical_probes import (
     _build_ensg_lookup,
     _resolve_targets,
     collapse_cols_data_in_array,
+    process_probes_data,
     process_probes_targets_data,
     replace_missing_placeholder,
 )
@@ -342,6 +344,64 @@ def test_the_cons_set_is_collected_as_its_own_datasource(spark):
     assert sorted(row_both.datasourceIds) == sorted([cons, older]), (
         'the two nuisance sets must be collected independently, not collapsed into one'
     )
+
+
+def _probes_xlsx(path, flag):
+    """Write a PROBES workbook with the real upstream set columns.
+
+    PD-1 is in every set and both origins, PD-2 in SGC Probes only and is experimental,
+    PD-3 has no target and is dropped. Set cells hold `flag` or are blank.
+    """
+    every = [flag, None, flag]
+    sgc_only = {c: [flag, flag if c == 'SGC Probes' else None, None] for c in PROBES_SHEET_DATASOURCE_COLUMNS}
+    frame = pd.DataFrame({
+        'pdid': ['PD-1', 'PD-2', 'PD-3'],
+        'compound_name': ['cmpd-1', 'cmpd-2', 'cmpd-3'],
+        'target': ['BRD4', 'EGFR', None],
+        'control_name': ['ctrl-1', '-', None],
+        'control_smiles': ['CC', 'CC', 'CC'],
+        **sgc_only,
+        'experimental probe': [flag, flag, flag],
+        'calculated probe': every,
+        # unused, and mixing numbers and text
+        'mw': [1.5, '-', None],
+    })
+    frame.to_excel(path, sheet_name='PROBES', index=False)
+    return path
+
+
+def _probe_memberships(spark, xlsx):
+    rows = process_probes_data(spark, str(xlsx)).collect()
+    return {
+        pdid: (
+            sorted(r.datasourceId for r in rows if r.pdid == pdid),
+            sorted({o for r in rows if r.pdid == pdid for o in r.origin}),
+            {r.isHighQuality for r in rows if r.pdid == pdid},
+        )
+        for pdid in {r.pdid for r in rows}
+    }
+
+
+@pytest.mark.usefixtures('ansi')
+@pytest.mark.parametrize('flag', [1, 1.0, 'True'], ids=['int', 'float', 'bool'])
+def test_probes_data_collects_every_set_and_origin(spark, tmp_path, flag):
+    """Every PROBES_SETS column is read from the sheet, whatever type its flags have.
+
+    Upstream has shipped one-hot flags as numbers and, for `covalent` in 01_2026, as
+    booleans; the text 'True' is what pandas reads back as a real bool.
+    """
+    xlsx = _probes_xlsx(tmp_path / 'probes.xlsx', flag)
+    if flag == 'True':
+        sheet = pd.read_excel(xlsx, sheet_name='PROBES', header=0, index_col=0)
+        assert sheet['experimental probe'].dtype == bool, 'the fixture must hold real booleans'
+
+    memberships = _probe_memberships(spark, xlsx)
+
+    every_set = sorted(s for s in PROBES_SETS if s != 'High-quality chemical probes')
+    assert memberships == {
+        'PD-1': (every_set, ['calculated', 'experimental'], {True}),
+        'PD-2': (['SGC Probes'], ['experimental'], {False}),
+    }
 
 
 # ---------------------------------------------------------------------------
