@@ -35,10 +35,6 @@ function run_with_retry() {
     err "Failed to run command: ${cmd[*]}"
 }
 
-function fetch_openai_token() {
-    gcloud secrets versions access latest --secret="openai-token" > /var/run/secrets/openai_token
-}
-
 # The interpreter PySpark jobs run under. Dataproc exports it as PYSPARK_PYTHON
 # from /etc/profile.d/effective-python.sh, which works the same on the 2.x
 # (conda) and 3.0 (Pixi) images, so nothing here depends on where the image
@@ -109,17 +105,6 @@ function main() {
     # report only: packages the image ships may declare pins the lock does not meet
     "${python}" -m uv pip check --python "${python}" || true
     "${python}" -c 'import pyspark; print("pyspark", pyspark.__version__, pyspark.__file__)'
-    # only the driver, on the master, reads the openai token
-    if [[ "${DATAPROC_ROLE}" != "Master" ]]; then
-        return 0
-    fi
-    echo "Get openai token secret..."
-    mkdir -p /var/run/secrets
-    run_with_retry fetch_openai_token
-    # by name: the 'hadoop' group was gid 112 on the 2.x images, and a new base OS
-    # need not keep it
-    chown root:hadoop /var/run/secrets/openai_token
-    chmod 440 /var/run/secrets/openai_token
 }
 
 main
