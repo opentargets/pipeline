@@ -31,6 +31,9 @@ orchestration = "orchestration:main"
 requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
 
+[tool.uv]
+override-dependencies = ["litellm>=1.88.6,<1.89"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "src/orchestration"]
 addopts = "--doctest-modules --cache-clear"
