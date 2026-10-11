@@ -13,6 +13,7 @@ from pts.transformers.interaction import (
     divide,
     explode,
     generate_interactions,
+    generate_mapping,
     get_code,
     interaction,
     interaction_id,
@@ -324,6 +325,34 @@ def test_check_interactions_refuses_nulls(column: str) -> None:
     check_interactions(df)
     with pytest.raises(ValueError, match=column):
         check_interactions(df.with_columns(pl.lit(None).cast(df.schema[column]).alias(column)))
+
+
+def test_check_interactions_refuses_a_duplicate_id() -> None:
+    df = with_interaction_id(key_frame()).with_columns(count=pl.lit(1, pl.Int64))
+    with pytest.raises(ValueError, match='not unique'):
+        check_interactions(pl.concat([df, df.with_columns(intA=pl.lit('P99999'))]))
+
+
+def test_mapping_resolves_an_accession_through_a_shared_gene_name() -> None:
+    target = pl.DataFrame({
+        'id': ['ENSG1', 'ENSG2'],
+        'proteinIds': [[{'id': 'P1', 'source': 'uniprot'}], [{'id': 'P2', 'source': 'uniprot'}]],
+        'dbXrefs': [[{'id': '5', 'source': 'HGNC'}, {'id': 'x', 'source': 'other'}], None],
+    })
+    human_mapping = pl.DataFrame({
+        '_c0': ['P1', 'Q9', 'P2', 'Q8'],
+        '_c1': ['Gene_Name', 'Gene_Name', 'Ensembl', 'Gene_Name'],
+        '_c2': ['BRCA1', 'BRCA1', 'ENSG2', 'ORPHAN'],
+    })
+    rnacentral = pl.DataFrame({f'_c{i}': ['URS1' if i == 0 else 'ENSG2' if i == 5 else 'x'] for i in range(6)})
+    mapping = set(generate_mapping(target, rnacentral, human_mapping).rows())
+    assert mapping == {
+        ('ENSG1', 'P1'),
+        ('ENSG1', 'HGNC:5'),
+        ('ENSG1', 'Q9'),
+        ('ENSG2', 'P2'),
+        ('ENSG2', 'URS1'),
+    }
 
 
 # ---------------------------------------------------------------------------
