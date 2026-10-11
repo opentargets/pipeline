@@ -2031,10 +2031,6 @@ steps:
           - /output/drug_molecule
           - /output/study
           - /output/clinical_report
-        upload_to_hf_hub: false
-        hf_token_filename: /var/run/secrets/hf_token
-        hf_repo_id: opentargets/ot-release-metrics
-        hf_data_dir: metrics
   ##################################################################################################
 
   #: SEARCH STEP :##################################################################################
