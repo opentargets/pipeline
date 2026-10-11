@@ -2098,7 +2098,6 @@ name = "pts"
 version = "26.9.1rc11"
 source = { editable = "." }
 dependencies = [
-    { name = "huggingface-hub" },
     { name = "loguru" },
     { name = "networkx" },
     { name = "numpy" },
@@ -2127,6 +2126,7 @@ baseline-expression = [
     { name = "scanpy" },
 ]
 nlp = [
+    { name = "huggingface-hub" },
     { name = "opentargets-mira", extra = ["ner"] },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
@@ -2148,7 +2148,7 @@ test = [
 requires-dist = [
     { name = "cellex", marker = "extra == 'baseline-expression'", git = "https://github.com/perslab/CELLEX?rev=119c7ca" },
     { name = "gcsfs", marker = "extra == 'baseline-expression'", specifier = ">=2026.2.0" },
-    { name = "huggingface-hub", specifier = ">=2.0.0" },
+    { name = "huggingface-hub", marker = "extra == 'nlp'", specifier = ">=2.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "networkx", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.4.4" },
