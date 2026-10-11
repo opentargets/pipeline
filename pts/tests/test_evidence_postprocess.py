@@ -351,13 +351,15 @@ def _linear_rescaling(value, in_range_min, in_range_max, out_range_min, out_rang
     return min(max(score, out_range_min), out_range_max)
 
 
+@pytest.fixture(scope='module')
+def score_expression() -> str:
+    """The crispr score expression, as configured."""
+    config = yaml.safe_load((Path(__file__).parents[1] / 'config.yaml').read_text())
+    return config['steps']['evidence_postprocess_project_score'][0]['settings']['score_expression']
+
+
 class TestCrisprScoreExpression:
     """The crispr score expression reproduces the `linear_rescale` UDF it replaced."""
-
-    @pytest.fixture(scope='class')
-    def score_expression(self: TestCrisprScoreExpression) -> str:
-        config = yaml.safe_load((Path(__file__).parents[1] / 'config.yaml').read_text())
-        return config['steps']['evidence_postprocess_project_score'][0]['settings']['score_expression']
 
     def test_matches_udf(self: TestCrisprScoreExpression, spark: SparkSession, score_expression: str) -> None:
         rng = random.Random(0)
