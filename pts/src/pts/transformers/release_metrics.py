@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from huggingface_hub import HfApi
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
@@ -707,35 +706,13 @@ def _compute_metrics(
     )
 
 
-def _upload_metrics_to_hf_hub(
-    csv_data: bytes,
-    csv_filename: str,
-    token_filename: Path,
-    repo_id: str,
-    data_dir: str,
-) -> None:
-    """Upload CSV metrics bytes to a Hugging Face dataset repository."""
-    hf_token = token_filename.read_text().strip()
-    if not hf_token:
-        msg = f'HF token file is empty: {token_filename}'
-        raise ValueError(msg)
-
-    api = HfApi(token=hf_token)
-    api.upload_file(
-        path_or_fileobj=csv_data,
-        path_in_repo=f'{data_dir}/{csv_filename}',
-        repo_id=repo_id,
-        repo_type='dataset',
-    )
-
-
 def release_metrics(
     source: dict[str, Path],
     destination: dict[str, Path],
     settings: dict[str, Any],
     config: Config,
 ) -> None:
-    """Generate release metrics parquet and optionally upload CSV to Hugging Face.
+    """Generate release metrics parquet.
 
     Args:
         source: Source paths (unused).
@@ -754,31 +731,7 @@ def release_metrics(
 
     logger.info(f'Writing metrics parquet to {destination["parquet"]}')
     # Deliberately NOT write_dataset: this is a single release-root report artifact, not a
-    # dataset under output/ -- nothing globs it and nothing reads it back (the optional HF
-    # upload below serialises `metrics` straight to CSV, never from this file). write_dataset
+    # dataset under output/ -- nothing globs it and nothing reads it back. write_dataset
     # always produces a directory of NNNNNNNN.parquet parts, which here would turn
     # metrics.parquet into a directory carrying a misleading .parquet-suffixed name.
     metrics.write_parquet(destination['parquet'], mkdir=True)
-
-    if settings.get('upload_to_hf_hub'):
-        hf_token_filename = settings.get('hf_token_filename')
-        if not hf_token_filename:
-            logger.warning('HF upload requested but settings["hf_token_filename"] is missing; skipping upload')
-            return
-
-        hf_repo_id = settings.get('hf_repo_id', 'opentargets/ot-release-metrics')
-        hf_data_dir = settings.get('hf_data_dir', 'metrics')
-        csv_filename = f'{run_id}.csv'
-        csv_data = metrics.write_csv(include_header=True).encode('utf-8')
-
-        try:
-            _upload_metrics_to_hf_hub(
-                csv_data=csv_data,
-                csv_filename=csv_filename,
-                token_filename=Path(hf_token_filename),
-                repo_id=hf_repo_id,
-                data_dir=hf_data_dir,
-            )
-            logger.info(f'Uploaded metrics CSV to hf://datasets/{hf_repo_id}/{hf_data_dir}/{csv_filename}')
-        except Exception:
-            logger.exception('HF upload failed; continuing without failing the step')
