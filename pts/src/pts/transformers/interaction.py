@@ -470,15 +470,9 @@ def sort_interactions(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def sort_evidences(evidences: pl.DataFrame, interactions: pl.DataFrame) -> pl.DataFrame:
-    """Order evidences as their interactions, with the row hash breaking ties."""
+    """Order evidences as their interactions, with the evidence columns breaking ties."""
     order = interactions.select('interactionId').with_row_index('_order')
-    return (
-        evidences
-        .with_columns(evidences.hash_rows(seed=0).alias('_hash'))
-        .join(order, on='interactionId', how='left')
-        .sort('_order', '_hash')
-        .drop('_order', '_hash')
-    )
+    return evidences.join(order, on='interactionId', how='left').sort('_order', *evidences.columns).drop('_order')
 
 
 def interaction(

@@ -18,6 +18,7 @@ from pts.transformers.interaction import (
     interaction,
     interaction_id,
     snake_to_lower_camel,
+    sort_evidences,
     to_camel_case,
     transform_ensembl_protein,
     transform_human_mapping,
@@ -116,6 +117,30 @@ def test_camel_case_renames_nested_structs_without_nulling_them() -> None:
         'hostOrganismTissue': {'fullName': 'liver', 'xrefs': ['a']},
         'participantDetectionMethodA': [{'miIdentifier': 'MI:1', 'shortName': 'x'}],
     }
+
+
+def test_sort_evidences_is_independent_of_input_order() -> None:
+    mi = pl.Struct({'miIdentifier': pl.String, 'shortName': pl.String})
+    evidences = pl.DataFrame(
+        {
+            'interactionId': [2, 1, 1, 1, 1],
+            'tissue': [None, {'fullName': 'a', 'xrefs': ['y']}, {'fullName': 'a', 'xrefs': ['x']}, None, None],
+            'pdm': [
+                [],
+                [{'miIdentifier': 'MI:1', 'shortName': 'b'}],
+                [],
+                [{'miIdentifier': 'MI:1', 'shortName': 'a'}],
+                None,
+            ],
+        },
+        schema_overrides={'pdm': pl.List(mi)},
+    )
+    interactions = pl.DataFrame({'interactionId': [2, 1]})
+    expected = sort_evidences(evidences, interactions)
+    assert expected['interactionId'].to_list() == [2, 1, 1, 1, 1]
+    for seed in range(5):
+        shuffled = evidences.sample(fraction=1.0, shuffle=True, seed=seed)
+        assert sort_evidences(shuffled, interactions).equals(expected)
 
 
 @pytest.mark.parametrize(
