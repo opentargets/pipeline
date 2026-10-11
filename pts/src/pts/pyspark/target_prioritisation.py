@@ -8,8 +8,7 @@ from typing import Any
 
 import pyspark.sql.functions as f
 from loguru import logger
-from pyspark.sql import DataFrame, Window
-from pyspark.sql.types import DoubleType
+from pyspark.sql import Column, DataFrame, Window
 
 from pts.pyspark.common.session import Session
 
@@ -592,6 +591,24 @@ def _driver_gene_query(queryset: DataFrame, targets: DataFrame) -> DataFrame:
     return queryset.join(onco_targets, on='targetid', how='left')
 
 
+def _sum(terms: Column) -> Column:
+    """Left-to-right sum of a double array."""
+    return f.aggregate(terms, f.lit(0.0), lambda acc, x: acc + x)
+
+
+def _harmonic_sum(scores: Column) -> Column:
+    """Sum of the non-null scores, sorted descending, each divided by its squared rank; 0.0 when there are none."""
+    ranked = f.sort_array(f.filter(scores, lambda s: s.isNotNull()), asc=False)
+    weighted = f.transform(ranked, lambda s, i: s / ((i + 1) * (i + 1)))
+    return f.coalesce(_sum(weighted), f.lit(0.0))
+
+
+def _max_harmonic_sum(scores: Column) -> Column:
+    """Harmonic sum of as many 1.0 scores as there are non-null scores; 0.0 when there are none."""
+    weights = f.transform(f.filter(scores, lambda s: s.isNotNull()), lambda _, i: f.lit(1.0) / ((i + 1) * (i + 1)))
+    return f.coalesce(_sum(weights), f.lit(0.0))
+
+
 def _mouse_model_query(
     queryset: DataFrame,
     mouse_df: DataFrame,
@@ -599,27 +616,6 @@ def _mouse_model_query(
 ) -> DataFrame:
     """Compute mouse knockout score using harmonic sum."""
     low_threshold = 0.6
-
-    # Register UDFs
-    @f.udf(returnType=DoubleType())
-    def harmonic_sum(scores):
-        if scores is None or len(scores) == 0:
-            return 0.0
-        sorted_scores = sorted([s for s in scores if s is not None], reverse=True)
-        if len(sorted_scores) == 0:
-            return 0.0
-        denominators = [(i + 1) ** 2 for i in range(len(sorted_scores))]
-        return sum(s / d for s, d in zip(sorted_scores, denominators, strict=False))
-
-    @f.udf(returnType=DoubleType())
-    def max_harmonic_sum(scores):
-        if scores is None or len(scores) == 0:
-            return 0.0
-        n = len([s for s in scores if s is not None])
-        if n == 0:
-            return 0.0
-        denominators = [(i + 1) ** 2 for i in range(n)]
-        return sum(1.0 / d for d in denominators)
 
     pheno_scores = mouse_pheno_scores.select(
         f.col('id').alias('idLabel'),
@@ -641,8 +637,8 @@ def _mouse_model_query(
         .withColumn('score', f.col('score').cast('double'))
         .groupBy('target_id_')
         .agg(f.collect_list(f.col('score')).alias('score'))
-        .withColumn('harmonicSum', harmonic_sum(f.col('score')).cast('double'))
-        .withColumn('maxHarmonicSum', max_harmonic_sum(f.col('score')).cast('double'))
+        .withColumn('harmonicSum', _harmonic_sum(f.col('score')))
+        .withColumn('maxHarmonicSum', _max_harmonic_sum(f.col('score')))
         .withColumn(
             'maximum',
             f.max(f.col('maxHarmonicSum')).over(Window.orderBy()).cast('double'),
