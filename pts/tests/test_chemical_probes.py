@@ -2,6 +2,7 @@
 
 import pandas as pd
 import pyspark.sql.functions as f
+import pytest
 from pyspark.sql import Row
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
@@ -10,6 +11,7 @@ from pts.pyspark.chemical_probes import (
     _build_ensg_lookup,
     _resolve_targets,
     collapse_cols_data_in_array,
+    process_probes_data,
     process_probes_targets_data,
     replace_missing_placeholder,
 )
@@ -344,6 +346,64 @@ def test_the_cons_set_is_collected_as_its_own_datasource(spark):
     )
 
 
+def _probes_xlsx(path, flag):
+    """Write a PROBES workbook with the real upstream set columns.
+
+    PD-1 is in every set and both origins, PD-2 in SGC Probes only and is experimental,
+    PD-3 has no target and is dropped. Set cells hold `flag` or are blank.
+    """
+    every = [flag, None, flag]
+    sgc_only = {c: [flag, flag if c == 'SGC Probes' else None, None] for c in PROBES_SHEET_DATASOURCE_COLUMNS}
+    frame = pd.DataFrame({
+        'pdid': ['PD-1', 'PD-2', 'PD-3'],
+        'compound_name': ['cmpd-1', 'cmpd-2', 'cmpd-3'],
+        'target': ['BRD4', 'EGFR', None],
+        'control_name': ['ctrl-1', '-', None],
+        'control_smiles': ['CC', 'CC', 'CC'],
+        **sgc_only,
+        'experimental probe': [flag, flag, flag],
+        'calculated probe': every,
+        # unused, and mixing numbers and text
+        'mw': [1.5, '-', None],
+    })
+    frame.to_excel(path, sheet_name='PROBES', index=False)
+    return path
+
+
+def _probe_memberships(spark, xlsx):
+    rows = process_probes_data(spark, str(xlsx)).collect()
+    return {
+        pdid: (
+            sorted(r.datasourceId for r in rows if r.pdid == pdid),
+            sorted({o for r in rows if r.pdid == pdid for o in r.origin}),
+            {r.isHighQuality for r in rows if r.pdid == pdid},
+        )
+        for pdid in {r.pdid for r in rows}
+    }
+
+
+@pytest.mark.usefixtures('ansi')
+@pytest.mark.parametrize('flag', [1, 1.0, 'True'], ids=['int', 'float', 'bool'])
+def test_probes_data_collects_every_set_and_origin(spark, tmp_path, flag):
+    """Every PROBES_SETS column is read from the sheet, whatever type its flags have.
+
+    Upstream has shipped one-hot flags as numbers and, for `covalent` in 01_2026, as
+    booleans; the text 'True' is what pandas reads back as a real bool.
+    """
+    xlsx = _probes_xlsx(tmp_path / 'probes.xlsx', flag)
+    if flag == 'True':
+        sheet = pd.read_excel(xlsx, sheet_name='PROBES', header=0, index_col=0)
+        assert sheet['experimental probe'].dtype == bool, 'the fixture must hold real booleans'
+
+    memberships = _probe_memberships(spark, xlsx)
+
+    every_set = sorted(s for s in PROBES_SETS if s != 'High-quality chemical probes')
+    assert memberships == {
+        'PD-1': (every_set, ['calculated', 'experimental'], {True}),
+        'PD-2': (['SGC Probes'], ['experimental'], {False}),
+    }
+
+
 # ---------------------------------------------------------------------------
 # PROBES TARGETS sheet
 # ---------------------------------------------------------------------------
@@ -373,45 +433,36 @@ def _probes_targets_xlsx(path, extra_columns=None):
 
 
 def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
-    """An unused column mixing booleans and blanks must not reach spark.
+    """A sheet column mixing numbers and text must not stop the step.
 
-    Upstream 01_2026 changed `covalent` from a string column to real booleans with
-    blank cells. Pandas types the blanks as float, and spark's schema inference
-    cannot merge DoubleType with BooleanType, so the step died on a column it
-    never reads. Handing spark only the columns the step uses keeps that class of
-    upstream drift out of inference.
+    Upstream writes "-" into otherwise numeric cells, and pandas reads such a column
+    as object. Arrow cannot convert a column holding both, and with fallback off the
+    step dies -- even on a column it never reads, such as `covalent`. The used
+    columns cross as strings, so the score's "-" becomes a null through try_cast.
     """
     xlsx = _probes_targets_xlsx(
         tmp_path / 'probes.xlsx',
-        # Upstream writes the literal text 'True' and leaves the rest blank. Pandas
-        # turns that text into real bools and the blanks into NaN, giving one object
-        # column holding both -- writing a python True instead round-trips to 1.0 and
-        # reproduces nothing.
-        extra_columns={'covalent': ['True', None, None]},
+        extra_columns={
+            'covalent': [1.0, '-', None],
+            'Cells score (Chemical Probes.org)': [1.5, '-', None],
+        },
     )
 
-    # The shared fixture enables arrow, whose converter tolerates the mixed column.
-    # Production sets no arrow config, so spark falls back to row-wise schema
-    # inference -- the path that actually failed. Match production here, and put the
-    # session-scoped setting back for everyone else.
-    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
-    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
-    try:
-        df = process_probes_targets_data(spark, str(xlsx))
-        rows = df.collect()
-    finally:
-        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+    df = process_probes_targets_data(spark, str(xlsx))
+    rows = {r.pdid: r for r in df.collect()}
 
     assert 'covalent' not in df.columns
-    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
-        'only the row without a gene_name should be dropped'
-    )
+    assert sorted(rows) == ['PD-1', 'PD-2'], 'only the row without a gene_name should be dropped'
+    assert rows['PD-1'].scoreInCells == 1.5
+    assert rows['PD-2'].scoreInCells is None
+    assert rows['PD-1'].probesDrugsScore == 1.0
 
 
 def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
     """A blank action cell doesn't become a fake single-element ["NaN"] mechanismOfAction.
 
-    Regression test: with Arrow disabled, a blank `action` cell reaches Spark as
+    Regression test: with Arrow disabled (production before it was enabled in
+    Session), a blank `action` cell reaches Spark as
     the literal string "NaN" -- the same pandas-to-Spark path as `control_name`
     -- and f.split("NaN", ';') previously produced ["NaN"] instead of a real
     null. Affected ~30% of chemical_probes rows in production.
@@ -421,13 +472,8 @@ def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
         extra_columns={'action': [None, 'inhibitor;agonist', '-']},
     )
 
-    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
-    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
-    try:
-        df = process_probes_targets_data(spark, str(xlsx))
-        rows = {r.pdid: r.mechanismOfAction for r in df.collect()}
-    finally:
-        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+    df = process_probes_targets_data(spark, str(xlsx))
+    rows = {r.pdid: r.mechanismOfAction for r in df.collect()}
 
     assert rows['PD-1'] is None, 'a blank action cell must not survive as ["NaN"]'
     assert rows['PD-2'] == ['inhibitor', 'agonist']

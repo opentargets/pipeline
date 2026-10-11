@@ -10,6 +10,7 @@ from pyspark.sql.dataframe import DataFrame
 
 from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import pandas_to_spark_strings
 
 CURATION_SCHEMA = t.StructType([
     t.StructField('projectId', t.StringType(), True),
@@ -39,18 +40,14 @@ CURATION_SCHEMA = t.StructType([
     t.StructField('url', t.StringType(), True),
 ])
 
+CVDI_NUMERIC_COLUMNS = ['cMAC', 'Meta P-value', 'Cauchy P-value', 'P cutoff']
+CVDI_COLUMNS = ['phenotype', 'Gene ID Ensembl', 'Gene', 'OR [95%CI]', 'method_name', *CVDI_NUMERIC_COLUMNS]
+
 
 def _excel_sheet_to_spark(spark: Session, path: str, sheet: str) -> DataFrame:
-    """Read an Excel sheet into Spark.
-
-    Every cell is read as a string and empty cells become null, so all typing happens downstream.
-    pandas 3's `str` dtype cannot hold None, so the frame goes to object first; otherwise the
-    blanks stay NaN and reach Spark as the string "nan".
-    """
+    """Read an Excel sheet into Spark, every cell a string and empty cells null, so all typing happens downstream."""
     workbook = StorageHandle(path).open('rb')
-    pdf = pd.read_excel(workbook, sheet_name=sheet, dtype=str).astype(object).where(lambda x: x.notnull(), None)
-    schema = t.StructType([t.StructField(column, t.StringType(), True) for column in pdf.columns])
-    return spark.spark.createDataFrame(pdf, schema=schema)
+    return pandas_to_spark_strings(spark.spark, pd.read_excel(workbook, sheet_name=sheet, dtype=str))
 
 
 def gene_burden(
@@ -230,10 +227,8 @@ def process_cvdi_gene_burden(
     )
 
     return (
-        spark.spark
-        .createDataFrame(
-            associations_df,
-        )
+        pandas_to_spark_strings(spark.spark, associations_df, CVDI_COLUMNS)
+        .withColumns({c: f.col(c).try_cast(t.DoubleType()) for c in CVDI_NUMERIC_COLUMNS})
         .withColumn(
             'resourceScore',
             f.when(f.col('method_name') == f.lit('Cauchy'), f.col('Cauchy P-value')).otherwise(f.col('Meta P-value')),

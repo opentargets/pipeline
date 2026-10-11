@@ -16,7 +16,7 @@ from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common import Session
-from pts.pyspark.common.utils import maybe_coalesce, safe_array_union
+from pts.pyspark.common.utils import maybe_coalesce, pandas_to_spark_strings, safe_array_union
 
 # Chemical probe data sources. Every entry must be a column of the PROBES sheet of the
 # upstream Probes & Drugs spreadsheet: a name that drifts upstream fails the step with
@@ -40,6 +40,8 @@ PROBES_SETS = [
     'Novartis Chemogenetic Library (NIBR MoA Box)',
     'Nuisance compounds in cellular assays',
 ]
+
+PROBES_COLUMNS = ['pdid', 'compound_name', 'control_name', 'experimental probe', 'calculated probe', *PROBES_SETS]
 
 PROBES_TARGETS_COLUMNS = [
     'pdid',
@@ -157,7 +159,7 @@ def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destinati
     source_cols = [f'`{e}`' for e in source_cols if ' ' in e]
     return df.withColumn(
         destination_col,
-        f.array([f.when(df[c] == 1, c.replace(r'`', '')) for c in source_cols]),
+        f.array([f.when(df[c].try_cast(t.DoubleType()) == 1, c.replace(r'`', '')) for c in source_cols]),
     ).withColumn(destination_col, f.array_except(f.col(destination_col), f.array(f.lit(None))))
 
 
@@ -193,9 +195,9 @@ def replace_missing_placeholder(col: Column) -> Column:
     """Converts to null values that only encode "missing" as a placeholder token.
 
     Upstream leaves `control_name` blank for probes without a designated control
-    compound. Pandas reads a blank Excel cell as a float NaN, and since production
-    runs pyspark with Arrow disabled (row-wise pandas-to-Spark schema inference),
-    that NaN crosses over as the literal string "NaN" -- Java's
+    compound. Pandas reads a blank Excel cell as a float NaN, and with Arrow
+    disabled (row-wise pandas-to-Spark schema inference), that NaN crosses over
+    as the literal string "NaN" -- Java's
     `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
     placeholder token seen in the same column.
     """
@@ -210,21 +212,20 @@ def process_scores(col_name: str) -> Column:
 
 def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the compound and the scores given by the different sources."""
-    return (
-        spark
-        .createDataFrame(
-            pd
-            .read_excel(
-                StorageHandle(probes_excel).open('rb'),
-                sheet_name='PROBES',
-                header=0,
-                index_col=0,
-            )
-            # Probes that do not have an associated target are marked as nulls
-            .query('target.notnull()')
-            .reset_index()
-            .drop('control_smiles', axis=1)
+    probes = (
+        pd
+        .read_excel(
+            StorageHandle(probes_excel).open('rb'),
+            sheet_name='PROBES',
+            header=0,
+            index_col=0,
         )
+        # Probes that do not have an associated target are marked as nulls
+        .query('target.notnull()')
+        .reset_index()
+    )
+    return (
+        pandas_to_spark_strings(spark, probes, PROBES_COLUMNS)
         # Collect list of datasources for each probe
         .transform(lambda df: collapse_cols_data_in_array(df, PROBES_SETS, 'datasourceIds'))
         # Collecting the list of detection methods of the probe
@@ -254,18 +255,17 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
 
 def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Collection of targets associated with the probes and their scores."""
+    probes_targets = (
+        pd
+        .read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='PROBES TARGETS', header=0, index_col=0)
+        # Probes that do not have an associated target are marked with "-",
+        # but a genuinely blank cell reads as NaN, not the string "-" --
+        # gene_name != '-' alone lets those rows through (NaN != anything).
+        .query("gene_name.notnull() and gene_name != '-'")
+        .reset_index()
+    )
     return (
-        spark
-        .createDataFrame(
-            pd
-            .read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='PROBES TARGETS', header=0, index_col=0)
-            # Probes that do not have an associated target are marked with "-",
-            # but a genuinely blank cell reads as NaN, not the string "-" --
-            # gene_name != '-' alone lets those rows through (NaN != anything).
-            .query("gene_name.notnull() and gene_name != '-'")
-            .reset_index()
-            [PROBES_TARGETS_COLUMNS]
-        )
+        pandas_to_spark_strings(spark, probes_targets, PROBES_TARGETS_COLUMNS)
         .filter(f.col('organism') == 'Homo sapiens')
         .withColumn(
             'mechanismOfAction',
@@ -284,11 +284,11 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
 
 def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the different sources of probes."""
+    compound_sets = pd.read_excel(
+        StorageHandle(probes_excel).open('rb'), sheet_name='COMPOUNDSETS', header=0, index_col=0
+    )
     return (
-        spark
-        .createDataFrame(
-            pd.read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='COMPOUNDSETS', header=0, index_col=0)
-        )
+        pandas_to_spark_strings(spark, compound_sets, ['COMPOUNDSET', 'SOURCE_URL'])
         .selectExpr('COMPOUNDSET as datasourceId', 'SOURCE_URL as url')
         .filter(f.col('url').startswith('http'))
     )
@@ -296,9 +296,10 @@ def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFram
 
 def process_targets_xrefs(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Look-up table between the gene symbols and the UniProt IDs."""
-    return spark.createDataFrame(
-        pd.read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='TARGETS', header=0, index_col=0).reset_index()
-    ).selectExpr('target as targetFromSource', 'uniprot as targetFromSourceId')
+    targets = pd.read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='TARGETS', header=0, index_col=0)
+    return pandas_to_spark_strings(spark, targets.reset_index(), ['target', 'uniprot']).selectExpr(
+        'target as targetFromSource', 'uniprot as targetFromSourceId'
+    )
 
 
 def process_drugs_xrefs(spark: SparkSession, drugs_csv: str, chembl_molecule: DataFrame) -> DataFrame:
