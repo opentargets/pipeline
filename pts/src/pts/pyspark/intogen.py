@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
-from pyspark.sql import types as t
 
 from pts.pyspark.common.session import Session
 
@@ -29,8 +28,8 @@ DOI_TO_PMID_MAPPING = {
 def parse_source(source_column: Column) -> Column:
     processed = f.when(source_column.startswith('WEB'), f.lit(None)).otherwise(f.trim(f.split(source_column, ':')[1]))
 
-    map_udf = f.udf(lambda v: DOI_TO_PMID_MAPPING.get(v, v), t.StringType())
-    mapped = map_udf(processed)
+    doi_to_pmid = f.create_map(*[f.lit(x) for pair in DOI_TO_PMID_MAPPING.items() for x in pair])
+    mapped = f.coalesce(doi_to_pmid[processed], processed)
 
     return f.when(mapped.isNotNull(), f.array(mapped))
 
