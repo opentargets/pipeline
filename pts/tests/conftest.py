@@ -21,6 +21,7 @@ def spark():
         .config('spark.sql.adaptive.coalescePartitions.enabled', 'false')
         .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
         .config('spark.sql.execution.arrow.pyspark.enabled', 'true')
+        .config('spark.sql.execution.arrow.pyspark.fallback.enabled', 'false')
         .config('spark.sql.shuffle.partitions', '1')
         # as Session and the pts clusters do: Spark 4 defaults ANSI mode on
         .config('spark.sql.ansi.enabled', 'false')

@@ -1,10 +1,8 @@
 """Tests for the gene_burden pyspark module."""
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pandas as pd
-import pytest
 from pyspark.sql import SparkSession
 
 from pts.pyspark.common.session import Session
@@ -97,27 +95,12 @@ def test_the_lookup_key_is_unique(spark: SparkSession):
     assert df.count() == df.select('Phenotype ID', 'Ancestry Group').distinct().count()
 
 
-@pytest.fixture
-def session_without_arrow(pts_session: Session) -> Iterator[Session]:
-    """The shared session as production runs it, with Arrow off.
-
-    The `spark` fixture enables Arrow and both fixtures share one SparkSession. Production sets no
-    Arrow config, and it is the row-wise pandas-to-Spark path that turns a NaN into the string "nan".
-    """
-    arrow = pts_session.spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
-    pts_session.spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
-    try:
-        yield pts_session
-    finally:
-        pts_session.spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
-
-
-def test_blank_excel_cells_become_null(session_without_arrow: Session, tmp_path: Path):
+def test_blank_excel_cells_become_null(pts_session: Session, tmp_path: Path):
     """Under pandas 3, a `str` column cannot hold None; the blanks must still reach Spark as null, not "nan"."""
     path = tmp_path / 'sheet.xlsx'
     pd.DataFrame({'gene': ['A', None], 'value': [None, 1.5]}).to_excel(path, sheet_name='S', index=False)
 
-    rows = _excel_sheet_to_spark(session_without_arrow, str(path), 'S').collect()
+    rows = _excel_sheet_to_spark(pts_session, str(path), 'S').collect()
 
     assert [r.asDict() for r in rows] == [{'gene': 'A', 'value': None}, {'gene': None, 'value': '1.5'}]
 
@@ -151,11 +134,11 @@ def _cvdi_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
     return associations, cutoffs
 
 
-def test_cvdi_cauchy_associations_are_kept_without_an_odds_ratio(session_without_arrow: Session):
+def test_cvdi_cauchy_associations_are_kept_without_an_odds_ratio(pts_session: Session):
     """The Cauchy combined test reports no odds ratio; its significant rows are evidence all the same."""
     associations, cutoffs = _cvdi_frames()
 
-    df = process_cvdi_gene_burden(session_without_arrow, associations, cutoffs)
+    df = process_cvdi_gene_burden(pts_session, associations, cutoffs)
     rows = {r.statisticalMethod: r for r in df.collect()}
 
     assert set(rows) == {'LOF (MAF<0.1%)', 'Cauchy'}

@@ -193,9 +193,9 @@ def replace_missing_placeholder(col: Column) -> Column:
     """Converts to null values that only encode "missing" as a placeholder token.
 
     Upstream leaves `control_name` blank for probes without a designated control
-    compound. Pandas reads a blank Excel cell as a float NaN, and since production
-    runs pyspark with Arrow disabled (row-wise pandas-to-Spark schema inference),
-    that NaN crosses over as the literal string "NaN" -- Java's
+    compound. Pandas reads a blank Excel cell as a float NaN, and with Arrow
+    disabled (row-wise pandas-to-Spark schema inference), that NaN crosses over
+    as the literal string "NaN" -- Java's
     `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
     placeholder token seen in the same column.
     """

@@ -17,6 +17,14 @@ def test_ansi_mode_is_off(dataproc):
     assert _config(dataproc=dataproc)['spark.sql.ansi.enabled'] == 'false'
 
 
+@pytest.mark.parametrize('dataproc', [False, True])
+def test_arrow_is_on_without_fallback(dataproc):
+    # pandas<->spark conversions take the Arrow path, or fail
+    conf = _config(dataproc=dataproc)
+    assert conf['spark.sql.execution.arrow.pyspark.enabled'] == 'true'
+    assert conf['spark.sql.execution.arrow.pyspark.fallback.enabled'] == 'false'
+
+
 def test_local_session_loads_the_spark_4_jars():
     conf = _config(dataproc=False)
     assert conf['spark.jars.packages'].startswith('com.johnsnowlabs.nlp:spark-nlp_2.13:')

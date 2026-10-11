@@ -390,17 +390,8 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
         extra_columns={'covalent': ['True', None, None]},
     )
 
-    # The shared fixture enables arrow, whose converter tolerates the mixed column.
-    # Production sets no arrow config, so spark falls back to row-wise schema
-    # inference -- the path that actually failed. Match production here, and put the
-    # session-scoped setting back for everyone else.
-    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
-    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
-    try:
-        df = process_probes_targets_data(spark, str(xlsx))
-        rows = df.collect()
-    finally:
-        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+    df = process_probes_targets_data(spark, str(xlsx))
+    rows = df.collect()
 
     assert 'covalent' not in df.columns
     assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
@@ -411,7 +402,8 @@ def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
 def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
     """A blank action cell doesn't become a fake single-element ["NaN"] mechanismOfAction.
 
-    Regression test: with Arrow disabled, a blank `action` cell reaches Spark as
+    Regression test: with Arrow disabled (production before it was enabled in
+    Session), a blank `action` cell reaches Spark as
     the literal string "NaN" -- the same pandas-to-Spark path as `control_name`
     -- and f.split("NaN", ';') previously produced ["NaN"] instead of a real
     null. Affected ~30% of chemical_probes rows in production.
@@ -421,13 +413,8 @@ def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):
         extra_columns={'action': [None, 'inhibitor;agonist', '-']},
     )
 
-    arrow = spark.conf.get('spark.sql.execution.arrow.pyspark.enabled')
-    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'false')
-    try:
-        df = process_probes_targets_data(spark, str(xlsx))
-        rows = {r.pdid: r.mechanismOfAction for r in df.collect()}
-    finally:
-        spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', arrow)
+    df = process_probes_targets_data(spark, str(xlsx))
+    rows = {r.pdid: r.mechanismOfAction for r in df.collect()}
 
     assert rows['PD-1'] is None, 'a blank action cell must not survive as ["NaN"]'
     assert rows['PD-2'] == ['inhibitor', 'agonist']

@@ -227,6 +227,8 @@ def process_cvdi_gene_burden(
         .astype({'OR [95%CI]': str})
         # Filter out rows where Gene ID Ensembl contains non-Ensembl values
         .query("`Gene ID Ensembl` != 'Gene ID Ensembl' and `Gene ID Ensembl`.notna()")
+        # pyspark's Arrow path rejects the multi-chunk str columns pd.concat can leave behind
+        .pipe(lambda df: df.astype(dict.fromkeys(df.select_dtypes('str').columns, object)))
     )
 
     return (

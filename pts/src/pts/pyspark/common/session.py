@@ -42,7 +42,13 @@ class Session:
         # out-of-range array access and arithmetic overflow raise instead of
         # returning null. Keep the Spark 3 behaviour until the pyspark modules
         # have been audited for it. The pts clusters set the same property.
-        base_properties = {'spark.sql.ansi.enabled': 'false'}
+        base_properties = {
+            'spark.sql.ansi.enabled': 'false',
+            # Arrow for pandas<->spark conversion, so pandas NaN crosses as null;
+            # fail rather than silently fall back to the row-wise path
+            'spark.sql.execution.arrow.pyspark.enabled': 'true',
+            'spark.sql.execution.arrow.pyspark.fallback.enabled': 'false',
+        }
 
         if not self.is_dataproc:
             base_properties |= {
