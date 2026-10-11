@@ -120,61 +120,6 @@ def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
     return decorator
 
 
-def linear_rescaling(
-    value: float,
-    in_range_min: float,
-    in_range_max: float,
-    out_range_min: float,
-    out_range_max: float,
-) -> float:
-    """Linearly rescaling a value across ranges.
-
-    Args:
-        value (float): value to rescale
-        in_range_min (float): minimum of the starting range
-        in_range_max (float): maximum of the starting range
-        out_range_min (float): minimum of the resulting range
-        out_range_max (float): maximum of the resulting range
-
-    Returns:
-        float: re-scaled value
-
-    Examples:
-        >>> # normal mapping: 5 maps from [0,10] -> [0,1] to 0.5
-        >>> linear_rescaling(5.0, 0.0, 10.0, 0.0, 1.0)
-        0.5
-
-        >>> # values below/above input range are clamped to the output range
-        >>> linear_rescaling(-10.0, 0.0, 10.0, 0.0, 1.0)
-        0.0
-        >>> linear_rescaling(20.0, 0.0, 10.0, 0.0, 1.0)
-        1.0
-
-        >>> # input range degenerate (in_range_min == in_range_max) and
-        >>> # output range degenerate (out_range_min == out_range_max):
-        >>> # score is set to the input value then clamped to the degenerate output range
-        >>> linear_rescaling(1.0, 1.0, 1.0, 2.0, 2.0)
-        2.0
-
-        >>> # input range degenerate but output range non-degenerate:
-        >>> # returns out_range_min (per implementation)
-        >>> linear_rescaling(1.0, 1.0, 1.0, 0.0, 1.0)
-        0.0
-    """
-    delta1 = float(in_range_max - in_range_min)
-    delta2 = float(out_range_max - out_range_min)
-
-    if delta1 != 0.0:
-        score = (float(delta2) * (value - float(in_range_min)) / delta1) + float(out_range_min)
-    elif delta1 == 0.0 and delta2 == 0.0:
-        score = value
-    else:
-        score = out_range_min
-
-    # clamp to [out_range_min, out_range_max]
-    return min(max(score, out_range_min), out_range_max)
-
-
 def parse_spark_schema(schema_json: str) -> StructType:
     """Parse Spark schema from JSON.
 

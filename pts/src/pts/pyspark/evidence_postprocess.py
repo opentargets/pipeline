@@ -8,7 +8,6 @@ from loguru import logger
 from pyspark.storagelevel import StorageLevel
 
 from pts.pyspark.common.session import Session
-from pts.pyspark.common.utils import linear_rescaling
 from pts.pyspark.evidence_utils.evidence import Evidence
 from pts.pyspark.evidence_utils.validation_lut import LookUpTables
 
@@ -41,9 +40,6 @@ def evidence_postprocess(
     logger.info(f'processing "{datasource_id}" evidence')
     # Initialise session:
     session = Session(app_name='evidence', properties=properties)
-
-    # Registering UDFs in the spark session:
-    session.spark.udf.register('linear_rescale', linear_rescaling)
 
     # Read input data:
     source_evidence = session.load_data(source['evidence_path'], format=evidence_format)
