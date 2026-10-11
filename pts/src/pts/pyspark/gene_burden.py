@@ -10,6 +10,7 @@ from pyspark.sql.dataframe import DataFrame
 
 from pts.pyspark.common.ontology import add_efo_mapping
 from pts.pyspark.common.session import Session
+from pts.pyspark.common.utils import pandas_to_spark_strings
 
 CURATION_SCHEMA = t.StructType([
     t.StructField('projectId', t.StringType(), True),
@@ -38,6 +39,9 @@ CURATION_SCHEMA = t.StructType([
     t.StructField('literature', t.StringType(), True),
     t.StructField('url', t.StringType(), True),
 ])
+
+CVDI_NUMERIC_COLUMNS = ['cMAC', 'Meta P-value', 'Cauchy P-value', 'P cutoff']
+CVDI_COLUMNS = ['phenotype', 'Gene ID Ensembl', 'Gene', 'OR [95%CI]', 'method_name', *CVDI_NUMERIC_COLUMNS]
 
 
 def _excel_sheet_to_spark(spark: Session, path: str, sheet: str) -> DataFrame:
@@ -227,15 +231,11 @@ def process_cvdi_gene_burden(
         .astype({'OR [95%CI]': str})
         # Filter out rows where Gene ID Ensembl contains non-Ensembl values
         .query("`Gene ID Ensembl` != 'Gene ID Ensembl' and `Gene ID Ensembl`.notna()")
-        # pyspark's Arrow path rejects the multi-chunk str columns pd.concat can leave behind
-        .pipe(lambda df: df.astype(dict.fromkeys(df.select_dtypes('str').columns, object)))
     )
 
     return (
-        spark.spark
-        .createDataFrame(
-            associations_df,
-        )
+        pandas_to_spark_strings(spark.spark, associations_df, CVDI_COLUMNS)
+        .withColumns({c: f.col(c).cast(t.DoubleType()) for c in CVDI_NUMERIC_COLUMNS})
         .withColumn(
             'resourceScore',
             f.when(f.col('method_name') == f.lit('Cauchy'), f.col('Cauchy P-value')).otherwise(f.col('Meta P-value')),

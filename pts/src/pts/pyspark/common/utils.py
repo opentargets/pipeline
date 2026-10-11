@@ -5,9 +5,10 @@ from enum import Enum
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+import pandas as pd
 import pyspark.sql.functions as f
-from pyspark.sql import Column, DataFrame
-from pyspark.sql.types import IntegerType, StructType
+from pyspark.sql import Column, DataFrame, SparkSession
+from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 from pts import schemas
 
@@ -213,3 +214,24 @@ def maybe_repartition(df: DataFrame, n: int | None) -> DataFrame:
     if n:
         return df.repartition(n)
     return df
+
+
+def pandas_to_spark_strings(spark: SparkSession, pdf: pd.DataFrame, columns: list[str] | None = None) -> DataFrame:
+    """Convert a pandas frame to Spark with every cell as a string and blanks as null.
+
+    Arrow rejects a column that mixes numbers and text, so spreadsheet cells cross as
+    strings and the caller casts the columns it uses.
+
+    Args:
+        spark: Spark session.
+        pdf: pandas frame, e.g. a sheet from ``pd.read_excel``.
+        columns: Columns to keep. All columns when omitted.
+
+    Returns:
+        DataFrame with one nullable string column per kept column.
+    """
+    if columns is not None:
+        pdf = pdf[columns]
+    values = pdf.astype(object).map(lambda v: None if pd.isna(v) else str(v))
+    schema = StructType([StructField(c, StringType(), True) for c in values.columns])
+    return spark.createDataFrame(values, schema=schema)

@@ -373,30 +373,29 @@ def _probes_targets_xlsx(path, extra_columns=None):
 
 
 def test_probes_targets_survives_a_mixed_type_column(spark, tmp_path):
-    """An unused column mixing booleans and blanks must not reach spark.
+    """A sheet column mixing numbers and text must not stop the step.
 
-    Upstream 01_2026 changed `covalent` from a string column to real booleans with
-    blank cells. Pandas types the blanks as float, and spark's schema inference
-    cannot merge DoubleType with BooleanType, so the step died on a column it
-    never reads. Handing spark only the columns the step uses keeps that class of
-    upstream drift out of inference.
+    Upstream writes "-" into otherwise numeric cells, and pandas reads such a column
+    as object. Arrow cannot convert a column holding both, and with fallback off the
+    step dies -- even on a column it never reads, such as `covalent`. The used
+    columns cross as strings, so the score's "-" becomes a null through try_cast.
     """
     xlsx = _probes_targets_xlsx(
         tmp_path / 'probes.xlsx',
-        # Upstream writes the literal text 'True' and leaves the rest blank. Pandas
-        # turns that text into real bools and the blanks into NaN, giving one object
-        # column holding both -- writing a python True instead round-trips to 1.0 and
-        # reproduces nothing.
-        extra_columns={'covalent': ['True', None, None]},
+        extra_columns={
+            'covalent': [1.0, '-', None],
+            'Cells score (Chemical Probes.org)': [1.5, '-', None],
+        },
     )
 
     df = process_probes_targets_data(spark, str(xlsx))
-    rows = df.collect()
+    rows = {r.pdid: r for r in df.collect()}
 
     assert 'covalent' not in df.columns
-    assert sorted(r.pdid for r in rows) == ['PD-1', 'PD-2'], (
-        'only the row without a gene_name should be dropped'
-    )
+    assert sorted(rows) == ['PD-1', 'PD-2'], 'only the row without a gene_name should be dropped'
+    assert rows['PD-1'].scoreInCells == 1.5
+    assert rows['PD-2'].scoreInCells is None
+    assert rows['PD-1'].probesDrugsScore == 1.0
 
 
 def test_probes_targets_nulls_stringified_nan_action(spark, tmp_path):

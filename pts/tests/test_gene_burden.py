@@ -144,3 +144,22 @@ def test_cvdi_cauchy_associations_are_kept_without_an_odds_ratio(pts_session: Se
     assert set(rows) == {'LOF (MAF<0.1%)', 'Cauchy'}
     assert rows['Cauchy'].oddsRatio is None
     assert rows['LOF (MAF<0.1%)'].oddsRatio == 2.5
+    assert rows['Cauchy'].studyCasesWithQualifyingVariants is None
+    assert rows['LOF (MAF<0.1%)'].studyCasesWithQualifyingVariants == 10
+
+
+def test_cvdi_survives_text_in_numeric_columns(pts_session: Session):
+    """A "-" in a numeric CVDI column must not stop the step; that cell reads as null."""
+    associations, cutoffs = _cvdi_frames()
+    associations.loc[1] = ['Asthma', 'ENSG00000002', 'GENE2', '-', '-', '-', 1e-12]
+
+    df = process_cvdi_gene_burden(pts_session, associations, cutoffs)
+    rows = {(r.targetFromSourceId, r.statisticalMethod): r for r in df.collect()}
+
+    assert set(rows) == {
+        ('ENSG00000001', 'LOF (MAF<0.1%)'),
+        ('ENSG00000001', 'Cauchy'),
+        ('ENSG00000002', 'Cauchy'),
+    }, 'the LOF row without a p-value is not significant'
+    assert rows[('ENSG00000002', 'Cauchy')].resourceScore == 1e-12
+    assert rows[('ENSG00000001', 'LOF (MAF<0.1%)')].resourceScore == 1e-10
