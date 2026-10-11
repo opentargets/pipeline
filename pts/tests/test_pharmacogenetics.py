@@ -1,136 +1,105 @@
-"""Tests for the pharmacogenetics module's OpenAI failure handling.
+"""Tests for the pharmacogenetics module's curated phenotype lookup."""
 
-The step annotates phenotypes from a curated lookup table and calls the OpenAI API only
-for text the table does not cover. That call is against a third party, from a Dataproc
-driver, one request per text — so it fails sometimes, and what it does when it fails
-decides whether a run survives.
-"""
-
+import json
 from unittest.mock import MagicMock
 
 import pytest
-from openai import APIConnectionError, APITimeoutError, RateLimitError
+from loguru import logger
+from pyspark.sql import DataFrame, SparkSession
 
-from pts.pyspark.pharmacogenetics import parse_phenotype_with_gpt, parse_phenotypes
+from pts.pyspark import pharmacogenetics as pgx
+from pts.pyspark.pharmacogenetics import annotate_phenotype, find_unparsed_texts
 
-
-def _client(side_effect=None, content: str | None = None) -> MagicMock:
-    """An OpenAI client stub whose `create` either raises or returns `content`."""
-    client = MagicMock()
-    if side_effect is not None:
-        client.responses.create.side_effect = side_effect
-    else:
-        completion = MagicMock()
-        completion.output_text = content
-        client.responses.create.return_value = completion
-    return client
+PGX_SCHEMA = 'genotypeAnnotationText string, phenotypeText string, phenotypeFromSourceId string, studyId string'
+LUT_SCHEMA = 'genotypeAnnotationText string, phenotypeText array<string>'
 
 
-def _connection_error() -> APIConnectionError:
-    return APIConnectionError(request=MagicMock())
-
-
-class TestParsePhenotypeWithGpt:
-    def test_a_connection_error_returns_none_instead_of_raising(self) -> None:
-        """The exact failure that killed run do/platform-2608-2.
-
-        `APIConnectionError` propagated out of the step, discarding 115s of completed
-        work and blocking ~200 downstream tasks. The text is simply left unextracted
-        instead, which is the same state it was in before the API was consulted.
-        """
-        assert parse_phenotype_with_gpt('some genotype text', _client(side_effect=_connection_error())) is None
-
-    @pytest.mark.parametrize(
-        'error',
+@pytest.fixture
+def pgx_df(spark: SparkSession) -> DataFrame:
+    return spark.createDataFrame(
         [
-            APITimeoutError(request=MagicMock()),
-            RateLimitError('rate limited', response=MagicMock(status_code=429), body=None),
+            ('parsed', 'verbose', None, 's1'),
+            ('parsed empty', 'verbose', None, 's2'),
+            ('unparsed b', 'verbose', None, 's3'),
+            ('unparsed a', 'verbose', None, 's4'),
+            (None, 'verbose', None, 's5'),
         ],
-        ids=['timeout', 'rate_limit'],
+        PGX_SCHEMA,
     )
-    def test_other_api_failures_are_also_survivable(self, error: Exception) -> None:
-        """A key that starts rate limiting mid-run must degrade, not abort."""
-        assert parse_phenotype_with_gpt('some genotype text', _client(side_effect=error)) is None
-
-    def test_a_successful_extraction_is_returned(self) -> None:
-        client = _client(content='{"gptExtractedPhenotype": ["increased response"]}')
-        assert parse_phenotype_with_gpt('text', client) == ['increased response']
-
-    def test_unparseable_content_returns_none(self) -> None:
-        """Pre-existing behaviour, pinned so the new try block above it cannot swallow it."""
-        assert parse_phenotype_with_gpt('text', _client(content='not json at all')) is None
 
 
-class TestParsePhenotypes:
-    def test_every_text_failing_still_produces_a_frame(self, spark) -> None:
-        """A total outage yields an empty result, not an exception.
+@pytest.fixture
+def lut_df(spark: SparkSession) -> DataFrame:
+    return spark.createDataFrame(
+        [('parsed', ['increased response']), ('parsed empty', [])],
+        LUT_SCHEMA,
+    )
 
-        Rows whose text could not be extracted keep a null phenotypeText and flow on. The
-        step degrades; it does not take the run down with it.
-        """
+
+class TestFindUnparsedTexts:
+    def test_texts_missing_from_the_lookup_are_returned_sorted(self, pgx_df, lut_df) -> None:
+        assert find_unparsed_texts(pgx_df, lut_df) == ['unparsed a', 'unparsed b']
+
+    def test_empty_when_everything_is_parsed(self, spark, lut_df) -> None:
+        df = spark.createDataFrame([('parsed', None, None, 's1'), ('parsed empty', None, None, 's2')], PGX_SCHEMA)
+        assert find_unparsed_texts(df, lut_df) == []
+
+
+class TestAnnotatePhenotype:
+    def test_unparsed_rows_are_kept_with_a_null_phenotype(self, pgx_df, lut_df) -> None:
+        rows = {r.studyId: r.phenotypeText for r in annotate_phenotype(pgx_df, lut_df).collect()}
+        assert rows == {
+            's1': 'increased response',
+            's2': None,
+            's3': None,
+            's4': None,
+            's5': None,
+        }
+
+
+class TestStep:
+    """The step writes the unparsed texts and warns, without calling any external API."""
+
+    def _run(self, spark, monkeypatch, tmp_path, pgx_df, lut_df) -> tuple[list[str], list[str]]:
+        frames = {'clinpgx': pgx_df, 'phenotypes': lut_df}
         session = MagicMock()
         session.spark = spark
-        result = parse_phenotypes(session, ['a', 'b', 'c'], _client(side_effect=_connection_error()), max_workers=1)
-        assert result.count() == 0
-        assert result.columns == ['genotypeAnnotationText', 'phenotypeText']
+        session.load_data.side_effect = lambda path, **_: frames.get(path, MagicMock())
+        monkeypatch.setattr(pgx, 'Session', lambda **_: session)
+        monkeypatch.setattr(pgx, 'add_variantid_column', lambda df: df)
+        monkeypatch.setattr(pgx, 'add_efo_mapping', lambda **kw: kw['evidence_df'])
+        monkeypatch.setattr(pgx, 'enrich_with_drug_and_target_info', lambda df, *_: df)
 
-    def test_a_partial_outage_keeps_what_succeeded(self, spark) -> None:
-        """One failure must not discard the extractions that worked."""
-        good = MagicMock()
-        good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
-        client = MagicMock()
-        client.responses.create.side_effect = [good, _connection_error(), good]
+        unparsed_path = tmp_path / 'unparsed_texts.json'
+        messages: list[str] = []
+        sink_id = logger.add(messages.append, level='WARNING')
+        try:
+            pgx.pharmacogenetics(
+                source={
+                    'clinpgx': 'clinpgx',
+                    'phenotypes': 'phenotypes',
+                    'chembl_molecule': 'chembl_molecule',
+                    'drug_mechanism_of_action': 'moa',
+                    'ontoma_disease_label_lut': 'lut',
+                },
+                destination={'associations': str(tmp_path / 'out'), 'unparsed_texts': str(unparsed_path)},
+                settings={'partition_count': 1},
+                properties={},
+            )
+        finally:
+            logger.remove(sink_id)
+        return json.loads(unparsed_path.read_text()), messages
 
-        session = MagicMock()
-        session.spark = spark
-        result = parse_phenotypes(session, ['a', 'b', 'c'], client, max_workers=1)
-        assert result.count() == 2, 'a single failed call discarded the successful ones'
-        assert sorted(r.genotypeAnnotationText for r in result.collect()) == ['a', 'c']
+    def test_unparsed_texts_are_written_and_warned(self, spark, monkeypatch, tmp_path, pgx_df, lut_df) -> None:
+        unparsed, messages = self._run(spark, monkeypatch, tmp_path, pgx_df, lut_df)
+        assert unparsed == ['unparsed a', 'unparsed b']
+        assert any('2 genotypeAnnotationText' in m for m in messages)
+        out = spark.read.parquet(str(tmp_path / 'out'))
+        assert out.count() == 5
+        assert out.where('phenotypeText is null').count() == 4
 
-    def test_concurrent_partial_outage_keeps_what_succeeded(self, spark) -> None:
-        """Same as above but with concurrency, order is nondeterministic so only count is checked."""
-        good = MagicMock()
-        good.output_text = '{"gptExtractedPhenotype": ["increased response"]}'
-
-        calls = {'count': 0}
-
-        def side_effect(*args, **kwargs):
-            # The genotype_text is embedded in the prompt as '"b"', use call order fallback
-            # by tracking calls; first and third succeed, second fails regardless of text.
-            calls['count'] += 1
-            if calls['count'] == 2:
-                raise _connection_error()
-            return good
-
-        client = MagicMock()
-        client.responses.create.side_effect = side_effect
-
-        session = MagicMock()
-        session.spark = spark
-        result = parse_phenotypes(session, ['a', 'b', 'c'], client, max_workers=3)
-        assert result.count() == 2
-        assert {r.genotypeAnnotationText for r in result.collect()}.issubset({'a', 'b', 'c'})
-
-
-class TestResponseShape:
-    def test_a_missing_key_is_not_treated_as_an_empty_extraction(self) -> None:
-        """A model answering in the wrong shape must be retried, not recorded as done.
-
-        `gptExtractedPhenotype` absent means the model ignored the requested shape. That
-        used to default to `[]`, which `parse_phenotypes` stores as a successful
-        extraction — so the text entered the lookup table permanently empty and was never
-        attempted again. Observed while probing a model swap: both models answered with
-        `phenotype` and `phenotypes` when the prompt was abbreviated.
-        """
-        client = _client(content='{"phenotype": "increased response"}')
-        assert parse_phenotype_with_gpt('text', client) is None
-
-    def test_a_genuinely_empty_extraction_is_kept(self) -> None:
-        """An empty list is real data, not a failure.
-
-        1,411 of the curated entries have an empty phenotypeText because the annotation
-        describes no phenotype. Those must stay distinguishable from a bad response, or
-        the fix above would make the step re-query them forever.
-        """
-        client = _client(content='{"gptExtractedPhenotype": []}')
-        assert parse_phenotype_with_gpt('text', client) == []
+    def test_an_empty_list_is_written_when_everything_is_parsed(self, spark, monkeypatch, tmp_path, lut_df) -> None:
+        df = spark.createDataFrame([('parsed', None, None, 's1')], PGX_SCHEMA)
+        unparsed, messages = self._run(spark, monkeypatch, tmp_path, df, lut_df)
+        assert unparsed == []
+        assert messages == []

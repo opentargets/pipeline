@@ -15,7 +15,6 @@ dependencies = [
   "polars[connectorx]>=1.41.2",
   "pyspark>=4.1,<4.2",
   "spark-nlp==7.0.0",
-  "openai>=2.41.1",
   "pydantic>=2.13.4",
   "openpyxl>=3.1.5",
   "numpy>=2.4.4",

@@ -526,10 +526,9 @@ steps:
         drug_mechanism_of_action: output/drug_mechanism_of_action
       destination:
         associations: output/pharmacogenomics
-        phenotypes: intermediate/pharmacogenetics/phenotypes.json
+        unparsed_texts: intermediate/pharmacogenetics/unparsed_texts.json
       settings:
         partition_count: 1
-        openai_token_filename: /var/run/secrets/openai_token
   ##################################################################################################
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
