@@ -1807,7 +1807,13 @@ steps:
         partition_count: 1
         evidence_format: parquet
         datasource_id: crispr
-        score_expression: linear_rescale(resourceScore, 41.5, 100, 0.415, 1.0)
+        score_expression: >-
+          CASE
+            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
+            ELSE LEAST(1.0, GREATEST(0.415,
+              (1.0 - 0.415) * (resourceScore - 41.5) / (100 - 41.5) + 0.415
+            ))
+          END
         unique_fields:
           - targetId
           - targetFromSourceId
