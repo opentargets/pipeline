@@ -12,10 +12,8 @@ from typing import Any
 from loguru import logger
 from pyspark.ml.feature import Word2VecModel
 from pyspark.ml.functions import vector_to_array
-from pyspark.ml.linalg import Vectors
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
-from pyspark.sql.types import DoubleType
 
 from pts.pyspark.common.session import Session
 
@@ -31,8 +29,6 @@ def _compute_vectors(vectors: DataFrame) -> DataFrame:
     Returns:
         DataFrame with columns [category, word, norm, vector].
     """
-    norm_udf = f.udf(lambda v: float(Vectors.norm(v, 2.0)), DoubleType())
-
     return (
         vectors
         .withColumn(
@@ -42,8 +38,8 @@ def _compute_vectors(vectors: DataFrame) -> DataFrame:
             .when(f.col('word').startswith('CHEMBL'), f.lit('drug'))
             .otherwise(f.lit('disease')),
         )
-        .withColumn('norm', norm_udf(f.col('vector')))
         .withColumn('vector', vector_to_array(f.col('vector')))
+        .withColumn('norm', f.sqrt(f.aggregate('vector', f.lit(0.0), lambda acc, x: acc + x * x)))
         .select(*_OUTPUT_COLUMNS)
     )
 
