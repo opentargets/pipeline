@@ -8,7 +8,11 @@ _chemical_probes_query/_paralogs_query/_orthologs_mouse_query work against
 the current output/target schema instead of crashing on a missing column.
 """
 
+import math
+import random
+
 from pyspark.sql import Row
+from pyspark.sql import functions as f
 from pyspark.sql.types import (
     BooleanType,
     DoubleType,
@@ -20,7 +24,9 @@ from pyspark.sql.types import (
 
 from pts.pyspark.target_prioritisation import (
     _chemical_probes_query,
+    _harmonic_sum,
     _ligand_pocket_query,
+    _max_harmonic_sum,
     _orthologs_mouse_query,
     _paralogs_query,
     _safety_query,
@@ -322,3 +328,71 @@ def test_orthologs_mouse_query_target_with_no_rows_is_kept(spark):
     homology = spark.createDataFrame([], HOMOLOGY_SCHEMA)
     result = _orthologs_mouse_query(_queryset(spark, ['T1']), homology)
     assert result.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# _harmonic_sum / _max_harmonic_sum
+# ---------------------------------------------------------------------------
+
+
+def _left_to_right_sum(terms):
+    # Python 3.12+ compensates float sums, so sum() no longer reproduces the release
+    total = 0.0
+    for term in terms:
+        total += term
+    return total
+
+
+def _harmonic_sum_reference(scores):
+    """The former `harmonic_sum` UDF, summed left to right as the release's Python 3.11 `sum` did."""
+    if scores is None or len(scores) == 0:
+        return 0.0
+    sorted_scores = sorted([s for s in scores if s is not None], reverse=True)
+    if len(sorted_scores) == 0:
+        return 0.0
+    denominators = [(i + 1) ** 2 for i in range(len(sorted_scores))]
+    return _left_to_right_sum(s / d for s, d in zip(sorted_scores, denominators, strict=False))
+
+
+def _max_harmonic_sum_reference(scores):
+    """The former `max_harmonic_sum` UDF, summed left to right as the release's Python 3.11 `sum` did."""
+    if scores is None or len(scores) == 0:
+        return 0.0
+    n = len([s for s in scores if s is not None])
+    if n == 0:
+        return 0.0
+    denominators = [(i + 1) ** 2 for i in range(n)]
+    return _left_to_right_sum(1.0 / d for d in denominators)
+
+
+def _same_double(a, b):
+    return (math.isnan(a) and math.isnan(b)) or a == b
+
+
+def test_harmonic_sums_match_udfs(spark):
+    rng = random.Random(0)
+    cases = [
+        None,
+        [],
+        [None],
+        [None, None],
+        [0.5],
+        [0.0],
+        [0.2, 0.9, 0.5],
+        [0.5, 0.5, 0.5],
+        [None, 0.3, None, 0.8],
+        [1.0, 0.0, -0.0, 0.25],
+        [float('nan'), 0.3],
+    ]
+    cases += [[rng.choice([0.0, 1.0, rng.random()]) for _ in range(rng.randint(1, 300))] for _ in range(500)]
+    df = spark.createDataFrame([(c,) for c in cases], 'score ARRAY<DOUBLE>')
+
+    rows = df.select(
+        'score',
+        _harmonic_sum(f.col('score')).alias('harmonic'),
+        _max_harmonic_sum(f.col('score')).alias('max_harmonic'),
+    ).collect()
+
+    for row in rows:
+        assert _same_double(row.harmonic, _harmonic_sum_reference(row.score))
+        assert _same_double(row.max_harmonic, _max_harmonic_sum_reference(row.score))
