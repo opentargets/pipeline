@@ -136,10 +136,6 @@
       minimumReleaseAge: null,
     },
     {
-      matchPackageNames: ['gcr.io/google.com/cloudsdktool/google-cloud-cli'],
-      minimumReleaseAge: null,
-    },
-    {
       matchFileNames: ['pts/**'],
       matchPackageNames: ['polars'],
       groupName: 'polars',
@@ -148,6 +144,12 @@
       matchUpdateTypes: ['major'],
       draftPR: true,
       addLabels: ['major'],
+    },
+    // gcloud bumps its major almost weekly
+    {
+      matchPackageNames: ['gcr.io/google.com/cloudsdktool/google-cloud-cli'],
+      minimumReleaseAge: null,
+      draftPR: false,
     },
     {
       matchDatasources: ['docker'],
