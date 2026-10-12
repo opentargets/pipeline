@@ -1963,9 +1963,7 @@ steps:
         test_split: intermediate/l2g_test_split
         split_stats: intermediate/l2g_train_test_split_stats.json
       settings:
-        # Anchored, not a scratchpad sentinel: otter's Scratchpad is string.Template
-        # substitution, so `${...}` can only ever produce a string. The order is the
-        # order the model is fitted on and the order of the output `features` array.
+        # fitted order; also the order of the output `features` array
         features_list: &l2g_features
           - eQtlColocClppMaximum
           - pQtlColocClppMaximum
@@ -2031,9 +2029,7 @@ steps:
         features_list: *l2g_features
         l2g_threshold: 0.05
         explain_predictions: true
-        # No `shap_background_size` here on purpose: the masker is sized from the background
-        # parquet the training task wrote, so the size is set once, above.
-  ##################################################################################################
+        # shap_background_size is set on l2g_train only
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:

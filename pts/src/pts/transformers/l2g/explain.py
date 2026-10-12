@@ -133,9 +133,7 @@ def explain(
     Returns:
         `(base_value, shap_values)` where `shap_values` has the shape of `matrix`.
     """
-    # The parent's own explainer is built solely to read `expected_value`, and is retained
-    # deliberately: under `spawn` it is not a fork hazard, and obtaining the base value any other
-    # way would mean restructuring this function to save a few milliseconds.
+    # the parent's explainer only provides expected_value
     _initialise(model, background, max_samples)
     base_value = float(_EXPLAINER.expected_value)
 
@@ -151,15 +149,7 @@ def explain(
     if resolved_workers == 1:
         return base_value, np.vstack([_explain_chunk(chunk) for chunk in chunks])
 
-    # `spawn` is pinned rather than left to the platform default, which is spawn on macOS but
-    # FORK on Linux -- and production is `python:3.11-slim`. By this point the parent has already
-    # run `predict_proba` over the whole matrix and built a `TreeExplainer`, both heavy OpenMP
-    # regions; forking a live OpenMP runtime and then entering a parallel region in the child is
-    # the classic hang, and no PTS step sets `execution_timeout`, so a hung pool runs until a
-    # human notices. Every test and every verification of this path has run on macOS, i.e. under
-    # spawn, so this also makes production execute the only configuration that has been exercised.
-    # The cost is one module re-import per worker: the model and background already travel through
-    # `initargs`, so nothing else has to be re-derived.
+    # spawn, not fork: the parent has already initialised openmp
     with ProcessPoolExecutor(
         max_workers=resolved_workers,
         mp_context=multiprocessing.get_context('spawn'),

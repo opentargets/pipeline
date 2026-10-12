@@ -52,13 +52,7 @@ def build_output(
     Returns:
         A DataFrame of `OUTPUT_COLUMNS`, in that order.
     """
-    # `matrix` is the IMPUTED matrix, so `value` is the number the model was actually handed.
-    # gentropy differs here: it rebuilds this payload by re-joining the RAW feature matrix
-    # (`add_features(self.feature_matrix)`), so a null feature would be published as null there
-    # and as 0.0 here. The divergence is deliberate and kept -- publishing a `value` that does not
-    # correspond to the `shapValue` beside it is incoherent -- and it is also unreachable on this
-    # data: all 31 features are null-free across all 200 partitions of the real matrix, and the
-    # published payload carries no nulls either, so the two paths agree on every released row.
+    # imputed values, so each `value` matches its `shapValue`
     values = pl.DataFrame(matrix, schema=[(name, pl.Float32) for name in features])
     shap_schema = [(f'shap_{name}', pl.Float32) for name in features]
     shaps = (
@@ -83,11 +77,7 @@ def build_output(
             for name in features
         ).alias('features'),
         pl.lit(base_value, dtype=pl.Float32).alias('shapBaseValue'),
-        # Re-selected by name so the declared contract is enforced rather than merely documented.
-        # The two drifts are caught differently: renaming or dropping an expression above raises
-        # here, because the name is then absent; reordering them is silently corrected back to
-        # `OUTPUT_COLUMNS`. Either way `gentropy_l2g_evidence`, which reads this dataset with an
-        # imposed schema, cannot be handed a drifted one.
+        # enforce OUTPUT_COLUMNS
     ).select(OUTPUT_COLUMNS)
 
 
@@ -145,18 +135,12 @@ def l2g_predict(
             model,
             matrix,
             background,
-            # Taken from the background that was actually loaded, NOT from a second
-            # `shap_background_size` setting on this task. The parquet training wrote already
-            # encodes the decision, and a size configured twice is a size that can disagree with
-            # itself: raise training's to 1000, forget this one, and the masker would quietly use
-            # 100 of the 1000 rows while `metrics.json` recorded 1000 -- which is precisely the
-            # silently-truncated background this port exists to remove.
+            # sized from the loaded background
             max_samples=background.shape[0],
             workers=workers,
         )
     else:
-        # Null, not NaN. The flag says no explanation was computed, which is a different
-        # statement from "the explanation is not a number", and consumers read them differently.
+        # null, not NaN: no explanation was computed
         base_value, shap_values = None, None
 
     output = build_output(keys, matrix, shap_values, base_value, features).sort(

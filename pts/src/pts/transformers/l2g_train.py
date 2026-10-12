@@ -113,15 +113,7 @@ def l2g_train(
 
     predefined = scan_dataset(source['predefined_test']).collect()
     train, test = split.derive_splits(annotated.lazy(), predefined.lazy())
-    # Polars joins leave their output order unspecified (`maintain_order=None`), and every path
-    # into `derive_splits` ends in one, so the same inputs come back in a different row order from
-    # run to run -- observed three orders in three calls within a single process. Everything below
-    # this line is positional: XGBoost's `subsample` draws its rows by POSITION, and
-    # `build_background` samples the background by position too. Sorting on the natural key, which
-    # is unique here, is what makes the fitted model and the SHAP background reproducible from the
-    # seeds `metrics.json` records; without it `random_state` and `shapBackgroundSeed` pin a draw
-    # over rows that are not the same rows. `require_unique_key` then refuses the run if that
-    # uniqueness ever stops holding, since the sort would silently stop being an order.
+    # sort on the unique natural key: join order is unspecified and what follows is positional
     train = train.sort(SORT_KEY)
     test = test.sort(SORT_KEY)
     require_unique_key(train, 'train')
@@ -143,22 +135,16 @@ def l2g_train(
     held_out = l2g_model.evaluate(fitted, x_test, y_test)
     logger.info(f'held-out metrics: {held_out}')
 
-    # Sorted, because both partitions are: `vertical` preserves each frame's order, so the refit
-    # below and the positional background draw further down both see a deterministic row order.
+    # both partitions are sorted
     labelled = pl.concat([train, test], how='vertical')
     if settings.get('train_on_full_dataset'):
-        # Evaluation above is complete and is not affected by this refit; the saved model simply
-        # benefits from the held-out rows too, which is what produced the 26.09-2 model.
         logger.info('refitting on train + held-out for the saved model')
         fitted = l2g_model.fit(
             l2g_model.to_matrix(labelled, features), l2g_model.to_labels(labelled), hyperparameters
         )
 
     background = explain.build_background(labelled, features, background_size, background_seed)
-    # Deliberately NOT write_dataset: a single named release artifact, not a dataset of parts --
-    # the same trade `release_metrics` makes for `metrics.parquet`. `mkdir=True` creates the
-    # parent locally and is inert on a cloud URI, which polars writes natively; a
-    # `Path(...).parent.mkdir` here would instead manufacture a stray local `gs:/…` tree.
+    # a single file, not a dataset of parts
     pl.DataFrame(background, schema=features).write_parquet(destination['background'], mkdir=True)
 
     l2g_model.save_model(fitted, destination['model'])
