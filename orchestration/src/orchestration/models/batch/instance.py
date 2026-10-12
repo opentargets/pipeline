@@ -6,7 +6,7 @@ from functools import cached_property
 from typing import Annotated, ClassVar, Literal
 
 from google.cloud import batch_v1
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, StringConstraints, model_validator
 
 from orchestration.utils.common import GCP_REGION
 from orchestration.utils.labels import Labels
@@ -111,47 +111,6 @@ class InstanceResourceSpec(BaseModel):
         )
 
 
-class NetworkSpec(BaseModel):
-    """Network specification for Google Batch tasks.
-
-    This class maps to the :py:class:`google.cloud.batch_v1.AllocationPolicy.NetworkPolicy` class used in Google Batch
-    job definitions. Network and subnetwork are partial URLs, resolved against the project the job runs in.
-    """
-
-    network: str = 'global/networks/default'
-    """Network the batch VMs attach to."""
-
-    subnetwork: str = f'regions/{GCP_REGION}/subnetworks/default'
-    """Subnetwork the batch VMs attach to. Needs Private Google Access when `no_external_ip_address` is set."""
-
-    no_external_ip_address: bool = True
-    """Whether the batch VMs run without an external IP address, and so without internet access."""
-
-    def build(self) -> batch_v1.AllocationPolicy.NetworkPolicy:
-        """Build a `google.cloud.batch_v1.AllocationPolicy.NetworkPolicy` object from the network specification.
-
-        Returns:
-            batch_v1.AllocationPolicy.NetworkPolicy: The built NetworkPolicy object.
-
-        Example:
-        ---
-        >>> nic = NetworkSpec().build().network_interfaces[0]
-        >>> nic.network, nic.subnetwork, nic.no_external_ip_address
-        ('global/networks/default', 'regions/europe-west1/subnetworks/default', True)
-        >>> NetworkSpec(no_external_ip_address=False).build().network_interfaces[0].no_external_ip_address
-        False
-        """
-        return batch_v1.AllocationPolicy.NetworkPolicy(
-            network_interfaces=[
-                batch_v1.AllocationPolicy.NetworkInterface(
-                    network=self.network,
-                    subnetwork=self.subnetwork,
-                    no_external_ip_address=self.no_external_ip_address,
-                )
-            ]
-        )
-
-
 class AllocationSpec(BaseModel):
     """Allocation specification for Google Batch tasks."""
 
@@ -159,9 +118,6 @@ class AllocationSpec(BaseModel):
 
     instance: InstanceSpec
     """Instance specification for the batch task."""
-
-    network: NetworkSpec = Field(default_factory=NetworkSpec)
-    """Network specification for the batch task. By default the VMs have no external IP address."""
 
     service_account_email: str | None = None
     """Service account email to be used for the batch task."""
@@ -231,6 +187,25 @@ class AllocationSpec(BaseModel):
         """
         return batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=[self.region] if self.region else self.zones)
 
+    @cached_property
+    def network(self) -> batch_v1.AllocationPolicy.NetworkPolicy:
+        """Get the network policy for the batch task: the default network, with no external IP address.
+
+        The subnetwork needs Private Google Access. Partial URLs resolve against the project the job runs in.
+
+        Returns:
+            batch_v1.AllocationPolicy.NetworkPolicy: The network policy for the batch task.
+        """
+        return batch_v1.AllocationPolicy.NetworkPolicy(
+            network_interfaces=[
+                batch_v1.AllocationPolicy.NetworkInterface(
+                    network='global/networks/default',
+                    subnetwork=f'regions/{GCP_REGION}/subnetworks/default',
+                    no_external_ip_address=True,
+                )
+            ]
+        )
+
     def build(self, labels: dict[str, str] | None = None) -> batch_v1.AllocationPolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy` object from the allocation specification.
 
@@ -263,7 +238,7 @@ class AllocationSpec(BaseModel):
         ap = {
             'instances': [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
             'labels': labels or self.labels or dict(Labels()),
-            'network': self.network.build(),
+            'network': self.network,
         }
         if self.location:
             ap['location'] = self.location
