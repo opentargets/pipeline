@@ -187,6 +187,25 @@ class AllocationSpec(BaseModel):
         """
         return batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=[self.region] if self.region else self.zones)
 
+    @cached_property
+    def network(self) -> batch_v1.AllocationPolicy.NetworkPolicy:
+        """Get the network policy for the batch task: the default network, with no external IP address.
+
+        The subnetwork needs Private Google Access. Partial URLs resolve against the project the job runs in.
+
+        Returns:
+            batch_v1.AllocationPolicy.NetworkPolicy: The network policy for the batch task.
+        """
+        return batch_v1.AllocationPolicy.NetworkPolicy(
+            network_interfaces=[
+                batch_v1.AllocationPolicy.NetworkInterface(
+                    network='global/networks/default',
+                    subnetwork=f'regions/{GCP_REGION}/subnetworks/default',
+                    no_external_ip_address=True,
+                )
+            ]
+        )
+
     def build(self, labels: dict[str, str] | None = None) -> batch_v1.AllocationPolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy` object from the allocation specification.
 
@@ -210,6 +229,8 @@ class AllocationSpec(BaseModel):
         ['regions/europe-west1']
         >>> ap.instances[0].policy.machine_type
         'n1-standard-4'
+        >>> ap.network.network_interfaces[0].no_external_ip_address
+        True
         >>> alloc_zones = AllocationSpec(instance=InstanceSpec(), zones=["zones/europe-west1-b"], labels={"team": "test"})
         >>> list(alloc_zones.build().location.allowed_locations)
         ['zones/europe-west1-b']
@@ -217,6 +238,7 @@ class AllocationSpec(BaseModel):
         ap = {
             'instances': [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
             'labels': labels or self.labels or dict(Labels()),
+            'network': self.network,
         }
         if self.location:
             ap['location'] = self.location
