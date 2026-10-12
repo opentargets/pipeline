@@ -1998,16 +1998,15 @@ steps:
           - credibleSetConfidence
           - transPQtlColocH4Maximum
           - transPQtlColocH4MaximumNeighbourhood
-        # Read off the 26.09-2 classifier.skops. n_estimators, gamma and max_delta_step
-        # are in neither gentropy nor this repo; do not "restore" them from gentropy's config.
+        # Pinned in #123.
         hyperparameters:
           objective: binary:logistic
           eval_metric: aucpr
           random_state: 777
-          n_estimators: 300
-          max_depth: 5
+          n_estimators: 200
+          max_depth: 4
           min_child_weight: 10
-          eta: 0.05
+          eta: 0.025
           subsample: 0.8
           colsample_bytree: 0.8
           reg_alpha: 1

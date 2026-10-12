@@ -35,8 +35,10 @@ def overlapping() -> tuple[np.ndarray, np.ndarray]:
     return x, y
 
 
-def test_default_hyperparameters_match_the_released_model() -> None:
-    assert DEFAULT_HYPERPARAMETERS['n_estimators'] == 300
+def test_default_hyperparameters_match_the_pinned_model() -> None:
+    assert DEFAULT_HYPERPARAMETERS['n_estimators'] == 200
+    assert DEFAULT_HYPERPARAMETERS['max_depth'] == 4
+    assert DEFAULT_HYPERPARAMETERS['eta'] == 0.025
     assert DEFAULT_HYPERPARAMETERS['random_state'] == 777
     assert DEFAULT_HYPERPARAMETERS['max_delta_step'] == 1
     assert DEFAULT_HYPERPARAMETERS['gamma'] == 0
@@ -73,7 +75,7 @@ def test_fit_is_deterministic_for_a_fixed_seed(separable) -> None:
 
 def test_evaluate_reports_the_seven_metrics(separable) -> None:
     x, y = separable
-    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 20})
     metrics = evaluate(model, x, y)
     assert set(metrics) == {
         'areaUnderROC',

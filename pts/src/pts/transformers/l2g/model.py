@@ -1,9 +1,7 @@
 """Fit, evaluate and persist the L2G classifier.
 
-`DEFAULT_HYPERPARAMETERS` is copied from the model that shipped with 26.09-2, read off
-`classifier.skops` itself. Three of its entries -- `n_estimators`, `gamma` and `max_delta_step` --
-appear in neither gentropy nor this repository, so reading them from gentropy's config would give
-a 100-tree model where the released one has 300. They live here so that never happens again.
+`DEFAULT_HYPERPARAMETERS` are the values gentropy was pinned to in #123, in full, so a change
+of gentropy or XGBoost defaults cannot change the model.
 """
 
 from collections.abc import Sequence
@@ -29,10 +27,10 @@ DEFAULT_HYPERPARAMETERS: dict[str, Any] = {
     'objective': 'binary:logistic',
     'eval_metric': 'aucpr',
     'random_state': 777,
-    'n_estimators': 300,
-    'max_depth': 5,
+    'n_estimators': 200,
+    'max_depth': 4,
     'min_child_weight': 10,
-    'eta': 0.05,
+    'eta': 0.025,
     'subsample': 0.8,
     'colsample_bytree': 0.8,
     'reg_alpha': 1,
@@ -41,7 +39,7 @@ DEFAULT_HYPERPARAMETERS: dict[str, Any] = {
     'gamma': 0,
     'max_delta_step': 1,
 }
-"""Read from the 26.09-2 `classifier.skops`; see the module docstring."""
+"""Pinned in #123; see the module docstring."""
 
 
 def to_matrix(frame: pl.DataFrame, features: Sequence[str]) -> np.ndarray:
