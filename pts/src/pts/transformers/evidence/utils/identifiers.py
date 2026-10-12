@@ -8,6 +8,7 @@ volume, but worth revisiting if a much larger evidence source reuses this.
 
 import hashlib
 import json
+from typing import Any
 
 import polars as pl
 
@@ -23,6 +24,19 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
+def _to_json(value: Any) -> str:
+    """Serialize one nested value for hashing.
+
+    `map_elements` hands a list cell over as a `pl.Series`, which `json.dumps` cannot serialize --
+    and `default=str` would fall back to its printed form, truncated for long lists, so lists
+    differing only past the cut-off would hash alike. Structs arrive as plain `dict`s, with any
+    nested lists already plain lists.
+    """
+    if isinstance(value, pl.Series):
+        value = value.to_list()
+    return json.dumps(value, sort_keys=True, default=str)
+
+
 def _stringify_field(df: pl.DataFrame, field: str) -> pl.Expr:
     """Stringify one column for identifier hashing.
 
@@ -36,11 +50,7 @@ def _stringify_field(df: pl.DataFrame, field: str) -> pl.Expr:
     """
     dtype = df.schema[field]
     if isinstance(dtype, pl.List | pl.Struct):
-        return (
-            pl.col(field)
-            .map_elements(lambda value: json.dumps(value, sort_keys=True, default=str), return_dtype=pl.String)
-            .fill_null('null')
-        )
+        return pl.col(field).map_elements(_to_json, return_dtype=pl.String).fill_null('null')
     return pl.col(field).cast(pl.String).fill_null('null')
 
 
@@ -74,11 +84,7 @@ def _content_string(dtype: pl.DataType, column: str) -> pl.Expr:
     structs) goes through `json.dumps` instead, same as `_stringify_field` above.
     """
     if isinstance(dtype, pl.Struct) or (isinstance(dtype, pl.List) and isinstance(dtype.inner, pl.Struct)):
-        return (
-            pl.col(column)
-            .map_elements(lambda value: json.dumps(value, sort_keys=True, default=str), return_dtype=pl.String)
-            .fill_null('null')
-        )
+        return pl.col(column).map_elements(_to_json, return_dtype=pl.String).fill_null('null')
     if isinstance(dtype, pl.List):
         return pl.col(column).fill_null([]).cast(pl.List(pl.String)).list.join(',')
     return pl.col(column).cast(pl.String).fill_null('null')

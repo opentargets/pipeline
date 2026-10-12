@@ -41,6 +41,16 @@ _DEFAULT_THRESHOLD = 0.05
 #: Loose validity check on a date string, matching gentropy's own -- a substring match, not a
 #: real date parse, so e.g. "9999-99-99" passes. Replicated as-is rather than "fixed".
 _CURATION_DATE_REGEX = r'\d{4}-\d{2}-\d{2}'
+#: The literature export columns the publication look-up table needs. Pinned rather than inferred:
+#: spark's JSON writer omits null fields, so e.g. `pmcid` can be absent from the first 100 rows
+#: polars infers from, and the inferred schema then lacks the column altogether.
+_LITERATURE_SCHEMA = {
+    'source': pl.String,
+    'firstPublicationDate': pl.String,
+    'pmid': pl.String,
+    'id': pl.String,
+    'pmcid': pl.String,
+}
 
 
 def gwas_evidence(
@@ -84,9 +94,7 @@ def gwas_evidence(
     )
     logger.info(f'Reading literature export from {source["literature"]}')
     publication_lut = build_publication_lut(
-        scan_dataset(str(source['literature']), format='ndjson')
-        .select('source', 'firstPublicationDate', 'pmid', 'id', 'pmcid')
-        .collect()
+        scan_dataset(str(source['literature']), format='ndjson', schema=_LITERATURE_SCHEMA).collect()
     )
 
     logger.info('Validating and dating GWAS credible set evidence')

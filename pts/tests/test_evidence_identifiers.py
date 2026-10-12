@@ -45,6 +45,17 @@ class TestAssignEvidenceIdentifier:
             pl.DataFrame({'a': ['x'], 'diseaseCellLines': [[]]}), ['a', 'diseaseCellLines']
         )['id'][0]
 
+    def test_long_lists_differing_only_late_get_different_ids(self) -> None:
+        """A list cell must be hashed in full, not via its printed form, which polars truncates."""
+        cell_lines = [{'id': f'SIDM{i:03}', 'name': 'A', 'tissue': 'Breast', 'tissueId': 'X'} for i in range(20)]
+        changed = [dict(cell_line) for cell_line in cell_lines]
+        changed[10]['id'] = 'SIDM999'
+        df = pl.DataFrame({'diseaseCellLines': [cell_lines, changed]})
+
+        result = assign_evidence_identifier(df, ['diseaseCellLines'])
+
+        assert result['id'].n_unique() == 2
+
 
 class TestValidateUniqueness:
     def test_flags_all_but_one_row_per_duplicate_id(self) -> None:
@@ -93,3 +104,16 @@ class TestValidateUniqueness:
         assert result.filter(pl.col('id') == '2').to_dicts()[0]['qualityControls'] == []
         flagged = result.filter(pl.col('id') == '1')
         assert sorted(flagged['qualityControls'].to_list()) == [[], [flags.DUPLICATED]]
+
+    def test_survivor_is_stable_across_row_order_when_long_lists_differ_only_late(self) -> None:
+        """The content hash must see a list-of-structs cell in full, or such rows tie on it."""
+        cell_lines = [{'id': f'SIDM{i:03}', 'name': 'A', 'tissue': 'Breast', 'tissueId': 'X'} for i in range(20)]
+        changed = [dict(cell_line) for cell_line in cell_lines]
+        changed[10]['id'] = 'SIDM999'
+        df = pl.DataFrame({'id': ['1', '1'], 'diseaseCellLines': [cell_lines, changed]})
+
+        def survivor(df: pl.DataFrame) -> list:
+            result = validate_uniqueness(df)
+            return result.filter(pl.col('qualityControls').list.len() == 0).to_dicts()[0]['diseaseCellLines']
+
+        assert survivor(df) == survivor(df.reverse())

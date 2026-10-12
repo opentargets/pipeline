@@ -2,12 +2,18 @@
 
 Only `_build_raw_evidence` (pure, no I/O) is tested directly, matching the convention in
 `test_drug_mechanism_of_action.py`: the top-level `gwas_evidence` entrypoint is orchestration
-(reads, delegates, writes) and is not unit tested here.
+(reads, delegates, writes) and is not unit tested here -- except for how it reads the
+literature export, whose schema it pins.
 """
+
+import json
+from pathlib import Path
 
 import polars as pl
 
-from pts.transformers.evidence.gwas_evidence import _build_raw_evidence
+from pts.transformers.evidence.gwas_evidence import _LITERATURE_SCHEMA, _build_raw_evidence
+from pts.transformers.evidence.utils import build_publication_lut
+from pts.transformers.utils.dataset import scan_dataset
 
 
 def rows_by_target_and_disease(df: pl.DataFrame) -> dict:
@@ -154,3 +160,14 @@ class TestBuildRawEvidence:
 
         assert row['datatypeId'] == 'genetic_association'
         assert row['datasourceId'] == 'gwas_credible_sets'
+
+
+def test_literature_export_keeps_a_column_first_seen_after_the_inference_window(tmp_path: Path) -> None:
+    """Spark's JSON writer omits null fields, so `pmcid` may only appear past polars' 100-row window."""
+    rows = [{'source': 'MED', 'firstPublicationDate': '2020-01-01', 'pmid': str(i), 'id': str(i)} for i in range(150)]
+    rows.append({'source': 'MED', 'firstPublicationDate': '2021-01-01', 'pmid': '999', 'id': '999', 'pmcid': 'PMC1'})
+    (tmp_path / 'part-0.json').write_text('\n'.join(json.dumps(row) for row in rows))
+
+    literature = scan_dataset(str(tmp_path), format='ndjson', schema=_LITERATURE_SCHEMA).collect()
+
+    assert 'PMC1' in build_publication_lut(literature)['publicationId'].to_list()
