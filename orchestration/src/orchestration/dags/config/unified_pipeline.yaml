@@ -26,11 +26,8 @@ run_name: "do/platform-2610-1"
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.12.0rc1"
 pts_version: "26.12.0rc1"
-# No leading `v` here: this value is used both ways and each consumer adds what it
-# needs. `clusters.yaml` interpolates it as `v{{gentropy_version}}` for the git ref,
-# while `gentropy.yaml` uses it bare as a Docker tag -- and `ghcr.io/opentargets/
-# gentropy:v3.4.0-rc.2` is a 404 while `:3.4.0-rc.2` resolves. Both forms were
-# checked: the image on ghcr and the tag v3.4.0-rc.2 in opentargets/gentropy.
+# A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
+# `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 gentropy_version: "3.4.0-rc.2"
 # Built by opentargets/vep-image; the GitHub release and the registry image are
 # published separately, so the tag existing in one does not mean it exists in the
