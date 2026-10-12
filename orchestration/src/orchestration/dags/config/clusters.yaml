@@ -5,7 +5,7 @@ clusters:
     num_masters: 1
     num_workers: 2
     autoscaling_policy: otg-etl-25-secondary
-    worker_machine_type: n1-standard-8
+    worker_machine_type: n1-highmem-8
     master_disk_size: 512
     worker_disk_size: 128
     idle_delete_ttl: 3600
