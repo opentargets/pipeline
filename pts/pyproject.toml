@@ -27,7 +27,9 @@ dependencies = [
   "networkx>=3.6.1",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
-  "xgboost>=3.2.0",
+  # cpu build, without nccl; it has no macos wheels
+  "xgboost-cpu>=3.2.0; sys_platform == 'linux'",
+  "xgboost>=3.2.0; sys_platform != 'linux'",
   "shap>=0.51.0",
   "scikit-learn>=1.7.0",
   "skops>=0.11.0",
