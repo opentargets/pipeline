@@ -41,20 +41,25 @@ class StructModel(SchemaModel):
 class DatasetModel(SchemaModel):
     """One output dataset.
 
-    A concrete dataset sets `dataset_name`, `dataset_description` and `example` in its own class
-    body. A subclass that does not set `dataset_name` is an abstract base sharing fields between
-    datasets (e.g. `pts.schemas.outputs.evidence_base.EvidenceBase`) -- never discovered, converted
-    or documented on its own.
+    A concrete dataset sets `dataset_name`, `dataset_title`, `dataset_description` and `example`
+    in its own class body, and `dataset_tags` where it has any. A subclass that does not set
+    `dataset_name` is an abstract base sharing fields between datasets (e.g.
+    `pts.schemas.outputs.evidence_base.EvidenceBase`) -- never discovered, converted or documented
+    on its own.
 
     Attributes:
         dataset_name: name of the dataset, matching the output name its step writes.
-        dataset_description: one-line description of the dataset.
+        dataset_title: human-readable name of the dataset, e.g. `Biosample core annotation`.
+        dataset_description: description of the dataset.
+        dataset_tags: categories the dataset belongs to, e.g. `Target-Disease`.
         example: one valid row, used by the test suite and shown in the documentation. Every list
             in it should hold at least one element, so every nested field is exercised.
     """
 
     dataset_name: ClassVar[str]
+    dataset_title: ClassVar[str]
     dataset_description: ClassVar[str]
+    dataset_tags: ClassVar[tuple[str, ...]] = ()
     example: ClassVar[dict[str, Any]]
 
     @classmethod

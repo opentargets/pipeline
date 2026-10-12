@@ -38,6 +38,7 @@ class _Base(DatasetModel):
 
 class _Measurement(_Base):
     dataset_name: ClassVar[str] = '_measurement'
+    dataset_title: ClassVar[str] = 'test dataset'
     dataset_description: ClassVar[str] = 'test dataset'
     example: ClassVar[dict] = {'id': 'a', 'value': 1.0, 'samples': [{'code': 'A1'}]}
 
@@ -58,6 +59,7 @@ def sorted_by_id(data: PolarsData) -> pl.LazyFrame:
 
 class _Pair(DatasetModel):
     dataset_name: ClassVar[str] = '_pair'
+    dataset_title: ClassVar[str] = 'composite key'
     dataset_description: ClassVar[str] = 'composite key'
     example: ClassVar[dict] = {'left': 'a', 'right': 1}
 
@@ -101,6 +103,7 @@ def test_registered_checks_run() -> None:
 def test_a_check_on_an_undeclared_column_is_rejected() -> None:
     class Orphan(DatasetModel):
         dataset_name: ClassVar[str] = '_orphan'
+        dataset_title: ClassVar[str] = 'orphan'
         dataset_description: ClassVar[str] = 'orphan'
         example: ClassVar[dict] = {}
         x: str
@@ -132,6 +135,7 @@ def test_undeclared_columns_are_rejected() -> None:
 def test_pattern_matches_anywhere_like_pydantic_does() -> None:
     class Loose(DatasetModel):
         dataset_name: ClassVar[str] = '_loose'
+        dataset_title: ClassVar[str] = 'unanchored pattern'
         dataset_description: ClassVar[str] = 'unanchored pattern'
         example: ClassVar[dict] = {}
         x: str = Field(pattern=r'\d{3}')
@@ -153,6 +157,7 @@ def test_failures_name_the_nested_path_and_rule() -> None:
 def test_nan_counts_as_null() -> None:
     class Floats(DatasetModel):
         dataset_name: ClassVar[str] = '_floats'
+        dataset_title: ClassVar[str] = 'floats'
         dataset_description: ClassVar[str] = 'floats'
         example: ClassVar[dict] = {}
         required: float = Field(le=1.0)

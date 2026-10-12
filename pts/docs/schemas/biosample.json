@@ -1,6 +1,10 @@
 {
   "name": "biosample",
-  "description": "Biosample index merged from Cell Ontology, Uberon and EFO",
+  "title": "Biosample core annotation",
+  "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies",
+  "tags": [
+    "Ontology"
+  ],
   "primary_key": [
     "biosampleId"
   ],

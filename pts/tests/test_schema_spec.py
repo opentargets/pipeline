@@ -27,6 +27,7 @@ def _dataset(**fields: Any) -> type[DatasetModel]:
     }
     model = create_model('_Model', __base__=DatasetModel, **definitions)
     model.dataset_name = 'model'
+    model.dataset_title = 'a model'
     model.dataset_description = 'a model'
     model.example = {}
     return model
@@ -132,6 +133,7 @@ def test_concrete_dataset_detection() -> None:
 
     class Concrete(Base):
         dataset_name: ClassVar[str] = 'concrete'
+        dataset_title: ClassVar[str] = 'concrete'
         dataset_description: ClassVar[str] = 'concrete'
         example: ClassVar[dict] = {}
 
@@ -221,18 +223,19 @@ def test_rejects_validators_serializers_and_computed_fields() -> None:
         (WithComputedField, 'computed_fields'),
     ]:
         model.dataset_name = 'm'
+        model.dataset_title = 'm'
         model.dataset_description = 'm'
         model.example = {}
         with pytest.raises(SchemaDefinitionError, match=kind):
             dataset_spec(model)
 
 
-def test_rejects_a_dataset_without_description_or_example() -> None:
+def test_rejects_a_dataset_without_title_description_or_example() -> None:
     class Incomplete(DatasetModel):
         dataset_name: ClassVar[str] = 'incomplete'
         x: str
 
-    with pytest.raises(SchemaDefinitionError, match='dataset_description, example'):
+    with pytest.raises(SchemaDefinitionError, match='dataset_title, dataset_description, example'):
         dataset_spec(Incomplete)
 
 

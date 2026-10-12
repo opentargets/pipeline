@@ -42,6 +42,7 @@ class _Branch(StructModel):
 
 class _KitchenSink(DatasetModel):
     dataset_name: ClassVar[str] = '_kitchen_sink'
+    dataset_title: ClassVar[str] = 'synthetic model using every supported construct'
     dataset_description: ClassVar[str] = 'synthetic model using every supported construct'
     example: ClassVar[dict] = {
         'key': 'abcd',

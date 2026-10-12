@@ -21,7 +21,12 @@ class BiosampleIndex(DatasetModel):
     """Biosample index merged from Cell Ontology, Uberon and EFO."""
 
     dataset_name: ClassVar[str] = 'biosample'
-    dataset_description: ClassVar[str] = 'Biosample index merged from Cell Ontology, Uberon and EFO'
+    dataset_title: ClassVar[str] = 'Biosample core annotation'
+    dataset_description: ClassVar[str] = (
+        'Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL '
+        'and EFO ontologies'
+    )
+    dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
     example: ClassVar[dict] = {
         'biosampleId': 'UBERON_0002107',
         'biosampleName': 'liver',

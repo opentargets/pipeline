@@ -92,3 +92,9 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
         pytest.skip(f'no {location}')
 
     to_pandera(model).validate(pl.read_parquet(location), lazy=True)
+
+
+def test_every_dataset_has_a_title_and_tags() -> None:
+    for name, model in discover_datasets().items():
+        assert model.dataset_title, name
+        assert model.dataset_tags, name

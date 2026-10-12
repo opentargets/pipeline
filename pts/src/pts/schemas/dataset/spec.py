@@ -156,13 +156,17 @@ class DatasetSpec:
 
     Attributes:
         name: the dataset name.
-        description: one-line description of the dataset.
+        title: human-readable name of the dataset.
+        description: description of the dataset.
+        tags: categories the dataset belongs to.
         fields: its top-level columns, in declaration order.
         example: one valid row.
     """
 
     name: str
+    title: str
     description: str
+    tags: tuple[str, ...]
     fields: tuple[FieldSpec, ...]
     example: dict[str, Any]
 
@@ -191,7 +195,7 @@ def dataset_spec(model: type[DatasetModel]) -> DatasetSpec:
     if not model.is_concrete():
         msg = f'{model.__name__} sets no dataset_name of its own: it is a shared base, not a dataset'
         raise SchemaDefinitionError(msg)
-    missing = [name for name in ('dataset_description', 'example') if not hasattr(model, name)]
+    missing = [name for name in ('dataset_title', 'dataset_description', 'example') if not hasattr(model, name)]
     if missing:
         raise SchemaDefinitionError(f'{model.__name__} does not set {", ".join(missing)}')
 
@@ -202,7 +206,9 @@ def dataset_spec(model: type[DatasetModel]) -> DatasetSpec:
         raise SchemaDefinitionError(
             f'{model.__name__}: primary-key column(s) {nullable_keys} must be required and non-null'
         )
-    return DatasetSpec(model.dataset_name, model.dataset_description, fields, model.example)
+    return DatasetSpec(
+        model.dataset_name, model.dataset_title, model.dataset_description, model.dataset_tags, fields, model.example
+    )
 
 
 def walk(spec: DatasetSpec) -> Iterator[tuple[str, Node]]:

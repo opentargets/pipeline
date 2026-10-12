@@ -29,7 +29,11 @@ class GwasCredibleSetEvidence(EvidenceBase):
     """GWAS credible-set locus-to-gene evidence."""
 
     dataset_name: ClassVar[str] = 'evidence_gwas_credible_sets'
-    dataset_description: ClassVar[str] = 'GWAS credible-set locus-to-gene evidence'
+    dataset_title: ClassVar[str] = 'GWAS credible-set evidence'
+    dataset_description: ClassVar[str] = (
+        'Disease-target evidence based on Locus-to-Gene prediction on GWAS credible sets'
+    )
+    dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     example: ClassVar[dict] = {
         'diseaseFromSourceMappedId': 'EFO_0004340',
         'diseaseId': 'EFO_0004340',

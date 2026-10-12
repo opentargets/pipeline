@@ -37,7 +37,9 @@ def dataset_doc(model: type[DatasetModel]) -> dict[str, Any]:
     spec = dataset_spec(model)
     return {
         'name': spec.name,
+        'title': spec.title,
         'description': spec.description,
+        'tags': list(spec.tags),
         'primary_key': list(spec.primary_key),
         'strict': True,
         'fields': [_field_doc(f, top_level=True) for f in spec.fields],

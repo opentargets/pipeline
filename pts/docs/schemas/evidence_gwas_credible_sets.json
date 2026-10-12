@@ -1,6 +1,10 @@
 {
   "name": "evidence_gwas_credible_sets",
-  "description": "GWAS credible-set locus-to-gene evidence",
+  "title": "GWAS credible-set evidence",
+  "description": "Disease-target evidence based on Locus-to-Gene prediction on GWAS credible sets",
+  "tags": [
+    "Target-Disease"
+  ],
   "primary_key": [
     "id"
   ],
