@@ -60,7 +60,6 @@ Built-in generators and their registry keys:
 | Registry key | Generator class | Used by |
 | --- | --- | --- |
 | `finemapping` | `FinemappingManifestGenerator` | SuSiE finemapping DAG |
-| `gentropy_step` | `GentropyStepManifestGenerator` | Unified pipeline |
 | `harmonisation` | `HarmonisationManifestGenerator` | GWAS harmonisation DAG |
 | `vep` | `VepManifestGenerator` | VEP annotation DAG |
 
