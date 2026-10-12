@@ -90,6 +90,8 @@ steps:
         - '{{release_uri}}/input/molqtl/credible_set/ukb_ppp_eur'
       step.study_index_path: '{{release_uri}}/output/study'
       step.target_index_path: '{{release_uri}}/output/target'
+      # Tells measurements from diseases in the GWAS replication check (opentargets/gentropy#1305).
+      step.disease_index_path: '{{release_uri}}/output/disease'
       # OUTPUTS
       step.valid_study_locus_path: '{{release_uri}}/output/credible_set'
       step.invalid_study_locus_path: '{{release_uri}}/excluded/credible_set'
@@ -210,6 +212,45 @@ steps:
       # OUTPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
 
+  l2g_effector_gene_list:
+    params:
+      step: effector_gene_list
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Keeps the top tier of every curated source and ClinVar pathogenic calls with stated criteria.
+      step.rare_variant_score_threshold: 0.91
+      # INPUTS
+      # Rare-variant evidence, one path per datasource; filtered on step.rare_variant_score_threshold.
+      step.rare_variant_evidence_paths:
+        - '{{release_uri}}/output/evidence_eva'
+        - '{{release_uri}}/output/evidence_genomics_england'
+        - '{{release_uri}}/output/evidence_clingen'
+        - '{{release_uri}}/output/evidence_gene2phenotype'
+        - '{{release_uri}}/output/evidence_orphanet'
+        - '{{release_uri}}/output/evidence_uniprot_variants'
+        - '{{release_uri}}/output/evidence_uniprot_literature'
+      step.clinical_evidence_path: '{{release_uri}}/output/evidence_clinical_precedence'
+      # Legacy OTG gold standard curation; pis_l2g stages it.
+      step.gold_standard_path: '{{release_uri}}/input/l2g/otg_gold_standard.json'
+      # OUTPUTS
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+
+  l2g_training_set:
+    params:
+      step: training_set
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Matches the old training set.
+      step.interaction_score_threshold: 0.8
+      # INPUTS
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.study_index_path: '{{release_uri}}/output/study'
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+      step.interaction_path: '{{release_uri}}/output/interaction'
+      # OUTPUTS
+      step.training_set_path: '{{release_uri}}/intermediate/l2g_training_set'
+
   l2g_train_test_split:
     params:
       step: locus_to_gene_train_test_split
@@ -219,7 +260,8 @@ steps:
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
-      step.gold_standard_curation_path: '{{release_uri}}/input/l2g/gold_standard.json'
+      # Full labelled training set built by l2g_training_set.
+      step.gold_standard_curation_path: '{{release_uri}}/intermediate/l2g_training_set'
       # The test set is pinned across releases rather than resampled per run, so
       # models stay comparable. `step.test_size` is ignored when this is set.
       # pis_l2g_predefined_test_for_split stages it into the release input directory.
