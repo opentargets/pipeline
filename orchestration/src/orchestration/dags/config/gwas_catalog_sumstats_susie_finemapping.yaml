@@ -44,7 +44,7 @@ nodes:
               memory_mib: 25000
               boot_disk_mib: 20000
             runnable_spec:
-              image_uri: 'ghcr.io/opentargets/gentropy:{GENTROPY_REF}'
+              image_uri: 'europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:{GENTROPY_REF}'
               entrypoint: /usr/bin/bash
               script_file: susie_finemap.sh
               script_variables:

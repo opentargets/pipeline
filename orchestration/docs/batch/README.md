@@ -107,7 +107,7 @@ nodes:
               memory_mib: 25000      # ~24 GiB
               boot_disk_mib: 20000   # 20 GiB
             runnable_spec:
-              image_uri: 'ghcr.io/opentargets/gentropy:3.2.0'
+              image_uri: 'europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.2.0'
               entrypoint: /usr/bin/bash
               script_file: my_script.sh   # relative to src/orchestration/assets/
               # OR use inline_commands: ["python", "-m", "my_module"]
