@@ -84,6 +84,12 @@ class TestStagingDagConfigModel:
         assert model.steps['c'].is_batch
         assert model.scratchpad == {'workers': '4', 'gwas_catalog_top_hits_path': 'gs://prod'}
 
+    def test_batch_only_dag_needs_no_pps(self) -> None:
+        config = dag_config(steps={'a': BATCH_STEP}, infrastructure={})
+        del config['staging_bucket'], config['pps_version']
+
+        assert self.validate(config).pps_version is None
+
     def test_staging_clusters_use_default_service_account(self) -> None:
         cluster = self.validate(dag_config()).infrastructure.clusters['cluster']
 
@@ -99,6 +105,8 @@ class TestStagingDagConfigModel:
             ({'steps': {'a': {**BATCH_STEP, 'cluster': 'cluster'}}}, 'exactly one of `cluster`'),
             ({'steps': {'a': {'google_batch': BATCH_STEP['google_batch']}}}, 'needs `google_batch_index_specs`'),
             ({'steps': {'a': {'cluster': 'missing'}}}, 'unknown cluster'),
+            ({'pps_version': None}, 'a dag with pps steps needs pps_version'),
+            ({'staging_bucket': None, 'pps_version': None}, 'needs staging_bucket and pps_version'),
             ({'steps': {'a': {'cluster': 'cluster', 'depends_on': ['missing']}}}, 'unknown steps'),
             (
                 {

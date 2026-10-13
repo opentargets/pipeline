@@ -76,6 +76,8 @@ class StagingDagConfig:
     @property
     def staging_uri(self) -> str:
         """The URI prefix for the files this DAG uploads for a run."""
+        # set whenever the dag has pps steps, the only ones uploading files
+        assert self.dag.staging_bucket is not None
         return f'{self.dag.staging_bucket.removesuffix("/")}/{self.dag_id}/{self.dag.pps_version}'
 
     def bin_uri(self, file_name: str) -> str:

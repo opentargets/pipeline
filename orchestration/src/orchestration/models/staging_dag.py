@@ -118,15 +118,21 @@ class StagingDagConfigModel(StagingEnvironments):
 
     description: str
     """Description of the DAG."""
-    staging_bucket: str
-    """GCS location for the files a run uploads: step configs, entrypoint and init script."""
-    pps_version: str
-    """pps release the pps steps run, as in its `pps@v<pps_version>` tag."""
+    staging_bucket: str | None = None
+    """GCS location for the files a run uploads: step configs, entrypoint and init script.
+    Required when the DAG has pps steps."""
+    pps_version: str | None = None
+    """pps release the pps steps run, as in its `pps@v<pps_version>` tag. Required when
+    the DAG has pps steps."""
     infrastructure: StagingInfrastructure = StagingInfrastructure()
     steps: dict[str, StagingStep]
 
     @model_validator(mode='after')
     def _validate_steps(self) -> Self:
+        if any(not step.is_batch for step in self.steps.values()):
+            if missing := [f for f in ('staging_bucket', 'pps_version') if getattr(self, f) is None]:
+                raise ValueError(f'a dag with pps steps needs {" and ".join(missing)}')
+
         for name, step in self.steps.items():
             if step.cluster is not None and step.cluster not in self.infrastructure.clusters:
                 raise ValueError(f'step {name} runs on unknown cluster {step.cluster!r}')
