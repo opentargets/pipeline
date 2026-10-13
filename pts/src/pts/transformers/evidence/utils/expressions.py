@@ -16,7 +16,8 @@ copy-pasted:
   `uniprot_literature` and others -- only the
   map differs, so `confidence_score` takes the map as its argument.
 * `CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` is the shared shape behind several direction
-  expressions across `cosmic` and `intogen` -- `direction_when_disease_present` takes the literal as its argument.
+  expressions across `clinical_precedence`, `cosmic` and `intogen` -- `direction_when_disease_present` takes the
+  literal as its argument.
 * `CASE WHEN <col> == a THEN 'GoF' WHEN <col> == b THEN 'LoF' ELSE NULL END` is a 1:1 value lookup,
   behind `cancer_gene_census`'s `direction_on_target` -- expressed
   as `direction_lookup`, a `replace_strict` on the named column.

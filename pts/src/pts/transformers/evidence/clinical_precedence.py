@@ -238,9 +238,9 @@ def clinical_precedence(
         source['drug_mechanism_of_action'],
         settings.get('invalid_clinical_report_qc', []),
     )
+    CLINICAL_PRECEDENCE.check_raw(raw)
     logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
     write_dataset(excluded, destination['excluded_report'])
-    CLINICAL_PRECEDENCE.check_raw(raw)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         CLINICAL_PRECEDENCE
