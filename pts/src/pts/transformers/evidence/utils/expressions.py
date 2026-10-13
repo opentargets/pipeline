@@ -18,13 +18,13 @@ copy-pasted:
   is a keyed lookup, so the two maps are the same function of `confidence`/`clinicalSignificances`
   despite the reordering; see the module's dedicated score comment.
 * `element_at(map(...), confidence)` is the shared shape behind `uniprot_variants`,
-  `uniprot_literature`, `clingen`, `orphanet`, `gene2phenotype` and `genomics_england` -- only the
+  `uniprot_literature` and others -- only the
   map differs, so `confidence_score` takes the map as its argument.
-* `CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` is the shared shape behind seven direction
-  expressions across `clinical_precedence`, `impc`, `orphanet`, `gene2phenotype`, `intogen` and
+* `CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` is the shared shape behind several direction
+  expressions across `clinical_precedence`, `intogen` and
   `cancer_gene_census` -- `direction_when_disease_present` takes the literal as its argument.
 * `CASE WHEN <col> == a THEN 'GoF' WHEN <col> == b THEN 'LoF' ELSE NULL END` is a 1:1 value lookup,
-  behind `orphanet`, `gene2phenotype` and `cancer_gene_census`'s `direction_on_target` -- expressed
+  behind `cancer_gene_census`'s `direction_on_target` -- expressed
   as `direction_lookup`, a `replace_strict` on the named column.
 * The log10-rescaled-score shape (null/NaN stays null, a non-positive value saturates to 1.0,
   everything else linearly interpolated in log10 space and clamped) is shared by `intogen`,
@@ -50,24 +50,6 @@ import polars as pl
 
 #: `element_at(map(...), confidence)` maps, one per datasource that uses the shared shape.
 _UNIPROT_CONFIDENCE_SCORES = {'high': 1.0, 'medium': 0.5}
-_CLINGEN_CONFIDENCE_SCORES = {
-    'No Known Disease Relationship': 0.01,
-    'Refuted': 0.01,
-    'Disputed': 0.01,
-    'Limited': 0.01,
-    'Moderate': 0.5,
-    'Strong': 1.0,
-    'Definitive': 1.0,
-}
-_ORPHANET_CONFIDENCE_SCORES = {'Assessed': 1.0, 'Not yet assessed': 0.5}
-_GENE2PHENOTYPE_CONFIDENCE_SCORES = {
-    'definitive': 1.0,
-    'both RD and IF': 1.0,
-    'strong': 1.0,
-    'moderate': 0.5,
-    'limited': 0.01,
-}
-_GENOMICS_ENGLAND_CONFIDENCE_SCORES = {'amber': 0.5, 'green': 1.0}
 
 #: `eva` (clinvar) / `eva_somatic` (clinvar_somatic) share one score expression -- see module
 #: docstring for why the two config.yaml strings differ in key order but not in meaning.
@@ -187,7 +169,7 @@ def confidence_score(mapping: dict[str, float]) -> pl.Expr:
 
 
 def direction_when_disease_present(value: str) -> pl.Expr:
-    """`CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` -- shared by seven direction fields."""
+    """`CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` -- shared by several direction fields."""
     return pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit(value)).otherwise(None)
 
 
@@ -385,33 +367,6 @@ def _clinical_precedence_direction_on_target() -> pl.Expr:
     )
 
 
-def _gene_burden_direction_on_trait() -> pl.Expr:
-    """gene_burden direction_on_trait: sign of `oddsRatio`, falling back to sign of `beta`.
-
-    ```
-    CASE WHEN oddsRatio > 1.0 THEN 'risk' WHEN oddsRatio < 1.0 THEN 'protect'
-         WHEN beta > 0.0 THEN 'risk' WHEN beta < 0.0 THEN 'protect' END
-    ```
-
-    A null `oddsRatio`/`beta` makes its comparison null, which -- in both spark's CASE and
-    polars' `.when()` -- is treated as not-taken rather than an error, falling through to the
-    next branch exactly as the SQL does.
-    """
-    odds_ratio = pl.col('oddsRatio')
-    beta = pl.col('beta')
-    return (
-        pl.when(odds_ratio > 1.0)
-        .then(pl.lit('risk'))
-        .when(odds_ratio < 1.0)
-        .then(pl.lit('protect'))
-        .when(beta > 0.0)
-        .then(pl.lit('risk'))
-        .when(beta < 0.0)
-        .then(pl.lit('protect'))
-        .otherwise(None)
-    )
-
-
 def _intogen_direction_on_target() -> pl.Expr:
     """Intogen direction_on_target: LoF/GoF consequence present among `mutatedSamples`.
 
@@ -462,7 +417,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     ),
     'uniprot_variants': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'uniprot_literature': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
-    'clingen': DatasourceExpressions(score=confidence_score(_CLINGEN_CONFIDENCE_SCORES)),
     'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),
     'clinical_precedence': DatasourceExpressions(
         score=_clinical_precedence_score(),
@@ -470,40 +424,15 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_target=_clinical_precedence_direction_on_target(),
     ),
     'reactome': DatasourceExpressions(score=pl.lit(1.0)),
-    'impc': DatasourceExpressions(
-        score=divide(pl.col('resourceScore'), 100),
-        direction_on_trait=direction_when_disease_present('risk'),
-        direction_on_target=direction_when_disease_present('LoF'),
-    ),
-    'orphanet': DatasourceExpressions(
-        score=confidence_score(_ORPHANET_CONFIDENCE_SCORES),
-        direction_on_trait=direction_when_disease_present('risk'),
-        direction_on_target=direction_lookup(
-            'variantFunctionalConsequenceId', {'SO_0002053': 'GoF', 'SO_0002054': 'LoF'}
-        ),
-    ),
-    'gene2phenotype': DatasourceExpressions(
-        score=confidence_score(_GENE2PHENOTYPE_CONFIDENCE_SCORES),
-        direction_on_trait=direction_when_disease_present('risk'),
-        direction_on_target=direction_lookup(
-            'variantFunctionalConsequenceId', {'SO_0002315': 'GoF', 'SO_0002317': 'LoF'}
-        ),
-    ),
     'intogen': DatasourceExpressions(
         score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
         direction_on_trait=direction_when_disease_present('risk'),
         direction_on_target=_intogen_direction_on_target(),
     ),
-    'gene_burden': DatasourceExpressions(
-        score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 1e-7, 1e-17),
-        direction_on_trait=_gene_burden_direction_on_trait(),
-        direction_on_target=pl.lit('LoF'),
-    ),
     'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
     # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
-    'genomics_england': DatasourceExpressions(score=confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
     'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'cancer_gene_census': DatasourceExpressions(
         score=pl.col('resourceScore'),

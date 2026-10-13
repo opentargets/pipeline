@@ -1127,8 +1127,8 @@ steps:
           - diseaseFromSource
 
   evidence_postprocess_clingen:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/clingen.parquet
         target_path: output/target
@@ -1138,8 +1138,22 @@ steps:
         failed_evidence: excluded/evidence/clingen
         evidence: output/evidence_clingen
       settings:
+        partition_count: 1
         datasource_id: clingen
         evidence_format: parquet
+        score_expression: |
+          element_at(
+            map(
+              'No Known Disease Relationship', 0.01,
+              'Refuted', 0.01,
+              'Disputed', 0.01,
+              'Limited', 0.01,
+              'Moderate', 0.5,
+              'Strong', 1.0,
+              'Definitive', 1.0
+            ),
+            confidence
+          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1224,8 +1238,8 @@ steps:
           - reactionId
 
   evidence_postprocess_impc:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/impc.parquet
         target_path: output/target
@@ -1235,8 +1249,10 @@ steps:
         failed_evidence: excluded/evidence/impc
         evidence: output/evidence_impc
       settings:
+        partition_count: 25
         evidence_format: parquet
         datasource_id: impc
+        score_expression: resourceScore / 100
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1246,10 +1262,12 @@ steps:
           - targetInModel
           - biologicalModelAllelicComposition
           - diseaseFromSource
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
+        direction_on_target_expression: CASE WHEN diseaseId IS NOT NULL THEN 'LoF' END
 
   evidence_postprocess_orphanet:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/orphanet.parquet
         target_path: output/target
@@ -1259,18 +1277,27 @@ steps:
         failed_evidence: excluded/evidence/orphanet
         evidence: output/evidence_orphanet
       settings:
+        partition_count: 1
         evidence_format: parquet
         datasource_id: orphanet
+        score_expression: element_at(map('Assessed', 1.0, 'Not yet assessed', 0.5), confidence)
         unique_fields:
           - targetId
           - targetFromSourceId
           - diseaseId
           - datasourceId
           - diseaseFromSourceId
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
+        direction_on_target_expression: |
+          CASE
+            WHEN variantFunctionalConsequenceId == 'SO_0002053' THEN 'GoF'
+            WHEN variantFunctionalConsequenceId == 'SO_0002054' THEN 'LoF'
+            ELSE null
+          END
 
   evidence_postprocess_gene2phenotype:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/gene2phenotype.parquet
         target_path: output/target
@@ -1280,8 +1307,20 @@ steps:
         failed_evidence: excluded/evidence/gene2phenotype
         evidence: output/evidence_gene2phenotype
       settings:
+        partition_count: 1
         evidence_format: parquet
         datasource_id: gene2phenotype
+        score_expression: |
+          element_at(
+            map(
+              'definitive', 1.0,
+              'both RD and IF', 1.0,
+              'strong', 1.0,
+              'moderate', 0.5,
+              'limited', 0.01
+            ),
+            confidence
+          )
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1290,6 +1329,13 @@ steps:
           - diseaseFromSource
           - allelicRequirements
           - studyId
+        direction_on_trait_expression: CASE WHEN diseaseId IS NOT NULL THEN 'risk' END
+        direction_on_target_expression: |
+          CASE
+            WHEN variantFunctionalConsequenceId == 'SO_0002315' THEN 'GoF'
+            WHEN variantFunctionalConsequenceId == 'SO_0002317' THEN 'LoF'
+            ELSE null
+          END
 
   evidence_postprocess_intogen:
     - name: transform evidence_postprocess
@@ -1313,8 +1359,8 @@ steps:
           - cohortShortName
 
   evidence_postprocess_gene_burden:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/gene_burden.parquet
         target_path: output/target
@@ -1324,8 +1370,17 @@ steps:
         failed_evidence: excluded/evidence/gene_burden
         evidence: output/evidence_gene_burden
       settings:
+        partition_count: 1
         evidence_format: parquet
         datasource_id: gene_burden
+        score_expression: >-
+          CASE
+            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
+            WHEN resourceScore <= 0 THEN 1.0
+            ELSE LEAST(1.0, GREATEST(0.25,
+              (1.0 - 0.25) * (log10(resourceScore) - log10(1e-7)) / (log10(1e-17) - log10(1e-7)) + 0.25
+            ))
+          END
         unique_fields:
           - targetId
           - targetFromSourceId
@@ -1335,6 +1390,14 @@ steps:
           - diseaseFromSource
           - statisticalMethod
           - projectId
+        direction_on_trait_expression: |
+          CASE WHEN oddsRatio > 1.0 THEN 'risk'
+          WHEN oddsRatio < 1.0 THEN 'protect'
+          WHEN beta > 0.0 THEN 'risk'
+          WHEN beta < 0.0 THEN 'protect'
+          END
+        direction_on_target_expression: |
+          'LoF'
 
   evidence_postprocess_crispr_screens:
     - name: transform evidence_postprocess
@@ -1379,8 +1442,8 @@ steps:
           - literature
 
   evidence_postprocess_panel_app:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: pyspark evidence_postprocess
+      pyspark: evidence_postprocess
       source:
         evidence_path: intermediate/evidence/panel_app.parquet
         target_path: output/target
@@ -1390,8 +1453,17 @@ steps:
         failed_evidence: excluded/evidence/panel_app
         evidence: output/evidence_genomics_england
       settings:
+        partition_count: 1
         evidence_format: parquet
         datasource_id: genomics_england
+        score_expression: |
+          element_at(
+            map(
+              'amber', 0.5,
+              'green', 1.0
+            ),
+            confidence
+          )
         unique_fields:
           - targetId
           - targetFromSourceId

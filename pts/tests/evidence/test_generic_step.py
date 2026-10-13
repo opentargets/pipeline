@@ -40,26 +40,30 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
 
 def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) -> None:
     src = tmp_path / 'src'
-    (src / 'impc').mkdir(parents=True)
+    (src / 'cancer_gene_census').mkdir(parents=True)
     pl.DataFrame({
-        'datasourceId': ['impc'],
+        'datasourceId': ['cancer_gene_census'],
         'targetFromSourceId': ['ENSG1'],
         'diseaseFromSourceMappedId': ['EFO_1'],
-        'resourceScore': [50.0],
-    }).write_parquet(src / 'impc' / 'part.parquet')
+        'resourceScore': [0.5],
+    }).write_parquet(src / 'cancer_gene_census' / 'part.parquet')
     dst = tmp_path / 'out'
 
     evidence_postprocess(
         {
-            'evidence_path': str(src / 'impc'),
+            'evidence_path': str(src / 'cancer_gene_census'),
             'disease_path': write_disease(src / 'disease', ['EFO_1']),
             'target_path': write_target(src / 'target', ['ENSG1']),
             'publication_date_lut': write_literature(src / 'literature', {'1': '2001-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {'datasource_id': 'impc', 'evidence_format': 'parquet', 'unique_fields': ['targetId', 'diseaseId']},
+        {
+            'datasource_id': 'cancer_gene_census',
+            'evidence_format': 'parquet',
+            'unique_fields': ['targetId', 'diseaseId'],
+        },
         None,
     )
 
     valid = pl.read_parquet(dst / 'valid')
-    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.5, 'risk', 'LoF')
+    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.5, 'risk', None)
