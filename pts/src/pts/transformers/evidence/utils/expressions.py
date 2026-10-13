@@ -12,11 +12,6 @@ Several steps carry byte-for-byte or functionally identical expressions; those a
 a module-level function/constant and referenced from every entry that needs them, rather than
 copy-pasted:
 
-* `eva` and `eva_somatic` (`evidence_postprocess_clinvar` / `_clinvar_somatic`) share all three
-  expressions. The two `score_expression` strings in config.yaml are NOT byte-identical -- one
-  entry (`'low penetrance'`) sits at a different position in each map literal -- but `element_at`
-  is a keyed lookup, so the two maps are the same function of `confidence`/`clinicalSignificances`
-  despite the reordering; see the module's dedicated score comment.
 * `element_at(map(...), confidence)` is the shared shape behind `uniprot_variants`,
   `uniprot_literature` and others -- only the
   map differs, so `confidence_score` takes the map as its argument.
@@ -50,52 +45,6 @@ import polars as pl
 
 #: `element_at(map(...), confidence)` maps, one per datasource that uses the shared shape.
 _UNIPROT_CONFIDENCE_SCORES = {'high': 1.0, 'medium': 0.5}
-
-#: `eva` (clinvar) / `eva_somatic` (clinvar_somatic) share one score expression -- see module
-#: docstring for why the two config.yaml strings differ in key order but not in meaning.
-_EVA_SIGNIFICANCE_SCORES = {
-    'association not found': 0.0,
-    'benign': 0.0,
-    'not provided': 0.0,
-    'likely benign': 0.0,
-    'evidence only': 0.0,
-    'likely risk allele': 0.3,
-    'low penetrance': 0.3,
-    'conflicting interpretations of pathogenicity': 0.3,
-    'conflicting data from submitters': 0.3,
-    'other': 0.3,
-    'uncertain significance': 0.3,
-    'uncertain risk allele': 0.3,
-    'established risk allele': 0.5,
-    'risk factor': 0.5,
-    'affects': 0.5,
-    'likely pathogenic': 0.7,
-    'confers sensitivity': 0.9,
-    'association': 0.9,
-    'drug response': 0.9,
-    'protective': 0.9,
-    'pathogenic': 0.9,
-}
-_EVA_CONFIDENCE_SCORES = {
-    'practice guideline': 0.1,
-    'reviewed by expert panel': 0.07,
-    'criteria provided, multiple submitters, no conflicts': 0.05,
-    'criteria provided, conflicting interpretations': 0.02,
-    'criteria provided, single submitter': 0.02,
-    'no assertion for the individual variant': 0.0,
-    'no assertion criteria provided': 0.0,
-    'no assertion provided': 0.0,
-}
-#: `variantFunctionalConsequenceId` values that map to `'LoF'` in the eva direction_on_target CASE.
-_EVA_LOF_CONSEQUENCES = [
-    'SO_0001589',
-    'SO_0001587',
-    'SO_0001574',
-    'SO_0001575',
-    'SO_0002012',
-    'SO_0001578',
-    'SO_0001893',
-]
 
 #: clinical_precedence score: `clinicalStage` map, `trialStopReasonCategories` element map.
 _CLINICAL_STAGE_SCORES = {
@@ -245,66 +194,6 @@ def linear_rescale(
     return pl.when(value.is_null() | value.is_nan()).then(None).otherwise(rescaled.clip(out_range_min, out_range_max))
 
 
-def _eva_score() -> pl.Expr:
-    """`eva` / `eva_somatic` score: best clinical-significance score plus a confidence bonus.
-
-    ```
-    coalesce(array_max(transform(clinicalSignificances, x -> element_at(map(...), x))), 0.0)
-    + coalesce(element_at(map(...), confidence), 0.0)
-    ```
-
-    `list.max()` on an empty or all-unmatched-elements list, and on a null list, is null in polars
-    just as spark's `array_max` is -- `fill_null(0.0)` reproduces the `coalesce(..., 0.0)` wrapping
-    either way.
-    """
-    per_significance = (
-        pl.col('clinicalSignificances')
-        .list.eval(pl.element().replace_strict(_EVA_SIGNIFICANCE_SCORES, default=None, return_dtype=pl.Float64))
-        .list.max()
-        .fill_null(0.0)
-    )
-    confidence_bonus = confidence_score(_EVA_CONFIDENCE_SCORES).fill_null(0.0)
-    return per_significance + confidence_bonus
-
-
-def _eva_direction_on_trait() -> pl.Expr:
-    """`eva` / `eva_somatic` direction_on_trait: pathogenic/protective terms in `clinicalSignificances`.
-
-    ```
-    CASE WHEN CONCAT_WS('', clinicalSignificances) RLIKE '(?i)pathogenic'
-     AND CONCAT_WS('', clinicalSignificances) RLIKE '(?i)protect' THEN null
-     WHEN ... RLIKE '(?i)pathogenic' THEN 'risk'
-     WHEN ... RLIKE '(?i)protect' THEN 'protect'
-     ELSE null END
-    ```
-
-    `CONCAT_WS('', arr)` skips null elements and never itself returns null; a null list here joins
-    to `''`, which matches neither pattern -- the same final `null` result the CASE's `ELSE`
-    branch would give, so a null `clinicalSignificances` needs no special casing.
-    """
-    joined = pl.col('clinicalSignificances').fill_null([]).list.eval(pl.element().fill_null('')).list.join('')
-    has_pathogenic = joined.str.contains('(?i)pathogenic')
-    has_protect = joined.str.contains('(?i)protect')
-    return (
-        pl.when(has_pathogenic & has_protect)
-        .then(None)
-        .when(has_pathogenic)
-        .then(pl.lit('risk'))
-        .when(has_protect)
-        .then(pl.lit('protect'))
-        .otherwise(None)
-    )
-
-
-def _eva_direction_on_target() -> pl.Expr:
-    """`eva` / `eva_somatic` direction_on_target: LoF-tagged `variantFunctionalConsequenceId`."""
-    return (
-        pl.when(pl.col('variantFunctionalConsequenceId').is_in(_EVA_LOF_CONSEQUENCES))
-        .then(pl.lit('LoF'))
-        .otherwise(None)
-    )
-
-
 def _expression_atlas_score() -> pl.Expr:
     """expression_atlas score: log10-rescaled p-value scaled by fold-change magnitude and rank.
 
@@ -405,16 +294,6 @@ class DatasourceExpressions:
 
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
     'expression_atlas': DatasourceExpressions(score=_expression_atlas_score()),
-    'eva': DatasourceExpressions(
-        score=_eva_score(),
-        direction_on_trait=_eva_direction_on_trait(),
-        direction_on_target=_eva_direction_on_target(),
-    ),
-    'eva_somatic': DatasourceExpressions(
-        score=_eva_score(),
-        direction_on_trait=_eva_direction_on_trait(),
-        direction_on_target=_eva_direction_on_target(),
-    ),
     'uniprot_variants': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'uniprot_literature': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),

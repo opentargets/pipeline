@@ -79,43 +79,6 @@ def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
 # ------------------------------------------------------------------------------------------------
 
 
-def test_eva_score_sums_significance_and_confidence() -> None:
-    df = pl.DataFrame({
-        'clinicalSignificances': [
-            ['pathogenic'],
-            [None],
-            ['unknown_value'],
-            None,
-            ['likely pathogenic', 'pathogenic'],
-        ],
-        'confidence': [
-            'practice guideline',
-            'criteria provided, single submitter',
-            'unknown_conf',
-            None,
-            'criteria provided, single submitter',
-        ],
-    })
-    # measured against spark: 0.9+0.1, 0.0+0.02, 0.0+0.0, 0.0+0.0, max(0.7,0.9)+0.02
-    # the last row is deliberately two matching, non-equal-scoring elements: array_max picks 0.9 and
-    # scores 0.92 -- a sum (0.7+0.9=1.6, +0.02=1.62) would go undetected by every other row here,
-    # which each carries only zero or one nonzero-scoring element.
-    got = df.with_columns(EXPRESSIONS['eva'].score.alias('score'))['score'].to_list()
-    assert got == pytest.approx([1.0, 0.02, 0.0, 0.0, 0.92])
-
-
-def test_eva_direction_on_trait_null_when_both_pathogenic_and_protective() -> None:
-    direction_on_trait = EXPRESSIONS['eva'].direction_on_trait
-    assert direction_on_trait is not None
-    df = pl.DataFrame({
-        'clinicalSignificances': [['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']]
-    })
-    got = df.with_columns(direction_on_trait.alias('d'))['d'].to_list()
-    # the trailing capitalised 'Pathogenic' pins the '(?i)' case-insensitivity flag: every other row
-    # here is already lowercase, so a match on 'pathogenic' would pass with or without that flag.
-    assert got == ['risk', 'protect', None, None, 'risk']
-
-
 def test_log10_rescaled_score_saturates_at_zero_and_null_propagates() -> None:
     # crispr_screen: out_min=0.0, weak_ref=0.5, strong_ref=0.005 -- measured against spark.
     df = pl.DataFrame({'resourceScore': [0.5, 0.005, 0.0, -1.0, None, float('nan')]})
@@ -242,72 +205,6 @@ CASES = [
             'log2FoldChangePercentileRank': [80.0, 50.0, 50.0, 1.0],
         },
         [0.096, 1.0, 1.0, 0.001],
-    ),
-    _ExpressionCase(
-        'eva',
-        'score',
-        {
-            'clinicalSignificances': [
-                ['pathogenic'], [None], ['unknown_value'], None, ['likely pathogenic', 'pathogenic']
-            ],
-            'confidence': [
-                'practice guideline',
-                'criteria provided, single submitter',
-                'unknown_conf',
-                None,
-                'criteria provided, single submitter',
-            ],
-        },
-        [1.0, 0.02, 0.0, 0.0, 0.92],
-    ),
-    _ExpressionCase(
-        'eva_somatic',
-        'score',
-        {
-            'clinicalSignificances': [
-                ['pathogenic'], [None], ['unknown_value'], None, ['likely pathogenic', 'pathogenic']
-            ],
-            'confidence': [
-                'practice guideline',
-                'criteria provided, single submitter',
-                'unknown_conf',
-                None,
-                'criteria provided, single submitter',
-            ],
-        },
-        [1.0, 0.02, 0.0, 0.0, 0.92],
-    ),
-    _ExpressionCase(
-        'eva',
-        'direction_on_trait',
-        {
-            'clinicalSignificances': [
-                ['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']
-            ]
-        },
-        ['risk', 'protect', None, None, 'risk'],
-    ),
-    _ExpressionCase(
-        'eva_somatic',
-        'direction_on_trait',
-        {
-            'clinicalSignificances': [
-                ['pathogenic'], ['protective'], ['pathogenic', 'protective'], [None], ['Pathogenic']
-            ]
-        },
-        ['risk', 'protect', None, None, 'risk'],
-    ),
-    _ExpressionCase(
-        'eva',
-        'direction_on_target',
-        {'variantFunctionalConsequenceId': ['SO_0001589', 'SO_0001893', 'SO_9999999', None]},
-        ['LoF', 'LoF', None, None],
-    ),
-    _ExpressionCase(
-        'eva_somatic',
-        'direction_on_target',
-        {'variantFunctionalConsequenceId': ['SO_0001589', 'SO_0001893', 'SO_9999999', None]},
-        ['LoF', 'LoF', None, None],
     ),
     _ExpressionCase(
         'uniprot_variants', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]

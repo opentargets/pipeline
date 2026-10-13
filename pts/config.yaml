@@ -1037,49 +1037,29 @@ steps:
           - 'unitary_pseudogene'
           - 'unprocessed_pseudogene'
 
-  evidence_postprocess_clinvar:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_clinvar:
+    - name: transform evidence.clinvar
+      transformer: evidence.clinvar
       source:
-        evidence_path: input/evidence/eva.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/eva.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/eva
         evidence: output/evidence_eva
-      settings:
-        evidence_format: json
-        datasource_id: eva
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyId
-          - variantId
 
-  evidence_postprocess_clinvar_somatic:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_clinvar_somatic:
+    - name: transform evidence.clinvar_somatic
+      transformer: evidence.clinvar_somatic
       source:
-        evidence_path: input/evidence/eva.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/eva.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/eva_somatic
         evidence: output/evidence_eva_somatic
-      settings:
-        evidence_format: json
-        datasource_id: eva_somatic
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyId
-          - variantId
 
   evidence_postprocess_uniprot_variants:
     - name: transform evidence_postprocess
