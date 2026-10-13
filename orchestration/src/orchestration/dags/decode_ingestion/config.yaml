@@ -3,26 +3,26 @@ env: prod
 environments:
   - name: prod
     scratchpad:
-      decode_cluster_autoscaling_policy: otg-decode-efm
-      decode_cluster_master_machine_type: n2-standard-16
-      decode_cluster_num_workers: '15'
-      decode_cluster_shuffle_partitions: '16000'
-      decode_cluster_worker_disk_size: '1024'
-      decode_cluster_worker_disk_type: pd-ssd
-      decode_cluster_worker_machine_type: n2-standard-16
+      cluster_autoscaling_policy: otg-decode-efm
+      cluster_master_machine_type: n2-standard-16
+      cluster_num_workers: '15'
+      cluster_shuffle_partitions: '16000'
+      cluster_worker_disk_size: '1024'
+      cluster_worker_disk_type: pd-ssd
+      cluster_worker_machine_type: n2-standard-16
       decode_data_path: gs://decode_data
       decode_input_path: gs://decode_inputs
       decode_molecular_complex_version: '2026-01-09'
       gnomad_path: gs://gnomad_data_2
   - name: test
     scratchpad:
-      decode_cluster_autoscaling_policy: otg-decode-test
-      decode_cluster_master_machine_type: n2-standard-8
-      decode_cluster_num_workers: '4'
-      decode_cluster_shuffle_partitions: '200'
-      decode_cluster_worker_disk_size: '500'
-      decode_cluster_worker_disk_type: pd-balanced
-      decode_cluster_worker_machine_type: n2-standard-16
+      cluster_autoscaling_policy: otg-decode-test
+      cluster_master_machine_type: n2-standard-8
+      cluster_num_workers: '4'
+      cluster_shuffle_partitions: '200'
+      cluster_worker_disk_size: '500'
+      cluster_worker_disk_type: pd-balanced
+      cluster_worker_machine_type: n2-standard-16
       decode_data_path: gs://ot_orchestration/test/decode_data
       decode_input_path: gs://ot_orchestration/test/decode_inputs
       decode_molecular_complex_version: '2026-01-09'
@@ -34,13 +34,13 @@ infrastructure:
   clusters:
     otg-decode:
       project_id: open-targets-genetics-dev
-      autoscaling_policy: '{{decode_cluster_autoscaling_policy}}'
-      worker_machine_type: '{{decode_cluster_worker_machine_type}}'
-      master_machine_type: '{{decode_cluster_master_machine_type}}'
-      num_workers: '{{decode_cluster_num_workers}}'
+      autoscaling_policy: '{{cluster_autoscaling_policy}}'
+      worker_machine_type: '{{cluster_worker_machine_type}}'
+      master_machine_type: '{{cluster_master_machine_type}}'
+      num_workers: '{{cluster_num_workers}}'
       num_masters: 1
-      worker_disk_size: '{{decode_cluster_worker_disk_size}}'
-      worker_disk_type: '{{decode_cluster_worker_disk_type}}'
+      worker_disk_size: '{{cluster_worker_disk_size}}'
+      worker_disk_type: '{{cluster_worker_disk_type}}'
       secondary_worker_machine_type: n2-standard-16
       secondary_worker_disk_size: 124
       secret_init_action_uri: gs://opentargets-pipelines/up/gentropy/fetch_secrets.sh
@@ -50,7 +50,7 @@ infrastructure:
         dataproc:efm.spark.shuffle: primary-worker
         spark:spark.shuffle.io.numConnectionsPerPeer: '5'
         spark:spark.serializer: org.apache.spark.serializer.KryoSerializer
-        spark:spark.sql.shuffle.partitions: '{{decode_cluster_shuffle_partitions}}'
+        spark:spark.sql.shuffle.partitions: '{{cluster_shuffle_partitions}}'
         spark:spark.sql.files.maxPartitionBytes: 100m
         spark:spark.executor.cores: '4'
         spark:spark.task.maxFailures: '20'

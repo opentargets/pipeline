@@ -3,10 +3,10 @@ env: prod
 environments:
   - name: test
     scratchpad:
-      gwas_catalog_input_path: gs://ot_orchestration/test/gwas_catalog_harmonisation/gwas_catalog_inputs
+      root_path: gs://ot_orchestration/test/gwas_catalog_harmonisation/gwas_catalog_inputs
   - name: prod
     scratchpad:
-      gwas_catalog_input_path: gs://gwas_catalog_inputs
+      root_path: gs://gwas_catalog_inputs
 description: Open Targets Genetics — GWAS Catalog Sumstat Harmonisation
 steps:
   gwas_catalog_harmonisation:
@@ -15,10 +15,10 @@ steps:
       max_task_count: 1000
       generator_specs:
         generator_options:
-          qc_output_pattern: '{{gwas_catalog_input_path}}/summary_statistics_qc/**_SUCCESS'
-          harm_output_pattern: '{{gwas_catalog_input_path}}/harmonised_summary_statistics/**_SUCCESS'
-          raw_input_pattern: '{{gwas_catalog_input_path}}/raw_summary_statistics/**.h.tsv.gz'
-          manifest_output_uri: '{{gwas_catalog_input_path}}/harmonisation_manifest.csv'
+          qc_output_pattern: '{{root_path}}/summary_statistics_qc/**_SUCCESS'
+          harm_output_pattern: '{{root_path}}/harmonised_summary_statistics/**_SUCCESS'
+          raw_input_pattern: '{{root_path}}/raw_summary_statistics/**.h.tsv.gz'
+          manifest_output_uri: '{{root_path}}/harmonisation_manifest.csv'
     google_batch:
       job:
         task_group:

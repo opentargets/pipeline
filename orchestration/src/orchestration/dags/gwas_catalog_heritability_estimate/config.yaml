@@ -3,18 +3,18 @@ env: test
 environments:
   - name: test
     scratchpad:
-      gwas_catalog_heritability_gentropy_image: europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.3.0-dev.14
-      gwas_catalog_heritability_ldscore_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel
-      gwas_catalog_heritability_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/outputs/gentropy_all_sumstats_2606
-      gwas_catalog_heritability_study_index_path: gs://gwas_catalog_sumstats_susie/study_index/
-      gwas_catalog_heritability_sumstats_path: gs://gwas_catalog_inputs/harmonised_summary_statistics
+      gentropy_image: europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.3.0-dev.14
+      ldscore_base_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel
+      outputs_dir: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/outputs/gentropy_all_sumstats_2606
+      study_index_path: gs://gwas_catalog_sumstats_susie/study_index/
+      sumstats_path: gs://gwas_catalog_inputs/harmonised_summary_statistics
   - name: prod
     scratchpad:
-      gwas_catalog_heritability_gentropy_image: europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.3.0-dev.14
-      gwas_catalog_heritability_ldscore_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel
-      gwas_catalog_heritability_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/outputs/gentropy_all_sumstats_2606
-      gwas_catalog_heritability_study_index_path: gs://gwas_catalog_sumstats_susie/study_index/
-      gwas_catalog_heritability_sumstats_path: gs://gwas_catalog_inputs/harmonised_summary_statistics
+      gentropy_image: europe-west1-docker.pkg.dev/open-targets-genetics-dev/opentargets/gentropy:3.3.0-dev.14
+      ldscore_base_path: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel
+      outputs_dir: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/outputs/gentropy_all_sumstats_2606
+      study_index_path: gs://gwas_catalog_sumstats_susie/study_index/
+      sumstats_path: gs://gwas_catalog_inputs/harmonised_summary_statistics
 description: Open Targets Genetics — GWAS Catalog summary statistics heritability estimation
 steps:
   gwas_catalog_heritability_estimate:
@@ -23,8 +23,8 @@ steps:
       max_task_count: 1000
       generator_specs:
         generator_options:
-          input_glob: '{{gwas_catalog_heritability_sumstats_path}}'
-          output_prefix: '{{gwas_catalog_heritability_path}}/heritability_estimates'
+          input_glob: '{{sumstats_path}}'
+          output_prefix: '{{outputs_dir}}/heritability_estimates'
     google_batch:
       job:
         task_group:
@@ -39,11 +39,11 @@ steps:
               memory_mib: 26000
               boot_disk_mib: 16000
             runnable_spec:
-              image_uri: '{{gwas_catalog_heritability_gentropy_image}}'
+              image_uri: '{{gentropy_image}}'
               entrypoint: /usr/bin/bash
               inline_commands:
                 - -c
-                - gentropy step=heritability_estimate step.session.write_mode=overwrite step.session.output_partitions=1 step.summary_statistics_input_path=$INPUT_PARTITION step.study_index_input_path={{gwas_catalog_heritability_study_index_path}} step.ldscore_base_path={{gwas_catalog_heritability_ldscore_path}} step.heritability_output_path=$OUTPUT_PARTITION "+step.session.extended_spark_conf={spark.jars:https://storage.googleapis.com/hadoop-lib/gcs/gcs-connector-hadoop3-latest.jar,spark.hadoop.fs.gs.requester.pays.mode:CUSTOM,spark.hadoop.fs.gs.requester.pays.buckets:open-targets-data-releases,spark.hadoop.fs.gs.requester.pays.project.id:open-targets-genetics-dev,spark.driver.memory:48g,spark.executor.memory:48g,spark.driver.memoryOverhead:8g,spark.executor.memoryOverhead:8g}"
+                - gentropy step=heritability_estimate step.session.write_mode=overwrite step.session.output_partitions=1 step.summary_statistics_input_path=$INPUT_PARTITION step.study_index_input_path={{study_index_path}} step.ldscore_base_path={{ldscore_base_path}} step.heritability_output_path=$OUTPUT_PARTITION "+step.session.extended_spark_conf={spark.jars:https://storage.googleapis.com/hadoop-lib/gcs/gcs-connector-hadoop3-latest.jar,spark.hadoop.fs.gs.requester.pays.mode:CUSTOM,spark.hadoop.fs.gs.requester.pays.buckets:open-targets-data-releases,spark.hadoop.fs.gs.requester.pays.project.id:open-targets-genetics-dev,spark.driver.memory:48g,spark.executor.memory:48g,spark.driver.memoryOverhead:8g,spark.executor.memoryOverhead:8g}"
         allocation:
           instance:
             machine_type: n2-highmem-4
