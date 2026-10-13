@@ -234,7 +234,7 @@ steps:
       - pts_target
       - pts_disease
       - pis_literature
-  pts_evidence_postprocess_reactome:
+  pts_evidence_reactome:
     depends_on:
       - pis_evidence_reactome
       - pts_target
@@ -445,7 +445,7 @@ steps:
       - pts_evidence_postprocess_panel_app
       - pts_evidence_postprocess_orphanet
       - pts_evidence_postprocess_intogen
-      - pts_evidence_postprocess_reactome
+      - pts_evidence_reactome
       - pts_evidence_postprocess_uniprot_literature
       - pts_evidence_postprocess_uniprot_variants
     depends_on_ppp:

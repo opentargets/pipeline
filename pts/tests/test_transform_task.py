@@ -4,6 +4,7 @@ import pytest
 
 from pts.tasks.transform import Transform
 from pts.transformers.evidence.encore import encore
+from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
 
 
@@ -13,6 +14,12 @@ def test_loads_a_plain_transformer_name() -> None:
 
 def test_loads_a_dotted_transformer_name_from_a_subpackage() -> None:
     assert Transform.load_transformer('evidence.encore') is encore
+
+
+def test_a_plain_name_is_not_shadowed_by_an_evidence_module_of_the_same_name() -> None:
+    assert Transform.load_transformer('reactome') is reactome
+    assert Transform.load_transformer('evidence.reactome') is reactome_evidence
+    assert reactome_evidence is not reactome
 
 
 def test_raises_for_an_unknown_transformer() -> None:

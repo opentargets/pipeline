@@ -1165,28 +1165,17 @@ steps:
           - drugId
           - clinicalReportId
 
-  evidence_postprocess_reactome:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_reactome:
+    - name: transform evidence.reactome
+      transformer: evidence.reactome
       source:
-        evidence_path: input/evidence/reactome.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/reactome.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/reactome
         evidence: output/evidence_reactome
-      settings:
-        evidence_format: json
-        datasource_id: reactome
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - variantAminoacidDescriptions
-          - targetModulation
-          - reactionId
 
   evidence_postprocess_impc:
     - name: pyspark evidence_postprocess

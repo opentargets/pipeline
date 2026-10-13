@@ -293,7 +293,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_trait=direction_when_disease_present('protect'),
         direction_on_target=_clinical_precedence_direction_on_target(),
     ),
-    'reactome': DatasourceExpressions(score=pl.lit(1.0)),
     'intogen': DatasourceExpressions(
         score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
         direction_on_trait=direction_when_disease_present('risk'),
