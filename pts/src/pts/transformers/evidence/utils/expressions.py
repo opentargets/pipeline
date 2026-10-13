@@ -43,9 +43,6 @@ from dataclasses import dataclass
 import numpy as np
 import polars as pl
 
-#: `element_at(map(...), confidence)` maps, one per datasource that uses the shared shape.
-_UNIPROT_CONFIDENCE_SCORES = {'high': 1.0, 'medium': 0.5}
-
 #: clinical_precedence score: `clinicalStage` map, `trialStopReasonCategories` element map.
 _CLINICAL_STAGE_SCORES = {
     'APPROVAL': 1.0,
@@ -285,8 +282,6 @@ class DatasourceExpressions:
 
 
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
-    'uniprot_variants': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
-    'uniprot_literature': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),
     'clinical_precedence': DatasourceExpressions(
         score=_clinical_precedence_score(),

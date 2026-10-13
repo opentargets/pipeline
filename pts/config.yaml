@@ -1032,50 +1032,29 @@ steps:
         failed_evidence: excluded/evidence/eva_somatic
         evidence: output/evidence_eva_somatic
 
-  evidence_postprocess_uniprot_variants:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_uniprot_variants:
+    - name: transform evidence.uniprot_variants
+      transformer: evidence.uniprot_variants
       source:
-        evidence_path: input/evidence/uniprot_variants.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/uniprot_variants.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/uniprot_variants
         evidence: output/evidence_uniprot_variants
-      settings:
-        evidence_format: json
-        datasource_id: uniprot_variants
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - diseaseFromSource
-          - variantRsId
-          - variantId
-          - literature
 
-  evidence_postprocess_uniprot_literature:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_uniprot_literature:
+    - name: transform evidence.uniprot_literature
+      transformer: evidence.uniprot_literature
       source:
-        evidence_path: input/evidence/uniprot_literature.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/uniprot_literature.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/uniprot_literature
         evidence: output/evidence_uniprot_literature
-      settings:
-        evidence_format: json
-        datasource_id: uniprot_literature
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - diseaseFromSource
 
   evidence_postprocess_clingen:
     - name: pyspark evidence_postprocess

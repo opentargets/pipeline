@@ -192,12 +192,6 @@ class _ExpressionCase:
 
 
 CASES = [
-    _ExpressionCase(
-        'uniprot_variants', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]
-    ),
-    _ExpressionCase(
-        'uniprot_literature', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]
-    ),
     _ExpressionCase('cancer_biomarkers', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
     _ExpressionCase('ot_crispr', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
     _ExpressionCase(

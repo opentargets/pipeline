@@ -240,13 +240,13 @@ steps:
       - pts_target
       - pts_disease
       - pis_literature
-  pts_evidence_postprocess_uniprot_literature:
+  pts_evidence_uniprot_literature:
     depends_on:
       - pis_evidence_uniprot_literature
       - pts_target
       - pts_disease
       - pis_literature
-  pts_evidence_postprocess_uniprot_variants:
+  pts_evidence_uniprot_variants:
     depends_on:
       - pis_evidence_uniprot_variants
       - pts_target
@@ -446,8 +446,8 @@ steps:
       - pts_evidence_postprocess_orphanet
       - pts_evidence_postprocess_intogen
       - pts_evidence_reactome
-      - pts_evidence_postprocess_uniprot_literature
-      - pts_evidence_postprocess_uniprot_variants
+      - pts_evidence_uniprot_literature
+      - pts_evidence_uniprot_variants
     depends_on_ppp:
       - pts_evidence_postprocess_ot_crispr
       - pts_evidence_postprocess_encore
