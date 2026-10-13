@@ -298,5 +298,4 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
-    'ot_crispr_validation': DatasourceExpressions(score=pl.col('resourceScore')),
 }

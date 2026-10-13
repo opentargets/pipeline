@@ -259,7 +259,7 @@ steps:
       - pts_target
       - pts_disease
       - pis_literature
-  pts_evidence_postprocess_validation_lab:
+  pts_evidence_validation_lab:
     ppp_only: true
     depends_on:
       - pis_evidence_ppp # TODO: split
@@ -451,7 +451,7 @@ steps:
     depends_on_ppp:
       - pts_evidence_postprocess_ot_crispr
       - pts_evidence_postprocess_encore
-      - pts_evidence_postprocess_validation_lab
+      - pts_evidence_validation_lab
 
   pts_association_timeseries_view:
     ppp_only: false

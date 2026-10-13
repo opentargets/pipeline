@@ -1459,30 +1459,17 @@ steps:
         failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
 
-  evidence_postprocess_validation_lab:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_validation_lab:
+    - name: transform evidence.validation_lab
+      transformer: evidence.validation_lab
       source:
-        evidence_path: input/evidence/validation_lab.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/validation_lab.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/ot_crispr_validation
         evidence: output/evidence_ot_crispr_validation
-      settings:
-        evidence_format: json
-        datasource_id: ot_crispr_validation
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - targetFromSourceId
-          - diseaseFromSourceMappedId
-          - resourceScore
-          - diseaseCellLines
-          - primaryProjectId
   ##################################################################################################
 
   #: ASSOCIATION_OTF STEP :#########################################################################

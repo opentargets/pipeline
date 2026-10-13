@@ -245,7 +245,6 @@ CASES = [
         {'resourceScore': [0.0, 41.5, 100.0, 150.0, None, nan]},
         [0.415, 0.415, 1.0, 1.0, None, None],
     ),
-    _ExpressionCase('ot_crispr_validation', 'score', {'resourceScore': [0.3, None]}, [0.3, None]),
 ]
 
 
