@@ -143,6 +143,22 @@ def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
     return expr.map_batches(lambda s: _true_divide(s, divisor), return_dtype=pl.Float64, is_elementwise=True)
 
 
+def _true_log10(series: pl.Series) -> pl.Series:
+    with np.errstate(divide='ignore', invalid='ignore'):
+        values = np.log10(series.cast(pl.Float64).to_numpy())
+    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
+    nulls = np.flatnonzero(series.is_null().to_numpy())
+    return out.scatter(nulls, None) if len(nulls) else out
+
+
+def log10(expr: pl.Expr) -> pl.Expr:
+    """Base-10 logarithm through numpy, keeping nulls and NaN.
+
+    Polars 2 `Expr.log10` differs from libm in the last bit for about half of all values.
+    """
+    return expr.map_batches(_true_log10, return_dtype=pl.Float64, is_elementwise=True)
+
+
 def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
     """Rescale a p-value-like `value` onto `[out_min, 1.0]` in log10 space, clamped.
 
@@ -163,7 +179,7 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
     """
     log_weak = math.log10(weak_ref)
     log_strong = math.log10(strong_ref)
-    rescaled = divide((1.0 - out_min) * (value.log10() - log_weak), log_strong - log_weak) + out_min
+    rescaled = divide((1.0 - out_min) * (log10(value) - log_weak), log_strong - log_weak) + out_min
     return (
         pl.when(value.is_null() | value.is_nan())
         .then(None)

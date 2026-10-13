@@ -16,6 +16,7 @@ entry is actually usable.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from math import isnan
@@ -28,7 +29,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
 from pts.transformers.evidence.encore import ENCORE
-from pts.transformers.evidence.utils.expressions import EXPRESSIONS
+from pts.transformers.evidence.utils.expressions import EXPRESSIONS, log10
 
 nan = float('nan')
 
@@ -110,6 +111,18 @@ def test_expression_atlas_and_europepmc_score_one_for_null_or_nan_resource_score
     df2 = pl.DataFrame({'resourceScore': [None, float('nan')]})
     got2 = df2.with_columns(EXPRESSIONS['europepmc'].score.alias('s'))['s'].to_list()
     assert got2 == pytest.approx([1.0, 1.0])
+
+
+def test_log10_equals_libm_bit_for_bit_and_keeps_null_nan_and_zero() -> None:
+    rng = random.Random(0)
+    values = [10 ** rng.uniform(-12, 3) for _ in range(5000)]
+    got = pl.DataFrame({'x': values}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
+    assert got == [math.log10(v) for v in values]
+    edge = pl.DataFrame({'x': [None, float('nan'), 0.0, 1.0]}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
+    assert edge[0] is None
+    assert isnan(edge[1])
+    assert edge[2] == float('-inf')
+    assert edge[3] == 0.0
 
 
 def test_linear_rescale_clamps_project_score() -> None:
