@@ -1626,8 +1626,10 @@ version = "26.9.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "gentropy" },
+    { name = "google-cloud-storage" },
     { name = "loguru" },
     { name = "opentargets-otter" },
+    { name = "pandas" },
     { name = "pydantic" },
     { name = "pyspark" },
 ]
@@ -1644,8 +1646,10 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "gentropy", editable = "../../../../gentropy/feat/migrate-studylocus-to-credible-set" },
+    { name = "google-cloud-storage", specifier = ">=3.11.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
+    { name = "pandas", specifier = ">=2.2.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pyspark", specifier = ">=3.5.1,<3.6" },
 ]
