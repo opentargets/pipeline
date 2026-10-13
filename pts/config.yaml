@@ -1274,26 +1274,17 @@ steps:
         direction_on_target_expression: |
           'LoF'
 
-  evidence_postprocess_europepmc:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_europepmc:
+    - name: transform evidence.europepmc
+      transformer: evidence.europepmc
       source:
-        evidence_path: intermediate/evidence/literature_epmc
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        cooccurrence: intermediate/literature/cooccurrence
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/europepmc
         evidence: output/evidence_europepmc
-      settings:
-        evidence_format: parquet
-        datasource_id: europepmc
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - literature
 
   evidence_postprocess_panel_app:
     - name: pyspark evidence_postprocess
@@ -1670,17 +1661,15 @@ steps:
       destination:
         vectors: output/literature_vector
 
-  literature_cooccurrence_evidence:
-    - name: pyspark literature cooccurrence evidence
-      pyspark: literature_cooccurrence_evidence
+  literature_cooccurrence:
+    - name: pyspark literature cooccurrence
+      pyspark: literature_cooccurrence
       source:
         match: intermediate/literature/match
       destination:
         cooccurrence: intermediate/literature/cooccurrence
-        evidence: intermediate/evidence/literature_epmc
       settings:
         cooccurrence_coalesce: 40
-        evidence_coalesce: 32
       properties:
         'spark.sql.shuffle.partitions': '15000'
         'spark.sql.adaptive.skewJoin.skewedPartitionFactor': '2'

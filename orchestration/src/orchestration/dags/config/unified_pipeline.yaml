@@ -200,16 +200,14 @@ steps:
   pts_literature_vector:
     depends_on:
       - pts_literature_embedding
-  pts_literature_cooccurrence_evidence:
+  pts_literature_cooccurrence:
     depends_on:
       - pts_literature_publication_match
   # Evidence not processed by PTS
-  pts_evidence_postprocess_europepmc:
+  pts_evidence_europepmc:
+    machine_type: n2d-highmem-32
     depends_on:
-      - pts_literature_cooccurrence_evidence
-      - pis_literature
-      - pts_target
-      - pts_disease
+      - pts_literature_cooccurrence
   pts_evidence_expression_atlas:
     depends_on:
       - pis_evidence_expression_atlas
@@ -411,7 +409,7 @@ steps:
     ppp_only: false
     depends_on:
       - pts_evidence_postprocess_impc
-      - pts_evidence_postprocess_europepmc
+      - pts_evidence_europepmc
       - pts_l2g
       - pts_evidence_expression_atlas
       - pts_evidence_cancer_biomarkers

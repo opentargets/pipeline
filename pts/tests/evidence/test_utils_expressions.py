@@ -33,8 +33,6 @@ from pyspark.sql import functions as f
 from pts.transformers.evidence.encore import ENCORE
 from pts.transformers.evidence.utils.expressions import EXPRESSIONS, log10
 
-nan = float('nan')
-
 CONFIG = Path(__file__).parents[2] / 'config.yaml'
 
 
@@ -80,15 +78,6 @@ def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
 # Hand-picked edge cases. Expected values measured against real spark evaluating the literal SQL
 # from config.yaml -- see registry-parity-output.txt for the full run these are drawn from.
 # ------------------------------------------------------------------------------------------------
-
-
-def test_europepmc_scores_one_for_null_or_nan_resource_score() -> None:
-    # The score routes null/NaN resourceScore through a min_horizontal(..., 1.0) that, like spark's
-    # array_min, ignores a null/NaN element rather than propagating it -- so the score saturates to
-    # 1.0 instead of going null.
-    df = pl.DataFrame({'resourceScore': [None, float('nan')]})
-    got = df.with_columns(EXPRESSIONS['europepmc'].score.alias('s'))['s'].to_list()
-    assert got == pytest.approx([1.0, 1.0])
 
 
 def test_log10_is_numpy_log10_and_within_one_ulp_of_libm() -> None:
@@ -143,8 +132,8 @@ def test_log10_of_an_all_null_column_is_all_null() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. cancer_biomarkers, clinical_precedence, crispr, crispr_screen, encore, gwas_credible_sets,
-# intogen and ot_crispr moved to their own modules.
+# on all 25. cancer_biomarkers, clinical_precedence, crispr, crispr_screen, encore, europepmc,
+# gwas_credible_sets, intogen and ot_crispr moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -158,9 +147,7 @@ class _ExpressionCase:
     expected: list
 
 
-CASES = [
-    _ExpressionCase('europepmc', 'score', {'resourceScore': [50.0, 150.0, 0.0, None, nan]}, [0.5, 1.0, 0.0, 1.0, 1.0]),
-]
+CASES: list[_ExpressionCase] = []
 
 
 def _assert_matches(got: list, expected: list) -> None:
@@ -214,11 +201,6 @@ def _spark_scores(spark: SparkSession, column: str, values: list, ddl_type: str,
     return [row.s for row in df.select(f.expr(sql).cast('double').alias('s')).collect()]
 
 
-def _polars_scores(datasource_id: str, column: str, values: list, dtype: pl.DataType) -> list:
-    df = pl.DataFrame({column: values}, schema={column: dtype})
-    return df.select(EXPRESSIONS[datasource_id].score.alias('s'))['s'].to_list()
-
-
 def _same(a: list, b: list) -> bool:
     return len(a) == len(b) and all(
         (x is None and y is None) or (x is not None and y is not None and (x == y or (isnan(x) and isnan(y))))
@@ -233,11 +215,3 @@ def test_encore_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
     expected = _spark_scores(spark, 'geneticInteractionScore', values, 'DOUBLE', ENCORE_SQL)
     got = pl.DataFrame({'geneticInteractionScore': values}, schema={'geneticInteractionScore': pl.Float64})
     assert _same(got.select(ENCORE.score.alias('s'))['s'].to_list(), expected)
-
-
-@pytest.mark.parametrize('datasource_id', ['europepmc'])
-def test_percent_scores_divide_exactly(datasource_id: str) -> None:
-    rng = random.Random(0)
-    values = [rng.uniform(0.0, 100.0) for _ in range(5000)]
-    got = _polars_scores(datasource_id, 'resourceScore', values, pl.Float64)
-    assert got == [min(v / 100, 1.0) if datasource_id == 'europepmc' else v / 100 for v in values]
