@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -14,6 +15,10 @@ from pyspark.sql import SparkSession
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
     from pyspark.sql.types import StructType
+
+
+_SENSITIVE_CONF_KEY = re.compile(r'secret|password|token|access\.key|credential|keyfile', re.IGNORECASE)
+"""Spark configuration keys whose values are credentials, never to be logged."""
 
 
 class NativeFileFormat(StrEnum):
@@ -388,7 +393,14 @@ class Session:
         """
         for key, value in requested.getAll():
             current_value = current.get(key, None)
-            if current_value != value:
+            if current_value == value:
+                continue
+            if _SENSITIVE_CONF_KEY.search(key):
+                self.logger.warning(
+                    f"Consider rebuilding SparkSession to apply requested configuration: '{key}' differs from the "
+                    'requested value (redacted).'
+                )
+            else:
                 self.logger.warning(
                     f"Consider rebuilding SparkSession to apply requested configuration: '{key}' has value "
                     f"'{current_value}' but '{value}' was requested."

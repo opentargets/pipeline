@@ -14,6 +14,7 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+from pyspark.conf import SparkConf
 from pyspark.sql import SparkSession
 
 from pps.external.gcs import GCSAuthType, GCSConfig
@@ -214,3 +215,24 @@ class TestGCSConnectorConfiguration:
         assert conf.get('spark.hadoop.fs.gs.requester.pays.mode') == 'ENABLED'
         assert conf.get('spark.hadoop.fs.gs.requester.pays.project.id') == 'billing-project'
         assert GCSConfig._HADOOP_CONNECTOR_JAR in conf.get('spark.jars', '')
+
+
+def test_compare_conf_redacts_credentials() -> None:
+    """Differences in credential settings are reported without their values."""
+    session = Session.__new__(Session)
+    session.logger = MagicMock()
+    current = SparkConf(loadDefaults=False).set('spark.sql.shuffle.partitions', '1')
+    requested = (
+        SparkConf(loadDefaults=False)
+        .set('spark.sql.shuffle.partitions', '2')
+        .set('spark.hadoop.fs.s3a.access.key', 'my-access-key')
+        .set('spark.hadoop.fs.s3a.secret.key', 'my-secret-key')
+    )
+
+    session._compare_conf(current=current, requested=requested)
+
+    logged = ' '.join(str(call.args[0]) for call in session.logger.warning.call_args_list)
+    assert session.logger.warning.call_count == 3
+    assert "'1' but '2' was requested" in logged
+    assert 'my-access-key' not in logged
+    assert 'my-secret-key' not in logged
