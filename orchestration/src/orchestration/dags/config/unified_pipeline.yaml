@@ -266,7 +266,7 @@ steps:
   pts_evidence_project_score:
     depends_on:
       - pis_evidence_project_score
-      - pts_ontoma
+      - pts_disease
       - pts_target
       - pis_literature
   pts_evidence_gene_burden:
