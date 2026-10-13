@@ -26,6 +26,7 @@ scratchpad:
   gwas_catalog_susie_path: output/gwas_catalog_sumstats_susie
   gwas_catalog_sync_date: '20260802'
   gwas_catalog_top_hits_path: output/gwas_catalog_top_hits
+  lof_curation_path: input/lof_curation
   ukb_ppp_eur_input_path: output/ukb_ppp_eur_inputs
   ukb_ppp_eur_path: output/ukb_ppp_eur
   ukb_ppp_eur_tmp_path: input/ukb_ppp_eur_tmp
@@ -555,4 +556,13 @@ steps:
         protein_study_index_path: ${decode_data_path}/raw/pqtl_study_qc_annotated/
         target_index_path: ${decode_data_path}/target/
         study_index_path: ${decode_data_path}/raw/study/
+  ##################################################################################################
+
+  #: LOF_CURATION_INGESTION :#######################################################################
+  lof_curation_ingestion:
+    - name: pyspark lof curation ingestion
+      step: lof_curation.ingestion
+      settings:
+        lof_curation_dataset_path: ${lof_curation_path}/curation_results_OT_21-01-25.csv
+        lof_curation_variant_annotations_path: ${lof_curation_path}/lof_curation_variant_annotations
   ##################################################################################################

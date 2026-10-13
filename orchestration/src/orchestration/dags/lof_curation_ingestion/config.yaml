@@ -1,0 +1,17 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      lof_curation_path: gs://otar013-ppp/OTAR2075_lof_curation
+description: Open Targets Genetics — Loss-of-Function curation ingestion
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    lof-curation-ingestion:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-etl
+steps:
+  lof_curation_ingestion:
+    cluster: lof-curation-ingestion
