@@ -11,6 +11,9 @@ scratchpad:
   eqtl_catalogue_lbf_glob: input/eqtl_catalogue/susie/*/*/*.lbf_variable.parquet
   eqtl_catalogue_metadata_uri: input/eqtl_catalogue/dataset_metadata.tsv
   eqtl_catalogue_study_index_path: output/eqtl_catalogue/study_index
+  finngen_curation_tag: '26.05'
+  finngen_input_path: input/finngen
+  finngen_path: output/finngen
   foldx_path: input/foldx
   gnomad_path: input/gnomad
   gwas_catalog_input_path: input/gwas_catalog
@@ -104,4 +107,50 @@ steps:
         purity_min_r2: 0.25
         n_partitions: 350
         clump: false
+  ##################################################################################################
+
+  #: GNOMAD_INGESTION :#############################################################################
+  gnomad_ld_index:
+    - name: pyspark gnomad ld index
+      step: gnomad.ld_index
+      session:
+        start_hail: true
+      settings:
+        ld_index_out: ${gnomad_path}/ld_index/v2.1.1
+  gnomad_variant_index:
+    - name: pyspark gnomad variant index
+      step: gnomad.variant_index
+      session:
+        start_hail: true
+      settings:
+        variant_annotation_path: ${gnomad_path}/v4.1/variant_index
+  ##################################################################################################
+
+  #: FINNGEN_INGESTION :############################################################################
+  finngen_studies:
+    - name: pyspark finngen studies
+      step: finngen.studies
+      session:
+        start_hail: true
+        write_mode: overwrite
+      settings:
+        finngen_study_index_out: ${finngen_path}/study_index
+        finngen_phenotype_table_url: https://r12.finngen.fi/api/phenos
+        finngen_release_prefix: FINNGEN_R12
+        finngen_summary_stats_url_prefix: ${finngen_input_path}/summary_stats/finngen_R12_
+        sample_size: 500348
+        finngen_summary_stats_url_suffix: .gz
+        efo_curation_mapping_url: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${finngen_curation_tag}/mappings/disease/manual_string.tsv
+  finngen_finemapping_ingestion:
+    - name: pyspark finngen finemapping ingestion
+      step: finngen.finemapping_ingestion
+      session:
+        start_hail: true
+        write_mode: overwrite
+      settings:
+        finngen_finemapping_out: ${finngen_path}/credible_set_datasets/susie
+        finngen_susie_finemapping_snp_files: ${finngen_input_path}/finemap/full/susie/*.snp.bgz
+        finngen_susie_finemapping_cs_summary_files: ${finngen_input_path}/finemap/summary/*SUSIE.cred.summary.tsv
+        finngen_finemapping_lead_pvalue_threshold: 1e-5
+        finngen_release_prefix: FINNGEN_R12
   ##################################################################################################

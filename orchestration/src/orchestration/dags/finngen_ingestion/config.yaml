@@ -1,0 +1,23 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      finngen_curation_tag: '26.05'
+      finngen_input_path: gs://finngen-public-data-r12
+      finngen_path: gs://finngen_data/r12
+description: Open Targets Genetics — FinnGen study index and credible set ingestion
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-ingestion-finngen:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: finngen-preprocess
+      master_disk_size: 2000
+      num_workers: 6
+steps:
+  finngen_studies:
+    cluster: otg-ingestion-finngen
+  finngen_finemapping_ingestion:
+    cluster: otg-ingestion-finngen

@@ -1,0 +1,21 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gnomad_path: gs://gnomad_data_2
+description: Open Targets Genetics — gnomAD LD index and variant index ingestion
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    gnomad-preprocess:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-etl
+steps:
+  gnomad_ld_index:
+    cluster: gnomad-preprocess
+  gnomad_variant_index:
+    cluster: gnomad-preprocess
+    depends_on:
+      - gnomad_ld_index
