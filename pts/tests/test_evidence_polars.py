@@ -919,8 +919,17 @@ class TestResolveEvidenceDate:
         assert out['evidenceDate'].to_list() == [None]
         assert out.schema['evidenceDate'] == pl.String
 
-    def test_covers_all_four_date_columns(self) -> None:
-        assert DATE_COLUMNS == ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
+    def test_covers_all_date_columns(self) -> None:
+        assert DATE_COLUMNS == ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate', 'evidenceDate']
+
+    def test_existing_evidence_date_takes_part(self) -> None:
+        lf = pl.LazyFrame({
+            'publicationDate': ['2020-01-01', None, None],
+            'curationDate': ['2021-01-01', '2019-06-01', None],
+            'evidenceDate': ['2019-01-01', '2022-01-01', '2018-01-01'],
+        })
+        out = Evidence(lf).resolve_evidence_date().lf.collect()
+        assert out['evidenceDate'].to_list() == ['2019-01-01', '2019-06-01', '2018-01-01']
 
 
 class TestCalculateEvidenceScore:

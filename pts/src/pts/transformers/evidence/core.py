@@ -30,7 +30,7 @@ QC_COLUMN = 'qualityControls'
 
 #: Columns considered when dating evidence, in `resolve_evidence_date` -- mirrors pyspark's
 #: `Evidence.EVIDENCE_DATE_COLUMNS`.
-DATE_COLUMNS = ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate']
+DATE_COLUMNS = ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate', 'evidenceDate']
 
 #: `variantId` length above which `hash_long_variant_identifiers` hashes it -- mirrors pyspark's
 #: `Evidence.VARIANT_HASH_LENGHT` (kept the correct spelling here; the pyspark name is a typo).
