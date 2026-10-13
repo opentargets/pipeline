@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.transformers.evidence.encore import ENCORE, encore
-from tests.evidence_fixtures import write_disease, write_target
+from tests.evidence.fixtures import write_disease, write_target
 
 
 def test_score_is_the_absolute_interaction_score_over_16() -> None:

@@ -19,17 +19,17 @@ copy-pasted:
   despite the reordering; see the module's dedicated score comment.
 * `element_at(map(...), confidence)` is the shared shape behind `uniprot_variants`,
   `uniprot_literature`, `clingen`, `orphanet`, `gene2phenotype` and `genomics_england` -- only the
-  map differs, so `_confidence_score` takes the map as its argument.
+  map differs, so `confidence_score` takes the map as its argument.
 * `CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` is the shared shape behind seven direction
   expressions across `clinical_precedence`, `impc`, `orphanet`, `gene2phenotype`, `intogen` and
-  `cancer_gene_census` -- `_direction_when_disease_present` takes the literal as its argument.
+  `cancer_gene_census` -- `direction_when_disease_present` takes the literal as its argument.
 * `CASE WHEN <col> == a THEN 'GoF' WHEN <col> == b THEN 'LoF' ELSE NULL END` is a 1:1 value lookup,
   behind `orphanet`, `gene2phenotype` and `cancer_gene_census`'s `direction_on_target` -- expressed
-  as `_direction_lookup`, a `replace_strict` on the named column.
+  as `direction_lookup`, a `replace_strict` on the named column.
 * The log10-rescaled-score shape (null/NaN stays null, a non-positive value saturates to 1.0,
   everything else linearly interpolated in log10 space and clamped) is shared by `intogen`,
   `gene_burden`, `crispr_screen` and the inner CASE of `expression_atlas` -- only the
-  reference points and output column differ, so `_log10_rescaled_score` takes them as arguments.
+  reference points and output column differ, so `log10_rescaled_score` takes them as arguments.
 
 Provenance: `pts/config.yaml` no longer carries the original `score_expression` /
 `direction_on_trait_expression` / `direction_on_target_expression` SQL strings -- git commit
@@ -177,7 +177,7 @@ _GOF_ACTION_TYPES = [
 ]
 
 
-def _confidence_score(mapping: dict[str, float]) -> pl.Expr:
+def confidence_score(mapping: dict[str, float]) -> pl.Expr:
     """`element_at(map(...), confidence)` -- the shared shape across five datasources.
 
     `replace_strict` with `default=None` matches spark's `element_at`: a `confidence` value absent
@@ -186,12 +186,12 @@ def _confidence_score(mapping: dict[str, float]) -> pl.Expr:
     return pl.col('confidence').replace_strict(mapping, default=None, return_dtype=pl.Float64)
 
 
-def _direction_when_disease_present(value: str) -> pl.Expr:
+def direction_when_disease_present(value: str) -> pl.Expr:
     """`CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` -- shared by seven direction fields."""
     return pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit(value)).otherwise(None)
 
 
-def _direction_lookup(column: str, mapping: dict[str, str]) -> pl.Expr:
+def direction_lookup(column: str, mapping: dict[str, str]) -> pl.Expr:
     """`CASE WHEN <column> == a THEN x WHEN <column> == b THEN y ELSE NULL END` as a 1:1 lookup."""
     return pl.col(column).replace_strict(mapping, default=None)
 
@@ -212,7 +212,7 @@ def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
     return expr.map_batches(lambda s: _true_divide(s, divisor), return_dtype=pl.Float64, is_elementwise=True)
 
 
-def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
+def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
     """Rescale a p-value-like `value` onto `[out_min, 1.0]` in log10 space, clamped.
 
     Common shape behind the intogen/gene_burden/crispr_screen score expressions, and
@@ -242,7 +242,7 @@ def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, stron
     )
 
 
-def _linear_rescale(
+def linear_rescale(
     value: pl.Expr, in_range_min: float, in_range_max: float, out_range_min: float, out_range_max: float
 ) -> pl.Expr:
     """Rescale `value` linearly between two ranges, clamped to the output range.
@@ -281,7 +281,7 @@ def _eva_score() -> pl.Expr:
         .list.max()
         .fill_null(0.0)
     )
-    confidence_bonus = _confidence_score(_EVA_CONFIDENCE_SCORES).fill_null(0.0)
+    confidence_bonus = confidence_score(_EVA_CONFIDENCE_SCORES).fill_null(0.0)
     return per_significance + confidence_bonus
 
 
@@ -333,7 +333,7 @@ def _expression_atlas_score() -> pl.Expr:
     ))
     ```
     """
-    base = _log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
+    base = log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
     magnitude = (
         base
         * divide(pl.col('log2FoldChangeValue').abs(), 10)
@@ -460,55 +460,55 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_trait=_eva_direction_on_trait(),
         direction_on_target=_eva_direction_on_target(),
     ),
-    'uniprot_variants': DatasourceExpressions(score=_confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
-    'uniprot_literature': DatasourceExpressions(score=_confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
-    'clingen': DatasourceExpressions(score=_confidence_score(_CLINGEN_CONFIDENCE_SCORES)),
+    'uniprot_variants': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
+    'uniprot_literature': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
+    'clingen': DatasourceExpressions(score=confidence_score(_CLINGEN_CONFIDENCE_SCORES)),
     'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),
     'clinical_precedence': DatasourceExpressions(
         score=_clinical_precedence_score(),
-        direction_on_trait=_direction_when_disease_present('protect'),
+        direction_on_trait=direction_when_disease_present('protect'),
         direction_on_target=_clinical_precedence_direction_on_target(),
     ),
     'reactome': DatasourceExpressions(score=pl.lit(1.0)),
     'impc': DatasourceExpressions(
         score=divide(pl.col('resourceScore'), 100),
-        direction_on_trait=_direction_when_disease_present('risk'),
-        direction_on_target=_direction_when_disease_present('LoF'),
+        direction_on_trait=direction_when_disease_present('risk'),
+        direction_on_target=direction_when_disease_present('LoF'),
     ),
     'orphanet': DatasourceExpressions(
-        score=_confidence_score(_ORPHANET_CONFIDENCE_SCORES),
-        direction_on_trait=_direction_when_disease_present('risk'),
-        direction_on_target=_direction_lookup(
+        score=confidence_score(_ORPHANET_CONFIDENCE_SCORES),
+        direction_on_trait=direction_when_disease_present('risk'),
+        direction_on_target=direction_lookup(
             'variantFunctionalConsequenceId', {'SO_0002053': 'GoF', 'SO_0002054': 'LoF'}
         ),
     ),
     'gene2phenotype': DatasourceExpressions(
-        score=_confidence_score(_GENE2PHENOTYPE_CONFIDENCE_SCORES),
-        direction_on_trait=_direction_when_disease_present('risk'),
-        direction_on_target=_direction_lookup(
+        score=confidence_score(_GENE2PHENOTYPE_CONFIDENCE_SCORES),
+        direction_on_trait=direction_when_disease_present('risk'),
+        direction_on_target=direction_lookup(
             'variantFunctionalConsequenceId', {'SO_0002315': 'GoF', 'SO_0002317': 'LoF'}
         ),
     ),
     'intogen': DatasourceExpressions(
-        score=_log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
-        direction_on_trait=_direction_when_disease_present('risk'),
+        score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
+        direction_on_trait=direction_when_disease_present('risk'),
         direction_on_target=_intogen_direction_on_target(),
     ),
     'gene_burden': DatasourceExpressions(
-        score=_log10_rescaled_score(pl.col('resourceScore'), 0.25, 1e-7, 1e-17),
+        score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 1e-7, 1e-17),
         direction_on_trait=_gene_burden_direction_on_trait(),
         direction_on_target=pl.lit('LoF'),
     ),
-    'crispr_screen': DatasourceExpressions(score=_log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
+    'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
     # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
-    'genomics_england': DatasourceExpressions(score=_confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
-    'crispr': DatasourceExpressions(score=_linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
+    'genomics_england': DatasourceExpressions(score=confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
+    'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'cancer_gene_census': DatasourceExpressions(
         score=pl.col('resourceScore'),
-        direction_on_trait=_direction_when_disease_present('risk'),
-        direction_on_target=_direction_lookup('TSorOncogene', {'oncogene': 'GoF', 'tsg': 'LoF'}),
+        direction_on_trait=direction_when_disease_present('risk'),
+        direction_on_target=direction_lookup('TSorOncogene', {'oncogene': 'GoF', 'tsg': 'LoF'}),
     ),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
     'ot_crispr_validation': DatasourceExpressions(score=pl.col('resourceScore')),

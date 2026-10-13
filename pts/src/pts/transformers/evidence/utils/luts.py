@@ -27,6 +27,8 @@ Divergences worth naming, because each one is deliberate:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import polars as pl
 
 from pts.schemas.literature import literature_schema
@@ -163,4 +165,46 @@ def build_publication_lut(path: str) -> pl.DataFrame:
         .drop_nulls('publicationId')
         .unique()
         .collect(engine='streaming')
+    )
+
+
+@dataclass(frozen=True)
+class ValidationLuts:
+    """The lookup tables every datasource is validated against.
+
+    Passed in already materialised: they are shared across datasources, so building them belongs to
+    the caller. `pl.DataFrame` rather than `LazyFrame` because each is joined against repeatedly.
+    `publication` is only needed for evidence carrying `literature`.
+    """
+
+    disease: pl.DataFrame
+    target: pl.DataFrame
+    publication: pl.DataFrame | None = None
+
+
+def build_luts(raw: pl.LazyFrame, *, disease: str, target: str, literature: str | None = None) -> ValidationLuts:
+    """Build the look-up tables for one datasource's raw evidence.
+
+    The publication table is built only when the evidence carries `literature`.
+
+    Args:
+        raw: raw evidence.
+        disease: location of the disease index.
+        target: location of the target index.
+        literature: location of the literature export, needed when `raw` carries `literature`.
+
+    Returns:
+        The look-up tables.
+
+    Raises:
+        ValueError: if `raw` carries `literature` and no `literature` location is given.
+    """
+    has_literature = 'literature' in raw.collect_schema().names()
+    if has_literature and literature is None:
+        msg = 'evidence carries literature but no literature export was given'
+        raise ValueError(msg)
+    return ValidationLuts(
+        disease=build_disease_lut(disease),
+        target=build_target_lut(target),
+        publication=build_publication_lut(literature) if has_literature and literature else None,
     )

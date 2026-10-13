@@ -1,4 +1,4 @@
-"""Tests for the parametrised post-processing recipe (`pts.transformers.evidence.postprocess`).
+"""Tests for the parametrised post-processing recipe (`pts.transformers.evidence.utils.datasource`).
 
 The `Evidence` chain's own semantics are covered in `test_evidence_polars.py`. What is covered here
 is the recipe as a reusable unit: that it is configured by parameters, that it neither reads nor
@@ -17,8 +17,9 @@ from pathlib import Path
 import polars as pl
 
 from pts.schemas.evidence import evidence_schema
-from pts.transformers.evidence.core import QC_COLUMN, Evidence, EvidenceFlags
-from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
+from pts.transformers.evidence.utils.datasource import EvidenceDatasource
+from pts.transformers.evidence.utils.evidence import QC_COLUMN, Evidence, EvidenceFlags
+from pts.transformers.evidence.utils.luts import ValidationLuts
 from pts.transformers.utils.dataset import scan_dataset
 
 
@@ -54,13 +55,13 @@ def _luts() -> ValidationLuts:
     )
 
 
-def _postprocessor(**overrides: object) -> EvidencePostprocessor:
+def _postprocessor(**overrides: object) -> EvidenceDatasource:
     defaults: dict[str, object] = {
         'datasource_id': 'eva',
         'unique_fields': ['targetFromSourceId', 'diseaseFromSourceMappedId'],
         'score': pl.col('resourceScore'),
     }
-    return EvidencePostprocessor(**(defaults | overrides))  # type: ignore[arg-type]
+    return EvidenceDatasource(**(defaults | overrides))  # type: ignore[arg-type]
 
 
 def _raw(**overrides: object) -> pl.LazyFrame:
@@ -78,21 +79,21 @@ def test_run_returns_lazy_evidence_and_touches_no_storage() -> None:
 
     This is what lets a caller run it on evidence held in memory, with no intermediate file.
     """
-    result = _postprocessor().run(_raw(), _luts())
+    result = _postprocessor().postprocess(_raw(), _luts())
 
     assert isinstance(result, Evidence)
     assert isinstance(result.lf, pl.LazyFrame)
 
 
 def test_run_leaves_directions_to_the_datasource() -> None:
-    columns = _postprocessor().run(_raw(), _luts()).lf.collect_schema().names()
+    columns = _postprocessor().postprocess(_raw(), _luts()).lf.collect_schema().names()
 
     assert 'directionOnTrait' not in columns
     assert 'directionOnTarget' not in columns
 
 
 def test_a_fully_resolvable_row_comes_out_valid() -> None:
-    result = _postprocessor().run(_raw(), _luts())
+    result = _postprocessor().postprocess(_raw(), _luts())
 
     valid = result.valid().collect()
     assert valid.height == 1
@@ -102,7 +103,7 @@ def test_a_fully_resolvable_row_comes_out_valid() -> None:
 
 
 def test_an_unresolvable_target_is_split_into_the_invalid_half() -> None:
-    result = _postprocessor().run(_raw(targetFromSourceId='NOT_A_TARGET'), _luts())
+    result = _postprocessor().postprocess(_raw(targetFromSourceId='NOT_A_TARGET'), _luts())
 
     assert result.valid().collect().height == 0
     invalid = result.invalid().collect()
@@ -117,8 +118,8 @@ def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
     """
     luts, raw = _luts(), _raw()
 
-    from_column = _postprocessor().run(raw, luts).valid().collect()
-    constant = _postprocessor(score=pl.lit(0.25)).run(raw, luts).valid().collect()
+    from_column = _postprocessor().postprocess(raw, luts).valid().collect()
+    constant = _postprocessor(score=pl.lit(0.25)).postprocess(raw, luts).valid().collect()
 
     assert from_column['score'].to_list() == [0.5]
     assert constant['score'].to_list() == [0.25]
@@ -127,8 +128,8 @@ def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
 def test_excluded_biotypes_are_applied_when_given() -> None:
     luts = _luts()
 
-    without = _postprocessor().run(_raw(), luts)
-    with_exclusion = _postprocessor(excluded_biotypes=['protein_coding']).run(_raw(), luts)
+    without = _postprocessor().postprocess(_raw(), luts)
+    with_exclusion = _postprocessor(excluded_biotypes=['protein_coding']).postprocess(_raw(), luts)
 
     assert without.valid().collect().height == 1
     assert with_exclusion.valid().collect().height == 0
@@ -144,7 +145,7 @@ def test_a_mismatched_datasource_is_dropped_entirely_not_flagged() -> None:
     `datasourceId` disagrees appears in neither half. A caller passing the wrong id therefore emits
     nothing at all, rather than a pile of failures.
     """
-    result = _postprocessor(datasource_id='not_eva').run(_raw(), _luts())
+    result = _postprocessor(datasource_id='not_eva').postprocess(_raw(), _luts())
 
     assert result.valid().collect().height == 0
     assert result.invalid().collect().height == 0

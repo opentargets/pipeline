@@ -1,6 +1,6 @@
 """Tests for the polars evidence post-processing.
 
-Two things live here: the validation look-up-table builders (`validation_lut.py`), and the
+Two things live here: the validation look-up-table builders (`luts.py`), and the
 `Evidence` class -- harmonisation, entity validation, identifier assignment, uniqueness, dating,
 scoring and direction of effect (`evidence.py`).
 """
@@ -18,16 +18,15 @@ import polars_hash as plh
 import pytest
 
 from pts.schemas.evidence import evidence_schema
-from pts.transformers.evidence.core import (
+from pts.transformers.evidence.utils.evidence import (
     DATE_COLUMNS,
     QC_COLUMN,
     VARIANT_HASH_LENGTH,
     Evidence,
     EvidenceFlags,
-    UnsupportedIdentifierField,
-    render_for_hash,
 )
-from pts.transformers.utils.validation_lut import (
+from pts.transformers.evidence.utils.hashing import UnsupportedIdentifierField, render_for_hash
+from pts.transformers.evidence.utils.luts import (
     build_disease_lut,
     build_publication_lut,
     build_target_lut,
@@ -1088,3 +1087,18 @@ class TestValidAndInvalid:
         assert valid_ids == {'r0', 'r2'}
         assert invalid_ids == {'r1', 'r3'}
         assert valid_ids.isdisjoint(invalid_ids)
+
+
+def test_uniqueness_survivor_does_not_depend_on_row_order() -> None:
+    rows = pl.DataFrame({
+        'datasourceId': ['ds'] * 6,
+        'targetFromSourceId': ['T1'] * 6,
+        'diseaseFromSourceMappedId': ['D1'] * 6,
+        'resourceScore': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    })
+
+    def survivors(frame: pl.DataFrame) -> list[float]:
+        ev = Evidence(frame.lazy()).assign_evidence_identifier(['targetFromSourceId']).validate_uniqueness()
+        return sorted(ev.valid().collect()['resourceScore'].to_list())
+
+    assert survivors(rows) == survivors(rows.reverse()) == survivors(rows.sample(fraction=1.0, shuffle=True, seed=1))

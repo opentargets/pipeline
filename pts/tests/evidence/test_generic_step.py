@@ -14,7 +14,7 @@ import polars as pl
 import pytest
 
 from pts.transformers.evidence_postprocess import evidence_postprocess
-from tests.evidence_fixtures import write_disease, write_literature, write_target
+from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 
 def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_path: Path) -> None:

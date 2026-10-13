@@ -7,12 +7,12 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
-from pts.transformers.evidence.expressions import divide
-from pts.transformers.evidence.postprocess import EvidencePostprocessor
-from pts.transformers.evidence.run import run_evidence
+from pts.transformers.evidence.utils.datasource import EvidenceDatasource
+from pts.transformers.evidence.utils.expressions import divide
+from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
 
-ENCORE = EvidencePostprocessor(
+ENCORE = EvidenceDatasource(
     datasource_id='encore',
     # order and repetition feed the id, as in the spark config
     unique_fields=[

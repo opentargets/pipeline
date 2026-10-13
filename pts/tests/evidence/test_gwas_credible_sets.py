@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.transformers.evidence.gwas_credible_sets import build_raw_evidence, gwas_credible_sets
-from tests.evidence_fixtures import write_disease, write_literature, write_target
+from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 STUDY_SCHEMA = {
     'studyId': pl.String,

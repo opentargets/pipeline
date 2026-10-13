@@ -7,12 +7,13 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence.core import QC_COLUMN, EvidenceFlags
-from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
-from pts.transformers.evidence.run import check_raw_evidence, run_evidence
-from tests.evidence_fixtures import write_disease, write_literature, write_target
+from pts.transformers.evidence.utils.datasource import EvidenceDatasource
+from pts.transformers.evidence.utils.evidence import QC_COLUMN, EvidenceFlags
+from pts.transformers.evidence.utils.luts import ValidationLuts
+from pts.transformers.evidence.utils.run import run_evidence
+from tests.evidence.fixtures import write_disease, write_literature, write_target
 
-SPEC = EvidencePostprocessor(
+SPEC = EvidenceDatasource(
     datasource_id='eva',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId'],
     score=pl.col('resourceScore'),
@@ -31,22 +32,22 @@ def raw(**columns: list) -> pl.LazyFrame:
 
 class TestCheckRawEvidence:
     def test_accepts_a_complete_frame(self) -> None:
-        check_raw_evidence(raw(), SPEC)
+        SPEC.check_raw(raw())
 
     def test_rejects_a_missing_required_column(self) -> None:
         with pytest.raises(ValueError, match='diseaseFromSourceMappedId'):
-            check_raw_evidence(raw().drop('diseaseFromSourceMappedId'), SPEC)
+            SPEC.check_raw(raw().drop('diseaseFromSourceMappedId'))
 
     def test_rejects_a_missing_unique_field(self) -> None:
-        spec = EvidencePostprocessor(datasource_id='eva', unique_fields=['studyLocusId'], score=pl.lit(1.0))
+        spec = EvidenceDatasource(datasource_id='eva', unique_fields=['studyLocusId'], score=pl.lit(1.0))
         with pytest.raises(ValueError, match='studyLocusId'):
-            check_raw_evidence(raw(), spec)
+            spec.check_raw(raw())
 
     def test_derived_unique_fields_need_not_be_raw(self) -> None:
-        check_raw_evidence(raw(), SPEC)
+        SPEC.check_raw(raw())
 
     def test_accepts_columns_outside_the_schema(self) -> None:
-        check_raw_evidence(raw(notInSchema=['x', 'y']), SPEC)
+        SPEC.check_raw(raw(notInSchema=['x', 'y']))
 
 
 class TestRecipeLiterature:
@@ -55,12 +56,12 @@ class TestRecipeLiterature:
             disease=pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']}),
             target=pl.DataFrame({'targetFromSourceId': ['ENSG1'], 'targetId': ['ENSG1'], 'biotype': ['pc']}),
         )
-        assert SPEC.run(raw(), luts).valid().collect().height == 1
+        assert SPEC.postprocess(raw(), luts).valid().collect().height == 1
 
     def test_refuses_literature_without_a_publication_table(self) -> None:
         luts = ValidationLuts(disease=pl.DataFrame(), target=pl.DataFrame())
         with pytest.raises(ValueError, match='no publication look-up table'):
-            SPEC.run(raw(literature=[['1'], None]), luts)
+            SPEC.postprocess(raw(literature=[['1'], None]), luts)
 
 
 class TestRunEvidence:
@@ -103,3 +104,15 @@ class TestRunEvidence:
                 target=str(tmp_path),
                 destination={},
             )
+
+
+def test_rerun_into_an_existing_destination_fails_and_names_it(tmp_path: Path) -> None:
+    dst = {'evidence': str(tmp_path / 'out' / 'valid'), 'failed_evidence': str(tmp_path / 'out' / 'failed')}
+    kwargs = {
+        'disease': write_disease(tmp_path / 'disease', ['EFO_1']),
+        'target': write_target(tmp_path / 'target', ['ENSG1']),
+        'destination': dst,
+    }
+    run_evidence(raw(), SPEC, **kwargs)
+    with pytest.raises(ValueError, match='valid'):
+        run_evidence(raw(), SPEC, **kwargs)

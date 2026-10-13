@@ -2,7 +2,7 @@
 
 Entry point for the `evidence_postprocess_*` config.yaml steps. Turns otter's
 `source`/`destination`/`settings` into the parameters the recipe needs, reads the evidence, runs
-`pts.transformers.evidence.postprocess`, and writes the two outputs. The processing itself lives in
+`pts.transformers.evidence.utils.datasource`, and writes the two outputs. The processing itself lives in
 the `pts.transformers.evidence` package.
 
 It stays here rather than inside that package because otter resolves a transformer by importing
@@ -24,11 +24,16 @@ from typing import Any
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.evidence.expressions import EXPRESSIONS
-from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
-from pts.transformers.evidence.run import write_evidence
+from pts.transformers.evidence.utils.datasource import EvidenceDatasource
+from pts.transformers.evidence.utils.expressions import EXPRESSIONS
+from pts.transformers.evidence.utils.luts import (
+    ValidationLuts,
+    build_disease_lut,
+    build_publication_lut,
+    build_target_lut,
+)
+from pts.transformers.evidence.utils.run import write_evidence
 from pts.transformers.utils.dataset import scan_dataset
-from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
 
 
 def evidence_postprocess(
@@ -64,7 +69,7 @@ def evidence_postprocess(
         publication=build_publication_lut(source['publication_date_lut']),
     )
 
-    postprocessor = EvidencePostprocessor(
+    postprocessor = EvidenceDatasource(
         datasource_id=datasource_id,
         unique_fields=settings['unique_fields'],
         score=expressions.score,
@@ -88,7 +93,7 @@ def evidence_postprocess(
 
     evidence = (
         postprocessor
-        .run(lf, luts)
+        .postprocess(lf, luts)
         .assign_direction_on_trait(expressions.direction_on_trait)
         .assign_direction_on_target(expressions.direction_on_target, luts.target)
         .hash_long_variant_identifiers()

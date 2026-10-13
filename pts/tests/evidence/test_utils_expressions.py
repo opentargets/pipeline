@@ -28,11 +28,11 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
 from pts.transformers.evidence.encore import ENCORE
-from pts.transformers.evidence.expressions import EXPRESSIONS
+from pts.transformers.evidence.utils.expressions import EXPRESSIONS
 
 nan = float('nan')
 
-CONFIG = Path(__file__).parents[1] / 'config.yaml'
+CONFIG = Path(__file__).parents[2] / 'config.yaml'
 
 
 def _config_datasource_ids() -> set[str]:
