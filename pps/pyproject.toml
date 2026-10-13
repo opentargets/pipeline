@@ -1,0 +1,35 @@
+[project]
+name = "PPS"
+version = "26.9.0.dev0"
+description = "Open Targets Pre-Pipeline Stage"
+authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+  "gentropy",
+  "loguru>=0.7.3",
+  "opentargets-otter>=26.9.1",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.15.17", "ty>=0.0.55"]
+test = ["pytest>=9.0.3"]
+
+# Temporary: local gentropy checkout until the trimmed-down gentropy is released.
+[tool.uv.sources]
+gentropy = { path = "/Users/ss60/Projects/gentropy/feat/migrate-studylocus-to-credible-set", editable = true }
+
+[project.scripts]
+pps = "pps.core:main"
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend = "../ruff.toml"

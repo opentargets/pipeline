@@ -24,7 +24,7 @@ jobs:
         # pts has far more tests than the other packages, so it's sharded
         # separately across 4 runners with pytest-split to cut CI wall time.
         run: |
-          packages='${{ inputs.packages || '["orchestration","pis","pts","croissant"]' }}'
+          packages='${{ inputs.packages || '["orchestration","pis","pps","pts","croissant"]' }}'
           include=$(jq -c '[.[] | select(. != "pts") | {package: .}]' <<< "$packages")
           has_pts=$(jq -c 'any(. == "pts")' <<< "$packages")
           echo "include=$include" >> "$GITHUB_OUTPUT"

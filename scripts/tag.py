@@ -45,7 +45,7 @@ from typing import NoReturn
 import tomllib
 from packaging.version import Version
 
-PACKAGES = ['orchestration', 'pis', 'pts', 'croissant']
+PACKAGES = ['orchestration', 'pis', 'pps', 'pts', 'croissant']
 
 
 def list_to_str(lst, sep: str = '|') -> str:

@@ -10,6 +10,10 @@
 			"path": "pis"
 		},
 		{
+			"name": "pps",
+			"path": "pps"
+		},
+		{
 			"name": "pts",
 			"path": "pts"
 		},
@@ -30,6 +34,7 @@
 			"**/.ruff_cache": true,
 			"*.egg-info": true,
 			"pis": true,
+			"pps": true,
 			"pts": true,
 			"orchestration": true,
 			"croissant": true
@@ -57,6 +62,7 @@
 		"yaml.schemas": {
 			"https://raw.githubusercontent.com/opentargets/otter/refs/heads/main/.vscode/config-schema.json": [
 				"pis/config.yaml",
+				"pps/config.yaml",
 				"pts/config.yaml",
 			]
 		},

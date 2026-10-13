@@ -1,5 +1,5 @@
 ### HOUSEKEEPING TARGETS ###
-COMPONENTS := pis pts orchestration croissant
+COMPONENTS := pis pps pts orchestration croissant
 
 .PHONY: help clean test dev
 

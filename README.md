@@ -4,8 +4,10 @@ Generates an Open Targets Data Release.
 
 ## Packages
 
-The Open Targets Data Pipeline is made up of four parts, each being a python package:
+The Open Targets Data Pipeline is made up of five parts, each being a python package:
 
+- [pps](pps/README.md) — Pre-Pipeline Stage: ingests and harmonises datasources
+    that need heavy preprocessing before they become pipeline inputs.
 - [pis](pis/README.md) — Pipeline Input Stage: fetches, validates, and arranges
     input data.
 - [pts](pts/README.md) — Pipeline Transformation Stage: transforms input data

@@ -19,6 +19,11 @@ repos:
         files: ^pis/
         always_run: false
       - id: ty
+        name: ty pps
+        args: [--directory, pps]
+        files: ^pps/
+        always_run: false
+      - id: ty
         name: ty pts
         args: [--directory, pts]
         files: ^pts/
