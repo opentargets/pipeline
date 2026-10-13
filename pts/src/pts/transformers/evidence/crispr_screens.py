@@ -166,17 +166,17 @@ def generate(screens: str, studies_dir: str, disease_mapping: str) -> pl.LazyFra
         _read_screens(screens),
         scan_dataset(disease_mapping, format='tsv', infer_schema=False).collect(),
     )
-    tail = pl.col('Hit Class')
+    hit_class = pl.col('Hit Class')
     genes = (
         _read_genes(studies_dir)
-        .filter(tail.is_in(['Positive Hit', 'Negative Hit']))
+        .filter(hit_class.is_in(['Positive Hit', 'Negative Hit']))
         .select(
             pl.col('Gene').alias('targetFromSourceId'),
             pl.col('P Value').alias('resourceScore'),
             pl
-            .when(tail == 'Positive Hit')
+            .when(hit_class == 'Positive Hit')
             .then(pl.lit('upper tail'))
-            .when(tail == 'Negative Hit')
+            .when(hit_class == 'Negative Hit')
             .then(pl.lit('lower tail'))
             .alias('statisticalTestTail'),
             pl.col('Phenotype').alias('log2FoldChangeValue'),

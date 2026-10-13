@@ -252,7 +252,7 @@ def test_score_multiplies_stage_by_stop_reason_minimum() -> None:
         'clinicalStage': ['PHASE_2_3', 'PRECLINICAL', 'PHASE_1', 'PHASE_2_3', 'NOT_A_STAGE'],
         'trialStopReasonCategories': [['Success', 'Negative'], [], ['unknown_reason'], None, None],
     })
-    # measured against spark: 0.5*0.5, 0.01*null, 0.1*null, 0.5*1.0, null*1.0
+    # 0.5*0.5, 0.01*null, 0.1*null, 0.5*1.0, null*1.0; the first four measured against spark
     got = df.with_columns(CLINICAL_PRECEDENCE.score.alias('s'))['s'].to_list()
     assert got[0] == pytest.approx(0.25)
     assert got[1] is None
@@ -318,3 +318,26 @@ def test_clinical_precedence_step_scores_assigns_directions_and_writes_excluded_
     assert valid['publicationDate'].to_list()[:3] == ['2002-01-01'] * 3
     assert failed.select('clinicalReportId', 'targetFromSourceId').rows() == [('R8', 'ENSG5')]
     assert sorted(excluded['id']) == ['R6', 'R7']
+
+
+def test_an_existing_evidence_destination_leaves_no_excluded_report(tmp_path: Path) -> None:
+    src = tmp_path / 'src'
+    dst = tmp_path / 'out'
+    (dst / 'valid').mkdir(parents=True)
+    with pytest.raises(ValueError, match='valid'):
+        clinical_precedence(
+            {
+                **_sources(src),
+                'disease': write_disease(src / 'disease', ['EFO_1', 'EFO_2']),
+                'target': write_target(src / 'target', ['ENSG1', 'ENSG2', 'ENSG3']),
+                'literature': write_literature(src / 'literature', {'111': '2002-01-01'}),
+            },
+            {
+                'evidence': str(dst / 'valid'),
+                'failed_evidence': str(dst / 'failed'),
+                'excluded_report': str(dst / 'excluded_report'),
+            },
+            {'invalid_clinical_report_qc': INVALID_QC},
+            None,
+        )
+    assert not (dst / 'excluded_report').exists()

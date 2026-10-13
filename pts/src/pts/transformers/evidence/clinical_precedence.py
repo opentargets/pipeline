@@ -12,7 +12,7 @@ from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
 from pts.transformers.evidence.utils.run import write_evidence
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 
 TRIAL_OUTCOME_REFERENCE_TYPES = ['result', 'derived']
 
@@ -239,8 +239,6 @@ def clinical_precedence(
         settings.get('invalid_clinical_report_qc', []),
     )
     CLINICAL_PRECEDENCE.check_raw(raw)
-    logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
-    write_dataset(excluded, destination['excluded_report'])
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         CLINICAL_PRECEDENCE
@@ -248,4 +246,5 @@ def clinical_precedence(
         .assign_direction_on_trait(DIRECTION_ON_TRAIT)
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
     )
-    write_evidence(evidence, destination)
+    logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
+    write_evidence(evidence, destination, alongside=[sink_dataset(excluded, destination['excluded_report'])])

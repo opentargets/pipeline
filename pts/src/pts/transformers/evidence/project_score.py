@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 from otter.config.model import Config
@@ -97,8 +97,8 @@ def disease_cell_lines(
     )
 
 
-def _read(path: str, separator: str) -> pl.DataFrame:
-    return scan_dataset(path, format='tsv' if separator == '\t' else 'csv', infer_schema=False).collect()
+def _read(path: str, format: Literal['csv', 'tsv']) -> pl.DataFrame:
+    return scan_dataset(path, format=format, infer_schema=False).collect()
 
 
 def generate(gene_scores: str, cell_types: str, cell_passport: str, cell_line_mapping: str) -> pl.LazyFrame:
@@ -114,12 +114,12 @@ def generate(gene_scores: str, cell_types: str, cell_passport: str, cell_line_ma
         Raw Project Score evidence, one row per hit outside the pan-cancer analysis.
     """
     cell_lines = disease_cell_lines(
-        _read(cell_passport, ','),
-        _read(cell_line_mapping, ','),
-        _read(cell_types, '\t'),
+        _read(cell_passport, 'csv'),
+        _read(cell_line_mapping, 'csv'),
+        _read(cell_types, 'tsv'),
     )
     return (
-        _read(gene_scores, '\t')
+        _read(gene_scores, 'tsv')
         .select(
             pl.col('cancerType').str.to_lowercase(),
             pl.col('targetSymbol').alias('targetFromSource'),

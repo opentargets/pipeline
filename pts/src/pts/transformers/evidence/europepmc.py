@@ -55,7 +55,7 @@ SECTIONS_OF_INTEREST = [
 EUROPEPMC = EvidenceDatasource(
     datasource_id='europepmc',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'literature'],
-    # a null or NaN resourceScore makes the first argument null, which min_horizontal skips
+    # min_horizontal skips a null or NaN resourceScore, so it scores 1.0
     score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0)),
 )
 

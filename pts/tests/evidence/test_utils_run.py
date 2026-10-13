@@ -114,7 +114,7 @@ def test_rerun_into_an_existing_destination_fails_and_names_it(tmp_path: Path) -
         'destination': dst,
     }
     run_evidence(raw(), SPEC, **kwargs)
-    with pytest.raises(ValueError, match='valid'):
+    with pytest.raises(ValueError, match=str(tmp_path / 'out' / 'valid')):
         run_evidence(raw(), SPEC, **kwargs)
 
 

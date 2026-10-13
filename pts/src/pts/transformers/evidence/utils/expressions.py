@@ -57,7 +57,7 @@ def log10(expr: pl.Expr) -> pl.Expr:
 def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
     """Rescale a p-value-like `value` onto `[out_min, 1.0]` in log10 space, clamped.
 
-    Common shape behind the intogen/gene_burden/crispr_screen score expressions, and
+    Common shape behind the intogen/crispr_screen score expressions, and
     expression_atlas's inner CASE:
 
     * null or NaN input stays null.
