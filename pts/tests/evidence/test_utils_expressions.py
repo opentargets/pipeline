@@ -95,22 +95,13 @@ def test_log10_rescaled_score_saturates_at_zero_and_null_propagates() -> None:
     assert got[5] is None
 
 
-def test_expression_atlas_and_europepmc_score_one_for_null_or_nan_resource_score() -> None:
-    # Both scores route null/NaN resourceScore through a min_horizontal(..., 1.0) that, like spark's
+def test_europepmc_scores_one_for_null_or_nan_resource_score() -> None:
+    # The score routes null/NaN resourceScore through a min_horizontal(..., 1.0) that, like spark's
     # array_min, ignores a null/NaN element rather than propagating it -- so the score saturates to
-    # 1.0 instead of going null. Deliberate (see the production comment); pinned here so a refactor
-    # that drops the min_horizontal wrapping is caught rather than silently reintroducing nulls.
-    df = pl.DataFrame({
-        'resourceScore': [None, float('nan')],
-        'log2FoldChangeValue': [2.0, 2.0],
-        'log2FoldChangePercentileRank': [50.0, 50.0],
-    })
-    got = df.with_columns(EXPRESSIONS['expression_atlas'].score.alias('s'))['s'].to_list()
+    # 1.0 instead of going null.
+    df = pl.DataFrame({'resourceScore': [None, float('nan')]})
+    got = df.with_columns(EXPRESSIONS['europepmc'].score.alias('s'))['s'].to_list()
     assert got == pytest.approx([1.0, 1.0])
-
-    df2 = pl.DataFrame({'resourceScore': [None, float('nan')]})
-    got2 = df2.with_columns(EXPRESSIONS['europepmc'].score.alias('s'))['s'].to_list()
-    assert got2 == pytest.approx([1.0, 1.0])
 
 
 def test_log10_equals_libm_bit_for_bit_and_keeps_null_nan_and_zero() -> None:
@@ -201,16 +192,6 @@ class _ExpressionCase:
 
 
 CASES = [
-    _ExpressionCase(
-        'expression_atlas',
-        'score',
-        {
-            'resourceScore': [0.001, None, nan, 0.0],
-            'log2FoldChangeValue': [-4.0, 2.0, 2.0, 1.0],
-            'log2FoldChangePercentileRank': [80.0, 50.0, 50.0, 1.0],
-        },
-        [0.096, 1.0, 1.0, 0.001],
-    ),
     _ExpressionCase(
         'uniprot_variants', 'score', {'confidence': ['high', 'medium', 'low', None]}, [1.0, 0.5, None, None]
     ),

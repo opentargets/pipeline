@@ -996,46 +996,17 @@ steps:
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
-  evidence_postprocess_expression_atlas:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_expression_atlas:
+    - name: transform evidence.expression_atlas
+      transformer: evidence.expression_atlas
       source:
-        evidence_path: input/evidence/atlas.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/atlas.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/expression_atlas
         evidence: output/evidence_expression_atlas
-      settings:
-        evidence_format: parquet
-        datasource_id: expression_atlas
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - contrast
-          - studyId
-        excluded_biotypes:
-          - 'IG_C_pseudogene'
-          - 'IG_J_pseudogene'
-          - 'IG_pseudogene'
-          - 'IG_V_pseudogene'
-          - 'polymorphic_pseudogene'
-          - 'processed_pseudogene'
-          - 'pseudogene'
-          - 'rRNA'
-          - 'rRNA_pseudogene'
-          - 'snoRNA'
-          - 'snRNA'
-          - 'transcribed_processed_pseudogene'
-          - 'transcribed_unitary_pseudogene'
-          - 'transcribed_unprocessed_pseudogene'
-          - 'TR_J_pseudogene'
-          - 'TR_V_pseudogene'
-          - 'unitary_pseudogene'
-          - 'unprocessed_pseudogene'
 
   evidence_clinvar:
     - name: transform evidence.clinvar

@@ -210,7 +210,7 @@ steps:
       - pis_literature
       - pts_target
       - pts_disease
-  pts_evidence_postprocess_expression_atlas:
+  pts_evidence_expression_atlas:
     depends_on:
       - pis_evidence_expression_atlas
       - pts_target
@@ -431,7 +431,7 @@ steps:
       - pts_evidence_postprocess_impc
       - pts_evidence_postprocess_europepmc
       - pts_l2g
-      - pts_evidence_postprocess_expression_atlas
+      - pts_evidence_expression_atlas
       - pts_evidence_postprocess_cancer_biomarkers
       - pts_evidence_postprocess_clinical_precedence
       - pts_evidence_postprocess_clingen

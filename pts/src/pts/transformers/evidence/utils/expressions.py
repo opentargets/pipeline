@@ -210,30 +210,6 @@ def linear_rescale(
     return pl.when(value.is_null() | value.is_nan()).then(None).otherwise(rescaled.clip(out_range_min, out_range_max))
 
 
-def _expression_atlas_score() -> pl.Expr:
-    """expression_atlas score: log10-rescaled p-value scaled by fold-change magnitude and rank.
-
-    ```
-    array_min(array(1.0,
-      (CASE ... log10 rescale of resourceScore ... END)
-      * (abs(log2FoldChangeValue) / 10) * (log2FoldChangePercentileRank / 100)
-    ))
-    ```
-    """
-    base = log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
-    magnitude = (
-        base
-        * divide(pl.col('log2FoldChangeValue').abs(), 10)
-        * divide(pl.col('log2FoldChangePercentileRank'), 100)
-    )
-    # A null or NaN resourceScore makes `base` (and so `magnitude`) null -- min_horizontal, like
-    # spark's array_min, skips a null element rather than propagating it, so the row scores 1.0
-    # instead of null. That is faithful to spark's `array_min` null-skipping and deliberate, not an
-    # oversight; `europepmc`'s score below is shaped the same way and null/NaN-scores 1.0 for the
-    # same reason.
-    return pl.min_horizontal(pl.lit(1.0), magnitude)
-
-
 def _clinical_precedence_score() -> pl.Expr:
     """clinical_precedence score: clinical-stage score times a trial-stop-reason multiplier.
 
@@ -309,7 +285,6 @@ class DatasourceExpressions:
 
 
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
-    'expression_atlas': DatasourceExpressions(score=_expression_atlas_score()),
     'uniprot_variants': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'uniprot_literature': DatasourceExpressions(score=confidence_score(_UNIPROT_CONFIDENCE_SCORES)),
     'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),
@@ -325,8 +300,7 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_target=_intogen_direction_on_target(),
     ),
     'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
-    # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
-    # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
+    # A null or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
