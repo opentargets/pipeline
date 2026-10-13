@@ -1,10 +1,18 @@
+import socket
+from pathlib import Path
+
+import huggingface_hub.constants as hf_constants
 import polars as pl
-from clinical_mining.dataset import ClinicalReport
-from clinical_mining.schemas import ClinicalSource
+import pytest
+from huggingface_hub import hf_hub_download
+from mira.dataset import ClinicalReport
+from mira.provider.aact.clinical_report import replace_with_llm_indications
+from mira.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
 
 from pts.pyspark.clinical_report import (
     ClinicalReportFlags,
     flag_indirect_primary_purpose,
+    offline_hf_models,
     validate_disease,
 )
 
@@ -24,11 +32,12 @@ def _report_entry(report_id: str, disease_struct: dict[str, str | None]) -> dict
     return {
         'id': report_id,
         'phaseFromSource': 'black box warning',
-        'type': 'CURATED_RESOURCE',
+        'type': ClinicalReportType.INDICATION.value,
+        'origin': ClinicalReportOrigin.DRUG_LABEL.value,
         'source': ClinicalSource.DailyMed.value,
+        'provider': ClinicalProvider.CHEMBL.value,
         'year': None,
         'countries': ['United States'],
-        'hasExpertReview': True,
         'url': 'https://example.org',
         'drugs': [{'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}],
         'diseases': [disease_struct],
@@ -72,8 +81,18 @@ def _report(id_: str, source: str, primary_purpose: str | None = None) -> dict:
     return {
         'id': id_,
         'phaseFromSource': 'phase 3',
-        'type': 'CURATED_RESOURCE',
+        'type': ClinicalReportType.INDICATION.value,
         'source': source,
+        'provider': (
+            ClinicalProvider.AACT.value
+            if source == ClinicalSource.CLINICAL_TRIALS_GOV.value
+            else ClinicalProvider.CHEMBL.value
+        ),
+        'origin': (
+            ClinicalReportOrigin.CLINICAL_TRIAL.value
+            if source == ClinicalSource.CLINICAL_TRIALS_GOV.value
+            else ClinicalReportOrigin.DRUG_LABEL.value
+        ),
         'trialPrimaryPurpose': primary_purpose,
         'drugs': [{'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}],
         'diseases': [{'diseaseFromSource': 'hypertension', 'diseaseId': 'EFO:0000537'}],
@@ -87,10 +106,10 @@ def _flagged(reports: ClinicalReport, report_id: str) -> bool:
 
 def test_flag_indirect_primary_purpose_device_feasibility() -> None:
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
-        _report('r2', ClinicalSource.AACT.value, primary_purpose='DEVICE_FEASIBILITY'),
-        _report('r3', ClinicalSource.AACT.value, primary_purpose='DIAGNOSTIC'),
-        _report('r4', ClinicalSource.AACT.value, primary_purpose='OTHER'),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+        _report('r2', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='DEVICE_FEASIBILITY'),
+        _report('r3', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='DIAGNOSTIC'),
+        _report('r4', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='OTHER'),
     ])
     result = flag_indirect_primary_purpose(reports)
     assert not _flagged(result, 'r1')
@@ -102,7 +121,7 @@ def test_flag_indirect_primary_purpose_device_feasibility() -> None:
 def test_flag_indirect_primary_purpose_no_primary_purpose() -> None:
     """Reports without a trialPrimaryPurpose should not be flagged."""
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose=None),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose=None),
     ])
     result = flag_indirect_primary_purpose(reports)
     assert not _flagged(result, 'r1')
@@ -111,7 +130,7 @@ def test_flag_indirect_primary_purpose_no_primary_purpose() -> None:
 def test_flag_indirect_primary_purpose_with_llm_no_match_is_flagged() -> None:
     """When llm_batch_results is provided but report has no match, drug_intent is null → flagged."""
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
     ])
     llm_batch_results = pl.DataFrame({
         'id': ['r_other'],
@@ -124,7 +143,7 @@ def test_flag_indirect_primary_purpose_with_llm_no_match_is_flagged() -> None:
 def test_flag_indirect_primary_purpose_with_llm_therapeutic_not_flagged() -> None:
     """drug_intent='therapeutic' should not be flagged."""
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
     ])
     llm_batch_results = pl.DataFrame({'id': ['r1'], 'drug_intent': ['therapeutic']})
     result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
@@ -134,8 +153,8 @@ def test_flag_indirect_primary_purpose_with_llm_therapeutic_not_flagged() -> Non
 def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> None:
     """Non-therapeutic drug_intent values (prevention, supportive_care, etc.) should be flagged."""
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
-        _report('r2', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+        _report('r2', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
     ])
     llm_batch_results = pl.DataFrame({
         'id': ['r1', 'r2'],
@@ -149,7 +168,7 @@ def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> Non
 def test_flag_indirect_primary_purpose_drops_drug_intent() -> None:
     """The drug_intent column must be dropped from the output."""
     reports = _build_reports([
-        _report('r1', ClinicalSource.AACT.value, primary_purpose='TREATMENT'),
+        _report('r1', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
     ])
     llm_batch_results = pl.DataFrame({'id': ['r1'], 'drug_intent': ['therapeutic']})
     result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
@@ -171,3 +190,63 @@ def test_flag_indirect_primary_purpose_non_aact_not_flagged() -> None:
     assert not _flagged(result, 'r1')
     assert not _flagged(result, 'r2')
     assert not _flagged(result, 'r3')
+
+
+def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
+    """A minimal frame in `ClinicalReportExtractionSchema` shape, as `parse_batch_results` returns."""
+    return pl.DataFrame({
+        'id': [nct_id],
+        'drug_intent': ['therapeutic'],
+        'drug_intent_confidence': [0.99],
+        'primary_indications': [[{'name': disease, 'evidence_quote': 'q'}]],
+        'investigated_drugs': [[{'drug': drug, 'evidence_quote': 'q'}]],
+    })
+
+
+def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
+    """`clinical_report` must hand the extraction to Mira unprojected."""
+    studies = pl.DataFrame({
+        'nct_id': ['NCT0001'],
+        'diseaseFromSource': ['from-aact'],
+        'drugFromSource': ['from-aact'],
+    })
+
+    result = replace_with_llm_indications(studies, _extraction('NCT0001', 'asthma', 'aspirin'))
+
+    assert result['diseaseFromSource'].to_list() == ['asthma']
+    assert result['drugFromSource'].to_list() == ['aspirin']
+
+    pre_projected = pl.DataFrame({'id': ['NCT0001'], 'drugs': [['aspirin']], 'diseases': [['asthma']]})
+    with pytest.raises(pl.exceptions.ColumnNotFoundError, match='primary_indications'):
+        replace_with_llm_indications(studies, pre_projected)
+
+
+def test_offline_hf_models_serves_staged_files_without_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    revision = 'a' * 40
+    staged = tmp_path / 'models' / 'some-org' / 'some-model' / revision
+    staged.mkdir(parents=True)
+    (staged / 'config.json').write_text('{"staged": true}')
+
+    def no_network(*args, **kwargs):
+        raise AssertionError('network access attempted')
+
+    monkeypatch.setattr(socket, 'create_connection', no_network)
+    previous = hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE
+
+    with offline_hf_models(str(tmp_path / 'models')) as cache:
+        assert hf_constants.HF_HUB_OFFLINE
+        path = Path(hf_hub_download('some-org/some-model', 'config.json'))
+        assert path.read_text() == '{"staged": true}'
+        assert path.resolve().is_relative_to(cache.resolve())
+        assert (cache / 'models--some-org--some-model' / 'refs' / 'main').read_text() == revision
+
+    assert previous == (hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE)
+
+
+def test_offline_hf_models_fails_when_nothing_is_staged(tmp_path: Path) -> None:
+    (tmp_path / 'models').mkdir()
+
+    with pytest.raises(ValueError, match='no models staged'), offline_hf_models(str(tmp_path / 'models')):
+        pass

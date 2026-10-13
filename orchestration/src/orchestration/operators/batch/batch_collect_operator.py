@@ -22,9 +22,12 @@ class BatchCollectOperator(BaseOperator):
     (e.g. ``credible_set_input_partition_hash=<hash>/part-*.parquet``).
     This operator lists every file matching ``collect_spec.file_glob`` under
     that prefix and copies each one to ``collect_spec.destination_prefix`` with
-    a ``part-<index>-<uuid5>-c000.snappy.<ext>`` name, where the UUID5 is derived
+    a ``part-<index>-<uuid5>-c000.<ext>`` name, where the UUID5 is derived
     deterministically from the source blob path, so re-running collect for the same
     source files always produces identical destination filenames.
+
+    The name carries no codec segment — collect is a byte-for-byte copy and cannot
+    know how the source was compressed. Do not reintroduce one.
 
     When ``collect_spec`` is ``None`` the task raises ``AirflowSkipException``
     — this lets the operator be wired unconditionally in the DAG for every
@@ -91,7 +94,7 @@ class BatchCollectOperator(BaseOperator):
             (
                 src_bucket.blob(src_name),
                 dst_bucket.blob(
-                    f'{dest_path}/part-{part_idx:05d}-{uuid.uuid5(uuid.NAMESPACE_URL, src_name)}-c000.snappy.{extension}'  # noqa: E501
+                    f'{dest_path}/part-{part_idx:05d}-{uuid.uuid5(uuid.NAMESPACE_URL, src_name)}-c000.{extension}'
                 ),
             )
             for part_idx, src_name in enumerate(sorted(files))

@@ -187,8 +187,34 @@ class AllocationSpec(BaseModel):
         """
         return batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=[self.region] if self.region else self.zones)
 
-    def build(self) -> batch_v1.AllocationPolicy:
+    @cached_property
+    def network(self) -> batch_v1.AllocationPolicy.NetworkPolicy:
+        """Get the network policy for the batch task: the default network, with no external IP address.
+
+        The subnetwork needs Private Google Access. Partial URLs resolve against the project the job runs in.
+
+        Returns:
+            batch_v1.AllocationPolicy.NetworkPolicy: The network policy for the batch task.
+        """
+        return batch_v1.AllocationPolicy.NetworkPolicy(
+            network_interfaces=[
+                batch_v1.AllocationPolicy.NetworkInterface(
+                    network='global/networks/default',
+                    subnetwork=f'regions/{GCP_REGION}/subnetworks/default',
+                    no_external_ip_address=True,
+                )
+            ]
+        )
+
+    def build(self, labels: dict[str, str] | None = None) -> batch_v1.AllocationPolicy:
         """Build a `google.cloud.batch_v1.AllocationPolicy` object from the allocation specification.
+
+        Args:
+            labels: Optional labels to override the labels defined in the AllocationSpec.
+                Batch applies the allocation policy labels to the job and to every Compute Engine
+                resource the policy creates (VMs and disks), which are the resources that carry the
+                cost. The job level labels only reach the job object and its log entries, so cost
+                attribution depends on these.
 
         Returns:
             batch_v1.AllocationPolicy: The built AllocationPolicy object.
@@ -203,13 +229,16 @@ class AllocationSpec(BaseModel):
         ['regions/europe-west1']
         >>> ap.instances[0].policy.machine_type
         'n1-standard-4'
+        >>> ap.network.network_interfaces[0].no_external_ip_address
+        True
         >>> alloc_zones = AllocationSpec(instance=InstanceSpec(), zones=["zones/europe-west1-b"], labels={"team": "test"})
         >>> list(alloc_zones.build().location.allowed_locations)
         ['zones/europe-west1-b']
         """  # noqa: E501
         ap = {
             'instances': [batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=self.instance.build())],
-            'labels': self.labels or dict(Labels()),
+            'labels': labels or self.labels or dict(Labels()),
+            'network': self.network,
         }
         if self.location:
             ap['location'] = self.location

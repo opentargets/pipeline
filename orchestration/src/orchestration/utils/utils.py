@@ -48,6 +48,56 @@ def resource_name(name: str) -> str:
     return f'up-{clean_name(name)}-{{{{ run_id | strhash }}}}'
 
 
+def resolve_jar_staging(
+    spark_jars: str,
+    registry: dict[str, str],
+    managed_prefix: str,
+) -> list[tuple[str, str]]:
+    """Resolve a cluster's ``spark.jars`` into the jars orchestration must stage.
+
+    ``spark.jars`` is Spark's comma-separated list of jar URIs. Each jar that
+    orchestration stages into the pipelines bucket lives under ``managed_prefix``
+    and must have a registered upstream source in ``registry`` (keyed by the
+    staged destination URI).
+
+    Any GCS jar with no registered source is a misconfiguration and raises,
+    whether or not it sits under ``managed_prefix``. Keying the check on the
+    prefix alone would let a mistyped path (``…/pts/jar/`` for ``…/pts/jars/``,
+    or the wrong bucket) fall through unstaged, and the cluster would then be
+    created pointing at an object that does not exist — every job on it failing
+    at submit with nothing in the DAG to explain why. Non-GCS jars (a path baked
+    into the image, say) are provided elsewhere and are ignored.
+
+    Args:
+        spark_jars (str): Rendered ``spark.jars`` value (comma-separated URIs).
+        registry (dict[str, str]): Map of staged destination URI to source URL.
+        managed_prefix (str): GCS prefix under which orchestration stages jars.
+
+    Returns:
+        list[tuple[str, str]]: ``(src_url, dst_uri)`` pairs to stage, in order.
+
+    Raises:
+        ValueError: When a GCS jar has no registered source in ``registry``.
+    """
+    pairs: list[tuple[str, str]] = []
+    for uri in (j.strip() for j in spark_jars.split(',') if j.strip()):
+        if uri in registry:
+            pairs.append((registry[uri], uri))
+        elif uri.startswith('gs://'):
+            hint = (
+                f'expected it under the managed jar prefix {managed_prefix!r}'
+                if not uri.startswith(managed_prefix)
+                else 'add its upstream URL'
+            )
+            raise ValueError(
+                f'{uri} has no registered source in staged_jars ({hint}); '
+                'orchestration cannot stage it and the cluster would be created '
+                'pointing at a jar that may not exist.'
+            )
+        # else: not a GCS jar (e.g. a path baked into the image) — leave it.
+    return pairs
+
+
 def read_yaml_config(
     config_path: Path | str,
     sentinels: dict[str, str] | None = None,

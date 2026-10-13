@@ -7,7 +7,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 				upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
 				upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-finngen-meta-readme
+				upload-finngen-meta-readme upload-decode-bucket-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,7 +35,7 @@ clean-vm: ## Destroy the Airflow development VM
 
 ### DEVELOPMENT TARGETS ###
 sync:
-	@uv sync --all-groups --all-extras
+	@uv sync --frozen --all-groups --all-extras
 
 test: sync ## Run unit tests
 	@uv run --frozen pytest -rxs
@@ -66,9 +66,9 @@ tunnel: ## Tunnel to the remote AirFlow instance
 ### OTHER TARGETS ###
 
 build-dag-svgs: ## Generate visual representations of Airflow DAGs for documentation purposes
-	@uv sync --all-groups
-	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow db migrate
-	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags reserialize
+	@uv sync --frozen --all-groups
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow db migrate
+	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags reserialize
 	@$(foreach dag, \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_clumping \
@@ -81,11 +81,12 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
 		datasources/finngen_data/finngen_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
+		datasources/decode_data/decode_ingestion \
 		credible_set_qc/credible_set_qc \
 		datasources/lof_annotations/lof_curation_ingestion \
 		datasources/foldx_annotations/foldx_ingestion \
 		unified_pipeline/unified_pipeline, \
-		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
+		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 
 upload-eqtl-catalogue-bucket-readme: ## Upload eqtl_catalogue_data readme to the bucket
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data gs://eqtl_catalogue_data/docs
@@ -113,8 +114,12 @@ upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
 	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
 
+upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
+	@gcloud storage rsync docs/datasources/decode_data gs://decode_data/docs
+	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
+
 update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
 									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-										upload-finngen-meta-readme
+										upload-finngen-meta-readme upload-decode-bucket-readme

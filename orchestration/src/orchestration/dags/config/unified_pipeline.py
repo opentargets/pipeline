@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from orchestration.dags.config.app_config import AppConfig
+from orchestration.models.run_config import PipelineRunConfig
 from orchestration.operators.dataproc import ClusterDefinition
 from orchestration.utils.common import GCP_PROJECT_PLATFORM
 
@@ -29,25 +29,17 @@ class UnifiedPipelineConfig:
     """
 
     def __init__(self) -> None:
+        """Construct unified pipeline configuration from a run_name."""
         self.logger = logging.getLogger(__name__)
         config_path = Path(__file__).parent
 
         up = AppConfig.from_file(file_path=config_path / 'unified_pipeline.yaml')
         self._steps = up.get('steps')
 
-        self.run_name = up.get('run_name') or datetime.now().strftime('%Y%m%d-%H%M')
-        """Used for labelling resources."""
-        self.release_uri: str = f'gs://open-targets-pre-data-releases/{up.get("release_name")}'
-        """The place where the production release files are read from and/or written to."""
-        self.is_dev = up.get('is_dev', True)
-        """Whether this is a development or production run."""
-        self.dev_uri = f'gs://open-targets-pipeline-runs/{self.run_name}' if self.is_dev else None
-        """The place where the development run files are read from and written to."""
+        self.run = PipelineRunConfig(run_name=up.get('run_name'))
         self.service_account_extra_scopes = ['https://www.googleapis.com/auth/drive']
         """Extra scopes to be added to the service account in executor machines"""
         """- the drive scope is needed to download Google Drive spreadsheets for the pis_otar step"""
-        self.is_ppp = up.get('is_ppp')
-        """Whether this is a ppp run or public platform run."""
         self.num_partitions = 20
         """The default number of partitions for steps using spark that do not specify it."""
 
@@ -56,7 +48,7 @@ class UnifiedPipelineConfig:
 
         # Replace config values, this should be refactored into the step class
         # eventually. Doing it here for now so config files work for local runs.
-        self.pis.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pis.config['release_uri'] = self.release_uri
         self.pis.config['work_path'] = '/mnt/disks/work'
         self.pis.config['log_level'] = 'INFO'
         self.pis.config['pool_size'] = 16
@@ -67,16 +59,24 @@ class UnifiedPipelineConfig:
 
         self.pts = AppConfig.from_file(
             file_path=config_path.parents[4] / 'pts' / 'config.yaml',
-            template_context={'release_name': up.get('release_name')},
+            template_context={'release_name': self.run.release_name},
         )
         """The internal configuration for PTS steps."""
 
         # Replace config values, this should be refactored into the step class
         # eventually. Doing it here for now so config files work for local runs.
-        self.pts.config['release_uri'] = self.dev_uri or self.release_uri
+        self.pts.config['release_uri'] = self.release_uri
         self.pts.config['work_path'] = '/mnt/disks/work'
         self.pts.config['log_level'] = 'INFO'
         self.pts.config['pool_size'] = 32
+
+        # PIS picks the STRING file, PTS stamps the version into interaction_evidence as
+        # database_version. Left independent the two can disagree, and the release then
+        # misreports which version it contains. An exception, not a pattern -- moving input
+        # versions to unified_pipeline.yaml would scatter them away from pis/config.yaml,
+        # which owns them.
+        for shared_version in ('string_version',):
+            self.pts.config['scratchpad'][shared_version] = self.pis.config['scratchpad'][shared_version]
 
         if self.is_ppp:
             self.pts = self.pts.overwrite(config_path / 'ppp' / 'pts.override.yaml')
@@ -85,9 +85,8 @@ class UnifiedPipelineConfig:
         self.gentropy = AppConfig.from_file(
             file_path=config_path / 'gentropy.yaml',
             template_context={
-                'release_uri': self.dev_uri or self.release_uri,
+                'release_uri': self.release_uri,
                 'gentropy_version': up.get('gentropy_version'),
-                'l2g_training_version': up.get('release_name'),
                 'vep_version': up.get('vep_version'),
             },
         )
@@ -97,12 +96,40 @@ class UnifiedPipelineConfig:
             self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
         """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
 
+        # Without this the sentinel substitution fails with a bare
+        # `TypeError: replace() argument 2 must be str, not None` that breaks the
+        # import of the whole DAG — PIS and GENTROPY stages included — while
+        # `staged_jars` quietly registers a `spark-nlp-assembly-None.jar`.
+        spark_nlp_version = up.get('spark_nlp_version')
+        if not spark_nlp_version:
+            raise ValueError(
+                'spark_nlp_version is missing from unified_pipeline.yaml; the pts and '
+                'pts_literature clusters need it to resolve the Spark-NLP jar they '
+                'load via spark.jars.'
+            )
+
+        boot_image_keys = ('dataproc_image_version_pts', 'dataproc_image_version_gentropy', 'cos_image')
+        boot_images = {k: up.get(k) for k in boot_image_keys}
+        if missing := [k for k, v in boot_images.items() if not v]:
+            raise ValueError(
+                f'{", ".join(missing)} missing from unified_pipeline.yaml; every release pins its boot images.'
+            )
+
+        self.cos_image = f'projects/cos-cloud/global/images/{boot_images["cos_image"]}'
+        """The COS image the PIS and PTS vms boot from."""
+
         self.clusters = AppConfig.from_file(
             file_path=config_path / 'clusters.yaml',
             template_context={
                 'pts_version': up.get('pts_version'),
                 'gentropy_version': up.get('gentropy_version'),
+                'dataproc_image_version_pts': boot_images['dataproc_image_version_pts'],
+                'dataproc_image_version_gentropy': boot_images['dataproc_image_version_gentropy'],
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
+                # Lets the pts / pts_literature clusters point spark.jars at the
+                # version-pinned Spark-NLP fat jar in the pipelines bucket.
+                'spark_nlp_version': spark_nlp_version,
+                'pts_init_action_uri': self.pts_init_action_uri,
             },
         )
         """The cluster definitions."""
@@ -124,16 +151,71 @@ class UnifiedPipelineConfig:
         pts_version = up.get('pts_version')
         self.pts_image = f'{pts_image}:{pts_version}'
         """The image and tag used to run PTS steps."""
-        self.pts_machine_type = 'n1-standard-32'
+        self.pts_machine_type = 'n2d-standard-32'
         """The machine type used to run PTS steps."""
         self.pts_disk_size = 300
         """The disk size for PTS vms, in GB."""
+        self.pts_boot_disk_size = 30
+        """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
+
+        # Spark-NLP fat jar. Clusters that use OnToma (pts, pts_literature) load
+        # it via spark.jars instead of resolving the package from Maven Central
+        # on every spark-submit (see opentargets/issues#4453). Orchestration
+        # stages the version-pinned jar from John Snow Labs into the pipelines
+        # bucket before cluster creation (idempotent), and the clusters read it
+        # from there.
+        self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
+        """GCS prefix under which orchestration stages Spark jars for PTS clusters.
+
+            Any GCS jar a PTS cluster references (via spark.jars) must have a
+            registered upstream source in `staged_jars`, or the DAG fails.
+        """
+        # The pts clusters run Spark 4, so they need the Scala 2.13 build. John Snow
+        # Labs publishes it under the same basename as the Scala 2.12 build, only
+        # in a `scala-2.13/` folder, so the staged copy carries the Scala version in
+        # its name: a 2.12 jar already staged for the same release cannot be
+        # mistaken for it.
+        spark_nlp_src = f'scala-2.13/spark-nlp-assembly-{spark_nlp_version}.jar'
+        spark_nlp_dst = f'spark-nlp-assembly_2.13-{spark_nlp_version}.jar'
+        self.staged_jars: dict[str, str] = {
+            f'{self.staged_jar_prefix}{spark_nlp_dst}': (
+                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_src}'
+            ),
+        }
+        """Registry of jars orchestration stages: staged destination URI -> source URL.
+
+            Add an entry here to have a new jar staged automatically for any PTS
+            cluster that references it in spark.jars. Only the PTS stage resolves
+            spark.jars against this registry; GENTROPY builds its clusters without
+            consulting it, so a GCS jar on a gentropy cluster is neither staged nor
+            rejected.
+        """
 
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'
         self.gentropy_cluster_init_script_uri = (
             'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
         )
+
+    @property
+    def release_uri(self) -> str:
+        """GCS URI for this run's output in the pipeline-runs bucket."""
+        return self.run.release_uri
+
+    @property
+    def pts_init_action_source(self) -> Path:
+        """Local path of the init action that installs pts on the pts clusters."""
+        return Path(__file__).parents[2] / 'assets' / 'install_dependencies_on_cluster.sh'
+
+    @property
+    def pts_init_action_uri(self) -> str:
+        """GCS URI the DAG uploads the pts init action to, and the pts clusters run it from."""
+        return f'{self.release_uri}/etc/bin/install_dependencies_on_cluster.sh'
+
+    @property
+    def is_ppp(self) -> bool:
+        """Whether this is a PPP run. Derived from the flavor portion of run_name."""
+        return self.run.is_ppp
 
     def pis_env_vars(self, step_name: str) -> dict[str, str]:
         """Return the environment variables for a PIS step."""
@@ -143,10 +225,19 @@ class UnifiedPipelineConfig:
         }
 
     def pts_env_vars(self, step_name: str) -> dict[str, str]:
-        """Return the environment variables for a PTS step."""
+        """Return the environment variables for a PTS step.
+
+        Polars 2 spills to disk when a query outgrows its memory budget. By default
+        it spills into the OS temp dir, which on these vms is the 10 GB boot disk: a
+        spill fills it and the step can hang instead of failing. Point it at the
+        work disk instead (polars creates the directory), and pin the disk budget
+        explicitly rather than rely on the polars default.
+        """
         return {
             'PTS_STEP': step_name.removeprefix('pts_'),
             'PTS_CONFIG_PATH': '/config.yaml',
+            'POLARS_OOC_SPILL_DIR': f'{self.pts.config["work_path"]}/.polars-spill',
+            'POLARS_OOC_DISK_BUDGET_MB': '64000',
         }
 
     def steps(self, prefix: str = '') -> list[str]:
@@ -291,7 +382,7 @@ class UnifiedPipelineConfig:
         Returns:
             str: The URI of the configuration file for the step.
         """
-        return f'{self.dev_uri or self.release_uri}/etc/config/{step_name}.yaml'
+        return f'{self.release_uri}/etc/config/{step_name}.yaml'
 
     def manifest_uri(self) -> str:
         """Return the URI of the manifest file for the run.
@@ -299,4 +390,4 @@ class UnifiedPipelineConfig:
         Returns:
             str: The URI of the manifest.
         """
-        return f'{self.dev_uri or self.release_uri}/manifest.json'
+        return f'{self.release_uri}/manifest.json'

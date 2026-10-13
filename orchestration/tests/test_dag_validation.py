@@ -1,6 +1,11 @@
 """Try to parse and validate the DAGs."""
 
+from typing import cast
+
 from airflow.models import DagBag
+
+from orchestration.operators.dataproc import CreateClusterOperator
+from orchestration.operators.gcs import UploadFileOperator
 
 
 def test_no_import_errors(dag_bag: DagBag) -> None:
@@ -38,3 +43,68 @@ def test_three_or_less_retries(dag_bag: DagBag) -> None:
     """Retries should be 3 or less."""
     for dag in dag_bag.dags.values():
         assert dag.default_args['retries'] <= 3
+
+
+def _stage_jar_tasks(dag_bag: DagBag) -> list:
+    dag = dag_bag.dags['unified_pipeline']
+    return [t for t in dag.tasks if t.task_id.split('.')[-1].startswith('stage_jar_')]
+
+
+def test_each_staged_jar_has_exactly_one_task(dag_bag: DagBag) -> None:
+    """One staging task per destination object, shared by every cluster using it.
+
+    Per-step staging produced ~60 tasks fetching the same ~629 MB jar, and
+    per-cluster staging still produced two writers for the one object.
+    """
+    tasks = _stage_jar_tasks(dag_bag)
+    destinations = [str(t.dst_uri) for t in tasks]
+    assert destinations, 'expected the pts clusters to stage their Spark-NLP jar'
+    assert len(destinations) == len(set(destinations)), (
+        f'a destination is staged by more than one task: {sorted(destinations)}'
+    )
+
+
+def test_staged_jars_gate_every_step_of_the_clusters_that_use_them(dag_bag: DagBag) -> None:
+    """A cluster must not be created before the jar it loads has been staged.
+
+    Clusters that declare no ``spark.jars`` (pts_openfda, pts_association) stage
+    nothing and are rightly ungated; but if any step of a cluster is gated, every
+    step of that cluster must be — each step creates the cluster itself.
+    """
+    dag = dag_bag.dags['unified_pipeline']
+    gated = {d for t in _stage_jar_tasks(dag_bag) for d in t.downstream_task_ids}
+    assert gated, 'expected jar staging to gate some cluster creation'
+
+    creates = [t.task_id for t in dag.tasks if t.task_id.split('.')[-1].startswith('create_cluster_')]
+    staged_cluster_types = {t.split('create_cluster_')[-1] for t in gated}
+
+    for task_id in creates:
+        cluster_type = task_id.split('create_cluster_')[-1]
+        if cluster_type in staged_cluster_types:
+            assert task_id in gated, f'{task_id} skips the staging its cluster depends on'
+
+
+def test_pts_init_action_is_uploaded_before_every_pts_cluster(dag_bag: DagBag) -> None:
+    """Every pts step creates its cluster itself, so each create must wait for the upload."""
+    dag = dag_bag.dags['unified_pipeline']
+    upload = cast(UploadFileOperator, dag.get_task('upload_pts_init_action'))
+    assert str(upload.src_path).endswith('assets/install_dependencies_on_cluster.sh')
+    assert str(upload.dst_uri).endswith('/etc/bin/install_dependencies_on_cluster.sh')
+    assert upload.retries
+
+    creates = {t.task_id for t in dag.tasks if t.task_id.startswith('pts_') and '.create_cluster_' in t.task_id}
+    assert creates, 'expected pts steps that create a cluster'
+    assert upload.downstream_task_ids == creates
+    for task_id in creates:
+        cluster_config = cast(dict, cast(CreateClusterOperator, dag.get_task(task_id)).cluster_config)
+        actions = cluster_config['initialization_actions']
+        assert [a['executable_file'] for a in actions] == [str(upload.dst_uri)], task_id
+
+
+def test_staged_jar_tasks_retry(dag_bag: DagBag) -> None:
+    """Staging gates every PTS cluster, so it must not inherit retries=0.
+
+    A single reset mid-transfer would otherwise fail every cluster creation.
+    """
+    for task in _stage_jar_tasks(dag_bag):
+        assert task.retries > 0, f'{task.task_id} would take down the PTS stage on one hiccup'

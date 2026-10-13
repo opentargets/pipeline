@@ -15,6 +15,7 @@ from pts.transformers.release_metrics import (
     _emit_evidence_metrics,
     _global_rich_metrics,
     _quality_control_flag_total_metrics,
+    _to_parquet_glob,
 )
 
 
@@ -222,6 +223,15 @@ def test_quality_control_flag_total_metrics() -> None:
     assert _metric_value(metrics, 'clinicalReportPhaseIvNotApprovedTotalCount') == 1
     assert _metric_value(metrics, 'clinicalReportUnvalidatedIndicationTotalCount') == 2
     assert _metric_value(metrics, 'clinicalReportIndirectPrimaryPurposeTotalCount') == 1
+
+
+def test_to_parquet_glob_skips_success_marker(tmp_path) -> None:
+    dataset = tmp_path / 'evidence.parquet'
+    dataset.mkdir()
+    pl.DataFrame({'id': [1, 2]}).write_parquet(dataset / 'part-00000.parquet')
+    (dataset / '_SUCCESS').write_text('{"committer": "manifest"}')
+
+    assert pl.read_parquet(_to_parquet_glob(f'{dataset}/')).height == 2
 
 
 def test_discover_dataset_paths_recovers_missing_directory_markers(monkeypatch) -> None:

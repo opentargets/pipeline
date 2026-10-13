@@ -1,16 +1,28 @@
-"""Parser to process chemical probes data and generate evidence."""
+"""Chemical probes dataset generation.
+
+Processes the Open Targets chemical probes Excel/CSV sources, resolves gene
+symbols to ENSG IDs via output/target, and produces a flat per-probe index
+validated against the target universe.
+"""
+
+from __future__ import annotations
 
 from typing import Any
 
 import pandas as pd
+from otter.storage.synchronous.handle import StorageHandle
 from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as f
 from pyspark.sql import types as t
 
 from pts.pyspark.common import Session
+from pts.pyspark.common.utils import maybe_coalesce, pandas_to_spark_strings, safe_array_union
 
-# Chemical probe data sources
+# Chemical probe data sources. Every entry must be a column of the PROBES sheet of the
+# upstream Probes & Drugs spreadsheet: a name that drifts upstream fails the step with
+# UNRESOLVED_COLUMN, so these are checked against the real headers, not just each other.
 PROBES_SETS = [
+    'A Collection of Useful Nuisance Compounds (CONS) for Interrogation of Bioassay Integrity',
     'Bromodomains chemical toolbox',
     'Chemical Probes for Understudied Kinases',
     'Chemical Probes.org',
@@ -20,15 +32,25 @@ PROBES_SETS = [
     'Nature Chemical Biology Probes',
     'Open Science Probes',
     'opnMe Portal',
-    'Probe Miner (suitable probes)',
     'Protein methyltransferases chemical toolbox',
     'SGC Probes',
-    'Tool Compound Set',
-    'Concise Guide to Pharmacology 2019/20',
+    'Concise Guide to Pharmacology 2025/26',
     'Kinase Chemogenomic Set (KCGS)',
     'Kinase Inhibitors (best-in-class)',
     'Novartis Chemogenetic Library (NIBR MoA Box)',
     'Nuisance compounds in cellular assays',
+]
+
+PROBES_COLUMNS = ['pdid', 'compound_name', 'control_name', 'experimental probe', 'calculated probe', *PROBES_SETS]
+
+PROBES_TARGETS_COLUMNS = [
+    'pdid',
+    'organism',
+    'target',
+    'action',
+    'P&D probe-likeness score',
+    'Cells score (Chemical Probes.org)',
+    'Organisms score (Chemical Probes.org)',
 ]
 
 
@@ -38,32 +60,88 @@ def chemical_probes(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Process chemical probes data and generate evidence."""
-    # Starting spark session
+    """Process chemical probes data, resolve target IDs, and write the output dataset.
+
+    Parses the chemical probes Excel/CSV sources, resolves gene symbols/UniProt
+    accessions to ENSG IDs via output/target, drops probes that cannot be mapped,
+    and writes a flat per-probe parquet to the destination.
+
+    Args:
+        source: Mapping with keys ``probes_excel``, ``drugs_csv``,
+            ``chembl_molecule``, and ``target`` (output/target parquet for
+            ENSG ID resolution and validation).
+        destination: Output path for the chemical probes parquet dataset.
+        settings: Step settings; supports ``partition_count`` (int, default 2).
+        properties: Spark properties passed to :class:`Session`.
+    """
     session = Session(app_name='chemical_probes', properties=properties)
 
-    # Extract input dataset locations from config
-    probes_excel = source['probes_excel']
-    drugs_csv = source['drugs_csv']
-    chembl_molecule_path = source['chembl_molecule']
+    chembl_molecule_df = session.load_data(source['chembl_molecule'])
+    target_df = session.spark.read.parquet(source['target'])
 
-    # Load ChEMBL molecule data for drug ID validation
-    chembl_molecule_df = session.load_data(chembl_molecule_path)
+    probes_data = process_probes_data(session.spark, source['probes_excel'])
+    probes_targets_data = process_probes_targets_data(session.spark, source['probes_excel'])
+    probes_sets_data = process_probes_sets_data(session.spark, source['probes_excel'])
+    targets_xref_data = process_targets_xrefs(session.spark, source['probes_excel'])
+    drugs_xref_data = process_drugs_xrefs(session.spark, source['drugs_csv'], chembl_molecule_df)
 
-    # Process chemical probes data from Excel and CSV files
-    probes_data = process_probes_data(session.spark, probes_excel)
-    probes_targets_data = process_probes_targets_data(session.spark, probes_excel)
-    probes_sets_data = process_probes_sets_data(session.spark, probes_excel)
-    targets_xref_data = process_targets_xrefs(session.spark, probes_excel)
-    drugs_xref_data = process_drugs_xrefs(session.spark, drugs_csv, chembl_molecule_df)
-
-    # Generate evidence from chemical probes
     evidence = generate_chemical_probes_evidence(
         session.spark, probes_data, probes_targets_data, probes_sets_data, targets_xref_data, drugs_xref_data
     )
 
-    # Write the final evidence dataset
-    evidence.write.mode('overwrite').parquet(destination)
+    ensg_lookup = _build_ensg_lookup(target_df)
+    result = _resolve_targets(evidence, ensg_lookup)
+
+    partition_count = (settings or {}).get('partition_count', 2)
+    maybe_coalesce(result, partition_count).write.mode('overwrite').parquet(destination)
+
+
+def _build_ensg_lookup(target_df: DataFrame) -> DataFrame:
+    """Build a symbol/proteinId → ENSG ID lookup from the target dataset.
+
+    Args:
+        target_df: Target parquet from ``output/target``.
+
+    Returns:
+        DataFrame with columns ``ensgId`` and ``name``
+        (``array<str>`` of protein accessions and approved symbol).
+    """
+    return target_df.select(
+        f.col('id').alias('ensgId'),
+        # proteinIds is NULL (not an empty array) for non-coding genes (e.g.
+        # microRNAs) since they have no protein product. flatten(array(...))
+        # returns NULL for the whole array if any element is NULL, which would
+        # silently drop approvedSymbol too -- safe_array_union coalesces each
+        # side to an empty array first, so non-coding targets still resolve by
+        # symbol.
+        safe_array_union(
+            f.col('proteinIds.id'),
+            f.array(f.col('approvedSymbol')),
+        ).alias('name'),
+    )
+
+
+def _resolve_targets(evidence: DataFrame, ensg_lookup: DataFrame) -> DataFrame:
+    """Resolve targetFromSourceId to ENSG IDs and validate against output/target.
+
+    Rows whose ``targetFromSourceId`` has no match in the target universe are
+    dropped.
+
+    Args:
+        evidence: Chemical probes evidence DataFrame from
+            :func:`generate_chemical_probes_evidence`.
+        ensg_lookup: ENSG lookup from :func:`_build_ensg_lookup`.
+
+    Returns:
+        DataFrame with ``targetId`` column added and ``targetFromSourceId``
+        retained.
+    """
+    return (
+        evidence
+        .join(ensg_lookup, f.array_contains(f.col('name'), f.col('targetFromSourceId')), 'inner')
+        .drop('name')
+        .withColumnRenamed('ensgId', 'targetId')
+    )
 
 
 def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destination_col: str) -> DataFrame:
@@ -81,7 +159,7 @@ def collapse_cols_data_in_array(df: DataFrame, source_cols: list[str], destinati
     source_cols = [f'`{e}`' for e in source_cols if ' ' in e]
     return df.withColumn(
         destination_col,
-        f.array([f.when(df[c] == 1, c.replace(r'`', '')) for c in source_cols]),
+        f.array([f.when(df[c].try_cast(t.DoubleType()) == 1, c.replace(r'`', '')) for c in source_cols]),
     ).withColumn(destination_col, f.array_except(f.col(destination_col), f.array(f.lit(None))))
 
 
@@ -110,9 +188,21 @@ def convert_stringified_array_to_array(col_name: str) -> Column:
     return f.split(f.translate(col_name, "[]'", ''), ', ').cast(t.ArrayType(t.StringType()))
 
 
-def replace_dash(col_name: str) -> Column:
-    """Converts to null those values that only contain `-`."""
-    return f.when(f.col(col_name).cast(t.StringType()) != '-', f.col(col_name))
+MISSING_VALUE_TOKENS = ('-', 'nan')
+
+
+def replace_missing_placeholder(col: Column) -> Column:
+    """Converts to null values that only encode "missing" as a placeholder token.
+
+    Upstream leaves `control_name` blank for probes without a designated control
+    compound. Pandas reads a blank Excel cell as a float NaN, and with Arrow
+    disabled (row-wise pandas-to-Spark schema inference), that NaN crosses over
+    as the literal string "NaN" -- Java's
+    `Double.toString(NaN)` -- rather than a null. "-" is a second, source-authored
+    placeholder token seen in the same column.
+    """
+    value = f.lower(f.trim(col.cast(t.StringType())))
+    return f.when(~value.isin(*MISSING_VALUE_TOKENS), col)
 
 
 def process_scores(col_name: str) -> Column:
@@ -122,21 +212,20 @@ def process_scores(col_name: str) -> Column:
 
 def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the compound and the scores given by the different sources."""
-    return (
-        spark
-        .createDataFrame(
-            pd
-            .read_excel(
-                probes_excel,
-                sheet_name='PROBES',
-                header=0,
-                index_col=0,
-            )
-            # Probes that do not have an associated target are marked as nulls
-            .query('target.notnull()')
-            .reset_index()
-            .drop('control_smiles', axis=1)
+    probes = (
+        pd
+        .read_excel(
+            StorageHandle(probes_excel).open('rb'),
+            sheet_name='PROBES',
+            header=0,
+            index_col=0,
         )
+        # Probes that do not have an associated target are marked as nulls
+        .query('target.notnull()')
+        .reset_index()
+    )
+    return (
+        pandas_to_spark_strings(spark, probes, PROBES_COLUMNS)
         # Collect list of datasources for each probe
         .transform(lambda df: collapse_cols_data_in_array(df, PROBES_SETS, 'datasourceIds'))
         # Collecting the list of detection methods of the probe
@@ -149,7 +238,7 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
         )
         .select(
             'pdid',
-            f.col('compound_name').alias('id'),
+            f.col('compound_name').alias('drugFromSource'),
             clean_origin_col().alias('origin'),
             # Flag the high-quality probes and remove this from the list of datasources
             extract_hq_flag().alias('isHighQuality'),
@@ -159,37 +248,34 @@ def process_probes_data(spark: SparkSession, probes_excel: str) -> DataFrame:
                     f.array(f.lit('High-quality chemical probes')),
                 )
             ).alias('datasourceId'),
-            replace_dash('control_name').alias('control'),
+            replace_missing_placeholder(f.col('control_name')).alias('control'),
         )
     )
 
 
 def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Collection of targets associated with the probes and their scores."""
+    probes_targets = (
+        pd
+        .read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='PROBES TARGETS', header=0, index_col=0)
+        # Probes that do not have an associated target are marked with "-",
+        # but a genuinely blank cell reads as NaN, not the string "-" --
+        # gene_name != '-' alone lets those rows through (NaN != anything).
+        .query("gene_name.notnull() and gene_name != '-'")
+        .reset_index()
+    )
     return (
-        spark
-        .createDataFrame(
-            pd
-            .read_excel(probes_excel, sheet_name='PROBES TARGETS', header=0, index_col=0)
-            # Probes that do not have an associated target are marked with "-"
-            .query("gene_name != '-'")
-            .reset_index()
-            .drop('control_smiles', axis=1)
-        )
+        pandas_to_spark_strings(spark, probes_targets, PROBES_TARGETS_COLUMNS)
         .filter(f.col('organism') == 'Homo sapiens')
         .withColumn(
             'mechanismOfAction',
-            f.when(
-                f.col('action') != '-',
-                f.split(f.col('action'), ';'),
-            ),
+            f.split(replace_missing_placeholder(f.col('action')), ';'),
         )
         .select(
             'pdid',
             f.col('target').alias('targetFromSource'),
             'mechanismOfAction',
             process_scores('`P&D probe-likeness score`').alias('probesDrugsScore'),
-            process_scores('`Probe Miner Score`').alias('probeMinerScore'),
             process_scores('`Cells score (Chemical Probes.org)`').alias('scoreInCells'),
             process_scores('`Organisms score (Chemical Probes.org)`').alias('scoreInOrganisms'),
         )
@@ -198,9 +284,11 @@ def process_probes_targets_data(spark: SparkSession, probes_excel: str) -> DataF
 
 def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Metadata about the different sources of probes."""
+    compound_sets = pd.read_excel(
+        StorageHandle(probes_excel).open('rb'), sheet_name='COMPOUNDSETS', header=0, index_col=0
+    )
     return (
-        spark
-        .createDataFrame(pd.read_excel(probes_excel, sheet_name='COMPOUNDSETS', header=0, index_col=0))
+        pandas_to_spark_strings(spark, compound_sets, ['COMPOUNDSET', 'SOURCE_URL'])
         .selectExpr('COMPOUNDSET as datasourceId', 'SOURCE_URL as url')
         .filter(f.col('url').startswith('http'))
     )
@@ -208,9 +296,10 @@ def process_probes_sets_data(spark: SparkSession, probes_excel: str) -> DataFram
 
 def process_targets_xrefs(spark: SparkSession, probes_excel: str) -> DataFrame:
     """Look-up table between the gene symbols and the UniProt IDs."""
-    return spark.createDataFrame(
-        pd.read_excel(probes_excel, sheet_name='TARGETS', header=0, index_col=0).reset_index()
-    ).selectExpr('target as targetFromSource', 'uniprot as targetFromSourceId')
+    targets = pd.read_excel(StorageHandle(probes_excel).open('rb'), sheet_name='TARGETS', header=0, index_col=0)
+    return pandas_to_spark_strings(spark, targets.reset_index(), ['target', 'uniprot']).selectExpr(
+        'target as targetFromSource', 'uniprot as targetFromSourceId'
+    )
 
 
 def process_drugs_xrefs(spark: SparkSession, drugs_csv: str, chembl_molecule: DataFrame) -> DataFrame:
@@ -261,7 +350,7 @@ def generate_chemical_probes_evidence(
     """
     grouping_cols = [
         'targetFromSourceId',
-        'id',
+        'drugFromSource',
         'pdid',
         'drugId',
         'mechanismOfAction',
@@ -269,7 +358,6 @@ def generate_chemical_probes_evidence(
         'control',
         'isHighQuality',
         'probesDrugsScore',
-        'probeMinerScore',
         'scoreInCells',
         'scoreInOrganisms',
     ]

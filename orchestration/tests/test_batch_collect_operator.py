@@ -40,9 +40,18 @@ def test_prepare_blob_pairs_sorts_files_and_builds_correct_names() -> None:
 
     assert src_bucket.blob.call_args_list == [call('a.parquet'), call('b.parquet')]
     assert dst_bucket.blob.call_args_list == [
-        call(f'dest/path/part-00000-{uuid.uuid5(uuid.NAMESPACE_URL, "a.parquet")}-c000.snappy.parquet'),
-        call(f'dest/path/part-00001-{uuid.uuid5(uuid.NAMESPACE_URL, "b.parquet")}-c000.snappy.parquet'),
+        call(f'dest/path/part-00000-{uuid.uuid5(uuid.NAMESPACE_URL, "a.parquet")}-c000.parquet'),
+        call(f'dest/path/part-00001-{uuid.uuid5(uuid.NAMESPACE_URL, "b.parquet")}-c000.parquet'),
     ]
+
+
+def test_prepare_blob_pairs_names_carry_no_codec_segment() -> None:
+    """Collect is a byte copy and cannot know the source codec, so the name must not claim one."""
+    dst_bucket = MagicMock()
+    BatchCollectOperator._prepare_blob_pairs(['a.json'], MagicMock(), dst_bucket, 'dest/path', 'json')
+
+    (name,) = (c.args[0] for c in dst_bucket.blob.call_args_list)
+    assert name.endswith('-c000.json')
 
 
 def test_submit_copies_maps_futures_to_source_blob_names() -> None:

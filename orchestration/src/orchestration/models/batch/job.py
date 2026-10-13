@@ -37,6 +37,9 @@ class JobSpec(BaseModel):
 
             labels: Optional labels to override the labels defined in the JobSpec.
                 This can be used to inject dynamic labels at runtime, for example by an Airflow operator.
+                They are applied to the job and forwarded to the allocation policy, which is what
+                puts them on the Compute Engine resources the job creates. Those resources, not the
+                job object, are what the billing export bills.
 
         Returns:
             batch_v1.Job: The built Job object.
@@ -70,7 +73,7 @@ class JobSpec(BaseModel):
         """
         j = {
             'task_groups': [self.task_group.build(task_environments=task_environments)],
-            'allocation_policy': self.allocation.build(),
+            'allocation_policy': self.allocation.build(labels=labels),
             'logs_policy': self.logs.build(),
             'labels': labels or self.labels or dict(Labels()),
         }

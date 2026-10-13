@@ -1,11 +1,15 @@
+import importlib.resources as pkg_resources
+import json
 from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+import numpy as np
+import pandas as pd
 import polars as pl
 import pyspark.sql.functions as f
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -22,6 +26,8 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
+
+from pts import schemas
 
 F = TypeVar('F', bound=Callable[..., Any])
 
@@ -147,59 +153,20 @@ def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
     return decorator
 
 
-def linear_rescaling(
-    value: float,
-    in_range_min: float,
-    in_range_max: float,
-    out_range_min: float,
-    out_range_max: float,
-) -> float:
-    """Linearly rescaling a value across ranges.
+def parse_spark_schema(schema_json: str) -> StructType:
+    """Parse Spark schema from JSON.
 
     Args:
-        value (float): value to rescale
-        in_range_min (float): minimum of the starting range
-        in_range_max (float): maximum of the starting range
-        out_range_min (float): minimum of the resulting range
-        out_range_max (float): maximum of the resulting range
+        schema_json (str): JSON filename containing spark schema in the schemas package
 
     Returns:
-        float: re-scaled value
-
-    Examples:
-        >>> # normal mapping: 5 maps from [0,10] -> [0,1] to 0.5
-        >>> linear_rescaling(5.0, 0.0, 10.0, 0.0, 1.0)
-        0.5
-
-        >>> # values below/above input range are clamped to the output range
-        >>> linear_rescaling(-10.0, 0.0, 10.0, 0.0, 1.0)
-        0.0
-        >>> linear_rescaling(20.0, 0.0, 10.0, 0.0, 1.0)
-        1.0
-
-        >>> # input range degenerate (in_range_min == in_range_max) and
-        >>> # output range degenerate (out_range_min == out_range_max):
-        >>> # score is set to the input value then clamped to the degenerate output range
-        >>> linear_rescaling(1.0, 1.0, 1.0, 2.0, 2.0)
-        2.0
-
-        >>> # input range degenerate but output range non-degenerate:
-        >>> # returns out_range_min (per implementation)
-        >>> linear_rescaling(1.0, 1.0, 1.0, 0.0, 1.0)
-        0.0
+        StructType: Spark schema
     """
-    delta1 = float(in_range_max - in_range_min)
-    delta2 = float(out_range_max - out_range_min)
+    pkg = pkg_resources.files(schemas).joinpath(schema_json)
+    with pkg.open(encoding='utf-8') as schema:
+        core_schema = json.load(schema)
 
-    if delta1 != 0.0:
-        score = (float(delta2) * (value - float(in_range_min)) / delta1) + float(out_range_min)
-    elif delta1 == 0.0 and delta2 == 0.0:
-        score = value
-    else:
-        score = out_range_min
-
-    # clamp to [out_range_min, out_range_max]
-    return min(max(score, out_range_min), out_range_max)
+    return StructType.fromJson(core_schema)
 
 
 def polars_type_to_spark(dtype: Any) -> DataType:
@@ -251,51 +218,35 @@ def polars_schema_to_spark(schema: Mapping[str, Any]) -> StructType:
     ])
 
 
-def snake_to_lower_camel(name: str) -> str:
-    """Convert a snake_case string to lowerCamelCase.
+def gff3_strand(col: Column) -> Column:
+    """Translate a GFF3 strand character into Ensembl's signed integer encoding.
 
-    >>> snake_to_lower_camel('evidence_score')
-    'evidenceScore'
-    >>> snake_to_lower_camel('already')
-    'already'
-    """
-    parts = name.split('_')
-    return parts[0] + ''.join(p.capitalize() for p in parts[1:])
+    Ensembl's core database stores strand as ``seq_region_strand`` -- 1 or -1 --
+    on gene, transcript and exon alike, and the release follows the database.
+    GFF3 spells the same fact as ``+``/``-`` in column 7, so every GFF3 read in
+    the pipeline translates it here on the way in.
 
+    Shared rather than duplicated per parse site: two GFF3 readers that disagree
+    about the encoding fail silently, because a strand comparison that never
+    matches yields a null column rather than an error.
 
-def rename_columns_to_camel_case(df: DataFrame) -> DataFrame:
-    """Recursively rename all columns and nested struct fields from snake_case to lowerCamelCase.
-
-    Handles:
-    - Top-level columns
-    - Nested struct fields (any depth)
-    - Array<struct> element fields
+    Mapped explicitly rather than cast: a GFF3 feature may also be unstranded
+    (``.``) or of unknown strand (``?``), and those must become null. Casting
+    ``.`` yields 0 in non-ANSI Spark -- a third, non-existent strand -- while
+    ``?`` yields null, so a cast is wrong in one case and accidental in the other.
 
     Args:
-        df: DataFrame with snake_case column/field names.
+        col: GFF3 column 7.
 
     Returns:
-        DataFrame with all names converted to lowerCamelCase.
+        IntegerType column holding 1, -1, or null. Only exact ``+`` and ``-``
+        map; whitespace-padded or otherwise unexpected input becomes null.
     """
-    from pyspark.sql.types import ArrayType as SparkArrayType
-
-    def _transform_schema(schema: StructType) -> StructType:
-        new_fields = []
-        for field in schema.fields:
-            new_name = snake_to_lower_camel(field.name)
-            new_type = _transform_type(field.dataType)
-            new_fields.append(StructField(new_name, new_type, field.nullable, field.metadata))
-        return StructType(new_fields)
-
-    def _transform_type(dtype):
-        if isinstance(dtype, StructType):
-            return _transform_schema(dtype)
-        if isinstance(dtype, SparkArrayType):
-            return SparkArrayType(_transform_type(dtype.elementType), dtype.containsNull)
-        return dtype
-
-    new_schema = _transform_schema(df.schema)
-    return df.sparkSession.createDataFrame(df.rdd, new_schema)
+    return (
+        f.when(col == '+', f.lit(1))
+        .when(col == '-', f.lit(-1))
+        .cast(IntegerType())
+    )
 
 
 def safe_array_union(*cols: Column) -> Column:
@@ -344,3 +295,33 @@ def maybe_repartition(df: DataFrame, n: int | None) -> DataFrame:
     if n:
         return df.repartition(n)
     return df
+
+
+def _cell_to_string(value: Any) -> str | None:
+    if pd.isna(value):
+        return None
+    if isinstance(value, bool | np.bool_):
+        return '1' if value else '0'
+    return str(value)
+
+
+def pandas_to_spark_strings(spark: SparkSession, pdf: pd.DataFrame, columns: list[str] | None = None) -> DataFrame:
+    """Convert a pandas frame to Spark with every cell as a string and blanks as null.
+
+    Arrow rejects a column that mixes numbers and text, so spreadsheet cells cross as
+    strings and the caller casts the columns it uses. Booleans become '1'/'0', so a
+    one-hot flag casts to a number either way.
+
+    Args:
+        spark: Spark session.
+        pdf: pandas frame, e.g. a sheet from ``pd.read_excel``.
+        columns: Columns to keep. All columns when omitted.
+
+    Returns:
+        DataFrame with one nullable string column per kept column.
+    """
+    if columns is not None:
+        pdf = pdf[columns]
+    values = pdf.astype(object).map(_cell_to_string)
+    schema = StructType([StructField(c, StringType(), True) for c in values.columns])
+    return spark.createDataFrame(values, schema=schema)

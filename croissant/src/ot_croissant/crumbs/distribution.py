@@ -121,7 +121,9 @@ class PlatformOutputDistribution:
             )
 
             if len(self.contained_in) > 0:
-                fileset.contained_in = self.contained_in
+                # A new list per fileset: mlcroissant types this as list[str | Source],
+                # which a list[str] is not assignable to.
+                fileset.contained_in = [*self.contained_in]
 
             self.distribution.append(fileset)
         return self
@@ -141,7 +143,7 @@ class PlatformOutputDistribution:
         if spark_context_jvm is None or spark_context_jsc is None:
             raise RuntimeError('spark context is not available')
         fs = spark_context_jvm.org.apache.hadoop.fs.FileSystem.get(spark_context_jsc.hadoopConfiguration())
-        p = spark_context_jvm.apache.hadoop.fs.Path(path)
+        p = spark_context_jvm.org.apache.hadoop.fs.Path(path)
         statuses = fs.listStatus(p)
 
         # Find folders with '=' in their name (Hive partition folders)

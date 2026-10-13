@@ -24,6 +24,8 @@ class CsvToParquetSpec(Spec):
     """The destination for the file, relative to the release root."""
     separator: str = ','
     """The separator used in the CSV file. Defaults to ','."""
+    infer_schema: bool = True
+    """Whether to let polars infer column types. Defaults to True."""
 
 
 class CsvToParquet(Task):
@@ -55,6 +57,7 @@ class CsvToParquet(Task):
             s.absolute,
             has_header=True,
             separator=self.spec.separator,
+            infer_schema=self.spec.infer_schema,
         )
         df.write_parquet(
             d.absolute,

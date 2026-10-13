@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from literature.dataset.publication import Publication
-from literature.datasource.epmc.publication import EPMCPublication
-from literature.datasource.epmc.publication_id_lut import PublicationIdLUT
 from loguru import logger
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce, maybe_repartition
+from pts.pyspark.literature_utils.dataset.publication import Publication
+from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublication
+from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -56,11 +56,10 @@ def _read_publications(
 ) -> Publication:
     """Read EPMC publications into a ``Publication`` dataset, in memory.
 
-    Replicates ``EPMCPublication.from_source`` but with a parameterisable
-    date-folder glob and an optional post-read repartition. No intermediate
-    publication parquet is written. The library's underscore-prefixed building
-    blocks are reused intentionally — the only part that must be reimplemented
-    is the read, because the library hardcodes its glob.
+    Reads each publication kind with a parameterisable date-folder glob and an
+    optional post-read repartition, then combines them with the
+    ``EPMCPublication`` building blocks. No intermediate publication parquet is
+    written.
 
     The final publication dataframe is persisted: the downstream pipeline
     triggers several independent actions (write match_valid, write

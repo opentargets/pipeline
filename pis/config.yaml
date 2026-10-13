@@ -4,17 +4,40 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
+  aact_version: '2026-09-23'
   chembl_version: '37'
-  efo_version: '3.88.0'
-  ensembl_version: '115'
-  gencode_version: '49'
+  efo_version: '3.93.0'
+  ensembl_version: '116'
+  gencode_version: '50'
   depmap_version: '2026Q1'
-  hpo_version: '2026-02-16'
-  mondo_version: '2026-05-05'
-  ot_curation: '26.05'
-  probes_drugs_version: '02_2025'
-  gnomad_version: '4.1'
+  hpo_version: '2026-06-23'
+  mondo_version: '2026-08-04'
+  ot_curation: '26.09.2'
+  probes_drugs_version: '01_2026'
+  gnomad_version: '4.1.1'
   gtex_version: '11'
+  cell_ontology_version: '2026-06-08'
+  uberon_version: '2026-06-23'
+  clinical_mining_version: '2026-05-27'
+  stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
+  biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
+  biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
+  drugtemist_ner_revision: 8cd97116de5fdc911817166df8cb41a022874b10
+  literature_lut_version: '2026.08'
+  atlas_version: '2025-07-14'
+  cosmic_version: '2025-06-24'
+  cosmic_hallmarks_version: '27-01-2026_v103'
+  eva_version: '2026-07-23'
+  reactome_version: '2026-01-19-v95'
+  clinpgx_version: '2026-07-24'
+  string_version: '12.0'
+  aopwiki_version: '2023-01-20'
+  toxcast_version: '2021-08-17'
+  hpa_subcellular_version: '2021-08-19'
+  validation_lab_version: '2024-11-12'
+  l2g_gold_standard_version: '2025-06-25'
+  l2g_test_split_version: '2026-09-02'
+  encore_version: '2026-09-21'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -121,11 +144,11 @@ steps:
   #: BIOSAMPLE STEP :###############################################################################
   biosample:
     - name: copy cell ontology
-      source: https://github.com/obophenotype/cell-ontology/releases/latest/download/cl.json
+      source: https://github.com/obophenotype/cell-ontology/releases/download/v${cell_ontology_version}/cl.json
       destination: input/biosample/cl.json
 
     - name: copy uberon
-      source: https://github.com/obophenotype/uberon/releases/latest/download/uberon.json
+      source: https://github.com/obophenotype/uberon/releases/download/v${uberon_version}/uberon.json
       destination: input/biosample/uberon.json
 
     - name: copy efo
@@ -133,14 +156,87 @@ steps:
       destination: input/biosample/efo.json
   ##################################################################################################
 
+  #: CHEMBL STEP :##################################################################################
+  chembl:
+    - name: copy chembl dump
+      source: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/releases/chembl_${chembl_version}/chembl_${chembl_version}_postgresql.tar.gz
+      destination: input/chembl/chembl.tar.gz
+  ##################################################################################################
+
+  #: AACT STEP :###################################################################################
+  # The preprocessing DAG downloads this archive; PTS reads it directly.
+  aact:
+    - name: copy aact dump
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      destination: input/aact.zip
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
   clinical_report:
+    # Consume the exact archive processed by the AACT preprocessing DAG.
+    - name: copy aact dump
+      source: gs://aact_data/${aact_version}/input/aact.zip
+      destination: input/clinical_report/aact.zip
+
+    # TODO: move other clinical report files to team bucket
     - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/**/*
+      glob: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/*
       do:
         - name: copy clinical_report ${match_stem} ${uuid}
           source: ${uri}
-          destination: input/clinical_report/${match_path}/${match_stem}.${match_ext}
+          destination: input/clinical_report/${match_stem}.${match_ext}
+
+    # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
+    - name: explode stop reasons model
+      foreach:
+        - config.json
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy stop reasons model ${each}
+          source: https://huggingface.co/opentargets/clinical_trial_stop_reasons/resolve/${stop_reasons_model_revision}/${each}
+          destination: input/clinical_report/models/opentargets/clinical_trial_stop_reasons/${stop_reasons_model_revision}/${each}
+
+    - name: explode biobert diseases ner model
+      foreach:
+        - config.json
+        - pytorch_model.bin
+        - special_tokens_map.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy biobert diseases ner model ${each}
+          source: https://huggingface.co/alvaroalon2/biobert_diseases_ner/resolve/${biobert_diseases_ner_revision}/${each}
+          destination: input/clinical_report/models/alvaroalon2/biobert_diseases_ner/${biobert_diseases_ner_revision}/${each}
+
+    - name: explode biobert chemical ner model
+      foreach:
+        - config.json
+        - pytorch_model.bin
+        - special_tokens_map.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy biobert chemical ner model ${each}
+          source: https://huggingface.co/alvaroalon2/biobert_chemical_ner/resolve/${biobert_chemical_ner_revision}/${each}
+          destination: input/clinical_report/models/alvaroalon2/biobert_chemical_ner/${biobert_chemical_ner_revision}/${each}
+
+    - name: explode drugtemist ner model
+      foreach:
+        - config.json
+        - merges.txt
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.json
+      do:
+        - name: copy drugtemist ner model ${each}
+          source: https://huggingface.co/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/resolve/${drugtemist_ner_revision}/${each}
+          destination: input/clinical_report/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -173,70 +269,11 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
 
-    # AACT clinical-trial batch extraction — a standalone source consumed by
-    # chembl_molecule (and clinical_report). Downloaded in the drug step so
-    # chembl_molecule's existing pis_drug dependency covers it.
-    - name: copy_many aact extraction batch results
-      sources: gs://ot-team/irene/clinical_mining/aact_extraction_batch_result/output/*
-      destination: input/clinical_report/aact_extraction_batch_results
-
-    - name: elasticsearch chembl drug warning
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_drug_warning.jsonl
-      index: chembl_${chembl_version}_drug_warning
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - parent_molecule_chembl_id
-        - efo_id
-        - efo_term
-        - efo_id_for_warning_class
-        - warning_class
-        - warning_country
-        - warning_description
-        - warning_id
-        - warning_refs
-        - warning_type
-        - warning_year
-    - name: elasticsearch chembl mechanism of action
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_mechanism.jsonl
-      index: chembl_${chembl_version}_mechanism
-      fields:
-        - _metadata
-        - molecule_chembl_id
-        - target_chembl_id
-        - action_type
-        - mechanism_of_action
-        - mechanism_refs
-        - record_id
-        - parent_molecule_chembl_id
-    - name: elasticsearch chembl molecule
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_molecule.jsonl
-      index: chembl_${chembl_version}_molecule
-      fields:
-        - molecule_chembl_id
-        - molecule_hierarchy
-        - molecule_type
-        - pref_name
-        - first_approval
-        - max_phase
-        - withdrawn_flag
-        - black_box_warning
-        - molecule_synonyms
-        - cross_references
-        - molecule_structures
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/drug/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
+    # AACT clinical-trial LLM extraction, produced by the extraction DAG.
+    - name: copy_many aact trial extraction
+      sources:
+        - gs://aact_data/${aact_version}/extraction/extractions.parquet
+      destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################
@@ -316,13 +353,8 @@ steps:
 
   #: EVIDENCE_EXPRESSION_ATLAS STEP :###############################################################
   evidence_expression_atlas:
-    - name: find_latest atlas
-      source: gs://otar010-atlas
-      scratchpad_key: 'latest_atlas'
     - name: copy atlas
-      requires:
-        - find_latest atlas
-      source: ${latest_atlas}
+      source: gs://otar010-atlas/cttv010-${atlas_version}.filtered.transformed.parquet
       destination: input/evidence/atlas.parquet
   ##################################################################################################
 
@@ -350,13 +382,8 @@ steps:
 
   #: EVIDENCE_COSMIC STEP :#########################################################################
   evidence_cosmic:
-    - name: find_latest cosmic
-      source: gs://otar007-cosmic
-      scratchpad_key: 'latest_cosmic'
     - name: copy cosmic
-      requires:
-        - find_latest cosmic
-      source: ${latest_cosmic}
+      source: gs://otar007-cosmic/CTTV007-${cosmic_version}.json.gz
       destination: input/evidence/cosmic.json.gz
   ##################################################################################################
 
@@ -395,13 +422,8 @@ steps:
 
   #: EVIDENCE_EVA STEP :############################################################################
   evidence_eva:
-    - name: find_latest eva
-      source: gs://otar012-eva/disease-target-evidence/*
-      scratchpad_key: 'latest_eva'
     - name: copy eva
-      requires:
-        - find_latest eva
-      source: ${latest_eva}
+      source: gs://otar012-eva/disease-target-evidence/cttv012-${eva_version}.json.gz
       destination: input/evidence/eva.json.gz
   ##################################################################################################
 
@@ -410,6 +432,14 @@ steps:
     - name: copy gene_burden cvdi
       source: https://static-content.springer.com/esm/art%3A10.1038%2Fs41588-024-01894-5/MediaObjects/41588_2024_1894_MOESM4_ESM.xlsx
       destination: input/evidence/gene_burden/cvdi.xlsx
+
+    - name: copy gene_burden genes_health
+      source: https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs41588-026-02553-7/MediaObjects/41588_2026_2553_MOESM4_ESM.xlsx
+      destination: input/evidence/gene_burden/genes_health.xlsx
+
+    - name: copy gene_burden brava
+      source: https://www.medrxiv.org/content/medrxiv/early/2026/05/24/2026.05.21.26353759/DC2/embed/media-2.xlsx
+      destination: input/evidence/gene_burden/brava.xlsx
 
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
@@ -506,37 +536,22 @@ steps:
 
   #: EVIDENCE_REACTOME STEP :#######################################################################
   evidence_reactome:
-    - name: find_latest reactome
-      source: gs://otar006-reactome
-      scratchpad_key: 'latest_reactome'
     - name: copy reactome
-      requires:
-        - find_latest reactome
-      source: ${latest_reactome}
+      source: gs://otar006-reactome/cttv006-${reactome_version}.json.gz
       destination: input/evidence/reactome.json.gz
   ##################################################################################################
 
   #: EVIDENCE_UNIPROT_LITERATURE STEP :#############################################################
   evidence_uniprot_literature:
-    - name: find_latest uniprot literature
-      source: gs://otar000-evidence_input/Uniprot_literature/json
-      scratchpad_key: 'latest_uniprot_literature'
     - name: copy uniprot_literature
-      requires:
-        - find_latest uniprot literature
-      source: ${latest_uniprot_literature}
+      source: gs://otar000-evidence_input/Uniprot_literature/json/uniprot_literature.json.gz
       destination: input/evidence/uniprot_literature.json.gz
   ##################################################################################################
 
   #: EVIDENCE_UNIPROT_VARIANTS STEP :###############################################################
   evidence_uniprot_variants:
-    - name: find_latest uniprot_variants
-      source: gs://otar000-evidence_input/Uniprot_variants/json
-      scratchpad_key: 'latest_uniprot_variants'
     - name: copy uniprot_variants
-      requires:
-        - find_latest uniprot_variants
-      source: ${latest_uniprot_variants}
+      source: gs://otar000-evidence_input/Uniprot_variants/json/uniprot_variants.json.gz
       destination: input/evidence/uniprot_variants.json.gz
   ##################################################################################################
 
@@ -558,32 +573,23 @@ steps:
 
   #: EVIDENCE_PPP STEP :############################################################################
   evidence_ppp:
-    # Validation lab => Get latest evidence.
-    - name: find_latest validation_lab
-      source: gs://otar013-ppp/validation_lab
-      scratchpad_key: latest_validation_lab
+    # Validation lab => evidence by fixed version:
     - name: copy validation_lab
-      requires:
-        - find_latest validation_lab
-      source: ${latest_validation_lab}
+      source: gs://otar013-ppp/validation_lab/validation_lab-${validation_lab_version}.json.gz
       destination: input/evidence/validation_lab.json.gz
 
-    # Encore => Get latest evidence.
-    - name: find_latest encore
-      source: gs://otar013-ppp/encore
-      scratchpad_key: latest_encore
-    - name: copy encore
-      requires:
-        - find_latest encore
-      source: ${latest_encore}
-      destination: input/evidence/encore.json.gz
+    # Encore => evidence by fixed version:
+    - name: copy_many encore
+      sources: gs://otar013-ppp/encore/encore_${encore_version}/*.parquet
+      destination: input/evidence/encore
 
-    # OT_crispr => generate evience.
+    # OT_crispr => fetch study metadata from spreadsheet:
     - name: spreadsheet_download otar crispr study spreadsheet
       sheet_id: 1eow_rTizGY_Vda0Q-8sFNWCOyFkKRSUen1Em1ysPSiA
       gid: '0'
       destination: input/evidence/ot_crispr/config.csv
 
+    # OT_crispr => fetch all mageck data:
     - name: explode_glob ot_crispr files
       glob: 'gs://otar013-ppp/ot_crispr/input_data_filtered/**/*'
       do:
@@ -617,13 +623,8 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/current_release/id_mapping/database_mappings/ensembl.tsv
       destination: input/interaction/rna_central_ensembl.tsv
 
-    - name: find_latest string interactions
-      source: gs://otar001-core/stringInteractions
-      scratchpad_key: latest_string_interactions
     - name: copy string interactions
-      requires:
-        - find_latest string interactions
-      source: ${latest_string_interactions}
+      source: gs://otar001-core/stringInteractions/9606.protein.links.full_w_homology.v${string_version}.txt.gz
       destination: input/interaction/string-interactions.txt.gz
   ##################################################################################################
 
@@ -659,26 +660,38 @@ steps:
   gwas:
     - name: copy_many GCCA study
       sources: gs://gwas_catalog_top_hits/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcca
 
     - name: copy_many GCCA credible sets
       sources: gs://gwas_catalog_top_hits/credible_sets/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcca
 
     - name: copy_many GCSS pics study
       sources: gs://gwas_catalog_sumstats_pics/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_pics
 
     - name: copy_many GCSS pics credible sets
       sources: gs://gwas_catalog_sumstats_pics/credible_sets/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_pics
 
     - name: copy_many GCSS susie study
       sources: gs://gwas_catalog_sumstats_susie/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_susie
 
     - name: copy_many GCSS susie credible sets
-      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260519/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260901/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_susie
 
     - name: copy_many finngen study
@@ -705,14 +718,23 @@ steps:
   heritability:
     - name: copy_many gwas ldsc h2 estimates
       sources: gs://gwas_catalog_sumstats_susie/heritability_estimates/**/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/heritability_estimate
   ##################################################################################################
 
   #: L2G STEP :#####################################################################################
   l2g:
     - name: copy_many l2g gold standard
-      sources: gs://genetics-portal-dev-analysis/yt4/2506_release/training_set/20250625_gentropy_paper_v1.json/*.json
+      sources: gs://otar001-core/l2g/goldStandard/${l2g_gold_standard_version}/*.json
       destination: input/l2g/gold_standard.json
+  ##################################################################################################
+
+  #: L2G_PREDEFINED_TEST_FOR_SPLIT STEP :###########################################################
+  l2g_predefined_test_for_split:
+    - name: copy_many l2g predefined test set for the train/test split
+      sources: gs://otar001-core/l2g/trainTestSplit/${l2g_test_split_version}/test/*.parquet
+      destination: input/l2g/predefined_test_for_split
   ##################################################################################################
 
   #: LITERATURE STEP :##############################################################################
@@ -722,7 +744,7 @@ steps:
       destination: input/literature/PMID_PMCID_DOI.csv.gz
 
     - name: explode_glob literature dating lut
-      glob: gs://otar000-evidence_input/literature_export/2026.05/*.json.gz
+      glob: gs://otar000-evidence_input/literature_export/${literature_lut_version}/*.json.gz
       do:
         - name: copy literature dating lut ${match_stem}
           source: ${match_prefix}/${match_path}/${match_stem}.${match_ext}
@@ -732,20 +754,45 @@ steps:
 
   #: MOLQTL STEP: ##################################################################################
   molqtl:
-    - name: copy_many eQTL Catalogue study
-      sources: gs://eqtl_catalogue_data/study_index/*.parquet
-      destination: input/molqtl/study/eqtl_catalogue
+    - name: explode otar2077 molqtl
+      foreach:
+        - MAGE_OTAR
+        - IBDverse
+      do:
+        - name: copy_many molqtl ${each} study
+          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/pub_date_patched_study_index/*.parquet
+          destination: input/molqtl/study/otar2077/${each}
 
-    - name: copy_many eQTL Catalogue credible sets
+        - name: copy_many molqtl ${each} credible sets
+          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_locus/*/*.parquet
+          destination: input/molqtl/credible_set/otar2077/${each}
+
+    - name: copy_many molqtl eQTL Catalogue GTEx v10 study
+      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_index/*/*.parquet
+      destination: input/molqtl/study/GTEx_v10
+
+    - name: copy_many molqtl eQTL Catalogue GTEx v10 credible sets
+      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_locus/*/*.parquet
+      destination: input/molqtl/credible_set/GTEx_v10
+
+    - name: copy_many eQTL Catalogue r7 study
+      sources: gs://eqtl_catalogue_data/study_index/*.parquet
+      destination: input/molqtl/study/eqtl_catalogue/r7
+
+    - name: copy_many eQTL Catalogue r7 credible sets
       sources: gs://eqtl_catalogue_data/credible_set_datasets/eqtl_catalogue_susie_patched_v2/*.parquet
-      destination: input/molqtl/credible_set/eqtl_catalogue
+      destination: input/molqtl/credible_set/eqtl_catalogue/r7
 
     - name: copy_many UKBB PPP EUR study
       sources: gs://ukb_ppp_eur_data/study_index/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/molqtl/study/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible sets
       sources: gs://ukb_ppp_eur_data/credible_set_clean/20250129/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set/ukb_ppp_eur
   ##################################################################################################
 
@@ -754,8 +801,7 @@ steps:
     - name: explode otar2077 molqtl
       foreach:
         - microglia
-        - MAGE_OTAR
-        - IBDverse
+
       do:
         - name: copy_many molqtl ${each} study
           sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
@@ -778,13 +824,30 @@ steps:
           sources: gs://eqtlgen_data/${each}/260326/credible_set/*.parquet
           destination: input/molqtl/credible_set/eQTLGen/${each}
 
-    - name: copy_many molqtl eQTL Catalogue GTEx v10 study
-      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_index/*/*.parquet
-      destination: input/molqtl/study/GTEx_v10
+    - name: copy_many eQTL Catalogue r8 study
+      sources: gs://eqtl_catalogue_data/r8/study_index/*.parquet
+      destination: input/molqtl/study/eqtl_catalogue/r8
 
-    - name: copy_many molqtl eQTL Catalogue GTEx v10 credible sets
-      sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/GTEx_v10_majiq/gentropy/output/study_locus/*/*.parquet
-      destination: input/molqtl/credible_set/GTEx_v10
+    - name: copy_many eQTL Catalogue r8 credible sets
+      sources: gs://eqtl_catalogue_data/r8/credible_set/*.parquet
+      destination: input/molqtl/credible_set/eqtl_catalogue/r8
+
+    - name: copy_many molqtl deCODE proteomics study
+      sources: gs://decode_data/smp/study/*.parquet
+      destination: input/molqtl/study/deCODE_proteomics
+
+    - name: copy_many molqtl deCODE proteomics credible sets
+      sources: gs://decode_data/smp/credible_set/*.parquet
+      destination: input/molqtl/credible_set/deCODE_proteomics
+
+    # SLE-map credible set and study table:
+    - name: copy_many sle_map credible sets
+      source: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/credible_set/*.parquet
+      destination: input/molqtl/credible_set/sle_map
+
+    - name: copy_many sle_map study
+      source: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/study/*.parquet
+      destination: input/molqtl/study/sle_map
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
@@ -807,7 +870,7 @@ steps:
   # '.results.drug.event.partitions[0:10] | map(.file)[]'
   openfda:
     - name: copy blacklisted event
-      source: https://raw.githubusercontent.com/opentargets/platform-etl-backend/master/src/main/resources/blacklisted_events.txt
+      source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/target_safety/openfda_blacklisted_events.txt
       destination: input/openfda/blacklisted_events.txt
 
     - name: copy openfda archive manifest
@@ -840,13 +903,8 @@ steps:
 
   #: PHARMACOGENETICS STEP :########################################################################
   pharmacogenetics:
-    - name: find_latest clinpgx annotation
-      source: gs://otar012-eva/pharmacogenomics/
-      scratchpad_key: latest_clinpgx_annotation
     - name: copy clinpgx annotation
-      requires:
-        - find_latest clinpgx annotation
-      source: ${latest_clinpgx_annotation}
+      source: gs://otar012-eva/pharmacogenomics/cttv012-${clinpgx_version}.json.gz
       destination: input/pharmacogenetics/clinpgx_annotation.json.gz
 
     - name: copy ot_curation extracted phenotypes
@@ -868,23 +926,13 @@ steps:
   #: SO STEP :######################################################################################
   so:
     - name: copy sequence ontology
+      # SO has no releases on github. We cannot reference tags or release, we have to pull from the default branch:
       source: https://raw.githubusercontent.com/The-Sequence-Ontology/SO-Ontologies/master/Ontology_Files/so.json
       destination: input/so/so.json
   ##################################################################################################
 
   #: TARGET STEP :##################################################################################
   target:
-    - name: elasticsearch chembl target
-      url: https://www.ebi.ac.uk/chembl/elk/es
-      destination: input/target/chembl/chembl_target.jsonl
-      index: chembl_${chembl_version}_target
-      fields:
-        - _metadata
-        - target_chembl_id
-        - target_components
-        - target_type
-        - pref_name
-
     - name: copy chemical probes
       source: https://www.probes-drugs.org/media/download/probes/pd_export_${probes_drugs_version}_probes_standardized.xlsx
       destination: input/target/chemicalprobes/probes.xlsx
@@ -921,8 +969,8 @@ steps:
       destination: input/target/genenames/hgnc_complete_set.json
 
     - name: copy gnomad
-      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv
-      destination: input/target/gnomad/gnomad_constraint_metrics.tsv
+      source: https://storage.googleapis.com/gcp-public-data--gnomad/release/${gnomad_version}/constraint/gnomad.v${gnomad_version}.constraint_metrics.tsv.bgz
+      destination: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
 
     - name: copy go annotation human eco gpa
       source: https://ftp.ebi.ac.uk/pub/databases/GO/goa/HUMAN/goa_human.gpa.gz
@@ -940,13 +988,8 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/current_release/id_mapping/database_mappings/ensembl.tsv
       destination: input/target/go/ensembl.tsv
 
-    - name: find_latest cosmic hallmark
-      source: gs://otar007-cosmic/hallmarks
-      scratchpad_key: 'latest_cosmic_hallmark'
     - name: copy cosmic
-      requires:
-        - find_latest cosmic hallmark
-      source: ${latest_cosmic_hallmark}
+      source: gs://otar007-cosmic/hallmarks/CTTV007-${cosmic_hallmarks_version}_hallmarks.tsv.gz
       destination: input/target/hallmarks/cosmic-hallmarks.tsv.gz
 
     - name: explode homology
@@ -983,13 +1026,8 @@ steps:
       source: https://www.proteinatlas.org/download/tsv/subcellular_location.tsv.zip
       destination: input/target/hpa/subcellular_location.tsv.zip
 
-    - name: find_latest hpa subcellular location ssl
-      source: gs://otar001-core/subcellularLocations
-      scratchpad_key: latest_hpa_subcellular_location_ssl
     - name: copy subcellular location
-      requires:
-        - find_latest hpa subcellular location ssl
-      source: ${latest_hpa_subcellular_location_ssl}
+      source: gs://otar001-core/subcellularLocations/HPA_subcellular_locations_SL-${hpa_subcellular_version}.tsv
       destination: input/target/hpa/subcellular_locations_ssl.tsv
 
     - name: copy ncbi homosapiens gene info
@@ -1010,40 +1048,16 @@ steps:
           source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/target_safety/${each}
           destination: input/target/safety/${each}
 
-    - name: find_latest toxcast
-      source: gs://otar001-core/TargetSafety/data_files/toxcast
-      scratchpad_key: latest_toxcast
     - name: copy toxcast
-      requires:
-        - find_latest toxcast
-      source: ${latest_toxcast}
+      source: gs://otar001-core/TargetSafety/data_files/toxcast/ToxCast_${toxcast_version}.tsv
       destination: input/target/safety/toxcast.tsv
 
-    - name: find_latest aopwiki
-      source: gs://otar001-core/TargetSafety/data_files/aopwiki
-      scratchpad_key: latest_aopwiki
     - name: copy aopwiki
-      requires:
-        - find_latest aopwiki
-      source: ${latest_aopwiki}
+      source: gs://otar001-core/TargetSafety/data_files/aopwiki/aopwiki-${aopwiki_version}.json
       destination: input/target/safety/aopwiki.json
 
-    - name: find_latest tep
-      source: gs://otar001-core/TEPs
-      scratchpad_key: latest_tep
-    - name: copy tep
-      requires:
-        - find_latest tep
-      source: ${latest_tep}
-      destination: input/target/tep/tep.json.gz
-
-    - name: find_latest tractability
-      source: gs://otar001-core/Tractability
-      scratchpad_key: latest_tractability
     - name: copy tractability
-      requires:
-        - find_latest tractability
-      source: ${latest_tractability}
+      source: gs://otar001-core/Tractability/tractability_buckets.tsv
       destination: input/target/tractability/tractability.tsv
 
     - name: copy uniprot

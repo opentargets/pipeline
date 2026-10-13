@@ -43,7 +43,7 @@ resource "google_compute_instance" "up_airflow_dev_vm" {
 
   boot_disk {
     initialize_params {
-      image = "debian-cloud/debian-11"
+      image = "debian-cloud/debian-12"
       type  = "pd-ssd"
       size  = "50"
     }

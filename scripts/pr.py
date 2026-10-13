@@ -46,6 +46,11 @@ def get_next_version(package: str, current: Version, versions: list[Version]) ->
     next_version = Version(f'{current.base_version}rc{latest_rc + 1}')
     if next_version < current:
         bail(f'{next_version} < current {current}, check pyproject.toml')
+    if next_version == current:
+        bail(
+            f'{package} is already at {current} but tag {package}@v{current} does not exist; '
+            f'set the version to {current.base_version}rc{latest_rc} in pyproject.toml'
+        )
     return next_version
 
 

@@ -65,7 +65,7 @@ def disease_phenotype(
         mondo_phenotypes
         .filter(pl.col('xrefs').is_not_null())
         .select('id', pl.col('xrefs').alias('phenotype_xrefs'))
-        .explode('phenotype_xrefs')
+        .explode('phenotype_xrefs', empty_as_null=True)
         .group_by('id')
         .agg(phenotype_xrefs=pl.col('phenotype_xrefs').unique())
     )
@@ -124,10 +124,10 @@ def disease_phenotype(
 
     # explode by dbxrefs, filtering only omim and orphanet
     explode_mondo = (
-        mondo_clean.explode('id').with_columns(
+        mondo_clean.explode('id', empty_as_null=True).with_columns(
             pl.col('id').str.replace('Orphanet:', 'ORPHA:'),
         )
-    ).explode('xrefs')
+    ).explode('xrefs', empty_as_null=True)
 
     # filter the mondo ids, leave only the ones that have an xref existing in efo
     trim_mondo = explode_mondo.join(
@@ -211,7 +211,7 @@ def disease_phenotype(
             ),
         )
         .drop('dbXRefs', 'obsoleteXRefs')
-        .explode('XRefs')
+        .explode('XRefs', empty_as_null=True)
     )
 
     phenotypes_with_disease = phenotypes.join(
@@ -259,7 +259,7 @@ def disease_phenotype(
                 pl.col('id').alias('phenotypeNew'),
                 pl.concat_list(pl.col('obsoleteTerms'), pl.col('id')).alias('phenotype'),
             )
-            .explode('phenotype'),
+            .explode('phenotype', empty_as_null=True),
             on='phenotype',
             how='left',
         )

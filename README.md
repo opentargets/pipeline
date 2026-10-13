@@ -64,6 +64,13 @@ last commit's sha. After confirmation, it will create and push that tag, which w
 trigger the [`tag.yaml`](.github/workflows/tag.yaml) workflow to run checks, build
 and publish the image.
 
+> [!NOTE]
+> The package's `pyproject.toml` version must match the branch you're on: an
+> `rc`/`final` version (e.g. `26.9.0rc3`) only builds from `main`, while a `dev`
+> version (e.g. `26.9.0.dev0`) only builds from any other branch. `make build`
+> fails otherwise — bump to a `dev` version on feature branches with
+> `uv --directory <package> version <next-dev-version>`.
+
 
 #### Open a PR
 

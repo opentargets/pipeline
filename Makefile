@@ -1,7 +1,7 @@
 ### HOUSEKEEPING TARGETS ###
 COMPONENTS := pis pts orchestration croissant
 
-.PHONY: help clean test dev
+.PHONY: help clean test dev versions
 
 
 #: HOUSEKEEPING TARGETS ############################################################################
@@ -23,8 +23,11 @@ lint-%: %/pyproject.toml
 	@cd $* && uv run --frozen ruff check . && uv run --frozen ty check
 	@echo "lint completed for $*"
 
-lint: $(addprefix lint-,$(COMPONENTS))  ## Run linter for all components
+lint: versions $(addprefix lint-,$(COMPONENTS))  ## Run linter for all components
 	@echo "lint completed for all components"
+
+versions:  ## Check ruff, ty and uv are pinned to one version everywhere
+	@./scripts/check_tool_versions.py
 
 test-%: dev-%
 	@cd $* && uv run --frozen pytest -rxs

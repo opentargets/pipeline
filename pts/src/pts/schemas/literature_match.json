@@ -1,0 +1,117 @@
+{
+    "fields": [
+      {
+        "name": "organisms",
+        "type": {
+          "containsNull": true,
+          "elementType": "string",
+          "type": "array"
+        },
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pmcid",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pmid",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pprid",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "pubDate",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "year",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "month",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "day",
+        "type": "integer",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "traceSource",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "section",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "sectionEnd",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "sectionStart",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "text",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "endInSentence",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "startInSentence",
+        "type": "long",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "nullable": true,
+        "metadata": {}
+      }
+    ],
+    "type": "struct"
+  }

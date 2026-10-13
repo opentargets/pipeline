@@ -11,7 +11,7 @@ from orchestration.utils.path import GCSPath, IOManager
 class ManifestArtifactDiffer(Differ):
     """Check whether the artifacts in the manifest exist in the release_uri.
 
-    This class fetches the manifest from GCS, using either `dev_uri` or `release_uri`
+    This class fetches the manifest from GCS using `release_uri`
     and then checks the steps' artifacts' destinations to ensure they are present.
 
     Args:
@@ -55,20 +55,27 @@ class ManifestArtifactDiffer(Differ):
             self.logger.info(f'step {step_name} not found in manifest')
             return True
         for artifact in relevant_manifest_step.get('artifacts', []):
-            artifact_uri: str = artifact.get('destination')
-            if not artifact_uri.startswith('gs://'):
-                self.logger.info(f'ignoring intermediate artifact {artifact_uri}')
-                continue
-            self.logger.info(f'checking artifact {artifact_uri}')
-            if not artifact_uri:
-                self.logger.warning(f'artifact {artifact} has no destination')
-                return True
+            destination = artifact.get('destination')
+            # Steps with more than one named destination record a single
+            # artifact whose `destination` is a list of URIs rather than one
+            # string; normalise to a list either way so the checks below run
+            # per-URI regardless of shape.
+            artifact_uris = destination if isinstance(destination, list) else [destination]
+            for artifact_uri in artifact_uris:
+                artifact_uri: str
+                if not artifact_uri.startswith('gs://'):
+                    self.logger.info(f'ignoring intermediate artifact {artifact_uri}')
+                    continue
+                self.logger.info(f'checking artifact {artifact_uri}')
+                if not artifact_uri:
+                    self.logger.warning(f'artifact {artifact} has no destination')
+                    return True
 
-            bucket, blob_name = artifact_uri.removeprefix('gs://').split('/', 1)
-            b = client.bucket(bucket).blob(blob_name)
-            if not b.exists():
-                self.logger.warning(f'artifact {artifact_uri} not found')
-                return True
+                bucket, blob_name = artifact_uri.removeprefix('gs://').split('/', 1)
+                b = client.bucket(bucket).blob(blob_name)
+                if not b.exists():
+                    self.logger.warning(f'artifact {artifact_uri} not found')
+                    return True
 
         # if we reach this, all artifacts exist
         return False

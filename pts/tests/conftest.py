@@ -1,5 +1,12 @@
 """Pytest configuration and shared fixtures for PTS tests."""
 
+# Imported first, before any test module. See pts/transformers/l2g/__init__.py: sklearn and
+# xgboost each ship their own LLVM OpenMP runtime on macOS, and whichever loads first wins.
+# The l2g package guard only helps once that package is imported, so a test module importing
+# skops at its top would still lose the race and die with SIGSEGV at first fit. This makes the
+# ordering hold for the whole suite whatever the collection order.
+import xgboost  # noqa: F401  # isort: skip
+
 import pytest
 from pyspark.sql import SparkSession
 
@@ -21,7 +28,10 @@ def spark():
         .config('spark.sql.adaptive.coalescePartitions.enabled', 'false')
         .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
         .config('spark.sql.execution.arrow.pyspark.enabled', 'true')
+        .config('spark.sql.execution.arrow.pyspark.fallback.enabled', 'false')
         .config('spark.sql.shuffle.partitions', '1')
+        # as Session and the pts clusters do: Spark 4 defaults ANSI mode on
+        .config('spark.sql.ansi.enabled', 'false')
         .getOrCreate()
     )
     spark_session.sparkContext.setLogLevel('ERROR')
@@ -37,8 +47,9 @@ def pts_session():
     """
     # Use small resources in CI if desired:
     props = {
-        # example: override any defaults if needed
-        # 'spark.driver.memory': '1g',
+        # no test runs OnToma, so skip resolving spark-nlp and its ~600 MB of
+        # dependencies from Maven Central
+        'spark.jars.packages': '',
     }
 
     s = Session(app_name='pts-test', properties=props)
@@ -47,3 +58,17 @@ def pts_session():
     finally:
         # ensure the spark session stops even if tests fail
         s.stop()
+
+
+@pytest.fixture(params=['false', 'true'], ids=['ansi_off', 'ansi_on'])
+def ansi(spark: SparkSession, request: pytest.FixtureRequest):
+    """Run a test with ANSI mode off, as pts runs, and on, as Spark 4 defaults.
+
+    Every session in the run is the same SparkSession, so the setting is put back.
+    """
+    previous = spark.conf.get('spark.sql.ansi.enabled')
+    spark.conf.set('spark.sql.ansi.enabled', request.param)
+    try:
+        yield request.param == 'true'
+    finally:
+        spark.conf.set('spark.sql.ansi.enabled', previous)

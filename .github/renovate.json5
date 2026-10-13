@@ -1,0 +1,188 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  timezone: 'Europe/London',
+  schedule: ['* 0-5 1-7 * 1'],
+  prHourlyLimit: 0,
+  prConcurrentLimit: 6,
+  minimumReleaseAge: '3 days',
+  labels: ['dependencies'],
+  semanticCommits: 'disabled',
+  commitMessageAction: 'update',
+  dependencyDashboard: false,
+  enabledManagers: ['pep621', 'github-actions', 'dockerfile', 'pre-commit', 'custom.regex'],
+  'pre-commit': {
+    enabled: true,
+  },
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    schedule: ['at any time'],
+    minimumReleaseAge: null,
+    draftPR: false,
+  },
+  // also bumped by the tooling group below
+  constraints: {
+    uv: '0.12.24',
+  },
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ['* 0-5 1-7 * 1'],
+    commitMessageAction: 'refresh lock file',
+  },
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'uv installer and init action',
+      managerFilePatterns: [
+        '/^orchestration/deployment/startup_user\\.sh$/',
+        '/^orchestration/src/orchestration/assets/install_dependencies_on_cluster\\.sh$/',
+      ],
+      matchStrings: [
+        'astral\\.sh/uv/(?<currentValue>[^/\\s]+)/install\\.sh',
+        'UV_VERSION="(?<currentValue>[^"]+)"',
+      ],
+      depNameTemplate: 'uv',
+      datasourceTemplate: 'pypi',
+    },
+    {
+      customType: 'regex',
+      description: 'uv constraint in this file',
+      managerFilePatterns: ['/^\\.github/renovate\\.json5$/'],
+      matchStrings: ["constraints: \\{\\s+uv: '(?<currentValue>[^']+)'"],
+      depNameTemplate: 'uv',
+      datasourceTemplate: 'pypi',
+    },
+    {
+      customType: 'regex',
+      description: 'polars fence in uv constraint-dependencies',
+      managerFilePatterns: ['/^pts/pyproject\\.toml$/'],
+      matchStrings: ['"(?<depName>polars)(?<currentValue><[^"]+)"'],
+      datasourceTemplate: 'pypi',
+      versioningTemplate: 'pep440',
+    },
+    {
+      customType: 'regex',
+      description: 'gcloud image run by the gce startup script',
+      managerFilePatterns: ['/^orchestration/src/orchestration/operators/gce\\.py$/'],
+      matchStrings: [
+        "'(?<depName>gcr\\.io/google\\.com/cloudsdktool/google-cloud-cli):(?<currentValue>[^'@]+)'\\s*'@(?<currentDigest>sha256:[0-9a-f]{64})'",
+      ],
+      datasourceTemplate: 'docker',
+    },
+  ],
+  packageRules: [
+    {
+      matchFileNames: ['pis/**'],
+      commitMessagePrefix: 'pis:',
+      additionalBranchPrefix: 'pis-',
+    },
+    {
+      matchFileNames: ['pts/**'],
+      commitMessagePrefix: 'pts:',
+      additionalBranchPrefix: 'pts-',
+    },
+    {
+      matchFileNames: ['orchestration/**'],
+      commitMessagePrefix: 'orchestration:',
+      additionalBranchPrefix: 'orchestration-',
+    },
+    {
+      matchFileNames: ['croissant/**'],
+      commitMessagePrefix: 'croissant:',
+      additionalBranchPrefix: 'croissant-',
+    },
+    // lock maintenance covers in-range bumps elsewhere
+    {
+      matchManagers: ['pep621'],
+      matchFileNames: ['orchestration/**'],
+      rangeStrategy: 'update-lockfile',
+    },
+    {
+      matchManagers: ['pep621'],
+      matchPackageNames: ['polars', 'pyspark'],
+      rangeStrategy: 'update-lockfile',
+    },
+    {
+      matchManagers: ['pep621'],
+      matchUpdateTypes: ['minor', 'patch'],
+      matchPackageNames: ['!polars', '!pyspark'],
+      groupName: 'non-major dependencies',
+      groupSlug: 'non-major',
+    },
+    {
+      matchManagers: ['github-actions', 'pre-commit'],
+      commitMessagePrefix: 'ci:',
+    },
+    {
+      matchManagers: ['github-actions', 'pre-commit'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      groupName: 'tooling',
+    },
+    {
+      matchPackageNames: [
+        'ruff',
+        'astral-sh/ruff-pre-commit',
+        'ty',
+        'astral-sh/ty-pre-commit',
+        'uv',
+        'uv-build',
+        'astral-sh/uv',
+        'ghcr.io/astral-sh/uv',
+      ],
+      groupName: 'tooling',
+      commitMessagePrefix: 'ci:',
+      additionalBranchPrefix: '',
+      // registry images have no release timestamp to age
+      minimumReleaseAge: null,
+    },
+    {
+      matchFileNames: ['pts/**'],
+      matchPackageNames: ['polars'],
+      groupName: 'polars',
+    },
+    {
+      matchUpdateTypes: ['major'],
+      draftPR: true,
+      addLabels: ['major'],
+    },
+    // gcloud bumps its major almost weekly
+    {
+      matchPackageNames: ['gcr.io/google.com/cloudsdktool/google-cloud-cli'],
+      minimumReleaseAge: null,
+      draftPR: false,
+    },
+    {
+      matchDatasources: ['docker'],
+      matchPackageNames: ['apache/airflow'],
+      versioning: 'regex:^slim-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-python(?<compatibility>\\d+\\.\\d+)$',
+    },
+    {
+      matchPackageNames: ['apache-airflow', 'apache/airflow'],
+      groupName: 'airflow',
+      draftPR: true,
+      addLabels: ['airflow'],
+      minimumReleaseAge: null,
+    },
+    // only the lock holds sqlalchemy and deprecated to Airflow's constraints
+    {
+      matchFileNames: ['orchestration/**'],
+      matchUpdateTypes: ['lockFileMaintenance'],
+      enabled: false,
+    },
+    {
+      matchPackageNames: ['python', 'cellex'],
+      enabled: false,
+    },
+    // pinned to the spark_nlp_version jar staged by orchestration
+    {
+      matchPackageNames: ['spark-nlp'],
+      enabled: false,
+    },
+    // Spark 4.1 on the Dataproc 3.0 image
+    {
+      matchFileNames: ['pts/**'],
+      matchPackageNames: ['pyspark'],
+      allowedVersions: '<4.2',
+    },
+  ],
+}

@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.ontology import node
-from pts.transformers.disease import (
+from pts.transformers.disease.coalescing import (
     _IAO_REPLACED_BY,
     annotate_name_duplicates,
     remap_edges,
@@ -124,7 +124,7 @@ class TestRemapEdges:
         superseded = (
             annotated_nodes
             .unnest('meta')
-            .explode('basicPropertyValues')
+            .explode('basicPropertyValues', empty_as_null=True)
             .unnest('basicPropertyValues')
             .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
             .to_list()
@@ -136,7 +136,7 @@ class TestRemapEdges:
         superseded = (
             annotated_nodes
             .unnest('meta')
-            .explode('basicPropertyValues')
+            .explode('basicPropertyValues', empty_as_null=True)
             .unnest('basicPropertyValues')
             .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)['id']
             .to_list()
