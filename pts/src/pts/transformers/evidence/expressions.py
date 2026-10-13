@@ -28,7 +28,7 @@ copy-pasted:
   as `_direction_lookup`, a `replace_strict` on the named column.
 * The log10-rescaled-score shape (null/NaN stays null, a non-positive value saturates to 1.0,
   everything else linearly interpolated in log10 space and clamped) is shared by `intogen`,
-  `gene_burden`, `crispr_screen`, `encore` and the inner CASE of `expression_atlas` -- only the
+  `gene_burden`, `crispr_screen` and the inner CASE of `expression_atlas` -- only the
   reference points and output column differ, so `_log10_rescaled_score` takes them as arguments.
 
 Provenance: `pts/config.yaml` no longer carries the original `score_expression` /
@@ -45,6 +45,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import numpy as np
 import polars as pl
 
 #: `element_at(map(...), confidence)` maps, one per datasource that uses the shared shape.
@@ -195,10 +196,26 @@ def _direction_lookup(column: str, mapping: dict[str, str]) -> pl.Expr:
     return pl.col(column).replace_strict(mapping, default=None)
 
 
+def _true_divide(series: pl.Series, divisor: float) -> pl.Series:
+    values = series.cast(pl.Float64).to_numpy() / divisor
+    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
+    nulls = np.flatnonzero(series.is_null().to_numpy())
+    return out.scatter(nulls, None) if len(nulls) else out
+
+
+def _divide(expr: pl.Expr, divisor: float) -> pl.Expr:
+    """Divide by a constant with IEEE division, keeping nulls and NaN.
+
+    Polars 2 does not divide exactly: `x / 10` differs from spark in the last bit for about a third
+    of values.
+    """
+    return expr.map_batches(lambda s: _true_divide(s, divisor), return_dtype=pl.Float64, is_elementwise=True)
+
+
 def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
     """Rescale a p-value-like `value` onto `[out_min, 1.0]` in log10 space, clamped.
 
-    Common shape behind the intogen/gene_burden/crispr_screen/encore score expressions, and
+    Common shape behind the intogen/gene_burden/crispr_screen score expressions, and
     expression_atlas's inner CASE:
 
     * null or NaN input stays null.
@@ -215,7 +232,7 @@ def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, stron
     """
     log_weak = math.log10(weak_ref)
     log_strong = math.log10(strong_ref)
-    rescaled = (1.0 - out_min) * (value.log10() - log_weak) / (log_strong - log_weak) + out_min
+    rescaled = _divide((1.0 - out_min) * (value.log10() - log_weak), log_strong - log_weak) + out_min
     return (
         pl.when(value.is_null() | value.is_nan())
         .then(None)
@@ -228,22 +245,22 @@ def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, stron
 def _linear_rescale(
     value: pl.Expr, in_range_min: float, in_range_max: float, out_range_min: float, out_range_max: float
 ) -> pl.Expr:
-    """Polars port of `linear_rescaling` (`pts/src/pts/pyspark/common/utils.py`).
+    """Rescale `value` linearly between two ranges, clamped to the output range.
 
-    project_score's `linear_rescale(resourceScore, 41.5, 100, 0.415, 1.0)` is the only caller in
-    config.yaml, and its four range bounds are literal constants in the SQL, not columns -- so,
-    exactly as the pyspark UDF does per call, the degenerate-range branching happens once here in
-    Python and only `value` varies per row.
+    ```
+    CASE
+      WHEN value IS NULL OR isnan(value) THEN NULL
+      ELSE LEAST(out_max, GREATEST(out_min,
+        (out_max - out_min) * (CAST(value AS DOUBLE) - in_min) / (in_max - in_min) + out_min
+      ))
+    END
+    ```
     """
-    delta_in = in_range_max - in_range_min
-    delta_out = out_range_max - out_range_min
-    if delta_in != 0.0:
-        rescaled = (delta_out * (value - in_range_min) / delta_in) + out_range_min
-    elif delta_out == 0.0:
-        rescaled = value
-    else:
-        rescaled = pl.lit(out_range_min, dtype=pl.Float64)
-    return rescaled.clip(out_range_min, out_range_max)
+    value = value.cast(pl.Float64)
+    rescaled = (
+        _divide((out_range_max - out_range_min) * (value - in_range_min), in_range_max - in_range_min) + out_range_min
+    )
+    return pl.when(value.is_null() | value.is_nan()).then(None).otherwise(rescaled.clip(out_range_min, out_range_max))
 
 
 def _eva_score() -> pl.Expr:
@@ -317,7 +334,11 @@ def _expression_atlas_score() -> pl.Expr:
     ```
     """
     base = _log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
-    magnitude = base * (pl.col('log2FoldChangeValue').abs() / 10) * (pl.col('log2FoldChangePercentileRank') / 100)
+    magnitude = (
+        base
+        * _divide(pl.col('log2FoldChangeValue').abs(), 10)
+        * _divide(pl.col('log2FoldChangePercentileRank'), 100)
+    )
     # A null or NaN resourceScore makes `base` (and so `magnitude`) null -- min_horizontal, like
     # spark's array_min, skips a null element rather than propagating it, so the row scores 1.0
     # instead of null. That is faithful to spark's `array_min` null-skipping and deliberate, not an
@@ -451,7 +472,7 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     ),
     'reactome': DatasourceExpressions(score=pl.lit(1.0)),
     'impc': DatasourceExpressions(
-        score=pl.col('resourceScore') / 100,
+        score=_divide(pl.col('resourceScore'), 100),
         direction_on_trait=_direction_when_disease_present('risk'),
         direction_on_target=_direction_when_disease_present('LoF'),
     ),
@@ -482,7 +503,7 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     'crispr_screen': DatasourceExpressions(score=_log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
     # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
-    'europepmc': DatasourceExpressions(score=pl.min_horizontal(pl.col('resourceScore') / 100.0, pl.lit(1.0))),
+    'europepmc': DatasourceExpressions(score=pl.min_horizontal(_divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'genomics_england': DatasourceExpressions(score=_confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
     'crispr': DatasourceExpressions(score=_linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'cancer_gene_census': DatasourceExpressions(
@@ -491,6 +512,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_target=_direction_lookup('TSorOncogene', {'oncogene': 'GoF', 'tsg': 'LoF'}),
     ),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
-    'encore': DatasourceExpressions(score=_log10_rescaled_score(pl.col('geneticInteractionPValue'), 0.0, 1.0, 0.01)),
+    'encore': DatasourceExpressions(score=_divide(pl.col('geneticInteractionScore').cast(pl.Float64).abs(), 16.0)),
     'ot_crispr_validation': DatasourceExpressions(score=pl.col('resourceScore')),
 }

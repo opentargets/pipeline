@@ -1,8 +1,9 @@
 """Tests for the evidence_postprocess score/direction expression registry.
 
-No spark dependency here -- the registry's parity with real spark is verified separately (see
+The registry's parity with real spark is verified separately (see
 `.superpowers/sdd/plan/registry-parity-output.txt` and `task-registry-report.md`), and the
 handful of expected values hard-coded below were measured against that spark run, not guessed.
+The crispr and encore scores are also checked bit for bit against spark at the end of this file.
 
 `pts/config.yaml` no longer carries `score_expression` / `direction_on_trait_expression` /
 `direction_on_target_expression` -- those were stripped once the registry below became the sole
@@ -15,12 +16,16 @@ entry is actually usable.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
+from math import isnan
 from pathlib import Path
 
 import polars as pl
 import pytest
 import yaml
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as f
 
 from pts.transformers.evidence.expressions import EXPRESSIONS
 
@@ -403,7 +408,12 @@ CASES = [
     _ExpressionCase(
         'genomics_england', 'score', {'confidence': ['amber', 'green', 'red', None]}, [0.5, 1.0, None, None]
     ),
-    _ExpressionCase('crispr', 'score', {'resourceScore': [0.0, 41.5, 100.0, 150.0]}, [0.415, 0.415, 1.0, 1.0]),
+    _ExpressionCase(
+        'crispr',
+        'score',
+        {'resourceScore': [0.0, 41.5, 100.0, 150.0, None, nan]},
+        [0.415, 0.415, 1.0, 1.0, None, None],
+    ),
     _ExpressionCase('cancer_gene_census', 'score', {'resourceScore': [0.5, None]}, [0.5, None]),
     _ExpressionCase('cancer_gene_census', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
     _ExpressionCase(
@@ -415,8 +425,8 @@ CASES = [
     _ExpressionCase(
         'encore',
         'score',
-        {'geneticInteractionPValue': [1.0, 0.01, 0.0, None, nan]},
-        [0.0, 1.0, 1.0, None, None],
+        {'geneticInteractionScore': [-32.0, 8.0, 0.0, None]},
+        [2.0, 0.5, 0.0, None],
     ),
     _ExpressionCase('ot_crispr_validation', 'score', {'resourceScore': [0.3, None]}, [0.3, None]),
 ]
@@ -459,3 +469,67 @@ def test_case_table_covers_every_registry_field() -> None:
     table_fields = {(case.datasource_id, case.field) for case in CASES}
     assert len(CASES) == len(table_fields), 'duplicate (datasource_id, field) in CASES'
     assert table_fields == registry_fields
+
+
+# ------------------------------------------------------------------------------------------------
+# Exact parity with the SQL on main for the scores rewritten since the case table was measured.
+# ------------------------------------------------------------------------------------------------
+
+CRISPR_SQL = """
+CASE
+  WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
+  ELSE LEAST(1.0, GREATEST(0.415,
+    (1.0 - 0.415) * (CAST(resourceScore AS DOUBLE) - 41.5) / (100 - 41.5) + 0.415
+  ))
+END
+"""
+
+ENCORE_SQL = 'ABS ( geneticInteractionScore  ) / 16.0'
+
+
+def _spark_scores(spark: SparkSession, column: str, values: list, ddl_type: str, sql: str) -> list:
+    df = spark.createDataFrame([(v,) for v in values], f'{column} {ddl_type}')
+    return [row.s for row in df.select(f.expr(sql).cast('double').alias('s')).collect()]
+
+
+def _polars_scores(datasource_id: str, column: str, values: list, dtype: pl.DataType) -> list:
+    df = pl.DataFrame({column: values}, schema={column: dtype})
+    return df.select(EXPRESSIONS[datasource_id].score.alias('s'))['s'].to_list()
+
+
+def _same(a: list, b: list) -> bool:
+    return len(a) == len(b) and all(
+        (x is None and y is None) or (x is not None and y is not None and (x == y or (isnan(x) and isnan(y))))
+        for x, y in zip(a, b, strict=True)
+    )
+
+
+def test_crispr_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
+    rng = random.Random(0)
+    values: list[float | None] = [0.0, -5.0, 36.0, 41.4, 41.5, 41.6, 44.8, 52.8, 83.8, 99.99, 100.0, 100.1, 1e30]
+    values += [-1e30, float('inf'), float('-inf'), float('nan'), None]
+    values += [rng.uniform(30.0, 110.0) for _ in range(5000)]
+    expected = _spark_scores(spark, 'resourceScore', values, 'DOUBLE', CRISPR_SQL)
+    assert _same(_polars_scores('crispr', 'resourceScore', values, pl.Float64), expected)
+
+
+def test_crispr_integer_score_matches_spark(spark: SparkSession) -> None:
+    values = [*range(-10, 151), None]
+    expected = _spark_scores(spark, 'resourceScore', values, 'BIGINT', CRISPR_SQL)
+    assert _same(_polars_scores('crispr', 'resourceScore', values, pl.Int64), expected)
+
+
+def test_encore_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
+    rng = random.Random(0)
+    values = [0.0, -0.0, 16.0, -32.5, 1e-310, float('inf'), float('nan'), None]
+    values += [rng.uniform(-20.0, 20.0) for _ in range(5000)]
+    expected = _spark_scores(spark, 'geneticInteractionScore', values, 'DOUBLE', ENCORE_SQL)
+    assert _same(_polars_scores('encore', 'geneticInteractionScore', values, pl.Float64), expected)
+
+
+@pytest.mark.parametrize('datasource_id', ['impc', 'europepmc'])
+def test_percent_scores_divide_exactly(datasource_id: str) -> None:
+    rng = random.Random(0)
+    values = [rng.uniform(0.0, 100.0) for _ in range(5000)]
+    got = _polars_scores(datasource_id, 'resourceScore', values, pl.Float64)
+    assert got == [min(v / 100, 1.0) if datasource_id == 'europepmc' else v / 100 for v in values]
