@@ -14,6 +14,7 @@ scratchpad:
   foldx_path: input/foldx
   gnomad_path: input/gnomad
   gwas_catalog_input_path: input/gwas_catalog
+  gwas_catalog_susie_path: output/gwas_catalog_sumstats_susie
   gwas_catalog_sync_date: '20260802'
   gwas_catalog_top_hits_path: output/gwas_catalog_top_hits
 
@@ -87,4 +88,20 @@ steps:
         credible_set_output_path: ${eqtl_catalogue_credible_set_path}
         lead_pvalue_threshold: 0.001
         mqtl_quantification_methods_blacklist: []
+  ##################################################################################################
+
+  #: GWAS_CATALOG_SUMSTATS_SUSIE_FINEMAPPING :######################################################
+  gwas_catalog_susie_credible_set_qc:
+    - name: pyspark gwas catalog susie credible set qc
+      step: shared.credible_set_qc
+      session:
+        write_mode: overwrite
+        start_hail: true
+      settings:
+        credible_sets_path: ${gwas_catalog_susie_path}/credible_set_datasets
+        output_path: ${gwas_catalog_susie_path}/credible_set_clean/20260901
+        p_value_threshold: 1.0e-05
+        purity_min_r2: 0.25
+        n_partitions: 350
+        clump: false
   ##################################################################################################

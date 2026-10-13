@@ -199,3 +199,16 @@ def test_gwas_catalog_top_hits_dag(dag_bag: DagBag) -> None:
         assert delete in tasks[step].downstream_task_ids
     assert steps[0] in tasks[steps[1]].upstream_task_ids
     assert steps[1] in tasks[steps[2]].upstream_task_ids
+
+
+def test_gwas_catalog_susie_finemapping_dag(dag_bag: DagBag) -> None:
+    dag = dag_bag.dags['gwas_catalog_sumstats_susie_finemapping']
+    tasks = {t.task_id: t for t in dag.tasks}
+    finemapping, qc = 'gwas_catalog_susie_finemapping', 'gwas_catalog_susie_credible_set_qc'
+
+    assert tasks[finemapping].is_mapped
+    assert tasks[finemapping].upstream_task_ids == {f'{finemapping}_index'}
+    assert finemapping in tasks[qc].upstream_task_ids
+    assert 'create_cluster_otg-credible-set-qc' in tasks[qc].upstream_task_ids
+    # the cluster is only created once the batch job is done, not left idle meanwhile
+    assert finemapping in tasks['create_cluster_otg-credible-set-qc'].upstream_task_ids

@@ -1,0 +1,63 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gentropy_ref: 3.2.0
+      gwas_catalog_susie_path: gs://gwas_catalog_sumstats_susie
+  - name: test
+    scratchpad:
+      gentropy_ref: 3.2.0
+      gwas_catalog_susie_path: gs://ot_orchestration/test/gwas_catalog_sumstats_susie
+
+description: Open Targets Genetics — Susie Finemap GWAS Catalog summary statistics and QC the credible sets
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+
+infrastructure:
+  clusters:
+    otg-credible-set-qc:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-etl
+
+steps:
+  gwas_catalog_susie_finemapping:
+    google_batch_index_specs:
+      pointer: finemapping
+      max_task_count: 40000
+      generator_specs:
+        generator_options:
+          collected_loci_path: '{{gwas_catalog_susie_path}}/study_locus_lb_clumped_20260802'
+          manifest_output_path: '{{gwas_catalog_susie_path}}/finemapping_manifest.csv'
+          output_path: '{{gwas_catalog_susie_path}}/credible_set_datasets'
+          #!WARNING: DO NOT CHANGE THE DATE for the log_path, as it is used to back reference the already fine-mapped loci.
+          log_path: '{{gwas_catalog_susie_path}}/finemapping_logs/20250204'
+    google_batch:
+      job:
+        task_group:
+          parallelism: 10000
+          task_environments:
+            environments: [] # populated at runtime by BatchIndexOperator
+          task_config:
+            max_retry_count: 1
+            max_run_duration: '7200s'
+            instance_resource_spec:
+              cpu_milli: 4000
+              memory_mib: 25000
+              boot_disk_mib: 20000
+            runnable_spec:
+              image_uri: 'ghcr.io/opentargets/gentropy:{{gentropy_ref}}'
+              entrypoint: /usr/bin/bash
+              script_file: susie_finemap.sh
+              script_variables:
+                study_index_path: '{{gwas_catalog_susie_path}}/study_index'
+                study_locus_manifest_path: '{{gwas_catalog_susie_path}}/finemapping_manifest.csv'
+        allocation:
+          instance:
+            machine_type: n2-highmem-4
+            provisioning_model: SPOT
+        logs: {}
+  gwas_catalog_susie_credible_set_qc:
+    cluster: otg-credible-set-qc
+    depends_on:
+      - gwas_catalog_susie_finemapping

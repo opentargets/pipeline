@@ -41,11 +41,12 @@ def build_staging_dag(dag_dir: Path) -> DAG:
         # the first and last task of each step, to chain the steps between them
         starts: dict[str, Operator] = {}
         ends: dict[str, Operator] = {}
+        creates: dict[str, Operator] = {}
 
         for cluster_name in config.dag.infrastructure.clusters:
             steps = config.steps_on_cluster(cluster_name)
             if steps:
-                runs = _cluster_steps(config, cluster_name, steps)
+                creates[cluster_name], runs = _cluster_steps(config, cluster_name, steps)
                 starts |= runs
                 ends |= runs
 
@@ -56,12 +57,21 @@ def build_staging_dag(dag_dir: Path) -> DAG:
         for step_name, step in config.steps.items():
             for dependency in step.depends_on:
                 ends[dependency] >> starts[step_name]
+                # a cluster waits for the work it depends on elsewhere, so it does not
+                # sit idle (and get deleted by its idle ttl) while that work runs
+                if step.cluster is not None and config.steps[dependency].cluster != step.cluster:
+                    ends[dependency] >> creates[step.cluster]
 
     return dag
 
 
-def _cluster_steps(config: StagingDagConfig, cluster_name: str, steps: list[str]) -> dict[str, BaseOperator]:
-    """Create the tasks running pps steps on a Dataproc cluster, and the cluster around them."""
+def _cluster_steps(
+    config: StagingDagConfig, cluster_name: str, steps: list[str]
+) -> tuple[BaseOperator, dict[str, BaseOperator]]:
+    """Create the tasks running pps steps on a Dataproc cluster, and the cluster around them.
+
+    Returns the cluster creation task, and the task running each step.
+    """
     upload_entrypoint = UploadFileOperator(
         task_id=f'upload_entrypoint_{cluster_name}',
         src_path=ASSETS_PATH / DATAPROC_ENTRYPOINT,
@@ -101,7 +111,7 @@ def _cluster_steps(config: StagingDagConfig, cluster_name: str, steps: list[str]
         )
         [create, upload_config] >> run >> delete
         runs[step_name] = run
-    return runs
+    return create, runs
 
 
 def _batch_step(config: StagingDagConfig, step_name: str) -> tuple[Operator, Operator]:
