@@ -1,0 +1,61 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      ukb_ppp_eur_finemapping_date: '20250129'
+      ukb_ppp_eur_gentropy_ref: 2.0.2-rc.2
+      ukb_ppp_eur_path: gs://ukb_ppp_eur_data
+  - name: test
+    scratchpad:
+      ukb_ppp_eur_finemapping_date: '20250129'
+      ukb_ppp_eur_gentropy_ref: 2.0.2-rc.2
+      ukb_ppp_eur_path: gs://ot_orchestration/test/ukb_ppp_eur_data
+description: Open Targets Genetics — UKB PPP (EUR) SuSiE fine-mapping on Google Batch and credible set QC
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-credible-set-qc:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-etl
+steps:
+  ukb_ppp_eur_finemapping:
+    google_batch_index_specs:
+      pointer: finemapping
+      max_task_count: 40000
+      generator_specs:
+        generator_options:
+          collected_loci_path: '{{ukb_ppp_eur_path}}/study_locus_lb_clumped'
+          manifest_output_path: '{{ukb_ppp_eur_path}}/finemapping_manifests/{{ukb_ppp_eur_finemapping_date}}/manifest.csv'
+          output_path: '{{ukb_ppp_eur_path}}/credible_set_datasets/susie/{{ukb_ppp_eur_finemapping_date}}'
+          log_path: '{{ukb_ppp_eur_path}}/finemapping_logs/{{ukb_ppp_eur_finemapping_date}}'
+    google_batch:
+      job:
+        task_group:
+          parallelism: 40000
+          task_environments:
+            environments: []
+          task_config:
+            max_retry_count: 5
+            max_run_duration: 7200s
+            instance_resource_spec:
+              cpu_milli: 4000
+              memory_mib: 25000
+              boot_disk_mib: 20000
+            runnable_spec:
+              image_uri: europe-west1-docker.pkg.dev/open-targets-genetics-dev/gentropy-app/gentropy:{{ukb_ppp_eur_gentropy_ref}}
+              entrypoint: /bin/sh
+              script_file: susie_finemap.sh
+              script_variables:
+                study_index_path: '{{ukb_ppp_eur_path}}/study_index'
+                study_locus_manifest_path: '{{ukb_ppp_eur_path}}/finemapping_manifests/{{ukb_ppp_eur_finemapping_date}}/manifest.csv'
+        allocation:
+          instance:
+            machine_type: n2-highmem-4
+            provisioning_model: SPOT
+        logs: {}
+  ukb_ppp_eur_credible_set_qc:
+    cluster: otg-credible-set-qc
+    depends_on:
+      - ukb_ppp_eur_finemapping

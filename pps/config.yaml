@@ -14,6 +14,7 @@ scratchpad:
   finngen_curation_tag: '26.05'
   finngen_input_path: input/finngen
   finngen_path: output/finngen
+  finngen_ukb_mvp_meta_path: output/finngen_ukb_mvp_meta
   foldx_path: input/foldx
   gnomad_path: input/gnomad
   gwas_catalog_curation_date: '20260812'
@@ -22,6 +23,9 @@ scratchpad:
   gwas_catalog_susie_path: output/gwas_catalog_sumstats_susie
   gwas_catalog_sync_date: '20260802'
   gwas_catalog_top_hits_path: output/gwas_catalog_top_hits
+  ukb_ppp_eur_input_path: output/ukb_ppp_eur_inputs
+  ukb_ppp_eur_path: output/ukb_ppp_eur
+  ukb_ppp_eur_tmp_path: input/ukb_ppp_eur_tmp
 
 steps:
   #: GWAS_CATALOG_TOP_HITS_INGESTION STEP :###########################################################
@@ -237,4 +241,116 @@ steps:
         wbc_pvalue_threshold: 1.0e-08
         collect_locus: true
         remove_mhc: true
+  ##################################################################################################
+
+  #: FINNGEN_UKB_MVP_META :#########################################################################
+  finngen_ukb_mvp_meta_harmonisation:
+    - name: pyspark finngen ukb mvp meta harmonisation
+      step: finngen_ukb_mvp_meta.ingestion
+      session:
+        use_enhanced_bgzip_codec: true
+        write_mode: overwrite
+        extended_spark_conf:
+          spark.executor.memory: 25g
+          spark.executor.cores: '7'
+          spark.driver.memory: 25g
+      settings:
+        source_manifest_path: ${finngen_input_path}/meta_analysis/mvp_ukbb/FinnGen_R12_MVP_UKBB_manifest.tsv
+        efo_curation_path: https://raw.githubusercontent.com/opentargets/curation/refs/tags/25.09/mappings/disease/manual_string.tsv
+        gnomad_variant_index_path: ${gnomad_path}/v4.1/variant_index/
+        study_index_output_path: ${finngen_ukb_mvp_meta_path}/study_index/
+        raw_summary_statistics_output_path: ${finngen_ukb_mvp_meta_path}/raw_summary_statistics/
+        harmonised_summary_statistics_output_path: ${finngen_ukb_mvp_meta_path}/harmonised_summary_statistics/
+        harmonised_summary_statistics_qc_output_path: ${finngen_ukb_mvp_meta_path}/harmonised_summary_statistics_qc/
+        perform_meta_analysis_filter: true
+        imputation_score_threshold: 0.8
+        perform_imputation_score_filter: true
+        min_allele_count_threshold: 20
+        perform_min_allele_count_filter: true
+        min_allele_frequency_threshold: 0.0001
+        perform_min_allele_frequency_filter: false
+        filter_out_ambiguous_variants: false
+  finngen_ukb_mvp_meta_window_clumping:
+    - name: pyspark finngen ukb mvp meta window clumping
+      step: shared.window_clumping
+      session:
+        start_hail: true
+        write_mode: overwrite
+        extended_spark_conf:
+          spark.executor.memory: 25g
+          spark.executor.cores: '4'
+          spark.shuffle.mapOutput.minSizeForBroadcast: 10m
+      settings:
+        summary_statistics_input_path: ${finngen_ukb_mvp_meta_path}/harmonised_summary_statistics
+        study_locus_output_path: ${finngen_ukb_mvp_meta_path}/study_locus_window_based_clumped
+  finngen_ukb_mvp_meta_ld_clumping:
+    - name: pyspark finngen ukb mvp meta ld clumping
+      step: shared.ld_clumping
+      session:
+        write_mode: overwrite
+        extended_spark_conf:
+          spark.executor.memory: 25g
+          spark.executor.cores: '4'
+          spark.shuffle.mapOutput.minSizeForBroadcast: 10m
+      settings:
+        ld_index_path: ${gnomad_path}/v2.1.1/ld_index
+        study_locus_input_path: ${finngen_ukb_mvp_meta_path}/study_locus_window_based_clumped
+        study_index_path: ${finngen_ukb_mvp_meta_path}/study_index
+        clumped_study_locus_output_path: ${finngen_ukb_mvp_meta_path}/study_locus_ld_clumped
+  finngen_ukb_mvp_meta_pics:
+    - name: pyspark finngen ukb mvp meta pics
+      step: shared.pics
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_ld_annotated_in: ${finngen_ukb_mvp_meta_path}/study_locus_ld_clumped
+        picsed_study_locus_out: ${finngen_ukb_mvp_meta_path}/credible_sets
+  ##################################################################################################
+
+  #: UKB_PPP_EUR_HARMONISATION :####################################################################
+  ukb_ppp_eur_harmonisation:
+    - name: pyspark ukb ppp eur harmonisation
+      step: ukb_ppp_eur.sumstat_preprocess
+      session:
+        write_mode: overwrite
+      settings:
+        raw_study_index_path_from_tsv: ${ukb_ppp_eur_tmp_path}/batch/output/ukb_ppp_eur/study_index.tsv
+        raw_summary_stats_path: ${ukb_ppp_eur_tmp_path}/batch/output/ukb_ppp_eur/summary_stats.parquet
+        tmp_variant_annotation_path: ${ukb_ppp_eur_tmp_path}/variant_annotation
+        variant_annotation_path: ${gnomad_path}/gnomad_variant_index
+        study_index_output_path: ${ukb_ppp_eur_path}/study_index
+        summary_stats_output_path: ${ukb_ppp_eur_input_path}/harmonised_summary_statistics
+  ukb_ppp_eur_locus_breaker_clumping:
+    - name: pyspark ukb ppp eur locus breaker clumping
+      step: shared.locus_breaker_clumping
+      session:
+        write_mode: overwrite
+      settings:
+        summary_statistics_input_path: ${ukb_ppp_eur_input_path}/harmonised_summary_statistics
+        clumped_study_locus_output_path: ${ukb_ppp_eur_path}/study_locus_lb_clumped
+        lbc_baseline_pvalue: 1.0e-05
+        lbc_distance_cutoff: 250000
+        lbc_pvalue_threshold: 1.7e-11
+        lbc_flanking_distance: 100000
+        large_loci_size: 1500000
+        wbc_clump_distance: 500000
+        wbc_pvalue_threshold: 1.7e-11
+        collect_locus: true
+        remove_mhc: true
+  ##################################################################################################
+
+  #: UKB_PPP_EUR_FINEMAPPING :######################################################################
+  ukb_ppp_eur_credible_set_qc:
+    - name: pyspark ukb ppp eur credible set qc
+      step: shared.credible_set_qc
+      session:
+        write_mode: overwrite
+        start_hail: true
+      settings:
+        credible_sets_path: ${ukb_ppp_eur_path}/credible_set_datasets/susie/20250129
+        output_path: ${ukb_ppp_eur_path}/credible_set_clean/20250129
+        p_value_threshold: 1.0e-05
+        purity_min_r2: 0.25
+        n_partitions: 50
+        clump: false
   ##################################################################################################
