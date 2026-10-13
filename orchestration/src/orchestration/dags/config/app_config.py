@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import yaml
 from deepdiff.diff import DeepDiff
+from pydantic import BaseModel
 
 from orchestration.utils.path import GCSPath, IOManager
 
@@ -17,6 +19,10 @@ if TYPE_CHECKING:
 _parsers: dict[str, Callable] = {
     'yaml': yaml.safe_load,
 }
+
+_PLACEHOLDER = re.compile(r'\{\{[^{}]*\}\}')
+
+M = TypeVar('M', bound=BaseModel)
 
 
 class AppConfig:
@@ -41,6 +47,8 @@ class AppConfig:
             self.logger.debug(f'rendering template with context {self.template_context}')
             for sentinel, value in self.template_context.items():
                 self.rendered_config = self.rendered_config.replace(f'{{{{{sentinel}}}}}', value)
+            if leftovers := sorted(set(_PLACEHOLDER.findall(self.rendered_config))):
+                raise ValueError(f'no value in the template context for placeholders: {", ".join(leftovers)}')
             self.is_rendered = True
 
     def _parse(self) -> None:
@@ -138,6 +146,17 @@ class AppConfig:
             else:
                 return default
         return current
+
+    def validate(self, model: type[M]) -> M:
+        """Validate the parsed configuration against a pydantic model.
+
+        Args:
+            model (type[M]): The pydantic model describing the configuration.
+
+        Returns:
+            M: The validated configuration.
+        """
+        return model.model_validate(self.config)
 
     def __le__(self, other: AppConfig) -> bool:
         if self.parser != other.parser:

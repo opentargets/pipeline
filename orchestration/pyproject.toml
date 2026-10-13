@@ -42,9 +42,11 @@ filterwarnings = "ignore::DeprecationWarning"
 extend = "../ruff.toml"
 exclude = [
   "src/orchestration/assets/dataproc_pts_run.py", # this is the dataproc cluster entrypoint file
+  "src/orchestration/assets/dataproc_pps_run.py", # this is the dataproc cluster entrypoint file
 ]
 
 [tool.ty.src]
 exclude = [
   "src/orchestration/assets/dataproc_pts_run.py", # this is the dataproc cluster entrypoint file
+  "src/orchestration/assets/dataproc_pps_run.py", # this is the dataproc cluster entrypoint file
 ]

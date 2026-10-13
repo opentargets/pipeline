@@ -1,0 +1,37 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gnomad_path: gs://gnomad_data_2
+      gwas_catalog_input_path: gs://gwas_catalog_inputs
+      gwas_catalog_sync_date: '20260802'
+      gwas_catalog_top_hits_path: gs://gwas_catalog_top_hits
+  - name: test
+    scratchpad:
+      gnomad_path: gs://gnomad_data_2
+      gwas_catalog_input_path: gs://ot_orchestration/test/gwas_catalog_inputs
+      gwas_catalog_sync_date: '20260802'
+      gwas_catalog_top_hits_path: gs://ot_orchestration/test/gwas_catalog_top_hits
+
+description: Open Targets Genetics — GWAS Catalog top hits
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: '26.9.0.dev0'
+
+infrastructure:
+  clusters:
+    otg-tophit-gwascatalog:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-gwascatalog-tophit
+
+steps:
+  gwas_catalog_top_hits_ingestion:
+    cluster: otg-tophit-gwascatalog
+  gwas_catalog_top_hits_ld_clumping:
+    cluster: otg-tophit-gwascatalog
+    depends_on:
+      - gwas_catalog_top_hits_ingestion
+  gwas_catalog_top_hits_pics:
+    cluster: otg-tophit-gwascatalog
+    depends_on:
+      - gwas_catalog_top_hits_ld_clumping

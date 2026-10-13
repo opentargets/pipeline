@@ -261,7 +261,7 @@ gs://gwas_catalog_top_hits/study_locus_window_based_clumped/
 
 Data contained in the `top_hits` corresponds to the [GWAS Catalog top associations](https://www.ebi.ac.uk/gwas/docs/methods/criteria#:~:text=statistics%20here.-,Top%20associations,-We%20also%20report)
 
-Data is produced by **gwas_catalog_top_hits DAG**. The dag configuration and topology can be found in `gwas_catalog_top_hits.yaml` file under the config directory.
+Data is produced by **gwas_catalog_top_hits DAG**. The dag configuration and topology can be found in `dags/gwas_catalog_top_hits/config.yaml`, and the steps it runs in `pps/config.yaml`.
 
 DAG contains 3 steps:
 

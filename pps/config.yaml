@@ -3,6 +3,53 @@ work_path: ../work
 log_level: DEBUG
 pool_size: 4
 
-scratchpad: {}
+# Defaults for local runs. Orchestration overrides these per environment from the
+# `pps.scratchpad` block of each staging DAG's config.yaml.
+scratchpad:
+  gnomad_path: input/gnomad
+  gwas_catalog_input_path: input/gwas_catalog
+  gwas_catalog_sync_date: '20260802'
+  gwas_catalog_top_hits_path: output/gwas_catalog_top_hits
 
-steps: {}
+steps:
+  #: GWAS_CATALOG_TOP_HITS_INGESTION STEP :###########################################################
+  gwas_catalog_top_hits_ingestion:
+    - name: pyspark gwas catalog top hit ingestion
+      step: gwas_catalog.top_hit_ingestion
+      session:
+        write_mode: overwrite
+        output_partitions: 1
+      settings:
+        catalog_study_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_studies.tsv
+        catalog_ancestry_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_ancestries.tsv
+        catalog_associations_file: ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_associations_ontology_annotated.tsv
+        variant_annotation_path: ${gnomad_path}/v4.1/variant_index
+        catalog_studies_out: ${gwas_catalog_top_hits_path}/study_index
+        catalog_associations_out: ${gwas_catalog_top_hits_path}/study_locus_window_based_clumped
+  ##################################################################################################
+
+  #: GWAS_CATALOG_TOP_HITS_LD_CLUMPING STEP :#########################################################
+  gwas_catalog_top_hits_ld_clumping:
+    - name: pyspark ld clumping of gwas catalog top hits
+      step: shared.ld_clumping
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_input_path: ${gwas_catalog_top_hits_path}/study_locus_window_based_clumped
+        study_index_path: ${gwas_catalog_top_hits_path}/study_index
+        ld_index_path: ${gnomad_path}/v2.1.1/ld_index
+        clumped_study_locus_output_path: ${gwas_catalog_top_hits_path}/study_locus_ld_clumped
+  ##################################################################################################
+
+  #: GWAS_CATALOG_TOP_HITS_PICS STEP :################################################################
+  gwas_catalog_top_hits_pics:
+    - name: pyspark pics of gwas catalog top hits
+      step: shared.pics
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_ld_annotated_in: ${gwas_catalog_top_hits_path}/study_locus_ld_clumped
+        picsed_study_locus_out: ${gwas_catalog_top_hits_path}/credible_sets
+  ##################################################################################################
