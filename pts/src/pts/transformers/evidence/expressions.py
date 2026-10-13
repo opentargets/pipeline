@@ -203,7 +203,7 @@ def _true_divide(series: pl.Series, divisor: float) -> pl.Series:
     return out.scatter(nulls, None) if len(nulls) else out
 
 
-def _divide(expr: pl.Expr, divisor: float) -> pl.Expr:
+def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
     """Divide by a constant with IEEE division, keeping nulls and NaN.
 
     Polars 2 does not divide exactly: `x / 10` differs from spark in the last bit for about a third
@@ -232,7 +232,7 @@ def _log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, stron
     """
     log_weak = math.log10(weak_ref)
     log_strong = math.log10(strong_ref)
-    rescaled = _divide((1.0 - out_min) * (value.log10() - log_weak), log_strong - log_weak) + out_min
+    rescaled = divide((1.0 - out_min) * (value.log10() - log_weak), log_strong - log_weak) + out_min
     return (
         pl.when(value.is_null() | value.is_nan())
         .then(None)
@@ -258,7 +258,7 @@ def _linear_rescale(
     """
     value = value.cast(pl.Float64)
     rescaled = (
-        _divide((out_range_max - out_range_min) * (value - in_range_min), in_range_max - in_range_min) + out_range_min
+        divide((out_range_max - out_range_min) * (value - in_range_min), in_range_max - in_range_min) + out_range_min
     )
     return pl.when(value.is_null() | value.is_nan()).then(None).otherwise(rescaled.clip(out_range_min, out_range_max))
 
@@ -336,8 +336,8 @@ def _expression_atlas_score() -> pl.Expr:
     base = _log10_rescaled_score(pl.col('resourceScore'), 0.0, 1.0, 1e-10)
     magnitude = (
         base
-        * _divide(pl.col('log2FoldChangeValue').abs(), 10)
-        * _divide(pl.col('log2FoldChangePercentileRank'), 100)
+        * divide(pl.col('log2FoldChangeValue').abs(), 10)
+        * divide(pl.col('log2FoldChangePercentileRank'), 100)
     )
     # A null or NaN resourceScore makes `base` (and so `magnitude`) null -- min_horizontal, like
     # spark's array_min, skips a null element rather than propagating it, so the row scores 1.0
@@ -449,7 +449,6 @@ class DatasourceExpressions:
 
 
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
-    'gwas_credible_sets': DatasourceExpressions(score=pl.col('resourceScore')),
     'expression_atlas': DatasourceExpressions(score=_expression_atlas_score()),
     'eva': DatasourceExpressions(
         score=_eva_score(),
@@ -472,7 +471,7 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     ),
     'reactome': DatasourceExpressions(score=pl.lit(1.0)),
     'impc': DatasourceExpressions(
-        score=_divide(pl.col('resourceScore'), 100),
+        score=divide(pl.col('resourceScore'), 100),
         direction_on_trait=_direction_when_disease_present('risk'),
         direction_on_target=_direction_when_disease_present('LoF'),
     ),
@@ -503,7 +502,7 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     'crispr_screen': DatasourceExpressions(score=_log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # Same null/NaN-scores-1.0 shape as `_expression_atlas_score` above, for the same reason: a null
     # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
-    'europepmc': DatasourceExpressions(score=pl.min_horizontal(_divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
+    'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'genomics_england': DatasourceExpressions(score=_confidence_score(_GENOMICS_ENGLAND_CONFIDENCE_SCORES)),
     'crispr': DatasourceExpressions(score=_linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'cancer_gene_census': DatasourceExpressions(
@@ -512,6 +511,5 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_target=_direction_lookup('TSorOncogene', {'oncogene': 'GoF', 'tsg': 'LoF'}),
     ),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
-    'encore': DatasourceExpressions(score=_divide(pl.col('geneticInteractionScore').cast(pl.Float64).abs(), 16.0)),
     'ot_crispr_validation': DatasourceExpressions(score=pl.col('resourceScore')),
 }

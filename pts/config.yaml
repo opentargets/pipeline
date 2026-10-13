@@ -996,27 +996,6 @@ steps:
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
-  evidence_postprocess_gwas_credible_sets:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/l2g_evidence
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/gwas_credible_sets
-        evidence: output/evidence_gwas_credible_sets
-      settings:
-        evidence_format: parquet
-        datasource_id: gwas_credible_sets
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyLocusId
-
   evidence_postprocess_expression_atlas:
     - name: transform evidence_postprocess
       transformer: evidence_postprocess
@@ -1487,28 +1466,15 @@ steps:
           - statisticalTestTail
 
   evidence_postprocess_encore:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+    - name: transform evidence.encore
+      transformer: evidence.encore
       source:
-        evidence_path: input/evidence/encore
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/encore
+        target: output/target
+        disease: output/disease
       destination:
         failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
-      settings:
-        evidence_format: parquet
-        datasource_id: encore
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - targetFromSourceId
-          - interactingTargetFromSourceId
-          - diseaseFromSourceMappedId
-          - diseaseCellLines
 
   evidence_postprocess_validation_lab:
     - name: transform evidence_postprocess
@@ -1633,9 +1599,25 @@ steps:
       destination: output/l2g_prediction
       settings:
         features_list: *l2g_features
-        l2g_threshold: 0.05
+        l2g_threshold: &l2g_threshold 0.05
         explain_predictions: true
         # shap_background_size is set on l2g_train only
+    - name: transform evidence.gwas_credible_sets
+      requires:
+        - transform l2g_predict
+      transformer: evidence.gwas_credible_sets
+      source:
+        l2g_predictions: output/l2g_prediction
+        credible_set: output/credible_set
+        study_index: output/study
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/gwas_credible_sets
+        evidence: output/evidence_gwas_credible_sets
+      settings:
+        locus_to_gene_threshold: *l2g_threshold
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:

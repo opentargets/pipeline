@@ -27,6 +27,7 @@ import yaml
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
+from pts.transformers.evidence.encore import ENCORE
 from pts.transformers.evidence.expressions import EXPRESSIONS
 
 nan = float('nan')
@@ -35,12 +36,12 @@ CONFIG = Path(__file__).parents[1] / 'config.yaml'
 
 
 def _config_datasource_ids() -> set[str]:
-    """`datasource_id` for every `evidence_postprocess_*` step in config.yaml."""
+    """`datasource_id` for every step in config.yaml run by the `evidence_postprocess` transformer."""
     steps = yaml.safe_load(CONFIG.read_text())['steps']
     return {
         tasks[0]['settings']['datasource_id']
-        for step_name, tasks in steps.items()
-        if step_name.startswith('evidence_postprocess')
+        for tasks in steps.values()
+        if tasks and tasks[0].get('transformer') == 'evidence_postprocess'
     }
 
 
@@ -204,7 +205,7 @@ def test_direction_when_disease_present_is_null_safe() -> None:
 
 
 # ------------------------------------------------------------------------------------------------
-# Exhaustive one-case-per-field table -- all 41 registry fields (23 `score`, 9
+# Exhaustive one-case-per-field table -- all 39 registry fields (21 `score`, 9
 # `direction_on_trait`, 9 `direction_on_target`). Each `expected` was derived by running the
 # ORIGINAL SQL (git `834f1db7` `pts/config.yaml`, the last commit before the registry replaced it)
 # against real spark, not by hand-computing it or reading it off this module -- that would just
@@ -217,7 +218,7 @@ def test_direction_when_disease_present_is_null_safe() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 41.
+# on all 39. encore and gwas_credible_sets moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -232,7 +233,6 @@ class _ExpressionCase:
 
 
 CASES = [
-    _ExpressionCase('gwas_credible_sets', 'score', {'resourceScore': [0.5, 0.0, None]}, [0.5, 0.0, None]),
     _ExpressionCase(
         'expression_atlas',
         'score',
@@ -422,12 +422,6 @@ CASES = [
         {'TSorOncogene': ['oncogene', 'tsg', 'bivalent', None]},
         ['GoF', 'LoF', None, None],
     ),
-    _ExpressionCase(
-        'encore',
-        'score',
-        {'geneticInteractionScore': [-32.0, 8.0, 0.0, None]},
-        [2.0, 0.5, 0.0, None],
-    ),
     _ExpressionCase('ot_crispr_validation', 'score', {'resourceScore': [0.3, None]}, [0.3, None]),
 ]
 
@@ -524,7 +518,8 @@ def test_encore_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
     values = [0.0, -0.0, 16.0, -32.5, 1e-310, float('inf'), float('nan'), None]
     values += [rng.uniform(-20.0, 20.0) for _ in range(5000)]
     expected = _spark_scores(spark, 'geneticInteractionScore', values, 'DOUBLE', ENCORE_SQL)
-    assert _same(_polars_scores('encore', 'geneticInteractionScore', values, pl.Float64), expected)
+    got = pl.DataFrame({'geneticInteractionScore': values}, schema={'geneticInteractionScore': pl.Float64})
+    assert _same(got.select(ENCORE.score.alias('s'))['s'].to_list(), expected)
 
 
 @pytest.mark.parametrize('datasource_id', ['impc', 'europepmc'])

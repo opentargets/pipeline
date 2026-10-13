@@ -28,11 +28,12 @@ class ValidationLuts:
 
     Passed in already materialised: they are shared across datasources, so building them belongs to
     the caller. `pl.DataFrame` rather than `LazyFrame` because each is joined against repeatedly.
+    `publication` is only needed for evidence carrying `literature`.
     """
 
     disease: pl.DataFrame
     target: pl.DataFrame
-    publication: pl.DataFrame
+    publication: pl.DataFrame | None = None
 
 
 @dataclass(frozen=True)
@@ -84,15 +85,25 @@ class EvidencePostprocessor:
 
         Returns:
             The valid and invalid halves, both still lazy.
+
+        Raises:
+            ValueError: if `lf` carries `literature` and `luts.publication` is not given.
         """
-        processed = (
+        if luts.publication is None and 'literature' in lf.collect_schema().names():
+            msg = f'{self.datasource_id} evidence carries literature but no publication look-up table was given'
+            raise ValueError(msg)
+        deduplicated = (
             Evidence(lf)
             .validate_diseases(luts.disease)
             .validate_target(luts.target, self.excluded_biotypes)
             .validate_datasource(self.datasource_id)
             .assign_evidence_identifier(self.unique_fields)
             .validate_uniqueness()
-            .resolve_publication_date(luts.publication)
+        )
+        if luts.publication is not None:
+            deduplicated = deduplicated.resolve_publication_date(luts.publication)
+        processed = (
+            deduplicated
             .resolve_evidence_date()
             .calculate_evidence_score(self.score)
             .assign_direction_on_trait(self.direction_on_trait)
