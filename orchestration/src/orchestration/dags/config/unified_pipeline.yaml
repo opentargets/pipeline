@@ -256,7 +256,6 @@ steps:
       - pis_evidence_ppp # TODO: split
       - pts_target
       - pts_disease
-      - pis_literature
   pts_evidence_validation_lab:
     ppp_only: true
     depends_on:
@@ -269,7 +268,6 @@ steps:
       - pis_evidence_project_score
       - pts_ontoma
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_gene_burden:
     depends_on:
@@ -279,7 +277,6 @@ steps:
     depends_on:
       - pts_evidence_gene_burden
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_clinical_precedence:
     depends_on:
@@ -291,9 +288,7 @@ steps:
     depends_on:
       - pis_evidence_cancer_biomarkers
       - pts_drug_molecule
-      - pts_disease
       - pis_literature
-      - pts_target
   pts_evidence_orphanet:
     depends_on:
       - pis_evidence_orphanet
@@ -302,7 +297,6 @@ steps:
     depends_on:
       - pts_evidence_orphanet
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_clingen:
     depends_on:
@@ -312,7 +306,6 @@ steps:
     depends_on:
       - pts_evidence_clingen
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_impc:
     depends_on:
@@ -323,7 +316,6 @@ steps:
     depends_on:
       - pts_evidence_impc
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_panel_app:
     depends_on:
@@ -334,7 +326,6 @@ steps:
       - pts_evidence_panel_app
       - pts_target
       - pis_literature
-      - pts_disease
   pts_evidence_crispr_screens:
     depends_on:
       - pis_evidence_crispr_screens
@@ -349,7 +340,6 @@ steps:
     depends_on:
       - pts_evidence_gene2phenotype
       - pts_target
-      - pts_disease
       - pis_literature
   pts_evidence_intogen:
     depends_on:
