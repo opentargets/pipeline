@@ -1,8 +1,9 @@
 """Run one datasource's evidence through the post-processing recipe and write it.
 
 A datasource module generates its raw evidence as a `LazyFrame`, declares its settings as an
-`EvidencePostprocessor`, and hands both to `run_evidence`. Nothing is written between generation
-and post-processing.
+`EvidencePostprocessor`, and hands both to `run_evidence`. A datasource that adds steps after the
+recipe, such as directions of effect, composes `build_luts`, `spec.run` and `write_evidence`
+itself. Nothing is written between generation and post-processing.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.evidence import evidence_schema
+from pts.transformers.evidence.core import Evidence
 from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
@@ -45,6 +47,47 @@ def check_raw_evidence(lf: pl.LazyFrame, spec: EvidencePostprocessor) -> None:
         logger.warning(f'{spec.datasource_id} raw evidence has columns outside evidence_schema: {unknown}')
 
 
+def build_luts(raw: pl.LazyFrame, *, disease: str, target: str, literature: str | None = None) -> ValidationLuts:
+    """Build the look-up tables for one datasource's raw evidence.
+
+    The publication table is built only when the evidence carries `literature`.
+
+    Args:
+        raw: raw evidence.
+        disease: location of the disease index.
+        target: location of the target index.
+        literature: location of the literature export, needed when `raw` carries `literature`.
+
+    Returns:
+        The look-up tables.
+
+    Raises:
+        ValueError: if `raw` carries `literature` and no `literature` location is given.
+    """
+    has_literature = 'literature' in raw.collect_schema().names()
+    if has_literature and literature is None:
+        msg = 'evidence carries literature but no literature export was given'
+        raise ValueError(msg)
+    return ValidationLuts(
+        disease=build_disease_lut(disease),
+        target=build_target_lut(target),
+        publication=build_publication_lut(literature) if has_literature and literature else None,
+    )
+
+
+def write_evidence(evidence: Evidence, destination: dict[str, str]) -> None:
+    """Write post-processed evidence, split into valid and failed.
+
+    Args:
+        evidence: post-processed evidence.
+        destination: `evidence` and `failed_evidence` output directories.
+    """
+    logger.info(f'writing valid evidence to {destination["evidence"]}')
+    write_dataset(evidence.valid(), destination['evidence'])
+    logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
+    write_dataset(evidence.invalid(), destination['failed_evidence'])
+
+
 def run_evidence(
     raw: pl.LazyFrame,
     spec: EvidencePostprocessor,
@@ -56,7 +99,8 @@ def run_evidence(
 ) -> None:
     """Check, post-process and write one datasource's raw evidence.
 
-    The publication look-up table is built only when the evidence carries `literature`.
+    For datasources with nothing to add after the recipe. Those that do compose `build_luts`,
+    `spec.run` and `write_evidence` themselves.
 
     Args:
         raw: raw evidence.
@@ -65,24 +109,7 @@ def run_evidence(
         target: location of the target index.
         destination: `evidence` and `failed_evidence` output directories.
         literature: location of the literature export, needed when `raw` carries `literature`.
-
-    Raises:
-        ValueError: if `raw` carries `literature` and no `literature` location is given.
     """
     check_raw_evidence(raw, spec)
-    has_literature = 'literature' in raw.collect_schema().names()
-    if has_literature and literature is None:
-        msg = f'{spec.datasource_id} evidence carries literature but no literature export was given'
-        raise ValueError(msg)
-
-    luts = ValidationLuts(
-        disease=build_disease_lut(disease),
-        target=build_target_lut(target),
-        publication=build_publication_lut(literature) if has_literature and literature else None,
-    )
-    processed = spec.run(raw, luts)
-
-    logger.info(f'writing valid {spec.datasource_id} evidence to {destination["evidence"]}')
-    write_dataset(processed.valid, destination['evidence'])
-    logger.info(f'writing failed {spec.datasource_id} evidence to {destination["failed_evidence"]}')
-    write_dataset(processed.invalid, destination['failed_evidence'])
+    luts = build_luts(raw, disease=disease, target=target, literature=literature)
+    write_evidence(spec.run(raw, luts), destination)

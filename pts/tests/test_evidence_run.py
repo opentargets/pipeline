@@ -55,7 +55,7 @@ class TestRecipeLiterature:
             disease=pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']}),
             target=pl.DataFrame({'targetFromSourceId': ['ENSG1'], 'targetId': ['ENSG1'], 'biotype': ['pc']}),
         )
-        assert SPEC.run(raw(), luts).valid.collect().height == 1
+        assert SPEC.run(raw(), luts).valid().collect().height == 1
 
     def test_refuses_literature_without_a_publication_table(self) -> None:
         luts = ValidationLuts(disease=pl.DataFrame(), target=pl.DataFrame())

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from pts.transformers.evidence_postprocess import evidence_postprocess
+from tests.evidence_fixtures import write_disease, write_literature, write_target
 
 
 def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_path: Path) -> None:
@@ -34,3 +36,30 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
 
     with pytest.raises(KeyError, match='no score/direction expressions registered for datasource'):
         evidence_postprocess(source, {}, settings, None)
+
+
+def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) -> None:
+    src = tmp_path / 'src'
+    (src / 'impc').mkdir(parents=True)
+    pl.DataFrame({
+        'datasourceId': ['impc'],
+        'targetFromSourceId': ['ENSG1'],
+        'diseaseFromSourceMappedId': ['EFO_1'],
+        'resourceScore': [50.0],
+    }).write_parquet(src / 'impc' / 'part.parquet')
+    dst = tmp_path / 'out'
+
+    evidence_postprocess(
+        {
+            'evidence_path': str(src / 'impc'),
+            'disease_path': write_disease(src / 'disease', ['EFO_1']),
+            'target_path': write_target(src / 'target', ['ENSG1']),
+            'publication_date_lut': write_literature(src / 'literature', {'1': '2001-01-01'}),
+        },
+        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
+        {'datasource_id': 'impc', 'evidence_format': 'parquet', 'unique_fields': ['targetId', 'diseaseId']},
+        None,
+    )
+
+    valid = pl.read_parquet(dst / 'valid')
+    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.5, 'risk', 'LoF')

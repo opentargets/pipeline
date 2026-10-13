@@ -2,11 +2,12 @@
 
 Harmonising, validating, dating and scoring evidence is the same sequence for every datasource;
 only a handful of per-datasource values differ. This module holds that sequence once, as an object
-you configure and then run.
+you configure and then run. Directions of effect and variant id hashing are not part of it: the
+datasources that need them apply them to the `Evidence` it returns.
 
-It reads nothing and writes nothing: `run` takes a `LazyFrame` and returns `LazyFrame`s. Any caller
-that can produce a frame can use it, whether the evidence came off storage or was generated in
-memory.
+It reads nothing and writes nothing: `run` takes a `LazyFrame` and returns a lazy `Evidence`. Any
+caller that can produce a frame can use it, whether the evidence came off storage or was generated
+in memory.
 
 It also imports nothing from `expressions`. Each expression arrives as its own parameter, so
 whoever constructs the postprocessor decides where they come from -- a central registry or a
@@ -37,18 +38,6 @@ class ValidationLuts:
 
 
 @dataclass(frozen=True)
-class PostprocessedEvidence:
-    """The two halves of a post-processed datasource, split on quality control.
-
-    Both stay lazy. Each collects the upstream chain independently, so whether that work is done
-    once or twice is the caller's decision.
-    """
-
-    valid: pl.LazyFrame
-    invalid: pl.LazyFrame
-
-
-@dataclass(frozen=True)
 class EvidencePostprocessor:
     """One datasource's post-processing, configured but not yet run.
 
@@ -57,21 +46,15 @@ class EvidencePostprocessor:
             flagged, so they appear in neither output.
         unique_fields: the fields whose contents identify an evidence row, used to derive `id`.
         score: expression producing the evidence score.
-        direction_on_trait: expression producing the direction of effect on the trait, or `None`
-            to leave it unset.
-        direction_on_target: expression producing the direction of effect on the target, or `None`
-            to leave it unset.
         excluded_biotypes: target biotypes to flag as invalid, for datasources that restrict them.
     """
 
     datasource_id: str
     unique_fields: list[str]
     score: pl.Expr
-    direction_on_trait: pl.Expr | None = None
-    direction_on_target: pl.Expr | None = None
     excluded_biotypes: list[str] | None = None
 
-    def run(self, lf: pl.LazyFrame, luts: ValidationLuts) -> PostprocessedEvidence:
+    def run(self, lf: pl.LazyFrame, luts: ValidationLuts) -> Evidence:
         """Apply the full post-processing chain to one datasource's raw evidence.
 
         The call order is load-bearing: later steps read columns earlier ones add, and
@@ -84,7 +67,7 @@ class EvidencePostprocessor:
             luts: the lookup tables to validate against.
 
         Returns:
-            The valid and invalid halves, both still lazy.
+            The scored evidence, still lazy and not yet split into valid and invalid.
 
         Raises:
             ValueError: if `lf` carries `literature` and `luts.publication` is not given.
@@ -102,12 +85,4 @@ class EvidencePostprocessor:
         )
         if luts.publication is not None:
             deduplicated = deduplicated.resolve_publication_date(luts.publication)
-        processed = (
-            deduplicated
-            .resolve_evidence_date()
-            .calculate_evidence_score(self.score)
-            .assign_direction_on_trait(self.direction_on_trait)
-            .assign_direction_on_target(self.direction_on_target, luts.target)
-            .hash_long_variant_identifiers()
-        )
-        return PostprocessedEvidence(valid=processed.valid(), invalid=processed.invalid())
+        return deduplicated.resolve_evidence_date().calculate_evidence_score(self.score)

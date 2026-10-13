@@ -26,7 +26,8 @@ from otter.config.model import Config
 
 from pts.transformers.evidence.expressions import EXPRESSIONS
 from pts.transformers.evidence.postprocess import EvidencePostprocessor, ValidationLuts
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.evidence.run import write_evidence
+from pts.transformers.utils.dataset import scan_dataset
 from pts.transformers.utils.validation_lut import build_disease_lut, build_publication_lut, build_target_lut
 
 
@@ -67,8 +68,6 @@ def evidence_postprocess(
         datasource_id=datasource_id,
         unique_fields=settings['unique_fields'],
         score=expressions.score,
-        direction_on_trait=expressions.direction_on_trait,
-        direction_on_target=expressions.direction_on_target,
         excluded_biotypes=settings.get('excluded_biotypes'),
     )
 
@@ -87,12 +86,11 @@ def evidence_postprocess(
         msg = f'unrecognised evidence_format {evidence_format!r} for {evidence_path!r}, expected "parquet" or "json"'
         raise ValueError(msg)
 
-    processed = postprocessor.run(lf, luts)
-
-    # Two independent writes rather than collecting once and splitting in memory, which would put
-    # a whole datasource in memory at once. Each write recomputes the chain; bounded memory is
-    # worth more here than the duplicated work.
-    logger.info(f'writing valid evidence to {destination["evidence"]}')
-    write_dataset(processed.valid, destination['evidence'])
-    logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    write_dataset(processed.invalid, destination['failed_evidence'])
+    evidence = (
+        postprocessor
+        .run(lf, luts)
+        .assign_direction_on_trait(expressions.direction_on_trait)
+        .assign_direction_on_target(expressions.direction_on_target, luts.target)
+        .hash_long_variant_identifiers()
+    )
+    write_evidence(evidence, destination)

@@ -6,7 +6,9 @@ new `Evidence`, so a caller can chain the full sequence -- `validate_diseases` -
 `validate_uniqueness` -> `resolve_publication_date` ->
 `resolve_evidence_date` -> `calculate_evidence_score` -> `assign_direction_on_trait` ->
 `assign_direction_on_target` -> `hash_long_variant_identifiers` -> `valid()`/`invalid()` -- exactly
-as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class.
+as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class. The shared recipe
+(`postprocess`) stops at `calculate_evidence_score`; the steps after it belong to the datasources
+that use them.
 
 `calculate_evidence_score`, `assign_direction_on_trait` and `assign_direction_on_target` take a
 `pl.Expr | None` rather than a spark SQL string: the SQL compiler that used to back these

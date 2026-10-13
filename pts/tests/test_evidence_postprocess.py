@@ -73,23 +73,30 @@ def _raw(**overrides: object) -> pl.LazyFrame:
     return pl.LazyFrame([row | overrides])
 
 
-def test_run_returns_lazy_frames_and_touches_no_storage() -> None:
+def test_run_returns_lazy_evidence_and_touches_no_storage() -> None:
     """The recipe is frame-to-frame: no paths in, no paths out, nothing collected.
 
     This is what lets a caller run it on evidence held in memory, with no intermediate file.
     """
     result = _postprocessor().run(_raw(), _luts())
 
-    assert isinstance(result.valid, pl.LazyFrame)
-    assert isinstance(result.invalid, pl.LazyFrame)
+    assert isinstance(result, Evidence)
+    assert isinstance(result.lf, pl.LazyFrame)
+
+
+def test_run_leaves_directions_to_the_datasource() -> None:
+    columns = _postprocessor().run(_raw(), _luts()).lf.collect_schema().names()
+
+    assert 'directionOnTrait' not in columns
+    assert 'directionOnTarget' not in columns
 
 
 def test_a_fully_resolvable_row_comes_out_valid() -> None:
     result = _postprocessor().run(_raw(), _luts())
 
-    valid = result.valid.collect()
+    valid = result.valid().collect()
     assert valid.height == 1
-    assert result.invalid.collect().height == 0
+    assert result.invalid().collect().height == 0
     assert valid['targetId'].to_list() == ['ENSG1']
     assert valid['diseaseId'].to_list() == ['EFO_1']
 
@@ -97,8 +104,8 @@ def test_a_fully_resolvable_row_comes_out_valid() -> None:
 def test_an_unresolvable_target_is_split_into_the_invalid_half() -> None:
     result = _postprocessor().run(_raw(targetFromSourceId='NOT_A_TARGET'), _luts())
 
-    assert result.valid.collect().height == 0
-    invalid = result.invalid.collect()
+    assert result.valid().collect().height == 0
+    invalid = result.invalid().collect()
     assert invalid.height == 1
     assert EvidenceFlags.INVALID_TARGET in invalid[QC_COLUMN].item().to_list()
 
@@ -110,8 +117,8 @@ def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
     """
     luts, raw = _luts(), _raw()
 
-    from_column = _postprocessor().run(raw, luts).valid.collect()
-    constant = _postprocessor(score=pl.lit(0.25)).run(raw, luts).valid.collect()
+    from_column = _postprocessor().run(raw, luts).valid().collect()
+    constant = _postprocessor(score=pl.lit(0.25)).run(raw, luts).valid().collect()
 
     assert from_column['score'].to_list() == [0.5]
     assert constant['score'].to_list() == [0.25]
@@ -123,9 +130,9 @@ def test_excluded_biotypes_are_applied_when_given() -> None:
     without = _postprocessor().run(_raw(), luts)
     with_exclusion = _postprocessor(excluded_biotypes=['protein_coding']).run(_raw(), luts)
 
-    assert without.valid.collect().height == 1
-    assert with_exclusion.valid.collect().height == 0
-    flags = with_exclusion.invalid.collect()[QC_COLUMN].item().to_list()
+    assert without.valid().collect().height == 1
+    assert with_exclusion.valid().collect().height == 0
+    flags = with_exclusion.invalid().collect()[QC_COLUMN].item().to_list()
     assert EvidenceFlags.INVALID_BIOTYPE in flags
 
 
@@ -139,8 +146,8 @@ def test_a_mismatched_datasource_is_dropped_entirely_not_flagged() -> None:
     """
     result = _postprocessor(datasource_id='not_eva').run(_raw(), _luts())
 
-    assert result.valid.collect().height == 0
-    assert result.invalid.collect().height == 0
+    assert result.valid().collect().height == 0
+    assert result.invalid().collect().height == 0
 
 
 # --------------------------------------------------------------- reading json evidence
