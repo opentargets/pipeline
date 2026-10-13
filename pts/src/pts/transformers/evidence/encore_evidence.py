@@ -8,24 +8,15 @@ validation, identifier assignment, dating, scoring), plus two pieces ENCORE need
 evidence didn't exercise: `validate_datasource` (a hard filter, not a flag) and a real `score_expr`
 (a linear rescale, not a straight column copy).
 
-`score_expression: ABS(geneticInteractionScore) / 16.0` here matches the fix landed upstream (see
-`pts/config.yaml` at commit 568b9ceb -- https://github.com/opentargets/pipeline/blob/568b9ceb1578062b6282410fa11a63993eaf42f2/pts/config.yaml),
-confirmed against real data with zero error across all 112,169 joinable rows between a real
-input/output pair (`work/input/evidence/encore`, a backed-up `work/output/evidence_encore_bak`).
-The generic PySpark step's earlier `score_expression` (still what's on `main` as of this writing)
-referenced `geneticInteractionPValue`, a column the current raw ENCORE export no longer provides
-(only `geneticInteractionScore`, a signed strength/direction statistic, is present) -- running that
-expression as written would raise an unresolved-column error, not silently produce nulls, since
-`harmonise_to_schema` only casts types for columns the source dataframe already has, it does not
-add missing target-schema columns. No clamping is applied here, matching
-`calculate_evidence_score`'s own semantics: a score outside `[0, 1]` (e.g. a `geneticInteractionScore`
-whose magnitude exceeds 16 -- none exist in the local sample, but the field's own description
-allows cooperative/positive values a plain negation wouldn't have scored correctly) is flagged
-`NO_VALID_SCORE` and excluded from `evidence`, not silently clamped into validity.
+The score is `ABS(geneticInteractionScore) / 16.0`, the PySpark step's ENCORE `score_expression`
+since commit 568b9ceb, and matched the PySpark output with zero error across all 112,169 joinable
+rows of a real input/output pair. `geneticInteractionScore` is a signed strength/direction
+statistic, hence the absolute value. No clamping is applied, matching `calculate_evidence_score`'s
+own semantics: a score outside `[0, 1]` (a `geneticInteractionScore` whose magnitude exceeds 16) is
+flagged `NO_VALID_SCORE` and excluded from `evidence`, not silently clamped into validity.
 
-The raw ENCORE export format also changed upstream at that same commit: from `input/evidence/encore.json.gz`
-(gzipped JSON) to `input/evidence/encore` (parquet) -- matched here by reading it as `scan_dataset`'s
-default `parquet` format instead of `ndjson`.
+The raw ENCORE export is parquet (`input/evidence/encore`), read with `scan_dataset`'s default
+format.
 """
 
 from pathlib import Path
