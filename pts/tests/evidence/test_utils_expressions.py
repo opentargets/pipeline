@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import math
 import random
+import warnings
 from dataclasses import dataclass
 from math import isnan
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 import yaml
@@ -104,16 +106,42 @@ def test_europepmc_scores_one_for_null_or_nan_resource_score() -> None:
     assert got == pytest.approx([1.0, 1.0])
 
 
-def test_log10_equals_libm_bit_for_bit_and_keeps_null_nan_and_zero() -> None:
+def test_log10_is_numpy_log10_and_within_one_ulp_of_libm() -> None:
     rng = random.Random(0)
     values = [10 ** rng.uniform(-12, 3) for _ in range(5000)]
     got = pl.DataFrame({'x': values}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
-    assert got == [math.log10(v) for v in values]
+    assert got == np.log10(np.array(values)).tolist()
+    assert all(abs(g - math.log10(v)) <= math.ulp(math.log10(v)) for g, v in zip(got, values, strict=True))
+
+
+def test_log10_keeps_null_nan_zero_and_one() -> None:
     edge = pl.DataFrame({'x': [None, float('nan'), 0.0, 1.0]}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
     assert edge[0] is None
     assert isnan(edge[1])
     assert edge[2] == float('-inf')
     assert edge[3] == 0.0
+
+
+def test_log10_accepts_integer_and_float32_input() -> None:
+    ints = pl.DataFrame({'x': [1, 10, 1000, None]}, schema={'x': pl.Int64}).select(log10(pl.col('x')).alias('y'))['y']
+    assert ints.dtype == pl.Float64
+    assert ints.to_list() == [0.0, 1.0, 3.0, None]
+    floats = pl.DataFrame({'x': [10.0, 100.0]}, schema={'x': pl.Float32}).select(log10(pl.col('x')).alias('y'))['y']
+    assert floats.dtype == pl.Float64
+    assert floats.to_list() == [1.0, 2.0]
+
+
+def test_log10_of_a_negative_is_nan_without_a_warning() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        got = pl.DataFrame({'x': [-1.0, 0.0]}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
+    assert isnan(got[0])
+    assert got[1] == float('-inf')
+
+
+def test_log10_of_an_all_null_column_is_all_null() -> None:
+    got = pl.DataFrame({'x': [None, None]}, schema={'x': pl.Float64}).select(log10(pl.col('x')).alias('y'))['y']
+    assert got.to_list() == [None, None]
 
 
 def test_linear_rescale_clamps_project_score() -> None:
