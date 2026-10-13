@@ -2063,8 +2063,8 @@ steps:
 
   #: SEARCH_FACET STEP :############################################################################
   search_facet:
-    - name: pyspark search_facet
-      pyspark: search_facet
+    - name: transform search_facet
+      transformer: search_facet
       source:
         diseases: output/disease
         targets: output/target
