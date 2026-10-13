@@ -1448,7 +1448,7 @@ steps:
           - resourceScore
           - statisticalTestTail
 
-  evidence_postprocess_encore:
+  evidence_encore:
     - name: transform evidence.encore
       transformer: evidence.encore
       source:
