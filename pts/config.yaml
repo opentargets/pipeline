@@ -573,14 +573,18 @@ steps:
 
   #: EVIDENCE_CLINICAL_PRECEDENCE STEP :############################################################
   evidence_clinical_precedence:
-    - name: pyspark clinical_precedence
-      pyspark: clinical_precedence
+    - name: transform evidence.clinical_precedence
+      transformer: evidence.clinical_precedence
       source:
         clinical_report: output/clinical_report
         drug_mechanism_of_action: output/drug_mechanism_of_action
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
-        output: intermediate/evidence/clinical_precedence.parquet
-        excluded: excluded/clinical_precedence_failed_report
+        failed_evidence: excluded/evidence/clinical_precedence
+        evidence: output/evidence_clinical_precedence
+        excluded_report: excluded/clinical_precedence_failed_report
       settings:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
@@ -1112,32 +1116,6 @@ steps:
           - diseaseFromSource
           - studyId
           - allelicRequirements
-
-  evidence_postprocess_clinical_precedence:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/clinical_precedence.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/clinical_precedence
-        evidence: output/evidence_clinical_precedence
-      properties:
-        spark.driver.memory: 8g
-        spark.executor.memory: 8g
-        spark.sql.shuffle.partitions: '800'
-      settings:
-        evidence_format: parquet
-        datasource_id: clinical_precedence
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - drugId
-          - clinicalReportId
 
   evidence_reactome:
     - name: transform evidence.reactome

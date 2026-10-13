@@ -287,9 +287,6 @@ steps:
     depends_on:
       - pts_clinical_report
       - pts_drug_mechanism_of_action
-  pts_evidence_postprocess_clinical_precedence:
-    depends_on:
-      - pts_evidence_clinical_precedence
       - pts_target
   pts_evidence_cancer_biomarkers:
     depends_on:
@@ -422,7 +419,7 @@ steps:
       - pts_l2g
       - pts_evidence_expression_atlas
       - pts_evidence_cancer_biomarkers
-      - pts_evidence_postprocess_clinical_precedence
+      - pts_evidence_clinical_precedence
       - pts_evidence_postprocess_clingen
       - pts_evidence_cosmic
       - pts_evidence_project_score

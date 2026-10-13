@@ -38,32 +38,27 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
         evidence_postprocess(source, {}, settings, None)
 
 
-def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) -> None:
+def test_evidence_postprocess_scores_with_the_registry_expression(tmp_path: Path) -> None:
+    """Checks the generic step's scoring path: the registry's `ot_crispr` score reaches the output."""
     src = tmp_path / 'src'
-    (src / 'clinical_precedence').mkdir(parents=True)
-    pl.DataFrame(
-        {
-            'datasourceId': ['clinical_precedence'],
-            'targetFromSourceId': ['ENSG1'],
-            'diseaseFromSourceMappedId': ['EFO_1'],
-            'clinicalStage': ['PHASE_3'],
-            'trialStopReasonCategories': [None],
-            'actionType': ['INHIBITOR'],
-        },
-        schema_overrides={'trialStopReasonCategories': pl.List(pl.String)},
-    ).write_parquet(src / 'clinical_precedence' / 'part.parquet')
+    (src / 'ot_crispr').mkdir(parents=True)
+    pl.DataFrame({
+        'datasourceId': ['ot_crispr'],
+        'targetFromSourceId': ['ENSG1'],
+        'diseaseFromSourceMappedId': ['EFO_1'],
+    }).write_parquet(src / 'ot_crispr' / 'part.parquet')
     dst = tmp_path / 'out'
 
     evidence_postprocess(
         {
-            'evidence_path': str(src / 'clinical_precedence'),
+            'evidence_path': str(src / 'ot_crispr'),
             'disease_path': write_disease(src / 'disease', ['EFO_1']),
             'target_path': write_target(src / 'target', ['ENSG1']),
             'publication_date_lut': write_literature(src / 'literature', {'1': '2001-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {
-            'datasource_id': 'clinical_precedence',
+            'datasource_id': 'ot_crispr',
             'evidence_format': 'parquet',
             'unique_fields': ['targetId', 'diseaseId'],
         },
@@ -71,4 +66,4 @@ def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) ->
     )
 
     valid = pl.read_parquet(dst / 'valid')
-    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.7, 'protect', 'LoF')
+    assert valid['score'].to_list() == [1.0]
