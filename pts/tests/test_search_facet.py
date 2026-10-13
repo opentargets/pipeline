@@ -1,539 +1,286 @@
-"""Tests for the search_facet pyspark module.
+"""Tests for the search_facet transformer."""
 
-Ported from platform-etl-backend searchFacet step.
-"""
+from pathlib import Path
 
-from pyspark.sql import Row
-from pyspark.sql.types import (
-    ArrayType,
-    BooleanType,
-    LongType,
-    StringType,
-    StructField,
-    StructType,
+import polars as pl
+
+from pts.transformers.search_facet import (
+    DEFAULT_CATEGORIES,
+    DISEASE_COLUMNS,
+    TARGET_COLUMNS,
+    disease_facets,
+    disease_name_facets,
+    go_facets,
+    pathway_facets,
+    search_facet,
+    simple_facet,
+    subcellular_location_facets,
+    target_class_facets,
+    therapeutic_area_facets,
+    tractability_facets,
 )
 
-from pts.pyspark.search_facet import (
-    _compute_disease_name_facets,
-    _compute_go_facets,
-    _compute_pathway_facets,
-    _compute_simple_facet,
-    _compute_subcellular_location_facets,
-    _compute_target_class_facets,
-    _compute_therapeutic_areas_facets,
-    _compute_tractability_facets,
-)
+CATEGORIES = DEFAULT_CATEGORIES
 
-# ---------------------------------------------------------------------------
-# Category label constants (mirrors reference.conf categories)
-# ---------------------------------------------------------------------------
+GO_ANNOTATION = pl.Struct({'id': pl.String, 'aspect': pl.String})
+LOCATION = pl.Struct({'location': pl.String, 'termSL': pl.String})
+TARGET_CLASS = pl.Struct({'id': pl.Int64, 'label': pl.String, 'level': pl.String})
+PATHWAY = pl.Struct({'pathwayId': pl.String, 'pathway': pl.String, 'topLevelTerm': pl.String})
 
-CATEGORIES = {
-    'disease_name': 'Disease',
-    'therapeutic_area': 'Therapeutic Area',
-    'sm': 'Tractability Small Molecule',
-    'ab': 'Tractability Antibody',
-    'pr': 'Tractability PROTAC',
-    'oc': 'Tractability Other Modalities',
-    'target_id': 'Target ID',
-    'approved_symbol': 'Approved Symbol',
-    'approved_name': 'Approved Name',
-    'subcellular_location': 'Subcellular Location',
-    'target_class': 'ChEMBL Target Class',
-    'pathways': 'Reactome',
-    'go_f': 'GO:MF',
-    'go_p': 'GO:BP',
-    'go_c': 'GO:CC',
+TARGET_SCHEMA = {
+    'id': pl.String,
+    'approvedSymbol': pl.String,
+    'approvedName': pl.String,
+    'go': pl.List(GO_ANNOTATION),
+    'subcellularLocations': pl.List(LOCATION),
+    'targetClass': pl.List(TARGET_CLASS),
+    'pathways': pl.List(PATHWAY),
 }
-
-# ---------------------------------------------------------------------------
-# Disease schemas
-# ---------------------------------------------------------------------------
-
-DISEASE_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('name', StringType()),
-    StructField('therapeuticAreas', ArrayType(StringType())),
-])
+DISEASE_SCHEMA = {'id': pl.String, 'name': pl.String, 'therapeuticAreas': pl.List(pl.String)}
+REFERENCE_SCHEMA = {'id': pl.String, 'label': pl.String, 'ancestors': pl.List(pl.String)}
+TRACTABILITY_SCHEMA = {'targetId': pl.String, 'modality': pl.String, 'category': pl.String, 'value': pl.Boolean}
 
 
-# ---------------------------------------------------------------------------
-# 1. Disease name facet
-# ---------------------------------------------------------------------------
+def target(rows: list[dict]) -> pl.LazyFrame:
+    return pl.LazyFrame([{k: row.get(k) for k in TARGET_SCHEMA} for row in rows], schema=TARGET_SCHEMA)
 
 
-def test_disease_name_facet_produces_name_category(spark):
-    """Disease name facet produces rows with 'Disease' category."""
-    data = [
-        Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=['EFO_0010285']),
-        Row(id='EFO_0000002', name='lung cancer', therapeuticAreas=[]),
+def disease(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=DISEASE_SCHEMA, orient='row')
+
+
+def reference(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=REFERENCE_SCHEMA, orient='row')
+
+
+def tractability(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=TRACTABILITY_SCHEMA, orient='row')
+
+
+def by_key(lf: pl.LazyFrame, key: str = 'datasourceId') -> dict:
+    return {row[key]: row for row in lf.collect().to_dicts()}
+
+
+def test_disease_name_facet() -> None:
+    rows = disease_name_facets(disease([('EFO_1', 'breast cancer', None), ('EFO_2', 'lung cancer', [])]), CATEGORIES)
+    assert by_key(rows) == {
+        'EFO_1': {'label': 'breast cancer', 'category': 'Disease', 'datasourceId': 'EFO_1', 'entityIds': ['EFO_1']},
+        'EFO_2': {'label': 'lung cancer', 'category': 'Disease', 'datasourceId': 'EFO_2', 'entityIds': ['EFO_2']},
+    }
+
+
+def test_therapeutic_area_facet_groups_diseases_under_the_area_name() -> None:
+    rows = therapeutic_area_facets(
+        disease([
+            ('EFO_10', 'neoplasm', []),
+            ('EFO_1', 'breast cancer', ['EFO_10']),
+            ('EFO_2', 'lung cancer', ['EFO_10', None]),
+            ('EFO_3', 'orphan', ['EFO_99']),
+            ('EFO_4', 'none', None),
+        ]),
+        CATEGORIES,
+    )
+    assert by_key(rows) == {
+        'EFO_10': {
+            'label': 'neoplasm',
+            'category': 'Therapeutic Area',
+            'datasourceId': 'EFO_10',
+            'entityIds': ['EFO_1', 'EFO_2'],
+        },
+    }
+
+
+def test_tractability_facet_keeps_true_values_only() -> None:
+    rows = tractability_facets(
+        tractability([
+            ('ENSG2', 'SM', 'Approved Drug', True),
+            ('ENSG1', 'SM', 'Approved Drug', True),
+            ('ENSG1', 'SM', 'Druggable Family', False),
+            ('ENSG1', 'SM', 'Unknown', None),
+            ('ENSG1', 'AB', 'Advanced Clinical', True),
+            ('ENSG1', 'XX', 'Other', True),
+        ]),
+        CATEGORIES,
+    ).collect()
+    assert sorted(rows.select('category', 'label', 'entityIds', 'datasourceId').rows()) == [
+        ('Tractability Antibody', 'Advanced Clinical', ['ENSG1'], None),
+        ('Tractability Small Molecule', 'Approved Drug', ['ENSG1', 'ENSG2'], None),
+        ('XX', 'Other', ['ENSG1'], None),
     ]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_disease_name_facets(df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'Disease' in categories
-    labels = {r.label for r in rows}
-    assert 'breast cancer' in labels
-    assert 'lung cancer' in labels
 
 
-def test_disease_name_facet_entry_structure(spark):
-    """Disease name facet entries have label, category, entityIds, datasourceId."""
-    data = [Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=[])]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_disease_name_facets(df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-    assert row.category == 'Disease'
-    assert 'EFO_0000001' in row.entityIds
+def test_go_facet_maps_aspects_and_propagates_to_ancestors() -> None:
+    rows = go_facets(
+        target([
+            {'id': 'ENSG1', 'go': [{'id': 'GO:2', 'aspect': 'F'}, {'id': 'GO:3', 'aspect': 'C'}]},
+            {'id': 'ENSG2', 'go': [{'id': 'GO:1', 'aspect': 'F'}, {'id': 'GO:9', 'aspect': 'Z'}]},
+            {'id': 'ENSG3', 'go': []},
+            {'id': 'ENSG4', 'go': None},
+        ]),
+        reference([
+            ('GO:1', 'binding', None),
+            ('GO:2', 'DNA binding', ['GO:1', 'GO:2']),
+            ('GO:3', 'nucleus', []),
+            ('GO:9', 'odd', []),
+            ('GO:0', None, []),
+        ]),
+        CATEGORIES,
+    )
+    assert by_key(rows) == {
+        'GO:1': {'label': 'binding', 'datasourceId': 'GO:1', 'entityIds': ['ENSG1', 'ENSG2'], 'category': 'GO:MF'},
+        'GO:2': {'label': 'DNA binding', 'datasourceId': 'GO:2', 'entityIds': ['ENSG1'], 'category': 'GO:MF'},
+        'GO:3': {'label': 'nucleus', 'datasourceId': 'GO:3', 'entityIds': ['ENSG1'], 'category': 'GO:CC'},
+        'GO:9': {'label': 'odd', 'datasourceId': 'GO:9', 'entityIds': ['ENSG2'], 'category': 'Z'},
+    }
 
 
-def test_disease_name_facet_datasource_id_is_disease_id(spark):
-    """Disease name facet datasourceId equals the disease id."""
-    data = [Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=[])]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_disease_name_facets(df, CATEGORIES)
-    row = result.collect()[0]
-    assert row.datasourceId == 'EFO_0000001'
+def test_go_facet_drops_terms_without_a_label() -> None:
+    rows = go_facets(
+        target([{'id': 'ENSG1', 'go': [{'id': 'GO:5', 'aspect': 'P'}, None]}]),
+        reference([('GO:5', 'process', ['GO:0']), ('GO:0', None, [])]),
+        CATEGORIES,
+    )
+    assert list(by_key(rows)) == ['GO:5']
 
 
-# ---------------------------------------------------------------------------
-# 2. Therapeutic area facet
-# ---------------------------------------------------------------------------
+def test_subcellular_location_facet() -> None:
+    rows = subcellular_location_facets(
+        target([
+            {'id': 'ENSG2', 'subcellularLocations': [{'location': 'nucleus', 'termSL': 'SL-0191'}]},
+            {'id': 'ENSG1', 'subcellularLocations': [{'location': 'nucleus', 'termSL': 'SL-0191'}]},
+            {'id': 'ENSG3', 'subcellularLocations': [{'location': 'cytosol', 'termSL': None}]},
+            {'id': 'ENSG4', 'subcellularLocations': []},
+        ]),
+        CATEGORIES,
+    )
+    assert by_key(rows, 'label') == {
+        'nucleus': {
+            'label': 'nucleus',
+            'category': 'Subcellular Location',
+            'datasourceId': 'SL-0191',
+            'entityIds': ['ENSG1', 'ENSG2'],
+        },
+        'cytosol': {
+            'label': 'cytosol',
+            'category': 'Subcellular Location',
+            'datasourceId': None,
+            'entityIds': ['ENSG3'],
+        },
+    }
 
 
-def test_therapeutic_area_facet_produces_therapeutic_area_category(spark):
-    """Therapeutic areas facet produces rows with 'Therapeutic Area' category."""
-    data = [
-        Row(id='EFO_0000010', name='cancer', therapeuticAreas=[]),
-        Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=['EFO_0000010']),
+def test_target_class_facet_has_null_datasource() -> None:
+    rows = target_class_facets(
+        target([
+            {'id': 'ENSG1', 'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}]},
+            {'id': 'ENSG1', 'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}]},
+        ]),
+        CATEGORIES,
+    )
+    assert by_key(rows, 'label') == {
+        'Kinase': {'label': 'Kinase', 'category': 'ChEMBL Target Class', 'entityIds': ['ENSG1'], 'datasourceId': None},
+    }
+
+
+def test_pathway_facet_propagates_to_ancestors() -> None:
+    rows = pathway_facets(
+        target([
+            {'id': 'ENSG1', 'pathways': [{'pathwayId': 'R-HSA-2', 'pathway': 'DNA Repair', 'topLevelTerm': 'x'}]},
+            {'id': 'ENSG2', 'pathways': [{'pathwayId': 'R-HSA-7', 'pathway': 'unknown', 'topLevelTerm': 'x'}]},
+        ]),
+        reference([('R-HSA-2', 'DNA Repair', ['R-HSA-1']), ('R-HSA-1', 'Cell Cycle', [])]),
+        CATEGORIES,
+    )
+    assert by_key(rows) == {
+        'R-HSA-1': {'label': 'Cell Cycle', 'category': 'Reactome', 'datasourceId': 'R-HSA-1', 'entityIds': ['ENSG1']},
+        'R-HSA-2': {'label': 'DNA Repair', 'category': 'Reactome', 'datasourceId': 'R-HSA-2', 'entityIds': ['ENSG1']},
+    }
+
+
+def test_simple_facet_groups_ids_by_label_and_keeps_null_labels() -> None:
+    rows = simple_facet(
+        target([
+            {'id': 'ENSG2', 'approvedSymbol': 'A'},
+            {'id': 'ENSG1', 'approvedSymbol': 'A'},
+            {'id': 'ENSG3', 'approvedSymbol': None},
+        ]),
+        'approvedSymbol',
+        'Approved Symbol',
+    )
+    assert by_key(rows, 'label') == {
+        'A': {'label': 'A', 'category': 'Approved Symbol', 'entityIds': ['ENSG1', 'ENSG2'], 'datasourceId': None},
+        None: {'label': None, 'category': 'Approved Symbol', 'entityIds': ['ENSG3'], 'datasourceId': None},
+    }
+
+
+def test_disease_facets_column_order_and_sort() -> None:
+    rows = disease_facets(
+        disease([('EFO_2', 'b', ['EFO_1']), ('EFO_1', 'a', None)]),
+        CATEGORIES,
+    ).collect()
+    assert rows.columns == DISEASE_COLUMNS
+    assert rows.select('category', 'label').rows() == [('Disease', 'a'), ('Disease', 'b'), ('Therapeutic Area', 'a')]
+
+
+def test_search_facet_end_to_end(tmp_path: Path) -> None:
+    src = tmp_path / 'src'
+    src.mkdir()
+    targets = target([
+        {
+            'id': 'ENSG1',
+            'approvedSymbol': 'A1',
+            'approvedName': 'alpha',
+            'go': [{'id': 'GO:2', 'aspect': 'F'}],
+            'subcellularLocations': [{'location': 'nucleus', 'termSL': 'SL-1'}],
+            'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}],
+            'pathways': [{'pathwayId': 'R-HSA-2', 'pathway': 'p', 'topLevelTerm': 'x'}],
+        },
+    ]).collect()
+    pl.concat([targets, targets.with_columns(pl.lit('ENSG2').alias('id'))], rechunk=False).write_parquet(
+        src / 'target.parquet'
+    )
+    disease([('EFO_2', 'b', ['EFO_1']), ('EFO_1', 'a', None)]).collect().write_parquet(src / 'disease.parquet')
+    reference([('GO:2', 'DNA binding', ['GO:1']), ('GO:1', 'binding', [])]).collect().write_parquet(src / 'go.parquet')
+    reference([('R-HSA-2', 'p', [])]).collect().write_parquet(src / 'reactome.parquet')
+    tractability([('ENSG1', 'SM', 'Approved Drug', True)]).collect().write_parquet(src / 'tractability.parquet')
+
+    def run(dst: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
+        search_facet(
+            {
+                'diseases': str(src / 'disease.parquet'),
+                'targets': str(src / 'target.parquet'),
+                'go': str(src / 'go.parquet'),
+                'reactome': str(src / 'reactome.parquet'),
+                'tractability': str(src / 'tractability.parquet'),
+            },
+            {'targets': str(dst / 'targets'), 'diseases': str(dst / 'diseases')},
+            {},
+            None,
+        )
+        return pl.read_parquet(dst / 'targets'), pl.read_parquet(dst / 'diseases')
+
+    targets_out, diseases_out = run(tmp_path / 'a')
+    assert targets_out.columns == TARGET_COLUMNS
+    assert diseases_out.columns == DISEASE_COLUMNS
+    assert dict(targets_out.schema) == {
+        'label': pl.String,
+        'category': pl.String,
+        'entityIds': pl.List(pl.String),
+        'datasourceId': pl.String,
+    }
+    assert sorted(targets_out['category'].unique().to_list()) == [
+        'Approved Name',
+        'Approved Symbol',
+        'ChEMBL Target Class',
+        'GO:MF',
+        'Reactome',
+        'Subcellular Location',
+        'Target ID',
+        'Tractability Small Molecule',
     ]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_therapeutic_areas_facets(df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'Therapeutic Area' in categories
+    assert targets_out.filter(pl.col('category') == 'GO:MF')['entityIds'].to_list() == [['ENSG1', 'ENSG2']] * 2
+    assert diseases_out.height == 3
 
-
-def test_therapeutic_area_facet_entry_structure(spark):
-    """Therapeutic area facet entries have label, category, entityIds, datasourceId."""
-    data = [
-        Row(id='EFO_0000010', name='neoplasm', therapeuticAreas=[]),
-        Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=['EFO_0000010']),
-    ]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_therapeutic_areas_facets(df, CATEGORIES)
-    rows = result.collect()
-    assert len(rows) >= 1
-    row = rows[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-
-
-def test_therapeutic_area_label_is_area_name(spark):
-    """Therapeutic area facet label is the name of the therapeutic area disease."""
-    data = [
-        Row(id='EFO_0000010', name='neoplasm', therapeuticAreas=[]),
-        Row(id='EFO_0000001', name='breast cancer', therapeuticAreas=['EFO_0000010']),
-    ]
-    df = spark.createDataFrame(data, DISEASE_SCHEMA)
-    result = _compute_therapeutic_areas_facets(df, CATEGORIES)
-    rows = result.collect()
-    labels = {r.label for r in rows}
-    assert 'neoplasm' in labels
-
-
-# ---------------------------------------------------------------------------
-# 3. Tractability facets
-# ---------------------------------------------------------------------------
-
-TRACTABILITY_SCHEMA = StructType([
-    StructField('targetId', StringType()),
-    StructField('modality', StringType()),
-    StructField('category', StringType()),
-    StructField('value', BooleanType()),
-])
-
-
-def test_tractability_facet_produces_modality_categories(spark):
-    """Tractability facet produces SM/AB/PR/OC modality categories."""
-    data = [
-        Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True),
-        Row(targetId='ENSG00000001', modality='AB', category='Advanced Clinical', value=True),
-    ]
-    df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
-    result = _compute_tractability_facets(df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'Tractability Small Molecule' in categories
-    assert 'Tractability Antibody' in categories
-
-
-def test_tractability_facet_only_true_values(spark):
-    """Tractability facet only includes entries where value=True."""
-    data = [
-        Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True),
-        Row(targetId='ENSG00000001', modality='SM', category='Druggable Family', value=False),
-    ]
-    df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
-    result = _compute_tractability_facets(df, CATEGORIES)
-    rows = result.collect()
-    labels = {r.label for r in rows}
-    assert 'Approved Drug' in labels
-    assert 'Druggable Family' not in labels
-
-
-def test_tractability_facet_label_is_the_bucket_category(spark):
-    """Facet label comes from the bucket ``category``, not from ``modality``.
-
-    The producer renamed this column from ``id`` to ``category``; pinning the
-    label/category pairing on one row keeps the two apart.
-    """
-    data = [Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True)]
-    df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
-    row = _compute_tractability_facets(df, CATEGORIES).collect()[0]
-    assert row.label == 'Approved Drug'
-    assert row.category == 'Tractability Small Molecule'
-    assert row.entityIds == ['ENSG00000001']
-
-
-def test_tractability_facet_entry_structure(spark):
-    """Tractability facet entries have label, category, entityIds, datasourceId."""
-    data = [Row(targetId='ENSG00000001', modality='SM', category='Approved Drug', value=True)]
-    df = spark.createDataFrame(data, TRACTABILITY_SCHEMA)
-    result = _compute_tractability_facets(df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-
-
-# ---------------------------------------------------------------------------
-# 4. GO facets
-# ---------------------------------------------------------------------------
-
-TARGET_GO_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField(
-        'go',
-        ArrayType(
-            StructType([
-                StructField('id', StringType()),
-                StructField('aspect', StringType()),
-            ])
-        ),
-    ),
-])
-
-GO_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('label', StringType()),
-    StructField('ancestors', ArrayType(StringType())),
-])
-
-
-def test_go_facet_produces_f_p_c_categories(spark):
-    """GO facet maps F/P/C aspects to GO:MF / GO:BP / GO:CC categories."""
-    target_data = [
-        Row(
-            id='ENSG00000001',
-            go=[
-                Row(id='GO:0003677', aspect='F'),
-                Row(id='GO:0008150', aspect='P'),
-                Row(id='GO:0005634', aspect='C'),
-            ],
-        ),
-    ]
-    go_data = [
-        Row(id='GO:0003677', label='DNA binding', ancestors=[]),
-        Row(id='GO:0008150', label='biological_process', ancestors=[]),
-        Row(id='GO:0005634', label='nucleus', ancestors=[]),
-    ]
-    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
-    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
-    result = _compute_go_facets(target_df, go_df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'GO:MF' in categories
-    assert 'GO:BP' in categories
-    assert 'GO:CC' in categories
-
-
-def test_go_facet_entry_structure(spark):
-    """GO facet entries have label, category, entityIds, datasourceId."""
-    target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
-    go_data = [Row(id='GO:0003677', label='DNA binding', ancestors=[])]
-    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
-    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
-    result = _compute_go_facets(target_df, go_df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-    assert row.datasourceId == 'GO:0003677'
-
-
-def test_go_facet_propagates_to_ancestors(spark):
-    """Target annotated with a child GO term also appears in ancestor GO term facets."""
-    target_data = [Row(id='ENSG00000001', go=[Row(id='GO:0003677', aspect='F')])]
-    go_data = [
-        Row(id='GO:0003677', label='DNA binding', ancestors=['GO:0005488']),
-        Row(id='GO:0005488', label='binding', ancestors=[]),
-    ]
-    target_df = spark.createDataFrame(target_data, TARGET_GO_SCHEMA)
-    go_df = spark.createDataFrame(go_data, GO_SCHEMA)
-    result = _compute_go_facets(target_df, go_df, CATEGORIES)
-    rows = {r.datasourceId: r for r in result.collect()}
-    assert 'GO:0003677' in rows
-    assert 'GO:0005488' in rows
-    assert 'ENSG00000001' in rows['GO:0005488'].entityIds
-
-
-# ---------------------------------------------------------------------------
-# 5. Subcellular location facets
-# ---------------------------------------------------------------------------
-
-SUBCELLULAR_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField(
-        'subcellularLocations',
-        ArrayType(
-            StructType([
-                StructField('location', StringType()),
-                StructField('termSl', StringType()),
-            ])
-        ),
-    ),
-])
-
-
-def test_subcellular_location_facet_category(spark):
-    """Subcellular location facet produces 'Subcellular Location' category."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            subcellularLocations=[Row(location='nucleus', termSl='SL-0191')],
-        ),
-    ]
-    df = spark.createDataFrame(data, SUBCELLULAR_SCHEMA)
-    result = _compute_subcellular_location_facets(df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'Subcellular Location' in categories
-
-
-def test_subcellular_location_facet_entry_structure(spark):
-    """Subcellular location facet entries have label, category, entityIds, datasourceId."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            subcellularLocations=[Row(location='nucleus', termSl='SL-0191')],
-        ),
-    ]
-    df = spark.createDataFrame(data, SUBCELLULAR_SCHEMA)
-    result = _compute_subcellular_location_facets(df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-    assert row.label == 'nucleus'
-    assert row.datasourceId == 'SL-0191'
-
-
-# ---------------------------------------------------------------------------
-# 6. Target class facets
-# ---------------------------------------------------------------------------
-
-TARGET_CLASS_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField(
-        'targetClass',
-        ArrayType(
-            StructType([
-                StructField('id', LongType()),
-                StructField('label', StringType()),
-                StructField('level', StringType()),
-            ])
-        ),
-    ),
-])
-
-
-def test_target_class_facet_category(spark):
-    """Target class facet produces 'ChEMBL Target Class' category."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            targetClass=[Row(id=1, label='Kinase', level='l1')],
-        ),
-    ]
-    df = spark.createDataFrame(data, TARGET_CLASS_SCHEMA)
-    result = _compute_target_class_facets(df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'ChEMBL Target Class' in categories
-
-
-def test_target_class_facet_entry_structure(spark):
-    """Target class facet entries have label, category, entityIds, datasourceId (null)."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            targetClass=[Row(id=1, label='Kinase', level='l1')],
-        ),
-    ]
-    df = spark.createDataFrame(data, TARGET_CLASS_SCHEMA)
-    result = _compute_target_class_facets(df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-    assert row.label == 'Kinase'
-    assert row.datasourceId is None
-
-
-# ---------------------------------------------------------------------------
-# 7. Pathway facets
-# ---------------------------------------------------------------------------
-
-PATHWAY_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField(
-        'pathways',
-        ArrayType(
-            StructType([
-                StructField('pathwayId', StringType()),
-                StructField('pathway', StringType()),
-                StructField('topLevelTerm', StringType()),
-            ])
-        ),
-    ),
-])
-
-REACTOME_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('label', StringType()),
-    StructField('ancestors', ArrayType(StringType())),
-])
-
-
-def test_pathway_facet_category(spark):
-    """Pathway facet produces 'Reactome' category."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            pathways=[Row(pathwayId='R-HSA-1', pathway='Cell Cycle', topLevelTerm='Cell Cycle')],
-        ),
-    ]
-    reactome_data = [Row(id='R-HSA-1', label='Cell Cycle', ancestors=[])]
-    df = spark.createDataFrame(data, PATHWAY_SCHEMA)
-    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
-    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
-    rows = result.collect()
-    categories = {r.category for r in rows}
-    assert 'Reactome' in categories
-
-
-def test_pathway_facet_entry_structure(spark):
-    """Pathway facet entries have label, category, entityIds, datasourceId."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            pathways=[Row(pathwayId='R-HSA-1', pathway='Cell Cycle', topLevelTerm='Cell Cycle')],
-        ),
-    ]
-    reactome_data = [Row(id='R-HSA-1', label='Cell Cycle', ancestors=[])]
-    df = spark.createDataFrame(data, PATHWAY_SCHEMA)
-    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
-    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
-    row = result.collect()[0]
-    assert hasattr(row, 'label')
-    assert hasattr(row, 'category')
-    assert hasattr(row, 'entityIds')
-    assert hasattr(row, 'datasourceId')
-    assert row.label == 'Cell Cycle'
-    assert row.datasourceId == 'R-HSA-1'
-
-
-def test_pathway_facet_propagates_to_ancestors(spark):
-    """Target mapped to a child pathway also appears in ancestor pathway facets."""
-    data = [
-        Row(
-            id='ENSG00000001',
-            pathways=[Row(pathwayId='R-HSA-2', pathway='DNA Repair', topLevelTerm='Cell Cycle')],
-        ),
-    ]
-    reactome_data = [
-        Row(id='R-HSA-2', label='DNA Repair', ancestors=['R-HSA-1']),
-        Row(id='R-HSA-1', label='Cell Cycle', ancestors=[]),
-    ]
-    df = spark.createDataFrame(data, PATHWAY_SCHEMA)
-    reactome_df = spark.createDataFrame(reactome_data, REACTOME_SCHEMA)
-    result = _compute_pathway_facets(df, reactome_df, CATEGORIES)
-    rows = {r.datasourceId: r for r in result.collect()}
-    assert 'R-HSA-2' in rows
-    assert 'R-HSA-1' in rows
-    assert 'ENSG00000001' in rows['R-HSA-1'].entityIds
-
-
-# ---------------------------------------------------------------------------
-# 8. Simple facet
-# ---------------------------------------------------------------------------
-
-SIMPLE_FACET_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('approvedSymbol', StringType()),
-])
-
-
-class TestComputeSimpleFacet:
-    """Tests for _compute_simple_facet."""
-
-    def test_simple_facet_produces_expected_columns(self, spark):
-        """Simple facet output has label, category, entityIds, datasourceId."""
-        data = [
-            Row(id='ENSG00000001', approvedSymbol='BRCA1'),
-            Row(id='ENSG00000002', approvedSymbol='TP53'),
-        ]
-        df = spark.createDataFrame(data, SIMPLE_FACET_SCHEMA)
-        result = _compute_simple_facet(df, 'approvedSymbol', 'Approved Symbol', 'id')
-        row_dict = {r.label: r for r in result.collect()}
-        assert 'BRCA1' in row_dict
-        assert 'TP53' in row_dict
-
-    def test_simple_facet_category_value(self, spark):
-        """Simple facet uses the provided category string."""
-        data = [Row(id='ENSG00000001', approvedSymbol='BRCA1')]
-        df = spark.createDataFrame(data, SIMPLE_FACET_SCHEMA)
-        result = _compute_simple_facet(df, 'approvedSymbol', 'Target ID', 'id')
-        row = result.collect()[0]
-        assert row.category == 'Target ID'
-
-    def test_simple_facet_entity_ids_collected(self, spark):
-        """Simple facet collects entity IDs for the same label."""
-        data = [
-            Row(id='ENSG00000001', approvedSymbol='BRCA1'),
-        ]
-        df = spark.createDataFrame(data, SIMPLE_FACET_SCHEMA)
-        result = _compute_simple_facet(df, 'approvedSymbol', 'Approved Symbol', 'id')
-        row = result.collect()[0]
-        assert row.label == 'BRCA1'
-        assert 'ENSG00000001' in row.entityIds
-
-    def test_simple_facet_datasource_id_is_null(self, spark):
-        """Simple facet datasourceId is null."""
-        data = [Row(id='ENSG00000001', approvedSymbol='BRCA1')]
-        df = spark.createDataFrame(data, SIMPLE_FACET_SCHEMA)
-        result = _compute_simple_facet(df, 'approvedSymbol', 'Approved Symbol', 'id')
-        row = result.collect()[0]
-        assert row.datasourceId is None
+    again = run(tmp_path / 'b')
+    assert targets_out.equals(again[0])
+    assert diseases_out.equals(again[1])
