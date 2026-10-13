@@ -3,9 +3,15 @@ work_path: ../work
 log_level: DEBUG
 pool_size: 4
 
-# Defaults for local runs. Orchestration overrides these per environment from the
-# `pps.scratchpad` block of each staging DAG's config.yaml.
+# Defaults for local runs. Orchestration overrides these with the scratchpad of the
+# selected environment of each staging DAG's config.yaml.
 scratchpad:
+  eqtl_catalogue_credible_set_glob: input/eqtl_catalogue/susie/*/*/*.credible_sets.parquet
+  eqtl_catalogue_credible_set_path: output/eqtl_catalogue/credible_set
+  eqtl_catalogue_lbf_glob: input/eqtl_catalogue/susie/*/*/*.lbf_variable.parquet
+  eqtl_catalogue_metadata_uri: input/eqtl_catalogue/dataset_metadata.tsv
+  eqtl_catalogue_study_index_path: output/eqtl_catalogue/study_index
+  foldx_path: input/foldx
   gnomad_path: input/gnomad
   gwas_catalog_input_path: input/gwas_catalog
   gwas_catalog_sync_date: '20260802'
@@ -52,4 +58,33 @@ steps:
       settings:
         study_locus_ld_annotated_in: ${gwas_catalog_top_hits_path}/study_locus_ld_clumped
         picsed_study_locus_out: ${gwas_catalog_top_hits_path}/credible_sets
+  ##################################################################################################
+
+  #: FOLDX_INGESTION :##############################################################################
+  foldx_ingestion:
+    - name: pyspark foldx ingestion
+      step: foldx.ingestion
+      settings:
+        foldx_dataset_path: ${foldx_path}/foldx_export.parquet
+        plddt_threshold: 0.7
+        annotation_path: ${foldx_path}/foldx_variant_annotation
+  ##################################################################################################
+
+  #: EQTL_CATALOGUE_INGESTION :#####################################################################
+  eqtl_catalogue_ingestion:
+    - name: pyspark eqtl catalogue ingestion
+      step: eqtl_catalogue.ingestion
+      session:
+        write_mode: overwrite
+        output_partitions: 50
+        extended_spark_conf:
+          spark.sql.shuffle.partitions: '2000'
+      settings:
+        eqtl_catalogue_dataset_metadata_path: ${eqtl_catalogue_metadata_uri}
+        credible_set_input_glob: ${eqtl_catalogue_credible_set_glob}
+        lbf_variable_input_glob: ${eqtl_catalogue_lbf_glob}
+        study_index_output_path: ${eqtl_catalogue_study_index_path}
+        credible_set_output_path: ${eqtl_catalogue_credible_set_path}
+        lead_pvalue_threshold: 0.001
+        mqtl_quantification_methods_blacklist: []
   ##################################################################################################

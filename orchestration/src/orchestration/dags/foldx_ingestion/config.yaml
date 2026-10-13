@@ -1,0 +1,17 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      foldx_path: gs://otar013-ppp/OTAR2081_foldx
+description: Open Targets Genetics — FoldX Ingestion
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    foldx-ingestion:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: otg-etl
+steps:
+  foldx_ingestion:
+    cluster: foldx-ingestion

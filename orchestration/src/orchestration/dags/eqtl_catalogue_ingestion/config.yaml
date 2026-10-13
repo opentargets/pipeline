@@ -1,0 +1,24 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      eqtl_catalogue_credible_set_glob: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626/susie/QTS*/QTD*/QTD*.credible_sets.parquet
+      eqtl_catalogue_credible_set_path: gs://eqtl_catalogue_data/r8/credible_set
+      eqtl_catalogue_lbf_glob: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626/susie/QTS*/QTD*/QTD*.lbf_variable.parquet
+      eqtl_catalogue_metadata_uri: https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/fd99d45d3e433dcdf3c3d0acb4db0b7d5e8a7bd3/data_tables/dataset_metadata_r8.tsv
+      eqtl_catalogue_study_index_path: gs://eqtl_catalogue_data/r8/study_index/
+description: Open Targets Genetics — eQTL credible set ingestion
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-preprocess-eqtl:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: eqtl-preprocess
+      num_workers: 4
+      worker_machine_type: n2d-highmem-8
+      auto_delete_ttl: 7200
+steps:
+  eqtl_catalogue_ingestion:
+    cluster: otg-preprocess-eqtl
