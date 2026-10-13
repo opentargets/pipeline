@@ -32,7 +32,7 @@ The full description of the process can be found in [issue](https://github.com/o
 - ld based clumping - [StudyLocus](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/)
 - pics finemapping - [StudyLocus](https://opentargets.github.io/gentropy/python_api/datasets/credible_sets/)
 
-The configuration of the dataproc infrastructure and individual step parameters can be found in `finngen_ukb_mvp_meta.yaml` file.
+The configuration of the dataproc infrastructure and individual step parameters can be found in `dags/finngen_ukb_mvp_meta/config.yaml` file.
 
 ![dag](finngen_ukb_mvp_meta.svg)
 
@@ -69,7 +69,7 @@ In the case of `finngen_ukb_mvp_meta_dag` we are using the (2).
 
 > [!WARNING]
 > To enable the Enhanced BGzip codec, we need to pre-set in the `dataproc` cluster, as downloading it via the SparkSession (setting in gentropy) fails to load the codec on workers.
-> This is allowed via the `dataproc.use_enhanced_bgzip_codec` configuration block in `finngen_ukb_mvp_meta.yaml` file.
+> This is allowed via the `dataproc.use_enhanced_bgzip_codec` configuration block in `dags/finngen_ukb_mvp_meta/config.yaml` file.
 
 ## Changelog
 

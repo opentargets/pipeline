@@ -92,7 +92,7 @@ Each branch runs the following processing steps:
 > [!CAUTION]
 > The `ingestion` steps are expensive and re-download the full deCODE dataset from s3. The data is already present under `gs://decode_inputs`, so these steps should not be re-run just to verify they work — doing so is costly and wasteful of resources.
 
-The dataproc infrastructure and individual step parameters are configured in `decode_ingestion.yaml`. With current setup, the harmonisation tasks transforms ~6TiB x 2, so make sure the cluster has sufficient resources to hold the shuffle/cache. The execution time for each harmonisation is expected to be ~1.5h.
+The dataproc infrastructure and individual step parameters are configured in `dags/decode_ingestion/config.yaml`. With current setup, the harmonisation tasks transforms ~6TiB x 2, so make sure the cluster has sufficient resources to hold the shuffle/cache. The execution time for each harmonisation is expected to be ~1.5h.
 
 > [!NOTE]
 > S3 credentials for the `manifest_generation` and `ingestion` steps are stored in the GCP Secret Manager `decode` secret, which the cluster init action writes to `/var/run/secrets/decode`. Those steps read them via `step.session.add_s3_connector: true` and `step.session.s3_configuration_path: /var/run/secrets/decode`.

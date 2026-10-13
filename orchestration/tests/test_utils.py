@@ -2,8 +2,7 @@
 
 import pytest
 
-from orchestration.types import ConfigNode
-from orchestration.utils import convert_params_to_hydra_positional_arg, find_node_in_config, time_to_seconds
+from orchestration.utils import convert_params_to_hydra_positional_arg, time_to_seconds
 
 
 @pytest.mark.parametrize(
@@ -64,21 +63,3 @@ def test_time_to_seconds(input: str, output: int) -> None:
 def test_convert_params_to_hydra_positional_arg(input: dict, output: list[str], is_dataproc_job: bool) -> None:
     """Test conversion of dictionary to hydra positional arguments."""
     assert convert_params_to_hydra_positional_arg(input, is_dataproc_job) == output
-
-
-@pytest.mark.parametrize(
-    ('node', 'result'),
-    [
-        pytest.param('A', {'id': 'A', 'kind': 'Task', 'prerequisites': []}, id='Existing node'),
-        pytest.param('D', None, id='Non existing node'),
-    ],
-)
-def test_find_node_in_config(node: str, result: ConfigNode | None) -> None:
-    """Test finding a node in a configuration."""
-    config_list = [
-        {'id': 'A', 'kind': 'Task', 'prerequisites': []},
-        {'id': 'B', 'kind': 'Task', 'prerequisites': ['A']},
-        {'id': 'C', 'kind': 'Task', 'prerequisites': ['B']},
-    ]
-
-    assert find_node_in_config(config_list, node) == result  # ty:ignore[invalid-argument-type]

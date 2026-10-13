@@ -56,7 +56,7 @@ The output datasets from the dataproc job are:
 - [x] [`StudyIndex`](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) stored under `gs://eqtl_catalogue_data/r8/study_index/`
 - [x] [`CredibleSets`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) stored under `gs://eqtl_catalogue_data/r8/credible_set/`
 
-The configuration of the dataproc infrastructure and individual step parameters can be found in `eqtl_catalogue_ingestion.yaml` file.
+The configuration of the dataproc infrastructure and individual step parameters can be found in `dags/eqtl_catalogue_ingestion/config.yaml` file.
 
 > [!NOTE]
 > The outputs of the steps are contained in the target bucket with prefix _eqtl_catalogue_susie_patched_v2_. The original credible sets are stored under `gs://eqtl_catalogue_data/credible_set_datasets/eqtl_catalogue_susie/`.

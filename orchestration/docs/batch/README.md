@@ -73,26 +73,34 @@ To add a new generator:
 
 ## Step 2 — Write the DAG YAML config
 
-All batch configuration lives in `src/orchestration/dags/config/<dag_name>.yaml`. A minimal config for a new batch DAG looks like:
+A batch DAG is a staging DAG: its configuration lives in `src/orchestration/dags/<dag_id>/config.yaml`
+(see `orchestration.models.staging_dag`). A batch step carries the index it is fanned out over
+(`google_batch_index_specs`) and the job it runs (`google_batch`). Values that differ between
+environments go in each environment's `scratchpad`, and are referenced as `{{placeholders}}`. A minimal
+config for a new batch DAG looks like:
 
 ```yaml
-nodes:
-  - id: generate_my_index
-    kind: Task
-    prerequisites: []
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      my_path: gs://my-bucket
+  - name: test
+    scratchpad:
+      my_path: gs://ot_orchestration/test/my-bucket
+
+description: Open Targets Genetics — my batch job
+
+steps:
+  my_batch_job:
     google_batch_index_specs:
       pointer: finemapping           # key in MANIFEST_GENERATOR_MAP
       max_task_count: 40000          # tasks per GCP Batch job; 0 = all in one job
       generator_specs:
         generator_options:
-          collected_loci_path: 'gs://my-bucket/input'
-          output_path: 'gs://my-bucket/output'
+          collected_loci_path: '{{my_path}}/input'
+          output_path: '{{my_path}}/output'
           # ...any options required by the chosen generator
-
-  - id: my_batch_job
-    kind: Task
-    prerequisites:
-      - generate_my_index
     google_batch:
       job:
         task_group:
@@ -117,6 +125,8 @@ nodes:
             provisioning_model: SPOT     # SPOT | STANDARD | PREEMPTIBLE
         logs: {}
 ```
+
+A batch step can `depends_on` other steps of the DAG, including pps steps running on a Dataproc cluster.
 
 ### Key config fields
 
@@ -150,28 +160,22 @@ In `my_script.sh` reference them as `${input_path}` and `${output_path}`.
 
 ## Step 3 — Wire up the DAG
 
+The DAG is built from its config, so `src/orchestration/dags/<dag_id>/dag.py` is only:
+
 ```python
-from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
-from orchestration.operators.batch import BatchIndexOperator, BatchJobOperator
+"""Airflow DAG running my batch job."""
 
-index_config = find_node_in_config(config["nodes"], "generate_my_index")
-job_config   = find_node_in_config(config["nodes"], "my_batch_job")
+from pathlib import Path
 
-batch_index = BatchIndexOperator(
-    task_id=index_config["id"],
-    batch_index_specs=BatchIndexOperatorSpec(**index_config["google_batch_index_specs"]),
-)
+from orchestration.utils.staging import build_staging_dag
 
-batch_job = BatchJobOperator.partial(
-    task_id=job_config["id"],
-    job_name="my-batch-job",
-    batch_job_spec=BatchJobOperatorSpec(**job_config["google_batch"]),
-).expand(batch_index_row=batch_index.output)
-
-chain(batch_index, batch_job)
+dag = build_staging_dag(Path(__file__).parent)
 ```
 
-See [gwas_catalog_sumstats_susie_finemapping.py](../../src/orchestration/dags/gwas_catalog_sumstats_susie_finemapping.py) for a full working example.
+For each batch step the builder creates a `BatchIndexOperator` task `<step>_index`, and a
+`BatchJobOperator` task `<step>` mapped over its output. See
+[gwas_catalog_sumstats_susie_finemapping](../../src/orchestration/dags/gwas_catalog_sumstats_susie_finemapping/config.yaml)
+for a full working example, followed by a pps step on Dataproc.
 
 ---
 
@@ -199,13 +203,12 @@ The UUID5 is derived deterministically from each source blob's path, so re-runni
 
 ### Config
 
-Add a `collect` block inside the `google_batch` node:
+Add a `collect` block inside the step's `google_batch`:
 
 ```yaml
-  - id: my_batch_job
-    kind: Task
-    prerequisites:
-      - generate_my_index
+  my_batch_job:
+    google_batch_index_specs:
+      # ... index config as before ...
     google_batch:
       job:
         # ... job config as before ...
@@ -227,19 +230,8 @@ Add a `collect` block inside the `google_batch` node:
 
 ### Wire up the operator
 
-```python
-from orchestration.models.batch import BatchJobOperatorSpec
-from orchestration.operators.batch import BatchCollectOperator
-
-collect_operator = BatchCollectOperator(
-    task_id="collect_my_batch_job",
-    collect_spec=BatchJobOperatorSpec(**job_config["google_batch"]).collect,
-)
-
-chain(batch_index, batch_job, collect_operator)
-```
-
-When `collect` is absent from the YAML, `BatchJobOperatorSpec.collect` is `None` and the task self-skips — so `BatchCollectOperator` can be wired unconditionally for every batch step.
+Nothing to wire: when a batch step has a `collect` block, the builder adds a `BatchCollectOperator`
+task `<step>_collect` after its jobs.
 
 ---
 

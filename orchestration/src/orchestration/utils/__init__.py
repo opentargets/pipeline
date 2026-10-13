@@ -3,12 +3,9 @@
 from orchestration.utils.manifest import extract_study_id_from_path
 from orchestration.utils.path import URI_PATTERN, GCSPath, IOManager, NativePath
 from orchestration.utils.utils import (
-    chain_dependencies,
     check_gcp_folder_exists,
     clean_name,
     convert_params_to_hydra_positional_arg,
-    find_environment_vars,
-    find_node_in_config,
     random_id,
     read_yaml_config,
     resolve_jar_staging,
@@ -23,13 +20,10 @@ __all__ = [
     'GCSPath',
     'IOManager',
     'NativePath',
-    'chain_dependencies',
     'check_gcp_folder_exists',
     'clean_name',
     'convert_params_to_hydra_positional_arg',
     'extract_study_id_from_path',
-    'find_environment_vars',
-    'find_node_in_config',
     'random_id',
     'read_yaml_config',
     'resolve_jar_staging',

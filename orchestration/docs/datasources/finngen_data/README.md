@@ -42,7 +42,7 @@ The output datasets are:
 - [x] [`StudyIndex`](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) stored under `gs://finngen_data/r12/study_index/`
 - [x] [`CredibleSets`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) stored under `gs://finngen_data/r12/credible_set_datasets/susie/`
 
-The configuration of the dataproc infrastructure and individual step parameters can be found in `finngen_ingestion.yaml` file.
+The configuration of the dataproc infrastructure and individual step parameters can be found in `dags/finngen_ingestion/config.yaml` file.
 
 ## Changelog
 

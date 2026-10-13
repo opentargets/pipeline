@@ -60,7 +60,7 @@ Full description of the process can be found in https://github.com/opentargets/i
 - raw sumstat preprocessing (ukb_ppp_eur_sumstat_preprocess)
 - locus breaker clumping (locus_breaker_clumping)
 
-The configuration of the dataproc infrastructure and individual step parameters can be found in `ukb_ppp_eur_harmonisation.yaml` file.
+The configuration of the dataproc infrastructure and individual step parameters can be found in `dags/ukb_ppp_eur_harmonisation/config.yaml` file.
 
 #### ukb_ppp_eur_sumstat_preprocess
 
@@ -80,7 +80,7 @@ This process performs locus clumping on previously harmonised summary statistics
 
 #### Parametrization of dataproc preprocessing jobs
 
-To parametrize the dataproc cluster one need to update the logic inside the `dataproc` block in `ukb_ppp_eur_harmonisation.yaml` file.
+To parametrize the dataproc cluster one need to update the logic inside the `dataproc` block in `dags/ukb_ppp_eur_harmonisation/config.yaml` file.
 
 ### ukb_ppp_eur_finemapping dag
 
@@ -127,7 +127,7 @@ The credible sets that pass the qc are collected in the `gs://ukb_ppp_eur_data/c
 
 #### Parametrization of google batch finemapping job
 
-The configuration of the google batch infrastructure and individual step parameters can be found in `ukb_ppp_eur_finemapping.yaml` file.
+The configuration of the google batch infrastructure and individual step parameters can be found in `dags/ukb_ppp_eur_finemapping/config.yaml` file.
 To adjust the parameters for google batch infrastructure refer to the `google_batch` block in the node configuration.
 
 > [!WARNING]
