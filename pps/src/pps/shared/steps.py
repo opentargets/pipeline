@@ -152,3 +152,22 @@ def credible_set_qc(session: Session, settings: CredibleSetQcSettings) -> None:
     Ported from `legacy_gentropy.credible_set_qc.CredibleSetQCStep`.
     """
     raise NotImplementedError
+
+
+class PqtlStudyIndexSettings(BaseModel):
+    """Settings for `pqtl_study_index`."""
+
+    protein_study_index_path: str
+    """Path to the `ProteinQuantitativeTraitLocusStudyIndex`."""
+    study_index_path: str
+    """Destination path for the resolved `StudyIndex` Parquet dataset."""
+    target_index_path: str
+    """Path to the `TargetIndex` Parquet dataset used to map gene symbols to Ensembl gene IDs."""
+
+
+def pqtl_study_index(session: Session, settings: PqtlStudyIndexSettings) -> None:
+    """Transform a `ProteinQuantitativeTraitLocusStudyIndex` into a standard `StudyIndex`.
+
+    Ported from `legacy_gentropy.pqtl_study.pQTLStudyIndexTransformationStep`.
+    """
+    raise NotImplementedError

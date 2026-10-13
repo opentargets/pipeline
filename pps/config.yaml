@@ -6,6 +6,9 @@ pool_size: 4
 # Defaults for local runs. Orchestration overrides these with the scratchpad of the
 # selected environment of each staging DAG's config.yaml.
 scratchpad:
+  decode_data_path: output/decode
+  decode_input_path: input/decode
+  decode_molecular_complex_version: '2026-01-09'
   eqtl_catalogue_credible_set_glob: input/eqtl_catalogue/susie/*/*/*.credible_sets.parquet
   eqtl_catalogue_credible_set_path: output/eqtl_catalogue/credible_set
   eqtl_catalogue_lbf_glob: input/eqtl_catalogue/susie/*/*/*.lbf_variable.parquet
@@ -353,4 +356,203 @@ steps:
         purity_min_r2: 0.25
         n_partitions: 50
         clump: false
+  ##################################################################################################
+
+  #: DECODE_INGESTION :#############################################################################
+  decode_molecular_complex:
+    - name: pyspark decode molecular complex
+      step: molecular_complex.ingestion
+      session:
+        write_mode: overwrite
+      settings:
+        predicted_complex_tab_path: https://ftp.ebi.ac.uk/pub/databases/intact/complex/${decode_molecular_complex_version}/complextab/9606_predicted.tsv
+        experimental_complex_tab_path: https://ftp.ebi.ac.uk/pub/databases/intact/complex/${decode_molecular_complex_version}/complextab/9606.tsv
+        output_path: ${decode_data_path}/molecular_complex/
+  decode_smp_manifest_generation:
+    - name: pyspark decode smp manifest generation
+      step: decode.manifest_generation
+      session:
+        write_mode: overwrite
+        s3_configuration_path: /var/run/secrets/decode
+        add_s3_connector: true
+      settings:
+        bucket_name: largescaleplasma-2023
+        prefix: final_somascan_smp/
+        output_path: ${decode_data_path}/smp/manifest/
+  decode_smp_ingestion:
+    - name: pyspark decode smp ingestion
+      step: decode.summary_statistics_ingestion
+      session:
+        s3_configuration_path: /var/run/secrets/decode
+        add_s3_connector: true
+      settings:
+        manifest_path: ${decode_data_path}/smp/manifest/
+        raw_summary_statistics_path: ${decode_input_path}/raw_summary_statistics/smp/
+  decode_smp_harmonisation:
+    - name: pyspark decode smp harmonisation
+      step: decode.summary_statistics_harmonisation
+      session:
+        write_mode: overwrite
+      settings:
+        raw_summary_statistics_path: ${decode_input_path}/raw_summary_statistics/smp/
+        manifest_path: ${decode_data_path}/smp/manifest/
+        aptamer_metadata_path: ${decode_data_path}/decode_2023_aptamer_mapping.tsv
+        variant_direction_path: ${gnomad_path}/v4.1/variant_direction/
+        molecular_complex_path: ${decode_data_path}/molecular_complex/
+        harmonised_summary_statistics_path: ${decode_data_path}/smp/harmonised_summary_statistics/
+        protein_qtl_study_index_path: ${decode_data_path}/smp/pqtl_study/
+        perform_min_allele_count_filter: true
+        min_mac_threshold: 50
+        perform_sample_size_filter: true
+        min_sample_size_threshold: 30000
+        flipping_window_size: 10000000
+        remove_equal_alleles: true
+        remove_ambiguous_alleles: false
+        verify_atgc: true
+  decode_smp_qc:
+    - name: pyspark decode smp qc
+      step: decode.summary_statistics_qc
+      session:
+        write_mode: overwrite
+      settings:
+        harmonised_summary_statistics_path: ${decode_data_path}/smp/harmonised_summary_statistics/
+        protein_qtl_study_index_path: ${decode_data_path}/smp/pqtl_study/
+        qc_summary_statistics_path: ${decode_data_path}/smp/harmonised_summary_statistics_qc/
+        protein_qtl_study_index_qc_annotated_path: ${decode_data_path}/smp/pqtl_study_qc_annotated/
+        pval_threshold: 5e-8
+  decode_smp_window_clumping:
+    - name: pyspark decode smp window clumping
+      step: shared.window_clumping
+      session:
+        start_hail: true
+        write_mode: overwrite
+      settings:
+        summary_statistics_input_path: ${decode_data_path}/smp/harmonised_summary_statistics/
+        study_locus_output_path: ${decode_data_path}/smp/study_locus_window_based_clumped/
+        recursive_file_lookup: false
+        gwas_significance: 1.8e-09
+        distance: 1000000
+        collect_locus: false
+        collect_locus_distance: 500000
+  decode_smp_ld_clumping:
+    - name: pyspark decode smp ld clumping
+      step: shared.ld_clumping
+      session:
+        write_mode: overwrite
+      settings:
+        ld_index_path: ${gnomad_path}/v2.1.1/ld_index/
+        study_locus_input_path: ${decode_data_path}/smp/study_locus_window_based_clumped/
+        study_index_path: ${decode_data_path}/smp/pqtl_study_qc_annotated/
+        clumped_study_locus_output_path: ${decode_data_path}/smp/study_locus_ld_clumped/
+  decode_smp_pics:
+    - name: pyspark decode smp pics
+      step: shared.pics
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_ld_annotated_in: ${decode_data_path}/smp/study_locus_ld_clumped/
+        picsed_study_locus_out: ${decode_data_path}/smp/credible_set/
+  decode_smp_pqtl_study_index:
+    - name: pyspark decode smp pqtl study index
+      step: shared.pqtl_study_index
+      session:
+        write_mode: overwrite
+      settings:
+        protein_study_index_path: ${decode_data_path}/smp/pqtl_study_qc_annotated/
+        target_index_path: ${decode_data_path}/target/
+        study_index_path: ${decode_data_path}/smp/study/
+  decode_raw_manifest_generation:
+    - name: pyspark decode raw manifest generation
+      step: decode.manifest_generation
+      session:
+        write_mode: overwrite
+        s3_configuration_path: /var/run/secrets/decode
+        add_s3_connector: true
+      settings:
+        bucket_name: largescaleplasma-2023
+        prefix: final_somascan_raw/
+        output_path: ${decode_data_path}/raw/manifest/
+  decode_raw_ingestion:
+    - name: pyspark decode raw ingestion
+      step: decode.summary_statistics_ingestion
+      session:
+        write_mode: overwrite
+        s3_configuration_path: /var/run/secrets/decode
+        add_s3_connector: true
+      settings:
+        manifest_path: ${decode_data_path}/raw/manifest/
+        raw_summary_statistics_path: ${decode_input_path}/raw_summary_statistics/raw/
+  decode_raw_harmonisation:
+    - name: pyspark decode raw harmonisation
+      step: decode.summary_statistics_harmonisation
+      session:
+        write_mode: overwrite
+      settings:
+        raw_summary_statistics_path: ${decode_input_path}/raw_summary_statistics/raw/
+        manifest_path: ${decode_data_path}/raw/manifest/
+        aptamer_metadata_path: ${decode_data_path}/decode_2023_aptamer_mapping.tsv
+        variant_direction_path: ${gnomad_path}/v4.1/variant_direction/
+        molecular_complex_path: ${decode_data_path}/molecular_complex/
+        harmonised_summary_statistics_path: ${decode_data_path}/raw/harmonised_summary_statistics/
+        protein_qtl_study_index_path: ${decode_data_path}/raw/pqtl_study/
+        perform_min_allele_count_filter: true
+        min_mac_threshold: 50
+        perform_sample_size_filter: true
+        min_sample_size_threshold: 30000
+        flipping_window_size: 10000000
+        remove_equal_alleles: true
+        remove_ambiguous_alleles: false
+        verify_atgc: true
+  decode_raw_qc:
+    - name: pyspark decode raw qc
+      step: decode.summary_statistics_qc
+      session:
+        write_mode: overwrite
+      settings:
+        harmonised_summary_statistics_path: ${decode_data_path}/raw/harmonised_summary_statistics/
+        protein_qtl_study_index_path: ${decode_data_path}/raw/pqtl_study/
+        qc_summary_statistics_path: ${decode_data_path}/raw/harmonised_summary_statistics_qc/
+        protein_qtl_study_index_qc_annotated_path: ${decode_data_path}/raw/pqtl_study_qc_annotated/
+        pval_threshold: 5e-8
+  decode_raw_window_clumping:
+    - name: pyspark decode raw window clumping
+      step: shared.window_clumping
+      session:
+        start_hail: true
+        write_mode: overwrite
+      settings:
+        summary_statistics_input_path: ${decode_data_path}/raw/harmonised_summary_statistics/
+        study_locus_output_path: ${decode_data_path}/raw/study_locus_window_based_clumped/
+        recursive_file_lookup: false
+        gwas_significance: 1.8e-09
+        distance: 1000000
+        collect_locus: false
+        collect_locus_distance: 500000
+  decode_raw_ld_clumping:
+    - name: pyspark decode raw ld clumping
+      step: shared.ld_clumping
+      session:
+        write_mode: overwrite
+      settings:
+        ld_index_path: ${gnomad_path}/v2.1.1/ld_index/
+        study_locus_input_path: ${decode_data_path}/raw/study_locus_window_based_clumped/
+        study_index_path: ${decode_data_path}/raw/pqtl_study_qc_annotated/
+        clumped_study_locus_output_path: ${decode_data_path}/raw/study_locus_ld_clumped/
+  decode_raw_pics:
+    - name: pyspark decode raw pics
+      step: shared.pics
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_ld_annotated_in: ${decode_data_path}/raw/study_locus_ld_clumped/
+        picsed_study_locus_out: ${decode_data_path}/raw/credible_set/
+  decode_raw_pqtl_study_index:
+    - name: pyspark decode raw pqtl study index
+      step: shared.pqtl_study_index
+      session:
+        write_mode: overwrite
+      settings:
+        protein_study_index_path: ${decode_data_path}/raw/pqtl_study_qc_annotated/
+        target_index_path: ${decode_data_path}/target/
+        study_index_path: ${decode_data_path}/raw/study/
   ##################################################################################################

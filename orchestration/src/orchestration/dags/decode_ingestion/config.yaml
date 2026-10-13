@@ -1,0 +1,135 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      decode_cluster_autoscaling_policy: otg-decode-efm
+      decode_cluster_master_machine_type: n2-standard-16
+      decode_cluster_num_workers: '15'
+      decode_cluster_shuffle_partitions: '16000'
+      decode_cluster_worker_disk_size: '1024'
+      decode_cluster_worker_disk_type: pd-ssd
+      decode_cluster_worker_machine_type: n2-standard-16
+      decode_data_path: gs://decode_data
+      decode_input_path: gs://decode_inputs
+      decode_molecular_complex_version: '2026-01-09'
+      gnomad_path: gs://gnomad_data_2
+  - name: test
+    scratchpad:
+      decode_cluster_autoscaling_policy: otg-decode-test
+      decode_cluster_master_machine_type: n2-standard-8
+      decode_cluster_num_workers: '4'
+      decode_cluster_shuffle_partitions: '200'
+      decode_cluster_worker_disk_size: '500'
+      decode_cluster_worker_disk_type: pd-balanced
+      decode_cluster_worker_machine_type: n2-standard-16
+      decode_data_path: gs://ot_orchestration/test/decode_data
+      decode_input_path: gs://ot_orchestration/test/decode_inputs
+      decode_molecular_complex_version: '2026-01-09'
+      gnomad_path: gs://gnomad_data_2
+description: Gentropy Pipeline — deCODE summary statistics ingestion pipeline
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-decode:
+      project_id: open-targets-genetics-dev
+      autoscaling_policy: '{{decode_cluster_autoscaling_policy}}'
+      worker_machine_type: '{{decode_cluster_worker_machine_type}}'
+      master_machine_type: '{{decode_cluster_master_machine_type}}'
+      num_workers: '{{decode_cluster_num_workers}}'
+      num_masters: 1
+      worker_disk_size: '{{decode_cluster_worker_disk_size}}'
+      worker_disk_type: '{{decode_cluster_worker_disk_type}}'
+      secondary_worker_machine_type: n2-standard-16
+      secondary_worker_disk_size: 124
+      secret_init_action_uri: gs://opentargets-pipelines/up/gentropy/fetch_secrets.sh
+      secret_blob_list:
+        - decode
+      properties:
+        dataproc:efm.spark.shuffle: primary-worker
+        spark:spark.shuffle.io.numConnectionsPerPeer: '5'
+        spark:spark.serializer: org.apache.spark.serializer.KryoSerializer
+        spark:spark.sql.shuffle.partitions: '{{decode_cluster_shuffle_partitions}}'
+        spark:spark.sql.files.maxPartitionBytes: 100m
+        spark:spark.executor.cores: '4'
+        spark:spark.task.maxFailures: '20'
+        spark:spark.stage.maxConsecutiveAttempts: '10'
+        spark:spark.sql.adaptive.enabled: 'true'
+        spark:spark.sql.adaptive.skewJoin.enabled: 'true'
+        spark:spark.sql.adaptive.coalescePartitions.enabled: 'true'
+        spark:spark.sql.adaptive.advisoryPartitionSizeInBytes: 256MB
+steps:
+  decode_molecular_complex:
+    cluster: otg-decode
+  decode_smp_manifest_generation:
+    cluster: otg-decode
+    depends_on:
+      - decode_molecular_complex
+  decode_smp_ingestion:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_manifest_generation
+  decode_smp_harmonisation:
+    cluster: otg-decode
+    depends_on:
+      - decode_molecular_complex
+      - decode_smp_manifest_generation
+      - decode_smp_ingestion
+  decode_smp_qc:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_harmonisation
+  decode_smp_window_clumping:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_harmonisation
+      - decode_smp_qc
+  decode_smp_ld_clumping:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_window_clumping
+  decode_smp_pics:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_ld_clumping
+  decode_smp_pqtl_study_index:
+    cluster: otg-decode
+    depends_on:
+      - decode_smp_pics
+  decode_raw_manifest_generation:
+    cluster: otg-decode
+    depends_on:
+      - decode_molecular_complex
+  decode_raw_ingestion:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_manifest_generation
+  decode_raw_harmonisation:
+    cluster: otg-decode
+    depends_on:
+      - decode_molecular_complex
+      - decode_raw_manifest_generation
+      - decode_smp_harmonisation
+      - decode_raw_ingestion
+  decode_raw_qc:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_harmonisation
+  decode_raw_window_clumping:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_harmonisation
+      - decode_raw_qc
+  decode_raw_ld_clumping:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_window_clumping
+  decode_raw_pics:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_ld_clumping
+  decode_raw_pqtl_study_index:
+    cluster: otg-decode
+    depends_on:
+      - decode_raw_pics
