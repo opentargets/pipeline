@@ -167,28 +167,12 @@ def test_clinical_precedence_score_multiplies_stage_by_stop_reason_minimum() -> 
     assert got[3] == pytest.approx(0.5)
 
 
-def test_intogen_direction_on_target_needs_a_matching_consequence() -> None:
-    direction_on_target = EXPRESSIONS['intogen'].direction_on_target
-    assert direction_on_target is not None
-    df = pl.DataFrame({
-        'mutatedSamples': [
-            [{'functionalConsequenceId': 'SO_0002054'}],
-            [{'functionalConsequenceId': 'SO_0002053'}],
-            [{'functionalConsequenceId': None}],
-            None,
-            [],
-        ],
-    })
-    got = df.with_columns(direction_on_target.alias('d'))['d'].to_list()
-    assert got == ['LoF', 'GoF', None, None, None]
-
-
 def test_direction_when_disease_present_is_null_safe() -> None:
-    direction_on_trait = EXPRESSIONS['intogen'].direction_on_trait
+    direction_on_trait = EXPRESSIONS['clinical_precedence'].direction_on_trait
     assert direction_on_trait is not None
     df = pl.DataFrame({'diseaseId': ['MONDO:1', None]})
     got = df.with_columns(direction_on_trait.alias('d'))['d'].to_list()
-    assert got == ['risk', None]
+    assert got == ['protect', None]
 
 
 # ------------------------------------------------------------------------------------------------
@@ -205,7 +189,7 @@ def test_direction_when_disease_present_is_null_safe() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. encore and gwas_credible_sets moved to their own modules.
+# on all 25. encore, gwas_credible_sets and intogen moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -239,24 +223,6 @@ CASES = [
         'direction_on_target',
         {'actionType': ['INHIBITOR', 'AGONIST', 'UNKNOWN', None]},
         ['LoF', 'GoF', None, None],
-    ),
-    _ExpressionCase(
-        'intogen', 'score', {'resourceScore': [0.1, 1e-10, 0.0, None, nan]}, [0.25, 1.0, 1.0, None, None]
-    ),
-    _ExpressionCase('intogen', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
-    _ExpressionCase(
-        'intogen',
-        'direction_on_target',
-        {
-            'mutatedSamples': [
-                [{'functionalConsequenceId': 'SO_0002054'}],
-                [{'functionalConsequenceId': 'SO_0002053'}],
-                [{'functionalConsequenceId': None}],
-                None,
-                [],
-            ]
-        },
-        ['LoF', 'GoF', None, None, None],
     ),
     _ExpressionCase(
         'crispr_screen',

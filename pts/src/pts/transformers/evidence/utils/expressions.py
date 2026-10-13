@@ -245,33 +245,6 @@ def _clinical_precedence_direction_on_target() -> pl.Expr:
     )
 
 
-def _intogen_direction_on_target() -> pl.Expr:
-    """Intogen direction_on_target: LoF/GoF consequence present among `mutatedSamples`.
-
-    ```
-    CASE WHEN mutatedSamples IS NOT NULL AND
-      exists(transform(mutatedSamples, x -> x.functionalConsequenceId), y -> y IN ('SO_0002054'))
-      THEN 'LoF'
-      WHEN ... IN ('SO_0002053') THEN 'GoF'
-    END
-    ```
-    """
-    consequences = pl.col('mutatedSamples').list.eval(pl.element().struct.field('functionalConsequenceId'))
-    # `mutated_present` is unreachable in polars: spark's `exists` is three-valued and would return
-    # NULL (not false) on a NULL `mutatedSamples`, which is why the source SQL guards it explicitly.
-    # polars' `list.contains` instead returns false for every list shape here -- [x], [null], [],
-    # and null itself -- so the guard never actually changes the result; it is kept only because it
-    # is faithful to the SQL it was translated from.
-    mutated_present = pl.col('mutatedSamples').is_not_null()
-    return (
-        pl.when(mutated_present & consequences.list.contains('SO_0002054'))
-        .then(pl.lit('LoF'))
-        .when(mutated_present & consequences.list.contains('SO_0002053'))
-        .then(pl.lit('GoF'))
-        .otherwise(None)
-    )
-
-
 @dataclass(frozen=True)
 class DatasourceExpressions:
     """The score and direction-of-effect expressions for one `datasourceId`."""
@@ -287,11 +260,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         score=_clinical_precedence_score(),
         direction_on_trait=direction_when_disease_present('protect'),
         direction_on_target=_clinical_precedence_direction_on_target(),
-    ),
-    'intogen': DatasourceExpressions(
-        score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
-        direction_on_trait=direction_when_disease_present('risk'),
-        direction_on_target=_intogen_direction_on_target(),
     ),
     'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # A null or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.

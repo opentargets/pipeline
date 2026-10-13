@@ -13,7 +13,6 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence_postprocess import evidence_postprocess
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
@@ -41,26 +40,30 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
 
 def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) -> None:
     src = tmp_path / 'src'
-    (src / 'intogen').mkdir(parents=True)
-    pl.DataFrame({
-        'datasourceId': ['intogen'],
-        'targetFromSourceId': ['ENSG1'],
-        'diseaseFromSourceMappedId': ['EFO_1'],
-        'resourceScore': [1e-5],
-        'mutatedSamples': [[{'functionalConsequenceId': 'SO_0002054'}]],
-    }).write_parquet(src / 'intogen' / 'part.parquet')
+    (src / 'clinical_precedence').mkdir(parents=True)
+    pl.DataFrame(
+        {
+            'datasourceId': ['clinical_precedence'],
+            'targetFromSourceId': ['ENSG1'],
+            'diseaseFromSourceMappedId': ['EFO_1'],
+            'clinicalStage': ['PHASE_3'],
+            'trialStopReasonCategories': [None],
+            'actionType': ['INHIBITOR'],
+        },
+        schema_overrides={'trialStopReasonCategories': pl.List(pl.String)},
+    ).write_parquet(src / 'clinical_precedence' / 'part.parquet')
     dst = tmp_path / 'out'
 
     evidence_postprocess(
         {
-            'evidence_path': str(src / 'intogen'),
+            'evidence_path': str(src / 'clinical_precedence'),
             'disease_path': write_disease(src / 'disease', ['EFO_1']),
             'target_path': write_target(src / 'target', ['ENSG1']),
             'publication_date_lut': write_literature(src / 'literature', {'1': '2001-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {
-            'datasource_id': 'intogen',
+            'datasource_id': 'clinical_precedence',
             'evidence_format': 'parquet',
             'unique_fields': ['targetId', 'diseaseId'],
         },
@@ -68,6 +71,4 @@ def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) ->
     )
 
     valid = pl.read_parquet(dst / 'valid')
-    expected_score = log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10)
-    expected = pl.DataFrame({'resourceScore': [1e-5]}).select(expected_score.alias('score'))['score'][0]
-    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (expected, 'risk', 'LoF')
+    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.7, 'protect', 'LoF')

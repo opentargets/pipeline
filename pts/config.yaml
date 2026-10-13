@@ -680,13 +680,18 @@ steps:
 
   #: EVIDENCE_INTOGEN STEP :#######################################################################
   evidence_intogen:
-    - name: pyspark intogen
-      pyspark: intogen
+    - name: transform evidence.intogen
+      transformer: evidence.intogen
       source:
         genes: input/evidence/intogen/Compendium_Cancer_Genes.tsv
         cohorts: input/evidence/intogen/cohorts.tsv
         disease_mapping: input/ot_curation/mappings/disease/cancer2EFO_mappings.tsv
-      destination: intermediate/evidence/intogen.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/intogen
+        evidence: output/evidence_intogen
   ##################################################################################################
 
   #: EVIDENCE PPP STEP :############################################################################
@@ -1255,27 +1260,6 @@ steps:
             WHEN variantFunctionalConsequenceId == 'SO_0002317' THEN 'LoF'
             ELSE null
           END
-
-  evidence_postprocess_intogen:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/intogen.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/intogen
-        evidence: output/evidence_intogen
-      settings:
-        evidence_format: parquet
-        datasource_id: intogen
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - cohortShortName
 
   evidence_postprocess_gene_burden:
     - name: pyspark evidence_postprocess
