@@ -13,6 +13,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence_postprocess import evidence_postprocess
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
@@ -40,25 +41,26 @@ def test_evidence_postprocess_raises_clearly_for_an_unregistered_datasource(tmp_
 
 def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) -> None:
     src = tmp_path / 'src'
-    (src / 'cancer_gene_census').mkdir(parents=True)
+    (src / 'intogen').mkdir(parents=True)
     pl.DataFrame({
-        'datasourceId': ['cancer_gene_census'],
+        'datasourceId': ['intogen'],
         'targetFromSourceId': ['ENSG1'],
         'diseaseFromSourceMappedId': ['EFO_1'],
-        'resourceScore': [0.5],
-    }).write_parquet(src / 'cancer_gene_census' / 'part.parquet')
+        'resourceScore': [1e-5],
+        'mutatedSamples': [[{'functionalConsequenceId': 'SO_0002054'}]],
+    }).write_parquet(src / 'intogen' / 'part.parquet')
     dst = tmp_path / 'out'
 
     evidence_postprocess(
         {
-            'evidence_path': str(src / 'cancer_gene_census'),
+            'evidence_path': str(src / 'intogen'),
             'disease_path': write_disease(src / 'disease', ['EFO_1']),
             'target_path': write_target(src / 'target', ['ENSG1']),
             'publication_date_lut': write_literature(src / 'literature', {'1': '2001-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {
-            'datasource_id': 'cancer_gene_census',
+            'datasource_id': 'intogen',
             'evidence_format': 'parquet',
             'unique_fields': ['targetId', 'diseaseId'],
         },
@@ -66,4 +68,6 @@ def test_evidence_postprocess_applies_the_registry_directions(tmp_path: Path) ->
     )
 
     valid = pl.read_parquet(dst / 'valid')
-    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (0.5, 'risk', None)
+    expected_score = log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10)
+    expected = pl.DataFrame({'resourceScore': [1e-5]}).select(expected_score.alias('score'))['score'][0]
+    assert valid.select('score', 'directionOnTrait', 'directionOnTarget').row(0) == (expected, 'risk', 'LoF')

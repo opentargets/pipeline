@@ -1472,25 +1472,17 @@ steps:
           - diseaseId
           - datasourceId
 
-  evidence_postprocess_cosmic:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
+  evidence_cosmic:
+    - name: transform evidence.cosmic
+      transformer: evidence.cosmic
       source:
-        evidence_path: input/evidence/cosmic.json.gz
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
+        evidence: input/evidence/cosmic.json.gz
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/cancer_gene_census
         evidence: output/evidence_cancer_gene_census
-      settings:
-        evidence_format: json
-        datasource_id: cancer_gene_census
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
 
   evidence_postprocess_ot_crispr:
     - name: transform evidence_postprocess

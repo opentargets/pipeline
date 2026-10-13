@@ -313,11 +313,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     # or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
-    'cancer_gene_census': DatasourceExpressions(
-        score=pl.col('resourceScore'),
-        direction_on_trait=direction_when_disease_present('risk'),
-        direction_on_target=direction_lookup('TSorOncogene', {'oncogene': 'GoF', 'tsg': 'LoF'}),
-    ),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
     'ot_crispr_validation': DatasourceExpressions(score=pl.col('resourceScore')),
 }

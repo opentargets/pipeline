@@ -216,7 +216,7 @@ steps:
       - pts_target
       - pts_disease
       - pis_literature
-  pts_evidence_postprocess_cosmic:
+  pts_evidence_cosmic:
     depends_on:
       - pis_evidence_cosmic
       - pts_target
@@ -435,7 +435,7 @@ steps:
       - pts_evidence_postprocess_cancer_biomarkers
       - pts_evidence_postprocess_clinical_precedence
       - pts_evidence_postprocess_clingen
-      - pts_evidence_postprocess_cosmic
+      - pts_evidence_cosmic
       - pts_evidence_postprocess_project_score
       - pts_evidence_postprocess_crispr_screens
       - pts_evidence_clinvar

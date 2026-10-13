@@ -26,8 +26,14 @@ def write_disease(path: Path, ids: list[str], obsolete: dict[str, list[str]] | N
     return str(path)
 
 
-def write_target(path: Path, ids: list[str], symbols: dict[str, str] | None = None) -> str:
+def write_target(
+    path: Path,
+    ids: list[str],
+    symbols: dict[str, str] | None = None,
+    hallmarks: dict[str, list[str]] | None = None,
+) -> str:
     symbols = symbols or {}
+    hallmarks = hallmarks or {}
     path.mkdir(parents=True, exist_ok=True)
     pl.DataFrame(
         {
@@ -35,7 +41,9 @@ def write_target(path: Path, ids: list[str], symbols: dict[str, str] | None = No
             'biotype': ['protein_coding'] * len(ids),
             'approvedSymbol': [symbols.get(i) for i in ids],
             'proteinIds': [[] for _ in ids],
-            'hallmarks': [None for _ in ids],
+            'hallmarks': [
+                {'attributes': [{'description': d} for d in hallmarks[i]]} if i in hallmarks else None for i in ids
+            ],
         },
         schema=TARGET_SCHEMA,
     ).write_parquet(path / 'target.parquet')

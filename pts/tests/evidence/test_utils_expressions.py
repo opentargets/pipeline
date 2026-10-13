@@ -151,14 +151,6 @@ def test_intogen_direction_on_target_needs_a_matching_consequence() -> None:
     assert got == ['LoF', 'GoF', None, None, None]
 
 
-def test_cancer_gene_census_direction_on_target_lookup() -> None:
-    direction_on_target = EXPRESSIONS['cancer_gene_census'].direction_on_target
-    assert direction_on_target is not None
-    df = pl.DataFrame({'TSorOncogene': ['oncogene', 'tsg', 'bivalent', None]})
-    got = df.with_columns(direction_on_target.alias('d'))['d'].to_list()
-    assert got == ['GoF', 'LoF', None, None]
-
-
 def test_direction_when_disease_present_is_null_safe() -> None:
     direction_on_trait = EXPRESSIONS['intogen'].direction_on_trait
     assert direction_on_trait is not None
@@ -265,14 +257,6 @@ CASES = [
         'score',
         {'resourceScore': [0.0, 41.5, 100.0, 150.0, None, nan]},
         [0.415, 0.415, 1.0, 1.0, None, None],
-    ),
-    _ExpressionCase('cancer_gene_census', 'score', {'resourceScore': [0.5, None]}, [0.5, None]),
-    _ExpressionCase('cancer_gene_census', 'direction_on_trait', {'diseaseId': ['MONDO:1', None]}, ['risk', None]),
-    _ExpressionCase(
-        'cancer_gene_census',
-        'direction_on_target',
-        {'TSorOncogene': ['oncogene', 'tsg', 'bivalent', None]},
-        ['GoF', 'LoF', None, None],
     ),
     _ExpressionCase('ot_crispr_validation', 'score', {'resourceScore': [0.3, None]}, [0.3, None]),
 ]
