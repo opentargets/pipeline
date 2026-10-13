@@ -179,14 +179,14 @@ def read_and_filter_mageck_file(mageck_file: str, filter_columns: list[str], thr
     """
     logger.info(f'reading MAGeCK file: {mageck_file}')
     raw_data = adjust_column_names(scan_dataset(mageck_file, format='tsv', infer_schema=False).collect())
-    values = {c: pl.col(c).cast(pl.Float64, strict=False).fill_nan(None) for c in filter_columns}
+    values = {c: pl.col(c).cast(pl.Float64, strict=False) for c in filter_columns}
     score = pl.col('resourceScore')
     source_label = pl.coalesce([pl.when(value == score).then(pl.lit(c)) for c, value in values.items()])
     is_pos, is_neg = source_label.str.contains('pos', literal=True), source_label.str.contains('neg', literal=True)
     return (
         raw_data
         .with_columns(pl.min_horizontal(values.values()).alias('resourceScore'))
-        .filter(score < threshold)
+        .filter(score < pl.lit(threshold, dtype=pl.Float32))
         .select(
             pl.col('id').str.split('_').list.first().alias('targetFromSourceId'),
             pl
@@ -306,7 +306,7 @@ def ot_crispr(
     """Generate and post-process OT CRISPR evidence.
 
     Args:
-        source: `study_table`, `ot_crispr_data`, `disease`, `target` and `literature` locations.
+        source: `study_table`, `ot_crispr_data`, `disease` and `target` locations.
         destination: `evidence` and `failed_evidence` output directories.
         settings: unused.
         config: unused.
@@ -316,6 +316,5 @@ def ot_crispr(
         OT_CRISPR,
         disease=source['disease'],
         target=source['target'],
-        literature=source['literature'],
         destination=destination,
     )

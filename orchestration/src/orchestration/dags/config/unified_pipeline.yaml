@@ -365,7 +365,6 @@ steps:
       - pis_evidence_ppp
       - pts_target
       - pts_disease
-      - pis_literature
 
   # clinical mining updates:
   pts_drug_warning:

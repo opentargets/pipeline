@@ -722,7 +722,6 @@ steps:
         ot_crispr_data: input/evidence/ot_crispr/data
         target: output/target
         disease: output/disease
-        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/ot_crispr
         evidence: output/evidence_ot_crispr

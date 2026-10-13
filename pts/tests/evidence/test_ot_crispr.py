@@ -15,7 +15,7 @@ from pts.transformers.evidence.ot_crispr import (
     ot_crispr,
     process_studies,
 )
-from tests.evidence.fixtures import write_disease, write_literature, write_target
+from tests.evidence.fixtures import write_disease, write_target
 
 STUDY_HEADER = [
     'studyId',
@@ -225,6 +225,47 @@ def test_generate_takes_the_first_matching_filter_column_on_a_tie(tmp_path: Path
     assert out.select('statisticalTestTail', 'log2FoldChangeValue').rows() == [('upper tail', 1.0)]
 
 
+def test_generate_reads_nan_and_unparseable_values_as_spark_does(tmp_path: Path) -> None:
+    """Unparseable filter and lfc values are null; NaN sorts after every number, so it never wins the min."""
+    _write_mageck(
+        tmp_path / 'data' / 'OTAR001' / 'a.txt',
+        [
+            {'id': 'G1', 'neg|p-value': 'NaN', 'pos|p-value': '0.001', 'pos|lfc': '1.0'},
+            {'id': 'G2', 'neg|p-value': 'NA', 'pos|p-value': '0.002', 'pos|lfc': 'NA'},
+            {'id': 'G3', 'neg|p-value': 'junk', 'pos|p-value': 'NaN'},
+            {'id': 'G4', 'neg|p-value': '0.003', 'pos|p-value': 'junk', 'neg|lfc': 'junk'},
+        ],
+    )
+    study_table = _write_study_table(tmp_path / 'config.csv', [_study('S1', filterColumn='neg|p-value,pos|p-value')])
+
+    out = generate(study_table, str(tmp_path / 'data')).collect().sort('targetFromSourceId')
+
+    assert out.select('targetFromSourceId', 'resourceScore', 'statisticalTestTail', 'log2FoldChangeValue').rows() == [
+        ('G1', 0.001, 'upper tail', 1.0),
+        ('G2', 0.002, 'upper tail', None),
+        ('G4', 0.003, 'lower tail', None),
+    ]
+
+
+@pytest.mark.parametrize(
+    ('threshold', 'expected'),
+    [
+        pytest.param('junk', [], id='unparseable threshold is null, so nothing passes'),
+        pytest.param('NaN', ['G1', 'G2'], id='NaN threshold sorts last, so every number passes'),
+    ],
+)
+def test_generate_reads_an_unusable_threshold_as_spark_does(tmp_path: Path, threshold: str, expected: list) -> None:
+    _write_mageck(
+        tmp_path / 'data' / 'OTAR001' / 'a.txt',
+        [{'id': 'G1', 'pos|p-value': '0.5'}, {'id': 'G2', 'pos|p-value': '7'}, {'id': 'G3', 'pos|p-value': 'NaN'}],
+    )
+    study_table = _write_study_table(tmp_path / 'config.csv', [_study('S1', threshold=threshold)])
+
+    out = generate(study_table, str(tmp_path / 'data')).collect()
+
+    assert sorted(out['targetFromSourceId'].to_list()) == expected
+
+
 def test_score_is_one() -> None:
     assert pl.select(OT_CRISPR.score.alias('s'))['s'].to_list() == [1.0]
 
@@ -238,7 +279,6 @@ def test_ot_crispr_step_writes_scored_evidence(tmp_path: Path) -> None:
             **_sources(src),
             'disease': write_disease(src / 'disease', ['EFO_1']),
             'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'GA', 'ENSG2': 'GB'}),
-            'literature': write_literature(src / 'literature', {'1': '2001-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {},
