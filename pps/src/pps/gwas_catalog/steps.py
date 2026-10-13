@@ -36,3 +36,26 @@ def top_hit_ingestion(session: Session, settings: TopHitIngestionSettings) -> No
     Ported from `legacy_gentropy.gwas_catalog_top_hits.GWASCatalogTopHitIngestionStep`.
     """
     raise NotImplementedError
+
+
+class StudyIndexSettings(BaseModel):
+    """Settings for `study_index`."""
+
+    catalog_study_files: list[str]
+    """List of raw GWAS catalog studies file."""
+    catalog_ancestry_files: list[str]
+    """List of raw ancestry annotations files from GWAS Catalog."""
+    study_index_path: str
+    """Output GWAS catalog studies path."""
+    gwas_catalog_study_curation_file: str | None = None
+    """Csv file or URL containing the curation table."""
+    sumstats_qc_path: str | None = None
+    """Path to the summary statistics QC table."""
+
+
+def study_index(session: Session, settings: StudyIndexSettings) -> None:
+    """GWAS Catalog study index generation.
+
+    Ported from `legacy_gentropy.gwas_catalog_study_index.GWASCatalogStudyIndexGenerationStep`.
+    """
+    raise NotImplementedError

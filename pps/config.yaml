@@ -16,7 +16,9 @@ scratchpad:
   finngen_path: output/finngen
   foldx_path: input/foldx
   gnomad_path: input/gnomad
+  gwas_catalog_curation_date: '20260812'
   gwas_catalog_input_path: input/gwas_catalog
+  gwas_catalog_sumstats_pics_path: output/gwas_catalog_sumstats_pics
   gwas_catalog_susie_path: output/gwas_catalog_sumstats_susie
   gwas_catalog_sync_date: '20260802'
   gwas_catalog_top_hits_path: output/gwas_catalog_top_hits
@@ -153,4 +155,86 @@ steps:
         finngen_susie_finemapping_cs_summary_files: ${finngen_input_path}/finemap/summary/*SUSIE.cred.summary.tsv
         finngen_finemapping_lead_pvalue_threshold: 1e-5
         finngen_release_prefix: FINNGEN_R12
+  ##################################################################################################
+
+  #: GWAS_CATALOG_SUMSTATS_PICS :###################################################################
+  gwas_catalog_sumstats_pics_study_index:
+    - name: pyspark gwas catalog sumstats pics study index
+      step: gwas_catalog.study_index
+      session:
+        write_mode: overwrite
+        output_partitions: 1
+      settings:
+        catalog_study_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_studies.tsv
+        catalog_ancestry_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_ancestries.tsv
+        study_index_path: ${gwas_catalog_sumstats_pics_path}/study_index
+  gwas_catalog_sumstats_pics_window_clumping:
+    - name: pyspark gwas catalog sumstats pics window clumping
+      step: shared.window_clumping
+      session:
+        start_hail: true
+        write_mode: overwrite
+        extended_spark_conf:
+          spark.shuffle.mapOutput.minSizeForBroadcast: 20m
+      settings:
+        summary_statistics_input_path: ${gwas_catalog_input_path}/harmonised_summary_statistics
+        study_locus_output_path: ${gwas_catalog_sumstats_pics_path}/study_locus_window_based_clumped
+  gwas_catalog_sumstats_pics_ld_clumping:
+    - name: pyspark gwas catalog sumstats pics ld clumping
+      step: shared.ld_clumping
+      session:
+        write_mode: overwrite
+        extended_spark_conf:
+          spark.shuffle.mapOutput.minSizeForBroadcast: 20m
+      settings:
+        ld_index_path: gs://gnomad_data_2/v2.1.1/ld_index
+        study_locus_input_path: ${gwas_catalog_sumstats_pics_path}/study_locus_window_based_clumped
+        clumped_study_locus_output_path: ${gwas_catalog_sumstats_pics_path}/study_locus_ld_clumped
+        study_index_path: ${gwas_catalog_sumstats_pics_path}/study_index
+  gwas_catalog_sumstats_pics_pics:
+    - name: pyspark gwas catalog sumstats pics pics
+      step: shared.pics
+      session:
+        write_mode: overwrite
+      settings:
+        study_locus_ld_annotated_in: ${gwas_catalog_sumstats_pics_path}/study_locus_ld_clumped
+        picsed_study_locus_out: ${gwas_catalog_sumstats_pics_path}/credible_sets
+  ##################################################################################################
+
+  #: GWAS_CATALOG_SUMSTATS_SUSIE_CLUMPING :#########################################################
+  gwas_catalog_susie_study_index:
+    - name: pyspark gwas catalog susie study index
+      step: gwas_catalog.study_index
+      session:
+        write_mode: overwrite
+        output_partitions: 1
+      settings:
+        catalog_study_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_studies.tsv
+        catalog_ancestry_files:
+          - ${gwas_catalog_input_path}/gentroutils/${gwas_catalog_sync_date}/gwas_catalog_download_ancestries.tsv
+        study_index_path: ${gwas_catalog_susie_path}/study_index
+        gwas_catalog_study_curation_file: ${gwas_catalog_input_path}/curation/${gwas_catalog_curation_date}/curated/GWAS_Catalog_study_curation.tsv
+        sumstats_qc_path: ${gwas_catalog_input_path}/summary_statistics_qc
+  gwas_catalog_susie_locus_breaker_clumping:
+    - name: pyspark gwas catalog susie locus breaker clumping
+      step: shared.locus_breaker_clumping
+      session:
+        extended_spark_conf:
+          spark.sql.sources.parallelPartitionDiscovery.parallelism: '100000'
+        write_mode: overwrite
+      settings:
+        summary_statistics_input_path: ${gwas_catalog_input_path}/harmonised_summary_statistics/*/*.parquet
+        clumped_study_locus_output_path: ${gwas_catalog_susie_path}/study_locus_lb_clumped_${gwas_catalog_sync_date}
+        lbc_baseline_pvalue: 1.0e-05
+        lbc_distance_cutoff: 250000
+        lbc_pvalue_threshold: 1.0e-08
+        lbc_flanking_distance: 100000
+        large_loci_size: 1500000
+        wbc_clump_distance: 500000
+        wbc_pvalue_threshold: 1.0e-08
+        collect_locus: true
+        remove_mhc: true
   ##################################################################################################

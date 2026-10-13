@@ -1,0 +1,32 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gwas_catalog_input_path: gs://gwas_catalog_inputs
+      gwas_catalog_sumstats_pics_path: gs://gwas_catalog_sumstats_pics
+      gwas_catalog_sync_date: '20260802'
+description: Open Targets Genetics — GWAS Catalog summary statistics PICS fine-mapping
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-gwascatalog-sumstats-pics:
+      project_id: open-targets-genetics-dev
+      num_workers: 10
+      worker_machine_type: n1-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 256
+steps:
+  gwas_catalog_sumstats_pics_study_index:
+    cluster: otg-gwascatalog-sumstats-pics
+  gwas_catalog_sumstats_pics_window_clumping:
+    cluster: otg-gwascatalog-sumstats-pics
+  gwas_catalog_sumstats_pics_ld_clumping:
+    cluster: otg-gwascatalog-sumstats-pics
+    depends_on:
+      - gwas_catalog_sumstats_pics_window_clumping
+  gwas_catalog_sumstats_pics_pics:
+    cluster: otg-gwascatalog-sumstats-pics
+    depends_on:
+      - gwas_catalog_sumstats_pics_ld_clumping

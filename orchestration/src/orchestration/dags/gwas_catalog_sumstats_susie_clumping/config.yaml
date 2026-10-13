@@ -1,0 +1,34 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gwas_catalog_curation_date: '20260812'
+      gwas_catalog_input_path: gs://gwas_catalog_inputs
+      gwas_catalog_susie_path: gs://gwas_catalog_sumstats_susie
+      gwas_catalog_sync_date: '20260802'
+description: Open Targets Genetics — GWAS Catalog summary statistics locus breaker clumping for SuSiE
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: 26.9.0.dev0
+infrastructure:
+  clusters:
+    otg-gwas-catalog-sumstat-susie-clumping:
+      project_id: open-targets-genetics-dev
+      num_workers: 30
+      worker_machine_type: n1-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 1024
+      properties:
+        spark:spark.sql.adaptive.enabled: 'true'
+        spark:spark.sql.adaptive.skewJoin.enabled: 'true'
+        spark:spark.sql.parquet.compression.codec: zstd
+        spark:spark.sql.files.maxPartitionBytes: '536870912'
+        spark:spark.sql.shuffle.partitions: '8000'
+        spark:spark.driver.maxResultSize: 4g
+steps:
+  gwas_catalog_susie_study_index:
+    cluster: otg-gwas-catalog-sumstat-susie-clumping
+  gwas_catalog_susie_locus_breaker_clumping:
+    cluster: otg-gwas-catalog-sumstat-susie-clumping
+    depends_on:
+      - gwas_catalog_susie_study_index
