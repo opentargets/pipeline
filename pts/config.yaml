@@ -589,14 +589,19 @@ steps:
 
   #: EVIDENCE_CANCER_BIOMARKERS STEP :################################################################
   evidence_cancer_biomarkers:
-    - name: pyspark cancer_biomarkers
-      pyspark: cancer_biomarkers
+    - name: transform evidence.cancer_biomarkers
+      transformer: evidence.cancer_biomarkers
       source:
         associations: input/evidence/cancerbiomarkers/associations.tsv
         source: input/evidence/cancerbiomarkers/sources.jsonl
-        disease: input/evidence/cancerbiomarkers/diseases.jsonl
+        biomarker_disease: input/evidence/cancerbiomarkers/diseases.jsonl
         drugs: output/drug_molecule
-      destination: intermediate/evidence/cancer_biomarkers.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/cancer_biomarkers
+        evidence: output/evidence_cancer_biomarkers
   ##################################################################################################
 
   #: EVIDENCE_ORPHANET STEP :#######################################################################
@@ -1107,31 +1112,6 @@ steps:
           - diseaseFromSource
           - studyId
           - allelicRequirements
-
-  evidence_postprocess_cancer_biomarkers:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/cancer_biomarkers.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/cancer_biomarkers
-        evidence: output/evidence_cancer_biomarkers
-      settings:
-        evidence_format: parquet
-        datasource_id: cancer_biomarkers
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - biomarkerName
-          - confidence
-          - diseaseFromSource
-          - drugFromSource
-          - drugResponse
 
   evidence_postprocess_clinical_precedence:
     - name: transform evidence_postprocess

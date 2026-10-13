@@ -295,9 +295,6 @@ steps:
     depends_on:
       - pis_evidence_cancer_biomarkers
       - pts_drug_molecule
-  pts_evidence_postprocess_cancer_biomarkers:
-    depends_on:
-      - pts_evidence_cancer_biomarkers
       - pts_disease
       - pis_literature
       - pts_target
@@ -424,7 +421,7 @@ steps:
       - pts_evidence_postprocess_europepmc
       - pts_l2g
       - pts_evidence_expression_atlas
-      - pts_evidence_postprocess_cancer_biomarkers
+      - pts_evidence_cancer_biomarkers
       - pts_evidence_postprocess_clinical_precedence
       - pts_evidence_postprocess_clingen
       - pts_evidence_cosmic

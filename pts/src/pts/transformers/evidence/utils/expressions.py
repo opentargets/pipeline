@@ -234,7 +234,6 @@ class DatasourceExpressions:
 
 
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
-    'cancer_biomarkers': DatasourceExpressions(score=pl.lit(1.0)),
     'clinical_precedence': DatasourceExpressions(
         score=_clinical_precedence_score(),
         direction_on_trait=direction_when_disease_present('protect'),
