@@ -63,8 +63,7 @@ EUROPEPMC = EvidenceDatasource(
 def compute_evidence(cooccurrences: pl.LazyFrame) -> pl.LazyFrame:
     """Aggregate gene-disease cooccurrences into evidence, one row per publication, target, disease and year.
 
-    Lists are sorted sets and the score is summed one by one in ascending order (polars drops a sort
-    before `sum`), so the output does not depend on input row order.
+    Lists are sorted sets and the score is summed one by one in ascending order.
 
     Args:
         cooccurrences: cooccurrences in the literature `Cooccurrence` schema.

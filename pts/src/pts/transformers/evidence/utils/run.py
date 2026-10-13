@@ -8,15 +8,17 @@ from loguru import logger
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import Evidence
 from pts.transformers.evidence.utils.luts import build_luts
-from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.dataset import sink_dataset
 
 
 def write_evidence(evidence: Evidence, destination: dict[str, str]) -> None:
-    """Write evidence split into `evidence` (valid) and `failed_evidence`."""
+    """Write evidence split into `evidence` (valid) and `failed_evidence`, computing it once."""
     logger.info(f'writing valid evidence to {destination["evidence"]}')
-    write_dataset(evidence.valid(), destination['evidence'])
     logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    write_dataset(evidence.invalid(), destination['failed_evidence'])
+    pl.collect_all([
+        sink_dataset(evidence.valid(), destination['evidence']),
+        sink_dataset(evidence.invalid(), destination['failed_evidence']),
+    ])
 
 
 def run_evidence(

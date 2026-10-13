@@ -116,3 +116,39 @@ def test_rerun_into_an_existing_destination_fails_and_names_it(tmp_path: Path) -
     run_evidence(raw(), SPEC, **kwargs)
     with pytest.raises(ValueError, match='valid'):
         run_evidence(raw(), SPEC, **kwargs)
+
+
+def test_valid_and_failed_evidence_are_computed_in_one_pass(tmp_path: Path) -> None:
+    batches: list[int] = []
+
+    def count(s: pl.Series) -> pl.Series:
+        batches.append(len(s))
+        return s
+
+    counted = raw().with_columns(pl.col('resourceScore').map_batches(count, return_dtype=pl.Float64))
+    dst = tmp_path / 'out'
+    run_evidence(
+        counted,
+        SPEC,
+        disease=write_disease(tmp_path / 'disease', ['EFO_1']),
+        target=write_target(tmp_path / 'target', ['ENSG1']),
+        destination={'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
+    )
+
+    assert sum(batches) == 2
+    assert pl.read_parquet(dst / 'valid')['targetId'].to_list() == ['ENSG1']
+    assert pl.read_parquet(dst / 'failed')['targetFromSourceId'].to_list() == ['NOT_A_TARGET']
+
+
+def test_an_existing_failed_destination_stops_both_writes(tmp_path: Path) -> None:
+    (tmp_path / 'out' / 'failed').mkdir(parents=True)
+    dst = {'evidence': str(tmp_path / 'out' / 'valid'), 'failed_evidence': str(tmp_path / 'out' / 'failed')}
+    with pytest.raises(ValueError, match='failed'):
+        run_evidence(
+            raw(),
+            SPEC,
+            disease=write_disease(tmp_path / 'disease', ['EFO_1']),
+            target=write_target(tmp_path / 'target', ['ENSG1']),
+            destination=dst,
+        )
+    assert not (tmp_path / 'out' / 'valid').exists()
