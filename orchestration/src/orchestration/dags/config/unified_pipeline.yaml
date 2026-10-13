@@ -363,10 +363,6 @@ steps:
     ppp_only: true
     depends_on:
       - pis_evidence_ppp
-  pts_evidence_postprocess_ot_crispr:
-    ppp_only: true
-    depends_on:
-      - pts_evidence_ot_crispr
       - pts_target
       - pts_disease
       - pis_literature
@@ -436,7 +432,7 @@ steps:
       - pts_evidence_uniprot_literature
       - pts_evidence_uniprot_variants
     depends_on_ppp:
-      - pts_evidence_postprocess_ot_crispr
+      - pts_evidence_ot_crispr
       - pts_evidence_encore
       - pts_evidence_validation_lab
 

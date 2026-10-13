@@ -143,8 +143,8 @@ def test_log10_of_an_all_null_column_is_all_null() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. cancer_biomarkers, clinical_precedence, crispr, crispr_screen, encore, gwas_credible_sets
-# and intogen moved to their own modules.
+# on all 25. cancer_biomarkers, clinical_precedence, crispr, crispr_screen, encore, gwas_credible_sets,
+# intogen and ot_crispr moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -159,7 +159,6 @@ class _ExpressionCase:
 
 
 CASES = [
-    _ExpressionCase('ot_crispr', 'score', {'dummy': ['x', None]}, [1.0, 1.0]),
     _ExpressionCase('europepmc', 'score', {'resourceScore': [50.0, 150.0, 0.0, None, nan]}, [0.5, 1.0, 0.0, 1.0, 1.0]),
 ]
 

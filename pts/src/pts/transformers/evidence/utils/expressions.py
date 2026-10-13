@@ -138,5 +138,4 @@ class DatasourceExpressions:
 EXPRESSIONS: dict[str, DatasourceExpressions] = {
     # A null or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
-    'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
 }

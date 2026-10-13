@@ -715,12 +715,17 @@ steps:
 
   #: EVIDENCE PPP STEP :############################################################################
   evidence_ot_crispr:
-    - name: pyspark ot_crispr
-      pyspark: ot_crispr
+    - name: transform evidence.ot_crispr
+      transformer: evidence.ot_crispr
       source:
         study_table: input/evidence/ot_crispr/config.csv
         ot_crispr_data: input/evidence/ot_crispr/data
-      destination: intermediate/evidence/ot_crispr.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/ot_crispr
+        evidence: output/evidence_ot_crispr
   ##################################################################################################
 
   #: ONTOMA STEPS :##################################################################################
@@ -1333,31 +1338,6 @@ steps:
       destination:
         failed_evidence: excluded/evidence/cancer_gene_census
         evidence: output/evidence_cancer_gene_census
-
-  evidence_postprocess_ot_crispr:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/ot_crispr.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/ot_crispr
-        evidence: output/evidence_ot_crispr
-      settings:
-        evidence_format: parquet
-        datasource_id: ot_crispr
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyId
-          - diseaseFromSourceMappedId
-          - targetFromSourceId
-          - resourceScore
-          - statisticalTestTail
 
   evidence_encore:
     - name: transform evidence.encore
