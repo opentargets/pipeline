@@ -1,83 +1,19 @@
-"""Tests for the evidence_postprocess score/direction expression registry.
-
-The registry's parity with real spark is verified separately (see
-`.superpowers/sdd/plan/registry-parity-output.txt` and `task-registry-report.md`), and the
-handful of expected values hard-coded below were measured against that spark run, not guessed.
-The encore score is also checked bit for bit against spark at the end of this file.
-
-`pts/config.yaml` no longer carries `score_expression` / `direction_on_trait_expression` /
-`direction_on_target_expression` -- those were stripped once the registry below became the sole
-source of truth (see `evidence_expressions.py`'s module docstring for where the original SQL a
-given entry was translated from still lives in git history). So config.yaml can no longer serve as
-this test's oracle for *which* fields a datasource has; the checks below are what config.yaml can
-still ground: that every step's `datasource_id` maps to a registry entry and back, and that every
-entry is actually usable.
-"""
+"""Tests for the shared score expression helpers."""
 
 from __future__ import annotations
 
 import math
 import random
 import warnings
-from dataclasses import dataclass
 from math import isnan
-from pathlib import Path
 
 import numpy as np
 import polars as pl
-import pytest
-import yaml
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
 from pts.transformers.evidence.encore import ENCORE
-from pts.transformers.evidence.utils.expressions import EXPRESSIONS, log10
-
-CONFIG = Path(__file__).parents[2] / 'config.yaml'
-
-
-def _config_datasource_ids() -> set[str]:
-    """`datasource_id` for every step in config.yaml run by the `evidence_postprocess` transformer."""
-    steps = yaml.safe_load(CONFIG.read_text())['steps']
-    return {
-        tasks[0]['settings']['datasource_id']
-        for tasks in steps.values()
-        if tasks and tasks[0].get('transformer') == 'evidence_postprocess'
-    }
-
-
-CONFIG_DATASOURCE_IDS = _config_datasource_ids()
-
-
-def test_every_config_datasource_has_a_registry_entry() -> None:
-    missing = CONFIG_DATASOURCE_IDS - set(EXPRESSIONS)
-    assert not missing
-
-
-def test_registry_has_no_unexpected_datasources() -> None:
-    extra = set(EXPRESSIONS) - CONFIG_DATASOURCE_IDS
-    assert not extra
-
-
-@pytest.mark.parametrize('datasource_id', sorted(EXPRESSIONS))
-def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
-    """Every entry's `score` is a usable, non-None polars expression.
-
-    The direction fields are each either absent or a polars expression -- never a leftover string,
-    a spark Column, or some other stand-in.
-    """
-    entry = EXPRESSIONS[datasource_id]
-    assert entry.score is not None
-    assert isinstance(entry.score, pl.Expr)
-    for field in ('direction_on_trait', 'direction_on_target'):
-        value = getattr(entry, field)
-        assert value is None or isinstance(value, pl.Expr)
-
-
-# ------------------------------------------------------------------------------------------------
-# Hand-picked edge cases. Expected values measured against real spark evaluating the literal SQL
-# from config.yaml -- see registry-parity-output.txt for the full run these are drawn from.
-# ------------------------------------------------------------------------------------------------
+from pts.transformers.evidence.utils.expressions import log10
 
 
 def test_log10_is_numpy_log10_and_within_one_ulp_of_libm() -> None:
@@ -116,77 +52,6 @@ def test_log10_of_a_negative_is_nan_without_a_warning() -> None:
 def test_log10_of_an_all_null_column_is_all_null() -> None:
     got = pl.DataFrame({'x': [None, None]}, schema={'x': pl.Float64}).select(log10(pl.col('x')).alias('y'))['y']
     assert got.to_list() == [None, None]
-
-
-# ------------------------------------------------------------------------------------------------
-# Exhaustive one-case-per-field table -- all 25 registry fields (15 `score`, 5
-# `direction_on_trait`, 5 `direction_on_target`). Each `expected` was derived by running the
-# ORIGINAL SQL (git `834f1db7` `pts/config.yaml`, the last commit before the registry replaced it)
-# against real spark, not by hand-computing it or reading it off this module -- that would just
-# make the test a mirror of the code it exists to pin. `score` fields were run through
-# `CAST(... AS DOUBLE)` and, for `crispr`'s `linear_rescale` UDF specifically, with the UDF
-# registered exactly as production did (no explicit `returnType`, which pyspark 3.5.7 defaults to
-# StringType rather than inferring `DoubleType` from the function's `-> float` hint) -- both match
-# `calculate_evidence_score`'s `.withColumn('score', f.expr(score_expression).cast(DoubleType()))`
-# (`evidence.py:240`, before the pyspark module was deleted). `direction_on_trait` /
-# `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
-# `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
-# was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. cancer_biomarkers, clinical_precedence, crispr, crispr_screen, encore, europepmc,
-# gwas_credible_sets, intogen and ot_crispr moved to their own modules.
-# ------------------------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _ExpressionCase:
-    """One registry field, a small input frame, and its spark-derived expected output."""
-
-    datasource_id: str
-    field: str
-    data: dict[str, list]
-    expected: list
-
-
-CASES: list[_ExpressionCase] = []
-
-
-def _assert_matches(got: list, expected: list) -> None:
-    """Element-wise compare, tolerating float rounding and null."""
-    assert len(got) == len(expected)
-    for value, exp in zip(got, expected, strict=True):
-        if exp is None:
-            assert value is None
-        elif isinstance(exp, float):
-            assert value == pytest.approx(exp)
-        else:
-            assert value == exp
-
-
-@pytest.mark.parametrize('case', CASES, ids=lambda c: f'{c.datasource_id}.{c.field}')
-def test_registry_expression_matches_spark(case: _ExpressionCase) -> None:
-    entry = EXPRESSIONS[case.datasource_id]
-    expr = getattr(entry, case.field)
-    assert expr is not None
-    df = pl.DataFrame(case.data)
-    got = df.with_columns(expr.alias('out'))['out'].to_list()
-    _assert_matches(got, case.expected)
-
-
-def test_case_table_covers_every_registry_field() -> None:
-    """The table above is exhaustive, not just large.
-
-    Every `(datasource_id, field)` in the registry has exactly one case, and there is nothing in
-    the table that isn't in the registry.
-    """
-    registry_fields = {
-        (datasource_id, field)
-        for datasource_id, entry in EXPRESSIONS.items()
-        for field in ('score', 'direction_on_trait', 'direction_on_target')
-        if getattr(entry, field) is not None
-    }
-    table_fields = {(case.datasource_id, case.field) for case in CASES}
-    assert len(CASES) == len(table_fields), 'duplicate (datasource_id, field) in CASES'
-    assert table_fields == registry_fields
 
 
 # ------------------------------------------------------------------------------------------------

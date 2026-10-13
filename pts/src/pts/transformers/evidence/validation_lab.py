@@ -50,7 +50,7 @@ def validation_lab(
     """Generate and post-process Validation Lab evidence.
 
     Args:
-        source: `evidence`, `disease`, `target` and `literature` locations.
+        source: `evidence`, `disease` and `target` locations.
         destination: `evidence` and `failed_evidence` output directories.
         settings: unused.
         config: unused.
@@ -60,6 +60,5 @@ def validation_lab(
         OT_CRISPR_VALIDATION,
         disease=source['disease'],
         target=source['target'],
-        literature=source['literature'],
         destination=destination,
     )

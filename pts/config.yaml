@@ -1347,7 +1347,6 @@ steps:
         evidence: input/evidence/validation_lab.json.gz
         target: output/target
         disease: output/disease
-        literature: input/literature/literature_export
       destination:
         failed_evidence: excluded/evidence/ot_crispr_validation
         evidence: output/evidence_ot_crispr_validation

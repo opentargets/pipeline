@@ -8,7 +8,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.transformers.evidence.validation_lab import OT_CRISPR_VALIDATION, validation_lab
-from tests.evidence.fixtures import write_disease, write_literature, write_target
+from tests.evidence.fixtures import write_disease, write_target
 
 
 def test_score_is_the_resource_score() -> None:
@@ -38,7 +38,6 @@ def test_evidence_is_scored_and_unknown_target_is_flagged(tmp_path: Path) -> Non
             'evidence': str(src / 'validation_lab.json'),
             'disease': write_disease(src / 'disease', ['EFO_1']),
             'target': write_target(src / 'target', ['ENSG1'], {'ENSG1': 'A1'}),
-            'literature': write_literature(src / 'literature', {}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {},

@@ -1,51 +1,15 @@
-"""Per-datasource score and direction-of-effect expressions for `evidence_postprocess`.
-
-Hand-translated, native-polars replacement for the spark SQL strings `pts/config.yaml` carries in
-`score_expression` / `direction_on_trait_expression` / `direction_on_target_expression` for each
-`evidence_postprocess_*` step. Every expression below was diffed against real spark evaluating the
-literal SQL from `config.yaml` -- see `task-registry-report.md` for the full parity run.
-
-Keyed by `settings.datasource_id`, not the step name -- e.g. the `evidence_postprocess_clinvar`
-step carries `datasource_id: eva`, so its entry lives under `'eva'`.
-
-Several steps carry byte-for-byte or functionally identical expressions; those are written once as
-a module-level function/constant and referenced from every entry that needs them, rather than
-copy-pasted:
-
-* `element_at(map(...), confidence)` is the shared shape behind `uniprot_variants`,
-  `uniprot_literature` and others -- only the
-  map differs, so `confidence_score` takes the map as its argument.
-* `CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` is the shared shape behind several direction
-  expressions across `clinical_precedence`, `cosmic` and `intogen` -- `direction_when_disease_present` takes the
-  literal as its argument.
-* `CASE WHEN <col> == a THEN 'GoF' WHEN <col> == b THEN 'LoF' ELSE NULL END` is a 1:1 value lookup,
-  behind `cancer_gene_census`'s `direction_on_target` -- expressed
-  as `direction_lookup`, a `replace_strict` on the named column.
-* The log10-rescaled-score shape (null/NaN stays null, a non-positive value saturates to 1.0,
-  everything else linearly interpolated in log10 space and clamped) is shared by `intogen`,
-  `gene_burden`, `crispr_screen` and the inner CASE of `expression_atlas` -- only the
-  reference points and output column differ, so `log10_rescaled_score` takes them as arguments.
-
-Provenance: `pts/config.yaml` no longer carries the original `score_expression` /
-`direction_on_trait_expression` / `direction_on_target_expression` SQL strings -- git commit
-`834f1db7` (just before they were stripped) has the last copy, one per `evidence_postprocess_*`
-step, if you need to see the source SQL a given entry below was translated from. The translation
-was verified 41/41 against real spark: on synthetic data covering the null/edge-case branches of
-every expression, and separately on 20/20 real staged datasources end to end -- see
-`task-registry-report.md` and `registry-parity-output.txt` for the runs.
-"""
+"""Score expression helpers shared by the evidence datasource modules."""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
 
 
 def confidence_score(mapping: dict[str, float]) -> pl.Expr:
-    """`element_at(map(...), confidence)` -- the shared shape across five datasources.
+    """`element_at(map(...), confidence)` -- the shared shape across datasources.
 
     `replace_strict` with `default=None` matches spark's `element_at`: a `confidence` value absent
     from `mapping` (or null) becomes null rather than raising.
@@ -56,11 +20,6 @@ def confidence_score(mapping: dict[str, float]) -> pl.Expr:
 def direction_when_disease_present(value: str) -> pl.Expr:
     """`CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` -- shared by several direction fields."""
     return pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit(value)).otherwise(None)
-
-
-def direction_lookup(column: str, mapping: dict[str, str]) -> pl.Expr:
-    """`CASE WHEN <column> == a THEN x WHEN <column> == b THEN y ELSE NULL END` as a 1:1 lookup."""
-    return pl.col(column).replace_strict(mapping, default=None)
 
 
 def _true_divide(series: pl.Series, divisor: float) -> pl.Series:
@@ -124,15 +83,3 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
         .then(1.0)
         .otherwise(rescaled.clip(out_min, 1.0))
     )
-
-
-@dataclass(frozen=True)
-class DatasourceExpressions:
-    """The score and direction-of-effect expressions for one `datasourceId`."""
-
-    score: pl.Expr
-    direction_on_trait: pl.Expr | None = None
-    direction_on_target: pl.Expr | None = None
-
-
-EXPRESSIONS: dict[str, DatasourceExpressions] = {}

@@ -939,10 +939,7 @@ class TestCalculateEvidenceScore:
         assert [EvidenceFlags.NO_VALID_SCORE in qc for qc in out[QC_COLUMN]] == [False, True]
 
     def test_none_expression_raises_rather_than_silently_skipping(self) -> None:
-        # Fix round 1, minor: unlike assign_direction_on_trait/assign_direction_on_target (where
-        # None is genuinely optional), every evidence_postprocess_* step in config.yaml carries a
-        # score_expression -- a None here is a caller bug, and spark's f.expr(...) would itself
-        # fail loudly rather than skip scoring.
+        # unlike the direction methods, None is not optional for a score
         lf = pl.LazyFrame({'resourceScore': [0.5]})
         with pytest.raises(ValueError, match='score_expression'):
             Evidence(lf).calculate_evidence_score(None)

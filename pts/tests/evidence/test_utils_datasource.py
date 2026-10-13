@@ -24,11 +24,7 @@ from pts.transformers.utils.dataset import scan_dataset
 
 
 def _read_json_evidence(path: str) -> pl.LazyFrame:
-    """Read json evidence exactly as `evidence_postprocess` does.
-
-    The step reads inline, so there is no function to call. This mirrors its json branch,
-    `infer_schema_length` included: keep the two in step.
-    """
+    """Read json evidence the way the datasource modules do, `infer_schema_length` included."""
     return scan_dataset(path, format='ndjson', infer_schema_length=None)
 
 
@@ -114,7 +110,7 @@ def test_an_unresolvable_target_is_split_into_the_invalid_half() -> None:
 def test_the_score_expression_is_a_parameter_not_a_lookup() -> None:
     """Two postprocessors differing ONLY in their score expression produce different scores.
 
-    Pins that the recipe never consults `EXPRESSIONS`, so a caller can supply its own.
+    Pins that the recipe takes the score from its caller.
     """
     luts, raw = _luts(), _raw()
 
