@@ -82,21 +82,6 @@ def test_every_registry_expression_is_a_polars_expr(datasource_id: str) -> None:
 # ------------------------------------------------------------------------------------------------
 
 
-def test_log10_rescaled_score_saturates_at_zero_and_null_propagates() -> None:
-    # crispr_screen: out_min=0.0, weak_ref=0.5, strong_ref=0.005 -- measured against spark.
-    df = pl.DataFrame({'resourceScore': [0.5, 0.005, 0.0, -1.0, None, float('nan')]})
-    got = df.with_columns(EXPRESSIONS['crispr_screen'].score.alias('s'))['s'].to_list()
-    assert got[0] == pytest.approx(0.0)
-    assert got[1] == pytest.approx(1.0)
-    assert got[2] == pytest.approx(1.0)  # non-positive input saturates to 1.0
-    assert got[3] == pytest.approx(1.0)
-    assert got[4] is None
-    # NaN pins the '| value.is_nan()' guard separately from is_null(): without it a NaN resourceScore
-    # scores `nan` instead of None, and 0.005 lands so close to 1.0 (0.9999999999999998) that
-    # pytest.approx would let a broken NaN guard hide behind that row instead.
-    assert got[5] is None
-
-
 def test_europepmc_scores_one_for_null_or_nan_resource_score() -> None:
     # The score routes null/NaN resourceScore through a min_horizontal(..., 1.0) that, like spark's
     # array_min, ignores a null/NaN element rather than propagating it -- so the score saturates to
@@ -182,7 +167,7 @@ def test_direction_when_disease_present_is_null_safe() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. crispr, encore, gwas_credible_sets and intogen moved to their own modules.
+# on all 25. crispr, crispr_screen, encore, gwas_credible_sets and intogen moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -216,12 +201,6 @@ CASES = [
         'direction_on_target',
         {'actionType': ['INHIBITOR', 'AGONIST', 'UNKNOWN', None]},
         ['LoF', 'GoF', None, None],
-    ),
-    _ExpressionCase(
-        'crispr_screen',
-        'score',
-        {'resourceScore': [0.5, 0.005, 0.0, -1.0, None, nan]},
-        [0.0, 1.0, 1.0, 1.0, None, None],
     ),
     _ExpressionCase(
         'europepmc', 'score', {'resourceScore': [50.0, 150.0, 0.0, None, nan]}, [0.5, 1.0, 0.0, 1.0, 1.0]

@@ -657,13 +657,18 @@ steps:
 
   #: EVIDENCE_CRISPR_SCREENS STEP :#################################################################
   evidence_crispr_screens:
-    - name: pyspark crispr screens
-      pyspark: crispr_screens
+    - name: transform evidence.crispr_screens
+      transformer: evidence.crispr_screens
       source:
         screens: input/evidence/crispr_screens/brain_screens.json.gz
         studies_dir: input/evidence/crispr_screens/brain_studies
         disease_mapping: input/ot_curation/mappings/disease/brain_crispr_studies.tsv
-      destination: intermediate/evidence/crispr_screens.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/crispr_screen
+        evidence: output/evidence_crispr_screen
   ##################################################################################################
 
   #: EVIDENCE_GENE2PHENOTYPE STEP :#################################################################
@@ -1306,27 +1311,6 @@ steps:
           END
         direction_on_target_expression: |
           'LoF'
-
-  evidence_postprocess_crispr_screens:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/crispr_screens.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/crispr_screen
-        evidence: output/evidence_crispr_screen
-      settings:
-        evidence_format: parquet
-        datasource_id: crispr_screen
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyId
 
   evidence_postprocess_europepmc:
     - name: transform evidence_postprocess

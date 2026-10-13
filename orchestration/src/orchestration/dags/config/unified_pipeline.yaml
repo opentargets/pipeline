@@ -345,9 +345,6 @@ steps:
   pts_evidence_crispr_screens:
     depends_on:
       - pis_evidence_crispr_screens
-  pts_evidence_postprocess_crispr_screens:
-    depends_on:
-      - pts_evidence_crispr_screens
       - pts_target
       - pts_disease
       - pis_literature
@@ -432,7 +429,7 @@ steps:
       - pts_evidence_postprocess_clingen
       - pts_evidence_cosmic
       - pts_evidence_project_score
-      - pts_evidence_postprocess_crispr_screens
+      - pts_evidence_crispr_screens
       - pts_evidence_clinvar
       - pts_evidence_clinvar_somatic
       - pts_evidence_postprocess_gene_burden

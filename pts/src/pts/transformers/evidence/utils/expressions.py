@@ -240,7 +240,6 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
         direction_on_trait=direction_when_disease_present('protect'),
         direction_on_target=_clinical_precedence_direction_on_target(),
     ),
-    'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # A null or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
