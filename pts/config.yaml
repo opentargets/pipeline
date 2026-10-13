@@ -1007,28 +1007,6 @@ steps:
   ##################################################################################################
 
   #: EVIDENCE POST PROCESS STEP :###################################################################
-  gwas_evidence:
-    - name: transform gwas_evidence
-      transformer: evidence.gwas_evidence
-      source:
-        l2g_predictions: output/l2g_prediction
-        credible_set: output/credible_set
-        study_index: output/study
-        disease: output/disease
-        target: output/target
-        literature: input/literature/literature_export
-      destination:
-        evidence: output/evidence_gwas_credible_sets
-        failed_evidence: excluded/evidence/gwas_credible_sets
-      settings:
-        locus_to_gene_threshold: 0.05
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - studyLocusId
-
   evidence_postprocess_expression_atlas:
     - name: pyspark evidence_postprocess
       pyspark: evidence_postprocess
@@ -2035,6 +2013,28 @@ steps:
         l2g_threshold: 0.05
         explain_predictions: true
         # shap_background_size is set on l2g_train only
+    - name: transform gwas_evidence
+      requires:
+        - transform l2g_predict
+      transformer: evidence.gwas_evidence
+      source:
+        l2g_predictions: output/l2g_prediction
+        credible_set: output/credible_set
+        study_index: output/study
+        disease: output/disease
+        target: output/target
+        literature: input/literature/literature_export
+      destination:
+        evidence: output/evidence_gwas_credible_sets
+        failed_evidence: excluded/evidence/gwas_credible_sets
+      settings:
+        locus_to_gene_threshold: 0.05
+        unique_fields:
+          - targetId
+          - targetFromSourceId
+          - diseaseId
+          - datasourceId
+          - studyLocusId
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:
