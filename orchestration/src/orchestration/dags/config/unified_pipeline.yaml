@@ -270,11 +270,9 @@ steps:
     depends_on:
       - pis_evidence_project_score
       - pts_ontoma
-  pts_evidence_postprocess_project_score:
-    depends_on:
-      - pts_evidence_project_score
       - pts_target
       - pts_disease
+      - pis_literature
   pts_evidence_gene_burden:
     depends_on:
       - pis_evidence_gene_burden
@@ -433,7 +431,7 @@ steps:
       - pts_evidence_postprocess_clinical_precedence
       - pts_evidence_postprocess_clingen
       - pts_evidence_cosmic
-      - pts_evidence_postprocess_project_score
+      - pts_evidence_project_score
       - pts_evidence_postprocess_crispr_screens
       - pts_evidence_clinvar
       - pts_evidence_clinvar_somatic

@@ -3,7 +3,7 @@
 The registry's parity with real spark is verified separately (see
 `.superpowers/sdd/plan/registry-parity-output.txt` and `task-registry-report.md`), and the
 handful of expected values hard-coded below were measured against that spark run, not guessed.
-The crispr and encore scores are also checked bit for bit against spark at the end of this file.
+The encore score is also checked bit for bit against spark at the end of this file.
 
 `pts/config.yaml` no longer carries `score_expression` / `direction_on_trait_expression` /
 `direction_on_target_expression` -- those were stripped once the registry below became the sole
@@ -144,13 +144,6 @@ def test_log10_of_an_all_null_column_is_all_null() -> None:
     assert got.to_list() == [None, None]
 
 
-def test_linear_rescale_clamps_project_score() -> None:
-    # crispr: linear_rescale(resourceScore, 41.5, 100, 0.415, 1.0) -- measured against spark.
-    df = pl.DataFrame({'resourceScore': [0.0, 41.5, 100.0, 150.0]})
-    got = df.with_columns(EXPRESSIONS['crispr'].score.alias('s'))['s'].to_list()
-    assert got == pytest.approx([0.415, 0.415, 1.0, 1.0])
-
-
 def test_clinical_precedence_score_multiplies_stage_by_stop_reason_minimum() -> None:
     df = pl.DataFrame({
         'clinicalStage': ['PHASE_2_3', 'PRECLINICAL', 'PHASE_1', 'PHASE_2_3'],
@@ -189,7 +182,7 @@ def test_direction_when_disease_present_is_null_safe() -> None:
 # `direction_on_target` are asserted uncast, matching `assign_direction_on_trait` /
 # `assign_direction_on_target`, which apply `f.expr(...)` directly with no cast. Every value here
 # was cross-checked against the current registry too (0 mismatches) -- spark and the registry agree
-# on all 25. encore, gwas_credible_sets and intogen moved to their own modules.
+# on all 25. crispr, encore, gwas_credible_sets and intogen moved to their own modules.
 # ------------------------------------------------------------------------------------------------
 
 
@@ -232,12 +225,6 @@ CASES = [
     ),
     _ExpressionCase(
         'europepmc', 'score', {'resourceScore': [50.0, 150.0, 0.0, None, nan]}, [0.5, 1.0, 0.0, 1.0, 1.0]
-    ),
-    _ExpressionCase(
-        'crispr',
-        'score',
-        {'resourceScore': [0.0, 41.5, 100.0, 150.0, None, nan]},
-        [0.415, 0.415, 1.0, 1.0, None, None],
     ),
 ]
 
@@ -285,15 +272,6 @@ def test_case_table_covers_every_registry_field() -> None:
 # Exact parity with the SQL on main for the scores rewritten since the case table was measured.
 # ------------------------------------------------------------------------------------------------
 
-CRISPR_SQL = """
-CASE
-  WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-  ELSE LEAST(1.0, GREATEST(0.415,
-    (1.0 - 0.415) * (CAST(resourceScore AS DOUBLE) - 41.5) / (100 - 41.5) + 0.415
-  ))
-END
-"""
-
 ENCORE_SQL = 'ABS ( geneticInteractionScore  ) / 16.0'
 
 
@@ -312,21 +290,6 @@ def _same(a: list, b: list) -> bool:
         (x is None and y is None) or (x is not None and y is not None and (x == y or (isnan(x) and isnan(y))))
         for x, y in zip(a, b, strict=True)
     )
-
-
-def test_crispr_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
-    rng = random.Random(0)
-    values: list[float | None] = [0.0, -5.0, 36.0, 41.4, 41.5, 41.6, 44.8, 52.8, 83.8, 99.99, 100.0, 100.1, 1e30]
-    values += [-1e30, float('inf'), float('-inf'), float('nan'), None]
-    values += [rng.uniform(30.0, 110.0) for _ in range(5000)]
-    expected = _spark_scores(spark, 'resourceScore', values, 'DOUBLE', CRISPR_SQL)
-    assert _same(_polars_scores('crispr', 'resourceScore', values, pl.Float64), expected)
-
-
-def test_crispr_integer_score_matches_spark(spark: SparkSession) -> None:
-    values = [*range(-10, 151), None]
-    expected = _spark_scores(spark, 'resourceScore', values, 'BIGINT', CRISPR_SQL)
-    assert _same(_polars_scores('crispr', 'resourceScore', values, pl.Int64), expected)
 
 
 def test_encore_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:

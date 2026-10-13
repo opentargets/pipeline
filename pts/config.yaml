@@ -533,14 +533,19 @@ steps:
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
   evidence_project_score:
-    - name: pyspark project_score
-      pyspark: project_score
+    - name: transform evidence.project_score
+      transformer: evidence.project_score
       source:
         gene_scores: input/evidence/project_score/mapped_diseases.tsv
         cell_types: input/evidence/project_score/cell_types.tsv
         cell_passport: input/evidence/cell_passport.csv.gz
         cell_line_mapping: input/ot_curation/mappings/biosystem/depmap_uberon_mapping.csv
-      destination: intermediate/evidence/project_score.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/crispr
+        evidence: output/evidence_crispr
   ##################################################################################################
 
   #: EVIDENCE_GENE_BURDEN STEP :####################################################################
@@ -1374,26 +1379,6 @@ steps:
           - datasourceId
           - diseaseFromSource
           - studyId
-
-  evidence_postprocess_project_score:
-    - name: transform evidence_postprocess
-      transformer: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/project_score.parquet
-        target_path: output/target
-        disease_path: output/disease/
-        publication_date_lut: input/literature/literature_export/
-      destination:
-        failed_evidence: excluded/evidence/crispr
-        evidence: output/evidence_crispr
-      settings:
-        evidence_format: parquet
-        datasource_id: crispr
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
 
   evidence_cosmic:
     - name: transform evidence.cosmic

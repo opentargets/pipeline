@@ -186,27 +186,6 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
     )
 
 
-def linear_rescale(
-    value: pl.Expr, in_range_min: float, in_range_max: float, out_range_min: float, out_range_max: float
-) -> pl.Expr:
-    """Rescale `value` linearly between two ranges, clamped to the output range.
-
-    ```
-    CASE
-      WHEN value IS NULL OR isnan(value) THEN NULL
-      ELSE LEAST(out_max, GREATEST(out_min,
-        (out_max - out_min) * (CAST(value AS DOUBLE) - in_min) / (in_max - in_min) + out_min
-      ))
-    END
-    ```
-    """
-    value = value.cast(pl.Float64)
-    rescaled = (
-        divide((out_range_max - out_range_min) * (value - in_range_min), in_range_max - in_range_min) + out_range_min
-    )
-    return pl.when(value.is_null() | value.is_nan()).then(None).otherwise(rescaled.clip(out_range_min, out_range_max))
-
-
 def _clinical_precedence_score() -> pl.Expr:
     """clinical_precedence score: clinical-stage score times a trial-stop-reason multiplier.
 
@@ -264,6 +243,5 @@ EXPRESSIONS: dict[str, DatasourceExpressions] = {
     'crispr_screen': DatasourceExpressions(score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005)),
     # A null or NaN resourceScore makes the first min_horizontal argument null, which min_horizontal skips.
     'europepmc': DatasourceExpressions(score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0))),
-    'crispr': DatasourceExpressions(score=linear_rescale(pl.col('resourceScore'), 41.5, 100.0, 0.415, 1.0)),
     'ot_crispr': DatasourceExpressions(score=pl.lit(1.0)),
 }
