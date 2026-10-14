@@ -1,0 +1,65 @@
+---
+# Ingest BigBrain's published SuSiE fine-mapping (PolyFun + SuSiE, L=5, in-sample LD
+# from 3,884 EUR donors) as credible sets. Re-fine-mapping the summary statistics with
+# SuSiE-inf against reference-panel LD and a constant sample size inflated logBFs, so the
+# published credible sets are used instead, as for eQTL Catalogue.
+#
+# Each node also writes a study index built from the fine-mapped features, so every
+# credible set has a study. sQTL genes come from top_assoc; junctions annotated to several
+# genes are resolved against the target index (gene body containment, then protein-coding)
+# and otherwise left without a gene, which study validation then excludes.
+#
+# The source files are small and are staged on GCS from Zenodo beforehand, rather than
+# fetched by a step, to avoid Zenodo's intermittent 504s:
+#   eQTL fine-mapping (10MB): https://zenodo.org/records/17226890/files/BigBrain_cis_eQTL_finemapping.txt.gz
+#   sQTL fine-mapping (22MB): https://zenodo.org/records/17153730/files/BigBrain_cis_sQTL_finemapping.txt.gz
+#   sQTL top_assoc   (34MB): https://zenodo.org/records/17153730/files/BigBrain_cis_sQTL_EUR_top_assoc.tsv.gz
+#
+# Outputs go under published_finemapping/ so they don't overwrite the harmonisation DAG's
+# study index (which covers every tested gene, not just the fine-mapped ones).
+#
+# Credible-set QC is deliberately absent (as for eQTL Catalogue): its purityMinR2 filter
+# would drop every multi-variant set, since BigBrain does not publish purity. Their sets
+# already passed SuSiE's purity filter (min |r| >= 0.5 on the in-sample LD).
+dataproc:
+  cluster_name: otg-bigbrain-finemapping
+  cluster_config:
+    project_id: open-targets-genetics-dev
+    autoscaling_policy: otg-etl
+    metadata:
+      # Needs BigBrainFinemappingIngestionStep, which is on this gentropy branch only.
+      GENTROPY_REF: xg1_bigbrain_finemapping
+    init_actions_uris:
+      - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
+    # Same rationale as bigbrain_harmonisation.yaml: the default pd-ssd sizes don't fit the
+    # region's SSD quota headroom, and the inputs here total ~32MB.
+    master_disk_size: 100
+    worker_disk_size: 100
+
+nodes:
+  - id: bigbrain_eqtl_finemapping_ingestion
+    kind: Task
+    prerequisites: []
+    params:
+      step: bigbrain_finemapping_ingestion
+      step.qtl_type: eqtl
+      step.finemapping_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/raw/eqtl/finemapping/BigBrain_cis_eQTL_finemapping.txt.gz
+      step.credible_set_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/published_finemapping/eqtl/credible_set
+      step.study_index_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/published_finemapping/eqtl/study_index
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 10
+
+  - id: bigbrain_sqtl_finemapping_ingestion
+    kind: Task
+    prerequisites: []
+    params:
+      step: bigbrain_finemapping_ingestion
+      step.qtl_type: sqtl
+      step.finemapping_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/raw/sqtl/finemapping/BigBrain_cis_sQTL_finemapping.txt.gz
+      step.credible_set_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/published_finemapping/sqtl/credible_set
+      step.study_index_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/published_finemapping/sqtl/study_index
+      step.top_assoc_path: gs://genetics-portal-dev-analysis/xg1/bigbrain/raw/sqtl/top_assoc_tsv/BigBrain_cis_sQTL_EUR_top_assoc.tsv.gz
+      # Use the target index of the release these credible sets will be validated in.
+      step.target_index_path: gs://open-targets-pre-data-releases/26.03/output/target
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 10
