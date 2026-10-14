@@ -27,18 +27,6 @@ REACTOME = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read Reactome's evidence.
-
-    Args:
-        evidence: location of the Reactome evidence json.
-
-    Returns:
-        Raw Reactome evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
-
-
 def reactome(
     source: dict[str, str],
     destination: dict[str, str],
@@ -54,7 +42,7 @@ def reactome(
         config: unused.
     """
     run_evidence(
-        generate(source['evidence']),
+        scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None),
         REACTOME,
         disease=source['disease'],
         target=source['target'],

@@ -118,18 +118,6 @@ def compute_evidence(cooccurrences: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def generate(cooccurrence: str) -> pl.LazyFrame:
-    """Build Europe PMC evidence from literature cooccurrences.
-
-    Args:
-        cooccurrence: location of the literature cooccurrence dataset.
-
-    Returns:
-        Raw Europe PMC evidence.
-    """
-    return compute_evidence(scan_dataset(cooccurrence))
-
-
 def europepmc(
     source: dict[str, str],
     destination: dict[str, str],
@@ -145,7 +133,7 @@ def europepmc(
         config: unused.
     """
     run_evidence(
-        generate(source['cooccurrence']),
+        compute_evidence(scan_dataset(source['cooccurrence'])),
         EUROPEPMC,
         disease=source['disease'],
         target=source['target'],

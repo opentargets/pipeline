@@ -29,18 +29,6 @@ OT_CRISPR_VALIDATION = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read Validation Lab evidence.
-
-    Args:
-        evidence: location of the Validation Lab evidence json.
-
-    Returns:
-        Raw Validation Lab evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
-
-
 def validation_lab(
     source: dict[str, str],
     destination: dict[str, str],
@@ -56,7 +44,7 @@ def validation_lab(
         config: unused.
     """
     run_evidence(
-        generate(source['evidence']),
+        scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None),
         OT_CRISPR_VALIDATION,
         disease=source['disease'],
         target=source['target'],

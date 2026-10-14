@@ -29,18 +29,6 @@ ENCORE = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read ENCORE's evidence, which arrives in the evidence format.
-
-    Args:
-        evidence: location of the ENCORE evidence parquet.
-
-    Returns:
-        Raw ENCORE evidence.
-    """
-    return scan_dataset(evidence)
-
-
 def encore(
     source: dict[str, str],
     destination: dict[str, str],
@@ -56,7 +44,7 @@ def encore(
         config: unused.
     """
     run_evidence(
-        generate(source['evidence']),
+        scan_dataset(source['evidence']),
         ENCORE,
         disease=source['disease'],
         target=source['target'],

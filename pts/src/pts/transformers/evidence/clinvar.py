@@ -130,18 +130,6 @@ EVA = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read EVA's evidence.
-
-    Args:
-        evidence: location of the EVA evidence json.
-
-    Returns:
-        Raw EVA evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
-
-
 def run_eva(source: dict[str, str], destination: dict[str, str], datasource: EvidenceDatasource) -> None:
     """Post-process EVA evidence for one of its datasources and write it.
 
@@ -150,7 +138,7 @@ def run_eva(source: dict[str, str], destination: dict[str, str], datasource: Evi
         destination: `evidence` and `failed_evidence` output directories.
         datasource: the EVA datasource to keep.
     """
-    raw = generate(source['evidence'])
+    raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         datasource

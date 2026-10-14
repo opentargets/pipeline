@@ -67,18 +67,6 @@ EXPRESSION_ATLAS = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read Expression Atlas evidence, which arrives in the evidence format.
-
-    Args:
-        evidence: location of the Expression Atlas evidence parquet.
-
-    Returns:
-        Raw Expression Atlas evidence.
-    """
-    return scan_dataset(evidence)
-
-
 def expression_atlas(
     source: dict[str, str],
     destination: dict[str, str],
@@ -94,7 +82,7 @@ def expression_atlas(
         config: unused.
     """
     run_evidence(
-        generate(source['evidence']),
+        scan_dataset(source['evidence']),
         EXPRESSION_ATLAS,
         disease=source['disease'],
         target=source['target'],

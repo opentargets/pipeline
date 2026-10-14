@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import polars as pl
 from otter.config.model import Config
 
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
@@ -32,18 +31,6 @@ UNIPROT_VARIANTS = EvidenceDatasource(
 )
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read UniProt variants evidence.
-
-    Args:
-        evidence: location of the UniProt variants evidence json.
-
-    Returns:
-        Raw UniProt variants evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
-
-
 def uniprot_variants(
     source: dict[str, str],
     destination: dict[str, str],
@@ -58,6 +45,6 @@ def uniprot_variants(
         settings: unused.
         config: unused.
     """
-    raw = generate(source['evidence'])
+    raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import polars as pl
 from otter.config.model import Config
 
 from pts.transformers.evidence.uniprot_variants import CONFIDENCE_SCORES
@@ -19,18 +18,6 @@ UNIPROT_LITERATURE = EvidenceDatasource(
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'diseaseFromSource'],
     score=confidence_score(CONFIDENCE_SCORES),
 )
-
-
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read UniProt literature evidence.
-
-    Args:
-        evidence: location of the UniProt literature evidence json.
-
-    Returns:
-        Raw UniProt literature evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
 
 
 def uniprot_literature(
@@ -48,7 +35,7 @@ def uniprot_literature(
         config: unused.
     """
     run_evidence(
-        generate(source['evidence']),
+        scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None),
         UNIPROT_LITERATURE,
         disease=source['disease'],
         target=source['target'],

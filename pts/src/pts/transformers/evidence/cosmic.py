@@ -22,18 +22,6 @@ DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = pl.col('TSorOncogene').replace_strict({'oncogene': 'GoF', 'tsg': 'LoF'}, default=None)
 
 
-def generate(evidence: str) -> pl.LazyFrame:
-    """Read COSMIC's evidence.
-
-    Args:
-        evidence: location of the COSMIC evidence json.
-
-    Returns:
-        Raw COSMIC evidence.
-    """
-    return scan_dataset(evidence, format='ndjson', infer_schema_length=None)
-
-
 def cosmic(
     source: dict[str, str],
     destination: dict[str, str],
@@ -48,7 +36,7 @@ def cosmic(
         settings: unused.
         config: unused.
     """
-    raw = generate(source['evidence'])
+    raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         CANCER_GENE_CENSUS

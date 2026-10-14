@@ -9,7 +9,7 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts.transformers.evidence.europepmc import EUROPEPMC, compute_evidence, europepmc, generate
+from pts.transformers.evidence.europepmc import EUROPEPMC, compute_evidence, europepmc
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 nan = float('nan')
@@ -245,16 +245,6 @@ def test_score_is_summed_in_ascending_order_whatever_the_row_order() -> None:
     for _ in range(5):
         rng.shuffle(rows)
         assert _evidence(*rows)['resourceScore'].to_list() == [expected]
-
-
-def test_generate_reads_the_cooccurrence_dataset(tmp_path: Path) -> None:
-    (tmp_path / 'cooccurrence').mkdir()
-    pl.DataFrame([_row(evidenceScore=1.5)], schema=COOCCURRENCE_SCHEMA).write_parquet(
-        tmp_path / 'cooccurrence' / 'part.parquet'
-    )
-    result = generate(str(tmp_path / 'cooccurrence'))
-    assert isinstance(result, pl.LazyFrame)
-    assert result.collect()['targetFromSourceId'].to_list() == ['ENSG001']
 
 
 # step
