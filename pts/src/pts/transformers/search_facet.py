@@ -62,27 +62,6 @@ def map_or_keep(column: str, mapping: dict[str, str]) -> pl.Expr:
     return pl.col(column).replace_strict(mapping, default=pl.col(column), return_dtype=pl.String)
 
 
-def with_ancestors(lf: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
-    """Replace each id with itself and its ancestors from the reference."""
-    ancestors = reference.select('id', 'ancestors')
-    return (
-        lf
-        .filter(pl.col('id').is_not_null())
-        .join(ancestors, on='id', how='left')
-        .with_columns(
-            pl.concat_list(pl.col('id'), pl.col('ancestors').fill_null([])).list.unique(maintain_order=True).alias('id')
-        )
-        .drop('ancestors')
-        .pipe(explode, 'id')
-    )
-
-
-def with_labels(lf: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
-    """Join each id to its reference label, dropping ids without one."""
-    labels = reference.select('id', 'label').filter(pl.col('label').is_not_null())
-    return lf.join(labels, on='id', how='inner')
-
-
 def disease_name_facets(disease: pl.LazyFrame, categories: dict[str, str]) -> pl.LazyFrame:
     """One facet per disease, labelled with its name."""
     return facet(
@@ -125,22 +104,10 @@ def tractability_facets(tractability: pl.LazyFrame, categories: dict[str, str]) 
     )
 
 
-def go_facets(target: pl.LazyFrame, go: pl.LazyFrame, categories: dict[str, str]) -> pl.LazyFrame:
-    """One facet per GO term and aspect, holding the targets annotated to it or a descendant."""
-    aspects = {'F': categories['go_f'], 'P': categories['go_p'], 'C': categories['go_c']}
-    annotations = explode(target.select(pl.col('id').alias('targetId'), 'go'), 'go').select(
-        'targetId',
-        pl.col('go').struct.field('id'),
-        pl.col('go').struct.field('aspect'),
-    )
-    return (
-        facet(
-            with_labels(with_ancestors(annotations, go), go).rename({'id': 'datasourceId'}),
-            ['label', 'aspect', 'datasourceId'],
-            'targetId',
-        )
-        .with_columns(map_or_keep('aspect', aspects).alias('category'))
-        .drop('aspect')
+def gene_set_facets(gene_sets: pl.LazyFrame, source: str) -> pl.LazyFrame:
+    """One facet per gene set from a source, keyed by the set id."""
+    return gene_sets.filter(pl.col('source') == source).select(
+        'label', 'category', 'entityIds', pl.col('id').alias('datasourceId')
     )
 
 
@@ -159,35 +126,10 @@ def subcellular_location_facets(target: pl.LazyFrame, categories: dict[str, str]
     )
 
 
-def target_class_facets(target: pl.LazyFrame, categories: dict[str, str]) -> pl.LazyFrame:
-    """One facet per ChEMBL target class label."""
-    classes = explode(target.select('id', 'targetClass'), 'targetClass')
-    return facet(
-        classes.select(
-            'id',
-            pl.col('targetClass').struct.field('label'),
-            pl.lit(categories['target_class']).alias('category'),
-        ),
-        ['label', 'category'],
-        'id',
-    ).pipe(null_datasource)
-
-
-def pathway_facets(target: pl.LazyFrame, reactome: pl.LazyFrame, categories: dict[str, str]) -> pl.LazyFrame:
-    """One facet per Reactome pathway, holding the targets in it or a descendant."""
-    pathways = explode(target.select(pl.col('id').alias('targetId'), 'pathways'), 'pathways').select(
-        'targetId', pl.col('pathways').struct.field('pathwayId').alias('id')
-    )
-    return facet(
-        with_labels(with_ancestors(pathways, reactome), reactome).select(
-            'targetId',
-            'label',
-            pl.lit(categories['pathways']).alias('category'),
-            pl.col('id').alias('datasourceId'),
-        ),
-        ['label', 'category', 'datasourceId'],
-        'targetId',
-    )
+def target_class_facets(gene_sets: pl.LazyFrame) -> pl.LazyFrame:
+    """One facet per ChEMBL target class label, merging the class gene sets that share it."""
+    classes = gene_sets.filter(pl.col('source') == 'chembl_target_class').select('label', 'category', 'entityIds')
+    return facet(explode(classes, 'entityIds'), ['label', 'category'], 'entityIds').pipe(null_datasource)
 
 
 def simple_facet(target: pl.LazyFrame, label: str, category: str) -> pl.LazyFrame:
@@ -201,8 +143,7 @@ def simple_facet(target: pl.LazyFrame, label: str, category: str) -> pl.LazyFram
 
 def target_facets(
     target: pl.LazyFrame,
-    go: pl.LazyFrame,
-    reactome: pl.LazyFrame,
+    gene_sets: pl.LazyFrame,
     tractability: pl.LazyFrame,
     categories: dict[str, str],
 ) -> pl.LazyFrame:
@@ -211,10 +152,10 @@ def target_facets(
         simple_facet(target, 'id', categories['target_id']),
         simple_facet(target, 'approvedSymbol', categories['approved_symbol']),
         simple_facet(target, 'approvedName', categories['approved_name']),
-        go_facets(target, go, categories),
+        gene_set_facets(gene_sets, 'go'),
         subcellular_location_facets(target, categories),
-        target_class_facets(target, categories),
-        pathway_facets(target, reactome, categories),
+        target_class_facets(gene_sets),
+        gene_set_facets(gene_sets, 'reactome'),
         tractability_facets(tractability, categories),
     ]
     return sort_facets(pl.concat([lf.select(TARGET_COLUMNS) for lf in frames]))
@@ -240,23 +181,21 @@ def search_facet(
     """Compute the search facets for targets and diseases.
 
     Args:
-        source: paths keyed by diseases, targets, go, reactome and tractability.
+        source: paths keyed by diseases, targets, gene_sets and tractability.
         destination: paths keyed by targets and diseases.
-        settings: an optional categories mapping overriding the default category labels.
+        settings: an optional categories mapping overriding the default category labels. GO, Reactome
+            and ChEMBL target class facets take their category from the gene sets.
         config: unused.
     """
     categories = {**DEFAULT_CATEGORIES, **(settings.get('categories') or {})}
 
     disease = scan_dataset(source['diseases']).select('id', 'name', 'therapeuticAreas')
-    target = scan_dataset(source['targets']).select(
-        'id', 'approvedSymbol', 'approvedName', 'go', 'subcellularLocations', 'targetClass', 'pathways'
-    )
-    go = scan_dataset(source['go']).select('id', 'label', 'ancestors')
-    reactome = scan_dataset(source['reactome']).select('id', 'label', 'ancestors')
+    target = scan_dataset(source['targets']).select('id', 'approvedSymbol', 'approvedName', 'subcellularLocations')
+    gene_sets = scan_dataset(source['gene_sets']).select('id', 'label', 'source', 'category', 'entityIds')
     tractability = scan_dataset(source['tractability']).select('targetId', 'modality', 'category', 'value')
 
     logger.info('computing target facets')
-    targets = target_facets(target, go, reactome, tractability, categories).collect()
+    targets = target_facets(target, gene_sets, tractability, categories).collect()
     logger.info('computing disease facets')
     diseases = disease_facets(disease, categories).collect()
 

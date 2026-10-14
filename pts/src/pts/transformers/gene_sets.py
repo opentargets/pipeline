@@ -14,7 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene_sets import gene_sets_schema
-from pts.transformers.search_facet import DEFAULT_CATEGORIES, explode, facet, with_ancestors
+from pts.transformers.search_facet import DEFAULT_CATEGORIES, explode, facet
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 GO_NAMESPACES = {
@@ -22,6 +22,21 @@ GO_NAMESPACES = {
     'biological_process': DEFAULT_CATEGORIES['go_p'],
     'cellular_component': DEFAULT_CATEGORIES['go_c'],
 }
+
+
+def with_ancestors(lf: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
+    """Replace each id with itself and its ancestors from the reference."""
+    ancestors = reference.select('id', 'ancestors')
+    return (
+        lf
+        .filter(pl.col('id').is_not_null())
+        .join(ancestors, on='id', how='left')
+        .with_columns(
+            pl.concat_list(pl.col('id'), pl.col('ancestors').fill_null([])).list.unique(maintain_order=True).alias('id')
+        )
+        .drop('ancestors')
+        .pipe(explode, 'id')
+    )
 
 
 def _go_hierarchy(go: pl.LazyFrame) -> pl.LazyFrame:

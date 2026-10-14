@@ -56,7 +56,7 @@ def output(tmp_path_factory: pytest.TempPathFactory) -> pl.DataFrame:
     for name, df in {'targets': TARGET, 'go': GO, 'reactome': REACTOME, 'protein_classification': CLASSES}.items():
         source[name] = str(path / name)
         write_dataset(df, source[name])
-    config = Config(step='search_facet', steps=['search_facet'], work_path=path)
+    config = Config(step='gene_sets', steps=['gene_sets'], work_path=path)
     gene_sets(source, str(path / 'output'), {}, config)
     return scan_dataset(str(path / 'output')).collect()
 
