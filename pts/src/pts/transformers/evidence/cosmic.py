@@ -49,7 +49,6 @@ def cosmic(
         config: unused.
     """
     raw = generate(source['evidence'])
-    CANCER_GENE_CENSUS.check_raw(raw)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         CANCER_GENE_CENSUS

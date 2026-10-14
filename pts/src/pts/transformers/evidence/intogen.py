@@ -134,7 +134,6 @@ def intogen(
         config: unused.
     """
     raw = generate(source['genes'], source['cohorts'], source['disease_mapping'])
-    INTOGEN.check_raw(raw)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         INTOGEN

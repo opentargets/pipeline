@@ -37,6 +37,5 @@ def run_evidence(
     literature: str | None = None,
 ) -> None:
     """Check, post-process and write raw evidence for a datasource with no steps after the recipe."""
-    datasource.check_raw(raw)
     luts = build_luts(raw, disease=disease, target=target, literature=literature)
     write_evidence(datasource.postprocess(raw, luts), destination)

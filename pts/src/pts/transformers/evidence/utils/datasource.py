@@ -57,8 +57,10 @@ class EvidenceDatasource:
             Scored evidence, lazy and not yet split into valid and invalid.
 
         Raises:
-            ValueError: if `raw` carries `literature` and `luts.publication` is not given.
+            ValueError: if a required or `unique_fields` column is missing, or if `raw` carries
+                `literature` and `luts.publication` is not given.
         """
+        self.check_raw(raw)
         if luts.publication is None and 'literature' in raw.collect_schema().names():
             msg = f'{self.datasource_id} evidence carries literature but no publication look-up table was given'
             raise ValueError(msg)

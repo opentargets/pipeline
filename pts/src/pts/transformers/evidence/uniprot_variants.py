@@ -59,6 +59,5 @@ def uniprot_variants(
         config: unused.
     """
     raw = generate(source['evidence'])
-    UNIPROT_VARIANTS.check_raw(raw)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)

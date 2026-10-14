@@ -151,7 +151,6 @@ def run_eva(source: dict[str, str], destination: dict[str, str], datasource: Evi
         datasource: the EVA datasource to keep.
     """
     raw = generate(source['evidence'])
-    datasource.check_raw(raw)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (
         datasource

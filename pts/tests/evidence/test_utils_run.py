@@ -49,6 +49,15 @@ class TestCheckRawEvidence:
     def test_accepts_columns_outside_the_schema(self) -> None:
         SPEC.check_raw(raw(notInSchema=['x', 'y']))
 
+    def test_postprocess_checks_the_raw_evidence(self) -> None:
+        spec = EvidenceDatasource(datasource_id='eva', unique_fields=['studyLocusId'], score=pl.lit(1.0))
+        luts = ValidationLuts(
+            disease=pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']}),
+            target=pl.DataFrame({'targetFromSourceId': ['ENSG1'], 'targetId': ['ENSG1'], 'biotype': ['pc']}),
+        )
+        with pytest.raises(ValueError, match='studyLocusId'):
+            spec.postprocess(raw(), luts)
+
 
 class TestRecipeLiterature:
     def test_runs_without_a_publication_table_when_there_is_no_literature(self) -> None:
