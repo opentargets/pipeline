@@ -59,6 +59,17 @@ steps:
       destination: output/reactome
   ##################################################################################################
 
+  #: WIKIPATHWAYS STEP :############################################################################
+  wikipathways:
+    - name: transform wikipathways
+      transformer: wikipathways
+      source: input/wikipathways/wikipathways-Homo_sapiens.gmt
+      destination: output/wikipathways
+      settings:
+        # The 2026-09-10 release has 991 human pathways; fail on a sharp drop.
+        min_pathways: 900
+  ##################################################################################################
+
   #: EXPRESSION STEP :##############################################################################
   baseline_expression_dice:
     - name: pyspark baseline expression harmonise dice

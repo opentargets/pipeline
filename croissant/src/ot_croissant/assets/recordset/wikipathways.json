@@ -1,0 +1,31 @@
+[
+  {
+    "id": "id",
+    "description": "Unique identifier for the WikiPathways pathway [bioregistry:wikipathways]",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "label",
+    "description": "Name or label of the pathway"
+  },
+  {
+    "id": "ancestors",
+    "description": "List of ancestor pathways in the ontology (always empty: WikiPathways has no pathway hierarchy)"
+  },
+  {
+    "id": "descendants",
+    "description": "List of descendant pathways in the ontology (always empty: WikiPathways has no pathway hierarchy)"
+  },
+  {
+    "id": "children",
+    "description": "Direct child pathways of the current pathway (always empty: WikiPathways has no pathway hierarchy)"
+  },
+  {
+    "id": "parents",
+    "description": "Direct parent pathways of the current pathway (always empty: WikiPathways has no pathway hierarchy)"
+  },
+  {
+    "id": "path",
+    "description": "Hierarchical path of the pathway; for WikiPathways this is the pathway alone, as it has no hierarchy"
+  }
+]

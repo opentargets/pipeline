@@ -543,5 +543,14 @@
       "Ontology"
     ],
     "description": "Pathway metadata from Reactome pathway database"
+  },
+  {
+    "id": "wikipathways",
+    "nice_name": "Target - WikiPathways pathway information",
+    "key": "wikipathways/id",
+    "tags": [
+      "Ontology"
+    ],
+    "description": "Pathway metadata from WikiPathways pathway database"
   }
 ]

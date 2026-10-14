@@ -121,10 +121,14 @@ steps:
   pis_so:
   pis_target:
   pis_target_prioritisation:
+  pis_wikipathways:
   # PTS STEPS
   pts_reactome:
     depends_on:
       - pis_reactome
+  pts_wikipathways:
+    depends_on:
+      - pis_wikipathways
   pts_go:
     depends_on:
       - pis_go
