@@ -70,21 +70,23 @@ CANCER_BIOMARKERS = EvidenceDatasource(
 )
 
 
-def get_variant_id(gdna: str) -> str | None:
-    """Converts the genomic coordinates to the CHROM_POS_REF_ALT notation.
+def get_variant_id(gdna: str | None) -> str | None:
+    """Converts the genomic coordinates to the CHROM_POS_REF_ALT notation, null without a position.
 
     Ex.: 'chr14:g.105243048G_T' --> '14_105243048_G_T'
     """
-    translate_dct = {'chr': '', ':g.': '_', '>': '_', 'del': '_', 'ins': '_'}
-    try:
-        for k, v in translate_dct.items():
-            gdna = gdna.replace(k, v)
-        _, head, tail = re.split(r'^(.*?_\d+)', gdna)
-        if bool(re.search(r'\d+', tail)):
-            tail = re.split(r'^(_\d+_)', tail)[-1]
-        return head + '_' + tail
-    except AttributeError:
+    if gdna is None:
         return None
+    translate_dct = {'chr': '', ':g.': '_', '>': '_', 'del': '_', 'ins': '_'}
+    for k, v in translate_dct.items():
+        gdna = gdna.replace(k, v)
+    parts = re.split(r'^(.*?_\d+)', gdna)
+    if len(parts) != 3:
+        return None
+    _, head, tail = parts
+    if bool(re.search(r'\d+', tail)):
+        tail = re.split(r'^(_\d+_)', tail)[-1]
+    return head + '_' + tail
 
 
 def initcap(value: pl.Expr) -> pl.Expr:
@@ -182,7 +184,8 @@ def _enrich(
         .explode('confidence', keep_nulls=False)
         .explode('tumor_type_full_name', keep_nulls=False)
         .with_columns(tumor_type=pl.col('tumor_type_full_name').str.replace_all('[ -]', ''))
-        .explode('Drug', keep_nulls=False)
+        # a null drug is kept, to fall back to the drug's full name below
+        .explode('Drug')
         .with_columns(drug=pl.col('Drug').str.replace_all(r'[\[\]]', ''))
         .drop('Drug')
         .explode('gene', keep_nulls=False)
@@ -204,7 +207,8 @@ def _enrich(
                     niceName=pl.lit('Clinical Trials'), url=pl.lit('https://clinicaltrials.gov/ct2/show/') + source
                 )
             )
-            .otherwise(pl.struct('niceName', 'url')),
+            .when(~source.str.starts_with('PMID') & ~source.str.starts_with('NCIT'))
+            .then(pl.struct('niceName', 'url')),
         )
         .rechunk()
         .with_columns(urls=pl.when(pl.col('urls').struct.field('niceName').is_not_null()).then('urls'))

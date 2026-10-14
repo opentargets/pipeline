@@ -171,8 +171,9 @@ ASSOCIATIONS = [
     },
     # A biomarker alteration has no functional consequence; an unknown association is kept.
     BASE,
-    # A null drug, source, evidence level, alteration type or alteration explodes to no rows.
+    # A null drug falls back to the drug's full name, like an empty one.
     {**BASE, 'Biomarker': 'no drug', 'Drug': ''},
+    # A null source, evidence level, alteration type or alteration explodes to no rows.
     {**BASE, 'Biomarker': 'no source', 'Source': ''},
     {**BASE, 'Biomarker': 'no confidence', 'EvidenceLevel': ''},
     {**BASE, 'Biomarker': 'no type', 'AlterationType': ''},
@@ -342,6 +343,17 @@ EXPECTED = [
         literature=['666'],
         biomarkers=_variants(_variant(None, None, 'MSI')),
     ),
+    _evidence(
+        drugFromSource='Pembrolizumab (pd1 Inhibitor)',
+        drugResponse='Unknown',
+        targetFromSourceId='MLH1',
+        diseaseFromSource='Any cancer type',
+        diseaseFromSourceMappedId=ANY_CANCER,
+        confidence='FDA guidelines',
+        biomarkerName='no drug',
+        literature=['666'],
+        biomarkers=_variants(_variant(None, None, 'MSI')),
+    ),
 ]
 
 SORT_KEY = ['biomarkerName', 'targetFromSourceId', 'confidence', 'drugFromSource', 'drugId']
@@ -365,10 +377,22 @@ def test_generate_is_independent_of_input_row_order(tmp_path: Path) -> None:
     assert _sorted(forward.to_dicts()) == _sorted(backward.to_dicts())
 
 
-def test_generate_drops_rows_whose_split_lists_are_null(tmp_path: Path) -> None:
+def test_generate_drops_rows_whose_split_lists_other_than_drug_are_null(tmp_path: Path) -> None:
     raw = generate(**_sources(tmp_path)).collect()
 
-    assert raw.filter(pl.col('biomarkerName').str.starts_with('no ')).height == 0
+    assert raw.filter(pl.col('biomarkerName').str.starts_with('no '))['biomarkerName'].to_list() == ['no drug']
+
+
+def test_generate_gives_no_urls_for_pmid_and_ncit_sources(tmp_path: Path) -> None:
+    sources = _sources(tmp_path, [{**BASE, 'Source': 'PMID:666;NCIT:C1;AACR 2012'}])
+    _jsonl(
+        Path(sources['source']),
+        [*SOURCES, *({'source': s, 'url': f'http://{s}', 'label': s} for s in ['PMID:666', 'NCIT'])],
+    )
+
+    raw = generate(**sources).collect()
+
+    assert raw['urls'].to_list() == [[{'niceName': 'AACR Meeting 2012', 'url': 'http://aacr/2012'}]]
 
 
 def _zip_alterations_with_type(alterations: list[str], alteration_type: list[str]) -> list[tuple[str, str]]:
@@ -422,16 +446,12 @@ def test_explode_alterations_null_yields_no_pairs() -> None:
         ('chr14:g.105243048G>T', '14_105243048_G_T'),
         ('chrX:g.1234A>C', 'X_1234_A_C'),
         ('chr7:g.140453136_140453137delCAinsTT', '7_140453136_CA_TT'),
+        ('chr7:g.A>T', None),
         (None, None),
     ],
 )
 def test_get_variant_id(gdna: str | None, expected: str | None) -> None:
     assert get_variant_id(gdna) == expected
-
-
-def test_get_variant_id_raises_without_a_position() -> None:
-    with pytest.raises(ValueError, match='unpack'):
-        get_variant_id('chr7:g.A>T')
 
 
 @pytest.mark.parametrize(
