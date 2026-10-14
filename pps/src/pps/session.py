@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from enum import StrEnum
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -15,6 +16,26 @@ from pyspark.sql import SparkSession
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
     from pyspark.sql.types import StructType
+
+
+DELTA_EXTENSION = 'io.delta.sql.DeltaSparkSessionExtension'
+DELTA_CATALOG = 'org.apache.spark.sql.delta.catalog.DeltaCatalog'
+BGZIP_CODEC = 'org.seqdoop.hadoop_bam.util.BGZFEnhancedGzipCodec'
+HAIL_KRYO_REGISTRATOR = 'is.hail.kryo.HailKryoRegistrator'
+
+
+def jvm_launched_by_spark_submit() -> bool:
+    """Whether the JVM was started by `spark-submit` (e.g. as a Dataproc job) rather than by the Session.
+
+    Jars and packages are only loaded when the JVM starts, so a JVM started by `spark-submit`
+    can only use those its cluster provides; the Session can still configure their use.
+    """
+    return 'PYSPARK_GATEWAY_PORT' in os.environ
+
+
+def _minor(v: str) -> tuple[str, ...]:
+    """The major and minor parts of a version."""
+    return tuple(v.split('.')[:2])
 
 
 _SENSITIVE_CONF_KEY = re.compile(r'secret|password|token|access\.key|credential|keyfile', re.IGNORECASE)
@@ -28,6 +49,7 @@ class NativeFileFormat(StrEnum):
     CSV = 'csv'
     TSV = 'tsv'
     JSON = 'json'
+    DELTA = 'delta'
 
 
 class SparkWriteMode(StrEnum):
@@ -85,6 +107,14 @@ class Session:
             executors as minimum.
         - **Enhanced BGZF codec configuration**: If `use_enhanced_bgzip_codec` is set to True, the Spark session will be
             configured to use the `BGZFEnhancedGzipCodec` for reading block gzipped files.
+        - **Delta Lake configuration**: If `add_delta_lake` is set to True, the Spark session will be configured with
+            the Delta Lake SQL extension and catalog, so delta tables can be read, written and managed with
+            `delta.tables.DeltaTable`.
+
+    !!! info "Jars of the optional features"
+        Hail, the enhanced BGZF codec and Delta Lake need jars. When the Session starts the JVM (locally, on a VM or
+        on Google Batch), it adds them itself. When the JVM was started by `spark-submit` (a Dataproc job), the jars
+        must be provided by the cluster, the Session only configures their use, and checks they are loaded.
 
     Note:
         The custom configuration parameters for gentropy are prefixed with `spark.gentropy.` to avoid conflicts with
@@ -135,6 +165,10 @@ class Session:
         ...     output_partitions=100,
         ...     write_mode="overwrite"
         ... ) # doctest: +SKIP
+
+        Create a new Spark Session with Delta Lake support
+
+        >>> session = Session(add_delta_lake=True) # doctest: +SKIP
 
         Stop the session
 
@@ -242,6 +276,7 @@ class Session:
         log_level: str | None = 'INFO',
         add_s3_connector: bool = False,
         add_gcs_connector: bool = False,
+        add_delta_lake: bool = False,
         s3_configuration: dict[str, Any] | None = None,
         gcs_configuration: dict[str, Any] | None = None,
         s3_configuration_path: str | None = None,
@@ -280,6 +315,7 @@ class Session:
                 necessary credentials (see `pps.external.gcs.GCSConfig`) from the provided `gcs_configuration`
                 parameter, `gcs_configuration_path` or environment variables
                 in that order of precedence. If no credentials are provided, the failure is raised.
+            add_delta_lake (bool): Whether to setup Spark configuration for Delta Lake. Defaults to False.
             s3_configuration (dict[str, Any] | None): Optional dictionary with s3 configuration parameters to include in
                 the session. Defaults to None.
                 The object needs to follow the `pps.external.s3.S3Config` class.
@@ -316,6 +352,7 @@ class Session:
             use_enhanced_bgzip_codec=use_enhanced_bgzip_codec,
             add_s3_connector=add_s3_connector,
             add_gcs_connector=add_gcs_connector,
+            add_delta_lake=add_delta_lake,
         )
         # Create or retrieve the Spark session
         _spark_exists = isinstance(SparkSession.getActiveSession(), SparkSession)
@@ -339,6 +376,9 @@ class Session:
 
             self.logger = Log4j(self.spark, level=log_level)
             self.conf = self.spark.sparkContext.getConf()
+            self._check_jars(
+                start_hail=start_hail, use_enhanced_bgzip_codec=use_enhanced_bgzip_codec, add_delta_lake=add_delta_lake
+            )
 
     def _build_config(
         self,
@@ -347,6 +387,7 @@ class Session:
         use_enhanced_bgzip_codec: bool,
         add_s3_connector: bool,
         add_gcs_connector: bool,
+        add_delta_lake: bool = False,
     ) -> SparkConf:
         """Prepare the SparkConf object with the requested configuration.
 
@@ -356,6 +397,7 @@ class Session:
             use_enhanced_bgzip_codec (bool): Whether to include enhanced BGZIP codec configuration.
             add_s3_connector (bool): Whether to include S3 connector configuration.
             add_gcs_connector (bool): Whether to include GCS connector configuration.
+            add_delta_lake (bool): Whether to include Delta Lake configuration.
 
         Returns:
             SparkConf: SparkConf object with the requested configuration.
@@ -376,6 +418,8 @@ class Session:
             _c = self._setup_s3_connector(_c, self._s3_configuration or self._s3_configuration_path)
         if add_gcs_connector:
             _c = self._setup_gcs_connector(_c, self._gcs_configuration or self._gcs_configuration_path)
+        if add_delta_lake:
+            _c = self._setup_delta_config(_c)
         # If any additional packages or jars, ensure they are included along existing ones instead of overwritten
         if self._extended_spark_conf:
             _c = self._setup_extended_spark_conf(self._extended_spark_conf, _c)
@@ -405,6 +449,39 @@ class Session:
                     f"Consider rebuilding SparkSession to apply requested configuration: '{key}' has value "
                     f"'{current_value}' but '{value}' was requested."
                 )
+
+    def _check_jars(self, *, start_hail: bool, use_enhanced_bgzip_codec: bool, add_delta_lake: bool) -> None:
+        """Check the jars of the requested features are loaded.
+
+        Raises:
+            RuntimeError: If a jar is missing, or the Delta Lake jar does not match the delta-spark package.
+        """
+        features = {
+            'hail': (start_hail, HAIL_KRYO_REGISTRATOR),
+            'bgzip': (use_enhanced_bgzip_codec, BGZIP_CODEC),
+            'delta': (add_delta_lake, DELTA_EXTENSION),
+        }
+        jvm: Any = self.spark.sparkContext._jvm
+        loader = jvm.java.lang.Thread.currentThread().getContextClassLoader()
+        for feature, (requested, class_name) in features.items():
+            if not requested:
+                continue
+            try:
+                cls = loader.loadClass(class_name)
+            except Exception as e:
+                hint = (
+                    f'list `{feature}` in the jars of the cluster running the step'
+                    if jvm_launched_by_spark_submit()
+                    else 'check the spark.jars and spark.jars.packages of the session'
+                )
+                raise RuntimeError(f'{feature} is requested, but its jar is not loaded: {hint}') from e
+            if feature == 'delta':
+                jar_version = cls.getPackage().getImplementationVersion()
+                if jar_version is not None and _minor(jar_version) != _minor(version('delta-spark')):
+                    raise RuntimeError(
+                        f'the delta lake jar ({jar_version}) does not match the delta-spark package '
+                        f'({version("delta-spark")}) up to the minor version'
+                    )
 
     @property
     def use_enhanced_bgzip_codec(self) -> bool:
@@ -532,14 +609,16 @@ class Session:
         jar_path = f'{hail_home}/backend/hail-all-spark.jar'
         if not Path(jar_path).exists():
             raise FileNotFoundError(f'Hail jar not found at {jar_path}. Please set hail_home in Session.')
-        c = Session._append_jar(c, jar_path)
-        c = Session._append_to_driver_classpath(c, jar_path)
-        # NOTE: the docs mention to not use full path for exectuor classPath
-        c = Session._append_to_executor_classpath(c, './hail-all-spark.jar')
+        # a JVM started by spark-submit gets the jar from its cluster
+        if not jvm_launched_by_spark_submit():
+            c = Session._append_jar(c, jar_path)
+            c = Session._append_to_driver_classpath(c, jar_path)
+            # NOTE: the docs mention to not use full path for exectuor classPath
+            c = Session._append_to_executor_classpath(c, './hail-all-spark.jar')
         return (
             c
             .set('spark.serializer', 'org.apache.spark.serializer.KryoSerializer')
-            .set('spark.kryo.registrator', 'is.hail.kryo.HailKryoRegistrator')
+            .set('spark.kryo.registrator', HAIL_KRYO_REGISTRATOR)
             .set('spark.gentropy.enableHail', 'true')
             .set('spark.gentropy.hailHome', hail_home)
         )
@@ -565,11 +644,36 @@ class Session:
           (1) SplittableCompressionCodec allowing parallel reading of bgzip files.
           (2) GzipCodec allowing reading of standard gzip files.
         """
-        c = Session._append_package(c, 'org.seqdoop:hadoop-bam:7.10.0')
-        return c.set(
-            'spark.hadoop.io.compression.codecs',
-            'org.seqdoop.hadoop_bam.util.BGZFEnhancedGzipCodec',
-        ).set('spark.gentropy.useEnhancedBgzipCodec', 'true')
+        # a JVM started by spark-submit gets the jar from its cluster
+        if not jvm_launched_by_spark_submit():
+            c = Session._append_package(c, 'org.seqdoop:hadoop-bam:7.10.0')
+        return c.set('spark.hadoop.io.compression.codecs', BGZIP_CODEC).set(
+            'spark.gentropy.useEnhancedBgzipCodec', 'true'
+        )
+
+    @staticmethod
+    def _setup_delta_config(c: SparkConf) -> SparkConf:
+        """Spark configuration for Delta Lake.
+
+        Args:
+            c (SparkConf): Existing Spark configuration.
+
+        Returns:
+            SparkConf: Adjusted spark configuration with the Delta Lake extension and catalog.
+
+        Delta Lake jars are built for a Spark patch version: when the Session starts the JVM, it runs the spark of
+        the `pyspark` package, so the jar is the version of the `delta-spark` package, whose pyspark requirement
+        matches it. The jar of a Dataproc cluster matches the spark of its image instead, so it may be a later patch
+        version: the python API of `delta-spark` only forwards its calls to the jar, so their minor versions must
+        match.
+        """
+        # a JVM started by spark-submit gets the jar from its cluster
+        if not jvm_launched_by_spark_submit():
+            c = Session._append_package(c, f'io.delta:delta-spark_2.12:{version("delta-spark")}')
+        extensions = c.get('spark.sql.extensions', '')
+        if DELTA_EXTENSION not in extensions:
+            c = c.set('spark.sql.extensions', f'{extensions},{DELTA_EXTENSION}' if extensions else DELTA_EXTENSION)
+        return c.set('spark.sql.catalog.spark_catalog', DELTA_CATALOG)
 
     def _setup_s3_connector(self, c: SparkConf, s3_configuration: dict[str, Any] | str | None = None) -> SparkConf:
         """Setup Spark configuration for S3 compatible storage.
@@ -836,6 +940,7 @@ class Session:
             - csv
             - tsv
             - json (including jsonl/jsonlines)
+            - delta (needs a session with `add_delta_lake`)
 
         Examples:
             Load single tsv file from url, the header is expected at the 0-th row
@@ -860,7 +965,8 @@ class Session:
         """
         # Set default kwargs
         _format = fmt.lower()
-        kwargs.setdefault('recursiveFileLookup', False)
+        if _format != NativeFileFormat.DELTA:
+            kwargs.setdefault('recursiveFileLookup', False)
 
         match _format:
             case 'parquet':
@@ -879,6 +985,8 @@ class Session:
                     kwargs.setdefault('inferSchema', 'true')
             case 'json' | 'jsonl' | 'jsonlines':
                 _fmt = NativeFileFormat.JSON.value
+            case 'delta':
+                _fmt = NativeFileFormat.DELTA.value
             case _:
                 raise ValueError(f'Unsupported file format: {_format}')
 
