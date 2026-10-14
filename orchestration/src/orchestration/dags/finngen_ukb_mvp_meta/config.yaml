@@ -15,8 +15,11 @@ infrastructure:
       project_id: open-targets-genetics-dev
       autoscaling_policy: otg-etl
       num_workers: 2
-      properties:
-        spark:spark.jars.packages: org.seqdoop:hadoop-bam:7.10.0
+      jars:
+        bgzip:
+          - org.seqdoop:hadoop-bam:7.10.0
+          - com.github.samtools:htsjdk:2.13.2
+        hail: []
 steps:
   finngen_ukb_mvp_meta_harmonisation:
     cluster: otg-finngen-ukb-meta

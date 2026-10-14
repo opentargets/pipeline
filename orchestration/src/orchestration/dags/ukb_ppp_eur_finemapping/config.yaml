@@ -18,6 +18,8 @@ infrastructure:
   clusters:
     otg-credible-set-qc:
       project_id: open-targets-genetics-dev
+      jars:
+        hail: []
       autoscaling_policy: otg-etl
 steps:
   ukb_ppp_eur_finemapping:

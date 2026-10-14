@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 
 from orchestration.dags.config.app_config import AppConfig
 from orchestration.models.staging_dag import StagingDagConfigModel, StagingEnvironments
+from orchestration.operators.dataproc import CustomClusterConfig
 from orchestration.utils.utils import read_yaml_config
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from orchestration.models.staging_dag import StagingStep
-    from orchestration.operators.dataproc import CustomClusterConfig
+    from orchestration.models.staging_dag import JarFeature, StagingStep
 
 # the repository root locally, `/opt` in the airflow containers (see compose.yaml)
 PPS_CONFIG_PATH = Path(__file__).resolve().parents[5] / 'pps' / 'config.yaml'
@@ -29,6 +29,16 @@ VM_CONFIG_PATH = '/config.yaml'
 """Where a VM step's pps config is mounted in its container."""
 VM_WORK_PATH = '/mnt/disks/work'
 """Where the work disk of a VM is mounted in its container."""
+MAVEN_CENTRAL = 'https://repo1.maven.org/maven2'
+"""Where the jars the clusters provide are staged from."""
+HAIL_JAR = '/opt/conda/default/lib/python3.11/site-packages/hail/backend/hail-all-spark.jar'
+"""The jar of the hail package pps installs on the clusters (see `DATAPROC_INIT_SCRIPT`)."""
+SESSION_JAR_FEATURES: dict[str, JarFeature] = {
+    'add_delta_lake': 'delta',
+    'use_enhanced_bgzip_codec': 'bgzip',
+    'start_hail': 'hail',
+}
+"""The arguments of the pps Session enabling a feature that needs jars, and the feature."""
 
 
 class StagingDagConfig:
@@ -68,6 +78,16 @@ class StagingDagConfig:
         # relative to the driver's working directory, which dataproc creates per job
         self.pps.config['work_path'] = 'work'
         self.pps.config['log_level'] = 'INFO'
+
+        for step_name, step in self.steps.items():
+            if step.cluster is None:
+                continue
+            provided = self.dag.infrastructure.clusters[step.cluster].jars
+            if missing := sorted(self.jar_features(step_name) - set(provided)):
+                raise ValueError(
+                    f'step {step_name} of dag {self.dag_id} uses {", ".join(missing)}, but its cluster '
+                    f'{step.cluster} does not provide the jars: list them in the jars of the cluster'
+                )
 
     @property
     def steps(self) -> dict[str, StagingStep]:
@@ -117,13 +137,59 @@ class StagingDagConfig:
             config['work_path'] = VM_WORK_PATH
         return config
 
+    def jar_features(self, step_name: str) -> set[JarFeature]:
+        """Return the features needing jars the pyspark tasks of a pps step use."""
+        tasks = self.pps.config.get('steps', {}).get(step_name, [])
+        return {
+            feature
+            for task in tasks
+            for argument, feature in SESSION_JAR_FEATURES.items()
+            if task.get('session', {}).get(argument)
+        }
+
+    def staged_jars(self, cluster_name: str) -> list[tuple[str, str]]:
+        """Return the jars a cluster loads from the staging bucket, as `(source url, staged uri)` pairs.
+
+        A jar is staged under its artifact and version, so DAGs pinning different versions
+        never overwrite a jar a cluster may be reading.
+        """
+        # set whenever the dag has pps steps, the only ones running on clusters
+        assert self.dag.staging_bucket is not None
+        jars_uri = f'{self.dag.staging_bucket.removesuffix("/")}/jars'
+        pairs = []
+        for coordinates in self.dag.infrastructure.clusters[cluster_name].jars.values():
+            for coordinate in coordinates:
+                group, artifact, version = coordinate.split(':')
+                jar = f'{artifact}-{version}.jar'
+                pairs.append((
+                    f'{MAVEN_CENTRAL}/{group.replace(".", "/")}/{artifact}/{version}/{jar}',
+                    f'{jars_uri}/{jar}',
+                ))
+        return pairs
+
     def cluster_config(self, cluster_name: str) -> CustomClusterConfig:
-        """Return the configuration of a cluster, set up to install pps when it starts."""
+        """Return the configuration of a cluster, set up to install pps when it starts.
+
+        The jars the cluster provides are added to its spark properties, so every job on it
+        loads them when it starts.
+        """
         cluster = self.dag.infrastructure.clusters[cluster_name]
-        return cluster.model_copy(
+        properties = dict(cluster.properties or {})
+        jars = [*properties.get('spark:spark.jars', '').split(','), *(uri for _, uri in self.staged_jars(cluster_name))]
+        if 'hail' in cluster.jars:
+            jars.append(HAIL_JAR)
+            properties['spark:spark.driver.extraClassPath'] = HAIL_JAR
+            properties['spark:spark.executor.extraClassPath'] = './hail-all-spark.jar'
+        if jars := [j for j in jars if j]:
+            properties['spark:spark.jars'] = ','.join(jars)
+
+        return CustomClusterConfig(
+            **cluster.model_dump(exclude={'jars'}),
+        ).model_copy(
             update={
                 'metadata': {**(cluster.metadata or {}), 'PPS_REF': self.pps_ref},
                 'init_actions_uris': [self.bin_uri(DATAPROC_INIT_SCRIPT), *(cluster.init_actions_uris or [])],
+                'properties': properties or None,
             }
         )
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from airflow.models import DagBag
 from airflow.task.trigger_rule import TriggerRule
 from pydantic import ValidationError
 
-from orchestration.dags.config.staging import DATAPROC_INIT_SCRIPT, PPS_CONFIG_PATH, StagingDagConfig
+from orchestration.dags.config.staging import DATAPROC_INIT_SCRIPT, HAIL_JAR, PPS_CONFIG_PATH, StagingDagConfig
 from orchestration.models.staging_dag import StagingDagConfigModel
 from orchestration.utils.common import GCP_PROJECT_GENETICS, GCP_ZONE
 from orchestration.utils.staging import build_staging_dag
@@ -43,6 +44,8 @@ BATCH_STEP: dict[str, Any] = {
 
 
 VM_STEP: dict[str, Any] = {'vm': {'machine_type': 'n1-standard-4'}}
+
+DELTA_JARS = ['io.delta:delta-spark_2.12:3.2.1', 'io.delta:delta-storage:3.2.1']
 
 
 def dag_config(**overrides: Any) -> dict[str, Any]:
@@ -121,6 +124,10 @@ class TestStagingDagConfigModel:
             ({'steps': {'a': {'vm': {'machine_type': 'n1-standard-4', 'scopes': []}}}}, 'Extra inputs'),
             ({'steps': {'a' * 55: VM_STEP}}, 'too long to name its VM'),
             ({'pps_version': None, 'steps': {'a': VM_STEP}}, 'a dag with pps steps needs pps_version'),
+            ({'infrastructure': {'clusters': {'cluster': {'jars': {'hail': ['a:b:1']}}}}}, '`hail` lists no jars'),
+            ({'infrastructure': {'clusters': {'cluster': {'jars': {'delta': []}}}}}, '`delta` needs the jars'),
+            ({'infrastructure': {'clusters': {'cluster': {'jars': {'delta': ['io.delta']}}}}}, 'should match pattern'),
+            ({'infrastructure': {'clusters': {'cluster': {'jars': {'spark_nlp': ['a:b:1']}}}}}, "'delta', 'bgzip'"),
             ({'steps': {'a': {'google_batch': BATCH_STEP['google_batch']}}}, 'needs `google_batch_index_specs`'),
             ({'steps': {'a': {'cluster': 'missing'}}}, 'unknown cluster'),
             ({'pps_version': None}, 'a dag with pps steps needs pps_version'),
@@ -178,6 +185,47 @@ class TestStagingDagConfig:
 
         assert config.step_config('gwas_catalog_release')['work_path'] == work_path
 
+    def test_step_needs_the_jars_of_the_features_it_uses(self, tmp_path: Path) -> None:
+        # gnomad_ld_index starts hail
+        dag_dir = write_dag(tmp_path, dag_config(steps={'gnomad_ld_index': {'cluster': 'cluster'}}))
+
+        with pytest.raises(ValueError, match='gnomad_ld_index of dag test_staging_dag uses hail, but its cluster'):
+            StagingDagConfig(dag_dir)
+
+    def test_cluster_provides_its_jars(self, tmp_path: Path) -> None:
+        cluster = {
+            'num_workers': '{{workers}}',
+            'properties': {'spark:spark.jars': 'gs://other/some.jar'},
+            'jars': {'delta': DELTA_JARS, 'hail': []},
+        }
+        config = StagingDagConfig(write_dag(tmp_path, dag_config(infrastructure={'clusters': {'cluster': cluster}})))
+        properties = config.cluster_config('cluster').properties or {}
+
+        assert config.staged_jars('cluster') == [
+            (
+                'https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.1/delta-spark_2.12-3.2.1.jar',
+                'gs://staging/jars/delta-spark_2.12-3.2.1.jar',
+            ),
+            (
+                'https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.1/delta-storage-3.2.1.jar',
+                'gs://staging/jars/delta-storage-3.2.1.jar',
+            ),
+        ]
+        assert properties['spark:spark.jars'].split(',') == [
+            'gs://other/some.jar',
+            'gs://staging/jars/delta-spark_2.12-3.2.1.jar',
+            'gs://staging/jars/delta-storage-3.2.1.jar',
+            HAIL_JAR,
+        ]
+        assert properties['spark:spark.driver.extraClassPath'] == HAIL_JAR
+        assert properties['spark:spark.executor.extraClassPath'] == './hail-all-spark.jar'
+
+    def test_cluster_without_jars_keeps_its_properties(self, tmp_path: Path) -> None:
+        config = StagingDagConfig(write_dag(tmp_path, dag_config()))
+
+        assert config.staged_jars('cluster') == []
+        assert config.cluster_config('cluster').properties is None
+
     def test_uris_and_cluster_config(self, tmp_path: Path) -> None:
         config = StagingDagConfig(write_dag(tmp_path, dag_config()))
         cluster = config.cluster_config('cluster')
@@ -204,6 +252,30 @@ def tasks_of(dag: Any) -> dict[str, Any]:
 
 def upstream(task: Any) -> set[str]:
     return {t.rsplit('.', 1)[-1] for t in task.upstream_task_ids}
+
+
+def test_jars_are_staged_before_their_cluster_is_created(tmp_path: Path) -> None:
+    cluster = {'num_workers': '{{workers}}', 'jars': {'delta': DELTA_JARS}}
+    config = dag_config(
+        infrastructure={'clusters': {'cluster': cluster}},
+        steps={
+            'gwas_catalog_top_hits_ingestion': {'cluster': 'cluster'},
+            'gwas_catalog_top_hits_ld_clumping': {'cluster': 'cluster'},
+        },
+    )
+    tasks = {t.task_id: t for t in build_staging_dag(write_dag(tmp_path, config)).tasks}
+    stages = {t for t in tasks if t.startswith('stage_jar_')}
+
+    assert stages == {'stage_jar_delta-spark-2-12-3-2-1-jar', 'stage_jar_delta-storage-3-2-1-jar'}
+    assert all((tasks[s].retries or 0) > 0 for s in stages)
+    for step in ('gwas_catalog_top_hits_ingestion', 'gwas_catalog_top_hits_ld_clumping'):
+        assert stages <= tasks[f'{step}.create_cluster_cluster'].upstream_task_ids
+
+
+def test_no_jars_no_staging(tmp_path: Path) -> None:
+    tasks = tasks_of(build_staging_dag(write_dag(tmp_path, dag_config())))
+
+    assert not [t for t in tasks if t.startswith('stage_jar_')]
 
 
 def test_steps_are_task_groups(tmp_path: Path) -> None:
@@ -284,3 +356,29 @@ def test_gwas_catalog_release_dag(dag_bag: DagBag) -> None:
 
     assert set(tasks) == {f'{t}_gwas_catalog_release' for t in ('upload_config', 'run', 'delete_vm', 'end')}
     assert tasks['run_gwas_catalog_release'].machine_type == 'n1-standard-4'
+
+
+def test_finngen_ukb_mvp_meta_dag_stages_the_bgzip_jars(dag_bag: DagBag) -> None:
+    tasks = tasks_of(dag_bag.dags['finngen_ukb_mvp_meta'])
+
+    assert {t for t in tasks if t.startswith('stage_jar_')} == {
+        'stage_jar_hadoop-bam-7-10-0-jar',
+        'stage_jar_htsjdk-2-13-2-jar',
+    }
+
+
+@pytest.mark.parametrize('dag_dir', STAGING_DAG_DIRS, ids=lambda p: p.name)
+def test_delta_jars_match_the_delta_spark_package_of_pps(dag_dir: Path) -> None:
+    """The python API of delta-spark forwards its calls to the delta jars, so their minor versions must match.
+
+    The jars may be a later patch version, built for the spark of the dataproc images.
+    """
+    lock = (PPS_CONFIG_PATH.parent / 'uv.lock').read_text()
+    package = re.search(r'name = "delta-spark"\nversion = "(\d+\.\d+)\.', lock)
+    assert package, 'delta-spark is missing from the pps lock'
+
+    for cluster in StagingDagConfig(dag_dir).dag.infrastructure.clusters.values():
+        for coordinate in cluster.jars.get('delta', []):
+            assert coordinate.split(':')[2].startswith(f'{package[1]}.'), (
+                f'{coordinate} does not match delta-spark {package[1]} of pps'
+            )

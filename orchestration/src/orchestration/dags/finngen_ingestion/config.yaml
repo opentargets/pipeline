@@ -13,6 +13,8 @@ infrastructure:
   clusters:
     otg-ingestion-finngen:
       project_id: open-targets-genetics-dev
+      jars:
+        hail: []
       autoscaling_policy: finngen-preprocess
       master_disk_size: 2000
       num_workers: 6

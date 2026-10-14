@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
 from orchestration.models.batch.operator import BatchIndexOperatorSpec, BatchJobOperatorSpec
 from orchestration.operators.dataproc import CustomClusterConfig
@@ -24,6 +24,10 @@ from orchestration.utils.utils import clean_name
 
 EnvironmentName = Literal['prod', 'test']
 StepKind = Literal['cluster', 'vm', 'batch']
+JarFeature = Literal['delta', 'bgzip', 'hail']
+"""Optional features of the pps Session that need jars on the cluster."""
+MavenCoordinate = Annotated[str, StringConstraints(pattern=r'^[\w.\-]+:[\w.\-]+:[\w.\-]+$')]
+"""A jar on Maven Central, as `<group>:<artifact>:<version>`."""
 
 VM_NAME_MAX_STEP_LENGTH = 63 - len('up-') - len('-xxxxx')
 """Longest step name a VM step can have: its instance is named `up-<step>-<run hash>`
@@ -67,12 +71,35 @@ class StagingEnvironments(BaseModel):
         return next(e.scratchpad for e in self.environments if e.name == self.env)
 
 
+class StagingClusterConfig(CustomClusterConfig):
+    """A Dataproc cluster of a staging DAG."""
+
+    jars: dict[JarFeature, list[MavenCoordinate]] = {}
+    """Jars the cluster provides, by the Session feature using them (`add_delta_lake`,
+    `use_enhanced_bgzip_codec`, `start_hail`). A step can only use a feature its cluster
+    provides.
+
+    The jars of `delta` and `bgzip` are on Maven Central, listed with their runtime
+    dependencies: they are staged in the staging bucket, and loaded by `spark.jars`
+    without resolving dependencies. The jar of `hail` comes with the hail package pps
+    installs on the cluster, so it lists none."""
+
+    @model_validator(mode='after')
+    def _validate_jars(self) -> Self:
+        for feature, coordinates in self.jars.items():
+            if feature == 'hail' and coordinates:
+                raise ValueError('the hail jar comes with the hail package, `hail` lists no jars')
+            if feature != 'hail' and not coordinates:
+                raise ValueError(f'`{feature}` needs the jars it loads')
+        return self
+
+
 class StagingInfrastructure(BaseModel):
     """The infrastructure the steps of a DAG run on."""
 
     model_config = ConfigDict(extra='forbid')
 
-    clusters: dict[str, CustomClusterConfig] = {}
+    clusters: dict[str, StagingClusterConfig] = {}
     """Dataproc clusters, by name. A cluster is created before its first step and
     deleted after its last."""
 

@@ -34,6 +34,8 @@ infrastructure:
   clusters:
     otg-decode:
       project_id: open-targets-genetics-dev
+      jars:
+        hail: []
       autoscaling_policy: '{{cluster_autoscaling_policy}}'
       worker_machine_type: '{{cluster_worker_machine_type}}'
       master_machine_type: '{{cluster_master_machine_type}}'

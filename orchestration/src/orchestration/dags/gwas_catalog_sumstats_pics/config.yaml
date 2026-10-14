@@ -13,6 +13,8 @@ infrastructure:
   clusters:
     otg-gwascatalog-sumstats-pics:
       project_id: open-targets-genetics-dev
+      jars:
+        hail: []
       num_workers: 10
       worker_machine_type: n1-highmem-16
       worker_disk_type: pd-ssd

@@ -6,7 +6,8 @@ builds its steps, and ending in an `end_<step>` task the steps depending on it w
 
 - a cluster step uploads its pps config and the files its cluster needs, creates the
   cluster (or reuses it, when an earlier step created it), and submits
-  `pps -s <step> -c <step>.yaml` to it. A cluster is deleted once all its steps ended;
+  `pps -s <step> -c <step>.yaml` to it. A cluster is deleted once all its steps ended,
+  and the jars it provides are staged before it is created;
 - a VM step uploads its pps config, runs `pps -s <step> -c /config.yaml` from the pps
   image on a VM, and deletes the VM, whether the step succeeded or not;
 - a Batch step generates its batch index, and runs its Batch job mapped over it.
@@ -14,6 +15,7 @@ builds its steps, and ending in an `end_<step>` task the steps depending on it w
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 from airflow.providers.standard.operators.empty import EmptyOperator
@@ -29,7 +31,7 @@ from orchestration.dags.config.staging import (
 from orchestration.operators.batch import BatchCollectOperator, BatchIndexOperator, BatchJobOperator
 from orchestration.operators.dataproc import PTSJobBuilder, SubmitJobOperator
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
-from orchestration.operators.gcs import UploadFileOperator, UploadStringOperator
+from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
 from orchestration.utils.common import GCP_PROJECT_GENETICS, GCP_REGION, GCP_ZONE, shared_dag_args, shared_dag_kwargs
 from orchestration.utils.dataproc import create_cluster, delete_cluster
 from orchestration.utils.labels import Labels
@@ -64,6 +66,24 @@ def build_staging_dag(dag_dir: Path) -> DAG:
                         steps[step_name] = _vm_step(config, step_name)
                     case 'batch':
                         steps[step_name] = _batch_step(config, step_name)
+
+        # stage the jars a cluster provides before it is created, once per jar
+        staged: dict[str, UploadRemoteFileOperator] = {}
+        for cluster_name, steps_in_cluster in clusters.items():
+            for src_url, dst_uri in config.staged_jars(cluster_name):
+                if dst_uri not in staged:
+                    staged[dst_uri] = UploadRemoteFileOperator(
+                        task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}',
+                        src_url=src_url,
+                        dst_uri=dst_uri,
+                        skip_if_exists=True,
+                        # a failure would fail every step on the cluster, so a reset
+                        # mid-transfer from maven central is retried
+                        retries=3,
+                        retry_delay=timedelta(minutes=2),
+                    )
+                for step_name in steps_in_cluster:
+                    staged[dst_uri].set_downstream(steps[step_name]['create'])
 
         # delete a cluster after its steps have run
         for cluster_name, steps_in_cluster in clusters.items():
@@ -130,7 +150,7 @@ def _cluster_step(config: StagingDagConfig, step_name: str) -> dict[str, BaseOpe
     e = _end(step_name)
 
     chain(u, u2, u3, c, r, e)
-    return {'start': u, 'end': e}
+    return {'start': u, 'create': c, 'end': e}
 
 
 def _vm_step(config: StagingDagConfig, step_name: str) -> dict[str, BaseOperator]:
