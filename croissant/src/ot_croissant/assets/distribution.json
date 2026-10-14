@@ -190,7 +190,8 @@
     "id": "evidence_clinical_precedence",
     "nice_name": "Clinical Precedence evidence",
     "tags": [
-      "Target-Disease"
+      "Target-Disease",
+      "Drug"
     ],
     "description": "Disease-target evidence based on clinical trials, drug indications, and mechanism of action"
   },
