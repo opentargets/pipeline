@@ -21,7 +21,9 @@ scratchpad:
   foldx_path: input/foldx
   gnomad_path: input/gnomad
   gwas_catalog_curation_date: '20260812'
+  gwas_catalog_ftp: ftp://ftp.ebi.ac.uk/pub/databases/gwas/releases
   gwas_catalog_input_path: input/gwas_catalog
+  gwas_catalog_stats_uri: https://www.ebi.ac.uk/gwas/api/search/stats
   gwas_catalog_sumstats_pics_path: output/gwas_catalog_sumstats_pics
   gwas_catalog_susie_path: output/gwas_catalog_sumstats_susie
   gwas_catalog_sync_date: '20260802'
@@ -32,6 +34,42 @@ scratchpad:
   ukb_ppp_eur_tmp_path: input/ukb_ppp_eur_tmp
 
 steps:
+  #: GWAS_CATALOG_RELEASE STEP :######################################################################
+  # Runs on a VM, not Dataproc: syncs the latest GWAS Catalog release and prepares the study curation.
+  gwas_catalog_release:
+    - name: crawl release metadata
+      stats_uri: ${gwas_catalog_stats_uri}
+      destination_template: '${gwas_catalog_input_path}/gentroutils/{release_date}/stats.json'
+      promote: true
+
+    - name: fetch studies
+      stats_uri: ${gwas_catalog_stats_uri}
+      source_template: '${gwas_catalog_ftp}/{release_date}/gwas-catalog-download-studies-v1.0.3.1.txt'
+      destination_template: '${gwas_catalog_input_path}/gentroutils/{release_date}/gwas_catalog_download_studies.tsv'
+      promote: true
+
+    - name: fetch ancestries
+      stats_uri: ${gwas_catalog_stats_uri}
+      source_template: '${gwas_catalog_ftp}/{release_date}/gwas-catalog-download-ancestries-v1.0.3.1.txt'
+      destination_template: '${gwas_catalog_input_path}/gentroutils/{release_date}/gwas_catalog_download_ancestries.tsv'
+      promote: true
+
+    - name: fetch associations
+      stats_uri: ${gwas_catalog_stats_uri}
+      source_template: '${gwas_catalog_ftp}/{release_date}/gwas-catalog-associations_ontology-annotated-full.zip'
+      destination_template: '${gwas_catalog_input_path}/gentroutils/{release_date}/gwas_catalog_associations_ontology_annotated.tsv'
+      promote: true
+
+    - name: curation study
+      requires:
+        - fetch studies
+      previous_curation: '${gwas_catalog_input_path}/curation/latest/curated/GWAS_Catalog_study_curation.tsv'
+      studies: '${gwas_catalog_input_path}/gentroutils/latest/gwas_catalog_download_studies.tsv'
+      summary_statistics_glob: '${gwas_catalog_input_path}/raw_summary_statistics/**.h.tsv.gz'
+      destination_template: '${gwas_catalog_input_path}/curation/{release_date}/raw/GWAS_Catalog_study_curation.tsv'
+      promote: true
+  ##################################################################################################
+
   #: GWAS_CATALOG_TOP_HITS_INGESTION STEP :###########################################################
   gwas_catalog_top_hits_ingestion:
     - name: pyspark gwas catalog top hit ingestion
