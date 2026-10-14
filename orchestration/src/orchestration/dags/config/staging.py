@@ -23,6 +23,12 @@ DATAPROC_ENTRYPOINT = 'dataproc_pps_run.py'
 """Main python file of the dataproc jobs running pps steps."""
 DATAPROC_INIT_SCRIPT = 'install_pps_on_cluster.sh'
 """Init action installing pps on the dataproc clusters."""
+PPS_IMAGE = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pps'
+"""Image the VM steps run, tagged with the pps version (see `.github/workflows/publish.yaml`)."""
+VM_CONFIG_PATH = '/config.yaml'
+"""Where a VM step's pps config is mounted in its container."""
+VM_WORK_PATH = '/mnt/disks/work'
+"""Where the work disk of a VM is mounted in its container."""
 
 
 class StagingDagConfig:
@@ -74,6 +80,11 @@ class StagingDagConfig:
         return f'pps%40v{self.dag.pps_version}'
 
     @property
+    def pps_image(self) -> str:
+        """The pps image the VM steps run."""
+        return f'{PPS_IMAGE}:{self.dag.pps_version}'
+
+    @property
     def staging_uri(self) -> str:
         """The URI prefix for the files this DAG uploads for a run."""
         # set whenever the dag has pps steps, the only ones uploading files
@@ -91,7 +102,8 @@ class StagingDagConfig:
     def step_config(self, step_name: str) -> dict[str, Any]:
         """Return the pps configuration for a step.
 
-        This is `pps/config.yaml`, with the replaced values, restricted to the step.
+        This is `pps/config.yaml`, with the replaced values, restricted to the step. A VM
+        step with a work disk works on that disk.
 
         Raises:
             ValueError: If the step is not defined in `pps/config.yaml`.
@@ -99,7 +111,11 @@ class StagingDagConfig:
         pps_steps = self.pps.config.get('steps', {})
         if step_name not in pps_steps:
             raise ValueError(f'step {step_name} of dag {self.dag_id} is not defined in {PPS_CONFIG_PATH}')
-        return {**self.pps.config, 'steps': {step_name: pps_steps[step_name]}}
+        config = {**self.pps.config, 'steps': {step_name: pps_steps[step_name]}}
+        vm = self.steps[step_name].vm if step_name in self.steps else None
+        if vm is not None and vm.work_disk_size_gb:
+            config['work_path'] = VM_WORK_PATH
+        return config
 
     def cluster_config(self, cluster_name: str) -> CustomClusterConfig:
         """Return the configuration of a cluster, set up to install pps when it starts."""

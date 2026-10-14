@@ -26,6 +26,7 @@ from google.cloud import compute_v1, logging_v2
 from google.cloud import logging as google_logging
 from google.cloud.compute_v1 import types
 from google.cloud.logging_v2.services.logging_service_v2 import LoggingServiceV2AsyncClient
+from pydantic import BaseModel, ConfigDict, Field
 
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.labels import Labels
@@ -280,6 +281,21 @@ class CloudLoggingAsyncHook(GoogleBaseHook):
 
         self.log.info('No log entries with an exit status found yet.')
         return None
+
+
+class ComputeEngineVmConfig(BaseModel):
+    """Instance settings of a VM running a containerized workload.
+
+    These are the settings of `ComputeEngineRunContainerizedWorkloadSensor` that describe
+    the machine itself; the workload (image, arguments, files) is set by whoever runs it.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    machine_type: str
+    """Compute Engine machine type, e.g. `n1-standard-4`."""
+    work_disk_size_gb: int = Field(default=0, ge=0)
+    """Size of an extra disk mounted at `/mnt/disks/work`, or 0 for none."""
 
 
 class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):

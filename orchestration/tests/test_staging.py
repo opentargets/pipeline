@@ -8,10 +8,12 @@ from typing import Any
 import pytest
 import yaml
 from airflow.models import DagBag
+from airflow.task.trigger_rule import TriggerRule
 from pydantic import ValidationError
 
 from orchestration.dags.config.staging import DATAPROC_INIT_SCRIPT, PPS_CONFIG_PATH, StagingDagConfig
 from orchestration.models.staging_dag import StagingDagConfigModel
+from orchestration.utils.common import GCP_PROJECT_GENETICS, GCP_ZONE
 from orchestration.utils.staging import build_staging_dag
 
 DAGS_PATH = Path(__file__).parent.parent / 'src' / 'orchestration' / 'dags'
@@ -38,6 +40,9 @@ BATCH_STEP: dict[str, Any] = {
         },
     },
 }
+
+
+VM_STEP: dict[str, Any] = {'vm': {'machine_type': 'n1-standard-4'}}
 
 
 def dag_config(**overrides: Any) -> dict[str, Any]:
@@ -76,12 +81,15 @@ class TestStagingDagConfigModel:
                     'a': {'cluster': 'cluster'},
                     'b': {'cluster': 'cluster', 'depends_on': ['a'], 'execution_timeout': 3600},
                     'c': {**BATCH_STEP, 'depends_on': ['b']},
+                    'd': {**VM_STEP, 'depends_on': ['c']},
                 }
             )
         )
 
-        assert not model.steps['a'].is_batch
-        assert model.steps['c'].is_batch
+        assert [s.kind for s in model.steps.values()] == ['cluster', 'cluster', 'batch', 'vm']
+        vm = model.steps['d'].vm
+        assert vm is not None
+        assert vm.work_disk_size_gb == 0
         assert model.scratchpad == {'workers': '4', 'gwas_catalog_top_hits_path': 'gs://prod'}
 
     def test_batch_only_dag_needs_no_pps(self) -> None:
@@ -103,6 +111,16 @@ class TestStagingDagConfigModel:
             ({'env': 'test', 'environments': [{'name': 'prod'}]}, 'environment test is not defined'),
             ({'steps': {'a': {}}}, 'exactly one of `cluster`'),
             ({'steps': {'a': {**BATCH_STEP, 'cluster': 'cluster'}}}, 'exactly one of `cluster`'),
+            ({'steps': {'a': {**VM_STEP, 'cluster': 'cluster'}}}, 'exactly one of `cluster`'),
+            (
+                {'steps': {'a': {**VM_STEP, 'google_batch_index_specs': BATCH_STEP['google_batch_index_specs']}}},
+                'only valid for Batch steps',
+            ),
+            ({'steps': {'a': {'vm': {}}}}, 'machine_type'),
+            ({'steps': {'a': {'vm': {'machine_type': 'n1-standard-4', 'work_disk_size_gb': -1}}}}, 'greater than'),
+            ({'steps': {'a': {'vm': {'machine_type': 'n1-standard-4', 'scopes': []}}}}, 'Extra inputs'),
+            ({'steps': {'a' * 55: VM_STEP}}, 'too long to name its VM'),
+            ({'pps_version': None, 'steps': {'a': VM_STEP}}, 'a dag with pps steps needs pps_version'),
             ({'steps': {'a': {'google_batch': BATCH_STEP['google_batch']}}}, 'needs `google_batch_index_specs`'),
             ({'steps': {'a': {'cluster': 'missing'}}}, 'unknown cluster'),
             ({'pps_version': None}, 'a dag with pps steps needs pps_version'),
@@ -153,6 +171,13 @@ class TestStagingDagConfig:
         with pytest.raises(ValueError, match='step missing_step of dag test_staging_dag is not defined'):
             config.step_config('missing_step')
 
+    @pytest.mark.parametrize(('disk', 'work_path'), [(0, 'work'), (100, '/mnt/disks/work')])
+    def test_vm_step_works_on_its_work_disk(self, tmp_path: Path, disk: int, work_path: str) -> None:
+        vm_step = {'vm': {'machine_type': 'n1-standard-4', 'work_disk_size_gb': disk}}
+        config = StagingDagConfig(write_dag(tmp_path, dag_config(steps={'gwas_catalog_release': vm_step})))
+
+        assert config.step_config('gwas_catalog_release')['work_path'] == work_path
+
     def test_uris_and_cluster_config(self, tmp_path: Path) -> None:
         config = StagingDagConfig(write_dag(tmp_path, dag_config()))
         cluster = config.cluster_config('cluster')
@@ -160,6 +185,7 @@ class TestStagingDagConfig:
         assert config.config_uri('a') == 'gs://staging/test_staging_dag/26.9.0/config/a.yaml'
         assert cluster.metadata == {'PPS_REF': 'pps%40v26.9.0'}
         assert cluster.init_actions_uris == [f'gs://staging/test_staging_dag/26.9.0/bin/{DATAPROC_INIT_SCRIPT}']
+        assert config.pps_image == 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pps:26.9.0'
 
 
 @pytest.mark.parametrize('dag_dir', STAGING_DAG_DIRS, ids=lambda p: p.name)
@@ -167,8 +193,28 @@ def test_pps_steps_of_staging_dags_exist_in_pps(dag_dir: Path) -> None:
     config = StagingDagConfig(dag_dir)
 
     for step_name, step in config.steps.items():
-        if not step.is_batch:
+        if step.kind != 'batch':
             assert config.step_config(step_name), f'{step_name} missing from {PPS_CONFIG_PATH}'
+
+
+def tasks_of(dag: Any) -> dict[str, Any]:
+    """The tasks of a DAG, by task id without its task group prefixes."""
+    return {t.task_id.rsplit('.', 1)[-1]: t for t in dag.tasks}
+
+
+def upstream(task: Any) -> set[str]:
+    return {t.rsplit('.', 1)[-1] for t in task.upstream_task_ids}
+
+
+def test_steps_are_task_groups(tmp_path: Path) -> None:
+    config = dag_config(
+        steps={'gwas_catalog_top_hits_ingestion': {'cluster': 'cluster'}, 'gwas_catalog_release': VM_STEP}
+    )
+    dag = build_staging_dag(write_dag(tmp_path, config))
+    groups = {t.task_id.split('.')[0] for t in dag.tasks if '.' in t.task_id}
+
+    assert groups == {'gwas_catalog_top_hits_ingestion', 'gwas_catalog_release'}
+    assert {t.task_id for t in dag.tasks if '.' not in t.task_id} == {'delete_cluster_cluster'}
 
 
 def test_batch_step_is_mapped_over_its_index(tmp_path: Path) -> None:
@@ -178,37 +224,63 @@ def test_batch_step_is_mapped_over_its_index(tmp_path: Path) -> None:
             'susie_finemapping': {**BATCH_STEP, 'depends_on': ['gwas_catalog_top_hits_ingestion']},
         }
     )
-    dag = build_staging_dag(write_dag(tmp_path, config))
-    tasks = {t.task_id: t for t in dag.tasks}
+    tasks = tasks_of(build_staging_dag(write_dag(tmp_path, config)))
 
-    assert tasks['susie_finemapping_index'].upstream_task_ids == {'gwas_catalog_top_hits_ingestion'}
-    assert tasks['susie_finemapping'].upstream_task_ids == {'susie_finemapping_index'}
-    assert tasks['susie_finemapping'].is_mapped
+    assert upstream(tasks['generate_manifest_susie_finemapping']) == {'end_gwas_catalog_top_hits_ingestion'}
+    assert upstream(tasks['run_susie_finemapping']) == {'generate_manifest_susie_finemapping'}
+    assert tasks['run_susie_finemapping'].is_mapped
+    assert upstream(tasks['end_susie_finemapping']) == {'run_susie_finemapping'}
+
+
+def test_vm_step(tmp_path: Path) -> None:
+    config = dag_config(steps={'gwas_catalog_release': {**VM_STEP, 'execution_timeout': 7200}})
+    tasks = tasks_of(build_staging_dag(write_dag(tmp_path, config)))
+    upload, run, delete, end = (
+        tasks[f'{t}_gwas_catalog_release'] for t in ('upload_config', 'run', 'delete_vm', 'end')
+    )
+
+    assert upstream(run) == {'upload_config_gwas_catalog_release'}
+    assert upstream(delete) == {'run_gwas_catalog_release'}
+    assert upstream(end) == {'run_gwas_catalog_release', 'delete_vm_gwas_catalog_release'}
+    # the vm is deleted even when the step fails, which still fails the dag through `end`
+    assert delete.trigger_rule == TriggerRule.NONE_SKIPPED
+    assert end.trigger_rule == TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+
+    assert (run.project, run.zone) == (delete.project_id, delete.zone) == (GCP_PROJECT_GENETICS, GCP_ZONE)
+    assert run.instance_name == delete.resource_id == 'up-gwas-catalog-release-{{ run_id | strhash }}'
+    assert run.container_image == 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pps:26.9.0'
+    assert run.container_args == ['-s', 'gwas_catalog_release', '-c', '/config.yaml']
+    assert run.container_files == {str(upload.dst_uri): '/config.yaml'}
+    assert (run.machine_type, run.work_disk_size_gb) == ('n1-standard-4', 0)
+    assert run.execution_timeout.total_seconds() == 7200
+    assert run.deferrable
 
 
 def test_gwas_catalog_top_hits_dag(dag_bag: DagBag) -> None:
-    dag = dag_bag.dags['gwas_catalog_top_hits']
-    tasks = {t.task_id: t for t in dag.tasks}
+    tasks = tasks_of(dag_bag.dags['gwas_catalog_top_hits'])
     steps = ['gwas_catalog_top_hits_ingestion', 'gwas_catalog_top_hits_ld_clumping', 'gwas_catalog_top_hits_pics']
     cluster = 'otg-tophit-gwascatalog'
-    create, delete = f'create_cluster_{cluster}', f'delete_cluster_{cluster}'
 
-    assert tasks[create].upstream_task_ids == {f'upload_entrypoint_{cluster}', f'upload_init_script_{cluster}'}
     for step in steps:
-        assert {create, f'upload_config_{step}'} <= tasks[step].upstream_task_ids
-        assert delete in tasks[step].downstream_task_ids
-    assert steps[0] in tasks[steps[1]].upstream_task_ids
-    assert steps[1] in tasks[steps[2]].upstream_task_ids
+        assert upstream(tasks[f'run_{step}']) == {f'create_cluster_{cluster}'}
+        assert f'end_{step}' in upstream(tasks[f'delete_cluster_{cluster}'])
+    assert upstream(tasks[f'upload_config_{steps[1]}']) == {f'end_{steps[0]}'}
+    assert upstream(tasks[f'upload_config_{steps[2]}']) == {f'end_{steps[1]}'}
 
 
 def test_gwas_catalog_susie_finemapping_dag(dag_bag: DagBag) -> None:
     dag = dag_bag.dags['gwas_catalog_sumstats_susie_finemapping']
-    tasks = {t.task_id: t for t in dag.tasks}
+    tasks = tasks_of(dag)
     finemapping, qc = 'gwas_catalog_susie_finemapping', 'gwas_catalog_susie_credible_set_qc'
 
-    assert tasks[finemapping].is_mapped
-    assert tasks[finemapping].upstream_task_ids == {f'{finemapping}_index'}
-    assert finemapping in tasks[qc].upstream_task_ids
-    assert 'create_cluster_otg-credible-set-qc' in tasks[qc].upstream_task_ids
-    # the cluster is only created once the batch job is done, not left idle meanwhile
-    assert finemapping in tasks['create_cluster_otg-credible-set-qc'].upstream_task_ids
+    assert tasks[f'run_{finemapping}'].is_mapped
+    assert upstream(tasks[f'run_{finemapping}']) == {f'generate_manifest_{finemapping}'}
+    # the qc step, and so the creation of its cluster, only start once the batch job is done
+    assert upstream(tasks[f'upload_config_{qc}']) == {f'end_{finemapping}'}
+
+
+def test_gwas_catalog_release_dag(dag_bag: DagBag) -> None:
+    tasks = tasks_of(dag_bag.dags['gwas_catalog_release'])
+
+    assert set(tasks) == {f'{t}_gwas_catalog_release' for t in ('upload_config', 'run', 'delete_vm', 'end')}
+    assert tasks['run_gwas_catalog_release'].machine_type == 'n1-standard-4'

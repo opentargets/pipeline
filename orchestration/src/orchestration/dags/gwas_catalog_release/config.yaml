@@ -1,0 +1,19 @@
+---
+env: prod
+environments:
+  - name: prod
+    scratchpad:
+      gwas_catalog_input_path: gs://gwas_catalog_inputs
+  - name: test
+    scratchpad:
+      gwas_catalog_input_path: gs://ot_orchestration/test/gwas_catalog_release/gwas_catalog_inputs
+
+description: Open Targets Genetics — GWAS Catalog release sync and study curation
+staging_bucket: gs://genetics_etl_python_playground/pps
+pps_version: '26.9.0.dev0'
+
+steps:
+  gwas_catalog_release:
+    vm:
+      machine_type: n1-standard-4
+    execution_timeout: 7200
