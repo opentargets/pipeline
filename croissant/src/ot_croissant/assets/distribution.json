@@ -543,5 +543,17 @@
       "Ontology"
     ],
     "description": "Pathway metadata from Reactome pathway database"
+  },
+  {
+    "id": "gene_sets",
+    "nice_name": "Target - gene sets",
+    "key": [
+      "source",
+      "id"
+    ],
+    "tags": [
+      "Target"
+    ],
+    "description": "Gene sets for GO terms, Reactome pathways and ChEMBL target classes. Each set holds the targets annotated to the term or to any of its descendants"
   }
 ]
