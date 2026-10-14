@@ -9,6 +9,7 @@ from functools import reduce
 from typing import Any
 
 import polars as pl
+from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
@@ -26,20 +27,12 @@ LITERATURE_MAPPING = {
     'https://pubmed.ncbi.nlm.nih.gov/30449619/': ['30449619'],
 }
 
-#: Study file columns, applied by position whatever the file's header says.
-GENES_SCHEMA: dict[str, pl.DataType] = {
+#: Study file columns read by header name, with the type each is cast to.
+STUDY_COLUMNS: dict[str, pl.DataType] = {
     'Gene': pl.String(),
-    'TSS': pl.String(),
     'Phenotype': pl.Float64(),
     'P Value': pl.Float32(),
-    'Gene Score': pl.Float32(),
     'Hit Class': pl.String(),
-    'P Value (-Log10)': pl.Float64(),
-    'P Value (Signed -Log10)': pl.Float64(),
-    'Gene Rank': pl.Float32(),
-    'Gene Score (Size)': pl.Float32(),
-    'Phenotype (Size)': pl.Float32(),
-    'P Value (-Log10) (Size)': pl.Float32(),
 }
 
 #: Screen fields read from the screens payload.
@@ -101,24 +94,25 @@ def _read_screens(path: str) -> pl.DataFrame:
     )
 
 
-def _read_study(path: str) -> pl.LazyFrame:
+def _read_study(path: str) -> pl.LazyFrame | None:
+    """The study's `STUDY_COLUMNS`, or None if it has no `Hit Class` (e.g. a CROP-seq screen)."""
     study = scan_dataset(path, format='csv', infer_schema=False)
-    width = study.collect_schema().len()
-    names = list(GENES_SCHEMA)
-    return study.select(
-        *(pl.nth(i).alias(name) for i, name in enumerate(names[:width])),
-        *(pl.lit(None, pl.String).alias(name) for name in names[width:]),
-        studyId=pl.lit(study_id(path)),
-    )
+    if 'Hit Class' not in study.collect_schema():
+        logger.warning(f'skipping study file without a Hit Class column: {path}')
+        return None
+    return study.select(*STUDY_COLUMNS, studyId=pl.lit(study_id(path)))
 
 
 def _read_genes(studies_dir: str) -> pl.LazyFrame:
     paths = sorted(StorageHandle(studies_dir).glob('*.csv.gz'))
     if not paths:
         raise ValueError(f'no *.csv.gz files found in {studies_dir}')
-    return pl.concat([_read_study(path) for path in paths]).with_columns(
+    studies = [study for path in paths if (study := _read_study(path)) is not None]
+    if not studies:
+        raise ValueError(f'no study file in {studies_dir} has a Hit Class column')
+    return pl.concat(studies).with_columns(
         pl.col(name).str.strip_chars().cast(dtype, strict=False)
-        for name, dtype in GENES_SCHEMA.items()
+        for name, dtype in STUDY_COLUMNS.items()
         if dtype != pl.String
     )
 

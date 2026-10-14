@@ -13,14 +13,16 @@ import pytest
 
 from pts.transformers.evidence.crispr_screens import (
     CRISPR_SCREEN,
-    GENES_SCHEMA,
     crispr_screens,
     generate,
     parsing_experiment,
 )
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
-GENES_HEADER = list(GENES_SCHEMA)
+GENES_HEADER = [
+    'Gene', 'TSS', 'Phenotype', 'P Value', 'Gene Score', 'Hit Class', 'P Value (-Log10)', 'P Value (Signed -Log10)',
+    'Gene Rank', 'Gene Score (Size)', 'Phenotype (Size)', 'P Value (-Log10) (Size)',
+]
 RNA_SEQ_HEADER = ['Gene', 'Log2CPM', 'Log2FC', 'P Value', 'FDR', 'name', 'P Value (Signed -Log10)']
 MAPPING_HEADER = ['studyId', 'diseaseFromSource', 'diseaseFromSourceMappedId', 'contrast']
 
@@ -212,21 +214,18 @@ def test_generate_takes_the_study_id_from_the_file_name(tmp_path: Path) -> None:
     ]
 
 
-def test_generate_reads_study_columns_by_position(tmp_path: Path) -> None:
+def test_generate_reads_study_columns_by_name(tmp_path: Path) -> None:
     sources = _write_inputs(
         tmp_path,
-        screens=[_screen('RNA-Seq')],
+        screens=[_screen('S')],
         studies={},
-        mapping=[['RNA-Seq', 'x', 'MONDO_1', '']],
+        mapping=[['S', 'x', 'MONDO_1', '']],
     )
     _write_study(
         tmp_path / 'studies',
-        'RNA-Seq',
-        RNA_SEQ_HEADER,
-        [
-            ['GENE1', '5.0', '-0.5', '0.03', '0.1', 'Negative Hit', '1.5'],
-            ['GENE2', '5.0', '1', '0.03', '0.1', 'GENE2', '1'],
-        ],
+        'S',
+        ['Hit Class', 'P Value', 'Extra', 'Gene', 'Phenotype'],
+        [['Negative Hit', '0.03', 'x', 'GENE1', '-0.5']],
     )
 
     raw = generate(**sources).collect()
@@ -235,6 +234,38 @@ def test_generate_reads_study_columns_by_position(tmp_path: Path) -> None:
         ('GENE1', -0.5, 'lower tail'),
     ]
     assert raw['resourceScore'].to_list() == [float(np.float32(0.03))]
+
+
+def test_generate_skips_study_files_without_a_hit_class(tmp_path: Path) -> None:
+    sources = _write_inputs(
+        tmp_path,
+        screens=[_screen('S'), _screen('RNA-Seq')],
+        studies={'S': [_hit('GENE1', '1', '0.1', 'Positive Hit')]},
+        mapping=[['S', 'x', 'MONDO_1', ''], ['RNA-Seq', 'x', 'MONDO_2', '']],
+    )
+    _write_study(
+        tmp_path / 'studies',
+        'RNA-Seq',
+        RNA_SEQ_HEADER,
+        [['GENE2', '5.0', '-0.5', '0.03', '0.1', 'Positive Hit', '1.5']],
+    )
+
+    raw = generate(**sources).collect()
+
+    assert raw.select('studyId', 'targetFromSourceId').rows() == [('S', 'GENE1')]
+
+
+def test_generate_fails_when_no_study_file_has_a_hit_class(tmp_path: Path) -> None:
+    sources = _write_inputs(
+        tmp_path,
+        screens=[_screen('RNA-Seq')],
+        studies={},
+        mapping=[['RNA-Seq', 'x', 'MONDO_1', '']],
+    )
+    _write_study(tmp_path / 'studies', 'RNA-Seq', RNA_SEQ_HEADER, [['GENE1', '5', '1', '0.1', '0.1', 'X', '1']])
+
+    with pytest.raises(ValueError, match='Hit Class'):
+        generate(**sources)
 
 
 def test_generate_casts_unparseable_numbers_to_null(tmp_path: Path) -> None:
