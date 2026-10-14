@@ -142,7 +142,7 @@ def process_studies(study_table: pl.DataFrame) -> pl.DataFrame:
             pl.col('releaseDate').str.strip_chars().str.to_date('%Y-%m-%d', strict=False),
             split_column_value(pl.col('diseases')).alias('diseaseFromSourceMappedId'),
             split_column_value(pl.col('filterColumn'), ',').alias('filterColumns'),
-            pl.col('threshold').str.strip_chars().cast(pl.Float32, strict=False),
+            pl.col('threshold').str.strip_chars().cast(pl.Float64, strict=False),
             pl.col('replicateNumber').fill_null('1').alias('replicateId'),
         )
         .group_by(keys, maintain_order=True)
@@ -186,7 +186,7 @@ def read_and_filter_mageck_file(mageck_file: str, filter_columns: list[str], thr
     return (
         raw_data
         .with_columns(pl.min_horizontal(values.values()).alias('resourceScore'))
-        .filter(score < pl.lit(threshold, dtype=pl.Float32))
+        .filter(score < pl.lit(threshold, dtype=pl.Float64))
         .select(
             pl.col('id').str.split('_').list.first().alias('targetFromSourceId'),
             pl
@@ -223,7 +223,10 @@ def process_replicate(
 
 
 def process_study(study: dict[str, Any], data_path: str) -> pl.DataFrame:
-    """Find the hits of one study: genes that are hits in every replicate, with the first replicate's values.
+    """Find the hits of one study: genes that are hits in every replicate, with the best replicate's values.
+
+    A gene counts once per replicate, however many of the replicate's ids it has. The best replicate
+    is the one with the smallest `resourceScore`, the first on a tie.
 
     Args:
         study: one row of `process_studies`.
@@ -244,9 +247,14 @@ def process_study(study: dict[str, Any], data_path: str) -> pl.DataFrame:
     ]
     return (
         pl
-        .concat(replicates)
+        .concat([hits.with_columns(replicate=pl.lit(i)) for i, hits in enumerate(replicates)])
         .group_by('targetFromSourceId', maintain_order=True)
-        .agg(pl.len().alias('found'), pl.col('log2FoldChangeValue', 'resourceScore', 'statisticalTestTail').first())
+        .agg(
+            pl.col('replicate').n_unique().alias('found'),
+            pl
+            .col('log2FoldChangeValue', 'resourceScore', 'statisticalTestTail')
+            .get(pl.col('resourceScore').arg_min()),
+        )
         .filter(pl.col('found') == len(replicates))
         .select(
             'targetFromSourceId',

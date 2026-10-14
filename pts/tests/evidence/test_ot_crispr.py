@@ -108,6 +108,9 @@ def _sources(src: Path) -> dict[str, str]:
             {'id': 'GB', 'pos|p-value': '0.05', 'pos|lfc': '2.0'},
             {'id': 'GC', 'neg|p-value': '0.2', 'pos|p-value': '0.3'},
             {'id': 'GD', 'neg|p-value': '0.001'},
+            {'id': 'GE', 'pos|p-value': '0.03', 'pos|lfc': '1.0'},
+            {'id': 'GF_1', 'neg|p-value': '0.001'},
+            {'id': 'GF_2', 'neg|p-value': '0.002'},
         ],
     )
     _write_mageck(
@@ -116,6 +119,7 @@ def _sources(src: Path) -> dict[str, str]:
             {'id': 'GA', 'neg|p-value': '0.02', 'neg|lfc': '-0.5'},
             {'id': 'GB', 'pos|p-value': '0.04', 'pos|lfc': '1.0'},
             {'id': 'GC', 'neg|p-value': '0.001'},
+            {'id': 'GE', 'pos|p-value': '0.005', 'pos|lfc': '3.0'},
         ],
         separator='.',
     )
@@ -156,7 +160,7 @@ def test_process_studies_drops_invalid_studies_and_collects_replicates(tmp_path:
     assert studies['studyId'].to_list() == ['S1', 'S2']
     assert studies['diseaseFromSourceMappedId'].to_list() == [['EFO_1', 'EFO_2'], ['EFO_1']]
     assert studies['filterColumns'].to_list() == [['neg|p-value', 'pos|p-value'], ['pos|fdr']]
-    assert studies['threshold'].dtype == pl.Float32
+    assert studies['threshold'].dtype == pl.Float64
     assert studies['releaseDate'].to_list() == [datetime.date(2021, 6, 10)] * 2
     assert studies['replicates'].to_list() == [
         [
@@ -184,12 +188,12 @@ def test_adjust_column_names_normalises_dots_and_rejects_unknown_separators() ->
         adjust_column_names(pl.DataFrame(schema=['id', 'num', 'neg_score', 'neg_p-value']))
 
 
-def test_generate_matches_spark(tmp_path: Path) -> None:
-    """Expected rows are the spark generator's output on the same fixture.
+def test_generate_keeps_hits_of_every_replicate(tmp_path: Path) -> None:
+    """Hits are genes below the threshold in every replicate, with the best replicate's values.
 
-    - S1 keeps the genes found in both replicates, with the first replicate's values;
-    - a p-value of exactly 0.05 passes a 0.05 threshold and exactly 0.01 fails a 0.01 one, since
-      spark compares against the threshold as a 32-bit float;
+    - S1 keeps GA and GE, found in both replicates, each with its smaller p-value's replicate;
+    - GB's p-value of exactly 0.05 fails the 0.05 threshold, so it is not found in replicate 1;
+    - GF has two ids in replicate 1 but is missing from replicate 2, so it is dropped;
     - S2 loses GX, a hit in its control too;
     - S3 to S5, the description row and the row without a studyId are dropped, so the null
       `diseases` of S4 never reaches the explode.
@@ -203,11 +207,11 @@ def test_generate_matches_spark(tmp_path: Path) -> None:
     ).rows() == [
         ('S1', 'GA', 'EFO_1', 0.01, 'lower tail'),
         ('S1', 'GA', 'EFO_2', 0.01, 'lower tail'),
-        ('S1', 'GB', 'EFO_1', 0.05, 'upper tail'),
-        ('S1', 'GB', 'EFO_2', 0.05, 'upper tail'),
+        ('S1', 'GE', 'EFO_1', 0.005, 'upper tail'),
+        ('S1', 'GE', 'EFO_2', 0.005, 'upper tail'),
         ('S2', 'GY', 'EFO_1', 0.005, 'upper tail'),
     ]
-    assert out['log2FoldChangeValue'].to_list() == [-1.5, -1.5, 2.0, 2.0, 4.0]
+    assert out['log2FoldChangeValue'].to_list() == [-1.5, -1.5, 3.0, 3.0, 4.0]
     assert out.select('projectId', 'releaseDate', 'datasourceId', 'datatypeId').unique().rows() == [
         ('OTAR001', datetime.date(2021, 6, 10), 'ot_crispr', 'ot_partner')
     ]
@@ -278,7 +282,7 @@ def test_ot_crispr_step_writes_scored_evidence(tmp_path: Path) -> None:
         {
             **_sources(src),
             'disease': write_disease(src / 'disease', ['EFO_1']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'GA', 'ENSG2': 'GB'}),
+            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'GA', 'ENSG2': 'GE'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         {},
