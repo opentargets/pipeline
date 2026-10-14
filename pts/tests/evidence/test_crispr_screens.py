@@ -46,6 +46,10 @@ RAW_SCHEMA = {
 }
 
 
+def _description(name: str) -> str:
+    return f'## {name}\n\nScreen of {name}.\n\n## Experiment\nThe experiment.\n## Analysis\nThe analysis.'
+
+
 def _screen(name: str, link: str = '', genotype: str = 'WT', phenotype: str = 'Survival') -> dict:
     return {
         'download_url': f'https://example.org/{name}.csv.gz',
@@ -55,7 +59,7 @@ def _screen(name: str, link: str = '', genotype: str = 'WT', phenotype: str = 'S
             'Genotype': genotype,
             'Libraries Screened': 'H1',
             'Phenotype': phenotype,
-            'Description': f'## {name}\n## Experiment\nThe experiment.\n## Analysis\nThe analysis.',
+            'Description': _description(name),
             'Reference Link': link,
         },
     }
@@ -120,7 +124,7 @@ def _study(study_id: str, library: str = 'H1', cell_type: str = 'Astrocyte') -> 
         'datasourceId': 'crispr_screen',
         'projectId': 'crispr_brain',
         'crisprScreenLibrary': library,
-        'studyOverview': 'Description',
+        'studyOverview': f'Screen of {study_id}.',
         'cellType': cell_type,
     }
 
@@ -284,33 +288,56 @@ def test_generate_casts_unparseable_numbers_to_null(tmp_path: Path) -> None:
     ]
 
 
-def test_parsing_experiment_splits_title_experiment_and_analysis() -> None:
+def test_parsing_experiment_takes_the_summary_after_a_screen_name_heading() -> None:
     description = (
-        '## iAstrocyte-LAMP1-Veh-CRISPRi\n\n'
-        'CRISPRi FACS screen for cell-surface LAMP1 (marker of lysosome\n'
-        'exocytosis) in human iPSC-derived astrocytes.\n\n'
-        '## Experiment\n\n'
-        'To screen against the **druggable** genome or genes involved in vesicular\n'
-        'trafficking, we used the H1 and H4 sub-libraries.\n\n'
-        '## Analysis\n\n'
-        'We analyzed the data from the pooled CRISPRi screens using the\n'
-        'MAGeCK-iNC bioinformatic pipeline previously described.\n'
+        '\ufeff## iAstrocyte-LAMP1-Veh-CRISPRi\r\n\r\n'
+        'CRISPRi FACS screen for cell-surface LAMP1 (marker of lysosome\r\n'
+        'exocytosis) in human iPSC-derived astrocytes.\r\n\r\n'
+        '## Experiment\r\n\r\n'
+        'To screen against the **druggable** genome or genes involved in vesicular\r\n'
+        'trafficking, we used the H1 and H4 sub-libraries.\r\n\r\n'
+        'Cells were treated with IL-1\u03b1.\r\n\r\n'
+        '## Analysis\r\n\r\n'
+        'We analyzed the data from the pooled CRISPRi screens using the\r\n'
+        'MAGeCK-iNC bioinformatic pipeline previously described.\r\n'
     )
     assert parsing_experiment(description) == {
-        'title': 'iAstrocyte-LAMP1-Veh-CRISPRi',
-        'experiment': 'To screen against the druggable genome or genes involved in vesicular',
-        'analysis': 'We analyzed the data from the pooled CRISPRi screens using the',
+        'title': (
+            'CRISPRi FACS screen for cell-surface LAMP1 (marker of lysosome exocytosis) '
+            'in human iPSC-derived astrocytes.'
+        ),
+        'experiment': (
+            'To screen against the druggable genome or genes involved in vesicular trafficking, '
+            'we used the H1 and H4 sub-libraries.\n\nCells were treated with IL-1\u03b1.'
+        ),
+        'analysis': (
+            'We analyzed the data from the pooled CRISPRi screens using the MAGeCK-iNC bioinformatic pipeline '
+            'previously described.'
+        ),
     }
+
+
+@pytest.mark.parametrize(
+    ('description', 'title'),
+    [
+        ('# S-CRISPRi\n\n## Description\n\nCRISPRi screen in iPSCs.\n\n## Experiment\nE', 'CRISPRi screen in iPSCs.'),
+        ('## CRISPRi screen in neurons.\n\n## Experiment\nE', 'CRISPRi screen in neurons.'),
+        ('## CRISPRi screen in iPSCs.\n\nCells were seeded.\nThen sorted.', 'CRISPRi screen in iPSCs.'),
+        ('# S-CRISPRi\nCRISPRi CROP-seq in microglia\n## Experiment\nE', 'CRISPRi CROP-seq in microglia'),
+    ],
+)
+def test_parsing_experiment_title_is_the_summary(description: str, title: str) -> None:
+    assert parsing_experiment(description)['title'] == title
 
 
 @pytest.mark.parametrize(
     ('description', 'expected'),
     [
-        (None, {'title': '', 'experiment': None, 'analysis': None}),
-        ('', {'title': '', 'experiment': None, 'analysis': None}),
-        ('Description', {'title': 'Description', 'experiment': None, 'analysis': None}),
-        ('## T\n## Experiment', {'title': 'T', 'experiment': None, 'analysis': None}),
-        ('# Té\n## Analysis\nAé', {'title': 'T', 'experiment': None, 'analysis': 'A'}),
+        (None, {'title': None, 'experiment': None, 'analysis': None}),
+        ('', {'title': None, 'experiment': None, 'analysis': None}),
+        ('## T.\n## Experiment', {'title': 'T.', 'experiment': None, 'analysis': None}),
+        ('## T.\n## Experiment\n## Analysis\nA', {'title': 'T.', 'experiment': None, 'analysis': 'A'}),
+        ('## T.\n## Analysis\nA', {'title': 'T.', 'experiment': None, 'analysis': 'A'}),
     ],
 )
 def test_parsing_experiment_edge_cases(description: str | None, expected: dict) -> None:

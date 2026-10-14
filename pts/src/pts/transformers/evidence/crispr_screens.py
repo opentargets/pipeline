@@ -5,7 +5,6 @@ from __future__ import annotations
 import gzip
 import json
 import re
-from functools import reduce
 from typing import Any
 
 import polars as pl
@@ -36,7 +35,9 @@ STUDY_COLUMNS: dict[str, pl.DataType] = {
 }
 
 #: Screen fields read from the screens payload.
-SCREEN_FIELDS = ['Screen Name', 'Libraries Screened', 'Cell Type', 'Genotype', 'Phenotype', 'Reference Link']
+SCREEN_FIELDS = [
+    'Screen Name', 'Libraries Screened', 'Cell Type', 'Genotype', 'Phenotype', 'Description', 'Reference Link'
+]
 
 CRISPR_SCREEN = EvidenceDatasource(
     datasource_id='crispr_screen',
@@ -45,36 +46,40 @@ CRISPR_SCREEN = EvidenceDatasource(
 )
 
 
+def _paragraphs(markdown: str) -> list[str]:
+    """Split markdown into paragraphs, a heading being one on its own, with wrapped lines joined."""
+    blocks: list[list[str]] = [[]]
+    for line in markdown.split('\n'):
+        if not line.strip() or line.startswith('#'):
+            blocks.append([])
+        blocks[-1].append(line)
+        if line.startswith('#'):
+            blocks.append([])
+    return [joined for block in blocks if (joined := ' '.join(' '.join(block).split()))]
+
+
+def _section(paragraphs: list[str]) -> str | None:
+    return '\n\n'.join(paragraphs) or None
+
+
 def parsing_experiment(description: str | None) -> dict[str, str | None]:
     """Parse the title, experiment and analysis out of a screen description.
 
-    The title is the first line without its leading `#`s; experiment and analysis are the lines
-    after `## Experiment` and `## Analysis`, both null if either heading is the last line.
+    A description is markdown: an intro, then `## Experiment` and `## Analysis` sections. The intro
+    holds a one-sentence summary, either as its heading or as a paragraph after a screen name
+    heading (sometimes followed by `## Description`). The title is that summary: the intro's first
+    paragraph ending in a full stop, else its last, without `#`s. Experiment and analysis are their
+    whole sections. Wrapped lines are joined, `*` emphasis removed, and a missing part is null.
     """
-    repl_patterns = [(r'\*+', ''), (r'\r', ''), (r'\t', ''), (r'\n+', '\n')]
-    description = reduce(lambda s, p: re.sub(p[0], p[1], s), repl_patterns, description or '')
-    description = description.encode('ascii', 'ignore').decode('ascii')
-
-    lines = re.split(r'\n+', description.strip()) if description else ['']
-    title = re.sub(r'#+\s+', '', lines[0]) if '#' in lines[0] else lines[0]
-
-    experiment = None
-    analysis = None
-    try:
-        for i in range(len(lines)):
-            if lines[i] == '## Experiment':
-                experiment = lines[i + 1]
-            if lines[i] == '## Analysis':
-                analysis = lines[i + 1]
-    except IndexError:
-        experiment = None
-        analysis = None
-
-    return {'title': title, 'experiment': experiment, 'analysis': analysis}
-
-
-#: The spark job parsed the literal string 'Description', not each screen's description.
-STUDY_OVERVIEW = parsing_experiment('Description')['title']
+    text = (description or '').lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n').replace('*', '')
+    parts = re.split(r'^#+\s*(Experiment|Analysis)\s*$', text, flags=re.MULTILINE)
+    sections = dict(zip(parts[1::2], parts[2::2], strict=True))
+    intro = [re.sub(r'^#+\s*', '', p) for p in _paragraphs(parts[0])]
+    return {
+        'title': next((p for p in intro if p.endswith('.')), intro[-1] if intro else None),
+        'experiment': _section(_paragraphs(sections.get('Experiment', ''))),
+        'analysis': _section(_paragraphs(sections.get('Analysis', ''))),
+    }
 
 
 def study_id(path: str) -> str:
@@ -131,7 +136,10 @@ def _studies(screens: pl.DataFrame, disease_mapping: pl.DataFrame) -> pl.DataFra
             pl.lit('crispr_screen').alias('datasourceId'),
             pl.lit('crispr_brain').alias('projectId'),
             pl.col('Libraries Screened').alias('crisprScreenLibrary'),
-            pl.lit(STUDY_OVERVIEW).alias('studyOverview'),
+            pl
+            .col('Description')
+            .map_elements(lambda d: parsing_experiment(d)['title'], return_dtype=pl.String)
+            .alias('studyOverview'),
             pl.col('Cell Type').alias('cellType'),
             pl.when(pl.col('Genotype') != 'WT').then(pl.col('Genotype')).alias('geneticBackground'),
             'Phenotype',
