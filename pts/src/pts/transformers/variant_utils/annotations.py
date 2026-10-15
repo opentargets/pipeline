@@ -4,6 +4,7 @@ import polars as pl
 import polars_hash as plh
 
 from pts.schemas.variant import variant_schema
+from pts.transformers.foldx import normalise_foldx_score
 
 
 def hash_long_variant_ids(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
@@ -119,7 +120,7 @@ def normalize_variant_effects(frame: pl.LazyFrame) -> pl.LazyFrame:
         .when(method == 'GERP')
         .then(gerp)
         .when(method == 'FoldX')
-        .then(pl.when(score.abs() >= 2).then(1.0).otherwise(score.abs() / 2))
+        .then(normalise_foldx_score(score))
     )
     return frame.with_columns(
         pl.col('variantEffect').list.eval(

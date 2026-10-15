@@ -1624,9 +1624,9 @@ steps:
       source:
         vep: intermediate/variant_annotation
         variant_annotations:
-          - gs://gnomad_data_2/v4.1/variant_index
+          - input/variant/gnomad
         amino_acid_annotations:
-          - gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation
+          - intermediate/variant/foldx
       destination:
         output: output/variant
       settings:

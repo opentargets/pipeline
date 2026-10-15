@@ -2,22 +2,15 @@
 
 import polars as pl
 
+from pts.schemas.amino_acid_variants import variant_effect_dtype
+
 variant_schema = pl.Schema({
     'variantId': pl.String,
     'chromosome': pl.String,
     'position': pl.Int32,
     'referenceAllele': pl.String,
     'alternateAllele': pl.String,
-    'variantEffect': pl.List(
-        pl.Struct({
-            'method': pl.String,
-            'assessment': pl.String,
-            'score': pl.Float32,
-            'assessmentFlag': pl.String,
-            'targetId': pl.String,
-            'normalisedScore': pl.Float64,
-        })
-    ),
+    'variantEffect': variant_effect_dtype,
     'mostSevereConsequenceId': pl.String,
     'transcriptConsequences': pl.List(
         pl.Struct({
