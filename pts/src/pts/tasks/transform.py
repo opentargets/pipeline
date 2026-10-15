@@ -7,6 +7,7 @@ from typing import Any, Self
 from loguru import logger
 from otter.config.model import Config
 from otter.manifest.model import Artifact
+from otter.storage.synchronous.handle import StorageHandle
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
@@ -14,11 +15,26 @@ from otter.util.fs import check_destination
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
-path_or_paths = str | dict[str, str]
+DestinationPaths = str | dict[str, str]
+SourcePaths = str | dict[str, str | list[str]]
 transformer_type = Callable[
-    [str | dict[str, str], str | dict[str, str], dict[str, Any] | None, Config | None],
+    [SourcePaths, DestinationPaths, dict[str, Any] | None, Config | None],
     None,
 ]
+
+
+def _resolve_source_paths(source: SourcePaths, config: Config) -> SourcePaths:
+    """Resolve source paths against the config, preserving named groups and lists."""
+    if isinstance(source, str):
+        return StorageHandle(source, config=config).absolute
+    return {
+        key: (
+            [StorageHandle(path, config=config).absolute for path in value]
+            if isinstance(value, list)
+            else StorageHandle(value, config=config).absolute
+        )
+        for key, value in source.items()
+    }
 
 
 class TransformSpec(Spec):
@@ -39,9 +55,9 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
     """
-    source: path_or_paths
-    """A string or a dictionary with the source paths."""
-    destination: path_or_paths
+    source: SourcePaths
+    """A path or a dictionary whose values are paths or lists of paths."""
+    destination: DestinationPaths
     """A string or a dictionary with the destination paths."""
     settings: dict[str, Any] | None = None
     """A dictionary with settings to pass to the transformer."""
@@ -59,7 +75,7 @@ class Transform(Task):
         self.spec: TransformSpec
         self.transformer = self.load_transformer(spec.transformer)
 
-    def _prepare_dirs(self, paths: str | dict[str, str]) -> None:
+    def _prepare_dirs(self, paths: DestinationPaths) -> None:
         if isinstance(paths, dict):
             for path in paths.values():
                 check_destination(path, delete=True)
@@ -82,7 +98,7 @@ class Transform(Task):
 
     @report
     def run(self) -> Self:
-        self.srcs = make_absolute(self.spec.source, self.context.config)
+        self.srcs = _resolve_source_paths(self.spec.source, self.context.config)
         self.dsts = make_absolute(self.spec.destination, self.context.config)
 
         logger.debug(f'running transformer {self.spec.transformer}')
@@ -99,7 +115,11 @@ class Transform(Task):
             self.context.config,
         )
 
-        srcs = list(self.srcs.values()) if isinstance(self.srcs, dict) else self.srcs
+        srcs = (
+            [path for value in self.srcs.values() for path in (value if isinstance(value, list) else [value])]
+            if isinstance(self.srcs, dict)
+            else self.srcs
+        )
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
         return self

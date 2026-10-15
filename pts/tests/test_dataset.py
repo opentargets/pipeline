@@ -13,6 +13,7 @@ import openpyxl
 import pandas as pd
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from pts.transformers.utils.dataset import (
     check_destinations_absent,
@@ -21,6 +22,12 @@ from pts.transformers.utils.dataset import (
     scan_datasets,
     write_dataset,
 )
+
+
+@pytest.fixture
+def doctest_namespace():
+    """Dataset I/O tests do not require the shared Spark doctest session."""
+    return {}
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -220,6 +227,23 @@ def test_write_accepts_a_lazyframe(tmp_path: Path) -> None:
     write_dataset(pl.LazyFrame({'a': [1, 2]}), path)
 
     assert pl.read_parquet(sorted(Path(path).glob('*.parquet'))).height == 2
+
+
+@pytest.mark.parametrize('empty', [False, True])
+def test_write_single_file_retains_dataset_directory(tmp_path: Path, empty: bool) -> None:
+    """Single-file outputs retain the directory layout even for excluded datasets with no rows."""
+    frame = pl.DataFrame({'id': ['a', 'b']})
+    if empty:
+        frame = frame.clear()
+    path = tmp_path / 'dataset'
+
+    write_dataset(frame.lazy(), str(path), single_file=True, approximate_bytes_per_file=1)
+
+    parts = list(path.glob('*.parquet'))
+    assert len(parts) == 1
+    assert_frame_equal(pl.read_parquet(parts[0]), frame)
+    if not empty:
+        assert _codecs(parts[0]) == {'ZSTD'}
 
 
 def test_write_splits_when_over_the_threshold(tmp_path: Path) -> None:
@@ -499,3 +523,74 @@ def test_check_destinations_absent_names_every_existing_path(tmp_path: Path) -> 
     assert str(tmp_path / 'b') not in str(error.value)
     assert str(tmp_path / 'c') in str(error.value)
     check_destinations_absent([str(tmp_path / 'b')])
+
+
+def test_scan_datasets_reads_only_explicit_paths(tmp_path: Path) -> None:
+    """Explicit selections accept directories and single files, retaining duplicate rows."""
+    first = _write_parts(tmp_path / 'selected', pl.DataFrame({'id': ['same']}))
+    second = tmp_path / 'single.parquet'
+    pl.DataFrame({'id': ['same']}).write_parquet(second)
+    _write_parts(tmp_path / 'other', pl.DataFrame({'id': ['unselected']}))
+
+    result = scan_datasets([first, str(second)])
+
+    assert isinstance(result, pl.LazyFrame)
+    assert_frame_equal(result.collect(), pl.DataFrame({'id': ['same', 'same']}))
+
+
+def test_scan_datasets_rejects_empty_path_list() -> None:
+    with pytest.raises(ValueError, match='At least one dataset path'):
+        scan_datasets([])
+
+
+def test_scan_datasets_explicit_paths_union_schemas_without_declared_schema(tmp_path: Path) -> None:
+    first = _write_parts(tmp_path / 'a', pl.DataFrame({'id': ['a'], 'value': pl.Series([1], dtype=pl.Int32)}))
+    second = _write_parts(tmp_path / 'b', pl.DataFrame({'id': ['b'], 'value': [2], 'extra': ['x']}))
+
+    expected = pl.DataFrame({'id': ['a', 'b'], 'value': [1, 2], 'extra': [None, 'x']})
+    assert_frame_equal(scan_datasets([first, second]).collect(), expected)
+
+
+@pytest.mark.parametrize('selection', ['list', 'glob'])
+def test_scan_datasets_matches_declared_schema(tmp_path: Path, selection: str) -> None:
+    """Both overloads insert typed nulls, including missing nested struct fields."""
+    first = _write_parts(tmp_path / 'dataset_a', pl.DataFrame({'id': ['a']}))
+    second = _write_parts(tmp_path / 'dataset_b', pl.DataFrame({'details': [{'name': 'b'}]}))
+    schema = pl.Schema({'details': pl.Struct({'name': pl.String, 'count': pl.Int32}), 'id': pl.String})
+    paths = [first, second] if selection == 'list' else str(tmp_path / 'dataset_*')
+
+    result = scan_datasets(paths, schema=schema)
+    expected = pl.DataFrame({'details': [None, {'name': 'b', 'count': None}], 'id': ['a', None]}, schema=schema)
+
+    assert isinstance(result, pl.LazyFrame)
+    assert_frame_equal(result.collect(), expected)
+
+
+@pytest.mark.parametrize('selection', ['list', 'glob'])
+@pytest.mark.parametrize(
+    'frame',
+    [pl.DataFrame({'unexpected': ['x']}), pl.DataFrame({'id': [1]})],
+    ids=['unexpected-column', 'mismatched-type'],
+)
+def test_scan_datasets_declared_schema_rejects_invalid_inputs(
+    tmp_path: Path, selection: str, frame: pl.DataFrame
+) -> None:
+    path = _write_parts(tmp_path / 'dataset_a', frame)
+    paths = [path] if selection == 'list' else str(tmp_path / 'dataset_*')
+
+    with pytest.raises(pl.exceptions.SchemaError):
+        scan_datasets(paths, schema=pl.Schema({'id': pl.String})).collect()
+
+
+def test_single_file_sink_remains_lazy(tmp_path):
+    """The migration's single-file option preserves main's deferred sink contract."""
+    from pts.transformers.utils.dataset import sink_dataset
+
+    destination = tmp_path / 'lazy-single-file'
+    frame = pl.DataFrame({'value': [1, 2]})
+    sink = sink_dataset(frame, str(destination), single_file=True)
+    assert not destination.exists()
+    sink.collect()
+    parts = list(destination.glob('*.parquet'))
+    assert len(parts) == 1
+    assert pl.read_parquet(parts[0]).equals(frame)
