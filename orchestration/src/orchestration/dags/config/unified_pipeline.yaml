@@ -115,6 +115,8 @@ steps:
   pis_go:
   pis_interaction:
   pis_heritability:
+  pis_lof_curation:
+    ppp_only: true
   pis_l2g:
   pis_l2g_predefined_test_for_split:
   pis_literature:
