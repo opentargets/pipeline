@@ -30,9 +30,9 @@ test = [
     "pytest-asyncio>=1.1.0",
 ]
 
-# Temporary: local gentropy checkout until the trimmed-down gentropy is released.
+# The trimmed-down gentropy, until it is released.
 [tool.uv.sources]
-gentropy = { path = "/Users/ss60/Projects/gentropy/feat/migrate-studylocus-to-credible-set", editable = true }
+gentropy = { git = "https://github.com/opentargets/gentropy", branch = "release/v4.0.0" }
 
 [project.scripts]
 pps = "pps.core:main"
