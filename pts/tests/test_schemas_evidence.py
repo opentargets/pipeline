@@ -136,3 +136,17 @@ class TestPolarsSchemaToSpark:
         converted = polars_schema_to_spark({'z': pl.String, 'a': pl.Int64})
 
         assert [field.name for field in converted] == ['z', 'a']
+
+
+def test_pyspark_evidence_harmonises_to_the_polars_schema(spark) -> None:
+    from pts.pyspark.evidence_utils.evidence import Evidence as SparkEvidence
+
+    df = spark.createDataFrame(
+        [('T1', 'D1', 'ds')],
+        'targetFromSourceId STRING, diseaseFromSourceMappedId STRING, datasourceId STRING',
+    )
+    harmonised = SparkEvidence(df).df.schema
+    expected = polars_schema_to_spark(evidence_schema)
+    shared = [f.name for f in expected if f.name in harmonised.fieldNames()]
+    assert [f.name for f in harmonised if f.name in shared] == shared
+    assert all(harmonised[name].dataType == expected[name].dataType for name in shared)

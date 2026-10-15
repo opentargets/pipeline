@@ -27,7 +27,8 @@ class TransformSpec(Spec):
     transformer: str
     """A string with the name of a transformer function.
 
-        The function should be available in the package `pts.transformers`.
+        The function should be available in the package `pts.transformers`. A dotted name
+        such as `evidence.encore` loads the function `encore` from `pts.transformers.evidence.encore`.
 
         It takes four arguments:
             * source: a string or a dict of source paths
@@ -71,7 +72,7 @@ class Transform(Task):
             module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
             transformer: transformer_type = getattr(
                 module,
-                transformer_name,
+                transformer_name.rsplit('.', 1)[-1],
             )
             if not callable(transformer):
                 raise TypeError(f'{transformer_name} is not a callable')
