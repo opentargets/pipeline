@@ -16,6 +16,7 @@ PTS = yaml.safe_load(PTS_CONFIG.read_text())['steps']
 DAG = yaml.safe_load(DAG_CONFIG.read_text())['steps']
 EVIDENCE_STEPS = sorted(name for name in DAG if name.startswith('pts_evidence_'))
 LITERATURE_PREFIXES = ('input/literature', 'intermediate/literature')
+DIRECT_ONLY_STEPS = [*EVIDENCE_STEPS, 'pts_l2g']
 
 
 def dependencies(name: str) -> set[str]:
@@ -54,8 +55,8 @@ def test_ppp_only_evidence_steps_stay_ppp_only() -> None:
         assert DAG[name].get('ppp_only') is True, name
 
 
-@pytest.mark.parametrize('name', EVIDENCE_STEPS)
-def test_no_evidence_dependency_is_already_implied(name: str) -> None:
+@pytest.mark.parametrize('name', DIRECT_ONLY_STEPS)
+def test_no_dependency_is_already_implied(name: str) -> None:
     direct = dependencies(name)
     redundant = sorted(d for d in direct if any(d in ancestors(other) for other in direct if other != d))
     assert not redundant, f'{name} lists {redundant}, already reachable through another dependency'

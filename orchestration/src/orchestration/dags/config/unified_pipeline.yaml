@@ -400,7 +400,7 @@ steps:
     depends_on:
       - pts_evidence_postprocess_impc
       - pts_evidence_europepmc
-      - pts_l2g
+      - pts_evidence_gwas_credible_sets
       - pts_evidence_expression_atlas
       - pts_evidence_cancer_biomarkers
       - pts_evidence_clinical_precedence
@@ -523,10 +523,11 @@ steps:
       - gentropy_l2g_feature_matrix
       - pis_l2g
       - pis_l2g_predefined_test_for_split
-      # gwas_credible_sets evidence, the step's last task
+
+  pts_evidence_gwas_credible_sets:
+    depends_on:
+      - pts_l2g
       - pis_literature
-      - pts_disease
-      - pts_target
 
   # GENTROPY STEPS
   gentropy_enhancer_to_gene:

@@ -1463,9 +1463,10 @@ steps:
         l2g_threshold: &l2g_threshold 0.05
         explain_predictions: true
         # shap_background_size is set on l2g_train only
+
+  #: EVIDENCE_GWAS_CREDIBLE_SETS STEP :#############################################################
+  evidence_gwas_credible_sets:
     - name: transform evidence.gwas_credible_sets
-      requires:
-        - transform l2g_predict
       transformer: evidence.gwas_credible_sets
       source:
         l2g_predictions: output/l2g_prediction
