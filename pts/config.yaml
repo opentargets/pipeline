@@ -7,6 +7,13 @@ scratchpad:
   string_version: '12.0'
 
 steps:
+  #: LOF CURATION
+  lof_curation:
+    - name: transform LoF curation annotations
+      source: input/lof_curation/curation.csv
+      destination: intermediate/variant/lof_curation
+      transformer: lof_curation
+
   #: DISEASE STEP :#################################################################################
   disease:
     - name: transform disease_efo
