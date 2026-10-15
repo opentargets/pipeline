@@ -832,6 +832,34 @@ steps:
         evidence: output/evidence_ot_crispr
   ##################################################################################################
 
+  #: ENHANCER_TO_GENE MIGRATION
+  enhancer_to_gene:
+    - name: transform enhancer to gene
+      transformer: enhancer_to_gene
+      source:
+        enhancer_to_gene: input/encode/rE2G/datasets/*.bed.gz
+        biosample_lut: input/encode/rE2G/biosample_mapping.csv
+        target: output/target
+        biosample: output/biosample
+        chromosome: input/chromosome/chromosome.parquet
+      destination:
+        output: output/enhancer_to_gene
+        excluded: excluded/enhancer_to_gene
+      settings:
+        min_valid_score: 0.6
+        max_valid_score: 1.0
+        invalid_qc_reasons:
+          - UNRESOLVED_TARGET
+          - UNKNOWN_BIOSAMPLE
+          - SCORE_OUTSIDE_BOUNDS
+          - UNKNOWN_INTERVAL_TYPE
+          - AMBIGUOUS_SCORE
+          - UNKNOWN_PROJECT_ID
+          - INVALID_CHROMOSOME
+          - INVALID_RANGE
+          - AMBIGUOUS_INTERVAL_TYPE
+          - TRANS_CHROMOSOMAL_EFFECT
+
   #: ONTOMA STEPS :##################################################################################
   ontoma:
     - name: pyspark ontoma generate lookup tables
