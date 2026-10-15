@@ -27,7 +27,10 @@ class TransformSpec(Spec):
     transformer: str
     """A string with the name of a transformer function.
 
-        The function should be available in the package `pts.transformers`.
+        The function should be available in the package `pts.transformers`, or in a subpackage of
+        it -- e.g. `evidence.gwas_evidence` resolves to `pts.transformers.evidence.gwas_evidence`'s
+        `gwas_evidence` function, for a subpackage grouping several related transformers (see
+        `pts.transformers.evidence`).
 
         It takes four arguments:
             * source: a string or a dict of source paths
@@ -67,11 +70,15 @@ class Transform(Task):
 
     @staticmethod
     def load_transformer(transformer_name: str) -> transformer_type:
+        # A dotted name (e.g. `evidence.gwas_evidence`) addresses a function in a subpackage --
+        # the whole string is the module path, the last segment is the function name within it.
+        # A plain name is unaffected: rsplit on an absent '.' just returns it unchanged.
+        function_name = transformer_name.rsplit('.', 1)[-1]
         try:
             module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
             transformer: transformer_type = getattr(
                 module,
-                transformer_name,
+                function_name,
             )
             if not callable(transformer):
                 raise TypeError(f'{transformer_name} is not a callable')
