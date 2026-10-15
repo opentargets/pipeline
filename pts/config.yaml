@@ -111,6 +111,46 @@ steps:
       destination: output/go
   ##################################################################################################
 
+  #: CREDIBLE_SET MIGRATION
+  credible_set:
+    - name: transform validate credible set
+      source:
+        credible_set:
+          - input/gwas/credible_set/gcca
+          - input/gwas/credible_set/gcss_pics
+          - input/gwas/credible_set/gcss_susie
+          - input/gwas/credible_set/finngen
+          - input/molqtl/credible_set/eqtl_catalogue/r7
+          - input/molqtl/credible_set/otar2077/MAGE_OTAR
+          - input/molqtl/credible_set/otar2077/IBDverse
+          - input/molqtl/credible_set/GTEx_v10
+          - input/molqtl/credible_set/ukb_ppp_eur
+        study: output/study
+        target: output/target
+      destination:
+        output: output/credible_set
+        excluded: excluded/credible_set
+      transformer: credible_set
+      settings:
+        trans_qtl_threshold: 5000000
+        invalid_qc_reasons:
+          - DUPLICATED_STUDYLOCUS_ID
+          - AMBIGUOUS_STUDY
+          - MISSING_STUDY
+          - NO_GENOMIC_LOCATION_FLAG
+          - COMPOSITE_FLAG
+          - INCONSISTENCY_FLAG
+          - SUBSIGNIFICANT_FLAG
+          - LD_CLUMPED
+          - IN_MHC
+          - REDUNDANT_PICS_TOP_HIT
+          - EXPLAINED_BY_SUSIE
+          - WINDOW_CLUMPED
+          - NON_MAPPED_VARIANT_FLAG
+          - INVALID_VARIANT_IDENTIFIER
+          - INVALID_CHROMOSOME
+          - TOP_HIT_AND_SUMMARY_STATS
+
   #: OTAR STEP :####################################################################################
   otar:
     - name: transform otar
