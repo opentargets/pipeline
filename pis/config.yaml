@@ -741,6 +741,15 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
+  #: LOF_CURATION VARIANT ANNOTATIONS :##############################################################
+  lof_curation:
+    - name: explode_glob lof_curation annotation parts
+      glob: gs://otar013-ppp/OTAR2075_lof_curation/lof_curation_variant_annotations/**/*.parquet
+      do:
+        - name: copy lof_curation ${match_path}/${match_stem}.${match_ext}
+          source: ${uri}
+          destination: input/variant/lof_curation/${match_path}/${match_stem}.${match_ext}
+
   #: L2G STEP :#####################################################################################
   l2g:
     - name: copy_many l2g gold standard
