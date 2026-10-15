@@ -206,9 +206,7 @@ def _flag(frame: pl.LazyFrame, condition: pl.Expr, flag: QualityFlag) -> pl.Lazy
 def validate_datasource_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag data sources other than E2G."""
     logger.info('Validating enhancer-to-gene data sources')
-    return _flag(
-        frame, pl.col('datasourceId') != E2G.datasource_id, QualityFlag.UNKNOWN_PROJECT_ID
-    )
+    return _flag(frame, pl.col('datasourceId') != E2G.datasource_id, QualityFlag.UNKNOWN_PROJECT_ID)
 
 
 def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.LazyFrame:
@@ -304,6 +302,13 @@ def enhancer_to_gene(
     destinations = EnhancerToGeneDestination.model_validate(destination)
     options = EnhancerToGeneSettings.model_validate(settings)
     target = scan_dataset(sources.target)
+    if 'canonicalTranscript' not in target.collect_schema():
+        target = target.with_columns(
+            pl.lit(
+                None,
+                dtype=pl.Struct({'chromosome': pl.String, 'strand': pl.String, 'start': pl.Int64, 'end': pl.Int64}),
+            ).alias('canonicalTranscript')
+        )
     biosample = scan_dataset(sources.biosample)
     contig = scan_dataset(sources.chromosome)
     biosample_mapping = scan_dataset(sources.biosample_lut, format='csv', has_header=True)
