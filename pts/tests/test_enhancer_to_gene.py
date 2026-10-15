@@ -341,7 +341,8 @@ def test_composed_qc_pipeline_and_valid_rows():
     assert result.invalid.collect()['intervalId'].to_list() == ['interval1']
 
 
-def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path):
+@pytest.mark.parametrize('missing_canonical_transcript', [False, True])
+def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, missing_canonical_transcript):
     """The entire step writes schema-preserving evidence to separate dataset directories."""
     from unittest.mock import Mock
 
@@ -368,6 +369,8 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path):
             ).alias('canonicalTranscript')
         )
     )
+    if missing_canonical_transcript:
+        target = target.drop('canonicalTranscript')
     frames = {
         'target': target,
         'biosample': pl.DataFrame({'biosampleId': ['CL_1']}),
