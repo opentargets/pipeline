@@ -383,6 +383,12 @@ def test_generate_drops_rows_whose_split_lists_other_than_drug_are_null(tmp_path
     assert raw.filter(pl.col('biomarkerName').str.starts_with('no '))['biomarkerName'].to_list() == ['no drug']
 
 
+def test_generate_maps_a_drug_full_name_fallback_to_its_drug_id(tmp_path: Path) -> None:
+    raw = generate(**_sources(tmp_path, [{**BASE, 'Drug': '', 'DrugFullName': 'Vemurafenib'}])).collect()
+
+    assert raw.select('drugFromSource', 'drugId').rows() == [('Vemurafenib', 'CHEMBL1')]
+
+
 def test_generate_gives_no_urls_for_pmid_and_ncit_sources(tmp_path: Path) -> None:
     sources = _sources(tmp_path, [{**BASE, 'Source': 'PMID:666;NCIT:C1;AACR 2012'}])
     _jsonl(

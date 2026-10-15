@@ -217,8 +217,8 @@ def _enrich(
             Association=pl.col('Association').replace(DRUGRESPONSE2EFO),
         )
         .join(diseases, on='tumor_type', how='left', maintain_order='left')
-        .with_columns(drug=drug.str.to_uppercase())
         .with_columns(drug=pl.when(drug.is_null() | (drug.str.len_chars() == 0)).then('DrugFullName').otherwise(drug))
+        .with_columns(drug=drug.str.to_uppercase())
         .join(drugs, on='drug', how='left', maintain_order='left')
         .with_columns(
             drug=initcap(drug),
