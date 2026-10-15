@@ -7,7 +7,8 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
-from pts.transformers.variant_utils.annotations import hash_long_variant_ids, normalize_variant_effects
+from pts.transformers.utils.variant_identifier import hash_long_variant_ids
+from pts.transformers.variant_utils.annotations import normalize_variant_effects
 
 SEQUENCE_ONTOLOGY = {
     'transcript_ablation': 'SO_0001893',

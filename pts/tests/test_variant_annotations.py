@@ -6,10 +6,10 @@ import polars as pl
 import pytest
 
 from pts.schemas.variant import variant_schema
+from pts.transformers.utils.variant_identifier import hash_long_variant_ids
 from pts.transformers.variant_utils.annotations import (
     add_annotation,
     annotate_with_amino_acid_consequences,
-    hash_long_variant_ids,
     normalize_variant_effects,
 )
 

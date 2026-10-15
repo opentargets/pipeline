@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from pts.schemas.amino_acid_variants import variant_effect_dtype
+from pts.schemas.variant_annotation import variant_effect_dtype
 
 variant_schema = pl.Schema({
     'variantId': pl.String,

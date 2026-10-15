@@ -10,10 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.variant_identifier import hash_long_variant_ids
 from pts.transformers.variant_utils.annotations import (
     add_annotation,
     annotate_with_amino_acid_consequences,
-    hash_long_variant_ids,
 )
 from pts.transformers.variant_utils.vep import parse_vep, read_vep
 

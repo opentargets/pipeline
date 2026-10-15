@@ -1,24 +1,10 @@
 """Lazy variant identifier and annotation transformations."""
 
 import polars as pl
-import polars_hash as plh
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.foldx import normalise_foldx_score
-
-
-def hash_long_variant_ids(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
-    """Hash identifiers with missing coordinates or long alleles."""
-    digest = plh.col('variantId').nchash.md5()
-    return frame.with_columns(
-        pl
-        .when(pl.col('chromosome').is_null() | pl.col('position').is_null())
-        .then(pl.concat_str(pl.lit('OTVAR_'), digest))
-        .when(pl.col('variantId').str.len_chars() >= hash_threshold)
-        .then(pl.concat_str(pl.lit('OTVAR'), pl.col('chromosome'), pl.col('position'), digest, separator='_'))
-        .otherwise(pl.col('variantId'))
-        .alias('variantId')
-    )
+from pts.transformers.lof_curation import normalise_lof_score
 
 
 def _rescale(value: pl.Expr, low: float, high: float, minimum: float, maximum: float) -> pl.Expr:
@@ -110,11 +96,7 @@ def normalize_variant_effects(frame: pl.LazyFrame) -> pl.LazyFrame:
         .when(method == 'Pangolin')
         .then(pangolin)
         .when(method == 'LossOfFunctionCuration')
-        .then(
-            assessment.replace_strict(
-                {'lof': 1.0, 'likely_lof': 0.5, 'uncertain': 0.0, 'likely_not_lof': -0.5, 'not_lof': -1.0}, default=None
-            )
-        )
+        .then(normalise_lof_score(assessment))
         .when(method.is_in(['SpliceAI', 'VEP']))
         .then(score)
         .when(method == 'GERP')

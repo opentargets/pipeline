@@ -1,0 +1,16 @@
+---
+steps:
+  variant:
+    - name: transform variant index
+      transformer: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - input/variant/gnomad
+          - intermediate/variant/lof_curation
+        amino_acid_annotations:
+          - intermediate/variant/foldx
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
