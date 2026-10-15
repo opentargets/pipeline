@@ -628,6 +628,15 @@ steps:
       destination: input/interaction/string-interactions.txt.gz
   ##################################################################################################
 
+  #: FOLDX VARIANT ANNOTATIONS :##############################################################
+  foldx:
+    - name: explode_glob foldx annotation parts
+      glob: gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation/**/*.parquet
+      do:
+        - name: copy foldx ${match_path}/${match_stem}.${match_ext}
+          source: ${uri}
+          destination: input/variant/foldx/${match_path}/${match_stem}.${match_ext}
+
   #: ENCODE STEP :##################################################################################
   encode:
     - name: copy chromosome contigs

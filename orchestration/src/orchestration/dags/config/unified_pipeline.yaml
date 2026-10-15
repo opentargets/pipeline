@@ -82,6 +82,7 @@ cos_image: "cos-133-19999-44-106"
 #
 steps:
   # PIS STEPS
+  pis_foldx:
   pis_encode:
   pis_baseline_expression:
   pis_chembl:
