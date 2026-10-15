@@ -17,7 +17,7 @@ steps:
   #: FOLDX ANNOTATIONS
   foldx:
     - name: transform FoldX annotations
-      source: input/foldx/foldx_export.parquet
+      source: input/foldx
       destination: intermediate/variant/foldx
       transformer: foldx
       settings:

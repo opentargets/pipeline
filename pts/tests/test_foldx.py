@@ -148,3 +148,19 @@ def test_real_step_writes_annotation_dataset(tmp_path):
 def test_settings_reject_unknown_options_and_nonfinite_thresholds(settings):
     with pytest.raises(ValidationError):
         FoldxSettings.model_validate(settings)
+
+
+def test_raw_export_string_types_preserve_ambiguity_and_numeric_filtering():
+    """Raw Parquet stores numbers as strings; ambiguity still compares source strings."""
+    frame = pl.DataFrame({
+        'protein_acc': ['P1', 'P1', 'P2', 'P3'],
+        'position': ['1', '1', '002', '3'],
+        'wild_type': ['A'] * 4,
+        'mutated_type': ['V'] * 4,
+        'plddt': ['0.8', '0.80', '0.9', 'invalid'],
+        'foldx_ddg': ['1', '1', '1.25', '1'],
+    }).lazy()
+    result = transform(frame).collect()
+    assert result['uniprotAccession'].to_list() == ['P2']
+    assert result['aminoAcidChange'].to_list() == ['A002V']
+    assert result['variantEffect'][0][0]['normalisedScore'] == 0.625

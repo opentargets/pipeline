@@ -41,7 +41,9 @@ def filter_foldx_predictions(frame: pl.LazyFrame, plddt_threshold: float) -> pl.
         .select('protein_acc')
         .unique()
     )
-    return frame.filter(pl.col('plddt') > plddt_threshold).join(excluded, on='protein_acc', how='anti')
+    return frame.filter(pl.col('plddt').cast(pl.Float64, strict=False) > plddt_threshold).join(
+        excluded, on='protein_acc', how='anti'
+    )
 
 
 def aggregate_foldx_predictions(frame: pl.LazyFrame) -> pl.LazyFrame:
