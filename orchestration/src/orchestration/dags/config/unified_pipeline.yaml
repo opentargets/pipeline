@@ -525,6 +525,7 @@ steps:
   gentropy_variant:
     depends_on:
       - gentropy_variant_annotation
+      - pis_gnomad
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation

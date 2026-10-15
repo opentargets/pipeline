@@ -670,12 +670,9 @@ steps:
 
   #: GNOMAD VARIANT ANNOTATIONS :##############################################################
   gnomad:
-    - name: explode_glob gnomad annotation parts
-      glob: gs://gnomad_data_2/v4.1/variant_index/**/*.parquet
-      do:
-        - name: copy gnomad ${match_path}/${match_stem}.${match_ext}
-          source: ${uri}
-          destination: input/variant/gnomad/${match_path}/${match_stem}.${match_ext}
+    - name: copy_many gnomad variant annotations
+      sources: gs://gnomad_data_2/v4.1/variant_index/*.parquet
+      destination: input/variant/gnomad
 
   #: GWAS STEP :######################################################################################
   gwas:
