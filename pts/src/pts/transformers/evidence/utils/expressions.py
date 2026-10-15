@@ -39,15 +39,20 @@ def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
 
 
 def _true_log10(series: pl.Series) -> pl.Series:
-    with np.errstate(divide='ignore', invalid='ignore'):
-        values = np.log10(series.cast(pl.Float64).to_numpy())
+    x = series.cast(pl.Float64).to_numpy()
+    # Not np.log10: on AVX512 CPUs numpy dispatches float64 log10 to SVML, which is only 4-ulp
+    # accurate, so results would depend on the host. math.log10 is libm on every machine.
+    values = np.full(len(x), np.nan)
+    positive = x > 0
+    values[positive] = [math.log10(v) for v in x[positive].tolist()]
+    values[x == 0] = -np.inf
     out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
     nulls = np.flatnonzero(series.is_null().to_numpy())
     return out.scatter(nulls, None) if len(nulls) else out
 
 
 def log10(expr: pl.Expr) -> pl.Expr:
-    """Base-10 logarithm through numpy, keeping nulls and NaN.
+    """Base-10 logarithm through libm (`math.log10`), keeping nulls and NaN.
 
     Polars 2 `Expr.log10` differs from libm in the last bit for about half of all values.
     """

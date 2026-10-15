@@ -7,7 +7,6 @@ import random
 import warnings
 from math import isnan
 
-import numpy as np
 import polars as pl
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
@@ -16,12 +15,11 @@ from pts.transformers.evidence.encore import ENCORE
 from pts.transformers.evidence.utils.expressions import log10
 
 
-def test_log10_is_numpy_log10_and_within_one_ulp_of_libm() -> None:
+def test_log10_is_libm_log10() -> None:
     rng = random.Random(0)
-    values = [10 ** rng.uniform(-12, 3) for _ in range(5000)]
+    values = [10 ** rng.uniform(-12, 3) for _ in range(5000)] + [float('inf')]
     got = pl.DataFrame({'x': values}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
-    assert got == np.log10(np.array(values)).tolist()
-    assert all(abs(g - math.log10(v)) <= math.ulp(math.log10(v)) for g, v in zip(got, values, strict=True))
+    assert got == [math.log10(v) for v in values]
 
 
 def test_log10_keeps_null_nan_zero_and_one() -> None:
