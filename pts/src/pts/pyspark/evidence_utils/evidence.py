@@ -11,7 +11,8 @@ from pyspark.sql import types as t
 from pyspark.sql.window import Window
 
 from pts.pyspark.common.cast_to_schema import harmonise_to_schema
-from pts.pyspark.common.utils import parse_spark_schema, required_columns, update_quality_flag
+from pts.pyspark.common.utils import polars_schema_to_spark, required_columns, update_quality_flag
+from pts.schemas.evidence import evidence_schema as polars_evidence_schema
 
 
 class EvidenceFlags(StrEnum):
@@ -47,7 +48,7 @@ class Evidence:
         if self.QC_COLUMN not in self.df.columns:
             self._df = self._df.withColumn(self.QC_COLUMN, f.lit([]).cast(t.ArrayType(t.StringType())))
 
-        evidence_schema = parse_spark_schema('evidence.json')
+        evidence_schema = polars_schema_to_spark(polars_evidence_schema)
         self._df = harmonise_to_schema(self._df, evidence_schema)
 
     @required_columns(['targetFromSourceId'])

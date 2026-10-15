@@ -38,8 +38,7 @@ def build_output(
     """Assemble the release schema from the scored keys and their explanations.
 
     The `features` array carries one struct per feature, in fitted order. Types are pinned here
-    rather than left to inference: `gentropy_l2g_evidence` reads this dataset with an imposed
-    schema, so a drift would be coerced silently instead of raised.
+    rather than left to inference.
 
     Args:
         keys: `studyLocusId`, `geneId` and `score`, one row per prediction.

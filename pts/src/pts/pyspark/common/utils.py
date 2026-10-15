@@ -1,19 +1,50 @@
 import importlib.resources as pkg_resources
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
 from functools import wraps
 from typing import Any, TypeVar, cast
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import pyspark.sql.functions as f
 from pyspark.sql import Column, DataFrame, SparkSession
-from pyspark.sql.types import IntegerType, StringType, StructField, StructType
+from pyspark.sql.types import (
+    ArrayType,
+    BooleanType,
+    ByteType,
+    DataType,
+    DateType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    ShortType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 from pts import schemas
 
 F = TypeVar('F', bound=Callable[..., Any])
+
+# The inverse of the spark->polars mapping that `pts/schemas/evidence.json` used to be read
+# through, kept exhaustive over that mapping so a schema round-trips unchanged.
+_POLARS_TO_SPARK_TYPE: dict[Any, type[DataType]] = {
+    pl.Boolean: BooleanType,
+    pl.Int8: ByteType,
+    pl.Int16: ShortType,
+    pl.Int32: IntegerType,
+    pl.Int64: LongType,
+    pl.Float32: FloatType,
+    pl.Float64: DoubleType,
+    pl.String: StringType,
+    pl.Date: DateType,
+    pl.Datetime: TimestampType,
+}
 
 
 def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> Column:
@@ -136,6 +167,55 @@ def parse_spark_schema(schema_json: str) -> StructType:
         core_schema = json.load(schema)
 
     return StructType.fromJson(core_schema)
+
+
+def polars_type_to_spark(dtype: Any) -> DataType:
+    """Convert a Polars dtype into its Spark equivalent.
+
+    Args:
+        dtype (Any): a Polars dtype, either a class (`pl.String`) or an instance (`pl.List(...)`).
+
+    Returns:
+        DataType: the equivalent Spark type.
+
+    Raises:
+        ValueError: if the dtype has no Spark equivalent here, rather than silently substituting
+            one -- a wrong type in a read schema changes what spark parses, not just how it is
+            labelled.
+    """
+    if isinstance(dtype, pl.List):
+        return ArrayType(polars_type_to_spark(dtype.inner))
+
+    if isinstance(dtype, pl.Struct):
+        # nullable=True throughout: spark's own `StructType.fromJson` defaulted every evidence
+        # field to nullable, and narrowing that would make spark reject rows it used to read.
+        return StructType([
+            StructField(field.name, polars_type_to_spark(field.dtype), nullable=True) for field in dtype.fields
+        ])
+
+    spark_type = _POLARS_TO_SPARK_TYPE.get(dtype.base_type() if isinstance(dtype, pl.DataType) else dtype)
+    if spark_type is None:
+        msg = f'Unsupported Polars type: {dtype}'
+        raise ValueError(msg)
+    return spark_type()
+
+
+def polars_schema_to_spark(schema: Mapping[str, Any]) -> StructType:
+    """Convert a Polars schema mapping into a Spark `StructType`.
+
+    Lets `pts.schemas` stay polars-native (see `pts/schemas/evidence.py`) while the remaining
+    pyspark jobs still get the `StructType` their readers need. Field order is preserved, since
+    the mapping's order is the schema's column order.
+
+    Args:
+        schema (Mapping[str, Any]): field name to Polars dtype, in column order.
+
+    Returns:
+        StructType: the equivalent Spark schema.
+    """
+    return StructType([
+        StructField(name, polars_type_to_spark(dtype), nullable=True) for name, dtype in schema.items()
+    ])
 
 
 def gff3_strand(col: Column) -> Column:

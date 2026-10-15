@@ -354,8 +354,8 @@ steps:
   #: EVIDENCE_EXPRESSION_ATLAS STEP :###############################################################
   evidence_expression_atlas:
     - name: copy atlas
-      source: gs://otar010-atlas/cttv010-${atlas_version}.filtered.transformed.json.bz2
-      destination: input/evidence/atlas.json.bz2
+      source: gs://otar010-atlas/cttv010-${atlas_version}.filtered.transformed.parquet
+      destination: input/evidence/atlas.parquet
   ##################################################################################################
 
   #: EVIDENCE_CANCER_BIOMARKERS STEP :##############################################################

@@ -231,6 +231,30 @@ def write_dataset(
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
     """
+    sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
+
+
+def sink_dataset(
+    frame: pl.LazyFrame | pl.DataFrame,
+    path: str,
+    *,
+    approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
+) -> pl.LazyFrame:
+    """Plan the `write_dataset` write of one dataset without running it.
+
+    Several sinks collected together with `pl.collect_all` compute their shared input once.
+
+    Args:
+        frame: the data to write; a `DataFrame` is made lazy so there is one code path.
+        path: destination directory, used as given.
+        approximate_bytes_per_file: target part size, as in `write_dataset`.
+
+    Returns:
+        The lazy sink; nothing is written until it is collected.
+
+    Raises:
+        ValueError: if anything already exists at `path`, file or directory.
+    """
     try:
         StorageHandle(path).stat()
     except NotFoundError:
@@ -243,7 +267,8 @@ def write_dataset(
         raise ValueError(msg)
 
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
-    lf.sink_parquet(
+    return lf.sink_parquet(
         pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),
         compression='zstd',
+        lazy=True,
     )
