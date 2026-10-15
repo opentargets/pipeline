@@ -1,10 +1,8 @@
 """Schema for the evidence dataset.
 
-Field order is load-bearing, not cosmetic: this dict's key order becomes the frame's column
-order in `_harmonise_to_schema`, and column order feeds the content hash that decides which row
-survives de-duplication in `Evidence.validate_uniqueness`. Reordering these keys silently changes
-which duplicate wins. Generated from the spark `evidence.json` this replaced, preserving that
-file's field order exactly.
+Generated from the spark `evidence.json` this replaced, preserving its field order. Struct field
+order feeds the content hash in `Evidence.validate_uniqueness`, so reordering struct fields changes
+which duplicate survives. Top-level key order does not set the output column order.
 """
 
 from typing import Any
