@@ -1617,6 +1617,21 @@ steps:
       settings:
         locus_to_gene_threshold: *l2g_threshold
 
+  #: VARIANT MIGRATION
+  variant:
+    - name: transform variant index
+      transformer: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - gs://gnomad_data_2/v4.1/variant_index
+        amino_acid_annotations:
+          - gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view

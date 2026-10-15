@@ -68,20 +68,6 @@ steps:
             provisioning_model: STANDARD # Other options: SPOT (but careful with max_retry_count)
         logs: {}
 
-  variant:
-    params:
-      step: variant_index
-      step.session.write_mode: overwrite
-      step.session.output_partitions: 25
-      # INPUTS
-      step.vep_output_json_path: '{{release_uri}}/intermediate/variant_annotation'
-      step.variant_annotations_path:
-        - '{{release_uri}}/input/variant/gnomad'
-      step.amino_acid_change_annotations:
-        - '{{release_uri}}/intermediate/variant/foldx'
-      # OUTPUTS
-      step.variant_index_path: '{{release_uri}}/output/variant'
-
   l2g_feature_matrix:
     params:
       step: locus_to_gene_feature_matrix
