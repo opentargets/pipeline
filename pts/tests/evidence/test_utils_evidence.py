@@ -566,6 +566,11 @@ class TestAssignEvidenceIdentifier:
         assert ids[0] != ids[2]
         assert all(len(i) == 40 for i in ids)
 
+    def test_field_boundaries_are_part_of_the_identifier(self) -> None:
+        lf = pl.LazyFrame({'contrast': ['ab', 'a'], 'studyId': ['c', 'bc']})
+        out = Evidence(lf).assign_evidence_identifier(['contrast', 'studyId']).lf.collect()
+        assert out['id'][0] != out['id'][1]
+
     def test_missing_unique_field_is_silently_skipped(self) -> None:
         # Not every unique_fields entry from config.yaml is present on every datasource's
         # frame; assign_evidence_identifier must not raise, mirroring the pyspark

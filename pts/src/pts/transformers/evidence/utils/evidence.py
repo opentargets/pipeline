@@ -216,7 +216,7 @@ class Evidence:
         return Evidence(self.lf.filter(pl.col('datasourceId') == datasource_id))
 
     def assign_evidence_identifier(self, unique_fields: list[str]) -> Evidence:
-        """Assign an `id` column, sha1 of the concatenated source-specific fields.
+        """Assign an `id` column, sha1 of the source-specific fields joined by U+0001.
 
         Args:
             unique_fields: column names that define evidence uniqueness for this datasource.
@@ -234,7 +234,7 @@ class Evidence:
         # `concat_ws('')` over zero columns is well-defined and yields `''`. Unreachable with
         # today's config.yaml (every unique_fields list names at least one column that is
         # always present), but a raw ComputeError here would be a real leak if that ever changes.
-        id_input = pl.concat_str(parts) if parts else pl.lit('')
+        id_input = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
             self.lf.with_columns(id_input.alias('_id_input'))
             .with_columns(plh.col('_id_input').nchash.sha1().alias('id'))
