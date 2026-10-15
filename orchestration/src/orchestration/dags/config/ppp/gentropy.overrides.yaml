@@ -61,4 +61,4 @@ steps:
       step.variant_annotations_path:
         - '{{release_uri}}/input/variant/gnomad'
         # PPP
-        - gs://otar013-ppp/OTAR2075_lof_curation/lof_curation_variant_annotations
+        - '{{release_uri}}/intermediate/variant/lof_curation'

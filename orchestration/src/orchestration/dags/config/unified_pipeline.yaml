@@ -116,6 +116,10 @@ steps:
   pis_target:
   pis_target_prioritisation:
   # PTS STEPS
+  pts_lof_curation:
+    ppp_only: true
+    depends_on:
+      - pis_lof_curation
   pts_reactome:
     depends_on:
       - pis_reactome
@@ -542,6 +546,8 @@ steps:
     depends_on:
       - gentropy_variant_annotation
       - pis_gnomad
+    depends_on_ppp:
+      - pts_lof_curation
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation
