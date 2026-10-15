@@ -508,8 +508,8 @@ steps:
 
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
-    - name: pyspark gene_essentiality
-      pyspark: gene_essentiality
+    - name: transform gene_essentiality
+      transformer: gene_essentiality
       source:
         models: input/target/gene-essentiality/depmap/Model.csv
         essential_genes: input/target/gene-essentiality/depmap/CRISPRInferredCommonEssentials.csv
@@ -522,7 +522,6 @@ steps:
       destination: output/target_essentiality
       settings:
         keep_only_essentials: false
-        partition_count: 4
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
