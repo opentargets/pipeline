@@ -158,7 +158,9 @@ def _ancestor_and_descendant_closure(direct: pl.DataFrame) -> tuple[pl.DataFrame
         `(ancestors, descendants)`, each a `biosampleId` + `list[str]` column, with one row per
         node that has at least one (a node with none is absent, not null-valued).
     """
-    frontier = direct.filter(pl.col('parents').is_not_null()).explode('parents').rename({'parents': 'ancestor'})
+    frontier = (
+        direct.filter(pl.col('parents').is_not_null()).explode('parents').rename({'parents': 'ancestor'}).unique()
+    )
     all_relationships = frontier
 
     while frontier.height > 0:
@@ -168,6 +170,8 @@ def _ancestor_and_descendant_closure(direct: pl.DataFrame) -> tuple[pl.DataFrame
             .filter(pl.col('parents').is_not_null())
             .explode('parents')
             .select(pl.col('biosampleId'), pl.col('parents').alias('ancestor'))
+            .unique()
+            .join(all_relationships, on=['biosampleId', 'ancestor'], how='anti')
         )
         if frontier.height == 0:
             break
