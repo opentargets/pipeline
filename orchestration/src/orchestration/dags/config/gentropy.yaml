@@ -176,7 +176,7 @@ steps:
       # INPUTS
       step.vep_output_json_path: '{{release_uri}}/intermediate/variant_annotation'
       step.variant_annotations_path:
-        - gs://gnomad_data_2/v4.1/variant_index
+        - '{{release_uri}}/input/variant/gnomad'
       step.amino_acid_change_annotations:
         - gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation
       # OUTPUTS
