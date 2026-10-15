@@ -297,8 +297,8 @@ steps:
 
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
-    - name: pyspark coding_variant view
-      pyspark: coding_variant
+    - name: transform coding_variant view
+      transformer: coding_variant
       source:
         variant: output/variant
         target: output/target
