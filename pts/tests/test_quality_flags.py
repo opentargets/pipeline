@@ -1,0 +1,70 @@
+"""Tests for splitting flagged datasets into accepted and excluded records."""
+
+from enum import StrEnum
+
+import polars as pl
+import pytest
+from polars.testing import assert_frame_equal
+
+from pts.transformers.utils.quality_flags import valid_rows
+
+
+class Flag(StrEnum):
+    """Flag names deliberately differ from the persisted flag values."""
+
+    INVALID = 'invalid study'
+    OTHER = 'another invalid reason'
+
+
+@pytest.fixture
+def doctest_namespace():
+    """Polars utility tests do not require the shared Spark session."""
+    return {}
+
+
+def flagged_frame():
+    """Retain null and empty lists alongside rows with multiple QC flags."""
+    return pl.DataFrame({
+        'id': ['null', 'empty', 'valid', 'invalid', 'multiple'],
+        'qualityControls': [
+            None,
+            [],
+            ['informational'],
+            ['invalid study'],
+            ['informational', 'another invalid reason'],
+        ],
+        'payload': [1, 2, 3, 4, 5],
+    }).lazy()
+
+
+def test_valid_rows_splits_using_enum_values_and_preserves_rows():
+    """Configured enum values exclude matching rows without rewriting their contents."""
+    frame = flagged_frame()
+    result = valid_rows(frame, [Flag.INVALID, Flag.OTHER])
+    assert isinstance(result.valid, pl.LazyFrame)
+    assert isinstance(result.invalid, pl.LazyFrame)
+    assert_frame_equal(result.valid.collect(), frame.filter(pl.col('id').is_in(['null', 'empty', 'valid'])).collect())
+    assert_frame_equal(result.invalid.collect(), frame.filter(pl.col('id').is_in(['invalid', 'multiple'])).collect())
+
+
+def test_valid_rows_excludes_only_selected_reasons():
+    """QC reasons outside the exclusion settings do not exclude a row."""
+    result = valid_rows(flagged_frame(), [Flag.INVALID])
+    assert result.valid.collect()['id'].to_list() == ['null', 'empty', 'valid', 'multiple']
+    assert result.invalid.collect()['id'].to_list() == ['invalid']
+
+
+def test_valid_rows_with_no_invalid_flags_accepts_every_row():
+    """An empty reason list accepts all rows, including rows carrying QC flags."""
+    frame = flagged_frame()
+    result = valid_rows(frame, [])
+    assert_frame_equal(result.valid.collect(), frame.collect())
+    assert_frame_equal(result.invalid.collect(), frame.collect().head(0))
+
+
+def test_valid_rows_preserves_schema_for_empty_input():
+    """Both empty partitions retain the input schema."""
+    frame = flagged_frame().limit(0)
+    result = valid_rows(frame, [Flag.INVALID])
+    assert_frame_equal(result.valid.collect(), frame.collect())
+    assert_frame_equal(result.invalid.collect(), frame.collect())
