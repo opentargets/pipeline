@@ -668,6 +668,15 @@ steps:
       destination: input/encode/rE2G/datasets
   ##################################################################################################
 
+  #: GNOMAD VARIANT ANNOTATIONS :##############################################################
+  gnomad:
+    - name: explode_glob gnomad annotation parts
+      glob: gs://gnomad_data_2/v4.1/variant_index/**/*.parquet
+      do:
+        - name: copy gnomad ${match_path}/${match_stem}.${match_ext}
+          source: ${uri}
+          destination: input/variant/gnomad/${match_path}/${match_stem}.${match_ext}
+
   #: GWAS STEP :######################################################################################
   gwas:
     - name: copy_many GCCA study
