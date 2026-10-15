@@ -1,127 +1,130 @@
-"""Tests for the search_ebi pyspark module.
+"""Tests for the search_ebi transformer."""
 
-Ported from platform-etl-backend SearchEBI step.
-"""
+from pathlib import Path
 
-from pyspark.sql import Row
-from pyspark.sql.types import (
-    DoubleType,
-    StringType,
-    StructField,
-    StructType,
-)
+import polars as pl
 
-from pts.pyspark.search_ebi import _generate_datasets
+from pts.transformers.search_ebi import generate_datasets, search_ebi
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-DISEASE_SCHEMA = StructType([
-    StructField('diseaseId', StringType()),
-    StructField('name', StringType()),
-])
-
-TARGET_SCHEMA = StructType([
-    StructField('targetId', StringType()),
-    StructField('approvedSymbol', StringType()),
-])
-
-ASSOC_SCHEMA = StructType([
-    StructField('targetId', StringType()),
-    StructField('diseaseId', StringType()),
-    StructField('associationScore', DoubleType()),
-])
-
-EVIDENCE_SCHEMA = StructType([
-    StructField('targetId', StringType()),
-    StructField('diseaseId', StringType()),
-    StructField('score', DoubleType()),
-])
+COLUMNS = ['targetId', 'diseaseId', 'approvedSymbol', 'name', 'score']
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+def disease(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema={'diseaseId': pl.String, 'name': pl.String}, orient='row')
 
 
-def test_generate_datasets_associations_output_columns(spark):
-    """_generate_datasets associations output has expected columns."""
-    diseases = spark.createDataFrame([Row(diseaseId='D1', name='Cancer')], DISEASE_SCHEMA)
-    targets = spark.createDataFrame([Row(targetId='T1', approvedSymbol='BRCA1')], TARGET_SCHEMA)
-    associations = spark.createDataFrame([Row(targetId='T1', diseaseId='D1', associationScore=0.9)], ASSOC_SCHEMA)
-    evidence = spark.createDataFrame([], EVIDENCE_SCHEMA)
-
-    result = _generate_datasets(diseases, targets, associations, evidence)
-    cols = set(result['associations'].columns)
-    assert 'targetId' in cols
-    assert 'diseaseId' in cols
-    assert 'approvedSymbol' in cols
-    assert 'name' in cols
-    assert 'score' in cols
+def target(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema={'targetId': pl.String, 'approvedSymbol': pl.String}, orient='row')
 
 
-def test_generate_datasets_associations_inner_join(spark):
-    """_generate_datasets associations only keeps rows matching both target and disease."""
-    diseases = spark.createDataFrame([Row(diseaseId='D1', name='Cancer')], DISEASE_SCHEMA)
-    targets = spark.createDataFrame([Row(targetId='T1', approvedSymbol='BRCA1')], TARGET_SCHEMA)
-    associations = spark.createDataFrame(
-        [
-            Row(targetId='T1', diseaseId='D1', associationScore=0.9),
-            Row(targetId='T2', diseaseId='D1', associationScore=0.5),  # T2 not in targets
-        ],
-        ASSOC_SCHEMA,
+def association(rows: list[tuple]) -> pl.LazyFrame:
+    schema = {'targetId': pl.String, 'diseaseId': pl.String, 'associationScore': pl.Float64}
+    return pl.LazyFrame(rows, schema=schema, orient='row')
+
+
+def evidence(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema={'targetId': pl.String, 'diseaseId': pl.String, 'score': pl.Float64}, orient='row')
+
+
+def test_associations_output_columns() -> None:
+    out = generate_datasets(
+        disease([('D1', 'Cancer')]),
+        target([('T1', 'BRCA1')]),
+        association([('T1', 'D1', 0.9)]),
+        evidence([]),
     )
-    evidence = spark.createDataFrame([], EVIDENCE_SCHEMA)
-
-    result = _generate_datasets(diseases, targets, associations, evidence)
-    rows = result['associations'].collect()
-    assert len(rows) == 1
-    assert rows[0].targetId == 'T1'
+    assert out['associations'].collect_schema().names() == COLUMNS
 
 
-def test_generate_datasets_associations_score_alias(spark):
-    """_generate_datasets renames associationScore to score."""
-    diseases = spark.createDataFrame([Row(diseaseId='D1', name='Cancer')], DISEASE_SCHEMA)
-    targets = spark.createDataFrame([Row(targetId='T1', approvedSymbol='BRCA1')], TARGET_SCHEMA)
-    associations = spark.createDataFrame([Row(targetId='T1', diseaseId='D1', associationScore=0.8)], ASSOC_SCHEMA)
-    evidence = spark.createDataFrame([], EVIDENCE_SCHEMA)
-
-    result = _generate_datasets(diseases, targets, associations, evidence)
-    row = result['associations'].collect()[0]
-    assert abs(row.score - 0.8) < 1e-6
-
-
-def test_generate_datasets_evidence_output_columns(spark):
-    """_generate_datasets evidence output has expected columns."""
-    diseases = spark.createDataFrame([Row(diseaseId='D1', name='Cancer')], DISEASE_SCHEMA)
-    targets = spark.createDataFrame([Row(targetId='T1', approvedSymbol='BRCA1')], TARGET_SCHEMA)
-    associations = spark.createDataFrame([], ASSOC_SCHEMA)
-    evidence = spark.createDataFrame([Row(targetId='T1', diseaseId='D1', score=0.7)], EVIDENCE_SCHEMA)
-
-    result = _generate_datasets(diseases, targets, associations, evidence)
-    cols = set(result['evidence'].columns)
-    assert 'targetId' in cols
-    assert 'diseaseId' in cols
-    assert 'approvedSymbol' in cols
-    assert 'name' in cols
-    assert 'score' in cols
-
-
-def test_generate_datasets_evidence_inner_join(spark):
-    """_generate_datasets evidence only keeps rows matching both target and disease."""
-    diseases = spark.createDataFrame([Row(diseaseId='D1', name='Cancer')], DISEASE_SCHEMA)
-    targets = spark.createDataFrame([Row(targetId='T1', approvedSymbol='BRCA1')], TARGET_SCHEMA)
-    associations = spark.createDataFrame([], ASSOC_SCHEMA)
-    evidence = spark.createDataFrame(
-        [
-            Row(targetId='T1', diseaseId='D1', score=0.7),
-            Row(targetId='T1', diseaseId='D2', score=0.5),  # D2 not in diseases
-        ],
-        EVIDENCE_SCHEMA,
+def test_associations_inner_join() -> None:
+    out = generate_datasets(
+        disease([('D1', 'Cancer')]),
+        target([('T1', 'BRCA1')]),
+        association([('T1', 'D1', 0.9), ('T2', 'D1', 0.5)]),
+        evidence([]),
     )
+    assert out['associations'].collect().rows() == [('T1', 'D1', 'BRCA1', 'Cancer', 0.9)]
 
-    result = _generate_datasets(diseases, targets, associations, evidence)
-    rows = result['evidence'].collect()
-    assert len(rows) == 1
-    assert rows[0].diseaseId == 'D1'
+
+def test_associations_score_alias_keeps_float64() -> None:
+    out = generate_datasets(
+        disease([('D1', 'Cancer')]),
+        target([('T1', 'BRCA1')]),
+        association([('T1', 'D1', 0.8)]),
+        evidence([]),
+    )
+    got = out['associations'].collect()
+    assert got.schema['score'] == pl.Float64
+    assert got['score'].to_list() == [0.8]
+
+
+def test_evidence_inner_join() -> None:
+    out = generate_datasets(
+        disease([('D1', 'Cancer')]),
+        target([('T1', 'BRCA1')]),
+        association([]),
+        evidence([('T1', 'D1', 0.7), ('T1', 'D2', 0.5)]),
+    )
+    assert out['evidence'].collect().rows() == [('T1', 'D1', 'BRCA1', 'Cancer', 0.7)]
+
+
+def test_evidence_duplicates_kept_unknown_ids_dropped() -> None:
+    d = pl.LazyFrame({'diseaseId': ['D1'], 'name': ['dis']})
+    t = pl.LazyFrame({'targetId': ['T1'], 'approvedSymbol': ['SYM']})
+    a = pl.LazyFrame({'targetId': ['T1', 'T9'], 'diseaseId': ['D1', 'D1'], 'associationScore': [0.5, 0.1]})
+    e = pl.LazyFrame({'targetId': ['T1', 'T1'], 'diseaseId': ['D1', 'D1'], 'score': [0.2, 0.2]})
+    out = generate_datasets(d, t, a, e)
+    assert out['associations'].collect().rows() == [('T1', 'D1', 'SYM', 'dis', 0.5)]
+    assert out['evidence'].collect().height == 2
+
+
+def test_extra_columns_do_not_leak() -> None:
+    d = disease([('D1', 'Cancer')]).with_columns(pl.lit('x').alias('score'))
+    t = target([('T1', 'BRCA1')]).with_columns(pl.lit('y').alias('name'))
+    out = generate_datasets(d, t, association([('T1', 'D1', 0.4)]), evidence([('T1', 'D1', 0.3)]))
+    assert out['associations'].collect().rows() == [('T1', 'D1', 'BRCA1', 'Cancer', 0.4)]
+    assert out['evidence'].collect().rows() == [('T1', 'D1', 'BRCA1', 'Cancer', 0.3)]
+
+
+def test_search_ebi_end_to_end_two_chunks_deterministic(tmp_path: Path) -> None:
+    pl.DataFrame({'id': ['D1', 'D2'], 'name': ['a', 'b'], 'extra': [1, 2]}).write_parquet(tmp_path / 'disease.parquet')
+    pl.DataFrame({'id': ['T1', 'T2'], 'approvedSymbol': ['S1', 'S2'], 'extra': [1, 2]}).write_parquet(
+        tmp_path / 'target.parquet'
+    )
+    assoc = pl.concat(
+        [
+            pl.DataFrame({'targetId': ['T2'], 'diseaseId': ['D2'], 'associationScore': [0.1]}),
+            pl.DataFrame({'targetId': ['T1', 'T9'], 'diseaseId': ['D1', 'D1'], 'associationScore': [0.9, 0.2]}),
+        ],
+        rechunk=False,
+    )
+    assoc.write_parquet(tmp_path / 'assoc.parquet')
+    ev = pl.concat(
+        [
+            pl.DataFrame({'targetId': ['T2', 'T1'], 'diseaseId': ['D1', 'D1'], 'score': [0.3, 0.6]}),
+            pl.DataFrame({'targetId': ['T1'], 'diseaseId': ['D1'], 'score': [0.6]}),
+        ],
+        rechunk=False,
+    )
+    ev.write_parquet(tmp_path / 'ev.parquet')
+    source = {
+        'disease': str(tmp_path / 'disease.parquet'),
+        'target': str(tmp_path / 'target.parquet'),
+        'association': str(tmp_path / 'assoc.parquet'),
+        'evidence': str(tmp_path / 'ev.parquet'),
+    }
+    blobs = []
+    for run in ('a', 'b'):
+        dest = {'associations': str(tmp_path / run / 'assoc'), 'evidence': str(tmp_path / run / 'ev')}
+        search_ebi(source, dest, None, None)
+        blobs.append({k: [p.read_bytes() for p in sorted(Path(v).glob('*.parquet'))] for k, v in dest.items()})
+        got_a = pl.read_parquet(Path(dest['associations']) / '*.parquet')
+        got_e = pl.read_parquet(Path(dest['evidence']) / '*.parquet')
+        assert got_a.columns == COLUMNS
+        assert got_a.rows() == [('T1', 'D1', 'S1', 'a', 0.9), ('T2', 'D2', 'S2', 'b', 0.1)]
+        assert got_e.rows() == [
+            ('T1', 'D1', 'S1', 'a', 0.6),
+            ('T1', 'D1', 'S1', 'a', 0.6),
+            ('T2', 'D1', 'S2', 'a', 0.3),
+        ]
+    assert blobs[0] == blobs[1]
