@@ -630,9 +630,9 @@ steps:
 
   #: FOLDX VARIANT ANNOTATIONS :##############################################################
   foldx:
-    - name: copy_many FoldX variant annotations
-      sources: gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation/*.parquet
-      destination: input/variant/foldx
+    - name: copy FoldX raw export
+      source: gs://otar013-ppp/OTAR2081_foldx/foldx_export.parquet
+      destination: input/foldx/foldx_export.parquet
 
   #: ENCODE STEP :##################################################################################
   encode:

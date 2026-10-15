@@ -178,7 +178,7 @@ steps:
       step.variant_annotations_path:
         - '{{release_uri}}/input/variant/gnomad'
       step.amino_acid_change_annotations:
-        - '{{release_uri}}/input/variant/foldx'
+        - '{{release_uri}}/intermediate/variant/foldx'
       # OUTPUTS
       step.variant_index_path: '{{release_uri}}/output/variant'
 
