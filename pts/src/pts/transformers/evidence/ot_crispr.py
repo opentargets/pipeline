@@ -275,8 +275,13 @@ def generate(study_table: str, ot_crispr_data: str) -> pl.LazyFrame:
 
     Returns:
         Raw OT CRISPR evidence, one row per hit gene, study and mapped disease.
+
+    Raises:
+        ValueError: if the study table has no valid study.
     """
     studies = process_studies(scan_dataset(study_table, format='csv', infer_schema=False).collect())
+    if studies.is_empty():
+        raise ValueError(f'no valid study in {study_table}')
     hits = pl.concat([process_study(study, ot_crispr_data) for study in studies.iter_rows(named=True)])
     return (
         hits

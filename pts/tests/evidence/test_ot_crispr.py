@@ -171,6 +171,12 @@ def test_process_studies_drops_invalid_studies_and_collects_replicates(tmp_path:
     ]
 
 
+def test_generate_refuses_a_study_table_without_valid_studies(tmp_path: Path) -> None:
+    study_table = _write_study_table(tmp_path / 'studies.csv', [_study(None)])
+    with pytest.raises(ValueError, match='no valid study'):
+        generate(study_table, str(tmp_path))
+
+
 def test_split_keeps_whitespace_after_a_separator(tmp_path: Path) -> None:
     """Only leading whitespace is removed, as spark's `regexp_replace(col, '^\\s+', '')`."""
     path = _write_study_table(tmp_path / 'config.csv', [_study('S1', diseases='\t EFO_1| EFO_2 ')])
