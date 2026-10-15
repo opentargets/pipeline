@@ -630,12 +630,9 @@ steps:
 
   #: FOLDX VARIANT ANNOTATIONS :##############################################################
   foldx:
-    - name: explode_glob foldx annotation parts
-      glob: gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation/**/*.parquet
-      do:
-        - name: copy foldx ${match_path}/${match_stem}.${match_ext}
-          source: ${uri}
-          destination: input/variant/foldx/${match_path}/${match_stem}.${match_ext}
+    - name: copy_many FoldX variant annotations
+      sources: gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation/*.parquet
+      destination: input/variant/foldx
 
   #: ENCODE STEP :##################################################################################
   encode:

@@ -575,6 +575,7 @@ steps:
     depends_on:
       - gentropy_variant_annotation
       - pis_gnomad
+      - pis_foldx
     depends_on_ppp:
       - pts_lof_curation
   gentropy_l2g_feature_matrix:
