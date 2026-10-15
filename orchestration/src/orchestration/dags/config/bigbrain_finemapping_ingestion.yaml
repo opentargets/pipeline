@@ -28,7 +28,7 @@ dataproc:
     autoscaling_policy: otg-etl
     metadata:
       # Needs BigBrainFinemappingIngestionStep, which is on this gentropy branch only.
-      GENTROPY_REF: xg1_bigbrain_finemapping
+      GENTROPY_REF: xg1_bigbrain_published_finemapping
     init_actions_uris:
       - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
     # Same rationale as bigbrain_harmonisation.yaml: the default pd-ssd sizes don't fit the
