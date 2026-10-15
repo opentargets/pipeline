@@ -1,17 +1,5 @@
 ---
 steps:
-  biosample:
-    params:
-      step: biosample_index
-      step.session.write_mode: overwrite
-      step.session.output_partitions: 1
-      # INPUTS
-      step.cell_ontology_input_path: '{{release_uri}}/input/biosample/cl.json'
-      step.uberon_input_path: '{{release_uri}}/input/biosample/uberon.json'
-      step.efo_input_path: '{{release_uri}}/input/biosample/efo.json'
-      # OUTPUTS
-      step.biosample_index_path: '{{release_uri}}/output/biosample'
-
   study:
     params:
       step: study_validation
