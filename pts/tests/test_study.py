@@ -456,3 +456,68 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
     assert valid['diseaseIds'].to_list() == [['disease']]
     assert valid['sumstatQCValues'][0][0]['QCCheckValue'] == 0.5
     assert str(QualityFlag.UNKNOWN_STUDY_TYPE) in invalid['qualityControls'][0]
+
+
+@pytest.mark.parametrize('seed', [1, 7, 42])
+def test_deconvolution_is_independent_of_row_order(seed):
+    """Explicit source ranks and canonical content break otherwise conflicting ties."""
+    rows = (
+        studies_frame([
+            {
+                'studyId': 's',
+                'projectId': 'z',
+                'traitFromSource': 'z',
+                'traitFromSourceMappedIds': ['b'],
+                'studyType': 'gwas',
+                'qualityControls': ['z', 'a'],
+                'analysisFlags': ['z', 'a', 'a'],
+            },
+            {
+                'studyId': 's',
+                'projectId': 'a',
+                'traitFromSource': 'a',
+                'traitFromSourceMappedIds': ['a'],
+                'studyType': 'no_licence',
+                'qualityControls': ['a', 'z'],
+                'analysisFlags': ['a'],
+            },
+            {
+                'studyId': 's',
+                'projectId': 'preferred',
+                'traitFromSource': 'last source',
+                'traitFromSourceMappedIds': ['c'],
+                'studyType': 'gwas',
+            },
+        ])
+        .with_columns(pl.Series('_source_rank', [0, 0, 1]))
+        .collect()
+    )
+    expected = deconvolute_studies(rows.lazy()).collect()
+    actual = deconvolute_studies(rows.sample(fraction=1, shuffle=True, seed=seed).lazy()).collect()
+    assert_frame_equal(actual, expected)
+    row = actual.row(0, named=True)
+    assert row['projectId'] == 'z'
+    assert row['traitFromSource'] == 'last source'
+    assert row['traitFromSourceMappedIds'] == ['c']
+    assert row['studyType'] == 'gwas,no_licence'
+    assert row['qualityControls'] == ['a', 'z']
+    assert row['analysisFlags'] == ['a', 'a', 'a', 'z']
+    assert '_source_rank' not in actual.columns
+
+
+def test_collection_ordering_preserves_nulls_and_sample_multiplicity():
+    """Canonical ordering changes order only, including nested sample arrays."""
+    from pts.transformers.study import sort_study_collections
+
+    samples = [
+        {'sampleSize': 20, 'ancestry': 'B'},
+        {'sampleSize': 10, 'ancestry': 'A'},
+        {'sampleSize': 10, 'ancestry': 'A'},
+    ]
+    frame = studies_frame([
+        {'studyId': 's', 'discoverySamples': samples, 'replicationSamples': None, 'diseaseIds': ['z', 'a']}
+    ])
+    result = frame.pipe(sort_study_collections).collect().row(0, named=True)
+    assert result['discoverySamples'] == [samples[1], samples[2], samples[0]]
+    assert result['replicationSamples'] is None
+    assert result['diseaseIds'] == ['a', 'z']

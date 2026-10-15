@@ -104,13 +104,32 @@ def _flag(studies: pl.LazyFrame, condition: pl.Expr, flag: QualityFlag) -> pl.La
     )
 
 
+def sort_study_collections(studies: pl.LazyFrame) -> pl.LazyFrame:
+    """Canonicalize list order without changing nulls, values, or multiplicities."""
+    return studies.with_columns(
+        pl.col(name).list.sort() for name, dtype in studies.collect_schema().items() if isinstance(dtype, pl.List)
+    )
+
+
 def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
     """Merge repeated study IDs and propagate their QC and most granular traits.
 
-    For conflicting unaggregated fields, retain the first input record. Trait ties
-    retain the last non-null value, making the source order the tie breaker.
+    For conflicting unaggregated fields, prefer the first configured source.
+    Equally granular traits prefer the last configured source. Within each source,
+    canonical record content breaks ties independently of file and row order.
+    Callers without source ranks treat all records as belonging to one source.
     """
     logger.info('Deconvoluting study records')
+    columns = [name for name in studies.collect_schema().names() if name != '_source_rank']
+    if '_source_rank' not in studies.collect_schema():
+        studies = studies.with_columns(pl.lit(0).alias('_source_rank'))
+    studies = (
+        studies
+        .pipe(sort_study_collections)
+        .with_columns(pl.struct(sorted(columns)).struct.json_encode().alias('_record_key'))
+        .sort(['studyId', '_source_rank', '_record_key'])
+        .drop('_record_key')
+    )
     has_summary = pl.col('hasSumstats').fill_null(False).any().over('studyId')
     qc = pl.col('qualityControls').fill_null([])
     prepared = studies.with_columns(
@@ -138,7 +157,8 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
         .col('qualityControls')
         .filter(pl.col('qualityControls').list.len() > 0)
         .explode()
-        .unique(maintain_order=True),
+        .unique()
+        .sort(),
         'sumstatQCValues': pl.col('sumstatQCValues').drop_nulls().first(),
         'analysisFlags': pl.col('analysisFlags').filter(pl.col('analysisFlags').list.len() > 0).explode(),
         'hasSumstats': pl
@@ -149,9 +169,8 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
         .otherwise(None),
         'traitFromSourceMappedIds': pl.col('traitFromSourceMappedIds').filter(granular).drop_nulls().last(),
         'traitFromSource': pl.col('traitFromSource').filter(granular).drop_nulls().last(),
-        'studyType': pl.col('studyType').drop_nulls().unique(maintain_order=True).str.join(','),
+        'studyType': pl.col('studyType').drop_nulls().unique().sort().str.join(','),
     }
-    columns = studies.collect_schema().names()
     return (
         prepared
         .group_by('studyId', maintain_order=True)
@@ -159,6 +178,7 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
             aggregated.get(column, pl.col(column).first()).alias(column) for column in columns if column != 'studyId'
         ])
         .select(columns)
+        .pipe(sort_study_collections)
     )
 
 
@@ -203,7 +223,7 @@ def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.Laz
             .explode('efo')
             .join(disease_map, on='efo', how='left')
             .group_by('studyId')
-            .agg(pl.col('diseaseId').drop_nulls().unique(maintain_order=True).alias(destination))
+            .agg(pl.col('diseaseId').drop_nulls().unique().sort().alias(destination))
         )
         result = result.join(mapped, on='studyId', how='left').with_columns(pl.col(destination).fill_null([]))
     return _flag(
@@ -318,7 +338,11 @@ def study(
     disease = disease_lut(scan_dataset(sources.disease))
     heritability = scan_dataset(sources.heritability)
     result = (
-        scan_datasets(sources.study, schema=study_schema)
+        pl
+        .concat([
+            scan_datasets([path], schema=study_schema).with_columns(pl.lit(rank).alias('_source_rank'))
+            for rank, path in enumerate(sources.study)
+        ])
         .pipe(deconvolute_studies)
         .pipe(validate_study_type)
         .pipe(validate_project_id, options.deprecated_project_ids)
@@ -328,6 +352,7 @@ def study(
         .pipe(validate_analysis_flags)
         .pipe(validate_ccs)
         .pipe(collect_heritability, heritability)
+        .pipe(sort_study_collections)
         .select(study_schema.names())
         .pipe(valid_rows, options.invalid_qc_reasons)
     )
