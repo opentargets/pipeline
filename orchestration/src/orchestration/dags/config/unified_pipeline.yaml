@@ -108,6 +108,7 @@ steps:
   pis_evidence_intogen:
   pis_evidence_ppp:
     ppp_only: true
+  pis_gnomad:
   pis_gwas:
   pis_gwas_ppp:
     ppp_only: true
