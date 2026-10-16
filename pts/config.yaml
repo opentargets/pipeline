@@ -283,10 +283,8 @@ steps:
 
   #: CHEMICAL PROBES STEP :#########################################################################
   chemical_probes:
-    - name: pyspark chemical probes
-      pyspark: chemical_probes
-      settings:
-        partition_count: 2
+    - name: transform chemical probes
+      transformer: chemical_probes
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
