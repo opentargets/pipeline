@@ -466,10 +466,8 @@ steps:
 
   #: TARGET_TRACTABILITY STEP :#########################################################################
   target_tractability:
-    - name: pyspark target_tractability
-      pyspark: target_tractability
-      settings:
-        partition_count: 2
+    - name: transform target_tractability
+      transformer: target_tractability
       source:
         tractability: input/target/tractability/tractability.tsv
         target: output/target
