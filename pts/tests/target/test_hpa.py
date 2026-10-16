@@ -6,9 +6,8 @@ import io
 import zipfile
 from pathlib import Path
 
-from pts.pyspark.target import _build_gene_with_location
 from pts.target.hpa import build_hpa, read_hpa, read_hpa_ssl
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 HPA_HEADER = 'Gene\tGene name\tReliability\tMain location\tAdditional location\tExtracellular location'
 HPA_LINES = [
@@ -75,12 +74,50 @@ def test_a_gene_without_locations_is_absent(tmp_path: Path) -> None:
     assert 'ENSG00000000003' not in _by_gene(tmp_path)
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
+def test_matches_the_spark_output(tmp_path: Path) -> None:
     hpa, ssl = _write(tmp_path)
-    hpa_raw = read_hpa(hpa)
-    ssl_raw = read_hpa_ssl(ssl)
-    expected = _build_gene_with_location(
-        spark.createDataFrame(hpa_raw.rows(), ', '.join(f'`{c}` string' for c in hpa_raw.columns)),
-        spark.createDataFrame(ssl_raw.rows(), ', '.join(f'`{c}` string' for c in ssl_raw.columns)),
-    )
-    assert rows(build_hpa(hpa_raw, ssl_raw), 'id', ('locations',)) == rows(expected, 'id', ('locations',))
+    assert rows(build_hpa(read_hpa(hpa), read_hpa_ssl(ssl)), 'id', ('locations',)) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'id': 'ENSG00000000001',
+        'locations': [
+            {
+                'location': 'Cytosol',
+                'source': 'HPA_additional',
+                'termSL': 'SL-0091',
+                'labelSL': 'Cytosol',
+                'targetModifier': None,
+            },
+            {
+                'location': 'Cytosol',
+                'source': 'HPA_main',
+                'termSL': 'SL-0091',
+                'labelSL': 'Cytosol',
+                'targetModifier': None,
+            },
+            {
+                'location': 'Nucleoplasm',
+                'source': 'HPA_main',
+                'termSL': 'SL-0190',
+                'labelSL': 'Nucleus',
+                'targetModifier': None,
+            },
+        ],
+    },
+    {
+        'id': 'ENSG00000000002',
+        'locations': [
+            {
+                'location': 'Predicted to be secreted',
+                'source': 'HPA_extracellular_location',
+                'termSL': None,
+                'labelSL': None,
+                'targetModifier': None,
+            },
+            {'location': 'Vesicles', 'source': 'HPA_main', 'termSL': None, 'labelSL': None, 'targetModifier': None},
+        ],
+    },
+]

@@ -1,11 +1,9 @@
-"""List helpers: spark's safe_array_union and flatten(collect_set(...)) semantics."""
+"""The list helpers: union, tag and flatten_distinct."""
 
 from __future__ import annotations
 
 import polars as pl
-import pyspark.sql.functions as f
 
-from pts.pyspark.common.utils import safe_array_union
 from pts.target.lists import flatten_distinct, tag, union
 
 LISTS = pl.DataFrame(
@@ -50,23 +48,3 @@ def test_flatten_distinct_concatenates_distinct_lists_per_key() -> None:
         {'g': 'B', 'l': []},
         {'g': 'C', 'l': []},
     ]
-
-
-def test_union_matches_spark_safe_array_union(spark) -> None:
-    sdf = spark.createDataFrame(LISTS.to_dicts(), 'k long, a array<string>, b array<string>')
-    expected = {
-        r['k']: (r['two'], r['one'])
-        for r in sdf.select(
-            'k', safe_array_union(f.col('a'), f.col('b')).alias('two'), safe_array_union(f.col('a')).alias('one')
-        ).collect()
-    }
-    result = LISTS.select('k', union(pl.col('a'), pl.col('b')).alias('two'), union(pl.col('a')).alias('one'))
-    assert {r['k']: (r['two'], r['one']) for r in result.to_dicts()} == expected
-
-
-def test_flatten_distinct_matches_spark_flatten_collect_set(spark) -> None:
-    sdf = spark.createDataFrame(GROUPED.to_dicts(), 'g string, l array<string>')
-    expected = {
-        r['g']: sorted(r['l']) for r in sdf.groupBy('g').agg(f.flatten(f.collect_set('l')).alias('l')).collect()
-    }
-    assert {r['g']: sorted(r['l']) for r in flatten_distinct(GROUPED, 'g', 'l').to_dicts()} == expected

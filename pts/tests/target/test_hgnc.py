@@ -7,10 +7,9 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.pyspark.target import _build_hgnc
 from pts.schemas.target import HGNC_DOC
 from pts.target.hgnc import build_hgnc, read_hgnc
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 DOCS = [
     {
@@ -85,12 +84,43 @@ def test_one_row_per_ensembl_id_including_null() -> None:
     assert build_hgnc(_docs())['ensemblId'].to_list() == ['ENSG00000141510', None, 'ENSG00000250413']
 
 
-def test_matches_spark(spark) -> None:
-    schema = (
-        'response struct<docs: array<struct<ensembl_gene_id: string, hgnc_id: string, symbol: string, name: string, '
-        'uniprot_ids: array<string>, alias_symbol: array<string>, alias_name: array<string>, '
-        'prev_symbol: array<string>, prev_name: array<string>>>>'
-    )
-    docs = [{k: d.get(k) for k in HGNC_DOC} for d in DOCS]
-    expected = _build_hgnc(spark.createDataFrame([({'docs': docs},)], schema)).drop('hgncSynonyms')
-    assert rows(build_hgnc(_docs()), 'ensemblId') == rows(expected, 'ensemblId')
+def test_matches_the_spark_output() -> None:
+    assert rows(build_hgnc(_docs()), 'ensemblId') == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'ensemblId': 'ENSG00000141510',
+        'approvedSymbol': 'TP53',
+        'approvedName': 'tumor protein p53',
+        'uniprotIds': ['P04637'],
+        'hgncId': [{'id': '11998', 'source': 'HGNC'}],
+        'hgncSymbolSynonyms': [{'label': 'p53', 'source': 'HGNC'}, {'label': 'LFS1', 'source': 'HGNC'}],
+        'hgncNameSynonyms': [],
+        'hgncObsoleteSymbols': [],
+        'hgncObsoleteNames': [{'label': 'Li-Fraumeni syndrome', 'source': 'HGNC'}],
+    },
+    {
+        'ensemblId': 'ENSG00000250413',
+        'approvedSymbol': 'SLC2A9-AS1',
+        'approvedName': 'SLC2A9 antisense RNA 1',
+        'uniprotIds': None,
+        'hgncId': [{'id': '40636', 'source': 'HGNC'}],
+        'hgncSymbolSynonyms': [{'label': 'A1', 'source': 'HGNC'}, {'label': 'A1', 'source': 'HGNC'}],
+        'hgncNameSynonyms': [],
+        'hgncObsoleteSymbols': [],
+        'hgncObsoleteNames': [],
+    },
+    {
+        'ensemblId': None,
+        'approvedSymbol': 'NOENS',
+        'approvedName': 'no ensembl id',
+        'uniprotIds': None,
+        'hgncId': [{'id': '1', 'source': 'HGNC'}],
+        'hgncSymbolSynonyms': [],
+        'hgncNameSynonyms': [],
+        'hgncObsoleteSymbols': [],
+        'hgncObsoleteNames': [],
+    },
+]

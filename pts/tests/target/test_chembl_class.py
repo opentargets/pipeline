@@ -6,17 +6,9 @@ import polars as pl
 import pytest
 from loguru import logger
 
-from pts.pyspark.target import _build_protein_classification, _flatten_protein_classification
 from pts.target.chembl_class import TABLES, build_protein_classification, flatten_protein_classification
-from tests.target.parity import rows
+from tests.target.rows import rows
 
-SCHEMAS = {
-    'target_dictionary': 'tid int, chembl_id string, pref_name string, target_type string',
-    'target_components': 'targcomp_id int, tid int, component_id int',
-    'component_sequences': 'component_id int, accession string',
-    'component_class': 'comp_class_id int, component_id int, protein_class_id int',
-    'protein_classification': 'protein_class_id int, parent_id int, pref_name string, class_level int',
-}
 DTYPES = {
     'target_dictionary': {'tid': pl.Int32, 'chembl_id': pl.String, 'pref_name': pl.String, 'target_type': pl.String},
     'target_components': {'targcomp_id': pl.Int32, 'tid': pl.Int32, 'component_id': pl.Int32},
@@ -128,11 +120,43 @@ def test_class_level_at_max_does_not_warn(chembl) -> None:
     assert messages == []
 
 
-def test_matches_spark(spark, chembl) -> None:
-    frames = {name: spark.createDataFrame(DATA[name], SCHEMAS[name]) for name in TABLES}
-    assert rows(flatten_protein_classification(chembl['protein_classification']), 'leaf_id') == rows(
-        _flatten_protein_classification(frames['protein_classification']), 'leaf_id'
-    )
-    assert rows(build_protein_classification(**chembl), 'accession', ('targetClass',)) == rows(
-        _build_protein_classification(**frames), 'accession', ('targetClass',)
-    )
+def test_matches_the_spark_output(chembl) -> None:
+    flattened = flatten_protein_classification(chembl['protein_classification'])
+    assert rows(flattened, 'leaf_id') == SPARK_FLATTENED
+    assert rows(build_protein_classification(**chembl), 'accession', ('targetClass',)) == SPARK_CLASSES
+
+
+#: The spark output for `flatten_protein_classification`, as `rows` normalises it.
+SPARK_FLATTENED = [
+    {'leaf_id': 1, 'l1': 'Enzyme', 'l2': None, 'l3': None, 'l4': None, 'l5': None, 'l6': None},
+    {'leaf_id': 2, 'l1': 'Enzyme', 'l2': 'Kinase', 'l3': None, 'l4': None, 'l5': None, 'l6': None},
+    {'leaf_id': 20, 'l1': 'Transporter', 'l2': None, 'l3': None, 'l4': None, 'l5': None, 'l6': None},
+    {'leaf_id': 21, 'l1': 'Ion channel', 'l2': None, 'l3': None, 'l4': None, 'l5': None, 'l6': None},
+    {'leaf_id': 3, 'l1': 'Enzyme', 'l2': 'Kinase', 'l3': 'Protein Kinase', 'l4': None, 'l5': None, 'l6': None},
+    {'leaf_id': 4, 'l1': 'Enzyme', 'l2': 'Kinase', 'l3': 'Protein Kinase', 'l4': 'TK', 'l5': None, 'l6': None},
+    {'leaf_id': 5, 'l1': 'Enzyme', 'l2': 'Kinase', 'l3': 'Protein Kinase', 'l4': 'TK', 'l5': 'TK group', 'l6': None},
+    {
+        'leaf_id': 6,
+        'l1': 'Enzyme',
+        'l2': 'Kinase',
+        'l3': 'Protein Kinase',
+        'l4': 'TK',
+        'l5': 'TK group',
+        'l6': 'TK family',
+    },
+]
+
+#: The spark output for `build_protein_classification`, as `rows` normalises it.
+SPARK_CLASSES = [
+    {
+        'accession': 'P00001',
+        'targetClass': [
+            {'id': 6, 'label': 'Enzyme', 'level': 'l1'},
+            {'id': 6, 'label': 'Kinase', 'level': 'l2'},
+            {'id': 6, 'label': 'Protein Kinase', 'level': 'l3'},
+            {'id': 6, 'label': 'TK family', 'level': 'l6'},
+            {'id': 6, 'label': 'TK group', 'level': 'l5'},
+            {'id': 6, 'label': 'TK', 'level': 'l4'},
+        ],
+    }
+]

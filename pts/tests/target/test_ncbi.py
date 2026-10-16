@@ -5,9 +5,8 @@ from __future__ import annotations
 import gzip
 from pathlib import Path
 
-from pts.pyspark.target import _build_ncbi
 from pts.target.ncbi import build_ncbi, read_ncbi
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 HEADER = '#tax_id\tGeneID\tSymbol\tLocusTag\tSynonyms\tdbXrefs\tchromosome\tOther_designations'
 LINES = [
@@ -52,7 +51,51 @@ def test_every_ensembl_xref_gets_the_synonyms(tmp_path: Path) -> None:
     assert _labels(genes['ENSG00000000001']['synonyms']) == _labels(genes['ENSG00000000002']['synonyms'])
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
-    path = _write(tmp_path)
-    raw = spark.read.option('sep', '\t').option('header', 'true').csv(path)
-    assert rows(build_ncbi(read_ncbi(path)), 'id', SYNONYMS) == rows(_build_ncbi(raw), 'id', SYNONYMS)
+def test_matches_the_spark_output(tmp_path: Path) -> None:
+    assert rows(build_ncbi(read_ncbi(_write(tmp_path))), 'id', SYNONYMS) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'id': 'ENSG00000000001',
+        'synonyms': [
+            {'label': 'T1', 'source': 'NCBI_entrez'},
+            {'label': 'TWO', 'source': 'NCBI_entrez'},
+            {'label': 'two genes', 'source': 'NCBI_entrez'},
+        ],
+        'symbolSynonyms': [{'label': 'T1', 'source': 'NCBI_entrez'}, {'label': 'TWO', 'source': 'NCBI_entrez'}],
+        'nameSynonyms': [{'label': 'two genes', 'source': 'NCBI_entrez'}],
+    },
+    {
+        'id': 'ENSG00000000002',
+        'synonyms': [
+            {'label': 'T1', 'source': 'NCBI_entrez'},
+            {'label': 'TWO', 'source': 'NCBI_entrez'},
+            {'label': 'two genes', 'source': 'NCBI_entrez'},
+        ],
+        'symbolSynonyms': [{'label': 'T1', 'source': 'NCBI_entrez'}, {'label': 'TWO', 'source': 'NCBI_entrez'}],
+        'nameSynonyms': [{'label': 'two genes', 'source': 'NCBI_entrez'}],
+    },
+    {
+        'id': 'ENSG00000121410',
+        'synonyms': [
+            {'label': 'A1B', 'source': 'NCBI_entrez'},
+            {'label': 'A1BG', 'source': 'NCBI_entrez'},
+            {'label': 'A1BG-X', 'source': 'NCBI_entrez'},
+            {'label': 'ABG', 'source': 'NCBI_entrez'},
+            {'label': 'HEL-S-163pA', 'source': 'NCBI_entrez'},
+            {'label': 'alpha-1B-glycoprotein', 'source': 'NCBI_entrez'},
+        ],
+        'symbolSynonyms': [
+            {'label': 'A1B', 'source': 'NCBI_entrez'},
+            {'label': 'A1BG', 'source': 'NCBI_entrez'},
+            {'label': 'A1BG-X', 'source': 'NCBI_entrez'},
+            {'label': 'ABG', 'source': 'NCBI_entrez'},
+        ],
+        'nameSynonyms': [
+            {'label': 'HEL-S-163pA', 'source': 'NCBI_entrez'},
+            {'label': 'alpha-1B-glycoprotein', 'source': 'NCBI_entrez'},
+        ],
+    },
+]

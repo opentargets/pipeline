@@ -7,11 +7,10 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.pyspark.target import _build_uniprot
 from pts.schemas.target import LOCATION, UNIPROT_ENTRY
 from pts.target.hpa import build_hpa
 from pts.target.uniprot import _parse_record, build_uniprot, read_uniprot, read_uniprot_ssl
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 MINIMAL_ENTRY = """\
 ID   PROT_HUMAN           Reviewed;         100 AA.
@@ -188,18 +187,81 @@ def test_location_struct_matches_hpa(tmp_path: Path) -> None:
     assert uniprot.schema['subcellularLocations'] == hpa.schema['locations'] == pl.List(LOCATION)
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
+def test_matches_the_spark_output(tmp_path: Path) -> None:
     flat, ssl = _write(tmp_path)
-    entries = read_uniprot(flat)
-    ssl_raw = read_uniprot_ssl(ssl)
-    schema = (
-        'id string, accessions array<string>, names array<string>, synonyms array<string>, '
-        'symbolSynonyms array<string>, dbXrefs array<string>, functions array<string>, '
-        'locations array<struct<location:string, targetModifier:string>>'
-    )
-    expected = _build_uniprot(
-        spark.createDataFrame(entries.to_dicts(), schema),
-        spark.createDataFrame(ssl_raw.rows(), ', '.join(f'`{c}` string' for c in ssl_raw.columns)),
-    )
-    unordered = ('subcellularLocations',)
-    assert rows(build_uniprot(entries, ssl_raw), 'uniprotId', unordered) == rows(expected, 'uniprotId', unordered)
+    built = build_uniprot(read_uniprot(flat), read_uniprot_ssl(ssl))
+    assert rows(built, 'uniprotId', ('subcellularLocations',)) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'uniprotId': 'O00001',
+        'functionDescriptions': [],
+        'dbXrefs': [],
+        'subcellularLocations': [
+            {
+                'location': '(Microbial infection) Host, Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            },
+            {
+                'location': 'Cell membrane; Multi-pass membrane protein',
+                'source': 'uniprot',
+                'termSL': 'SL-0039',
+                'labelSL': 'Cellular component',
+                'targetModifier': 'Isoform 2',
+            },
+            {
+                'location': 'Golgi apparatus, trans-Golgi network membrane',
+                'source': 'uniprot',
+                'termSL': None,
+                'labelSL': None,
+                'targetModifier': None,
+            },
+        ],
+        'proteinIds': [{'id': 'O00001', 'source': 'uniprot_obsolete'}],
+        'synonyms': [
+            {'label': 'Other protein', 'source': 'uniprot'},
+            {'label': 'OP', 'source': 'uniprot'},
+            {'label': 'OTHER1', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [{'label': 'OP', 'source': 'uniprot'}, {'label': 'OTHER1', 'source': 'uniprot'}],
+        'nameSynonyms': [{'label': 'Other protein', 'source': 'uniprot'}],
+    },
+    {
+        'uniprotId': 'P12345',
+        'functionDescriptions': ['Catalyzes the reaction.'],
+        'dbXrefs': [
+            {'id': 'CHEMBL123', 'source': 'ChEMBL'},
+            {'id': 'ENST00001', 'source': 'Ensembl'},
+            {'id': '1ABC', 'source': 'PDB'},
+        ],
+        'subcellularLocations': [
+            {
+                'location': 'Cytoplasm',
+                'source': 'uniprot',
+                'termSL': 'SL-0086',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            },
+            {
+                'location': 'Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            },
+        ],
+        'proteinIds': [{'id': 'P12345', 'source': 'uniprot_obsolete'}, {'id': 'Q99999', 'source': 'uniprot_obsolete'}],
+        'synonyms': [
+            {'label': 'Test protein', 'source': 'uniprot'},
+            {'label': 'GENE1', 'source': 'uniprot'},
+            {'label': 'SYN1', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [{'label': 'GENE1', 'source': 'uniprot'}, {'label': 'SYN1', 'source': 'uniprot'}],
+        'nameSynonyms': [{'label': 'Test protein', 'source': 'uniprot'}, {'label': 'Alt protein', 'source': 'uniprot'}],
+    },
+]

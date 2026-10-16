@@ -7,9 +7,8 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.pyspark.target import _build_hallmarks
 from pts.target.hallmarks import COLUMNS, build_hallmarks, read_hallmarks
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 HEADER = 'GENE_SYMBOL\tCELL_TYPE\tPUBMED_PMID\tHALLMARK\tIMPACT\tDESCRIPTION\tCELL_LINE'
 LINES = [
@@ -78,10 +77,36 @@ def test_a_gene_with_no_cancer_hallmark_has_null_cancer_hallmarks() -> None:
     ]
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
-    path = _write(tmp_path)
-    raw = spark.read.option('sep', '\t').option('header', 'true').csv(path)
+def test_matches_the_spark_output(tmp_path: Path) -> None:
     unordered = ('hallmarks.attributes', 'hallmarks.cancerHallmarks')
-    assert rows(build_hallmarks(read_hallmarks(path)), 'approvedSymbol', unordered) == rows(
-        _build_hallmarks(raw), 'approvedSymbol', unordered
-    )
+    assert rows(build_hallmarks(read_hallmarks(_write(tmp_path))), 'approvedSymbol', unordered) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'approvedSymbol': 'EGFR',
+        'hallmarks': {
+            'attributes': [
+                {'pmid': 111, 'description': '"restrains an active ""in"" conformation"', 'name': 'role in cancer'}
+            ],
+            'cancerHallmarks': [
+                {'pmid': None, 'description': 'no pmid', 'impact': 'promotes', 'label': 'angiogenesis'}
+            ],
+        },
+    },
+    {
+        'approvedSymbol': 'TP53',
+        'hallmarks': {
+            'attributes': [{'pmid': 67890, 'description': 'induces apoptosis, in vitro', 'name': 'apoptosis'}],
+            'cancerHallmarks': [
+                {
+                    'pmid': 12345,
+                    'description': 'promotes tumour angiogenesis',
+                    'impact': 'promotes',
+                    'label': 'angiogenesis',
+                }
+            ],
+        },
+    },
+]

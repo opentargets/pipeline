@@ -3,21 +3,8 @@
 from __future__ import annotations
 
 import polars as pl
-import pyspark.sql.functions as f
 import pytest
 
-from pts.pyspark.common.utils import polars_schema_to_spark, safe_array_union
-from pts.pyspark.target import (
-    _add_ensembl_ids_to_uniprot,
-    _add_ncbi_synonyms,
-    _add_protein_classification_to_uniprot,
-    _add_reactome,
-    _add_tss,
-    _filter_and_sort_protein_ids,
-    _merge_hgnc_ensembl,
-    _remove_duplicated_synonyms,
-    _remove_redundant_xrefs,
-)
 from pts.schemas.target import (
     CANONICAL_TRANSCRIPT,
     CONSTRAINT,
@@ -44,7 +31,7 @@ from pts.target.assemble import (
 )
 from pts.target.ensembl import ensembl_genes
 from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 
 def _ids(*pairs: tuple[str, str]) -> list[dict]:
@@ -433,78 +420,16 @@ def test_tp53_end_to_end() -> None:
     assert gene['tss'] == 7687538
 
 
-def _spark_target(spark) -> object:
-    """The merge `pts.pyspark.target.target` runs on the built frames."""
-
-    def s(frame: pl.DataFrame):
-        return spark.createDataFrame(frame.to_dicts(), polars_schema_to_spark(frame.schema))
-
-    hgnc_df, ensembl_df = s(HGNC), s(ENSEMBL)
-    hgnc_ensembl = _merge_hgnc_ensembl(hgnc_df, ensembl_df)
-    go_df = s(GO_FRAME)
-    hgnc_ensembl_go = (
-        hgnc_ensembl
-        .join(go_df, hgnc_ensembl['id'] == go_df['ensemblId'], 'left_outer')
-        .drop('ensemblId')
-        .join(s(HALLMARKS_FRAME), 'approvedSymbol', 'left_outer')
-    )
-    uniprot_with_class = _add_protein_classification_to_uniprot(s(UNIPROT), s(PROTEIN_CLASS))
-    uniprot_by_ensembl = (
-        _add_ensembl_ids_to_uniprot(hgnc_df, uniprot_with_class)
-        .withColumnRenamed('proteinIds', 'pid')
-        .join(s(HPA), 'id', 'left_outer')
-        .withColumn('subcellularLocations', safe_array_union(f.col('subcellularLocations'), f.col('locations')))
-        .drop('locations')
-    )
-    interim = (
-        hgnc_ensembl_go
-        .join(uniprot_by_ensembl, 'id', 'left_outer')
-        .withColumn('proteinIds', safe_array_union(f.col('proteinIds'), f.col('pid')))
-        .withColumn('dbXrefs', safe_array_union(f.col('hgncId'), f.col('dbXrefs'), f.col('signalP')))
-        .withColumn('symbolSynonyms', safe_array_union(f.col('symbolSynonyms'), f.col('hgncSymbolSynonyms')))
-        .withColumn('nameSynonyms', safe_array_union(f.col('nameSynonyms'), f.col('hgncNameSynonyms')))
-        .withColumn('synonyms', safe_array_union(f.col('synonyms'), f.col('symbolSynonyms'), f.col('nameSynonyms')))
-        .withColumn('obsoleteSymbols', safe_array_union(f.col('hgncObsoleteSymbols')))
-        .withColumn('obsoleteNames', safe_array_union(f.col('hgncObsoleteNames')))
-        .drop(
-            'pid',
-            'hgncId',
-            'hgncSynonyms',
-            'hgncNameSynonyms',
-            'hgncSymbolSynonyms',
-            'hgncObsoleteNames',
-            'hgncObsoleteSymbols',
-            'uniprotIds',
-            'signalP',
-        )
-    )
-    return (
-        interim
-        .join(s(CONSTRAINT_FRAME), 'id', 'left_outer')
-        .transform(_filter_and_sort_protein_ids)
-        .transform(_remove_redundant_xrefs)
-        .transform(lambda df: _add_ncbi_synonyms(df, s(NCBI)))
-        .transform(lambda df: _add_reactome(df, s(REACTOME)))
-        .transform(_remove_duplicated_synonyms)
-        .transform(_add_tss)
-        .select(*TARGET)
-    )
-
-
-def test_matches_spark(spark) -> None:
+def test_matches_the_spark_output() -> None:
     result = assemble(
         ENSEMBL, HGNC, GO_FRAME, HALLMARKS_FRAME, UNIPROT, PROTEIN_CLASS, HPA, CONSTRAINT_FRAME, NCBI, REACTOME
     )
-    assert rows(result, 'id', UNORDERED) == rows(_spark_target(spark), 'id', UNORDERED)
+    assert rows(result, 'id', UNORDERED) == SPARK_TARGET
 
 
-def test_uniprot_by_gene_matches_spark(spark) -> None:
-    def s(frame: pl.DataFrame):
-        return spark.createDataFrame(frame.to_dicts(), polars_schema_to_spark(frame.schema))
-
+def test_uniprot_by_gene_matches_the_spark_output() -> None:
     with_class = add_protein_classification(UNIPROT, PROTEIN_CLASS)
-    expected_class = _add_protein_classification_to_uniprot(s(UNIPROT), s(PROTEIN_CLASS))
-    assert rows(with_class, 'uniprotId', ('targetClass',)) == rows(expected_class, 'uniprotId', ('targetClass',))
+    assert rows(with_class, 'uniprotId', ('targetClass',)) == SPARK_WITH_CLASS
     lists = (
         'synonyms',
         'symbolSynonyms',
@@ -515,9 +440,7 @@ def test_uniprot_by_gene_matches_spark(spark) -> None:
         'dbXrefs',
         'targetClass',
     )
-    assert rows(uniprot_by_gene(HGNC, with_class), 'id', lists) == rows(
-        _add_ensembl_ids_to_uniprot(s(HGNC), expected_class), 'id', lists
-    )
+    assert rows(uniprot_by_gene(HGNC, with_class), 'id', lists) == SPARK_BY_GENE
 
 
 def test_genes_without_pathways_keep_null_pathways() -> None:
@@ -539,3 +462,265 @@ def test_protein_id_label_does_not_depend_on_input_order() -> None:
         for ordered in (pairs, pairs[::-1])
     ]
     assert labels[0] == labels[1] == [_ids(('X', 'uniprot_swissprot'))]
+
+
+#: The spark output for `assemble`, as `rows` normalises it.
+SPARK_TARGET = [
+    {
+        'id': 'ENSG00000000002',
+        'approvedSymbol': 'ENSG00000000002',
+        'biotype': '',
+        'genomicLocation': {'chromosome': 'X', 'start': 1000, 'end': 2000, 'strand': 1},
+        'approvedName': '',
+        'go': None,
+        'hallmarks': None,
+        'synonyms': [],
+        'symbolSynonyms': [],
+        'nameSynonyms': [],
+        'functionDescriptions': None,
+        'subcellularLocations': None,
+        'targetClass': None,
+        'obsoleteSymbols': [],
+        'obsoleteNames': [],
+        'constraint': None,
+        'proteinIds': None,
+        'dbXrefs': [],
+        'pathways': None,
+        'tss': 1000,
+    },
+    {
+        'id': 'ENSG00000000003',
+        'approvedSymbol': 'TWO',
+        'biotype': 'protein_coding',
+        'genomicLocation': {'chromosome': '1', 'start': 10, 'end': 20, 'strand': 1},
+        'approvedName': 'two entries',
+        'go': None,
+        'hallmarks': None,
+        'synonyms': [{'label': 'one', 'source': 'uniprot'}, {'label': 'second', 'source': 'HGNC'}],
+        'symbolSynonyms': [],
+        'nameSynonyms': [{'label': 'one', 'source': 'uniprot'}, {'label': 'second', 'source': 'HGNC'}],
+        'functionDescriptions': ['First function.', 'Shared function.', 'Shared function.'],
+        'subcellularLocations': [
+            {'location': 'Cytoplasm', 'source': 'uniprot', 'termSL': None, 'labelSL': None, 'targetModifier': None}
+        ],
+        'targetClass': [{'id': 7, 'label': 'Kinase', 'level': 'l1'}],
+        'obsoleteSymbols': [{'label': 'OLD', 'source': 'HGNC'}],
+        'obsoleteNames': [],
+        'constraint': None,
+        'proteinIds': [{'id': 'O00001', 'source': 'uniprot_swissprot'}, {'id': 'O00002', 'source': 'uniprot_obsolete'}],
+        'dbXrefs': [{'id': '1AAA', 'source': 'PDB'}, {'id': '2', 'source': 'HGNC'}],
+        'pathways': None,
+        'tss': None,
+    },
+    {
+        'id': 'ENSG00000141510',
+        'approvedSymbol': 'TP53',
+        'biotype': 'protein_coding',
+        'genomicLocation': {'chromosome': '17', 'start': 7661779, 'end': 7687546, 'strand': -1},
+        'approvedName': 'tumor protein p53',
+        'go': [
+            {
+                'id': 'GO:0003677',
+                'source': 'PMID:1',
+                'evidence': 'IDA',
+                'aspect': 'F',
+                'geneProduct': 'P04637',
+                'ecoId': None,
+            }
+        ],
+        'hallmarks': {
+            'attributes': [{'pmid': 1, 'description': 'x', 'name': 'role in cancer'}],
+            'cancerHallmarks': None,
+        },
+        'synonyms': [
+            {'label': 'BCC7', 'source': 'NCBI_entrez'},
+            {'label': 'Cellular tumor antigen p53', 'source': 'uniprot'},
+            {'label': 'LFS1', 'source': 'HGNC'},
+            {'label': 'cellular tumor antigen p53', 'source': 'NCBI_entrez'},
+            {'label': 'p53', 'source': 'HGNC'},
+            {'label': 'p53', 'source': 'NCBI_entrez'},
+            {'label': 'p53', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [
+            {'label': 'BCC7', 'source': 'NCBI_entrez'},
+            {'label': 'LFS1', 'source': 'HGNC'},
+            {'label': 'p53', 'source': 'HGNC'},
+            {'label': 'p53', 'source': 'NCBI_entrez'},
+            {'label': 'p53', 'source': 'uniprot'},
+        ],
+        'nameSynonyms': [
+            {'label': 'Cellular tumor antigen p53', 'source': 'uniprot'},
+            {'label': 'cellular tumor antigen p53', 'source': 'NCBI_entrez'},
+        ],
+        'functionDescriptions': ['Acts as a tumor suppressor.'],
+        'subcellularLocations': [
+            {
+                'location': 'Nucleus',
+                'source': 'HPA_main',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            },
+            {
+                'location': 'Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            },
+        ],
+        'targetClass': [{'id': 6, 'label': 'Enzyme', 'level': 'l1'}],
+        'obsoleteSymbols': [],
+        'obsoleteNames': [{'label': 'Li-Fraumeni syndrome', 'source': 'HGNC'}],
+        'constraint': [
+            {
+                'constraintType': 'syn',
+                'score': 1.5,
+                'exp': 2.0,
+                'obs': 3,
+                'oe': 0.5,
+                'oeLower': 0.25,
+                'oeUpper': 0.75,
+                'upperRank': None,
+                'upperBin': None,
+                'upperBin6': None,
+            }
+        ],
+        'proteinIds': [
+            {'id': 'P04637', 'source': 'uniprot_swissprot'},
+            {'id': 'K7PPA8', 'source': 'uniprot_trembl'},
+            {'id': 'ENSP00000269305', 'source': 'ensembl_PRO'},
+            {'id': 'Q15086', 'source': 'uniprot_obsolete'},
+        ],
+        'dbXrefs': [
+            {'id': '11998', 'source': 'HGNC'},
+            {'id': '1A1U', 'source': 'PDB'},
+            {'id': 'SignalP-noTM', 'source': 'signalP'},
+        ],
+        'pathways': [{'pathwayId': 'R-HSA-69278', 'pathway': 'Cell Cycle, Mitotic', 'topLevelTerm': 'Cell Cycle'}],
+        'tss': 7687538,
+    },
+]
+
+#: The spark output for `add_protein_classification`, as `rows` normalises it.
+SPARK_WITH_CLASS = [
+    {
+        'uniprotId': 'O00001',
+        'functionDescriptions': ['Shared function.', 'First function.'],
+        'dbXrefs': [{'id': '1AAA', 'source': 'PDB'}],
+        'subcellularLocations': None,
+        'proteinIds': [{'id': 'O00001', 'source': 'uniprot_obsolete'}],
+        'synonyms': [{'label': 'one', 'source': 'uniprot'}],
+        'symbolSynonyms': [],
+        'nameSynonyms': [{'label': 'one', 'source': 'uniprot'}],
+        'targetClass': [],
+    },
+    {
+        'uniprotId': 'O00002',
+        'functionDescriptions': ['Shared function.'],
+        'dbXrefs': [{'id': '1AAA', 'source': 'PDB'}],
+        'subcellularLocations': [
+            {'location': 'Cytoplasm', 'source': 'uniprot', 'termSL': None, 'labelSL': None, 'targetModifier': None}
+        ],
+        'proteinIds': [{'id': 'O00002', 'source': 'uniprot_obsolete'}],
+        'synonyms': [],
+        'symbolSynonyms': [],
+        'nameSynonyms': [],
+        'targetClass': [{'id': 7, 'label': 'Kinase', 'level': 'l1'}],
+    },
+    {
+        'uniprotId': 'P04637',
+        'functionDescriptions': ['Acts as a tumor suppressor.'],
+        'dbXrefs': [
+            {'id': '1A1U', 'source': 'PDB'},
+            {'id': 'GO:0000785', 'source': 'GO'},
+            {'id': 'ENST00000269305', 'source': 'Ensembl'},
+        ],
+        'subcellularLocations': [
+            {
+                'location': 'Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            }
+        ],
+        'proteinIds': [{'id': 'P04637', 'source': 'uniprot_obsolete'}, {'id': 'Q15086', 'source': 'uniprot_obsolete'}],
+        'synonyms': [
+            {'label': 'Cellular tumor antigen p53', 'source': 'uniprot'},
+            {'label': 'p53', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [{'label': 'p53', 'source': 'uniprot'}],
+        'nameSynonyms': [{'label': 'Cellular tumor antigen p53', 'source': 'uniprot'}],
+        'targetClass': [{'id': 6, 'label': 'Enzyme', 'level': 'l1'}],
+    },
+]
+
+#: The spark output for `uniprot_by_gene`, as `rows` normalises it.
+SPARK_BY_GENE = [
+    {
+        'id': 'ENSG00000000003',
+        'synonyms': [{'label': 'one', 'source': 'uniprot'}],
+        'symbolSynonyms': [],
+        'nameSynonyms': [{'label': 'one', 'source': 'uniprot'}],
+        'functionDescriptions': ['First function.', 'Shared function.', 'Shared function.'],
+        'proteinIds': [{'id': 'O00001', 'source': 'uniprot_obsolete'}, {'id': 'O00002', 'source': 'uniprot_obsolete'}],
+        'subcellularLocations': [
+            {'location': 'Cytoplasm', 'source': 'uniprot', 'termSL': None, 'labelSL': None, 'targetModifier': None}
+        ],
+        'dbXrefs': [{'id': '1AAA', 'source': 'PDB'}],
+        'targetClass': [{'id': 7, 'label': 'Kinase', 'level': 'l1'}],
+    },
+    {
+        'id': 'ENSG00000141510',
+        'synonyms': [
+            {'label': 'Cellular tumor antigen p53', 'source': 'uniprot'},
+            {'label': 'p53', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [{'label': 'p53', 'source': 'uniprot'}],
+        'nameSynonyms': [{'label': 'Cellular tumor antigen p53', 'source': 'uniprot'}],
+        'functionDescriptions': ['Acts as a tumor suppressor.'],
+        'proteinIds': [{'id': 'P04637', 'source': 'uniprot_obsolete'}, {'id': 'Q15086', 'source': 'uniprot_obsolete'}],
+        'subcellularLocations': [
+            {
+                'location': 'Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            }
+        ],
+        'dbXrefs': [
+            {'id': '1A1U', 'source': 'PDB'},
+            {'id': 'ENST00000269305', 'source': 'Ensembl'},
+            {'id': 'GO:0000785', 'source': 'GO'},
+        ],
+        'targetClass': [{'id': 6, 'label': 'Enzyme', 'level': 'l1'}],
+    },
+    {
+        'id': None,
+        'synonyms': [
+            {'label': 'Cellular tumor antigen p53', 'source': 'uniprot'},
+            {'label': 'p53', 'source': 'uniprot'},
+        ],
+        'symbolSynonyms': [{'label': 'p53', 'source': 'uniprot'}],
+        'nameSynonyms': [{'label': 'Cellular tumor antigen p53', 'source': 'uniprot'}],
+        'functionDescriptions': ['Acts as a tumor suppressor.'],
+        'proteinIds': [{'id': 'P04637', 'source': 'uniprot_obsolete'}, {'id': 'Q15086', 'source': 'uniprot_obsolete'}],
+        'subcellularLocations': [
+            {
+                'location': 'Nucleus',
+                'source': 'uniprot',
+                'termSL': 'SL-0191',
+                'labelSL': 'Cellular component',
+                'targetModifier': None,
+            }
+        ],
+        'dbXrefs': [
+            {'id': '1A1U', 'source': 'PDB'},
+            {'id': 'ENST00000269305', 'source': 'Ensembl'},
+            {'id': 'GO:0000785', 'source': 'GO'},
+        ],
+        'targetClass': [{'id': 6, 'label': 'Enzyme', 'level': 'l1'}],
+    },
+]

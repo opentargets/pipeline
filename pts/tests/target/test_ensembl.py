@@ -3,100 +3,10 @@
 from __future__ import annotations
 
 import polars as pl
-from pyspark.sql import Row
 
-from pts.pyspark.target import _build_ensembl, _build_gene_code
 from pts.target.ensembl import ensembl_genes
 from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
-from tests.target.parity import rows
-
-# The same genes as the species JSON and the GENCODE GFF3 spelled them, for the spark builder.
-JSON_SCHEMA = (
-    'id string, approvedSymbol string, biotype string, description string, chromosome string, '
-    'strand string, start string, end string, SignalP array<string>, uniprot_trembl array<string>, '
-    'uniprot_swissprot array<string>, transcripts array<struct<id:string, translations:array<struct<id:string>>>>'
-)
-JSON_ROWS = [
-    (
-        'ENSG00000141510',
-        'TP53',
-        'protein_coding',
-        'tumor protein p53 [Source:HGNC Symbol;Acc:HGNC:11998]',
-        '17',
-        '-1',
-        '7661779',
-        '7687546',
-        ['SignalP-noTM'],
-        ['K7PPA8', 'H2EHT1'],
-        ['P04637'],
-        [('ENST00000269305', [('ENSP00000269305',)]), ('ENST00000413465', [('ENSP00000410739',)])],
-    ),
-    (
-        'ENSG00000000002',
-        None,
-        'TEC',
-        'TEC protein detection [Source:x]',
-        'X',
-        '1',
-        '1000',
-        '2000',
-        None,
-        None,
-        None,
-        [('ENST00000000021', [])],
-    ),
-    ('ENSG00000000003', 'MT-TF', 'Mt_tRNA', None, 'MT', '1', '577', '647', None, None, None, [('ENST00000000031', [])]),
-    (
-        'LRG_1',
-        'LRG',
-        'protein_coding',
-        'lrg',
-        '1',
-        '1',
-        '10',
-        '20',
-        None,
-        None,
-        ['P00001'],
-        [('LRG_1t1', [('LRG_1p1',)])],
-    ),
-]
-GFF3_ROWS = [
-    Row(
-        _c0='chr17',
-        _c1='HAVANA',
-        _c2='transcript',
-        _c3='7661779',
-        _c4='7687538',
-        _c5='.',
-        _c6='-',
-        _c7='.',
-        _c8='gene_id=ENSG00000141510.19;transcript_id=ENST00000269305.9;tag=Ensembl_canonical',
-    ),
-    Row(
-        _c0='chrX',
-        _c1='HAVANA',
-        _c2='transcript',
-        _c3='1000',
-        _c4='2000',
-        _c5='.',
-        _c6='+',
-        _c7='.',
-        _c8='gene_id=ENSG00000000002.1;transcript_id=ENST00000000021.1;tag=Ensembl_canonical',
-    ),
-    Row(
-        _c0='chrM',
-        _c1='ENSEMBL',
-        _c2='transcript',
-        _c3='577',
-        _c4='647',
-        _c5='.',
-        _c6='+',
-        _c7='.',
-        _c8='gene_id=ENSG00000000003.1;transcript_id=ENST00000000031.1;tag=Ensembl_canonical',
-    ),
-]
-GFF3_SCHEMA = ', '.join(f'_c{i} string' for i in range(9))
+from tests.target.rows import rows
 
 
 def _built() -> pl.DataFrame:
@@ -178,10 +88,52 @@ def test_genomic_location_dtype() -> None:
     })
 
 
-def test_matches_spark(spark) -> None:
-    gene_code = _build_gene_code(spark.createDataFrame(GFF3_ROWS, GFF3_SCHEMA))
-    expected = _build_ensembl(spark.createDataFrame(JSON_ROWS, JSON_SCHEMA), gene_code)
-    unordered = ('proteinIds', 'signalP')
-    assert rows(_built(), 'id', unordered, empty_as_null=('signalP',)) == rows(
-        expected, 'id', unordered, empty_as_null=('signalP',)
-    )
+def test_matches_the_spark_output() -> None:
+    assert rows(_built(), 'id', ('proteinIds', 'signalP'), empty_as_null=('signalP',)) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'id': 'ENSG00000000002',
+        'biotype': '',
+        'approvedName': ' protein detion ',
+        'genomicLocation': {'chromosome': 'X', 'start': 1000, 'end': 2000, 'strand': 1},
+        'approvedSymbol': None,
+        'proteinIds': [],
+        'signalP': None,
+        'canonicalTranscript': {'id': 'ENST00000000021', 'chromosome': 'X', 'start': 1000, 'end': 2000, 'strand': 1},
+    },
+    {
+        'id': 'ENSG00000000003',
+        'biotype': 'Mt_tRNA',
+        'approvedName': None,
+        'genomicLocation': {'chromosome': 'MT', 'start': 577, 'end': 647, 'strand': 1},
+        'approvedSymbol': 'MT-TF',
+        'proteinIds': [],
+        'signalP': None,
+        'canonicalTranscript': {'id': 'ENST00000000031', 'chromosome': 'MT', 'start': 577, 'end': 647, 'strand': 1},
+    },
+    {
+        'id': 'ENSG00000141510',
+        'biotype': 'protein_coding',
+        'approvedName': 'tumor protein p53 ',
+        'genomicLocation': {'chromosome': '17', 'start': 7661779, 'end': 7687546, 'strand': -1},
+        'approvedSymbol': 'TP53',
+        'proteinIds': [
+            {'id': 'ENSP00000269305', 'source': 'ensembl_PRO'},
+            {'id': 'ENSP00000410739', 'source': 'ensembl_PRO'},
+            {'id': 'H2EHT1', 'source': 'uniprot_trembl'},
+            {'id': 'K7PPA8', 'source': 'uniprot_trembl'},
+            {'id': 'P04637', 'source': 'uniprot_swissprot'},
+        ],
+        'signalP': [{'id': 'SignalP-noTM', 'source': 'signalP'}],
+        'canonicalTranscript': {
+            'id': 'ENST00000269305',
+            'chromosome': '17',
+            'start': 7661779,
+            'end': 7687538,
+            'strand': -1,
+        },
+    },
+]

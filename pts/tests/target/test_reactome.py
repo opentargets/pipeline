@@ -6,9 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.pyspark.target import _build_reactome
 from pts.target.reactome import ENSEMBL2REACTOME_COLUMNS, build_reactome, read_reactome_pathways
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 LINES = [
     'ENSG00000141510\tR-HSA-69278\turl\tCell Cycle, Mitotic\tTAS\tHomo sapiens',
@@ -52,10 +51,17 @@ def test_human_genes_with_the_first_path_top_level_term(tmp_path: Path) -> None:
     ]
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
-    pathways = _pathways(tmp_path)
-    expected = _build_reactome(
-        spark.read.option('sep', '\t').csv(str(tmp_path / 'Ensembl2Reactome.txt')),
-        spark.createDataFrame(REACTOME.to_dicts(), 'id string, label string, path array<array<string>>'),
-    )
-    assert rows(build_reactome(pathways, REACTOME), 'id', ('pathways',)) == rows(expected, 'id', ('pathways',))
+def test_matches_the_spark_output(tmp_path: Path) -> None:
+    assert rows(build_reactome(_pathways(tmp_path), REACTOME), 'id', ('pathways',)) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'id': 'ENSG00000141510',
+        'pathways': [
+            {'pathwayId': 'R-HSA-1', 'pathway': 'Cell Cycle', 'topLevelTerm': 'Cell Cycle'},
+            {'pathwayId': 'R-HSA-69278', 'pathway': 'Cell Cycle, Mitotic', 'topLevelTerm': 'Cell Cycle'},
+        ],
+    }
+]

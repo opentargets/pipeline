@@ -7,10 +7,9 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.pyspark.target import _build_gene_ontology
 from pts.schemas.target import ID_SOURCE
 from pts.target.go import build_go, read_tsv
-from tests.target.parity import rows
+from tests.target.rows import rows
 
 
 def _gaf(db: str, object_id: str, go_id: str, reference: str, evidence: str, aspect: str) -> str:
@@ -143,16 +142,68 @@ def test_unmapped_annotations_are_dropped(tmp_path: Path) -> None:
     assert set(_by_gene(tmp_path)) == {'ENSG00000141510', 'ENSG00000226803'}
 
 
-def test_matches_spark(spark, tmp_path: Path) -> None:
-    paths = _paths(tmp_path)
-    csv = spark.read.option('sep', '\t')
-    expected = _build_gene_ontology(
-        csv.option('comment', '!').csv(paths['human']),
-        csv.option('comment', '!').csv(paths['rna']),
-        spark.read.option('sep', '\t').csv(paths['rna_lookup']),
-        csv.option('comment', '!').csv(paths['eco']),
-        spark.createDataFrame(
-            ENSEMBL.to_dicts(), 'id string, approvedSymbol string, proteinIds array<struct<id:string, source:string>>'
-        ),
-    )
-    assert rows(_go(tmp_path), 'ensemblId', ('go',)) == rows(expected, 'ensemblId', ('go',))
+def test_matches_the_spark_output(tmp_path: Path) -> None:
+    assert rows(_go(tmp_path), 'ensemblId', ('go',)) == SPARK_ROWS
+
+
+#: The spark output for this fixture, as `rows` normalises it.
+SPARK_ROWS = [
+    {
+        'ensemblId': 'ENSG00000141510',
+        'go': [
+            {
+                'id': 'GO:0005634',
+                'source': 'PMID:3',
+                'evidence': 'IDA',
+                'aspect': 'C',
+                'geneProduct': 'TP53',
+                'ecoId': None,
+            },
+            {
+                'id': 'GO:0003677',
+                'source': 'PMID:1',
+                'evidence': 'IDA',
+                'aspect': 'F',
+                'geneProduct': 'P04637',
+                'ecoId': 'ECO:0000269',
+            },
+            {
+                'id': 'GO:0003677',
+                'source': 'PMID:1',
+                'evidence': 'IDA',
+                'aspect': 'F',
+                'geneProduct': 'P04637',
+                'ecoId': 'ECO:0000314',
+            },
+            {
+                'id': 'GO:0030533',
+                'source': 'GO_REF:0000115',
+                'evidence': 'IEA',
+                'aspect': 'F',
+                'geneProduct': 'URS0000001346_9606',
+                'ecoId': None,
+            },
+            {
+                'id': 'GO:0008150',
+                'source': 'PMID:2',
+                'evidence': 'TAS',
+                'aspect': 'P',
+                'geneProduct': 'P04637',
+                'ecoId': None,
+            },
+        ],
+    },
+    {
+        'ensemblId': 'ENSG00000226803',
+        'go': [
+            {
+                'id': 'GO:0030533',
+                'source': 'GO_REF:0000115',
+                'evidence': 'IEA',
+                'aspect': 'F',
+                'geneProduct': 'URS0000001346_9606',
+                'ecoId': None,
+            }
+        ],
+    },
+]

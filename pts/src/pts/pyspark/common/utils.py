@@ -218,45 +218,6 @@ def polars_schema_to_spark(schema: Mapping[str, Any]) -> StructType:
     ])
 
 
-def gff3_strand(col: Column) -> Column:
-    """Translate a GFF3 strand character into Ensembl's signed integer encoding.
-
-    Ensembl's core database stores strand as ``seq_region_strand`` -- 1 or -1 --
-    on gene, transcript and exon alike, and the release follows the database.
-    GFF3 spells the same fact as ``+``/``-`` in column 7, so every GFF3 read in
-    the pipeline translates it here on the way in.
-
-    Shared rather than duplicated per parse site: two GFF3 readers that disagree
-    about the encoding fail silently, because a strand comparison that never
-    matches yields a null column rather than an error.
-
-    Mapped explicitly rather than cast: a GFF3 feature may also be unstranded
-    (``.``) or of unknown strand (``?``), and those must become null. Casting
-    ``.`` yields 0 in non-ANSI Spark -- a third, non-existent strand -- while
-    ``?`` yields null, so a cast is wrong in one case and accidental in the other.
-
-    Args:
-        col: GFF3 column 7.
-
-    Returns:
-        IntegerType column holding 1, -1, or null. Only exact ``+`` and ``-``
-        map; whitespace-padded or otherwise unexpected input becomes null.
-    """
-    return (
-        f.when(col == '+', f.lit(1))
-        .when(col == '-', f.lit(-1))
-        .cast(IntegerType())
-    )
-
-
-def safe_array_union(*cols: Column) -> Column:
-    """Return union of multiple array columns, treating nulls as empty arrays."""
-    result = f.coalesce(cols[0], f.array())
-    for col in cols[1:]:
-        result = f.array_union(result, f.coalesce(col, f.array()))
-    return result
-
-
 def maybe_coalesce(df: DataFrame, n: int | None) -> DataFrame:
     """Coalesce a DataFrame to a fixed partition count when configured.
 
