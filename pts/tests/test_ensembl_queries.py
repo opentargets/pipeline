@@ -136,7 +136,7 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (3, 1002, 'Translation', 602),
             (4, 1002, 'Translation', 603),
             (5, 1002, 'Translation', 604),
-            (6, 102, 'Transcript', 605),
+            (6, 1002, 'Transcript', 605),
             (7, 1, 'Gene', 501),
         ],
     ),
