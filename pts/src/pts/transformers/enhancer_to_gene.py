@@ -231,11 +231,11 @@ def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.Laz
 
 
 def validate_target(frame: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag unknown genes and interval chromosomes differing from their canonical transcript."""
+    """Flag unknown genes and interval chromosomes differing from their genomic location."""
     logger.info('Validating enhancer-to-gene targets')
     lookup = target.select(
         pl.col('id').alias('geneId'),
-        pl.col('canonicalTranscript').struct.field('chromosome').alias('_gene_chromosome'),
+        pl.col('genomicLocation').struct.field('chromosome').alias('_gene_chromosome'),
         pl.lit(True).alias('_target_found'),
     )
     result = _flag(
@@ -302,13 +302,6 @@ def enhancer_to_gene(
     destinations = EnhancerToGeneDestination.model_validate(destination)
     options = EnhancerToGeneSettings.model_validate(settings)
     target = scan_dataset(sources.target)
-    if 'canonicalTranscript' not in target.collect_schema():
-        target = target.with_columns(
-            pl.lit(
-                None,
-                dtype=pl.Struct({'chromosome': pl.String, 'strand': pl.String, 'start': pl.Int64, 'end': pl.Int64}),
-            ).alias('canonicalTranscript')
-        )
     biosample = scan_dataset(sources.biosample)
     contig = scan_dataset(sources.chromosome)
     biosample_mapping = scan_dataset(sources.biosample_lut, format='csv', has_header=True)
