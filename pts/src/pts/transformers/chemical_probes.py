@@ -7,14 +7,12 @@ validated against the target universe.
 
 from __future__ import annotations
 
-import io
 from typing import Any
 
 import polars as pl
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
 # Chemical probe data sources: columns of the PROBES sheet.
@@ -53,12 +51,6 @@ PROBES_TARGETS_COLUMNS = [
 MISSING_VALUE_TOKENS = ('-', 'nan')
 
 HIGH_QUALITY = 'High-quality chemical probes'
-
-# pandas.read_excel's default na_values
-MISSING_CELL_VALUES = [
-    '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA',
-    'NULL', 'NaN', 'None', 'n/a', 'nan', 'null',
-]  # fmt: skip
 
 # Characters spark's string-to-number cast trims from both ends.
 _CAST_TRIM = ''.join(chr(c) for c in range(0x21))
@@ -186,27 +178,10 @@ def process_scores(col_name: str) -> pl.Expr:
     )
 
 
-def read_sheet(probes_excel: str, sheet_name: str) -> pl.DataFrame:
-    """Read a sheet with every cell as a string: blanks and `MISSING_CELL_VALUES` as null, booleans as '1'/'0'.
-
-    Args:
-        probes_excel: path to the workbook.
-        sheet_name: sheet to read.
-
-    Returns:
-        DataFrame with one string column per sheet column.
-    """
-    with StorageHandle(probes_excel).open('rb') as f:
-        data = f.read()
-    sheet = pl.read_excel(io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None)
-    strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
-    return strings.with_columns(pl.when(~pl.all().is_in(MISSING_CELL_VALUES)).then(pl.all()).name.keep())
-
-
 def process_probes_data(probes_excel: str) -> pl.DataFrame:
     """Metadata about the compound and the scores given by the different sources."""
     return (
-        read_sheet(probes_excel, 'PROBES')
+        read_spreadsheet(probes_excel, 'PROBES')
         # Probes that do not have an associated target are marked as nulls
         .filter(pl.col('target').is_not_null())
         .select(PROBES_COLUMNS)
@@ -228,7 +203,7 @@ def process_probes_data(probes_excel: str) -> pl.DataFrame:
 def process_probes_targets_data(probes_excel: str) -> pl.DataFrame:
     """Collection of targets associated with the probes and their scores."""
     return (
-        read_sheet(probes_excel, 'PROBES TARGETS')
+        read_spreadsheet(probes_excel, 'PROBES TARGETS')
         # Probes without an associated target are marked with "-" or left blank
         .filter(pl.col('gene_name').is_not_null() & (pl.col('gene_name') != '-'))
         .select(PROBES_TARGETS_COLUMNS)
@@ -247,7 +222,7 @@ def process_probes_targets_data(probes_excel: str) -> pl.DataFrame:
 def process_probes_sets_data(probes_excel: str) -> pl.DataFrame:
     """Metadata about the different sources of probes."""
     return (
-        read_sheet(probes_excel, 'COMPOUNDSETS')
+        read_spreadsheet(probes_excel, 'COMPOUNDSETS')
         .select(pl.col('COMPOUNDSET').alias('datasourceId'), pl.col('SOURCE_URL').alias('url'))
         .filter(pl.col('url').str.starts_with('http'))
     )
@@ -255,7 +230,7 @@ def process_probes_sets_data(probes_excel: str) -> pl.DataFrame:
 
 def process_targets_xrefs(probes_excel: str) -> pl.DataFrame:
     """Look-up table between the gene symbols and the UniProt IDs."""
-    return read_sheet(probes_excel, 'TARGETS').select(
+    return read_spreadsheet(probes_excel, 'TARGETS').select(
         pl.col('target').alias('targetFromSource'), pl.col('uniprot').alias('targetFromSourceId')
     )
 

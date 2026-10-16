@@ -24,6 +24,7 @@ cannot do rather than half-doing it.
 
 from __future__ import annotations
 
+import io
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -37,6 +38,12 @@ from otter.util.errors import NotFoundError
 #: best, so that poorly-compressing datasets stay near the target instead of overshooting it --
 #: which makes this a cap on typical data, not a guarantee. Aim is roughly 250 MB per file.
 _DEFAULT_TARGET_BYTES = 1_400_000_000
+
+#: `pandas.read_excel`'s default `na_values`.
+_MISSING_CELL_VALUES = [
+    '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA',
+    'NULL', 'NaN', 'None', 'n/a', 'nan', 'null',
+]  # fmt: skip
 
 Format = Literal['parquet', 'ndjson', 'csv', 'tsv']
 
@@ -193,6 +200,26 @@ def scan_datasets(
 
     frames = [scan_dataset(directory, format=format, **options) for directory in directories]
     return pl.concat(frames, how='diagonal_relaxed')
+
+
+def read_spreadsheet(path: str, sheet_name: str) -> pl.DataFrame:
+    """Read one sheet of an Excel workbook with every cell as a string.
+
+    Blanks and `pandas.read_excel`'s default missing-value strings are null, booleans are '1'/'0',
+    and whitespace is kept. The workbook is read whole through `StorageHandle`.
+
+    Args:
+        path: location of the workbook.
+        sheet_name: sheet to read.
+
+    Returns:
+        DataFrame with one string column per sheet column.
+    """
+    with StorageHandle(path).open('rb') as f:
+        data = f.read()
+    sheet = pl.read_excel(io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None)
+    strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
+    return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
 
 
 def write_dataset(

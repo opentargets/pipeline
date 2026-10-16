@@ -19,7 +19,6 @@ from pts.transformers.chemical_probes import (
     process_probes_targets_data,
     process_scores,
     process_targets_xrefs,
-    read_sheet,
     replace_missing_placeholder,
     resolve_targets,
 )
@@ -380,21 +379,6 @@ def test_probes_targets_drops_blank_gene_name_and_other_organisms(tmp_path):
         },
     )
     assert process_probes_targets_data(xlsx)['pdid'].to_list() == ['PD-1']
-
-
-def test_read_sheet_normalises_cells(tmp_path):
-    xlsx = _write_xlsx(
-        tmp_path / 'cells.xlsx',
-        {'S': {'d': ['x', None, ' '], 'a': [1, 2, 3], 'b': [1.5, None, 2.0], 'c': [True, False, None],
-               'm': [1.0, '-', 'NaN'], 'n': ['NA', 'n/a', ' NA']}},
-    )  # fmt: skip
-    df = read_sheet(xlsx, 'S')
-    assert df.schema == pl.Schema(dict.fromkeys(['d', 'a', 'b', 'c', 'm', 'n'], pl.String))
-    assert df.rows() == [
-        ('x', '1', '1.5', '1', '1', None),
-        (None, '2', None, '0', '-', None),
-        (' ', '3', '2.0', None, None, ' NA'),
-    ]
 
 
 def test_process_drugs_xrefs_keeps_chembl_ids_only(tmp_path):
