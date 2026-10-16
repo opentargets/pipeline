@@ -21,7 +21,6 @@ scratchpad:
   ensembl_core_sus_scrofa: sus_scrofa_core_116_111
   ensembl_core_xenopus_tropicalis: xenopus_tropicalis_core_116_10
   ensembl_core_homo_sapiens: homo_sapiens_core_116_38
-  gencode_version: '50'
   depmap_version: '2026Q1'
   hpo_version: '2026-06-23'
   mondo_version: '2026-08-04'
@@ -953,14 +952,6 @@ steps:
     - name: copy chemical probes links
       source: https://www.probes-drugs.org/media/download/id_mapping/pd_export_${probes_drugs_version}_links_standardized.csv
       destination: input/target/chemicalprobes/probes_links.csv
-
-    - name: copy ensembl
-      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/homo_sapiens/homo_sapiens.json
-      destination: input/target/ensembl/homo_sapiens.json
-
-    - name: copy gencode
-      source: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_${gencode_version}/gencode.v${gencode_version}.annotation.gff3.gz
-      destination: input/target/gencode/gencode.gff3.gz
 
     - name: explode ensembl core caenorhabditis_elegans
       foreach:
