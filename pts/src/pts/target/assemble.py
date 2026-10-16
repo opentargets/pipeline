@@ -7,7 +7,7 @@ import polars as pl
 from pts.schemas.target import TARGET
 from pts.target.lists import flatten_distinct, union
 
-#: Lists `_uniprot_by_gene` gathers from a gene's UniProt entries.
+#: Lists `uniprot_by_gene` gathers from a gene's UniProt entries.
 UNIPROT_LISTS = [
     'synonyms',
     'symbolSynonyms',

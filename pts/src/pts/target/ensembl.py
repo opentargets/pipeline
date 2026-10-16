@@ -62,7 +62,7 @@ def ensembl_genes(genes: pl.DataFrame, transcripts: pl.DataFrame, translation_xr
         .filter(pl.col('id').str.starts_with('ENSG'))
         .filter(pl.col('chromosome').is_in(CANONICAL_CHROMOSOMES))
         .with_columns(pl.col('id').str.strip_chars(' '))
-        .sort('id')
+        .sort('id', maintain_order=True)
         .unique(subset='id', keep='first', maintain_order=True)
         .join(canonical, on=['id', 'canonicalTranscriptId'], how='left', maintain_order='left')
         .rechunk()

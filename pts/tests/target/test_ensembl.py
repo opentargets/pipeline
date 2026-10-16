@@ -137,3 +137,9 @@ SPARK_ROWS = [
         },
     },
 ]
+
+
+def test_a_duplicated_gene_id_keeps_the_first_input_row() -> None:
+    first = GENES.filter(pl.col('id') == 'ENSG00000141510').with_columns(pl.lit('first_row').alias('biotype'))
+    built = ensembl_genes(pl.concat([first, GENES]), TRANSCRIPTS, XREFS)
+    assert built.filter(pl.col('id') == 'ENSG00000141510')['biotype'].to_list() == ['first_row']
