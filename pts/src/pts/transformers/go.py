@@ -20,9 +20,19 @@ def _non_obsolete_ids(graph) -> set[str]:
 
 
 def _hierarchy(graph) -> nx.DiGraph:
+    """The is_a and part_of edges between terms of the same namespace.
+
+    go.obo has part_of edges from molecular_function to biological_process terms, which would
+    propagate function annotations into process terms.
+    """
+    namespace = dict(graph.nodes(data='namespace'))
     hierarchy = nx.DiGraph()
     hierarchy.add_nodes_from(graph)
-    hierarchy.add_edges_from((u, v) for u, v, key in graph.edges(keys=True) if key in ('is_a', 'part_of'))
+    hierarchy.add_edges_from(
+        (u, v)
+        for u, v, key in graph.edges(keys=True)
+        if key in ('is_a', 'part_of') and namespace.get(u) == namespace.get(v)
+    )
     return hierarchy
 
 

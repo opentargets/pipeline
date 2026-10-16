@@ -40,13 +40,16 @@ def with_ancestors(lf: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def _go_hierarchy(go: pl.LazyFrame) -> pl.LazyFrame:
-    """Live GO terms, with parents from `isA` and `partOf`."""
+    """Live GO terms, with parents from `isA` and `partOf` that are also ancestors.
+
+    Ancestors stay within the term's namespace, so this drops parents from another namespace.
+    """
     return go.filter(~pl.col('isObsolete')).select(
         'id',
         'label',
         pl.lit('go').alias('source'),
         pl.col('namespace').replace_strict(GO_NAMESPACES).alias('category'),
-        pl.concat_list('isA', 'partOf').list.unique().list.sort().alias('parentIds'),
+        pl.concat_list('isA', 'partOf').list.set_intersection('ancestors').list.sort().alias('parentIds'),
         'ancestors',
     )
 

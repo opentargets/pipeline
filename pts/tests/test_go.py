@@ -39,6 +39,12 @@ namespace: biological_process
 id: GO:0000005
 name: regulated
 namespace: biological_process
+
+[Term]
+id: GO:0000006
+name: function
+namespace: molecular_function
+relationship: part_of GO:0000003
 """
 
 
@@ -51,3 +57,13 @@ def test_ancestors_follow_only_is_a_and_part_of(tmp_path: Path) -> None:
     assert rows['GO:0000001']['descendants'] == ['GO:0000002', 'GO:0000003']
     assert rows['GO:0000004']['descendants'] == []
     assert rows['GO:0000005']['descendants'] == []
+
+
+def test_ancestors_stay_within_the_namespace(tmp_path: Path) -> None:
+    source = tmp_path / 'go.obo'
+    source.write_text(OBO)
+    go(str(source), str(tmp_path / 'go'), {}, Config(step='go', steps=['go'], work_path=tmp_path))
+    rows = {row['id']: row for row in scan_dataset(str(tmp_path / 'go')).collect().iter_rows(named=True)}
+    assert rows['GO:0000006']['partOf'] == ['GO:0000003']
+    assert rows['GO:0000006']['ancestors'] == []
+    assert rows['GO:0000003']['descendants'] == []
