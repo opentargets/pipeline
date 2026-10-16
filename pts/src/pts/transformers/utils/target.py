@@ -5,15 +5,7 @@ import polars as pl
 
 def tss_lut(target: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve gene TSS from preferred, canonical transcript, then genomic coordinates."""
-    canonical = pl.col('canonicalTranscript')
     genomic = pl.col('genomicLocation')
-    canonical_tss = (
-        pl
-        .when(canonical.struct.field('strand') == '+')
-        .then(canonical.struct.field('start'))
-        .when(canonical.struct.field('strand') == '-')
-        .then(canonical.struct.field('end'))
-    )
     genomic_tss = (
         pl
         .when(genomic.struct.field('strand') == 1)
@@ -21,7 +13,18 @@ def tss_lut(target: pl.LazyFrame) -> pl.LazyFrame:
         .when(genomic.struct.field('strand') == -1)
         .then(genomic.struct.field('end'))
     )
+    candidates = [pl.col('tss')]
+    if 'canonicalTranscript' in target.collect_schema():
+        canonical = pl.col('canonicalTranscript')
+        canonical_tss = (
+            pl
+            .when(canonical.struct.field('strand') == '+')
+            .then(canonical.struct.field('start'))
+            .when(canonical.struct.field('strand') == '-')
+            .then(canonical.struct.field('end'))
+        )
+        candidates.append(canonical_tss)
     return target.select(
         pl.col('id').alias('geneId'),
-        pl.coalesce(pl.col('tss'), canonical_tss, genomic_tss).cast(pl.Int64).alias('tss'),
+        pl.coalesce(*candidates, genomic_tss).cast(pl.Int64).alias('tss'),
     )
