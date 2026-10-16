@@ -770,7 +770,7 @@ steps:
       transformer: drug_mechanism_of_action
       source:
         chembl: input/chembl/chembl.tar.gz
-        target: intermediate/target/ensembl/homo_sapiens.parquet
+        target: output/target
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
