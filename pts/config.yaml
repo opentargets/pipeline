@@ -444,10 +444,8 @@ steps:
 
   #: TARGET_SAFETY_EVENT STEP :##########################################################################
   target_safety_event:
-    - name: pyspark target_safety_event
-      pyspark: target_safety_event
-      settings:
-        partition_count: 2
+    - name: transform target_safety_event
+      transformer: target_safety_event
       source:
         adverse_events: input/target/safety/adverse_effects.tsv
         safety_risks: input/target/safety/safety_risks.tsv
