@@ -170,13 +170,13 @@ def evidence_rows(*changes):
 
 
 def qc_target(*chromosomes):
-    """Create canonical transcript chromosome lookups."""
+    """Create genomic chromosome lookups."""
     return pl.DataFrame(
         {
             'id': ['ENSG1'] * len(chromosomes),
-            'canonicalTranscript': [{'chromosome': chromosome} for chromosome in chromosomes],
+            'genomicLocation': [{'chromosome': chromosome} for chromosome in chromosomes],
         },
-        schema={'id': pl.String, 'canonicalTranscript': pl.Struct({'chromosome': pl.String})},
+        schema={'id': pl.String, 'genomicLocation': pl.Struct({'chromosome': pl.String})},
     ).lazy()
 
 
@@ -366,7 +366,13 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
                 pl.lit('+').alias('strand'),
                 pl.lit(150, dtype=pl.Int64).alias('start'),
                 pl.lit(300, dtype=pl.Int64).alias('end'),
-            ).alias('canonicalTranscript')
+            ).alias('canonicalTranscript'),
+            pl.struct(
+                pl.lit('1').alias('chromosome'),
+                pl.lit(1).alias('strand'),
+                pl.lit(100, dtype=pl.Int64).alias('start'),
+                pl.lit(300, dtype=pl.Int64).alias('end'),
+            ).alias('genomicLocation'),
         )
     )
     if missing_canonical_transcript:
@@ -412,3 +418,14 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
         assert frame['pmid'].to_list() == ['38014075']
         assert frame['biosampleId'].to_list() == ['CL_1']
         assert frame['studyId'].to_list() == ['study']
+
+
+@pytest.mark.parametrize(('chromosome', 'expected'), [('1', False), ('2', True)])
+def test_target_qc_uses_genomic_chromosome_when_transcript_disagrees(chromosome, expected):
+    from pts.transformers.enhancer_to_gene import QualityFlag, validate_target
+
+    target = qc_target(chromosome).with_columns(
+        pl.struct(pl.lit('2' if chromosome == '1' else '1').alias('chromosome')).alias('canonicalTranscript')
+    )
+    result = validate_target(evidence_rows({}), target).collect()
+    assert (QualityFlag.TRANS_CHROMOSOMAL_EFFECT in result['qualityControls'][0]) == expected
