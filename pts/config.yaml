@@ -389,6 +389,20 @@ steps:
       destination: output/chemical_probe
   ##################################################################################################
 
+  #: VARIANT_PARTITION MIGRATION
+  variant_partition:
+    - name: transform variant partitions
+      transformer: variant_partition
+      source:
+        uniprot_variants: input/evidence/uniprot_variants.json.gz
+        eva: input/evidence/eva.json.gz
+        pharmacogenomics: output/pharmacogenomics
+        credible_set: output/credible_set
+      destination:
+        output: intermediate/variant_partition
+      settings:
+        partition_size: 2000
+
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
     - name: pyspark coding_variant view
