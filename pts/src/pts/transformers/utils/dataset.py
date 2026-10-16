@@ -25,7 +25,7 @@ cannot do rather than half-doing it.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, overload
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
@@ -132,13 +132,34 @@ def scan_dataset(
     return pl.scan_csv(parts, separator=_SEPARATORS[format], schema=schema, **options)
 
 
+@overload
 def scan_datasets(
     pattern: str,
     *,
     format: Format = 'parquet',
+    schema: pl.Schema | None = None,
+    **options: Any,
+) -> pl.LazyFrame: ...
+
+
+@overload
+def scan_datasets(
+    pattern: list[str],
+    *,
+    format: Format = 'parquet',
+    schema: pl.Schema | None = None,
+    **options: Any,
+) -> pl.LazyFrame: ...
+
+
+def scan_datasets(
+    pattern: str | list[str],
+    *,
+    format: Format = 'parquet',
+    schema: pl.Schema | None = None,
     **options: Any,
 ) -> pl.LazyFrame:
-    """Lazily read every dataset whose directory name matches a glob, as one frame.
+    """Lazily combine datasets selected by a directory glob or an explicit path list.
 
     `scan_dataset` refuses a glob because it enumerates a single directory itself. This is the
     dataset-level counterpart: the glob selects DIRECTORIES (`output/evidence_*`), and every
@@ -162,8 +183,10 @@ def scan_datasets(
     would silently strip every drug from the disease index instead of failing the step.
 
     Args:
-        pattern: dataset location containing a glob in its LAST segment, already absolute.
+        pattern: Absolute dataset paths, or a location with a glob in its LAST segment.
         format: `'parquet'`, `'ndjson'`, `'csv'` or `'tsv'`.
+        schema: Optional output schema. Missing columns and nested fields become typed
+            nulls; unexpected fields and mismatched types are rejected.
         **options: forwarded to `scan_dataset` for each matched dataset.
 
     Returns:
@@ -171,28 +194,37 @@ def scan_datasets(
 
     Raises:
         ValueError: for an unrecognised `format`, if `pattern` has no glob, if the glob is not
-            in the last segment, or if it matches no datasets.
+            in the last segment, if it matches no datasets, or if the path list is empty.
     """
     if format not in _GLOBS:
         msg = f'unrecognised format {format!r} for {pattern!r}, expected one of {sorted(_GLOBS)}'
         raise ValueError(msg)
 
-    parent, _, name_glob = pattern.rpartition('/')
-    if not any(char in name_glob for char in '*?['):
-        msg = f'{pattern!r} is not a glob; use scan_dataset for a single dataset'
-        raise ValueError(msg)
-    if any(char in parent for char in '*?['):
-        msg = f'{pattern!r} globs above the dataset name; only the last segment may be a glob'
-        raise ValueError(msg)
+    if isinstance(pattern, list):
+        if not pattern:
+            raise ValueError('At least one dataset path is required')
+        directories = pattern
+    else:
+        parent, _, name_glob = pattern.rpartition('/')
+        if not any(char in name_glob for char in '*?['):
+            msg = f'{pattern!r} is not a glob; use scan_dataset for a single dataset'
+            raise ValueError(msg)
+        if any(char in parent for char in '*?['):
+            msg = f'{pattern!r} globs above the dataset name; only the last segment may be a glob'
+            raise ValueError(msg)
 
-    files = StorageHandle(parent).glob(f'{name_glob}/{_GLOBS[format]}')
-    directories = sorted({file.rsplit('/', 1)[0] for file in files})
-    if not directories:
-        msg = f'{pattern!r} matched no datasets'
-        raise ValueError(msg)
+        files = StorageHandle(parent).glob(f'{name_glob}/{_GLOBS[format]}')
+        directories = sorted({file.rsplit('/', 1)[0] for file in files})
+        if not directories:
+            msg = f'{pattern!r} matched no datasets'
+            raise ValueError(msg)
 
     frames = [scan_dataset(directory, format=format, **options) for directory in directories]
-    return pl.concat(frames, how='diagonal_relaxed')
+    if schema is not None:
+        frames = [
+            frame.match_to_schema(schema, missing_columns='insert', missing_struct_fields='insert') for frame in frames
+        ]
+    return pl.concat(frames, how='vertical' if schema is not None else 'diagonal_relaxed')
 
 
 def write_dataset(
@@ -200,8 +232,11 @@ def write_dataset(
     path: str,
     *,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
+    single_file: bool = False,
 ) -> None:
-    """Write one dataset as a directory of size-capped zstd parquet parts.
+    """Write one dataset as a directory of zstd Parquet parts.
+
+    Parts use approximate size limits by default; `single_file=True` writes one part.
 
     Always a directory, never a single named file, so no dataset can outgrow its layout as it
     grows.
@@ -227,11 +262,12 @@ def write_dataset(
         path: destination directory, used as given -- never a parent or a derived path.
         approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
+        single_file: Write exactly one Parquet part, bypassing size-based splitting.
 
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
     """
-    sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
+    sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file, single_file=single_file).collect()
 
 
 def sink_dataset(
@@ -239,6 +275,7 @@ def sink_dataset(
     path: str,
     *,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
+    single_file: bool = False,
 ) -> pl.LazyFrame:
     """Plan the `write_dataset` write of one dataset without running it.
 
@@ -248,6 +285,7 @@ def sink_dataset(
         frame: the data to write; a `DataFrame` is made lazy so there is one code path.
         path: destination directory, used as given.
         approximate_bytes_per_file: target part size, as in `write_dataset`.
+        single_file: Write exactly one Parquet part when the sink is collected.
 
     Returns:
         The lazy sink; nothing is written until it is collected.
@@ -267,6 +305,8 @@ def sink_dataset(
         raise ValueError(msg)
 
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    if single_file:
+        return lf.sink_parquet(f'{path.rstrip("/")}/00000000.parquet', compression='zstd', mkdir=True, lazy=True)
     return lf.sink_parquet(
         pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),
         compression='zstd',
