@@ -1,14 +1,21 @@
-import gc
-import json
+"""Homology dataset generation.
+
+Resolves Ensembl Compara homologies into one row per target and homologue. Homologue gene names
+come from each species' Ensembl core database, human symbols and the target universe from
+output/target.
+"""
+
+from __future__ import annotations
+
 from typing import Any
 
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
+from pts.ensembl import CoreDump, gene_names
 from pts.schemas.homology import homology_schema, orthologs_schema
-from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.spark_casts import cast_double
 
 DEFAULT_HGNC_ORTHOLOG_SPECIES = [
@@ -42,34 +49,28 @@ COMPARA_COLUMNS = [
 ]
 
 
-class FilteredJSONDecoder(json.JSONDecoder):
-    """JSON Decoder that filter keys in the JSON object.
+def read_species_dictionary(path: str) -> pl.DataFrame:
+    """Read `species_EnsemblVertebrates.txt`, whose data rows end in a tab the header lacks."""
+    return (
+        scan_dataset(path, format='tsv', infer_schema=False, truncate_ragged_lines=True)
+        .select('#name', 'species', 'taxonomy_id')
+        .collect()
+    )
 
-    This decoder calls a hook on each JSON object that filters out keys not in
-    allowed_keys set. It also processes the root_key, so we can get to the data.
 
-    This saves us a lot of memory and time, and serves as a workaround for the
-    bug in polars that causes it to crash when loading large JSON objects:
+def read_homologies(path: str) -> pl.DataFrame:
+    """Read the Compara homology TSVs, keeping the rows with a human gene on either side."""
+    return (
+        scan_dataset(path, format='tsv', infer_schema=False)
+        .select(COMPARA_COLUMNS)
+        .filter((pl.col('species') == HUMAN) | (pl.col('homology_species') == HUMAN))
+        .collect()
+    )
 
-    https://github.com/pola-rs/polars/issues/17677
-    """
 
-    def __init__(
-        self,
-        root_key='genes',
-        allowed_keys=None,
-        *args,
-        **kwargs,
-    ) -> None:
-        self.root_key = root_key
-        self.allowed_keys = allowed_keys or {'id', 'name'}
-        super().__init__(*args, **kwargs, object_hook=self.filter_keys)
-
-    def filter_keys(self, obj: dict) -> dict:
-        """Modified filter that keeps only certain roots."""
-        if self.root_key in obj:
-            return {self.root_key: obj[self.root_key]}
-        return {k: v for k, v in obj.items() if k in self.allowed_keys}
+def read_gene_names(path: str, species: list[str]) -> pl.DataFrame:
+    """Gene id and name of every gene of every species, from `<path>/<species>/` core dumps."""
+    return pl.concat([gene_names(CoreDump(f'{path}/{name}')) for name in species])
 
 
 def build_homology(
@@ -171,20 +172,36 @@ def resolve_homology(orthologs: pl.DataFrame, target: pl.DataFrame) -> pl.DataFr
 
 
 def homology(
-    source: str,
+    source: dict[str, str],
     destination: str,
-    settings: dict[str, Any],
-    config: Config,
+    settings: dict[str, Any] | None,
+    config: Config | None,
 ) -> None:
-    s = StorageHandle(source)
-    f = s.open()
+    """Build the homology dataset and write it out.
 
-    data = json.loads(f.read(), cls=FilteredJSONDecoder)
-    df = pl.from_dicts(data['genes'])
-    # free up memory
-    del data
-    gc.collect()
+    Args:
+        source: Mapping with keys `species_dictionary` (`species_EnsemblVertebrates.txt`),
+            `homologies` (directory of Compara homology TSVs), `ensembl` (directory of one core
+            dump per species) and `target` (output/target).
+        destination: Output path for the homology dataset.
+        settings: `ensembl_species`, the core dump directories under `ensembl`; optionally
+            `hgncOrthologSpecies`.
+        config: Unused.
+    """
+    settings = settings or {}
+    target_species: list[str] = settings.get('hgncOrthologSpecies', DEFAULT_HGNC_ORTHOLOG_SPECIES)
 
-    # write the result locally
-    write_dataset(df, destination)
-    logger.info('transformation complete')
+    logger.info(f'loading data from {source}')
+    species_dictionary = read_species_dictionary(source['species_dictionary'])
+    homologies = read_homologies(source['homologies'])
+    names = read_gene_names(source['ensembl'], settings['ensembl_species'])
+    target = scan_dataset(source['target']).select('id', 'approvedSymbol').collect()
+
+    logger.info('building homologue pairs')
+    orthologs = build_homology(species_dictionary, homologies, names, target_species)
+
+    logger.info('resolving homologue symbols against output/target')
+    result = resolve_homology(orthologs, target)
+
+    logger.info(f'writing output data to {destination}')
+    write_dataset(result, destination)

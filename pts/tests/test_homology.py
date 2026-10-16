@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import gzip
+from pathlib import Path
+
 import polars as pl
 import pytest
+import yaml
 from polars.testing import assert_frame_equal
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StringType, StructField, StructType
 
 from pts.pyspark.homology import _build_homology, _resolve_homology
 from pts.schemas.homology import homology_schema, orthologs_schema
-from pts.transformers.homology import COMPARA_COLUMNS, build_homology, resolve_homology
+from pts.transformers.homology import (
+    COMPARA_COLUMNS,
+    build_homology,
+    homology,
+    read_gene_names,
+    read_homologies,
+    read_species_dictionary,
+    resolve_homology,
+)
+from pts.transformers.utils.dataset import write_dataset
+from tests.ensembl_fixtures import cells, release_116_ddl, write_dump
+
+REPO = Path(__file__).parents[2]
 
 SPECIES_SCHEMA = {'#name': pl.String, 'species': pl.String, 'taxonomy_id': pl.String}
 COMPARA_SCHEMA = dict.fromkeys(COMPARA_COLUMNS, pl.String)
@@ -422,3 +438,126 @@ def test_resolve_homology_matches_spark(spark: SparkSession) -> None:
     result = resolve_homology(orthologs, _target(*PARITY_TARGET))
     assert result.height > 0
     assert_frame_equal(_sorted(result), _sorted(expected))
+
+
+# ---------------------------------------------------------------------------
+# readers and the entrypoint
+# ---------------------------------------------------------------------------
+
+
+def _write_gz(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, 'wt', encoding='utf8') as f:
+        f.write(text)
+
+
+def _write_core(root: Path, db: str, genes: list[tuple[str, str | None]]) -> None:
+    """A core dump holding `genes` as (stable id, display label or None)."""
+    species = db.split('_core_', maxsplit=1)[0]
+    gene_rows, xref_rows = [], []
+    for i, (stable_id, label) in enumerate(genes, start=1):
+        display_xref = None if label is None else i
+        gene_rows.append(
+            cells(i, 'protein_coding', 1, 1, 1, 100, 1, display_xref, 'ensembl', None, 1, i, stable_id, 1, None, None)
+        )
+        if label is not None:
+            xref_rows.append(cells(i, 1, label, label, 0, None, 'DIRECT', ''))
+    (root / species).mkdir(parents=True, exist_ok=True)
+    write_dump(root / species, {'gene': gene_rows, 'xref': xref_rows}, release_116_ddl(['gene', 'xref']), db=db)
+
+
+def _write_tsv_gz(path: Path, header: list[str], rows: list[dict[str, str | None]]) -> None:
+    lines = ['\t'.join(header)] + ['\t'.join(row.get(c) or 'NULL' for c in header) for row in rows]
+    _write_gz(path, '\n'.join(lines) + '\n')
+
+
+def test_read_species_dictionary_drops_the_trailing_tab(tmp_path: Path) -> None:
+    """Data rows carry one more tab than the header; the extra empty field is dropped."""
+    path = tmp_path / 'species_EnsemblVertebrates.txt'
+    path.write_text('#name\tspecies\tdivision\ttaxonomy_id\nMouse\tmus_musculus\tEnsemblVertebrates\t10090\t\n')
+    result = read_species_dictionary(str(path))
+    assert result.rows() == [('Mouse', 'mus_musculus', '10090')]
+    assert result.schema['taxonomy_id'] == pl.String
+
+
+def test_read_homologies_keeps_rows_with_a_human_gene(tmp_path: Path) -> None:
+    """Rows reach the step only if either side is human; every column stays a string."""
+    header = COMPARA_COLUMNS + OTHER_COMPARA_COLUMNS
+    _write_tsv_gz(tmp_path / 'protein-homo_sapiens.tsv.gz', header, [_pair()])
+    _write_tsv_gz(
+        tmp_path / 'protein-mus_musculus.tsv.gz',
+        header,
+        [
+            _pair(
+                gene_stable_id='ENSMUSG0001',
+                species='mus_musculus',
+                homology_gene_stable_id='ENSG0001',
+                homology_species='homo_sapiens',
+            ),
+            _pair(
+                gene_stable_id='ENSMUSG0001',
+                species='mus_musculus',
+                homology_gene_stable_id='ENSRNOG1',
+                homology_species='rattus_norvegicus',
+            ),
+        ],
+    )
+    result = read_homologies(str(tmp_path))
+    assert result.schema == pl.Schema(COMPARA_SCHEMA)
+    assert result.select('gene_stable_id', 'homology_gene_stable_id').rows() == [
+        ('ENSG0001', 'ENSMUSG0001'),
+        ('ENSMUSG0001', 'ENSG0001'),
+    ]
+
+
+def test_read_gene_names_concatenates_every_species(tmp_path: Path) -> None:
+    """Each species' core dump contributes all its genes, unnamed ones with a null name."""
+    _write_core(tmp_path, 'homo_sapiens_core_116_38', [('ENSG0001', 'TP53'), ('ENSG0002', None)])
+    _write_core(tmp_path, 'mus_musculus_core_116_39', [('ENSMUSG0001', 'Trp53')])
+    result = read_gene_names(str(tmp_path), ['homo_sapiens', 'mus_musculus'])
+    assert result.rows() == [('ENSG0001', 'TP53'), ('ENSG0002', None), ('ENSMUSG0001', 'Trp53')]
+
+
+def test_homology_writes_the_dataset(tmp_path: Path) -> None:
+    """The entrypoint reads every source and writes the resolved pairs."""
+    species = tmp_path / 'species_EnsemblVertebrates.txt'
+    species.write_text(
+        '#name\tspecies\tdivision\ttaxonomy_id\n'
+        'Human\thomo_sapiens\tEnsemblVertebrates\t9606\t\n'
+        'Mouse\tmus_musculus\tEnsemblVertebrates\t10090\t\n'
+    )
+    header = COMPARA_COLUMNS + OTHER_COMPARA_COLUMNS
+    _write_tsv_gz(tmp_path / 'homologies' / 'protein-homo_sapiens.tsv.gz', header, [_pair(is_high_confidence=None)])
+    _write_core(tmp_path / 'ensembl', 'homo_sapiens_core_116_38', [('ENSG0001', 'TP53')])
+    _write_core(tmp_path / 'ensembl', 'mus_musculus_core_116_39', [('ENSMUSG0001', ' Trp53 ')])
+    write_dataset(_target(('ENSG0001', 'TP53')), str(tmp_path / 'target'))
+    destination = tmp_path / 'homology'
+
+    homology(
+        {
+            'species_dictionary': str(species),
+            'homologies': str(tmp_path / 'homologies'),
+            'ensembl': str(tmp_path / 'ensembl'),
+            'target': str(tmp_path / 'target'),
+        },
+        str(destination),
+        {'ensembl_species': ['homo_sapiens', 'mus_musculus']},
+        None,
+    )
+
+    expected = pl.DataFrame(
+        [('ENSG0001', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0001', None, 'Trp53', 100.0, 88.0, 3)],
+        schema=homology_schema,
+        orient='row',
+    )
+    assert_frame_equal(pl.read_parquet(str(destination / '*.parquet')), expected)
+
+
+def test_homology_species_match_the_pis_core_dumps() -> None:
+    """The step reads one core dump per species PIS pins a core database for."""
+    pts_config = yaml.safe_load((REPO / 'pts' / 'config.yaml').read_text())
+    pis_config = yaml.safe_load((REPO / 'pis' / 'config.yaml').read_text())
+    (task,) = pts_config['steps']['homology']
+    pinned = {key.removeprefix('ensembl_core_') for key in pis_config['scratchpad'] if key.startswith('ensembl_core_')}
+    assert sorted(task['settings']['ensembl_species']) == sorted(pinned)
+    assert len(pinned) == 13
