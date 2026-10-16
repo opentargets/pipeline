@@ -10,8 +10,7 @@ from pts.transformers.search_facet import (
     TARGET_COLUMNS,
     disease_facets,
     disease_name_facets,
-    go_facets,
-    pathway_facets,
+    gene_set_facets,
     search_facet,
     simple_facet,
     subcellular_location_facets,
@@ -22,22 +21,22 @@ from pts.transformers.search_facet import (
 
 CATEGORIES = DEFAULT_CATEGORIES
 
-GO_ANNOTATION = pl.Struct({'id': pl.String, 'aspect': pl.String})
 LOCATION = pl.Struct({'location': pl.String, 'termSL': pl.String})
-TARGET_CLASS = pl.Struct({'id': pl.Int64, 'label': pl.String, 'level': pl.String})
-PATHWAY = pl.Struct({'pathwayId': pl.String, 'pathway': pl.String, 'topLevelTerm': pl.String})
 
 TARGET_SCHEMA = {
     'id': pl.String,
     'approvedSymbol': pl.String,
     'approvedName': pl.String,
-    'go': pl.List(GO_ANNOTATION),
     'subcellularLocations': pl.List(LOCATION),
-    'targetClass': pl.List(TARGET_CLASS),
-    'pathways': pl.List(PATHWAY),
 }
 DISEASE_SCHEMA = {'id': pl.String, 'name': pl.String, 'therapeuticAreas': pl.List(pl.String)}
-REFERENCE_SCHEMA = {'id': pl.String, 'label': pl.String, 'ancestors': pl.List(pl.String)}
+GENE_SET_SCHEMA = {
+    'id': pl.String,
+    'label': pl.String,
+    'source': pl.String,
+    'category': pl.String,
+    'entityIds': pl.List(pl.String),
+}
 TRACTABILITY_SCHEMA = {'targetId': pl.String, 'modality': pl.String, 'category': pl.String, 'value': pl.Boolean}
 
 
@@ -49,8 +48,8 @@ def disease(rows: list[tuple]) -> pl.LazyFrame:
     return pl.LazyFrame(rows, schema=DISEASE_SCHEMA, orient='row')
 
 
-def reference(rows: list[tuple]) -> pl.LazyFrame:
-    return pl.LazyFrame(rows, schema=REFERENCE_SCHEMA, orient='row')
+def gene_sets(rows: list[tuple]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=GENE_SET_SCHEMA, orient='row')
 
 
 def tractability(rows: list[tuple]) -> pl.LazyFrame:
@@ -109,38 +108,19 @@ def test_tractability_facet_keeps_true_values_only() -> None:
     ]
 
 
-def test_go_facet_maps_aspects_and_propagates_to_ancestors() -> None:
-    rows = go_facets(
-        target([
-            {'id': 'ENSG1', 'go': [{'id': 'GO:2', 'aspect': 'F'}, {'id': 'GO:3', 'aspect': 'C'}]},
-            {'id': 'ENSG2', 'go': [{'id': 'GO:1', 'aspect': 'F'}, {'id': 'GO:9', 'aspect': 'Z'}]},
-            {'id': 'ENSG3', 'go': []},
-            {'id': 'ENSG4', 'go': None},
+def test_gene_set_facets_keep_one_source_keyed_by_set_id() -> None:
+    rows = gene_set_facets(
+        gene_sets([
+            ('GO:1', 'binding', 'go', 'GO:MF', ['ENSG1', 'ENSG2']),
+            ('GO:3', 'nucleus', 'go', 'GO:CC', ['ENSG1']),
+            ('R-HSA-1', 'Cell Cycle', 'reactome', 'Reactome', ['ENSG1']),
         ]),
-        reference([
-            ('GO:1', 'binding', None),
-            ('GO:2', 'DNA binding', ['GO:1', 'GO:2']),
-            ('GO:3', 'nucleus', []),
-            ('GO:9', 'odd', []),
-            ('GO:0', None, []),
-        ]),
-        CATEGORIES,
+        'go',
     )
     assert by_key(rows) == {
-        'GO:1': {'label': 'binding', 'datasourceId': 'GO:1', 'entityIds': ['ENSG1', 'ENSG2'], 'category': 'GO:MF'},
-        'GO:2': {'label': 'DNA binding', 'datasourceId': 'GO:2', 'entityIds': ['ENSG1'], 'category': 'GO:MF'},
-        'GO:3': {'label': 'nucleus', 'datasourceId': 'GO:3', 'entityIds': ['ENSG1'], 'category': 'GO:CC'},
-        'GO:9': {'label': 'odd', 'datasourceId': 'GO:9', 'entityIds': ['ENSG2'], 'category': 'Z'},
+        'GO:1': {'label': 'binding', 'category': 'GO:MF', 'entityIds': ['ENSG1', 'ENSG2'], 'datasourceId': 'GO:1'},
+        'GO:3': {'label': 'nucleus', 'category': 'GO:CC', 'entityIds': ['ENSG1'], 'datasourceId': 'GO:3'},
     }
-
-
-def test_go_facet_drops_terms_without_a_label() -> None:
-    rows = go_facets(
-        target([{'id': 'ENSG1', 'go': [{'id': 'GO:5', 'aspect': 'P'}, None]}]),
-        reference([('GO:5', 'process', ['GO:0']), ('GO:0', None, [])]),
-        CATEGORIES,
-    )
-    assert list(by_key(rows)) == ['GO:5']
 
 
 def test_subcellular_location_facet() -> None:
@@ -169,31 +149,21 @@ def test_subcellular_location_facet() -> None:
     }
 
 
-def test_target_class_facet_has_null_datasource() -> None:
+def test_target_class_facet_merges_classes_sharing_a_label_with_null_datasource() -> None:
     rows = target_class_facets(
-        target([
-            {'id': 'ENSG1', 'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}]},
-            {'id': 'ENSG1', 'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}]},
+        gene_sets([
+            ('1', 'Kinase', 'chembl_target_class', 'ChEMBL Target Class', ['ENSG2', 'ENSG1']),
+            ('7', 'Kinase', 'chembl_target_class', 'ChEMBL Target Class', ['ENSG1', 'ENSG3']),
+            ('GO:1', 'Kinase', 'go', 'GO:MF', ['ENSG4']),
         ]),
-        CATEGORIES,
     )
     assert by_key(rows, 'label') == {
-        'Kinase': {'label': 'Kinase', 'category': 'ChEMBL Target Class', 'entityIds': ['ENSG1'], 'datasourceId': None},
-    }
-
-
-def test_pathway_facet_propagates_to_ancestors() -> None:
-    rows = pathway_facets(
-        target([
-            {'id': 'ENSG1', 'pathways': [{'pathwayId': 'R-HSA-2', 'pathway': 'DNA Repair', 'topLevelTerm': 'x'}]},
-            {'id': 'ENSG2', 'pathways': [{'pathwayId': 'R-HSA-7', 'pathway': 'unknown', 'topLevelTerm': 'x'}]},
-        ]),
-        reference([('R-HSA-2', 'DNA Repair', ['R-HSA-1']), ('R-HSA-1', 'Cell Cycle', [])]),
-        CATEGORIES,
-    )
-    assert by_key(rows) == {
-        'R-HSA-1': {'label': 'Cell Cycle', 'category': 'Reactome', 'datasourceId': 'R-HSA-1', 'entityIds': ['ENSG1']},
-        'R-HSA-2': {'label': 'DNA Repair', 'category': 'Reactome', 'datasourceId': 'R-HSA-2', 'entityIds': ['ENSG1']},
+        'Kinase': {
+            'label': 'Kinase',
+            'category': 'ChEMBL Target Class',
+            'entityIds': ['ENSG1', 'ENSG2', 'ENSG3'],
+            'datasourceId': None,
+        },
     }
 
 
@@ -230,18 +200,19 @@ def test_search_facet_end_to_end(tmp_path: Path) -> None:
             'id': 'ENSG1',
             'approvedSymbol': 'A1',
             'approvedName': 'alpha',
-            'go': [{'id': 'GO:2', 'aspect': 'F'}],
             'subcellularLocations': [{'location': 'nucleus', 'termSL': 'SL-1'}],
-            'targetClass': [{'id': 1, 'label': 'Kinase', 'level': 'l1'}],
-            'pathways': [{'pathwayId': 'R-HSA-2', 'pathway': 'p', 'topLevelTerm': 'x'}],
         },
     ]).collect()
     pl.concat([targets, targets.with_columns(pl.lit('ENSG2').alias('id'))], rechunk=False).write_parquet(
         src / 'target.parquet'
     )
     disease([('EFO_2', 'b', ['EFO_1']), ('EFO_1', 'a', None)]).collect().write_parquet(src / 'disease.parquet')
-    reference([('GO:2', 'DNA binding', ['GO:1']), ('GO:1', 'binding', [])]).collect().write_parquet(src / 'go.parquet')
-    reference([('R-HSA-2', 'p', [])]).collect().write_parquet(src / 'reactome.parquet')
+    gene_sets([
+        ('GO:1', 'binding', 'go', 'GO:MF', ['ENSG1', 'ENSG2']),
+        ('GO:2', 'DNA binding', 'go', 'GO:MF', ['ENSG1', 'ENSG2']),
+        ('R-HSA-2', 'p', 'reactome', 'Reactome', ['ENSG1', 'ENSG2']),
+        ('1', 'Kinase', 'chembl_target_class', 'ChEMBL Target Class', ['ENSG1', 'ENSG2']),
+    ]).collect().write_parquet(src / 'gene_sets.parquet')
     tractability([('ENSG1', 'SM', 'Approved Drug', True)]).collect().write_parquet(src / 'tractability.parquet')
 
     def run(dst: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -249,8 +220,7 @@ def test_search_facet_end_to_end(tmp_path: Path) -> None:
             {
                 'diseases': str(src / 'disease.parquet'),
                 'targets': str(src / 'target.parquet'),
-                'go': str(src / 'go.parquet'),
-                'reactome': str(src / 'reactome.parquet'),
+                'gene_sets': str(src / 'gene_sets.parquet'),
                 'tractability': str(src / 'tractability.parquet'),
             },
             {'targets': str(dst / 'targets'), 'diseases': str(dst / 'diseases')},

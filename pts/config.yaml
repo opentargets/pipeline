@@ -1447,6 +1447,18 @@ steps:
         spark.driver.memory: 12g
   ##################################################################################################
 
+  #: GENE_SETS STEP :###############################################################################
+  gene_sets:
+    - name: transform gene_sets
+      transformer: gene_sets
+      source:
+        targets: output/target
+        go: output/go
+        reactome: output/reactome
+        protein_classification: intermediate/chembl/protein_classification.parquet
+      destination: output/gene_sets
+  ##################################################################################################
+
   #: SEARCH_FACET STEP :############################################################################
   search_facet:
     - name: transform search_facet
@@ -1454,8 +1466,7 @@ steps:
       source:
         diseases: output/disease
         targets: output/target
-        go: output/go
-        reactome: output/reactome
+        gene_sets: output/gene_sets
         tractability: output/target_tractability
       destination:
         targets: view/search_facet_target
