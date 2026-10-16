@@ -8,10 +8,7 @@ import polars as pl
 import pytest
 import yaml
 from polars.testing import assert_frame_equal
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StringType, StructField, StructType
 
-from pts.pyspark.homology import _build_homology, _resolve_homology
 from pts.schemas.homology import homology_schema, orthologs_schema
 from pts.transformers.homology import (
     COMPARA_COLUMNS,
@@ -309,10 +306,10 @@ def test_resolve_homology_sorts_rows() -> None:
 
 
 # ---------------------------------------------------------------------------
-# parity with the spark job
+# a mixed fixture
 # ---------------------------------------------------------------------------
 
-PARITY_SPECIES = [
+MIXED_SPECIES = [
     ('Human', 'homo_sapiens', '9606'),
     MOUSE,
     ('Mouse A/J', 'mus_musculus_aj', '10090'),
@@ -321,7 +318,7 @@ PARITY_SPECIES = [
     ('Zebrafish', 'danio_rerio', '7955'),
     ('Nameless', 'no_taxonomy', None),
 ]
-PARITY_HOMOLOGIES = [
+MIXED_HOMOLOGIES = [
     _pair(),
     _pair(
         gene_stable_id='ENSG0002',
@@ -372,7 +369,7 @@ PARITY_HOMOLOGIES = [
     ),
     _pair(homology_gene_stable_id='ENSXXXG0001', homology_species='no_taxonomy'),
 ]
-PARITY_NAMES = [
+MIXED_NAMES = [
     ('ENSMUSG0001', ' Trp53 '),
     ('ENSMUSG0002', '   '),
     ('ENSMUSG0003', 'na'),
@@ -383,60 +380,67 @@ PARITY_NAMES = [
     ('ENSG0002', ''),
     ('ENSG0003', '\tTAB'),
 ]
-PARITY_TARGET = [('ENSG0001', 'GENE1'), ('ENSG0002', 'GENE2'), ('ENSG0003', None)]
-PARITY_WHITELIST = ['9606-human', '10090-mouse', '10116-rat', '7955-zebrafish']
-
-
-def _strings(spark: SparkSession, rows: list[dict[str, str | None]], columns: list[str]):
-    schema = StructType([StructField(c, StringType()) for c in columns])
-    return spark.createDataFrame([tuple(row.get(c) for c in columns) for row in rows], schema)
-
-
-def _from_spark(df, schema: pl.Schema) -> pl.DataFrame:
-    return pl.DataFrame([row.asDict() for row in df.collect()], schema=schema)
-
-
-def _spark_inputs(spark: SparkSession):
-    species = _strings(
-        spark, [dict(zip(SPECIES_SCHEMA, row, strict=True)) for row in PARITY_SPECIES], list(SPECIES_SCHEMA)
-    )
-    homologies = _strings(spark, PARITY_HOMOLOGIES, COMPARA_COLUMNS + OTHER_COMPARA_COLUMNS)
-    names = _strings(spark, [dict(zip(NAMES_SCHEMA, row, strict=True)) for row in PARITY_NAMES], list(NAMES_SCHEMA))
-    target = _strings(spark, [dict(zip(TARGET_SCHEMA, row, strict=True)) for row in PARITY_TARGET], list(TARGET_SCHEMA))
-    return species, homologies, names, target
+MIXED_TARGET = [('ENSG0001', 'GENE1'), ('ENSG0002', 'GENE2'), ('ENSG0003', None)]
+MIXED_WHITELIST = ['9606-human', '10090-mouse', '10116-rat', '7955-zebrafish']
 
 
 def _sorted(df: pl.DataFrame) -> pl.DataFrame:
     return df.sort(df.columns, nulls_last=True)
 
 
-def test_build_homology_matches_spark(spark: SparkSession) -> None:
-    """The polars pairs equal the spark job's on the same inputs."""
-    species, homologies, names, _ = _spark_inputs(spark)
-    expected = _from_spark(_build_homology(species, homologies, names, PARITY_WHITELIST), orthologs_schema)
+#: `build_homology` on the mixed fixture, sorted by every column; equal to the spark job's.
+MIXED_ORTHOLOGS = [
+    ('ENSG0001', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0001', '1', 'Trp53', 100.0, 88.0, 1),
+    ('ENSG0001', '10090', 'Mouse', None, 'ENSMUSG0006', '1', 'ENSMUSG0006', 100.0, 88.0, 1),
+    ('ENSG0001', '10090', 'Mouse A/J', 'ortholog_one2one', 'ENSMUSG0004', '1', 'Trp53', 100.0, 88.0, 1),
+    ('ENSG0001', '7955', 'Zebrafish', 'ortholog_one2one', 'ENSDARG0001', '1', None, 5.0, 100.0, 3),
+    ('ENSG0001', '9606', 'Human', 'within_species_paralog', 'ENSG0003', None, '\tTAB', None, None, 0),
+    ('ENSG0002', '10090', 'Mouse', 'ortholog_one2many', 'ENSMUSG0002', '0', 'ENSMUSG0002', 75.0, 70.0, 1),
+    ('ENSG0002', '9606', 'Human', 'other_paralog', 'ENSG0003', None, '\tTAB', 41.5335, 41.8006, 0),
+    ('ENSG0003', '9606', 'Human', 'other_paralog', 'ENSG0002', None, 'ENSG0002', 41.8006, 41.5335, 0),
+    ('ENSG0003', '9606', 'Human', 'within_species_paralog', 'ENSG0001', None, 'GENE1-ensembl', None, None, 0),
+    ('ENSG0099', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0005', '1', 'ENSMUSG0005', 100.0, 88.0, 1),
+]
+
+#: `resolve_homology` on the mixed fixture, in output order; equal to the spark job's, row order aside.
+MIXED_HOMOLOGY = [
+    ('ENSG0001', '7955', 'Zebrafish', 'ortholog_one2one', 'ENSDARG0001', '1', 'GENE1', 5.0, 100.0, 3),
+    ('ENSG0001', '9606', 'Human', 'within_species_paralog', 'ENSG0003', None, '\tTAB', None, None, 0),
+    ('ENSG0001', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0001', '1', 'Trp53', 100.0, 88.0, 1),
+    ('ENSG0001', '10090', 'Mouse A/J', 'ortholog_one2one', 'ENSMUSG0004', '1', 'Trp53', 100.0, 88.0, 1),
+    ('ENSG0001', '10090', 'Mouse', None, 'ENSMUSG0006', '1', 'ENSMUSG0006', 100.0, 88.0, 1),
+    ('ENSG0002', '9606', 'Human', 'other_paralog', 'ENSG0003', None, '\tTAB', 41.5335, 41.8006, 0),
+    ('ENSG0002', '10090', 'Mouse', 'ortholog_one2many', 'ENSMUSG0002', '0', 'ENSMUSG0002', 75.0, 70.0, 1),
+    ('ENSG0003', '9606', 'Human', 'within_species_paralog', 'ENSG0001', None, 'GENE1', None, None, 0),
+    ('ENSG0003', '9606', 'Human', 'other_paralog', 'ENSG0002', None, 'GENE2', 41.8006, 41.5335, 0),
+]
+
+
+def test_build_homology_on_a_mixed_fixture() -> None:
+    """Swaps, paralogs, strains, unlisted species, null keys and names together."""
     result = build_homology(
-        _species(*PARITY_SPECIES),
-        _homologies(*PARITY_HOMOLOGIES),
-        _names(*PARITY_NAMES),
-        PARITY_WHITELIST,
+        _species(*MIXED_SPECIES),
+        _homologies(*MIXED_HOMOLOGIES),
+        _names(*MIXED_NAMES),
+        MIXED_WHITELIST,
     )
-    assert_frame_equal(_sorted(result), _sorted(expected))
-
-
-def test_resolve_homology_matches_spark(spark: SparkSession) -> None:
-    """The polars dataset equals the spark job's on the same inputs, row order aside."""
-    species, homologies, names, target = _spark_inputs(spark)
-    spark_orthologs = _build_homology(species, homologies, names, PARITY_WHITELIST)
-    expected = _from_spark(_resolve_homology(spark_orthologs, target), homology_schema)
-    orthologs = build_homology(
-        _species(*PARITY_SPECIES),
-        _homologies(*PARITY_HOMOLOGIES),
-        _names(*PARITY_NAMES),
-        PARITY_WHITELIST,
-    )
-    result = resolve_homology(orthologs, _target(*PARITY_TARGET))
+    expected = pl.DataFrame(MIXED_ORTHOLOGS, schema=orthologs_schema, orient='row')
     assert result.height > 0
-    assert_frame_equal(_sorted(result), _sorted(expected))
+    assert_frame_equal(_sorted(result), expected, check_exact=True)
+
+
+def test_resolve_homology_on_a_mixed_fixture() -> None:
+    """The mixed fixture resolved against output/target, in output order."""
+    orthologs = build_homology(
+        _species(*MIXED_SPECIES),
+        _homologies(*MIXED_HOMOLOGIES),
+        _names(*MIXED_NAMES),
+        MIXED_WHITELIST,
+    )
+    result = resolve_homology(orthologs, _target(*MIXED_TARGET))
+    expected = pl.DataFrame(MIXED_HOMOLOGY, schema=homology_schema, orient='row')
+    assert result.height > 0
+    assert_frame_equal(result, expected, check_exact=True)
 
 
 # ---------------------------------------------------------------------------
