@@ -1595,8 +1595,8 @@ steps:
 
   #: SEARCH_EBI STEP :##############################################################################
   search_ebi:
-    - name: pyspark search_ebi
-      pyspark: search_ebi
+    - name: transform search_ebi
+      transformer: search_ebi
       source:
         disease: output/disease
         target: output/target
@@ -1605,8 +1605,6 @@ steps:
       destination:
         associations: view/search_ebi_associations
         evidence: view/search_ebi_evidence
-      properties:
-        spark.driver.memory: 8g
   ##################################################################################################
 
   #: LITERATURE STEPS (run on pts_literature cluster) :#############################################
