@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 from pathlib import Path
 
 import polars as pl
@@ -24,7 +23,7 @@ from pts.transformers.homology import (
     resolve_homology,
 )
 from pts.transformers.utils.dataset import write_dataset
-from tests.ensembl_fixtures import cells, release_116_ddl, write_dump
+from tests.ensembl_fixtures import cells, release_116_ddl, write_dump, write_gz
 
 REPO = Path(__file__).parents[2]
 
@@ -445,12 +444,6 @@ def test_resolve_homology_matches_spark(spark: SparkSession) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _write_gz(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, 'wt', encoding='utf8') as f:
-        f.write(text)
-
-
 def _write_core(root: Path, db: str, genes: list[tuple[str, str | None]]) -> None:
     """A core dump holding `genes` as (stable id, display label or None)."""
     species = db.split('_core_', maxsplit=1)[0]
@@ -468,7 +461,8 @@ def _write_core(root: Path, db: str, genes: list[tuple[str, str | None]]) -> Non
 
 def _write_tsv_gz(path: Path, header: list[str], rows: list[dict[str, str | None]]) -> None:
     lines = ['\t'.join(header)] + ['\t'.join(row.get(c) or 'NULL' for c in header) for row in rows]
-    _write_gz(path, '\n'.join(lines) + '\n')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_gz(path, '\n'.join(lines) + '\n')
 
 
 def test_read_species_dictionary_drops_the_trailing_tab(tmp_path: Path) -> None:
@@ -551,6 +545,12 @@ def test_homology_writes_the_dataset(tmp_path: Path) -> None:
         orient='row',
     )
     assert_frame_equal(pl.read_parquet(str(destination / '*.parquet')), expected)
+
+
+def test_homology_requires_the_species_setting(tmp_path: Path) -> None:
+    """A step without `ensembl_species` fails with a message naming the setting."""
+    with pytest.raises(ValueError, match='ensembl_species'):
+        homology({}, str(tmp_path), {}, None)
 
 
 def test_homology_species_match_the_pis_core_dumps() -> None:

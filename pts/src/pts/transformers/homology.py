@@ -189,6 +189,8 @@ def homology(
         config: Unused.
     """
     settings = settings or {}
+    if 'ensembl_species' not in settings:
+        raise ValueError('homology needs the `ensembl_species` setting')
     target_species: list[str] = settings.get('hgncOrthologSpecies', DEFAULT_HGNC_ORTHOLOG_SPECIES)
 
     logger.info(f'loading data from {source}')
