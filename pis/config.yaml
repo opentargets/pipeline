@@ -8,7 +8,19 @@ scratchpad:
   chembl_version: '37'
   efo_version: '3.93.0'
   ensembl_version: '116'
-  gencode_version: '50'
+  ensembl_core_caenorhabditis_elegans: caenorhabditis_elegans_core_63_116_282
+  ensembl_core_canis_lupus_familiaris: canis_lupus_familiaris_core_116_1
+  ensembl_core_cavia_porcellus: cavia_porcellus_core_116_4
+  ensembl_core_danio_rerio: danio_rerio_core_116_11
+  ensembl_core_drosophila_melanogaster: drosophila_melanogaster_core_63_116_11
+  ensembl_core_macaca_mulatta: macaca_mulatta_core_116_10
+  ensembl_core_mus_musculus: mus_musculus_core_116_39
+  ensembl_core_oryctolagus_cuniculus: oryctolagus_cuniculus_core_116_2
+  ensembl_core_pan_troglodytes: pan_troglodytes_core_116_3
+  ensembl_core_rattus_norvegicus: rattus_norvegicus_core_116_1
+  ensembl_core_sus_scrofa: sus_scrofa_core_116_111
+  ensembl_core_xenopus_tropicalis: xenopus_tropicalis_core_116_10
+  ensembl_core_homo_sapiens: homo_sapiens_core_116_38
   depmap_version: '2026Q1'
   hpo_version: '2026-06-23'
   mondo_version: '2026-08-04'
@@ -941,13 +953,147 @@ steps:
       source: https://www.probes-drugs.org/media/download/id_mapping/pd_export_${probes_drugs_version}_links_standardized.csv
       destination: input/target/chemicalprobes/probes_links.csv
 
-    - name: copy ensembl
-      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/homo_sapiens/homo_sapiens.json
-      destination: input/target/ensembl/homo_sapiens.json
+    - name: explode ensembl core caenorhabditis_elegans
+      foreach:
+        - ${ensembl_core_caenorhabditis_elegans}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core caenorhabditis_elegans ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_caenorhabditis_elegans}/${each}.gz
+          destination: input/ensembl/caenorhabditis_elegans/${each}.gz
 
-    - name: copy gencode
-      source: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_${gencode_version}/gencode.v${gencode_version}.annotation.gff3.gz
-      destination: input/target/gencode/gencode.gff3.gz
+    - name: explode ensembl core canis_lupus_familiaris
+      foreach:
+        - ${ensembl_core_canis_lupus_familiaris}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core canis_lupus_familiaris ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_canis_lupus_familiaris}/${each}.gz
+          destination: input/ensembl/canis_lupus_familiaris/${each}.gz
+
+    - name: explode ensembl core cavia_porcellus
+      foreach:
+        - ${ensembl_core_cavia_porcellus}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core cavia_porcellus ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_cavia_porcellus}/${each}.gz
+          destination: input/ensembl/cavia_porcellus/${each}.gz
+
+    - name: explode ensembl core danio_rerio
+      foreach:
+        - ${ensembl_core_danio_rerio}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core danio_rerio ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_danio_rerio}/${each}.gz
+          destination: input/ensembl/danio_rerio/${each}.gz
+
+    - name: explode ensembl core drosophila_melanogaster
+      foreach:
+        - ${ensembl_core_drosophila_melanogaster}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core drosophila_melanogaster ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_drosophila_melanogaster}/${each}.gz
+          destination: input/ensembl/drosophila_melanogaster/${each}.gz
+
+    - name: explode ensembl core macaca_mulatta
+      foreach:
+        - ${ensembl_core_macaca_mulatta}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core macaca_mulatta ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_macaca_mulatta}/${each}.gz
+          destination: input/ensembl/macaca_mulatta/${each}.gz
+
+    - name: explode ensembl core mus_musculus
+      foreach:
+        - ${ensembl_core_mus_musculus}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core mus_musculus ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_mus_musculus}/${each}.gz
+          destination: input/ensembl/mus_musculus/${each}.gz
+
+    - name: explode ensembl core oryctolagus_cuniculus
+      foreach:
+        - ${ensembl_core_oryctolagus_cuniculus}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core oryctolagus_cuniculus ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_oryctolagus_cuniculus}/${each}.gz
+          destination: input/ensembl/oryctolagus_cuniculus/${each}.gz
+
+    - name: explode ensembl core pan_troglodytes
+      foreach:
+        - ${ensembl_core_pan_troglodytes}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core pan_troglodytes ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_pan_troglodytes}/${each}.gz
+          destination: input/ensembl/pan_troglodytes/${each}.gz
+
+    - name: explode ensembl core rattus_norvegicus
+      foreach:
+        - ${ensembl_core_rattus_norvegicus}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core rattus_norvegicus ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_rattus_norvegicus}/${each}.gz
+          destination: input/ensembl/rattus_norvegicus/${each}.gz
+
+    - name: explode ensembl core sus_scrofa
+      foreach:
+        - ${ensembl_core_sus_scrofa}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core sus_scrofa ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_sus_scrofa}/${each}.gz
+          destination: input/ensembl/sus_scrofa/${each}.gz
+
+    - name: explode ensembl core xenopus_tropicalis
+      foreach:
+        - ${ensembl_core_xenopus_tropicalis}.sql
+        - gene.txt
+        - xref.txt
+      do:
+        - name: copy ensembl core xenopus_tropicalis ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_xenopus_tropicalis}/${each}.gz
+          destination: input/ensembl/xenopus_tropicalis/${each}.gz
+
+    - name: explode ensembl core homo_sapiens
+      foreach:
+        - ${ensembl_core_homo_sapiens}.sql
+        - gene.txt
+        - xref.txt
+        - seq_region.txt
+        - coord_system.txt
+        - object_xref.txt
+        - external_db.txt
+        - analysis.txt
+        - protein_feature.txt
+        - translation.txt
+        - transcript.txt
+        - transcript_attrib.txt
+        - attrib_type.txt
+        - exon.txt
+        - exon_transcript.txt
+      do:
+        - name: copy ensembl core homo_sapiens ${each}
+          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/${ensembl_core_homo_sapiens}/${each}.gz
+          destination: input/ensembl/homo_sapiens/${each}.gz
 
     - name: explode_glob download essentiality files
       glob: 'gs://otar000-evidence_input/Essentiality/DepMap/${depmap_version}/*.csv'
@@ -992,7 +1138,7 @@ steps:
       source: gs://otar007-cosmic/hallmarks/CTTV007-${cosmic_hallmarks_version}_hallmarks.tsv.gz
       destination: input/target/hallmarks/cosmic-hallmarks.tsv.gz
 
-    - name: explode homology
+    - name: explode compara homologies
       foreach:
         - caenorhabditis_elegans
         - canis_lupus_familiaris
@@ -1008,9 +1154,6 @@ steps:
         - xenopus_tropicalis
         - homo_sapiens
       do:
-        - name: copy ${each} gene dictionary
-          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/${each}/${each}.json
-          destination: input/target/homologue/gene_dictionary/${each}.json
         - name: copy ${each} protein homology
           source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/${each}/Compara.${ensembl_version}.protein_default.homologies.tsv.gz
           destination: input/target/homologue/homologies/protein-${each}.tsv.gz

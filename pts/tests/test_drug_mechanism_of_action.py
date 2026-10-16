@@ -12,6 +12,8 @@ from pts.transformers.drug_mechanism_of_action import (
     process_mechanism_of_action,
 )
 
+PROTEIN_ID = pl.Struct({'id': pl.String, 'source': pl.String})
+
 REFERENCE_SCHEMA = pl.Struct({'source': pl.String, 'ids': pl.List(pl.String), 'urls': pl.List(pl.String)})
 
 MECHANISM_SCHEMA = {
@@ -70,10 +72,13 @@ def tables() -> dict:
     gene_df = pl.DataFrame(
         {
             'id': ['ENSG1', 'ENSG2', 'ENSG3'],
-            'uniprot_trembl': [['P100'], None, None],
-            'uniprot_swissprot': [None, ['P200'], ['P300']],
+            'proteinIds': [
+                [{'id': 'P100', 'source': 'uniprot_trembl'}],
+                [{'id': 'P200', 'source': 'uniprot_swissprot'}, {'id': 'ENSP2', 'source': 'ensembl_PRO'}],
+                [{'id': 'P300', 'source': 'uniprot_swissprot'}],
+            ],
         },
-        schema={'id': pl.String, 'uniprot_trembl': pl.List(pl.String), 'uniprot_swissprot': pl.List(pl.String)},
+        schema={'id': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
     )
     return {
         'drug_mechanism': drug_mechanism,
@@ -235,6 +240,47 @@ class TestChemblTarget:
         assert rows['Target Twenty']['target_chembl_id'] == 'CHEMBL_T20'
         assert sorted(rows['Target Twenty']['targets']) == ['ENSG1', 'ENSG2']
         assert rows['Target TwentyOne']['targets'] == ['ENSG3']
+
+
+class TestTargetLookup:
+    """Accessions resolve through the target dataset's `proteinIds`."""
+
+    @staticmethod
+    def _targets(tables: dict, gene_df: pl.DataFrame) -> dict:
+        result = _chembl_target(
+            tables['target_dictionary'], tables['target_components'], tables['component_sequences'], gene_df
+        )
+        return {r['targetName']: r['targets'] for r in result.to_dicts()}
+
+    def test_only_swissprot_and_trembl_accessions_resolve(self, tables: dict) -> None:
+        gene_df = pl.DataFrame(
+            {
+                'id': ['ENSG1', 'ENSG2', 'ENSG3'],
+                'proteinIds': [
+                    [{'id': 'P100', 'source': 'uniprot_obsolete'}],
+                    [{'id': 'P200', 'source': 'ensembl_PRO'}],
+                    None,
+                ],
+            },
+            schema={'id': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
+        )
+        assert self._targets(tables, gene_df) == {'Target Twenty': [], 'Target TwentyOne': []}
+
+    def test_a_target_named_by_gene_id_resolves(self, tables: dict) -> None:
+        sequences = tables['component_sequences'].with_columns(pl.col('accession').replace({'P300': 'ENSG3'}))
+        result = _chembl_target(tables['target_dictionary'], tables['target_components'], sequences, tables['gene_df'])
+        assert {r['targetName']: r['targets'] for r in result.to_dicts()}['Target TwentyOne'] == ['ENSG3']
+
+    def test_genes_sharing_an_accession_come_in_id_order(self, tables: dict) -> None:
+        gene_df = pl.DataFrame(
+            {
+                'id': ['ENSG9', 'ENSG4', 'ENSG7'],
+                'proteinIds': [[{'id': 'P300', 'source': 'uniprot_swissprot'}]] * 3,
+            },
+            schema={'id': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
+        )
+        assert self._targets(tables, gene_df)['Target TwentyOne'] == ['ENSG4', 'ENSG7', 'ENSG9']
+        assert self._targets(tables, gene_df.reverse())['Target TwentyOne'] == ['ENSG4', 'ENSG7', 'ENSG9']
 
 
 class TestConsolidateDuplicateReferences:
