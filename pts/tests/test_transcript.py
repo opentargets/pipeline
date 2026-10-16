@@ -1,12 +1,14 @@
 """Tests for the transcript transformer."""
 
+from pathlib import Path
 from typing import Any
 
 import polars as pl
 import pytest
 
 from pts.schemas.transcript import transcript as transcript_schema
-from pts.transformers.transcript import build_flags, build_transcripts
+from pts.transformers.transcript import build_flags, build_transcripts, transcript
+from tests.ensembl_fixtures import NULL, RELEASE_116_COLUMNS, release_116_ddl, write_dump
 
 ATTRIBUTE = pl.Struct({'code': pl.String, 'value': pl.String})
 FLAG = pl.Struct({'label': pl.String, 'value': pl.String})
@@ -302,3 +304,346 @@ def test_multi_chunk_input_matches_single_chunk() -> None:
     assert chunked_tx.n_chunks() == 2
     assert build_transcripts(chunked_tx, chunked_xref).equals(single)
 
+
+# end to end, on a core dump
+
+def row(table: str, **values: object) -> list[str]:
+    """One dump row of `table`, in DDL order; unset columns are null."""
+    assert set(values) <= set(RELEASE_116_COLUMNS[table]), set(values) - set(RELEASE_116_COLUMNS[table])
+    return [NULL if values.get(c) is None else str(values[c]) for c in RELEASE_116_COLUMNS[table]]
+
+
+def _gene(gene_id: int, stable_id: str, region: int, start: int, end: int, strand: int, canonical: int) -> list[str]:
+    return row(
+        'gene',
+        gene_id=gene_id,
+        biotype='protein_coding',
+        analysis_id=1,
+        seq_region_id=region,
+        seq_region_start=start,
+        seq_region_end=end,
+        seq_region_strand=strand,
+        source='ensembl_havana',
+        is_current=1,
+        canonical_transcript_id=canonical,
+        stable_id=stable_id,
+        version=1,
+    )
+
+
+def _transcript(
+    transcript_id: int,
+    gene_id: int,
+    stable_id: str,
+    region: int,
+    start: int,
+    end: int,
+    strand: int,
+    biotype: str,
+    translation: int | None,
+) -> list[str]:
+    return row(
+        'transcript',
+        transcript_id=transcript_id,
+        gene_id=gene_id,
+        analysis_id=1,
+        seq_region_id=region,
+        seq_region_start=start,
+        seq_region_end=end,
+        seq_region_strand=strand,
+        source='ensembl',
+        biotype=biotype,
+        is_current=1,
+        canonical_translation_id=translation,
+        stable_id=stable_id,
+        version=1,
+    )
+
+
+def _exon(exon_id: int, stable_id: str, region: int, start: int, end: int, strand: int) -> list[str]:
+    return row(
+        'exon',
+        exon_id=exon_id,
+        seq_region_id=region,
+        seq_region_start=start,
+        seq_region_end=end,
+        seq_region_strand=strand,
+        phase=-1,
+        end_phase=-1,
+        is_current=1,
+        is_constitutive=0,
+        stable_id=stable_id,
+        version=1,
+    )
+
+
+TABLES: dict[str, list[list[str]]] = {
+    'coord_system': [
+        row(
+            'coord_system',
+            coord_system_id=4,
+            species_id=1,
+            name='chromosome',
+            version='GRCh38',
+            rank=1,
+            attrib='default_version',
+        ),
+        row(
+            'coord_system',
+            coord_system_id=3,
+            species_id=1,
+            name='scaffold',
+            version='GRCh38',
+            rank=2,
+            attrib='default_version',
+        ),
+    ],
+    'seq_region': [
+        row('seq_region', seq_region_id=131, name='1', coord_system_id=4, length=248956422),
+        row('seq_region', seq_region_id=132, name='MT', coord_system_id=4, length=16569),
+        row('seq_region', seq_region_id=133, name='KI270706.1', coord_system_id=3, length=175055),
+    ],
+    'analysis': [
+        row('analysis', analysis_id=1, logic_name='alphafold'),
+        row('analysis', analysis_id=2, logic_name='signalp'),
+    ],
+    'attrib_type': [
+        row('attrib_type', attrib_type_id=427, code='appris', name='APPRIS'),
+        row('attrib_type', attrib_type_id=535, code='MANE_Select', name='MANE Select'),
+        row('attrib_type', attrib_type_id=536, code='Ensembl_Select', name='Ensembl Select'),
+        row('attrib_type', attrib_type_id=550, code='MANE_Plus_Clinical', name='MANE Plus Clinical'),
+        row('attrib_type', attrib_type_id=554, code='is_canonical', name='Ensembl Canonical'),
+        row('attrib_type', attrib_type_id=576, code='gencode_primary', name='GENCODE primary annotation'),
+    ],
+    'external_db': [
+        row('external_db', external_db_id=2000, db_name='Uniprot/SPTREMBL', status='KNOWN', priority=5, type='MISC'),
+        row('external_db', external_db_id=2200, db_name='Uniprot/SWISSPROT', status='KNOWN', priority=5, type='MISC'),
+        row('external_db', external_db_id=2201, db_name='Uniprot_isoform', status='KNOWN', priority=5, type='MISC'),
+    ],
+    'gene': [
+        _gene(1, 'ENSG00000186092', 131, 65419, 71585, 1, 11),
+        _gene(2, 'ENSG00000284733', 131, 450740, 451678, -1, 12),
+        _gene(3, 'ENSG00000211459', 132, 648, 1601, 1, 13),
+        _gene(4, 'ENSG00000277196', 133, 1000, 2000, 1, 14),
+    ],
+    'transcript': [
+        _transcript(11, 1, 'ENST00000641515', 131, 65419, 71585, 1, 'protein_coding', 21),
+        _transcript(12, 2, 'ENST00000426406', 131, 450740, 451678, -1, 'protein_coding', 22),
+        _transcript(13, 3, 'ENST00000389680', 132, 648, 1601, 1, 'Mt_rRNA', None),
+        _transcript(14, 4, 'ENST00000612152', 133, 1000, 2000, 1, 'protein_coding', 24),
+    ],
+    'translation': [
+        row(
+            'translation',
+            translation_id=21,
+            transcript_id=11,
+            seq_start=1,
+            start_exon_id=31,
+            seq_end=3,
+            end_exon_id=33,
+            stable_id='ENSP00000493376',
+            version=2,
+        ),
+        row(
+            'translation',
+            translation_id=22,
+            transcript_id=12,
+            seq_start=1,
+            start_exon_id=34,
+            seq_end=3,
+            end_exon_id=35,
+            stable_id='ENSP00000409316',
+            version=1,
+        ),
+        row(
+            'translation',
+            translation_id=24,
+            transcript_id=14,
+            seq_start=1,
+            start_exon_id=37,
+            seq_end=3,
+            end_exon_id=37,
+            stable_id='ENSP00000482090',
+            version=1,
+        ),
+    ],
+    'exon': [
+        _exon(31, 'ENSE00003812156', 131, 65419, 65433, 1),
+        _exon(32, 'ENSE00003813641', 131, 65520, 65573, 1),
+        _exon(33, 'ENSE00003813949', 131, 69037, 71585, 1),
+        _exon(34, 'ENSE00002319515', 131, 451000, 451678, -1),
+        _exon(35, 'ENSE00001000001', 131, 450740, 450900, -1),
+        _exon(36, 'ENSE00001544501', 132, 648, 1601, 1),
+        _exon(37, 'ENSE00003718300', 133, 1000, 2000, 1),
+    ],
+    'exon_transcript': [
+        row('exon_transcript', exon_id=33, transcript_id=11, rank=3),
+        row('exon_transcript', exon_id=31, transcript_id=11, rank=1),
+        row('exon_transcript', exon_id=32, transcript_id=11, rank=2),
+        row('exon_transcript', exon_id=35, transcript_id=12, rank=2),
+        row('exon_transcript', exon_id=34, transcript_id=12, rank=1),
+        row('exon_transcript', exon_id=36, transcript_id=13, rank=1),
+        row('exon_transcript', exon_id=37, transcript_id=14, rank=1),
+    ],
+    'transcript_attrib': [
+        row('transcript_attrib', transcript_id=11, attrib_type_id=427, value='principal1'),
+        row('transcript_attrib', transcript_id=11, attrib_type_id=554, value=1),
+        row('transcript_attrib', transcript_id=11, attrib_type_id=535, value='NM_001005484.2'),
+        row('transcript_attrib', transcript_id=11, attrib_type_id=576, value='GENCODE primary'),
+        row('transcript_attrib', transcript_id=11, attrib_type_id=536, value='ENST00000641515.2'),
+        row('transcript_attrib', transcript_id=12, attrib_type_id=550, value='NM_000000.1'),
+        row('transcript_attrib', transcript_id=12, attrib_type_id=427, value='alternativeM'),
+        row('transcript_attrib', transcript_id=13, attrib_type_id=554, value=1),
+        row('transcript_attrib', transcript_id=14, attrib_type_id=554, value=1),
+    ],
+    'xref': [
+        row(
+            'xref',
+            xref_id=41,
+            external_db_id=2200,
+            dbprimary_acc='Q8NH21',
+            display_label='OR4F5_HUMAN',
+            version=1,
+            info_type='DIRECT',
+        ),
+        row(
+            'xref',
+            xref_id=42,
+            external_db_id=2000,
+            dbprimary_acc='X6RKS3',
+            display_label='X6RKS3',
+            version=1,
+            info_type='SEQUENCE_MATCH',
+        ),
+        row(
+            'xref',
+            xref_id=43,
+            external_db_id=2000,
+            dbprimary_acc='A2A2V1',
+            display_label='A2A2V1',
+            version=1,
+            info_type='SEQUENCE_MATCH',
+        ),
+        row(
+            'xref',
+            xref_id=44,
+            external_db_id=2201,
+            dbprimary_acc='Q6IEY1-2',
+            display_label='Q6IEY1-2',
+            version=0,
+            info_type='DIRECT',
+        ),
+    ],
+    'object_xref': [
+        row('object_xref', object_xref_id=51, ensembl_id=21, ensembl_object_type='Translation', xref_id=41),
+        row('object_xref', object_xref_id=52, ensembl_id=21, ensembl_object_type='Translation', xref_id=42),
+        row('object_xref', object_xref_id=53, ensembl_id=21, ensembl_object_type='Translation', xref_id=43),
+        row('object_xref', object_xref_id=54, ensembl_id=22, ensembl_object_type='Translation', xref_id=44),
+    ],
+    'protein_feature': [
+        row(
+            'protein_feature',
+            protein_feature_id=61,
+            translation_id=21,
+            seq_start=1,
+            seq_end=312,
+            hit_start=1,
+            hit_end=312,
+            hit_name='AF-Q8NH21-F1',
+            analysis_id=1,
+        ),
+        row(
+            'protein_feature',
+            protein_feature_id=62,
+            translation_id=21,
+            seq_start=1,
+            seq_end=20,
+            hit_start=1,
+            hit_end=20,
+            hit_name='SignalP-noTM',
+            analysis_id=2,
+        ),
+    ],
+}
+
+
+def test_transcript_end_to_end(tmp_path: Path) -> None:
+    source = {'ensembl': write_dump(tmp_path, TABLES, release_116_ddl(TABLES))}
+
+    transcript(source, str(tmp_path / 'out' / 'a'), {}, None)
+    transcript(source, str(tmp_path / 'out' / 'b'), {}, None)
+
+    out = pl.read_parquet(tmp_path / 'out' / 'a')
+    assert dict(out.schema) == OUTPUT_SCHEMA
+    assert out.rows(named=True) == [
+        {
+            'targetId': 'ENSG00000186092',
+            'transcriptId': 'ENST00000641515',
+            'biotype': 'protein_coding',
+            'proteinId': 'ENSP00000493376',
+            'uniprotSwissprotIds': ['Q8NH21'],
+            'uniprotTremblIds': ['A2A2V1', 'X6RKS3'],
+            'uniprotIsoformIds': None,
+            'alphafoldIds': ['AF-Q8NH21-F1'],
+            'isEnsemblCanonical': True,
+            'chromosome': '1',
+            'start': 65419,
+            'end': 71585,
+            'strand': 1,
+            'transcriptionStartSite': 65419,
+            'flags': [
+                {'label': 'mane', 'value': 'select'},
+                {'label': 'gencode_primary', 'value': 'true'},
+                {'label': 'ensembl_canonical', 'value': 'true'},
+                {'label': 'appris', 'value': 'principal_1'},
+            ],
+            'exons': [
+                {'exonId': 'ENSE00003812156', 'chromosome': '1', 'start': 65419, 'end': 65433, 'strand': 1},
+                {'exonId': 'ENSE00003813641', 'chromosome': '1', 'start': 65520, 'end': 65573, 'strand': 1},
+                {'exonId': 'ENSE00003813949', 'chromosome': '1', 'start': 69037, 'end': 71585, 'strand': 1},
+            ],
+        },
+        {
+            'targetId': 'ENSG00000211459',
+            'transcriptId': 'ENST00000389680',
+            'biotype': 'Mt_rRNA',
+            'proteinId': None,
+            'uniprotSwissprotIds': None,
+            'uniprotTremblIds': None,
+            'uniprotIsoformIds': None,
+            'alphafoldIds': None,
+            'isEnsemblCanonical': True,
+            'chromosome': 'MT',
+            'start': 648,
+            'end': 1601,
+            'strand': 1,
+            'transcriptionStartSite': 648,
+            'flags': [{'label': 'ensembl_canonical', 'value': 'true'}],
+            'exons': [{'exonId': 'ENSE00001544501', 'chromosome': 'MT', 'start': 648, 'end': 1601, 'strand': 1}],
+        },
+        {
+            'targetId': 'ENSG00000284733',
+            'transcriptId': 'ENST00000426406',
+            'biotype': 'protein_coding',
+            'proteinId': 'ENSP00000409316',
+            'uniprotSwissprotIds': None,
+            'uniprotTremblIds': None,
+            'uniprotIsoformIds': ['Q6IEY1-2'],
+            'alphafoldIds': None,
+            'isEnsemblCanonical': False,
+            'chromosome': '1',
+            'start': 450740,
+            'end': 451678,
+            'strand': -1,
+            'transcriptionStartSite': 451678,
+            'flags': [{'label': 'mane', 'value': 'plus_clinical'}, {'label': 'appris', 'value': 'alternative_M'}],
+            'exons': [
+                {'exonId': 'ENSE00002319515', 'chromosome': '1', 'start': 451000, 'end': 451678, 'strand': -1},
+                {'exonId': 'ENSE00001000001', 'chromosome': '1', 'start': 450740, 'end': 450900, 'strand': -1},
+            ],
+        },
+    ]
+    files_a = sorted(p.relative_to(tmp_path / 'out' / 'a') for p in (tmp_path / 'out' / 'a').rglob('*') if p.is_file())
+    files_b = sorted(p.relative_to(tmp_path / 'out' / 'b') for p in (tmp_path / 'out' / 'b').rglob('*') if p.is_file())
+    assert files_a == files_b
+    assert all((tmp_path / 'out' / 'a' / f).read_bytes() == (tmp_path / 'out' / 'b' / f).read_bytes() for f in files_a)
