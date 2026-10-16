@@ -65,7 +65,7 @@ class TestTarget:
         assert output['frame'].schema == TARGET
 
     def test_genes_on_the_primary_assembly_only(self, output: dict) -> None:
-        assert sorted(output['frame']['id'].to_list()) == ['ENSG00000000002', 'ENSG00000141510']
+        assert output['frame']['id'].to_list() == ['ENSG00000000002', 'ENSG00000141510']
 
     def test_tp53(self, output: dict) -> None:
         tp53 = output['rows']['ENSG00000141510']

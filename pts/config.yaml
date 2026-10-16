@@ -343,56 +343,6 @@ steps:
       transformer: so
   ##################################################################################################
 
-  #: PRE_TARGET STEP :##############################################################################
-  pre_target:
-    - name: unzip subcellular location
-      source: input/target/hpa/subcellular_location.tsv.zip
-      destination: intermediate/target/hpa/subcellular_location.tsv
-    - name: gzip subcellular location
-      requires:
-        - unzip subcellular location
-      source: intermediate/target/hpa/subcellular_location.tsv
-      destination: intermediate/target/hpa/subcellular_location.tsv.gz
-
-    - name: csv_to_parquet subcellular location ssl
-      source: input/target/hpa/subcellular_locations_ssl.tsv
-      destination: intermediate/target/hpa/subcellular_locations_ssl.parquet
-      separator: "\t"
-
-    # gnomAD ships the constraint metrics bgzip-compressed. Converting to parquet
-    # here keeps the decompression off the spark cluster; `infer_schema: false`
-    # preserves the raw text the target step parses itself.
-    - name: csv_to_parquet gnomad constraint metrics
-      source: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
-      destination: intermediate/target/gnomad/constraint_metrics.parquet
-      separator: "\t"
-      infer_schema: false
-
-    - name: download ensembl
-      source: input/target/ensembl/homo_sapiens.json
-    - name: transform ensembl
-      requires:
-        - download ensembl
-      transformer: ensembl
-      source: input/target/ensembl/homo_sapiens.json
-      destination: intermediate/target/ensembl/homo_sapiens.parquet
-
-    - name: transform uniprot
-      transformer: uniprot
-      source: input/target/uniprot/uniprot.txt.gz
-      destination: intermediate/target/uniprot/uniprot.parquet
-
-    - name: transform chembl_target_class_dump
-      transformer: chembl_target_class_dump
-      source: input/chembl/chembl.tar.gz
-      destination:
-        target_dictionary: intermediate/chembl/target_dictionary.parquet
-        target_components: intermediate/chembl/target_components.parquet
-        component_sequences: intermediate/chembl/component_sequences.parquet
-        component_class: intermediate/chembl/component_class.parquet
-        protein_classification: intermediate/chembl/protein_classification.parquet
-  ##################################################################################################
-
   #: TARGET STEP :##################################################################################
   target:
     - name: transform target

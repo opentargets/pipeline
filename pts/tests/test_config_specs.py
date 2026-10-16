@@ -124,3 +124,8 @@ def test_every_requires_entry_names_a_task_in_the_same_step() -> None:
                 assert dependency in names, (
                     f'step {step_name}: task {task["name"]!r} requires {dependency!r}, which is not in the step'
                 )
+
+
+def test_pre_target_is_gone() -> None:
+    """Folded into `target`, which reads the raw inputs itself."""
+    assert 'pre_target' not in _config_dict()['steps']
