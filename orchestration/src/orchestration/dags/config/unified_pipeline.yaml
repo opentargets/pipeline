@@ -454,7 +454,7 @@ steps:
   # Steps extracted from pts_target
   pts_transcript:
     depends_on:
-      - pts_pre_target
+      - pis_target
   pts_target_safety_event:
     depends_on:
       - pts_pharmacogenetics
