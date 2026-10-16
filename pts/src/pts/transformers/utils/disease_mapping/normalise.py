@@ -11,8 +11,10 @@ edge cases -- with no mismatch on either track.
 What the pipeline stages reduce to:
 
 * **Tokenizer.** Candidates are runs of non-whitespace, where whitespace is Java's ASCII `\s`
-  (a no-break space is NOT a separator). The tokenizer rule peels a run of context characters
-  off either end of a candidate, and only then are the pieces split on the split characters.
+  (a no-break space is NOT a separator). The tokenizer marks breaks by writing `ↇ` (U+2187) over
+  the whitespace and then splitting on it, so a literal `ↇ` in a label separates too. The
+  tokenizer rule peels a run of context characters off either end of a candidate, and only then
+  are the pieces split on the split characters.
   The order matters: `of.-x` yields `of.` and `x`, so `of` survives as a stop word would not.
 * **Normalizer.** Its cleanup patterns run BEFORE lowercasing and Java's `\w` is ASCII, so a
   token keeps `[A-Za-z0-9_]` only, lowercased, and is dropped when nothing is left.
@@ -58,8 +60,9 @@ CONTEXT_CHARS = '.,;:!?*-()"\''
 TERM_SPLIT_CHARS = '-/:,;'
 SYMBOL_SPLIT_CHARS = ':,;'
 
-#: Java's `\s`, which unlike Python's is ASCII only.
-_JAVA_WHITESPACE = re.compile(r'[ \t\n\x0b\f\r]+')
+#: What separates candidates: Java's `\s`, which unlike Python's is ASCII only, and the
+#: tokenizer's own break marker `ↇ` (`BREAK_CHAR` in TokenizerModel.scala).
+_CANDIDATE_SEPARATOR = re.compile('[ \t\n\x0b\f\r\u2187]+')
 _NON_WORD = re.compile(r'[^A-Za-z0-9_]')
 _TERM_SPLIT = re.compile(f'[{re.escape(TERM_SPLIT_CHARS)}]')
 
@@ -73,7 +76,7 @@ def _term_tokens(label: str) -> list[str]:
     and emptied the same way.
     """
     tokens = []
-    for candidate in _JAVA_WHITESPACE.split(label):
+    for candidate in _CANDIDATE_SEPARATOR.split(label):
         middle = candidate.strip(CONTEXT_CHARS)
         tokens.extend(t for t in _TERM_SPLIT.split(middle) if t)
     return tokens

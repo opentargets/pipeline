@@ -6,9 +6,11 @@ Polars port of `pts.pyspark.common.ontology.add_efo_mapping`.
 from __future__ import annotations
 
 import polars as pl
+import polars.selectors as cs
 from loguru import logger
 
 from pts.transformers.utils.disease_mapping import map_entities, read_entity_lut
+from pts.transformers.utils.disease_mapping.mapping import temporary_prefix
 
 MAPPED_ID_COLUMN = 'diseaseFromSourceMappedId'
 
@@ -37,33 +39,37 @@ def add_efo_mapping(
     Returns:
         The evidence with `diseaseFromSourceMappedId` added.
     """
+    # the per-lookup results are working columns, kept clear of every evidence column
+    prefix = temporary_prefix(evidence.collect_schema().names())
+    label_result, id_result = f'{prefix}label', f'{prefix}id'
+
     logger.info(f'load disease label lookup table from {disease_label_lut_path}')
     mapped = map_entities(
         evidence,
         read_entity_lut(disease_label_lut_path),
-        'labelMappedResult',
+        label_result,
         label_col_name,
         'label',
         type_col=pl.lit('DS'),
     )
-    mapped_ids = pl.col('labelMappedResult').fill_null([])
+    mapped_ids = pl.col(label_result).fill_null([])
 
     if id_col_name and disease_id_lut_path:
         logger.info(f'load disease id lookup table from {disease_id_lut_path}')
         mapped = map_entities(
             mapped,
             read_entity_lut(disease_id_lut_path),
-            'idMappedResult',
+            id_result,
             id_col_name,
             'id',
             type_col=pl.lit('DS'),
         )
-        mapped_ids = pl.concat_list(mapped_ids, pl.col('idMappedResult').fill_null([])).list.unique().list.sort()
+        mapped_ids = pl.concat_list(mapped_ids, pl.col(id_result).fill_null([])).list.unique().list.sort()
 
     return (
         mapped
         .with_columns(mapped_ids.alias(MAPPED_ID_COLUMN))
-        .drop('labelMappedResult', 'idMappedResult', strict=False)
+        .drop(cs.starts_with(prefix))
         # explode_outer: no mapping still leaves one row, with a null id
         .explode(MAPPED_ID_COLUMN, empty_as_null=True)
     )

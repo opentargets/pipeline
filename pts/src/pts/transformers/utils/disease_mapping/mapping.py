@@ -12,10 +12,15 @@ Behaviour kept from OnToma on purpose, because it is observable in the output:
   the identifiers found for either are merged.
 * **No identifier means null, not an empty list.**
 
-Differences, neither of which can change which identifiers are found:
+Differences, none of which can change which identifiers are found for the current callers:
 
 * The identifier lists are sorted. OnToma's come out of `collect_set` in no particular order.
 * Rows keep their input order, which spark's aggregation does not.
+* Input columns are never touched. OnToma works in the input frame itself, so input columns named
+  like its working columns (`entityLabel`, `entityType`, `entityKind`, `nlpPipelineTrack`) are
+  overwritten, and an `entityLabel` label column even changes which track a label takes. Here the
+  working columns carry a random prefix that no input column has, and are dropped before
+  returning; only an output column already in the input is refused.
 
 Diffed against `OnToma.map_entities` on spark with lookup tables built by OnToma from the disease
 index: 162,085 query rows covering names, synonyms, cross references and perturbed copies of
@@ -25,9 +30,13 @@ them, mapped as labels and as ids, with a type column of mixed and null types an
 
 from __future__ import annotations
 
+import uuid
+from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import polars as pl
+import polars.selectors as cs
 
 from pts.transformers.utils.dataset import scan_dataset
 from pts.transformers.utils.disease_mapping.normalise import normalise
@@ -44,11 +53,31 @@ EntityKind = Literal['label', 'id']
 #: Column of the normalised label, in the lookup table and in the output when it is asked for.
 NORMALISED_COLUMN = 'entityLabelNormalised'
 
-_ROW = '__disease_mapping_row'
-_ENTITY = '__disease_mapping_entity'
-_TYPE = '__disease_mapping_type'
-_LABEL = '__disease_mapping_label'
-_TRACK = '__disease_mapping_track'
+
+def temporary_prefix(columns: list[str]) -> str:
+    """A random column name prefix no column in `columns` starts with, for working columns."""
+    while any(column.startswith(prefix := f'__{uuid.uuid4().hex[:8]}_') for column in columns):
+        pass
+    return prefix
+
+
+@dataclass(frozen=True)
+class _Working:
+    """Names of the working columns of one `map_entities` call, all under one random prefix."""
+
+    prefix: str
+    row: str
+    entity: str
+    type: str
+    label: str
+    track: str
+    normalised: str
+    ids: str
+
+    @classmethod
+    def under(cls, prefix: str) -> _Working:
+        names = ('row', 'entity', 'type', 'label', 'track', 'normalised', 'ids')
+        return cls(prefix, *(f'{prefix}{name}' for name in names))
 
 
 def read_entity_lut(path: str) -> pl.LazyFrame:
@@ -56,56 +85,59 @@ def read_entity_lut(path: str) -> pl.LazyFrame:
     return scan_dataset(path).select('entityKind', 'entityType', NORMALISED_COLUMN, 'entityIds')
 
 
-def _normalise_batch(batch: pl.Series) -> pl.Series:
-    labels = batch.struct.field(_LABEL).to_list()
-    tracks = batch.struct.field(_TRACK).to_list()
+def _normalise_batch(batch: pl.Series, w: _Working) -> pl.Series:
+    labels = batch.struct.field(w.label).to_list()
+    tracks = batch.struct.field(w.track).to_list()
     return pl.Series([normalise(label, track) for label, track in zip(labels, tracks, strict=True)], dtype=pl.String)
 
 
-def _query_labels(query: pl.LazyFrame) -> pl.LazyFrame:
+def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
     """`OnToma._extract_query_entity_labels`."""
-    entity = pl.col(_ENTITY)
-    entity_type = pl.col(_TYPE)
+    entity = pl.col(w.entity)
+    entity_type = pl.col(w.type)
     return (
         query
         .with_columns(
-            alternative_translations(spark_trim(entity)).alias(_LABEL),
+            alternative_translations(spark_trim(entity)).alias(w.label),
             # decided on the raw label, before trimming, translating or cleaning
-            pl.when(entity_type == 'CD').then(pl.lit('symbol')).otherwise(determine_track(entity)).alias(_TRACK),
+            pl.when(entity_type == 'CD').then(pl.lit('symbol')).otherwise(determine_track(entity)).alias(w.track),
         )
-        .explode(_LABEL)
+        .explode(w.label)
         .with_columns(
             pl
             .when(entity_type == 'DS')
-            .then(clean_disease_label(pl.col(_LABEL)))
-            .otherwise(pl.col(_LABEL))
-            .alias(_LABEL),
+            .then(clean_disease_label(pl.col(w.label)))
+            .otherwise(pl.col(w.label))
+            .alias(w.label),
         )
     )
 
 
-def _query_ids(query: pl.LazyFrame) -> pl.LazyFrame:
+def _query_ids(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
     """`OnToma._extract_query_entity_ids`."""
     return query.with_columns(
-        format_identifier(spark_trim(pl.col(_ENTITY)).str.to_uppercase()).alias(_LABEL),
-        pl.lit('symbol').alias(_TRACK),
+        format_identifier(spark_trim(pl.col(w.entity)).str.to_uppercase()).alias(w.label),
+        pl.lit('symbol').alias(w.track),
     )
 
 
-def _normalise_query(query: pl.LazyFrame) -> pl.LazyFrame:
+def _normalise_query(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
     """`OnToma._normalise_entities`: normalise each distinct label once and join the result back.
 
     The join is an equi-join as in OnToma, so a null label stays unnormalised.
     """
     distinct = (
         query
-        .select(_LABEL, _TRACK)
+        .select(w.label, w.track)
         .unique()
         .with_columns(
-            pl.struct(_LABEL, _TRACK).map_batches(_normalise_batch, return_dtype=pl.String).alias(NORMALISED_COLUMN),
+            pl
+            .struct(w.label, w.track)
+            .map_batches(partial(_normalise_batch, w=w), return_dtype=pl.String)
+            .alias(w.normalised),
         )
     )
-    return query.join(distinct, on=[_LABEL, _TRACK], how='left')
+    return query.join(distinct, on=[w.label, w.track], how='left')
 
 
 def map_entities(
@@ -135,12 +167,12 @@ def map_entities(
         include_entity_source: Output `{entityId, entitySource}` structs rather than bare ids.
 
     Returns:
-        The input with the identifiers found added as a list column, null when there are none.
-        Identical input rows come out once.
+        The input, untouched, with the identifiers found added as a list column, null when there
+        are none. Identical input rows come out once.
 
     Raises:
         ValueError: When not exactly one of `type_col_name` and `type_col` is given, the kind is
-            unknown, or an output column already exists.
+            unknown, or an output column is already in the input.
     """
     if type_col_name is not None and type_col is None:
         entity_type = pl.col(type_col_name)
@@ -152,35 +184,38 @@ def map_entities(
         raise ValueError(f"entity_kind must be 'label' or 'id', not {entity_kind!r}")
 
     columns = lf.collect_schema().names()
-    extra_columns = [NORMALISED_COLUMN] if include_normalised_entities else []
-    if clashing := {result_col_name, *extra_columns} & set(columns):
+    output_columns = [result_col_name, *([NORMALISED_COLUMN] if include_normalised_entities else [])]
+    if clashing := set(output_columns) & set(columns):
         raise ValueError(f'output columns already present in the input: {sorted(clashing)}')
 
-    indexed = lf.with_row_index(_ROW)
-    query = indexed.select(_ROW, pl.col(entity_col_name).alias(_ENTITY), entity_type.alias(_TYPE))
-    query = _query_labels(query) if entity_kind == 'label' else _query_ids(query)
+    w = _Working.under(temporary_prefix(columns))
+    indexed = lf.with_row_index(w.row)
+    query = indexed.select(w.row, pl.col(entity_col_name).alias(w.entity), entity_type.alias(w.type))
+    query = _query_labels(query, w) if entity_kind == 'label' else _query_ids(query, w)
 
     lut = lut.filter(pl.col('entityKind') == entity_kind).select(
-        NORMALISED_COLUMN,
-        pl.col('entityType').alias(_TYPE),
-        'entityIds',
+        pl.col(NORMALISED_COLUMN).alias(w.normalised),
+        pl.col('entityType').alias(w.type),
+        pl.col('entityIds').alias(w.ids),
     )
-    mapped = _normalise_query(query).join(lut, on=[NORMALISED_COLUMN, _TYPE], how='left')
+    mapped = _normalise_query(query, w).join(lut, on=[w.normalised, w.type], how='left')
 
-    ids = pl.col('entityIds')
+    ids = pl.col(w.ids)
     if not include_entity_source:
         ids = ids.list.eval(pl.element().struct.field('entityId'))
     found = (
         mapped
-        .group_by(_ROW, *extra_columns)
+        .group_by(w.row, *([w.normalised] if include_normalised_entities else []))
         .agg(ids.list.explode(keep_nulls=False, empty_as_null=False).unique().sort().alias(result_col_name))
         .with_columns(
             pl.when(pl.col(result_col_name).list.len() > 0).then(pl.col(result_col_name)).alias(result_col_name)
         )
+        .rename({w.normalised: NORMALISED_COLUMN}, strict=False)
     )
     return (
         indexed
-        .join(found, on=_ROW, how='left', maintain_order='left')
-        .select(*columns, *extra_columns, result_col_name)
+        .join(found, on=w.row, how='left', maintain_order='left')
+        # leaves the input columns, then the normalised label when asked for, then the result
+        .drop(cs.starts_with(w.prefix))
         .unique(maintain_order=True)
     )

@@ -131,6 +131,28 @@ def test_rejects_an_output_column_already_present() -> None:
         _map(pl.DataFrame({'label': ['x'], 'ids': ['y']}))
 
 
+def test_input_columns_are_kept_untouched() -> None:
+    # OnToma would overwrite these working-column names; the port keeps every input column as is
+    df = pl.DataFrame({
+        'entityLabel': ['#MS ', 'cystic fibrosis'],
+        'entityType': ['GP', 'CD'],
+        'entityKind': ['x', 'y'],
+        'nlpPipelineTrack': ['a', 'b'],
+        'entityLabelNormalised': ['p', 'q'],
+        'entityIds': [1, 2],
+        '__disease_mapping_row': [3, 4],
+    })
+    out = map_entities(df.lazy(), LABEL_LUT.lazy(), 'ids', 'entityLabel', 'label', type_col=pl.lit('DS')).collect()
+    assert out.drop('ids').equals(df)
+    assert out['ids'].to_list() == [None, ['MONDO_0009061']]
+
+
+def test_no_working_column_is_left_behind() -> None:
+    df = pl.DataFrame({'label': ['cystic fibrosis'], 'type': ['DS']})
+    out = _map(df, type_col=None, type_col_name='type', include_normalised_entities=True)
+    assert out.columns == ['label', 'type', 'entityLabelNormalised', 'ids']
+
+
 @pytest.fixture
 def lut_paths(tmp_path: Path) -> tuple[str, str]:
     label, ids = tmp_path / 'label_lut', tmp_path / 'id_lut'
@@ -163,3 +185,19 @@ def test_add_efo_mapping_by_label_only(lut_paths: tuple[str, str]) -> None:
     evidence = pl.LazyFrame({'diseaseFromSource': ['ALS', 'unknown'], 'diseaseFromSourceId': ['x', 'y']})
     out = add_efo_mapping(evidence, label_lut, id_col_name=None).collect()
     assert out.rows() == [('ALS', 'x', 'EFO_0000253'), ('ALS', 'x', 'MONDO_0004976'), ('unknown', 'y', None)]
+
+
+@pytest.mark.parametrize('with_id_lut', [False, True])
+def test_add_efo_mapping_keeps_evidence_columns(lut_paths: tuple[str, str], with_id_lut: bool) -> None:
+    label_lut, id_lut = lut_paths
+    # named like the spark implementation's intermediate columns
+    evidence = pl.LazyFrame({
+        'diseaseFromSource': ['ALS'],
+        'diseaseFromSourceId': ['x'],
+        'labelMappedResult': [['kept']],
+        'idMappedResult': [['kept too']],
+    })
+    out = add_efo_mapping(evidence, label_lut, disease_id_lut_path=id_lut if with_id_lut else None).collect()
+    assert out.columns == [*evidence.collect_schema().names(), 'diseaseFromSourceMappedId']
+    assert out['labelMappedResult'].to_list() == [['kept'], ['kept']]
+    assert out['idMappedResult'].to_list() == [['kept too'], ['kept too']]

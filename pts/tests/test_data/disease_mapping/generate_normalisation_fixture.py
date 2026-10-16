@@ -79,6 +79,10 @@ EDGE_CASES = [
     'vt\x0bsep',
     'ls sep',
     'nel\u0085sep',
+    # the tokenizer's break marker, and its protect marker, which does not break
+    'theↇasthma',
+    'fibrosisↇcystic',
+    'aↈb c',
     'ﬁbrosis',
     'İstanbul',
     'ſyndrome',
