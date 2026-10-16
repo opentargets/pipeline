@@ -883,8 +883,8 @@ steps:
 
   #: TARGET_PRIORITISATION STEP :###################################################################
   target_prioritisation:
-    - name: pyspark target_prioritisation
-      pyspark: target_prioritisation
+    - name: transform target_prioritisation
+      transformer: target_prioritisation
       source:
         targets: output/target
         tractability: output/target_tractability
@@ -898,8 +898,6 @@ steps:
         uniprot_slterms: input/target_prioritisation/uniprot_locations.tsv.gz
         mouse_pheno_scores: input/target_prioritisation/mouse_pheno_scores.csv
       destination: output/target_prioritisation
-      properties:
-        spark.driver.memory: 16g
   ##################################################################################################
 
   #: ASSOCIATION STEP :#############################################################################
