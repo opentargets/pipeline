@@ -46,6 +46,44 @@ steps:
       transformer: disease_phenotype
   ##################################################################################################
 
+  #: STUDY MIGRATION
+  study:
+    - name: transform validate study
+      source:
+        study:
+          - input/gwas/study/gcca
+          - input/gwas/study/gcss_pics
+          - input/gwas/study/gcss_susie
+          - input/gwas/study/finngen
+          - input/molqtl/study/eqtl_catalogue/r7
+          - input/molqtl/study/otar2077/MAGE_OTAR
+          - input/molqtl/study/otar2077/IBDverse
+          - input/molqtl/study/GTEx_v10
+          - input/molqtl/study/ukb_ppp_eur
+        target: intermediate/target/ensembl/homo_sapiens.parquet
+        disease: output/disease
+        biosample: output/biosample
+        heritability: input/heritability_estimate
+      destination:
+        output: output/study
+        excluded: excluded/study
+      transformer: study
+      settings:
+        invalid_qc_reasons:
+          - UNRESOLVED_TARGET
+          - UNRESOLVED_DISEASE
+          - UNKNOWN_STUDY_TYPE
+          - DUPLICATED_STUDY
+          - UNKNOWN_BIOSAMPLE
+          - FAILED_MEAN_BETA_CHECK
+          - FAILED_PZ_CHECK
+          - FAILED_GC_LAMBDA_CHECK
+          - NO_OT_CURATION
+          - CASE_CASE_STUDY_DESIGN
+          - DEPRECATED_PROJECT
+        deprecated_project_ids:
+          - GTEx
+
   #: GO STEP :######################################################################################
   go:
     - name: transform go
