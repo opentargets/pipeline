@@ -9,7 +9,7 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import credible_set_schema
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import valid_rows
 
 
@@ -418,9 +418,13 @@ def credible_set(
         .pipe(assign_confidence)
         .pipe(flag_trans_qtls, study, target, options.trans_qtl_threshold)
         .select(credible_set_schema.names())
+        .collect()
+        .lazy()
         .pipe(valid_rows, options.invalid_qc_reasons)
     )
-    unique = result.valid.pipe(validate_unique_study_locus_id).pipe(valid_rows, options.invalid_qc_reasons)
+    unique = (
+        result.valid.pipe(validate_unique_study_locus_id).collect().lazy().pipe(valid_rows, options.invalid_qc_reasons)
+    )
     accepted = (
         unique.valid
         .pipe(qc_replication, study)
@@ -428,7 +432,12 @@ def credible_set(
         .sort('chromosome', 'position', nulls_last=False)
     )
     excluded = pl.concat([result.invalid, unique.invalid.select(credible_set_schema.names())], how='vertical')
-    logger.info('Writing accepted credible sets to {}', destinations.output)
-    write_dataset(accepted, destinations.output)
-    logger.info('Writing excluded credible sets to {}', destinations.excluded)
-    write_dataset(excluded, destinations.excluded)
+    logger.info(
+        'Writing accepted credible sets to {} and excluded credible sets to {}',
+        destinations.output,
+        destinations.excluded,
+    )
+    pl.collect_all([
+        sink_dataset(accepted, destinations.output),
+        sink_dataset(excluded, destinations.excluded),
+    ])
