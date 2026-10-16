@@ -386,13 +386,11 @@ steps:
       - pts_drug_mechanism_of_action
   pts_target_prioritisation:
     depends_on:
-      - pts_target
       - pts_target_tractability
       - pts_target_safety_event
-      - pts_chemical_probes
       - pts_homology
+      - pts_mouse_phenotype
       - pts_drug_molecule
-      - pts_drug_mechanism_of_action
       - pis_target_prioritisation
       - pts_baseline_expression
   pts_association:
