@@ -71,11 +71,13 @@ cos_image: "cos-133-19999-44-106"
 #   - pts_target_gene_essentiality decoupled from pts_target: now depends on
 #     pts_target (rather than the other way around).
 #   - New standalone steps extracted from pts_target: pts_transcript,
-#     pts_target_tractability, pts_homology (all depend on pts_target/
-#     pts_pre_target; none of this existed as separate steps before).
+#     pts_target_tractability, pts_homology; none of this existed as
+#     separate steps before. pts_transcript depends on pis_target.
 #   - pts_chemical_probes promoted to depend on pts_target (now ENSG-resolved).
-#   - pts_target's own depends_on shrank to [pts_pre_target, pts_reactome]
-#     now that safety/essentiality/disease resolution live in their own steps.
+#   - pts_pre_target folded into pts_target, which reads the Ensembl core
+#     tables and the raw inputs directly and depends on
+#     [pis_target, pis_chembl, pts_reactome]. pts_drug_mechanism_of_action and
+#     gentropy_study read output/target and depend on pts_target.
 #   - Downstream consumers (pts_target_prioritisation, pts_association_otf,
 #     pts_search_facet) gained edges onto the new pts_target_tractability/
 #     pts_target_safety_event/pts_chemical_probes/pts_homology datasets.
@@ -173,10 +175,6 @@ steps:
   pts_so:
     depends_on:
       - pis_so
-  pts_pre_target:
-    depends_on:
-      - pis_target
-      - pis_chembl
   pts_target_gene_essentiality:
     depends_on:
       - pis_target
@@ -282,7 +280,6 @@ steps:
     depends_on:
       - pts_clinical_report
       - pts_drug_mechanism_of_action
-      - pts_target
       - pis_literature
   pts_evidence_cancer_biomarkers:
     depends_on:
@@ -364,8 +361,7 @@ steps:
       - pis_drug
   pts_drug_mechanism_of_action:
     depends_on:
-      - pis_chembl
-      - pts_pre_target
+      - pts_target
   pts_drug_molecule:
     depends_on:
       - pts_chemical_probes
@@ -446,9 +442,9 @@ steps:
       - pts_disease
 
   pts_target:
-    num_partitions: 10
     depends_on:
-      - pts_pre_target
+      - pis_target
+      - pis_chembl
       - pts_reactome
 
   # Steps extracted from pts_target
@@ -537,7 +533,7 @@ steps:
     depends_on:
       - pis_gwas
       - pis_molqtl
-      - pts_pre_target
+      - pts_target
       - pts_disease
       - pts_biosample
       - pis_heritability
