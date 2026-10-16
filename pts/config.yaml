@@ -393,34 +393,27 @@ steps:
         protein_classification: intermediate/chembl/protein_classification.parquet
   ##################################################################################################
 
-  #: TARGET STEP (pyspark) :#######################################################################
+  #: TARGET STEP :##################################################################################
   target:
-    - name: pyspark target
-      pyspark: target
-      settings:
-        partition_count: 3
+    - name: transform target
+      transformer: target
       source:
-        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
-        gene_code: input/target/gencode/gencode.gff3.gz
-        genetic_constraints: intermediate/target/gnomad/constraint_metrics.parquet
+        ensembl: input/ensembl/homo_sapiens
+        chembl: input/chembl/chembl.tar.gz
         gene_ontology_human: input/target/go/goa_human.gaf.gz
         gene_ontology_rna: input/target/go/goa_human_rna.gaf.gz
         gene_ontology_rna_lookup: input/target/go/ensembl.tsv
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
+        gnomad: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
         hgnc: input/target/genenames/hgnc_complete_set.json
-        hpa: intermediate/target/hpa/subcellular_location.tsv.gz
-        hpa_sl: intermediate/target/hpa/subcellular_locations_ssl.parquet
+        hpa: input/target/hpa/subcellular_location.tsv.zip
+        hpa_sl: input/target/hpa/subcellular_locations_ssl.tsv
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        uniprot: intermediate/target/uniprot/uniprot.parquet
+        uniprot: input/target/uniprot/uniprot.txt.gz
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        target_dictionary: intermediate/chembl/target_dictionary.parquet
-        target_components: intermediate/chembl/target_components.parquet
-        component_sequences: intermediate/chembl/component_sequences.parquet
-        component_class: intermediate/chembl/component_class.parquet
-        protein_classification: intermediate/chembl/protein_classification.parquet
       destination: output/target
   ##################################################################################################
 
