@@ -7,10 +7,9 @@ validated against the target universe.
 
 from __future__ import annotations
 
+import io
 from typing import Any
 
-import numpy as np
-import pandas as pd
 import polars as pl
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
@@ -54,6 +53,12 @@ PROBES_TARGETS_COLUMNS = [
 MISSING_VALUE_TOKENS = ('-', 'nan')
 
 HIGH_QUALITY = 'High-quality chemical probes'
+
+# pandas.read_excel's default na_values
+MISSING_CELL_VALUES = [
+    '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA',
+    'NULL', 'NaN', 'None', 'n/a', 'nan', 'null',
+]  # fmt: skip
 
 # Characters spark's string-to-number cast trims from both ends.
 _CAST_TRIM = ''.join(chr(c) for c in range(0x21))
@@ -121,31 +126,6 @@ def resolve_targets(evidence: pl.DataFrame, lookup: pl.DataFrame) -> pl.DataFram
     })
 
 
-def cell_to_string(value: Any) -> str | None:
-    """Render a spreadsheet cell as a string: blanks as null, booleans as '1'/'0'."""
-    if pd.isna(value):
-        return None
-    if isinstance(value, bool | np.bool_):
-        return '1' if value else '0'
-    return str(value)
-
-
-def pandas_to_strings(pdf: pd.DataFrame, columns: list[str] | None = None) -> pl.DataFrame:
-    """Convert a pandas frame to polars with every cell as a string and blanks as null.
-
-    Args:
-        pdf: pandas frame, e.g. a sheet from `pd.read_excel`.
-        columns: columns to keep. All columns when omitted.
-
-    Returns:
-        DataFrame with one string column per kept column.
-    """
-    if columns is not None:
-        pdf = pdf[columns]
-    values = {c: [cell_to_string(v) for v in pdf[c].astype(object)] for c in pdf.columns}
-    return pl.DataFrame(values, schema=dict.fromkeys(values, pl.String))
-
-
 def collapse_cols_data_in_array(df: pl.DataFrame, source_cols: list[str], destination_col: str) -> pl.DataFrame:
     """Collapses the data in a single column when the information is one-hot encoded.
 
@@ -206,16 +186,30 @@ def process_scores(col_name: str) -> pl.Expr:
     )
 
 
-def _read_sheet(probes_excel: str, sheet_name: str) -> pd.DataFrame:
-    return pd.read_excel(StorageHandle(probes_excel).open('rb'), sheet_name=sheet_name, header=0, index_col=0)
+def read_sheet(probes_excel: str, sheet_name: str) -> pl.DataFrame:
+    """Read a sheet with every cell as a string: blanks and `MISSING_CELL_VALUES` as null, booleans as '1'/'0'.
+
+    Args:
+        probes_excel: path to the workbook.
+        sheet_name: sheet to read.
+
+    Returns:
+        DataFrame with one string column per sheet column.
+    """
+    with StorageHandle(probes_excel).open('rb') as f:
+        data = f.read()
+    sheet = pl.read_excel(io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None)
+    strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
+    return strings.with_columns(pl.when(~pl.all().is_in(MISSING_CELL_VALUES)).then(pl.all()).name.keep())
 
 
 def process_probes_data(probes_excel: str) -> pl.DataFrame:
     """Metadata about the compound and the scores given by the different sources."""
-    # Probes that do not have an associated target are marked as nulls
-    probes = _read_sheet(probes_excel, 'PROBES').query('target.notnull()').reset_index()
     return (
-        pandas_to_strings(probes, PROBES_COLUMNS)
+        read_sheet(probes_excel, 'PROBES')
+        # Probes that do not have an associated target are marked as nulls
+        .filter(pl.col('target').is_not_null())
+        .select(PROBES_COLUMNS)
         .pipe(collapse_cols_data_in_array, PROBES_SETS, 'datasourceIds')
         .pipe(collapse_cols_data_in_array, ['experimental probe', 'calculated probe'], 'origin')
         .select(
@@ -233,14 +227,11 @@ def process_probes_data(probes_excel: str) -> pl.DataFrame:
 
 def process_probes_targets_data(probes_excel: str) -> pl.DataFrame:
     """Collection of targets associated with the probes and their scores."""
-    probes_targets = (
-        _read_sheet(probes_excel, 'PROBES TARGETS')
-        # Probes without an associated target are marked with "-" or left blank
-        .query("gene_name.notnull() and gene_name != '-'")
-        .reset_index()
-    )
     return (
-        pandas_to_strings(probes_targets, PROBES_TARGETS_COLUMNS)
+        read_sheet(probes_excel, 'PROBES TARGETS')
+        # Probes without an associated target are marked with "-" or left blank
+        .filter(pl.col('gene_name').is_not_null() & (pl.col('gene_name') != '-'))
+        .select(PROBES_TARGETS_COLUMNS)
         .filter(pl.col('organism') == 'Homo sapiens')
         .select(
             'pdid',
@@ -255,9 +246,8 @@ def process_probes_targets_data(probes_excel: str) -> pl.DataFrame:
 
 def process_probes_sets_data(probes_excel: str) -> pl.DataFrame:
     """Metadata about the different sources of probes."""
-    compound_sets = _read_sheet(probes_excel, 'COMPOUNDSETS')
     return (
-        pandas_to_strings(compound_sets, ['COMPOUNDSET', 'SOURCE_URL'])
+        read_sheet(probes_excel, 'COMPOUNDSETS')
         .select(pl.col('COMPOUNDSET').alias('datasourceId'), pl.col('SOURCE_URL').alias('url'))
         .filter(pl.col('url').str.starts_with('http'))
     )
@@ -265,8 +255,7 @@ def process_probes_sets_data(probes_excel: str) -> pl.DataFrame:
 
 def process_targets_xrefs(probes_excel: str) -> pl.DataFrame:
     """Look-up table between the gene symbols and the UniProt IDs."""
-    targets = _read_sheet(probes_excel, 'TARGETS').reset_index()
-    return pandas_to_strings(targets, ['target', 'uniprot']).select(
+    return read_sheet(probes_excel, 'TARGETS').select(
         pl.col('target').alias('targetFromSource'), pl.col('uniprot').alias('targetFromSourceId')
     )
 
