@@ -3,7 +3,7 @@
 import math
 from pathlib import Path
 
-import pandas as pd
+import openpyxl
 import polars as pl
 import pytest
 
@@ -13,7 +13,6 @@ from pts.transformers.chemical_probes import (
     collapse_cols_data_in_array,
     convert_stringified_array_to_array,
     generate_chemical_probes_evidence,
-    pandas_to_strings,
     process_drugs_xrefs,
     process_probes_data,
     process_probes_sets_data,
@@ -194,6 +193,22 @@ def test_convert_stringified_array_to_array():
     assert df['a'].to_list() == [['x', 'y'], [''], None]
 
 
+def _write_xlsx(path: Path, sheets: dict[str, dict[str, list]]) -> str:
+    """Write a workbook with one sheet per entry, each given as columns of cell values."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, columns in sheets.items():
+        ws = wb.create_sheet(name)
+        ws.append(list(columns))
+        for row in zip(*columns.values(), strict=True):
+            ws.append(list(row))
+    wb.save(path)
+    return str(path)
+
+
+def _records(rows: list[dict]) -> dict[str, list]:
+    return {c: [r[c] for r in rows] for c in rows[0]}
+
 # ---------------------------------------------------------------------------
 # collapse_cols_data_in_array / PROBES_SETS
 # ---------------------------------------------------------------------------
@@ -272,7 +287,7 @@ def _probes_xlsx(path: Path, flag) -> str:
     """
     every = [flag, None, flag]
     sgc_only = {c: [flag, flag if c == SGC else None, None] for c in PROBES_SHEET_DATASOURCE_COLUMNS}
-    frame = pd.DataFrame({
+    frame = {
         'pdid': ['PD-1', 'PD-2', 'PD-3'],
         'compound_name': ['cmpd-1', 'cmpd-2', 'cmpd-3'],
         'target': ['BRD4', 'EGFR', None],
@@ -283,18 +298,17 @@ def _probes_xlsx(path: Path, flag) -> str:
         'calculated probe': every,
         # unused, and mixing numbers and text
         'mw': [1.5, '-', None],
-    })
-    frame.to_excel(path, sheet_name='PROBES', index=False)
-    return str(path)
+    }
+    return _write_xlsx(path, {'PROBES': frame})
 
 
-@pytest.mark.parametrize('flag', [1, 1.0, 'True'], ids=['int', 'float', 'bool'])
+@pytest.mark.parametrize('flag', [1, 1.0, True], ids=['int', 'float', 'bool'])
 def test_probes_data_collects_every_set_and_origin(tmp_path, flag):
     """Every PROBES_SETS column is read from the sheet, whatever type its flags have."""
     xlsx = _probes_xlsx(tmp_path / 'probes.xlsx', flag)
-    if flag == 'True':
-        sheet = pd.read_excel(xlsx, sheet_name='PROBES', header=0, index_col=0)
-        assert sheet['experimental probe'].dtype == bool, 'the fixture must hold real booleans'
+    if flag is True:
+        sheet = pl.read_excel(xlsx, sheet_name='PROBES', infer_schema_length=None)
+        assert sheet.schema['experimental probe'] == pl.Boolean, 'the fixture must hold real booleans'
 
     rows = process_probes_data(xlsx)
     assert rows.columns == ['pdid', 'drugFromSource', 'origin', 'isHighQuality', 'datasourceId', 'control']
@@ -316,7 +330,7 @@ def test_probes_data_collects_every_set_and_origin(tmp_path, flag):
 
 def _probes_targets_xlsx(path: Path, extra_columns: dict | None = None) -> str:
     """Write a minimal PROBES TARGETS workbook, shaped like the upstream export."""
-    frame = pd.DataFrame({
+    frame = {
         'pdid': ['PD-1', 'PD-2', 'PD-3'],
         'gene_name': ['BRD4', 'EGFR', '-'],
         'organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
@@ -327,9 +341,8 @@ def _probes_targets_xlsx(path: Path, extra_columns: dict | None = None) -> str:
         'Cells score (Chemical Probes.org)': [1.0, 2.0, 3.0],
         'Organisms score (Chemical Probes.org)': [1.0, 2.0, 3.0],
         **(extra_columns or {}),
-    })
-    frame.to_excel(path, sheet_name='PROBES TARGETS', index=False)
-    return str(path)
+    }
+    return _write_xlsx(path, {'PROBES TARGETS': frame})
 
 
 def test_probes_targets_survives_a_mixed_type_column(tmp_path):
@@ -368,13 +381,6 @@ def test_probes_targets_drops_blank_gene_name_and_other_organisms(tmp_path):
     assert process_probes_targets_data(xlsx)['pdid'].to_list() == ['PD-1']
 
 
-def test_pandas_to_strings_normalises_cells():
-    pdf = pd.DataFrame({'a': [1, 2], 'b': [1.5, float('nan')], 'c': [True, False], 'd': ['x', None]})
-    df = pandas_to_strings(pdf, ['d', 'a', 'b', 'c'])
-    assert df.schema == pl.Schema({'d': pl.String, 'a': pl.String, 'b': pl.String, 'c': pl.String})
-    assert df.rows() == [('x', '1', '1.5', '1'), (None, '2', None, '0')]
-
-
 def test_process_drugs_xrefs_keeps_chembl_ids_only(tmp_path):
     csv = tmp_path / 'links.csv'
     csv.write_text('compound_id,pdid,name,ChEMBL\n1,PD-1,"multi\nline",CHEMBL1\n2,PD-2,b,CHEMBL2\n3,PD-3,c,\n')
@@ -386,6 +392,12 @@ def test_process_drugs_xrefs_keeps_chembl_ids_only(tmp_path):
 # ---------------------------------------------------------------------------
 # End to end
 # ---------------------------------------------------------------------------
+
+
+PROBES_TARGETS_HEADER = [
+    'pdid', 'gene_name', 'organism', 'target', 'action', 'P&D probe-likeness score',
+    'Cells score (Chemical Probes.org)', 'Organisms score (Chemical Probes.org)',
+]  # fmt: skip
 
 
 def _sets(*names: str) -> dict:
@@ -400,7 +412,7 @@ def _write_inputs(src: Path) -> dict[str, str]:
     shared by two targets; PD-MISSING is not in the PROBES sheet.
     """
     src.mkdir()
-    probes = pd.DataFrame([
+    probes = _records([
         {'pdid': 'PD-A', 'compound_name': 'cmpd-a', 'target': 'x', 'control_name': 'ctrl', **_sets(SGC, HQ, CPO),
          'experimental probe': 1.0, 'calculated probe': None},
         {'pdid': 'PD-HQ', 'compound_name': 'cmpd-hq', 'target': 'x', 'control_name': '-', **_sets(HQ),
@@ -412,8 +424,9 @@ def _write_inputs(src: Path) -> dict[str, str]:
         {'pdid': 'PD-NOTGT', 'compound_name': 'cmpd-n', 'target': None, 'control_name': None, **_sets(SGC),
          'experimental probe': 1.0, 'calculated probe': None},
     ])  # fmt: skip
-    probes_targets = pd.DataFrame(
-        [
+    probes_targets = _records([
+        dict(zip(PROBES_TARGETS_HEADER, row, strict=True))
+        for row in [
             ('PD-A', 'BRD4', 'Homo sapiens', 'Bromo 4', 'inhibitor;antagonist', ' 1.5 ', '\t2', 'abc'),
             ('PD-A', 'BRD4', 'Homo sapiens', 'Bromo 4', 'inhibitor;antagonist', ' 1.5 ', '\t2', 'abc'),
             ('PD-HQ', 'EGFR', 'Homo sapiens', 'EGF receptor', '-', 'NaN', '1e3', '-'),
@@ -421,26 +434,19 @@ def _write_inputs(src: Path) -> dict[str, str]:
             ('PD-B', 'MULTI', 'Homo sapiens', 'Multi', ' ', '3', 'inf', '-1'),
             ('PD-MISSING', 'BRD4', 'Homo sapiens', 'Bromo 4', 'agonist', '1', '2', '3'),
             ('PD-A', 'BRD4', 'Mus musculus', 'Bromo 4', 'inhibitor', '1', '1', '1'),
-        ],
-        columns=[
-            'pdid', 'gene_name', 'organism', 'target', 'action', 'P&D probe-likeness score',
-            'Cells score (Chemical Probes.org)', 'Organisms score (Chemical Probes.org)',
-        ],
-    )  # fmt: skip
-    compoundsets = pd.DataFrame({
+        ]
+    ])  # fmt: skip
+    compoundsets = {
         'INDEX': [1, 2, 3, 4],
         'COMPOUNDSET': [SGC, CPO, HQ, 'Bromodomains chemical toolbox'],
         'SOURCE_URL': ['http://sgc', 'https://cpo', 'http://hq', 'n/a'],
-    })
-    targets = pd.DataFrame({
+    }
+    targets = {
         'target': ['Bromo 4', 'EGF receptor', 'K-Ras', 'Multi', None],
         'uniprot': ['O60885', 'P00533', 'P01116', 'Q99999', None],
-    })
-    with pd.ExcelWriter(src / 'probes.xlsx') as w:
-        probes.to_excel(w, sheet_name='PROBES', index=False)
-        probes_targets.to_excel(w, sheet_name='PROBES TARGETS', index=False)
-        compoundsets.to_excel(w, sheet_name='COMPOUNDSETS', index=False)
-        targets.to_excel(w, sheet_name='TARGETS', index=False)
+    }
+    sheets = {'PROBES': probes, 'PROBES TARGETS': probes_targets, 'COMPOUNDSETS': compoundsets, 'TARGETS': targets}
+    _write_xlsx(src / 'probes.xlsx', sheets)
     (src / 'links.csv').write_text(
         'compound_id,pdid,ChEMBL\n1,PD-A,CHEMBL1\n2,PD-A,CHEMBL1\n3,PD-B,CHEMBL2\n4,PD-B,\n5,PD-HQ,CHEMBL3\n'
     )
