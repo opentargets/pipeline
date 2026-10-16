@@ -65,3 +65,16 @@ def test_tss_preserves_duplicate_targets_and_null_structs():
 def test_empty_tss_lookup_schema():
     """Empty input still yields the lookup contract."""
     assert tss_lut(target_frame([])).collect_schema() == pl.Schema({'geneId': pl.String, 'tss': pl.Int64})
+
+
+@pytest.mark.parametrize(('preferred', 'strand', 'expected'), [(9, 1, 9), (None, 1, 300), (None, -1, 400)])
+def test_tss_without_canonical_transcript(preferred, strand, expected):
+    target = target_frame([
+        {
+            'id': 'ENSG1',
+            'tss': preferred,
+            'canonicalTranscript': None,
+            'genomicLocation': {'strand': strand, 'start': 300, 'end': 400},
+        }
+    ]).drop('canonicalTranscript')
+    assert tss_lut(target).collect().to_dicts() == [{'geneId': 'ENSG1', 'tss': expected}]
