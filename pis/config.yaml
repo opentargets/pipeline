@@ -40,6 +40,12 @@ scratchpad:
   encore_version: '2026-09-21'
 
 steps:
+  #: GRCh38 REFERENCE
+  reference_grch38:
+    - name: copy GRCh38 reference FASTA
+      source: gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta
+      destination: input/reference/GRCh38/Homo_sapiens_assembly38.fasta
+
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
   baseline_expression_raw:
     - name: copy GTEx TPM matrix

@@ -35,38 +35,102 @@ def normalise_lof_score(assessment: pl.Expr) -> pl.Expr:
     )
 
 
-def transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Keep GRCh38 coordinates and GRCh37 alleles, then annotate each verdict.
+def _validated_variants(frame: pl.LazyFrame, reference: pl.LazyFrame) -> pl.DataFrame:
+    """Keep GRCh38 IDs whose entire REF span matches the base-level reference.
 
-    Records and duplicates are preserved. Missing identifier components are
-    omitted from variantId, matching concat_ws in the existing implementation.
+    Only the small curation table and requested reference bases are materialized.
+    The genome table is scanned with a streaming semi-join against requested
+    positions. A left join then ensures absent bases fail rather than shortening
+    a deletion's comparison. Row identities preserve duplicate curation records.
     """
-    logger.info('Parsing LoF curation identifiers and verdicts')
-    parsed = frame.select(
-        pl.col('Variant ID GRCh37').str.split_exact('-', 3).alias('_h37'),
-        pl.col('Variant ID GRCh38').str.split_exact('-', 3).alias('_h38'),
-        pl.col('Verdict').alias('_verdict'),
+    raw = frame.select('Variant ID GRCh38', pl.col('Verdict').alias('_verdict')).collect()
+    valid = (
+        raw
+        .with_row_index('_row')
+        .filter(pl.col('Variant ID GRCh38').str.contains(r'^[^-\s]+-[1-9]\d*-[ACGTN]+-[ACGTN]+$'))
+        .with_columns(pl.col('Variant ID GRCh38').str.split_exact('-', 3).alias('_h38'))
+        .select(
+            '_row',
+            '_verdict',
+            pl.col('_h38').struct.field('field_0').str.strip_prefix('chr').replace('M', 'MT').alias('chromosome'),
+            pl.col('_h38').struct.field('field_1').cast(pl.Int32, strict=False).alias('position'),
+            pl.col('_h38').struct.field('field_2').alias('referenceAllele'),
+            pl.col('_h38').struct.field('field_3').alias('alternateAllele'),
+        )
+        .filter(
+            pl.col('position').is_not_null(),
+            pl.col('chromosome') != '',
+            pl.col('referenceAllele') != pl.col('alternateAllele'),
+        )
     )
+    if valid.is_empty():
+        logger.info(
+            'LoF reference validation: input={}, kept=0, invalid_or_missing_id={}, ref_failed=0', raw.height, raw.height
+        )
+        return valid
 
-    def component(build: str, index: int) -> pl.Expr:
-        return pl.col(build).struct.field(f'field_{index}').replace('', None)
+    expected = valid.select(
+        '_row',
+        pl.col('chromosome').alias('chr'),
+        pl.int_ranges(
+            pl.col('position').cast(pl.Int64),
+            pl.col('position').cast(pl.Int64) + pl.col('referenceAllele').str.len_bytes(),
+        ).alias('pos'),
+        pl.col('referenceAllele').str.split('').alias('_expected'),
+    ).explode('pos', '_expected')
+    keys = expected.select('chr', 'pos').unique()
+    bases = (
+        reference
+        .select('chr', pl.col('pos').cast(pl.Int64), pl.col('ref').alias('_reference'))
+        .filter(
+            pl.col('chr').is_in(keys['chr'].unique().implode()),
+            pl.col('pos').is_between(keys['pos'].min(), keys['pos'].max()),
+        )
+        .join(keys.lazy(), on=['chr', 'pos'], how='semi')
+        .collect(engine='streaming')
+    )
+    matching_rows = (
+        expected
+        .join(bases, on=['chr', 'pos'], how='left', validate='m:1')
+        .group_by('_row')
+        .agg((pl.col('_expected') == pl.col('_reference')).fill_null(False).all().alias('_matches'))
+        .filter('_matches')
+    )
+    result = valid.join(matching_rows.select('_row'), on='_row', how='semi', maintain_order='left')
+    logger.info(
+        'LoF reference validation: input={}, kept={}, invalid_or_missing_id={}, ref_failed={}',
+        raw.height,
+        result.height,
+        raw.height - valid.height,
+        valid.height - result.height,
+    )
+    return result
 
-    chromosome = component('_h38', 0)
-    position = component('_h38', 1)
-    reference = component('_h37', 2)
-    alternate = component('_h37', 3)
+
+def transform_lof_curation(frame: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
+    """Use all GRCh38 ID components and drop records without a full REF match.
+
+    Coordinates are 1-based. Validate every REF base, including deletion spans,
+    against the GRCh38 chr/pos/ref dataset before constructing output IDs.
+    Missing/malformed IDs, missing contigs/positions, and REF mismatches are
+    dropped. Matching duplicates and their individual verdicts are preserved.
+
+    REF agreement establishes sequence compatibility, not ALT identity or the
+    correctness of the original liftover. Distinct source variants may share a
+    GRCh38 ID; their curation rows remain separate.
+    """
+    parsed = _validated_variants(frame, reference).lazy()
     verdict = pl.col('_verdict')
     return (
         parsed
         .select(
-            pl.concat_str(chromosome, position, reference, alternate, separator='_', ignore_nulls=True).alias(
+            pl.concat_str('chromosome', 'position', 'referenceAllele', 'alternateAllele', separator='_').alias(
                 'variantId'
             ),
-            chromosome.alias('chromosome'),
-            # Spark's non-ANSI string-to-integer cast truncates decimal suffixes.
-            position.str.extract(r'^\s*([+-]?\d+)(?:\.\d*)?\s*$', 1).cast(pl.Int32, strict=False).alias('position'),
-            reference.alias('referenceAllele'),
-            alternate.alias('alternateAllele'),
+            'chromosome',
+            'position',
+            'referenceAllele',
+            'alternateAllele',
             pl.concat_list(
                 pl.struct(
                     pl.lit('LossOfFunctionCuration').alias('method'),
@@ -87,16 +151,19 @@ def transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def lof_curation(source: str, destination: str, settings: dict[str, Any], config: Config) -> None:
+def lof_curation(source: dict[str, str], destination: str, settings: dict[str, Any], config: Config) -> None:
     """Read the multiline curation CSV and write variant annotation Parquet.
 
     Args:
-        source: Raw OTAR2075 curation CSV.
+        source: Paths keyed by ``curation`` (CSV) and ``reference`` (GRCh38 Parquet).
         destination: Output annotation dataset directory.
         settings: No settings are currently supported.
         config: Pipeline runtime configuration.
     """
     LofCurationSettings.model_validate(settings)
-    result = scan_dataset(source, format='csv', infer_schema=False, null_values='').pipe(transform_lof_curation)
+    result = transform_lof_curation(
+        scan_dataset(source['curation'], format='csv', infer_schema=False, null_values=''),
+        scan_dataset(source['reference']),
+    )
     logger.info('Writing LoF curation annotations to {}', destination)
     write_dataset(result, destination)

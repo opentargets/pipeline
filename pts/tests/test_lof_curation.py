@@ -27,23 +27,73 @@ def raw_annotations(rows):
     ).lazy()
 
 
-def test_coordinates_and_alleles_come_from_their_respective_genome_builds():
-    """GRCh38 coordinates retain GRCh37 alleles when liftover changes them."""
+def reference_bases(sequence='A', chromosome='1', position=20):
+    return pl.LazyFrame(
+        {
+            'chr': [chromosome] * len(sequence),
+            'pos': list(range(position, position + len(sequence))),
+            'ref': list(sequence),
+        },
+        schema={'chr': pl.String, 'pos': pl.Int64, 'ref': pl.String},
+    )
+
+
+def test_step_validates_full_grch38_ref_against_reference_parquet(tmp_path):
+    """Only complete GRCh38 REF matches survive, including across Parquet parts."""
+    import csv
+
+    from pts.transformers.lof_curation import lof_curation
+    from pts.transformers.reference import reference
+
+    fasta = tmp_path / 'genome.fasta'
+    fasta.write_text('>chr1\nACGTAC\n>chr19_KI270938v1_alt\nGC\n')
+    reference_path = tmp_path / 'reference'
+    reference(str(fasta), str(reference_path), {'batch_size': 2}, Mock(spec=Config))
+    source = tmp_path / 'curation.csv'
+    with source.open('w', newline='') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(['Variant ID GRCh37', 'Variant ID GRCh38', 'Verdict'])
+        writer.writerows([
+            ['1-20-T-G', '1-2-C-T', 'lof'],
+            ['1-20-T-G', '1-2-C-T', 'uncertain'],
+            ['1-20-T-G', '1-2-CGT-C', 'likely_lof'],
+            ['1-20-T-G', '1-2-CGA-C', 'lof'],  # anchor matches, deletion suffix does not
+            ['1-20-T-G', '1-6-CA-C', 'lof'],  # reference span runs beyond contig
+            ['1-20-T-G', '1-1-T-A', 'lof'],  # wrong SNV REF
+            ['1-20-T-G', 'missing-1-A-T', 'lof'],
+            ['1-20-T-G', '', 'lof'],
+            ['', '19_KI270938v1_alt-1-G-A', 'lof'],  # GRCh37 ID is not required
+        ])
+    destination = tmp_path / 'annotations'
+    lof_curation(
+        {'curation': str(source), 'reference': str(reference_path)},
+        str(destination),
+        {},
+        Mock(spec=Config),
+    )
+    result = pl.read_parquet(destination / '*.parquet')
+    assert result['variantId'].to_list() == ['1_2_C_T', '1_2_C_T', '1_2_CGT_C', '19_KI270938v1_alt_1_G_A']
+    assert [entry[0]['assessment'] for entry in result['variantEffect']] == ['lof', 'uncertain', 'likely_lof', 'lof']
+
+
+def test_all_identifier_components_come_from_grch38():
+    """GRCh37 alleles never replace the validated GRCh38 alleles."""
     result = (
         transform_lof_curation(
             raw_annotations([
                 {'Variant ID GRCh37': '1-100-A-T', 'Variant ID GRCh38': '2-200-C-G', 'Verdict': 'lof'},
-            ])
+            ]),
+            reference_bases('C', '2', 200),
         )
         .collect()
         .row(0, named=True)
     )
     assert result == {
-        'variantId': '2_200_A_T',
+        'variantId': '2_200_C_G',
         'chromosome': '2',
         'position': 200,
-        'referenceAllele': 'A',
-        'alternateAllele': 'T',
+        'referenceAllele': 'C',
+        'alternateAllele': 'G',
         'variantEffect': [
             {
                 'method': 'LossOfFunctionCuration',
@@ -77,7 +127,8 @@ def test_verdict_scores_and_descriptions(verdict, score, description):
         transform_lof_curation(
             raw_annotations([
                 {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': verdict},
-            ])
+            ]),
+            reference_bases(),
         )
         .collect()
         .row(0, named=True)
@@ -88,46 +139,45 @@ def test_verdict_scores_and_descriptions(verdict, score, description):
 
 
 @pytest.mark.parametrize(
-    ('h37', 'h38', 'variant_id', 'position'),
+    'h38',
     [
-        (None, None, '', None),
-        ('1-10-A', '2-20-C-G', '2_20_A', 20),
-        ('1-10--G', '2-20-C-G', '2_20_G', 20),
-        ('1-10-A-T-extra', '2-20-C-G', '2_20_A_T', 20),
-        ('1-10-A-G', '2-1.9-C-T', '2_1.9_A_G', 1),
-        ('1-10-A-G', '2-2147483648-C-T', '2_2147483648_A_G', None),
-        ('1-10-A-G', '2-1e2-C-T', '2_1e2_A_G', None),
+        None,
+        '',
+        '1-20-A',
+        '1-20--G',
+        '1-20-A-G-extra',
+        '1-20.9-A-T',
+        '1-2147483648-A-T',
+        '1-2e1-A-T',
+        '1-0-A-T',
+        '1--20-A-T',
+        '1-20-A-A',
+        '1-20-A-<DEL>',
+        '1-20-a-g',
     ],
 )
-def test_partial_identifiers_and_integer_casting(h37, h38, variant_id, position):
-    """Identifier concatenation skips nulls while invalid Int32 coordinates remain null."""
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': h37, 'Variant ID GRCh38': h38, 'Verdict': 'lof'},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
-    )
-    import hashlib
-
-    expected_id = 'OTVAR_' + hashlib.md5(variant_id.encode()).hexdigest() if position is None else variant_id
-    assert row['variantId'] == expected_id
-    assert row['position'] == position
+def test_invalid_or_missing_grch38_identifiers_are_dropped(h38):
+    """Malformed IDs are not truncated, repaired, or converted to fallback hashes."""
+    result = transform_lof_curation(
+        raw_annotations([
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': h38, 'Verdict': 'lof'},
+        ]),
+        reference_bases(),
+    ).collect()
+    assert result.is_empty()
 
 
 def test_duplicate_annotations_are_preserved():
     """Curation ingestion preserves source records instead of choosing a verdict."""
     row = {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'lof'}
-    assert transform_lof_curation(raw_annotations([row, row])).collect().height == 2
+    assert transform_lof_curation(raw_annotations([row, row]), reference_bases()).collect().height == 2
 
 
 def test_empty_input_has_the_annotation_schema():
     """An empty raw export still yields typed annotation columns."""
     from pts.schemas.variant_annotation import variant_annotation_schema
 
-    result = transform_lof_curation(raw_annotations([])).collect()
+    result = transform_lof_curation(raw_annotations([]), reference_bases()).collect()
     assert result.is_empty()
     assert result.schema == variant_annotation_schema
 
@@ -146,11 +196,13 @@ def test_step_reads_multiline_csv_and_writes_typed_parquet(tmp_path):
         writer.writerow(['1-10-A-G', '2-20-C-T', 'likely_lof', 'Comment, with "quotes"\nand a newline'])
         writer.writerow(['1-11-G-T', '2-21-G-T', '', 'Other note'])
     destination = tmp_path / 'annotations'
-    lof_curation(str(source), str(destination), {}, Mock(spec=Config))
+    reference_path = tmp_path / 'reference.parquet'
+    reference_bases('CG', '2', 20).collect().write_parquet(reference_path)
+    lof_curation({'curation': str(source), 'reference': str(reference_path)}, str(destination), {}, Mock(spec=Config))
     result = pl.read_parquet(destination / '*.parquet').sort('position')
     assert result.height == 2
     assert result.schema == variant_annotation_schema
-    assert result['variantId'].to_list() == ['2_20_A_G', '2_21_G_T']
+    assert result['variantId'].to_list() == ['2_20_C_T', '2_21_G_T']
     assert result['variantEffect'][0][0]['normalisedScore'] == 0.5
     assert result['variantEffect'][1][0]['assessment'] is None
 
@@ -162,21 +214,20 @@ def test_settings_reject_unrecognized_options():
     from pts.transformers.lof_curation import lof_curation
 
     with pytest.raises(ValidationError):
-        lof_curation('unused.csv', 'unused-output', {'unknown': True}, Mock(spec=Config))
-
-
-def test_missing_coordinate_uses_the_stored_annotation_identifier():
-    """Real curation without GRCh38 coordinates receives VariantIndex's stable hash."""
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': '1-10-GTCTTCCAATACCTCCCA-G', 'Variant ID GRCh38': None, 'Verdict': 'lof'},
-            ])
+        lof_curation(
+            {'curation': 'unused.csv', 'reference': 'unused'}, 'unused-output', {'unknown': True}, Mock(spec=Config)
         )
-        .collect()
-        .row(0, named=True)
-    )
-    assert row['variantId'] == 'OTVAR_f61f8e0a0e77bdd4a448620d69674736'
+
+
+def test_missing_reference_base_inside_deletion_is_dropped():
+    """A gap within the reference span cannot validate a partial REF sequence."""
+    result = transform_lof_curation(
+        raw_annotations([
+            {'Variant ID GRCh38': '1-20-ACG-A', 'Verdict': 'lof'},
+        ]),
+        reference_bases('ACG').filter(pl.col('pos') != 21),
+    ).collect()
+    assert result.is_empty()
 
 
 def test_long_alleles_use_hashed_id_with_coordinates():
@@ -188,10 +239,45 @@ def test_long_alleles_use_hashed_id_with_coordinates():
     row = (
         transform_lof_curation(
             raw_annotations([
-                {'Variant ID GRCh37': '1-10-' + allele + '-T', 'Variant ID GRCh38': '2-200-A-G', 'Verdict': 'lof'},
-            ])
+                {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '2-200-' + allele + '-T', 'Verdict': 'lof'},
+            ]),
+            reference_bases(allele, '2', 200),
         )
         .collect()
         .row(0, named=True)
     )
     assert row['variantId'] == 'OTVAR_2_200_' + hashlib.md5(identifier.encode()).hexdigest()
+
+
+def test_duplicate_reference_coordinates_fail_instead_of_multiplying_annotations():
+    rows = raw_annotations([{'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'lof'}])
+    with pytest.raises(pl.exceptions.ComputeError, match='m:1'):
+        transform_lof_curation(rows, pl.concat([reference_bases(), reference_bases()]))
+
+
+def test_chromosome_aliases_and_insertions_are_validated():
+    rows = raw_annotations([{'Variant ID GRCh38': 'chrM-1-A-ACG', 'Verdict': 'lof'}])
+    result = transform_lof_curation(rows, reference_bases('A', 'MT', 1)).collect()
+    assert result['variantId'].to_list() == ['MT_1_A_ACG']
+
+
+def test_step_writes_a_readable_empty_dataset_when_every_ref_fails(tmp_path):
+    from pts.schemas.variant_annotation import variant_annotation_schema
+    from pts.transformers.lof_curation import lof_curation
+
+    source = tmp_path / 'curation.csv'
+    source.write_text('Variant ID GRCh38,Verdict\n1-20-C-T,lof\n')
+    reference_path = tmp_path / 'reference.parquet'
+    reference_bases('A').collect().write_parquet(reference_path)
+    destination = tmp_path / 'annotations'
+
+    lof_curation(
+        {'curation': str(source), 'reference': str(reference_path)},
+        str(destination),
+        {},
+        Mock(spec=Config),
+    )
+
+    result = pl.read_parquet(destination / '*.parquet')
+    assert result.is_empty()
+    assert result.schema == variant_annotation_schema

@@ -117,6 +117,8 @@ steps:
   pis_heritability:
   pis_lof_curation:
     ppp_only: true
+  pis_reference_grch38:
+    ppp_only: true
   pis_l2g:
   pis_l2g_predefined_test_for_split:
   pis_literature:
@@ -132,10 +134,15 @@ steps:
   pis_target:
   pis_target_prioritisation:
   # PTS STEPS
+  pts_reference_grch38:
+    ppp_only: true
+    depends_on:
+      - pis_reference_grch38
   pts_lof_curation:
     ppp_only: true
     depends_on:
       - pis_lof_curation
+      - pts_reference_grch38
   pts_reactome:
     depends_on:
       - pis_reactome

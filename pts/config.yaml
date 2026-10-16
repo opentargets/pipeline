@@ -7,10 +7,19 @@ scratchpad:
   string_version: '12.0'
 
 steps:
+  #: GRCh38 REFERENCE
+  reference_grch38:
+    - name: transform GRCh38 reference bases
+      source: input/reference/GRCh38/Homo_sapiens_assembly38.fasta
+      destination: intermediate/reference/GRCh38
+      transformer: reference
+
   #: LOF CURATION
   lof_curation:
     - name: transform LoF curation annotations
-      source: input/lof_curation/curation.csv
+      source:
+        curation: input/lof_curation/curation.csv
+        reference: intermediate/reference/GRCh38
       destination: intermediate/variant/lof_curation
       transformer: lof_curation
 
