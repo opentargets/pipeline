@@ -64,24 +64,6 @@ cos_image: "cos-133-19999-44-106"
 # pipeline, it is not worth the effort to implement this until things have
 # stabilised.
 #
-# Target-refactor changes (opentargets/issues#4457, opentargets/pipeline#9):
-#   - pts_target_safety (embedded-only) merged into the new standalone
-#     pts_target_safety_event, which now depends on pts_target + pts_disease
-#     directly instead of pts_target depending on it.
-#   - pts_target_gene_essentiality decoupled from pts_target: now depends on
-#     pts_target (rather than the other way around).
-#   - New standalone steps extracted from pts_target: pts_transcript,
-#     pts_target_tractability, pts_homology; none of this existed as
-#     separate steps before. pts_transcript depends on pis_target.
-#   - pts_chemical_probes promoted to depend on pts_target (now ENSG-resolved).
-#   - pts_pre_target folded into pts_target, which reads the Ensembl core
-#     tables and the raw inputs directly and depends on
-#     [pis_target, pis_chembl, pts_reactome]. pts_drug_mechanism_of_action and
-#     gentropy_study read output/target and depend on pts_target.
-#   - Downstream consumers (pts_target_prioritisation, pts_association_otf,
-#     pts_search_facet) gained edges onto the new pts_target_tractability/
-#     pts_target_safety_event/pts_chemical_probes/pts_homology datasets.
-#
 steps:
   # PIS STEPS
   pis_encode:
