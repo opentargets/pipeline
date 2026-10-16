@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.ensembl import CoreDump, gene_names, genes
+from pts.ensembl import CoreDump, gene_names, genes, transcripts, translation_xrefs
 from pts.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.schemas import ensembl_core as schema
 from tests.ensembl_fixtures import cells, ddl, write_dump
@@ -209,3 +209,95 @@ def test_genes_values(dump: CoreDump) -> None:
 def test_gene_with_a_dangling_canonical_transcript_is_kept(dump: CoreDump) -> None:
     row = genes(dump).filter(pl.col('id') == 'ENSG05').row(0, named=True)
     assert row['canonicalTranscriptId'] is None
+
+
+def test_gene_without_transcripts_has_no_transcript_rows(dump: CoreDump) -> None:
+    assert transcripts(dump).filter(pl.col('geneId') == 'ENSG05').is_empty()
+
+
+def test_transcripts_of_canonical_genes_sorted(dump: CoreDump) -> None:
+    frame = transcripts(dump)
+    assert frame.schema == schema.transcripts
+    assert frame.select('geneId', 'transcriptId').rows() == [
+        ('ENSG01', 'ENST01'),
+        ('ENSG01', 'ENST02'),
+        ('ENSG02', 'ENST03'),
+        ('ENSG04', 'ENST05'),
+    ]
+
+
+def test_transcript_values(dump: CoreDump) -> None:
+    row = transcripts(dump).filter(pl.col('transcriptId') == 'ENST02').row(0, named=True)
+    assert row == {
+        'geneId': 'ENSG01',
+        'transcriptId': 'ENST02',
+        'biotype': 'protein_coding',
+        'chromosome': '1',
+        'start': 150,
+        'end': 900,
+        'strand': 1,
+        'translationId': 'ENSP02',
+        'attributes': [
+            {'code': 'MANE_Select', 'value': 'NM_000001.1'},
+            {'code': 'appris', 'value': 'principal1'},
+            {'code': 'gencode_primary', 'value': '1'},
+            {'code': 'is_canonical', 'value': '1'},
+        ],
+        'exons': [
+            {'exonId': 'ENSE02', 'chromosome': '1', 'start': 150, 'end': 300, 'strand': 1},
+            {'exonId': 'ENSE01', 'chromosome': '1', 'start': 700, 'end': 900, 'strand': 1},
+        ],
+    }
+
+
+def test_transcript_without_translation_attributes_or_exons(dump: CoreDump) -> None:
+    row = transcripts(dump).filter(pl.col('transcriptId') == 'ENST01').row(0, named=True)
+    assert row['translationId'] is None
+    assert row['attributes'] == []
+    assert row['exons'] == []
+
+
+def test_negative_strand_exons_follow_rank(dump: CoreDump) -> None:
+    row = transcripts(dump).filter(pl.col('transcriptId') == 'ENST03').row(0, named=True)
+    assert row['strand'] == -1
+    assert [exon['exonId'] for exon in row['exons']] == ['ENSE03', 'ENSE04']
+    assert {exon['strand'] for exon in row['exons']} == {-1}
+    assert row['attributes'] == [{'code': 'MANE_Plus_Clinical', 'value': 'NM_000002.1'}]
+
+
+def test_translation_xrefs_one_row_per_translation(dump: CoreDump) -> None:
+    frame = translation_xrefs(dump)
+    assert frame.schema == schema.translation_xrefs
+    assert frame.select('transcriptId', 'translationId').rows() == [('ENST02', 'ENSP02'), ('ENST05', 'ENSP05')]
+
+
+def test_translation_xrefs_values(dump: CoreDump) -> None:
+    row = translation_xrefs(dump).row(0, named=True)
+    assert row == {
+        'transcriptId': 'ENST02',
+        'translationId': 'ENSP02',
+        'uniprot_swissprot': ['P00001', 'P00002'],
+        'uniprot_trembl': ['A0A001'],
+        'uniprot_isoform': ['P00001-2'],
+        'alphafold': ['AF-P00001-F1'],
+        'signalp': ['SignalP-noTM'],
+    }
+
+
+def test_translation_without_xrefs_has_empty_lists(dump: CoreDump) -> None:
+    row = translation_xrefs(dump).row(1, named=True)
+    assert row['translationId'] == 'ENSP05'
+    fields = ['uniprot_swissprot', 'uniprot_trembl', 'uniprot_isoform', 'alphafold', 'signalp']
+    assert all(row[field] == [] for field in fields)
+
+
+def test_transcript_without_translation_has_no_xref_row(dump: CoreDump) -> None:
+    assert 'ENST01' not in translation_xrefs(dump)['transcriptId'].to_list()
+
+
+def test_translation_on_a_scaffold_gene_has_no_xref_row(dump: CoreDump) -> None:
+    assert 'ENSP04' not in translation_xrefs(dump)['translationId'].to_list()
+
+
+def test_xref_on_a_transcript_is_ignored(dump: CoreDump) -> None:
+    assert 'Q00009' not in translation_xrefs(dump)['uniprot_swissprot'].explode().to_list()
