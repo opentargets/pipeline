@@ -83,7 +83,6 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
 		credible_set_qc/credible_set_qc \
-		datasources/foldx_annotations/foldx_ingestion \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 

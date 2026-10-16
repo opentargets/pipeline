@@ -628,6 +628,12 @@ steps:
       destination: input/interaction/string-interactions.txt.gz
   ##################################################################################################
 
+  #: FOLDX VARIANT ANNOTATIONS :##############################################################
+  foldx:
+    - name: copy_many FoldX raw export
+      sources: gs://otar013-ppp/OTAR2081_foldx/exported/2024.12.10_foldx_energy.parquet/*.parquet
+      destination: input/foldx
+
   #: ENCODE STEP :##################################################################################
   encode:
     - name: copy chromosome contigs

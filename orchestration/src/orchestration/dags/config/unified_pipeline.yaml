@@ -82,6 +82,7 @@ cos_image: "cos-133-19999-44-106"
 #
 steps:
   # PIS STEPS
+  pis_foldx:
   pis_encode:
   pis_baseline_expression:
   pis_chembl:
@@ -136,6 +137,10 @@ steps:
     ppp_only: true
     depends_on:
       - pis_lof_curation
+
+  pts_foldx:
+    depends_on:
+      - pis_foldx
   pts_reactome:
     depends_on:
       - pis_reactome
@@ -574,6 +579,7 @@ steps:
     depends_on:
       - gentropy_variant_annotation
       - pis_gnomad
+      - pts_foldx
     depends_on_ppp:
       - pts_lof_curation
   gentropy_l2g_feature_matrix:
