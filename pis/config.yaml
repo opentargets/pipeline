@@ -656,9 +656,9 @@ steps:
       destination: input/encode/rE2G/datasets
   ##################################################################################################
 
-  #: GNOMAD VARIANT ANNOTATIONS :##############################################################
+  #: GNOMAD VARIANT STEP ANNOTATIONS :##############################################################
   gnomad:
-    - name: copy_many gnomad variant annotations
+    - name: copy_many gnomad variant index
       sources: gs://gnomad_data_2/v4.1/variant_index/*.parquet
       destination: input/variant/gnomad
 
