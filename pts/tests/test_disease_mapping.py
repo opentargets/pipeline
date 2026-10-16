@@ -6,8 +6,8 @@ import polars as pl
 import pytest
 
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
-from pts.transformers.utils.ontoma import map_entities
-from pts.transformers.utils.ontoma.normalise import normalise_symbol, normalise_term
+from pts.transformers.utils.disease_mapping import map_entities
+from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 
 LUT_SCHEMA = {
     'entityKind': pl.String,

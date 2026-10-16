@@ -11,8 +11,14 @@ import polars as pl
 import pytest
 from ontoma.nlp_pipeline import NLPPipeline
 
-from pts.transformers.utils.ontoma.normalise import STOP_WORDS, normalise, normalise_symbol, normalise_term, stem
-from pts.transformers.utils.ontoma.query import (
+from pts.transformers.utils.disease_mapping.normalise import (
+    STOP_WORDS,
+    normalise,
+    normalise_symbol,
+    normalise_term,
+    stem,
+)
+from pts.transformers.utils.disease_mapping.query import (
     alternative_translations,
     clean_disease_label,
     determine_track,
@@ -20,7 +26,7 @@ from pts.transformers.utils.ontoma.query import (
     spark_trim,
 )
 
-FIXTURE = Path(__file__).parent / 'test_data' / 'ontoma' / 'normalisation.parquet'
+FIXTURE = Path(__file__).parent / 'test_data' / 'disease_mapping' / 'normalisation.parquet'
 
 
 @pytest.fixture(scope='module')

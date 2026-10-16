@@ -8,7 +8,7 @@ from __future__ import annotations
 import polars as pl
 from loguru import logger
 
-from pts.transformers.utils.ontoma import map_entities, read_entity_lut
+from pts.transformers.utils.disease_mapping import map_entities, read_entity_lut
 
 MAPPED_ID_COLUMN = 'diseaseFromSourceMappedId'
 

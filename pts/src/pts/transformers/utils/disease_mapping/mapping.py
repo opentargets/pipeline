@@ -2,7 +2,7 @@
 
 The lookup tables themselves are still built by OnToma on spark (`pyspark ontoma_lut_generation`);
 only the query side is ported. It must normalise exactly as the tables were, so it is tied to the
-spark-nlp version that built them -- see `pts.transformers.utils.ontoma.normalise`.
+spark-nlp version that built them -- see `pts.transformers.utils.disease_mapping.normalise`.
 
 Behaviour kept from OnToma on purpose, because it is observable in the output:
 
@@ -30,8 +30,8 @@ from typing import Literal
 import polars as pl
 
 from pts.transformers.utils.dataset import scan_dataset
-from pts.transformers.utils.ontoma.normalise import normalise
-from pts.transformers.utils.ontoma.query import (
+from pts.transformers.utils.disease_mapping.normalise import normalise
+from pts.transformers.utils.disease_mapping.query import (
     alternative_translations,
     clean_disease_label,
     determine_track,
@@ -44,11 +44,11 @@ EntityKind = Literal['label', 'id']
 #: Column of the normalised label, in the lookup table and in the output when it is asked for.
 NORMALISED_COLUMN = 'entityLabelNormalised'
 
-_ROW = '__ontoma_row'
-_ENTITY = '__ontoma_entity'
-_TYPE = '__ontoma_type'
-_LABEL = '__ontoma_label'
-_TRACK = '__ontoma_track'
+_ROW = '__disease_mapping_row'
+_ENTITY = '__disease_mapping_entity'
+_TYPE = '__disease_mapping_type'
+_LABEL = '__disease_mapping_label'
+_TRACK = '__disease_mapping_track'
 
 
 def read_entity_lut(path: str) -> pl.LazyFrame:

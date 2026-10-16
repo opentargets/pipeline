@@ -4,7 +4,7 @@ The test suite runs without spark-nlp, so the polars port of OnToma is checked a
 recorded output instead. Rerun after bumping ontoma or spark-nlp, then rerun the tests:
 
     cd pts && JAVA_HOME=<java 17+> PYSPARK_PYTHON=$PWD/.venv/bin/python \\
-        uv run python tests/test_data/ontoma/generate_normalisation_fixture.py <disease index parquet>
+        uv run python tests/test_data/disease_mapping/generate_normalisation_fixture.py <disease index parquet>
 
 The disease index is sampled for real names, synonyms and cross references; the edge cases are
 fixed below. spark-nlp is resolved from Maven by `spark.jars.packages`.
