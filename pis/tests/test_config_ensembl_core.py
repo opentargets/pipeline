@@ -92,8 +92,8 @@ def core_copies() -> list[CopySpec]:
 
 
 def test_there_is_one_core_db_per_homology_species() -> None:
-    """The core dbs are the Compara species, read from the `explode homology` task by name."""
-    assert sorted(_core_dbs()) == sorted(_target_task('explode homology')['foreach'])
+    """The core dbs are the Compara species, read from the `explode compara homologies` task by name."""
+    assert sorted(_core_dbs()) == sorted(_target_task('explode compara homologies')['foreach'])
     assert len(_core_dbs()) == 13
 
 

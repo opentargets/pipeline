@@ -1147,7 +1147,7 @@ steps:
       source: gs://otar007-cosmic/hallmarks/CTTV007-${cosmic_hallmarks_version}_hallmarks.tsv.gz
       destination: input/target/hallmarks/cosmic-hallmarks.tsv.gz
 
-    - name: explode homology
+    - name: explode compara homologies
       foreach:
         - caenorhabditis_elegans
         - canis_lupus_familiaris
@@ -1163,9 +1163,6 @@ steps:
         - xenopus_tropicalis
         - homo_sapiens
       do:
-        - name: copy ${each} gene dictionary
-          source: https://ftp.ensembl.org/pub/release-${ensembl_version}/json/${each}/${each}.json
-          destination: input/target/homologue/gene_dictionary/${each}.json
         - name: copy ${each} protein homology
           source: https://ftp.ensembl.org/pub/release-${ensembl_version}/tsv/ensembl-compara/homologies/${each}/Compara.${ensembl_version}.protein_default.homologies.tsv.gz
           destination: input/target/homologue/homologies/protein-${each}.tsv.gz
