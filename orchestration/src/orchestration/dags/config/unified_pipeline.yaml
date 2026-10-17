@@ -311,11 +311,11 @@ steps:
     depends_on:
       - pis_evidence_gene2phenotype
       - pts_ontoma
+      - pts_target
+      - pis_literature
   pts_evidence_postprocess_gene2phenotype:
     depends_on:
       - pts_evidence_gene2phenotype
-      - pts_target
-      - pis_literature
   pts_evidence_intogen:
     depends_on:
       - pis_evidence_intogen
