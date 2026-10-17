@@ -465,8 +465,8 @@ steps:
 
   #: PHARMACOGENETICS STEP :########################################################################
   pharmacogenetics:
-    - name: pyspark pharmacogenetics
-      pyspark: pharmacogenetics
+    - name: transform pharmacogenetics
+      transformer: pharmacogenetics
       source:
         clinpgx: input/pharmacogenetics/clinpgx_annotation.json.gz
         phenotypes: input/pharmacogenetics/phenotypes.json
@@ -476,8 +476,6 @@ steps:
       destination:
         associations: output/pharmacogenomics
         unparsed_texts: intermediate/pharmacogenetics/unparsed_texts.json
-      settings:
-        partition_count: 1
   ##################################################################################################
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
