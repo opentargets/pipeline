@@ -66,3 +66,23 @@ def test_no_dependency_is_already_implied(name: str) -> None:
 def test_literature_edge_iff_the_step_reads_literature(name: str) -> None:
     tasks = PTS[name.removeprefix('pts_')]
     assert reads_literature(tasks) == ('pis_literature' in ancestors(name)), name
+
+
+ONTOMA_TIER1_SOURCES = ['gene2phenotype', 'orphanet', 'impc', 'panel_app']
+
+
+@pytest.mark.parametrize('source', ONTOMA_TIER1_SOURCES)
+def test_ontoma_tier1_sources_have_no_postprocess_step(source: str) -> None:
+    assert f'pts_evidence_postprocess_{source}' not in DAG
+    assert f'evidence_postprocess_{source}' not in PTS
+
+
+@pytest.mark.parametrize('source', ONTOMA_TIER1_SOURCES)
+def test_association_depends_on_ontoma_tier1_sources(source: str) -> None:
+    assert f'pts_evidence_{source}' in dependencies('pts_association')
+
+
+@pytest.mark.parametrize('step', [*(f'evidence_{s}' for s in ONTOMA_TIER1_SOURCES), 'pharmacogenetics'])
+def test_ontoma_tier1_steps_have_no_pyspark_task(step: str) -> None:
+    assert PTS[step], step
+    assert all('pyspark' not in task for task in PTS[step]), step
