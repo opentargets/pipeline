@@ -590,8 +590,8 @@ steps:
 
   #: EVIDENCE_IMPC STEP :###########################################################################
   evidence_impc:
-    - name: pyspark impc evidence strings
-      pyspark: impc
+    - name: transform evidence.impc
+      transformer: evidence.impc
       source:
         solr_gene_gene: input/impc/gene_gene.csv
         solr_ontology_ontology: input/impc/ontology_ontology.csv
@@ -602,10 +602,14 @@ steps:
         hgnc_gene_mappings: input/target/genenames/hgnc_complete_set.tsv
         mouse_gene_mappings: input/impc/MGI_Gene_Model_Coord.rpt
         mouse_pubmed_refs: input/impc/MGI_PhenoGenoMP.rpt
-        mp_ontology: input/impc/mp.json
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/impc.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/impc
+        evidence: output/evidence_impc
       settings:
         score_cutoff: 41
   ##################################################################################################
