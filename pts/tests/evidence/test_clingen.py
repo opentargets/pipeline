@@ -9,7 +9,7 @@ import pytest
 
 from pts.transformers.evidence.clingen import CLINGEN, COLUMNS, clingen, parse_clingen
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
-from tests.evidence.fixtures import write_disease, write_target
+from tests.evidence.fixtures import write_disease, write_ontoma_lut, write_target
 
 
 def _csv_row(values: list[str]) -> str:
@@ -69,25 +69,9 @@ ROWS = [
     ),
 ]
 
-LUT_SCHEMA = {
-    'entityKind': pl.String,
-    'entityType': pl.String,
-    'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
-}
-
-
 def _write_csv(path: Path) -> str:
     body = ''.join(_csv_row(list(row)) for row in ROWS)
     path.write_text(HEADER + body)
-    return str(path)
-
-
-def _write_lut(path: Path, kind: str, label: str, entity_id: str) -> str:
-    path.mkdir(parents=True)
-    pl.DataFrame(
-        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name'}])], schema=LUT_SCHEMA, orient='row'
-    ).write_parquet(path / 'part-0.parquet')
     return str(path)
 
 
@@ -130,10 +114,10 @@ def test_maps_scores_and_splits_valid_from_failed(tmp_path: Path) -> None:
     clingen(
         {
             'evidence': _write_csv(src / 'clingen.csv'),
-            'ontoma_disease_label_lut': _write_lut(
+            'ontoma_disease_label_lut': write_ontoma_lut(
                 src / 'label_lut', 'label', normalise_term('cystic fibrosis'), 'MONDO_0009061'
             ),
-            'ontoma_disease_id_lut': _write_lut(
+            'ontoma_disease_id_lut': write_ontoma_lut(
                 src / 'id_lut', 'id', normalise_symbol('MONDO:0007254'), 'MONDO_0007254'
             ),
             'disease': write_disease(src / 'disease', ['MONDO_0009061', 'MONDO_0007254']),

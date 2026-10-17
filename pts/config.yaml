@@ -635,8 +635,8 @@ steps:
 
   #: EVIDENCE_GENE2PHENOTYPE STEP :#################################################################
   evidence_gene2phenotype:
-    - name: pyspark gene2phenotype
-      pyspark: gene2phenotype
+    - name: transform evidence.gene2phenotype
+      transformer: evidence.gene2phenotype
       source:
         cancer_panel: input/evidence/gene2phenotype/cancer.csv
         cardiac_panel: input/evidence/gene2phenotype/cardiac.csv
@@ -647,7 +647,12 @@ steps:
         skin_panel: input/evidence/gene2phenotype/skin.csv
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/gene2phenotype.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/gene2phenotype
+        evidence: output/evidence_gene2phenotype
   ##################################################################################################
 
   #: EVIDENCE_INTOGEN STEP :#######################################################################

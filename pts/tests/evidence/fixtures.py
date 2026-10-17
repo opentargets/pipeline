@@ -55,3 +55,20 @@ def write_literature(path: Path, dates: dict[str, str]) -> str:
     rows = [{'source': 'MED', 'pmid': pmid, 'id': pmid, 'firstPublicationDate': date} for pmid, date in dates.items()]
     (path / 'part-00000.json').write_text('\n'.join(json.dumps(row) for row in rows) + '\n')
     return str(path)
+
+
+ONTOMA_LUT_SCHEMA = {
+    'entityKind': pl.String,
+    'entityType': pl.String,
+    'entityLabelNormalised': pl.String,
+    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+}
+
+
+def write_ontoma_lut(path: Path, kind: str, label: str, entity_id: str) -> str:
+    """One-row OnToma disease look-up table: `label` is the already normalised key."""
+    path.mkdir(parents=True)
+    pl.DataFrame(
+        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name'}])], schema=ONTOMA_LUT_SCHEMA, orient='row'
+    ).write_parquet(path / 'part-0.parquet')
+    return str(path)
