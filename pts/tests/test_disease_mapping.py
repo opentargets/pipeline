@@ -71,6 +71,15 @@ def test_identical_rows_collapse_as_in_ontoma() -> None:
     assert _map(df).rows() == [('cystic fibrosis', 1, ['MONDO_0009061']), ('cystic fibrosis', 2, ['MONDO_0009061'])]
 
 
+def test_unordered_input_maps_each_row_to_its_own_label() -> None:
+    labels = [f'disease{i}' for i in range(2000)]
+    lut = _lut([('label', 'DS', normalise_term(label), [(f'ID_{label}', 'name')]) for label in labels])
+    lf = pl.LazyFrame({'label': labels * 2, 'n': 1}).group_by('label').agg(pl.col('n').sum())
+    out = map_entities(lf, lut.lazy(), 'ids', 'label', 'label', type_col=pl.lit('DS')).collect()
+    assert out.height == len(labels)
+    assert out['ids'].to_list() == [[f'ID_{label}'] for label in out['label']]
+
+
 def test_type_column_selects_lut_rows_and_track() -> None:
     df = pl.DataFrame({
         'label': ['aspirin', 'aspirin', 'cystic fibrosis', 'cystic fibrosis'],

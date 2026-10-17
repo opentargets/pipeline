@@ -66,7 +66,6 @@ class _Working:
     """Names of the working columns of one `map_entities` call, all under one random prefix."""
 
     prefix: str
-    row: str
     entity: str
     type: str
     label: str
@@ -76,7 +75,7 @@ class _Working:
 
     @classmethod
     def under(cls, prefix: str) -> _Working:
-        names = ('row', 'entity', 'type', 'label', 'track', 'normalised', 'ids')
+        names = ('entity', 'type', 'label', 'track', 'normalised', 'ids')
         return cls(prefix, *(f'{prefix}{name}' for name in names))
 
 
@@ -189,8 +188,9 @@ def map_entities(
         raise ValueError(f'output columns already present in the input: {sorted(clashing)}')
 
     w = _Working.under(temporary_prefix(columns))
-    indexed = lf.with_row_index(w.row)
-    query = indexed.select(w.row, pl.col(entity_col_name).alias(w.entity), entity_type.alias(w.type))
+    keyed = lf.with_columns(pl.col(entity_col_name).alias(w.entity), entity_type.alias(w.type))
+    keys = [w.entity, w.type]
+    query = keyed.select(keys).unique()
     query = _query_labels(query, w) if entity_kind == 'label' else _query_ids(query, w)
 
     lut = lut.filter(pl.col('entityKind') == entity_kind).select(
@@ -205,7 +205,7 @@ def map_entities(
         ids = ids.list.eval(pl.element().struct.field('entityId'))
     found = (
         mapped
-        .group_by(w.row, *([w.normalised] if include_normalised_entities else []))
+        .group_by(*keys, *([w.normalised] if include_normalised_entities else []))
         .agg(ids.list.explode(keep_nulls=False, empty_as_null=False).unique().sort().alias(result_col_name))
         .with_columns(
             pl.when(pl.col(result_col_name).list.len() > 0).then(pl.col(result_col_name)).alias(result_col_name)
@@ -213,8 +213,8 @@ def map_entities(
         .rename({w.normalised: NORMALISED_COLUMN}, strict=False)
     )
     return (
-        indexed
-        .join(found, on=w.row, how='left', maintain_order='left')
+        keyed
+        .join(found, on=keys, how='left', nulls_equal=True, maintain_order='left')
         # leaves the input columns, then the normalised label when asked for, then the result
         .drop(cs.starts_with(w.prefix))
         .unique(maintain_order=True)
