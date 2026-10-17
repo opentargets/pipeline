@@ -3,6 +3,7 @@
 from typing import Any
 
 import polars as pl
+import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict
@@ -11,12 +12,12 @@ from pts.schemas.variant_annotation import variant_annotation_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.variant_identifier import hash_long_variant_ids
 
-_DESCRIPTIONS = {
-    'lof': 'Assessed to cause LoF',
-    'likely_lof': 'Suspected to cause LoF',
-    'uncertain': 'Uncertain LoF assessment',
-    'likely_not_lof': 'Suspected not to cause LoF',
-    'not_lof': 'Assessed not to cause LoF',
+LOF_ASSESSMENTS: dict[str, tuple[str, float]] = {
+    'lof': ('Assessed to cause LoF', 1.0),
+    'likely_lof': ('Suspected to cause LoF', 0.5),
+    'uncertain': ('Uncertain LoF assessment', 0.0),
+    'likely_not_lof': ('Suspected not to cause LoF', -0.5),
+    'not_lof': ('Assessed not to cause LoF', -1.0),
 }
 
 
@@ -26,65 +27,75 @@ class LofCurationSettings(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-def normalise_lof_score(assessment: pl.Expr) -> pl.Expr:
-    """Map the five curated verdicts to ordinal scores; unknowns remain null."""
-    return assessment.replace_strict(
-        {'lof': 1.0, 'likely_lof': 0.5, 'uncertain': 0.0, 'likely_not_lof': -0.5, 'not_lof': -1.0},
-        default=None,
-        return_dtype=pl.Float64,
-    )
-
-
-def transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
+def _transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Keep GRCh38 coordinates and GRCh37 alleles, then annotate each verdict.
 
-    Records and duplicates are preserved. Missing identifier components are
-    omitted from variantId, matching concat_ws in the existing implementation.
+    Retain rows with missing coordinates using an OTVAR identifier.
+    Reject empty input or multiple annotations for the same variantId, including
+    identical annotations.
     """
     logger.info('Parsing LoF curation identifiers and verdicts')
-    parsed = frame.select(
-        pl.col('Variant ID GRCh37').str.split_exact('-', 3).alias('_h37'),
-        pl.col('Variant ID GRCh38').str.split_exact('-', 3).alias('_h38'),
-        pl.col('Verdict').alias('_verdict'),
-    )
-
-    def component(build: str, index: int) -> pl.Expr:
-        return pl.col(build).struct.field(f'field_{index}').replace('', None)
-
-    chromosome = component('_h38', 0)
-    position = component('_h38', 1)
-    reference = component('_h37', 2)
-    alternate = component('_h37', 3)
-    verdict = pl.col('_verdict')
-    return (
-        parsed
+    h37 = pl.col('Variant ID GRCh37').str.split_exact('-', 3)
+    h38 = pl.col('Variant ID GRCh38').str.split_exact('-', 3)
+    assessments = pl.DataFrame(
+        [(verdict, description) for verdict, (description, _) in LOF_ASSESSMENTS.items()],
+        schema=['assessment', '_description'],
+        orient='row',
+    ).lazy()
+    result = (
+        frame
         .select(
-            pl.concat_str(chromosome, position, reference, alternate, separator='_', ignore_nulls=True).alias(
-                'variantId'
-            ),
-            chromosome.alias('chromosome'),
-            # Spark's non-ANSI string-to-integer cast truncates decimal suffixes.
-            position.str.extract(r'^\s*([+-]?\d+)(?:\.\d*)?\s*$', 1).cast(pl.Int32, strict=False).alias('position'),
-            reference.alias('referenceAllele'),
-            alternate.alias('alternateAllele'),
+            chromosome=h38.struct[0],
+            position=h38.struct[1],
+            referenceAllele=h37.struct[2],
+            alternateAllele=h37.struct[3],
+            assessment=pl.col('Verdict'),
+        )
+        .with_columns(pl.col('chromosome', 'position', 'referenceAllele', 'alternateAllele').replace('', None))
+        .join(assessments, on='assessment', how='left', maintain_order='left')
+        .with_columns(
+            pl.concat_str(
+                'chromosome', 'position', 'referenceAllele', 'alternateAllele', separator='_', ignore_nulls=True
+            ).alias('variantId'),
+            # Genomic positions must be positive integers; never truncate decimals.
+            pl.col('position').str.extract(r'^([1-9][0-9]*)$', 1).cast(pl.Int32, strict=False),
             pl.concat_list(
                 pl.struct(
                     pl.lit('LossOfFunctionCuration').alias('method'),
-                    verdict.alias('assessment'),
+                    pl.col('assessment'),
                     pl.lit(None, dtype=pl.Float32).alias('score'),
                     pl.lit(None, dtype=pl.String).alias('assessmentFlag'),
                     pl.lit(None, dtype=pl.String).alias('targetId'),
-                    normalise_lof_score(verdict).alias('normalisedScore'),
+                    pl
+                    .col('assessment')
+                    .replace_strict(
+                        {verdict: score for verdict, (_, score) in LOF_ASSESSMENTS.items()},
+                        default=None,
+                        return_dtype=pl.Float64,
+                    )
+                    .alias('normalisedScore'),
                 )
             ).alias('variantEffect'),
             pl.concat_str(
-                verdict.replace_strict(_DESCRIPTIONS, default=None),
+                pl.col('_description'),
                 pl.lit(' by OTAR2075 variant curation effort.'),
             ).alias('variantDescription'),
         )
         .select(variant_annotation_schema.names())
-        .pipe(hash_long_variant_ids)
+        .collect()
     )
+    if result.is_empty():
+        raise ValueError('LoF curation input is empty')
+    result = result.with_columns(
+        pl.when(pl.col('chromosome').is_null() | pl.col('position').is_null())
+        .then(pl.lit('OTVAR_') + plh.col('variantId').nchash.md5())
+        .otherwise(hash_long_variant_ids(pl.col('variantId')))
+        .alias('variantId')
+    )
+    duplicate_ids = result.filter(pl.col('variantId').is_duplicated()).get_column('variantId').unique().to_list()
+    if duplicate_ids:
+        raise ValueError(f'Multiple LoF annotations for variantId: {duplicate_ids}')
+    return result.lazy()
 
 
 def lof_curation(source: str, destination: str, settings: dict[str, Any], config: Config) -> None:
@@ -97,6 +108,6 @@ def lof_curation(source: str, destination: str, settings: dict[str, Any], config
         config: Pipeline runtime configuration.
     """
     LofCurationSettings.model_validate(settings)
-    result = scan_dataset(source, format='csv', infer_schema=False, null_values='').pipe(transform_lof_curation)
+    result = scan_dataset(source, format='csv', infer_schema=False, null_values='').pipe(_transform_lof_curation)
     logger.info('Writing LoF curation annotations to {}', destination)
     write_dataset(result, destination)

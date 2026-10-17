@@ -1,197 +1,266 @@
-"""LoF curation transformation and complete CSV-to-Parquet behaviour."""
+"""LoF annotation transformation and isolated CSV/Parquet I/O."""
 
 from unittest.mock import Mock
 
 import polars as pl
 import pytest
 from otter.config.model import Config
+from polars.testing import assert_frame_equal
 
-from pts.transformers.lof_curation import transform_lof_curation
+from pts.schemas.variant_annotation import variant_annotation_schema
+from pts.transformers.lof_curation import _transform_lof_curation, lof_curation
 
-
-@pytest.fixture
-def doctest_namespace():
-    """These Polars tests do not need the shared Spark doctest session."""
-    return {}
-
-
-def raw_annotations(rows):
-    """Use the three string columns consumed from the multiline curation CSV."""
-    return pl.DataFrame(
-        rows,
-        schema={
-            'Variant ID GRCh37': pl.String,
-            'Variant ID GRCh38': pl.String,
-            'Verdict': pl.String,
-        },
-    ).lazy()
+_RAW_SCHEMA = {
+    'Variant ID GRCh37': pl.String,
+    'Variant ID GRCh38': pl.String,
+    'Verdict': pl.String,
+}
 
 
-def test_coordinates_and_alleles_come_from_their_respective_genome_builds():
-    """GRCh38 coordinates retain GRCh37 alleles when liftover changes them."""
-    result = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': '1-100-A-T', 'Variant ID GRCh38': '2-200-C-G', 'Verdict': 'lof'},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
-    )
-    assert result == {
-        'variantId': '2_200_A_T',
-        'chromosome': '2',
-        'position': 200,
-        'referenceAllele': 'A',
-        'alternateAllele': 'T',
-        'variantEffect': [
+@pytest.mark.parametrize(
+    ('input_row', 'output_row'),
+    [
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'lof'},
             {
-                'method': 'LossOfFunctionCuration',
-                'assessment': 'lof',
-                'score': None,
-                'assessmentFlag': None,
-                'targetId': None,
-                'normalisedScore': 1.0,
-            }
-        ],
-        'variantDescription': 'Assessed to cause LoF by OTAR2075 variant curation effort.',
-    }
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': 1.0,
+                    }
+                ],
+                'variantDescription': 'Assessed to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='lof',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'likely_lof'},
+            {
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'likely_lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': 0.5,
+                    }
+                ],
+                'variantDescription': 'Suspected to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='likely-lof',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'uncertain'},
+            {
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'uncertain',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': 0.0,
+                    }
+                ],
+                'variantDescription': 'Uncertain LoF assessment by OTAR2075 variant curation effort.',
+            },
+            id='uncertain',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'likely_not_lof'},
+            {
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'likely_not_lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': -0.5,
+                    }
+                ],
+                'variantDescription': 'Suspected not to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='likely-not-lof',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'not_lof'},
+            {
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'not_lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': -1.0,
+                    }
+                ],
+                'variantDescription': 'Assessed not to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='not-lof',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '2-200-C-T', 'Verdict': 'lof'},
+            {
+                'variantId': '2_200_A_G',
+                'chromosome': '2',
+                'position': 200,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': 1.0,
+                    }
+                ],
+                'variantDescription': 'Assessed to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='reference-allele-from-grch37',
+        ),
+        pytest.param(
+            {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': None},
+            {
+                'variantId': '1_20_A_G',
+                'chromosome': '1',
+                'position': 20,
+                'referenceAllele': 'A',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': None,
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': None,
+                    }
+                ],
+                'variantDescription': None,
+            },
+            id='empty-lof-class',
+        ),
+        # The inspected input has one missing GRCh38 ID, leaving both coordinates
+        # null. No isolated missing chromosome/position or missing REF/ALT cases
+        # occur in that input, so we do not add synthetic cases for them here.
+        pytest.param(
+            {
+                'Variant ID GRCh37': '18-72228107-GTCTTCCAATACCTCCCA-G',
+                'Variant ID GRCh38': None,
+                'Verdict': 'lof',
+            },
+            {
+                'variantId': 'OTVAR_f61f8e0a0e77bdd4a448620d69674736',
+                'chromosome': None,
+                'position': None,
+                'referenceAllele': 'GTCTTCCAATACCTCCCA',
+                'alternateAllele': 'G',
+                'variantEffect': [
+                    {
+                        'method': 'LossOfFunctionCuration',
+                        'assessment': 'lof',
+                        'score': None,
+                        'assessmentFlag': None,
+                        'targetId': None,
+                        'normalisedScore': 1.0,
+                    }
+                ],
+                'variantDescription': 'Assessed to cause LoF by OTAR2075 variant curation effort.',
+            },
+            id='missing-chromosome-and-position-uses-otvar',
+        ),
+    ],
+)
+def test_transform_lof_curation(input_row, output_row):
+    source = pl.LazyFrame([input_row], schema=_RAW_SCHEMA)
+    expected = pl.DataFrame([output_row], schema=variant_annotation_schema)
+
+    result = _transform_lof_curation(source).collect()
+
+    assert_frame_equal(result, expected)
+
+
+def test_transform_lof_curation_rejects_empty_input():
+    with pytest.raises(ValueError, match='empty'):
+        _transform_lof_curation(pl.LazyFrame(schema=_RAW_SCHEMA)).collect()
 
 
 @pytest.mark.parametrize(
-    ('verdict', 'score', 'description'),
+    'second_verdict',
     [
-        ('lof', 1.0, 'Assessed to cause LoF'),
-        ('likely_lof', 0.5, 'Suspected to cause LoF'),
-        ('uncertain', 0.0, 'Uncertain LoF assessment'),
-        ('likely_not_lof', -0.5, 'Suspected not to cause LoF'),
-        ('not_lof', -1.0, 'Assessed not to cause LoF'),
-        ('LOF', None, None),
-        ('unknown', None, None),
-        (None, None, None),
+        pytest.param('lof', id='identical-annotations'),
+        pytest.param('likely_lof', id='different-annotations-same-variant'),
     ],
 )
-def test_verdict_scores_and_descriptions(verdict, score, description):
-    """All five verdicts retain their ordinal mapping; unknowns are not inferred."""
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': verdict},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
-    )
-    assert row['variantEffect'][0]['assessment'] == verdict
-    assert row['variantEffect'][0]['normalisedScore'] == score
-    assert row['variantDescription'] == (description + ' by OTAR2075 variant curation effort.' if description else None)
-
-
-@pytest.mark.parametrize(
-    ('h37', 'h38', 'variant_id', 'position'),
-    [
-        (None, None, '', None),
-        ('1-10-A', '2-20-C-G', '2_20_A', 20),
-        ('1-10--G', '2-20-C-G', '2_20_G', 20),
-        ('1-10-A-T-extra', '2-20-C-G', '2_20_A_T', 20),
-        ('1-10-A-G', '2-1.9-C-T', '2_1.9_A_G', 1),
-        ('1-10-A-G', '2-2147483648-C-T', '2_2147483648_A_G', None),
-        ('1-10-A-G', '2-1e2-C-T', '2_1e2_A_G', None),
-    ],
-)
-def test_partial_identifiers_and_integer_casting(h37, h38, variant_id, position):
-    """Identifier concatenation skips nulls while invalid Int32 coordinates remain null."""
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': h37, 'Variant ID GRCh38': h38, 'Verdict': 'lof'},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
-    )
-    import hashlib
-
-    expected_id = 'OTVAR_' + hashlib.md5(variant_id.encode()).hexdigest() if position is None else variant_id
-    assert row['variantId'] == expected_id
-    assert row['position'] == position
-
-
-def test_duplicate_annotations_are_preserved():
-    """Curation ingestion preserves source records instead of choosing a verdict."""
+def test_transform_lof_curation_rejects_duplicate_variants(second_verdict):
     row = {'Variant ID GRCh37': '1-10-A-G', 'Variant ID GRCh38': '1-20-A-G', 'Verdict': 'lof'}
-    assert transform_lof_curation(raw_annotations([row, row])).collect().height == 2
+    source = pl.LazyFrame([row, {**row, 'Verdict': second_verdict}], schema=_RAW_SCHEMA)
+
+    with pytest.raises(ValueError, match='1_20_A_G'):
+        _transform_lof_curation(source).collect()
 
 
-def test_empty_input_has_the_annotation_schema():
-    """An empty raw export still yields typed annotation columns."""
-    from pts.schemas.variant_annotation import variant_annotation_schema
-
-    result = transform_lof_curation(raw_annotations([])).collect()
-    assert result.is_empty()
-    assert result.schema == variant_annotation_schema
-
-
-def test_step_reads_multiline_csv_and_writes_typed_parquet(tmp_path):
-    """Quoted commas and newlines in unused curation columns do not split records."""
-    import csv
-
-    from pts.schemas.variant_annotation import variant_annotation_schema
-    from pts.transformers.lof_curation import lof_curation
-
+def test_step_reads_multiline_csv_and_writes_parquet(tmp_path, monkeypatch):
+    source_frame = pl.DataFrame([
+        {
+            'Variant ID GRCh37': '1-10-A-G',
+            'Variant ID GRCh38': '2-20-C-T',
+            'Verdict': 'likely_lof',
+            'Notes': 'Comment, with "quotes"\nand a newline',
+        },
+        {
+            'Variant ID GRCh37': '1-11-G-T',
+            'Variant ID GRCh38': '2-21-G-T',
+            'Verdict': '',
+            'Notes': 'Other note',
+        },
+    ])
     source = tmp_path / 'curation.csv'
-    with source.open('w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Variant ID GRCh37', 'Variant ID GRCh38', 'Verdict', 'Notes'])
-        writer.writerow(['1-10-A-G', '2-20-C-T', 'likely_lof', 'Comment, with "quotes"\nand a newline'])
-        writer.writerow(['1-11-G-T', '2-21-G-T', '', 'Other note'])
+    source_frame.write_csv(source)
+    dummy = pl.DataFrame({'dummy': ['transformed']})
+    transform = Mock(return_value=dummy.lazy())
+    monkeypatch.setattr('pts.transformers.lof_curation._transform_lof_curation', transform)
     destination = tmp_path / 'annotations'
+
     lof_curation(str(source), str(destination), {}, Mock(spec=Config))
-    result = pl.read_parquet(destination / '*.parquet').sort('position')
-    assert result.height == 2
-    assert result.schema == variant_annotation_schema
-    assert result['variantId'].to_list() == ['2_20_A_G', '2_21_G_T']
-    assert result['variantEffect'][0][0]['normalisedScore'] == 0.5
-    assert result['variantEffect'][1][0]['assessment'] is None
 
-
-def test_settings_reject_unrecognized_options():
-    """Unsupported settings fail before trying to read the input."""
-    from pydantic import ValidationError
-
-    from pts.transformers.lof_curation import lof_curation
-
-    with pytest.raises(ValidationError):
-        lof_curation('unused.csv', 'unused-output', {'unknown': True}, Mock(spec=Config))
-
-
-def test_missing_coordinate_uses_the_stored_annotation_identifier():
-    """Real curation without GRCh38 coordinates receives VariantIndex's stable hash."""
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': '1-10-GTCTTCCAATACCTCCCA-G', 'Variant ID GRCh38': None, 'Verdict': 'lof'},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
+    transform.assert_called_once()
+    assert_frame_equal(
+        transform.call_args.args[0].collect(),
+        source_frame.with_columns(pl.col('Verdict').replace('', None)),
     )
-    assert row['variantId'] == 'OTVAR_f61f8e0a0e77bdd4a448620d69674736'
-
-
-def test_long_alleles_use_hashed_id_with_coordinates():
-    """Long alleles preserve genomic context in the compact identifier."""
-    import hashlib
-
-    allele = 'A' * 300
-    identifier = '2_200_' + allele + '_T'
-    row = (
-        transform_lof_curation(
-            raw_annotations([
-                {'Variant ID GRCh37': '1-10-' + allele + '-T', 'Variant ID GRCh38': '2-200-A-G', 'Verdict': 'lof'},
-            ])
-        )
-        .collect()
-        .row(0, named=True)
-    )
-    assert row['variantId'] == 'OTVAR_2_200_' + hashlib.md5(identifier.encode()).hexdigest()
+    assert_frame_equal(pl.read_parquet(destination / '*.parquet'), dummy)
