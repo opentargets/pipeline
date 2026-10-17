@@ -75,8 +75,9 @@ def build_disease_lut(path: str) -> pl.DataFrame:
         path: location of the disease index.
 
     Returns:
-        DataFrame with columns `diseaseId` and `diseaseFromSourceMappedId`. Rows are
-        deliberately left duplicated; see the module docstring.
+        DataFrame with columns `diseaseId` and `diseaseFromSourceMappedId`, sorted by
+        `diseaseFromSourceMappedId` then `diseaseId`. Rows are deliberately left duplicated; see
+        the module docstring.
     """
     return (
         scan_dataset(path)
@@ -86,6 +87,7 @@ def build_disease_lut(path: str) -> pl.DataFrame:
             pl.concat_list(pl.col('id'), pl.col('obsoleteTerms').fill_null([])).alias('diseaseFromSourceMappedId'),
         )
         .explode('diseaseFromSourceMappedId')
+        .sort('diseaseFromSourceMappedId', 'diseaseId')
     )
 
 
@@ -97,7 +99,7 @@ def build_target_lut(path: str) -> pl.DataFrame:
 
     Returns:
         DataFrame with columns `targetId`, `biotype`, `TSorOncogene` and
-        `targetFromSourceId`.
+        `targetFromSourceId`, sorted by `targetFromSourceId` then `targetId`.
     """
     return (
         scan_dataset(path)
@@ -117,6 +119,7 @@ def build_target_lut(path: str) -> pl.DataFrame:
         )
         .explode('targetFromSourceId')
         .unique()
+        .sort('targetFromSourceId', 'targetId')
     )
 
 

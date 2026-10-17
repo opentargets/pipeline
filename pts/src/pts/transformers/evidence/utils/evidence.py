@@ -138,7 +138,7 @@ def _join_matching_spark_order(lf: pl.LazyFrame, other: pl.LazyFrame, on: str, h
     """
     left_columns = lf.collect_schema().names()
     right_only = [c for c in other.collect_schema().names() if c != on]
-    joined = lf.join(other, on=on, how=how, maintain_order='left')
+    joined = lf.join(other, on=on, how=how, maintain_order='left_right')
     return joined.select(on, *[c for c in left_columns if c != on], *right_only)
 
 
@@ -231,10 +231,7 @@ class Evidence:
         schema = self.lf.collect_schema()
         present = [f for f in unique_fields if f in schema.names()]
         parts = [render_for_hash(f, schema[f]).fill_null('null') for f in present]
-        # `pl.concat_str([])` raises ComputeError on an empty list of expressions; spark's
-        # `concat_ws('')` over zero columns is well-defined and yields `''`. Unreachable with
-        # today's config.yaml (every unique_fields list names at least one column that is
-        # always present), but a raw ComputeError here would be a real leak if that ever changes.
+        # `pl.concat_str([])` raises; spark's `concat_ws` over no columns yields `''`.
         id_input = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
             self.lf.with_columns(id_input.alias('_id_input'))
@@ -278,24 +275,8 @@ class Evidence:
         schema = self.lf.collect_schema()
         _require_id_column(schema.names(), 'validate_uniqueness')
         parts = [render_for_hash(c, schema[c]).fill_null('null') for c in schema.names()]
-        # `pl.concat_str`'s default separator is '', deliberately matching spark's ACTUAL
-        # `concat_ws('', ...)` call -- not an oversight. Spark's own comment above that call
-        # claims the separator is ASCII SOH (U+0001) "so distinct field values can never
-        # collide", but the code it comments passes ''; the comment is wrong about its own code.
-        # Following spark's comment instead of its code would change every row's content string,
-        # hence every hash, hence every partition's survivor -- exactly the divergence this
-        # method exists to remove (measured, task-9-report.md). The collision this leaves open is
-        # real but unobserved: ('ab', 'c') and ('a', 'bc') both render the joined string 'abc...',
-        # so two genuinely different rows CAN share a content string, and the tie-break between
-        # them is then unspecified in BOTH engines -- 0 shared content strings found across
-        # 935,018 real staged rows. A pre-existing upstream defect to report, not one to repair
-        # inside this port: repairing it here would itself be the divergence.
-        #
-        # pl.concat_str([]) also raises ComputeError on an empty expression list; unreachable
-        # here (schema always has at least `id`, just required above), but
-        # assign_evidence_identifier guards the identical shape, so match it rather than leave
-        # the asymmetry.
-        content = pl.concat_str(parts) if parts else pl.lit('')
+        # spark's concat_ws separator is U+0001
+        content = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
             self.lf.with_columns(content.alias('_content'))
             .with_columns(plh.col('_content').chash.sha2_256().alias('_content_hash'))
