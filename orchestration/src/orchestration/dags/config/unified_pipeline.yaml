@@ -286,12 +286,12 @@ steps:
     depends_on:
       - pis_impc
       - pts_ontoma
+      - pts_target
+      - pis_literature
   pts_evidence_postprocess_impc:
     num_partitions: 100
     depends_on:
       - pts_evidence_impc
-      - pts_target
-      - pis_literature
   pts_evidence_panel_app:
     depends_on:
       - pis_evidence_panel_app
