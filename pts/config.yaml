@@ -612,14 +612,19 @@ steps:
 
   #: EVIDENCE PANEL APP STEP :#######################################################################
   evidence_panel_app:
-    - name: pyspark panel_app
-      pyspark: panel_app
+    - name: transform evidence.panel_app
+      transformer: evidence.panel_app
       source:
         evidence: input/evidence/panelapp/panel_app.tsv
         panels: input/evidence/panelapp/panels.jsonl
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/panel_app.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/panel_app
+        evidence: output/evidence_genomics_england
   ##################################################################################################
 
   #: EVIDENCE_CRISPR_SCREENS STEP :#################################################################
