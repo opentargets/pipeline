@@ -281,11 +281,7 @@ steps:
     depends_on:
       - pis_evidence_clingen
       - pts_ontoma
-  pts_evidence_postprocess_clingen:
-    depends_on:
-      - pts_evidence_clingen
       - pts_target
-      - pis_literature
   pts_evidence_impc:
     depends_on:
       - pis_impc
@@ -380,7 +376,7 @@ steps:
       - pts_evidence_expression_atlas
       - pts_evidence_cancer_biomarkers
       - pts_evidence_clinical_precedence
-      - pts_evidence_postprocess_clingen
+      - pts_evidence_clingen
       - pts_evidence_cosmic
       - pts_evidence_project_score
       - pts_evidence_crispr_screens

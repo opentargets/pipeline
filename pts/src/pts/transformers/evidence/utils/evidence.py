@@ -25,6 +25,7 @@ import polars_hash as plh
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.utils.hashing import render_for_hash
+from pts.transformers.utils.spark_strings import regexp_extract
 
 QC_COLUMN = 'qualityControls'
 
@@ -438,20 +439,9 @@ class Evidence:
         variant_id = pl.col('variantId')
         pattern = r'^([0-9XYMT]{1,2})_([0-9]+)_([ACGTN]+)_([ACGTN]+)$'
 
-        def _spark_like_extract(group: int) -> pl.Expr:
-            # Spark's `regexp_extract` returns the EMPTY STRING on a non-match; polars'
-            # `str.extract` returns null (measured, task-9-report.md). So in spark the
-            # `chr.isNull() | pos.isNull()` branch below is reachable ONLY when `variantId`
-            # itself is null -- reproduced by extracting null only for a null input, and '' for
-            # anything else (a match with no captured group, or no match at all).
-            return (
-                pl.when(variant_id.is_null())
-                .then(None)
-                .otherwise(variant_id.str.extract(pattern, group).fill_null(''))
-            )
-
-        chrom = _spark_like_extract(1)
-        position = _spark_like_extract(2)
+        # a non-match extracts '', so the null branch below is reached only by a null `variantId`
+        chrom = regexp_extract(variant_id, pattern, 1)
+        position = regexp_extract(variant_id, pattern, 2)
         digest = plh.col('variantId').nchash.md5()
         return Evidence(
             self.lf.with_columns(

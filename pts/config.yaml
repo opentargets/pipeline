@@ -570,13 +570,17 @@ steps:
 
   #: EVIDENCE_CLINGEN STEP :#######################################################################
   evidence_clingen:
-    - name: pyspark clingen
-      pyspark: clingen
+    - name: transform evidence.clingen
+      transformer: evidence.clingen
       source:
         evidence: input/evidence/clingen.csv
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/clingen.parquet
+        target: output/target
+        disease: output/disease
+      destination:
+        failed_evidence: excluded/evidence/clingen
+        evidence: output/evidence_clingen
   ##################################################################################################
 
   #: EVIDENCE_IMPC STEP :###########################################################################
@@ -1030,43 +1034,6 @@ steps:
       destination:
         failed_evidence: excluded/evidence/uniprot_literature
         evidence: output/evidence_uniprot_literature
-
-  evidence_postprocess_clingen:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/clingen.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/clingen
-        evidence: output/evidence_clingen
-      settings:
-        partition_count: 1
-        datasource_id: clingen
-        evidence_format: parquet
-        score_expression: |
-          element_at(
-            map(
-              'No Known Disease Relationship', 0.01,
-              'Refuted', 0.01,
-              'Disputed', 0.01,
-              'Limited', 0.01,
-              'Moderate', 0.5,
-              'Strong', 1.0,
-              'Definitive', 1.0
-            ),
-            confidence
-          )
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - diseaseFromSource
-          - studyId
-          - allelicRequirements
 
   evidence_reactome:
     - name: transform evidence.reactome
