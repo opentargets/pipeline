@@ -353,6 +353,20 @@ def test_empty_panels_write_empty_outputs(tmp: Path) -> None:
     source = _sources(tmp / 'src', {})
     destination = _destination(tmp / 'out')
     gene2phenotype(source, destination, {}, None)
+    full_source = _sources(
+        tmp / 'full_src',
+        {
+            'eye_panel': [
+                _line(gene_symbol='CFTR', disease_name='cystic fibrosis', confidence='strong', panel='Eye'),
+                _line(gene_symbol='CFTR', disease_name='nothing at all', confidence='strong', panel='Eye'),
+            ]
+        },
+    )
+    full = _destination(tmp / 'full_out')
+    gene2phenotype(full_source, full, {}, None)
 
-    assert pl.read_parquet(destination['evidence']).height == 0
-    assert pl.read_parquet(destination['failed_evidence']).height == 0
+    for key in ('evidence', 'failed_evidence'):
+        empty, non_empty = pl.read_parquet(destination[key]), pl.read_parquet(full[key])
+        assert empty.height == 0
+        assert non_empty.height == 1
+        assert empty.schema == non_empty.schema

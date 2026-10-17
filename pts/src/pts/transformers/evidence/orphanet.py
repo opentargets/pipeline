@@ -1,6 +1,6 @@
 """Evidence from Orphanet's gene-disease associations.
 
-Polars port of the `pyspark orphanet` parser together with its `evidence_postprocess` step.
+Parses Orphanet's gene-disease XML into evidence and post-processes it.
 Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by id.
 """
 

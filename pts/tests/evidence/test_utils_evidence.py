@@ -628,10 +628,7 @@ class TestAssignEvidenceIdentifier:
         assert out['id'][0] == out['id'][1]
 
     def test_no_unique_field_present_hashes_the_empty_string_like_spark(self) -> None:
-        # pl.concat_str([]) raises ComputeError on an empty expression list; spark's
-        # concat_ws('') over zero columns is well-defined and yields '', so the id must be
-        # sha1(''), not a crash. Unreachable with today's config.yaml, but a raw ComputeError
-        # leaking out of assign_evidence_identifier would be a real regression if that changes.
+        # spark's concat_ws over no columns yields '', so the id is sha1('').
         lf = pl.LazyFrame({'targetId': ['T1']})
         out = Evidence(lf).assign_evidence_identifier(['doesNotExist']).lf.collect()
         assert out['id'][0] == 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
@@ -812,20 +809,7 @@ class TestValidateUniqueness:
         assert sum(flagged) == 1
 
     def test_survivor_matches_an_independently_computed_content_hash(self) -> None:
-        # Fix round 1: a purely positional over('id') (or any implementation that doesn't
-        # actually rank by content) would pass a self-comparison test like "rerun and check the
-        # same row wins" without ever computing a real hash. This instead computes the expected
-        # winner independently via hashlib.sha256 over the exact content string this method
-        # builds, and asserts the actual survivor matches that computation, not just itself.
-        #
-        # Fix round 2, minor: the content string is built via render_for_hash over the real
-        # `collect_schema()`, the same way validate_uniqueness itself builds it -- not a
-        # hand-written approximation. An earlier version hand-wrote 'a1'/'a2' as the content,
-        # silently omitting `qualityControls` (the real content is 'a1[]'/'a2[]'); both happened
-        # to pick survivor '2' anyway, so the test passed by coincidence, not because it actually
-        # caught a wrong rendering or column order -- it could not have failed against either.
-        # Only the HASHING is independent (hashlib, not chash.sha2_256); the content string must
-        # match what's actually hashed, or this test drifts from the code it's meant to pin.
+        # the survivor has the lowest sha256, computed with hashlib, of the row's rendered content
         lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
         ev = Evidence(lf)
         schema = ev.lf.collect_schema()
@@ -866,12 +850,7 @@ class TestValidateUniqueness:
         assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
 
     def test_id_column_itself_is_included_in_the_content_hash(self) -> None:
-        # Fix round 1, Critical 2(a): id constant within the id-partitioned window being ranked
-        # does NOT mean including it is a no-op -- sha256 ordering is not preserved under a
-        # constant infix (measured: excluding id changed the survivor in 48.1% of 2,000 sampled
-        # partitions). id='a', v='1'/'2' is a concrete case where the two schemes disagree: hashing
-        # 'a', '3' (id included) picks '3' as the lower hash, hashing '1'/'3' alone (id excluded,
-        # the old behaviour) picks '1' -- so this fails if id were ever dropped from the hash again.
+        # with id in the hash '3' survives; without it '1' would
         lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '3']})
         out = Evidence(lf).validate_uniqueness().lf.collect()
         flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}

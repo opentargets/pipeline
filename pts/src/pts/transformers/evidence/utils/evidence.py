@@ -231,10 +231,7 @@ class Evidence:
         schema = self.lf.collect_schema()
         present = [f for f in unique_fields if f in schema.names()]
         parts = [render_for_hash(f, schema[f]).fill_null('null') for f in present]
-        # `pl.concat_str([])` raises ComputeError on an empty list of expressions; spark's
-        # `concat_ws('')` over zero columns is well-defined and yields `''`. Unreachable with
-        # today's config.yaml (every unique_fields list names at least one column that is
-        # always present), but a raw ComputeError here would be a real leak if that ever changes.
+        # `pl.concat_str([])` raises; spark's `concat_ws` over no columns yields `''`.
         id_input = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
             self.lf.with_columns(id_input.alias('_id_input'))

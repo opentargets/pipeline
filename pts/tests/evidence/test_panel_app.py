@@ -611,6 +611,12 @@ def test_unmapped_disease_lands_in_failed_evidence(tmp_path: Path) -> None:
 
 
 def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
-    valid, failed = _run(tmp_path, [], [])
+    valid, failed = _run(tmp_path / 'empty', [], [])
+    full_valid, full_failed = _run(
+        tmp_path / 'full', [_row(), _row(phenotypes='nothing at all')], [_panel(1, {'CFTR': ['111']})]
+    )
     assert valid.height == 0
     assert failed.height == 0
+    assert (full_valid.height, full_failed.height) == (1, 1)
+    assert valid.schema == full_valid.schema
+    assert failed.schema == full_failed.schema

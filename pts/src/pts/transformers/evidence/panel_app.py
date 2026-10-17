@@ -1,6 +1,6 @@
 r"""Genomics England PanelApp evidence.
 
-Polars port of the `pyspark panel_app` parser together with its `evidence_postprocess` step.
+Parses the PanelApp gene panels into evidence and post-processes it.
 Phenotype strings are cleaned and split with the spark step's regular expressions, rewritten for
 the Rust engine (`\d` as `[0-9]`, `$1` as `${1}`). Diseases are mapped with the OnToma lookup
 tables through `add_efo_mapping`, by label and by OMIM, Orphanet, HP or MONDO id.

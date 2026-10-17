@@ -1,6 +1,6 @@
 """Gene2Phenotype disease panel evidence.
 
-Polars port of the `pyspark gene2phenotype` parser together with its `evidence_postprocess` step.
+Parses the Gene2Phenotype panels into evidence and post-processes it.
 Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by
 MONDO or OMIM id.
 """
