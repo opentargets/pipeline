@@ -11,7 +11,7 @@ from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import process_az_gene_burden
-from pts.schemas.gene_burden import GENE_BURDEN_UNION
+from pts.schemas.gene_burden import GENE_BURDEN_PARSED, GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import AZ_METHOD_DESCRIPTIONS, parse_az
 from tests.evidence.gene_burden.spark_rows import multiset
 
@@ -111,8 +111,17 @@ def _logged(run: Any) -> tuple[Any, str]:
     return result, ''.join(messages)
 
 
-def test_output_has_the_union_schema(tmp_path: Path) -> None:
-    assert _parse(tmp_path, [_binary()], [_quantitative()]).schema == GENE_BURDEN_UNION
+def test_parsed_schema_is_the_union_with_the_curated_id_in_place_of_the_mapped_id() -> None:
+    assert list(GENE_BURDEN_PARSED.dtypes()) == list(GENE_BURDEN_UNION.dtypes())
+    assert [n for n in GENE_BURDEN_PARSED if n not in GENE_BURDEN_UNION] == ['curatedDiseaseFromSourceMappedId']
+    assert [n for n in GENE_BURDEN_UNION if n not in GENE_BURDEN_PARSED] == ['diseaseFromSourceMappedId']
+    assert list(GENE_BURDEN_PARSED).index('curatedDiseaseFromSourceMappedId') == list(GENE_BURDEN_UNION).index(
+        'diseaseFromSourceMappedId'
+    )
+
+
+def test_output_has_the_parsed_schema(tmp_path: Path) -> None:
+    assert _parse(tmp_path, [_binary()], [_quantitative()]).schema == GENE_BURDEN_PARSED
 
 
 def test_binary_columns_are_renamed(tmp_path: Path) -> None:
@@ -136,7 +145,7 @@ def test_binary_columns_are_renamed(tmp_path: Path) -> None:
     assert row['ancestryId'] == 'HANCESTRO_0005'
     assert row['allelicRequirements'] == ['dominant']
     assert row['diseaseFromSourceId'] is None
-    assert row['diseaseFromSourceMappedId'] is None
+    assert row['curatedDiseaseFromSourceMappedId'] is None
 
 
 def test_quantitative_columns_are_renamed(tmp_path: Path) -> None:
@@ -174,7 +183,7 @@ def test_raw_mantissa_at_a_power_of_ten(tmp_path: Path) -> None:
     assert (row['pValueMantissa'], row['pValueExponent']) == (10.0, -9)
 
 
-def test_zero_pvalue_takes_the_minimum_after_the_filter(tmp_path: Path) -> None:
+def test_zero_pvalue_takes_the_smallest_positive_pvalue(tmp_path: Path) -> None:
     rows, log = _logged(
         lambda: _parse(
             tmp_path,
@@ -186,8 +195,8 @@ def test_zero_pvalue_takes_the_minimum_after_the_filter(tmp_path: Path) -> None:
     assert 'There are 1 AZ evidence with a p-value of 0.0' in log
 
 
-def test_all_zero_pvalues_become_null(tmp_path: Path) -> None:
-    # the minimum is taken over the significant rows only, and there is none above zero
+def test_zero_pvalue_minimum_is_taken_after_the_filter(tmp_path: Path) -> None:
+    # no significant row is above zero; the filtered-out 0.01 is not a candidate
     rows = _parse(tmp_path, [_binary(pValue='0')], [_quantitative(pValue='0.01')])
     assert rows.select('resourceScore', 'pValueMantissa', 'pValueExponent').rows() == [(None, None, None)]
 
@@ -264,7 +273,7 @@ def test_rows_are_distinct(tmp_path: Path) -> None:
 def test_empty_inputs_give_an_empty_union(tmp_path: Path) -> None:
     rows = _parse(tmp_path, [_binary(pValue='0.5')], [])
     assert rows.height == 0
-    assert rows.schema == GENE_BURDEN_UNION
+    assert rows.schema == GENE_BURDEN_PARSED
 
 
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
@@ -310,7 +319,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
             row['urls'] = None
     new = parse_az(*paths).collect()
 
-    absent = ['sex', 'diseaseFromSourceId', 'diseaseFromSourceMappedId']
+    absent = ['sex', 'diseaseFromSourceId', 'curatedDiseaseFromSourceMappedId']
     assert set(new.columns) - set(columns) == set(absent)
     assert new.select(absent).null_count().row(0) == (new.height,) * len(absent)
     assert multiset(new.rows(named=True), columns) == multiset(old_rows, columns)

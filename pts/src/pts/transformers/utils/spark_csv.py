@@ -25,7 +25,7 @@ _BLANK = re.compile(r'[\x00- ]*\Z')
 
 _ASCII_INT = r'^[+-]?[0-9]+$'
 #: `Integer.parseInt` takes any unicode decimal digit
-_JAVA_INT = re.compile(r'[+-]?\d+')
+_JAVA_INT = r'^[+-]?\d+$'
 _INT32_MIN, _INT32_MAX = -(2**31), 2**31 - 1
 _JAVA_DECIMAL = r'^([+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)[fFdD]?$'
 _JAVA_HEX = r'^([+-]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)[pP][+-]?[0-9]+)[fFdD]?$'
@@ -171,12 +171,20 @@ def read_spark_csv(
     return pl.DataFrame(padded, schema=dict.fromkeys(names, pl.String), orient='row')
 
 
+def _java_int(text: str) -> int | None:
+    """Unicode decimal digits as an int, null outside the Int32 range."""
+    value = int(text)
+    return value if _INT32_MIN <= value <= _INT32_MAX else None
+
+
 def _unicode_ints(texts: pl.Series) -> pl.Series:
-    """Texts of unicode decimal digits as Int32, null for anything else or out of range."""
-    values = [int(t) if t is not None and _JAVA_INT.fullmatch(t) else None for t in texts.to_list()]
-    return pl.Series(
-        texts.name, [v if v is not None and _INT32_MIN <= v <= _INT32_MAX else None for v in values], dtype=pl.Int32
-    )
+    """The texts of non-ASCII decimal digits as Int32, null elsewhere."""
+    unicode = (texts.str.contains(_JAVA_INT) & ~texts.str.contains(_ASCII_INT)).fill_null(False)
+    out = pl.Series(texts.name, [None] * len(texts), dtype=pl.Int32)
+    rows = unicode.arg_true()
+    if rows.is_empty():
+        return out
+    return out.scatter(rows, pl.Series([_java_int(t) for t in texts.gather(rows).to_list()], dtype=pl.Int32))
 
 
 def spark_csv_int(field: pl.Expr) -> pl.Expr:
@@ -185,7 +193,7 @@ def spark_csv_int(field: pl.Expr) -> pl.Expr:
         pl
         .when(field.str.contains(_ASCII_INT))
         .then(field.str.strip_prefix('+').cast(pl.Int64, strict=False).cast(pl.Int32, strict=False))
-        .when(field.str.contains(_JAVA_INT.pattern))
+        .when(field.str.contains(_JAVA_INT))
         .then(field.map_batches(_unicode_ints, return_dtype=pl.Int32, is_elementwise=True))
     )
 

@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from pyspark.sql import SparkSession
 
+from pts.transformers.utils import spark_csv
 from pts.transformers.utils.spark_csv import read_spark_csv, spark_csv_double, spark_csv_int
 
 COLUMNS = ['x', 'y', 'z']
@@ -213,7 +214,8 @@ TYPED_FIELDS = [
     '1', '+5', '-3', '007', ' 5', '5 ', '5.0', '5.', '.5', '1e3', '1E+2', '1.0f', '2.5d', '2.5D ', '0x1p3', 'abc',
     '1,5', '2147483647', '2147483648', '-2147483648', '-2147483649', 'NaN', '-NaN', '+NaN', 'nan', 'Inf', '-Inf',
     '+Inf', 'inf', 'Infinity', '-Infinity', '+Infinity', ' Infinity', 'infinity', '-0.0', '1e-400', '1e400',
-    '4.9e-324', '1.7976931348623157e308', '\u0661',
+    '4.9e-324', '1.7976931348623157e308', '\u0661', '1\u0662', '+\u0661', '-\u0661\u0660', '\u0661.0', 'a\u0661',
+    '\u0661' * 11,
 ]  # fmt: skip
 
 
@@ -228,3 +230,12 @@ def test_typed_fields_parse_like_spark(spark: SparkSession, tmp_path: Path) -> N
     assert [(f, i, repr(d)) for f, (i, d) in zip(TYPED_FIELDS, parsed.rows(), strict=True)] == [
         (f, r['i'], repr(r['d'])) for f, r in zip(TYPED_FIELDS, expected, strict=True)
     ]
+
+
+def test_ascii_ints_run_no_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(text: str) -> int | None:
+        raise AssertionError(text)
+
+    monkeypatch.setattr(spark_csv, '_java_int', fail)
+    texts = pl.DataFrame({'i': ['1', '-2', '5.0', 'abc', None]})
+    assert texts.select(spark_csv_int(pl.col('i')))['i'].to_list() == [1, -2, None, None, None]

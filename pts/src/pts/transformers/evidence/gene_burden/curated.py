@@ -6,8 +6,9 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.gene_burden import CURATED_INPUT_COLUMNS
-from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, spark_distinct, to_union
+from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, to_parsed
 from pts.transformers.utils.spark_csv import read_spark_csv, spark_csv_double, spark_csv_int
+from pts.transformers.utils.spark_frames import spark_distinct
 
 #: Case counts the curation writes as `N.0`.
 CASE_COUNT_COLUMNS = ['studyCases', 'studyCasesWithQualifyingVariants']
@@ -33,13 +34,13 @@ def parse_curated(path: str) -> pl.LazyFrame:
 
     Numbers parse as Spark's CSV reader parses them, except the case counts, which may be written
     `N.0`. The p-value mantissa and exponent are taken as written, and the curated disease id is
-    carried in `diseaseFromSourceMappedId`.
+    carried in `curatedDiseaseFromSourceMappedId`.
 
     Args:
         path: the curation file, with a header line.
 
     Returns:
-        The evidence in `GENE_BURDEN_UNION`.
+        The evidence in `GENE_BURDEN_PARSED`.
     """
     curated = read_spark_csv(path, separator='\t', new_columns=CURATED_INPUT_COLUMNS)
     _log_case_counts(curated)
@@ -56,7 +57,7 @@ def parse_curated(path: str) -> pl.LazyFrame:
             projectId=pl.col('projectId'),
             targetFromSourceId=pl.col('targetFromSourceId'),
             diseaseFromSource=pl.col('diseaseFromSource'),
-            diseaseFromSourceMappedId=pl.col('diseaseFromSourceMappedId'),
+            curatedDiseaseFromSourceMappedId=pl.col('diseaseFromSourceMappedId'),
             resourceScore=spark_csv_double(pl.col('resourceScore')),
             pValueMantissa=spark_csv_double(pl.col('pValueMantissa')),
             pValueExponent=spark_csv_int(pl.col('pValueExponent')),
@@ -84,7 +85,7 @@ def parse_curated(path: str) -> pl.LazyFrame:
             .then(pl.concat_list(literature))
             .otherwise(pl.lit([None], dtype=pl.List(pl.String))),
         )
-        .pipe(to_union)
+        .pipe(to_parsed)
         .pipe(spark_distinct)
         .lazy()
     )

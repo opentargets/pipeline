@@ -5,10 +5,11 @@ from __future__ import annotations
 import polars as pl
 from loguru import logger
 
-from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, spark_distinct, to_union
+from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, to_parsed
 from pts.transformers.utils.dataset import scan_dataset
 from pts.transformers.utils.spark_casts import cast_double, to_float, to_int
 from pts.transformers.utils.spark_csv import read_spark_csv
+from pts.transformers.utils.spark_frames import spark_distinct
 from pts.transformers.utils.spark_math import pvalue_exponent, pvalue_mantissa, substitute_zero_pvalues
 from pts.transformers.utils.spark_strings import regexp_extract
 
@@ -61,7 +62,7 @@ def parse_az(binary: str, quantitative: str, genes: str, phenotypes: str) -> pl.
         phenotypes: phenotype name and link CSV without a header.
 
     Returns:
-        The evidence in `GENE_BURDEN_UNION`.
+        The evidence in `GENE_BURDEN_PARSED`.
     """
     associations = pl.concat(
         [
@@ -123,7 +124,7 @@ def parse_az(binary: str, quantitative: str, genes: str, phenotypes: str) -> pl.
                 pl.concat_list(pl.struct('url', niceName=pl.lit(PROJECT_ID)))
             )
         )
-        .pipe(to_union)
+        .pipe(to_parsed)
         .pipe(spark_distinct)
     )
     unlinked = evidence['urls'].null_count()

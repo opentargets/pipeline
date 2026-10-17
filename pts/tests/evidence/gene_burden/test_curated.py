@@ -10,7 +10,7 @@ from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import CURATION_SCHEMA, process_gene_burden_curation
-from pts.schemas.gene_burden import CURATED_INPUT_COLUMNS, GENE_BURDEN_UNION
+from pts.schemas.gene_burden import CURATED_INPUT_COLUMNS, GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.curated import parse_curated
 from tests.evidence.gene_burden.spark_rows import multiset
 
@@ -47,8 +47,8 @@ def _parse(tmp: Path, *lines: str, header: str = HEADER) -> pl.DataFrame:
     return parse_curated(_write(tmp / 'curated_evidence.tsv', *lines, header=header)).collect()
 
 
-def test_output_has_the_union_schema(tmp_path: Path) -> None:
-    assert _parse(tmp_path, _line()).schema == GENE_BURDEN_UNION
+def test_output_has_the_parsed_schema(tmp_path: Path) -> None:
+    assert _parse(tmp_path, _line()).schema == GENE_BURDEN_PARSED
 
 
 def test_columns_are_read_by_position(tmp_path: Path) -> None:
@@ -65,8 +65,10 @@ def test_columns_are_read_by_position(tmp_path: Path) -> None:
     assert (row['releaseVersion'], row['urls'], row['diseaseFromSourceId']) == (None, None, None)
 
 
-def test_curated_disease_id_is_carried_as_the_mapped_id(tmp_path: Path) -> None:
-    assert _parse(tmp_path, _line())['diseaseFromSourceMappedId'].to_list() == ['EFO_0000001']
+def test_curated_disease_id_is_kept_apart_from_the_mapped_id(tmp_path: Path) -> None:
+    parsed = _parse(tmp_path, _line())
+    assert parsed['curatedDiseaseFromSourceMappedId'].to_list() == ['EFO_0000001']
+    assert 'diseaseFromSourceMappedId' not in parsed.columns
 
 
 def test_float_case_counts_parse(tmp_path: Path) -> None:
@@ -164,8 +166,6 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     )
     old = process_gene_burden_curation(spark.read.csv(path, header=True, sep='\t', schema=CURATION_SCHEMA))
     old_rows = [row.asDict(recursive=True) for row in old.collect()]
-    for row in old_rows:
-        row['diseaseFromSourceMappedId'] = row.pop('curatedDiseaseFromSourceMappedId')
     columns = list(old_rows[0])
     new = parse_curated(path).collect()
 

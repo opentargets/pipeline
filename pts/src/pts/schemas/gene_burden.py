@@ -2,8 +2,7 @@
 
 import polars as pl
 
-#: The parsed evidence of every sub-source, in the column order of the old intermediate. Before
-#: disease mapping, `diseaseFromSourceMappedId` holds the id the source itself gives, if any.
+#: The evidence of every sub-source after disease mapping, as the old intermediate.
 GENE_BURDEN_UNION = pl.Schema({
     'datasourceId': pl.String,
     'datatypeId': pl.String,
@@ -34,6 +33,13 @@ GENE_BURDEN_UNION = pl.Schema({
     'sex': pl.List(pl.String),
     'diseaseFromSourceId': pl.String,
     'diseaseFromSourceMappedId': pl.String,
+})
+
+#: What every sub-source parser returns: `GENE_BURDEN_UNION` before disease mapping, with the id
+#: the source itself gives, if any, in place of the mapped one.
+GENE_BURDEN_PARSED = pl.Schema({
+    'curatedDiseaseFromSourceMappedId' if name == 'diseaseFromSourceMappedId' else name: dtype
+    for name, dtype in GENE_BURDEN_UNION.items()
 })
 
 #: The curated evidence file's columns by position; their header names are not read.
