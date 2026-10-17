@@ -2,7 +2,7 @@
 
 import mlcroissant as mlc
 
-# Maps PySpark typeName() strings to their Croissant DataType equivalents.
+# Maps Spark type names, as `ot_croissant.schema.type_name` gives them, to their Croissant DataType equivalents.
 TYPE_DICT = {
     # Text / boolean
     'string': mlc.DataType.TEXT,

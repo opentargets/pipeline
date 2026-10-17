@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import mlcroissant as mlc
 from loguru import logger
-from pyspark.errors.exceptions.captured import AnalysisException
-from pyspark.sql import SparkSession
-from pyspark.sql import types as t
 
 from ot_croissant.constants import TYPE_DICT
 from ot_croissant.curation import DistributionCuration, RecordsetCuration
+from ot_croissant.schema import SchemaField, read_schema
 
 SNAKE_CASE_WARNING = "column '{field_name}' is snake_case, camelCase is expected"
 MISSING_KEY_WARNING = (
@@ -31,11 +27,9 @@ class PlatformOutputRecordSets:
 
     record_sets: list[mlc.RecordSet]
     DISTRIBUTION_ID: str
-    spark: SparkSession
 
     def __init__(self: PlatformOutputRecordSets) -> None:
         self.record_sets = []
-        self.spark = SparkSession.builder.getOrCreate()
         super().__init__()  # <- What is the parent class here?
 
     def get_metadata(self: PlatformOutputRecordSets) -> list[mlc.RecordSet]:
@@ -73,12 +67,12 @@ class PlatformOutputRecordSets:
         # Get the schema from the recordset:
         logger.info(f"processing '{self.DISTRIBUTION_ID}'")
         try:
-            schema = self.spark.read.parquet(path, recursiveFileLookup=True).schema
-        except AnalysisException:
+            schema = read_schema(path)
+        except ValueError:
             logger.error(f'could not read parquet: {path}')
-            raise ValueError(f'Could not read dataset: {path}')
+            raise
 
-        fields = [self.parse_spark_field(field) for field in schema]
+        fields = [self.parse_field(field) for field in schema]
 
         # Collect primary key field IDs from recordset curation:
         recordset_curation = RecordsetCuration()
@@ -113,17 +107,17 @@ class PlatformOutputRecordSets:
         # Return record set
         return record_set
 
-    def parse_spark_field(
+    def parse_field(
         self: PlatformOutputRecordSets,
-        field: t.StructField,
+        field: SchemaField,
         parent: str | None = None,
     ) -> mlc.Field:
-        """Parse a Spark StructField into a Croissant Field.
+        """Parse a dataset column into a Croissant Field.
 
         The parsing is recursive with arrays, structs, and maps.
         """
 
-        def get_field_description(field: t.StructField, field_id: str) -> str:
+        def get_field_description(field: SchemaField, field_id: str) -> str:
             """Get the field description."""
             # Get the description from the data:
             description = get_field_description_from_data(field)
@@ -143,7 +137,7 @@ class PlatformOutputRecordSets:
             ann = RecordsetCuration().get_field(field_id)
             return ann.description if ann else None
 
-        def get_field_description_from_data(field: t.StructField) -> str | None:
+        def get_field_description_from_data(field: SchemaField) -> str | None:
             metadata: dict[str, str] | None = field.metadata
 
             if metadata and 'description' in metadata:
@@ -153,7 +147,7 @@ class PlatformOutputRecordSets:
 
         def get_field_id(
             parent: str | None,
-            field: t.StructField,
+            field: SchemaField,
             include_distribution_id: bool = True,
         ) -> str:
             """Get the field id."""
@@ -166,7 +160,7 @@ class PlatformOutputRecordSets:
                 column_id = f'{self.DISTRIBUTION_ID}/{column_id}'
             return column_id
 
-        def get_foreign_key(field: t.StructField, field_id: str) -> str | None:
+        def get_foreign_key(field: SchemaField, field_id: str) -> str | None:
             """Get the foreign key from the curation."""
             metadata: dict[str, str] | None = field.metadata
 
@@ -180,7 +174,7 @@ class PlatformOutputRecordSets:
 
         _warn_if_snake_case(field.name)
 
-        field_type: str = field.dataType.typeName()  # <- This might be a map. Not yet supported by croissant.
+        field_type: str = field.type.name
 
         # Get the field description from the data:
         column_description: str = get_field_description(field, get_field_id(parent, field))
@@ -207,61 +201,54 @@ class PlatformOutputRecordSets:
 
         # Test if the field is a list:
         if field_type == 'array':
-            data_type = cast(t.ArrayType, field.dataType)
-            element_type = data_type.elementType
+            element_type = field.type.element
+            assert element_type is not None
             croissant_field.repeated = True
 
             # A list of struct:
-            if element_type.typeName() == 'struct':
-                data_type = cast(t.StructType, element_type)
+            if element_type.name == 'struct':
                 croissant_field.sub_fields = [
-                    self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in data_type
+                    self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in element_type.fields
                 ]
 
             # If element type is a primitive type:
-            elif element_type.typeName() in TYPE_DICT:
+            elif element_type.name in TYPE_DICT:
                 # Append data type of the primitive type
-                if (type_name := TYPE_DICT.get(element_type.typeName())) is not None:
+                if (type_name := TYPE_DICT.get(element_type.name)) is not None:
                     croissant_field.data_types.append(type_name)
 
             # If the element type is another array, we flatten it
-            if isinstance(element_type, t.ArrayType):
+            if element_type.name == 'array' and element_type.element is not None:
                 logger.warning(
                     f'field {field.name} is of type array of array, this is not yet supported by croissant, flattening'
                 )
-                sub_type_name = element_type.elementType.typeName()
+                sub_type_name = element_type.element.name
                 if sub_type_name in TYPE_DICT:
                     croissant_field.data_types.append(TYPE_DICT[sub_type_name])
 
         # Test if the field is a struct:
         elif field_type == 'struct':
-            data_type = cast(t.StructType, field.dataType)
             croissant_field.sub_fields = [
-                self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in data_type
+                self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in field.type.fields
             ]
         elif field_type == 'map':
             logger.warning(
                 f'field {self.DISTRIBUTION_ID}/{field.name} is of type map,this is not yet supported by croissant'
             )
 
-            data_type = cast(t.MapType, field.dataType)
-
-            # Extracting keys/values:
-            key_type = data_type.keyType
-            value_type = data_type.valueType
+            key_type = field.type.key
+            value_type = field.type.value
+            assert key_type is not None and value_type is not None
 
             # Constructing an artifical struct:
-            struct = t.StructType([
-                t.StructField('key', key_type),
-                t.StructField('value', value_type),
-            ])
+            struct = [SchemaField('key', key_type), SchemaField('value', value_type)]
 
             # Modelling maps as arrays:
             croissant_field.repeated = True
 
             # Adding key/value fields:
             croissant_field.sub_fields = [
-                self.parse_spark_field(subfield, get_field_id(parent, field, False)) for subfield in struct
+                self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in struct
             ]
 
         return croissant_field
