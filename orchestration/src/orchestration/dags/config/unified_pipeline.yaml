@@ -272,11 +272,11 @@ steps:
     depends_on:
       - pis_evidence_orphanet
       - pts_ontoma
+      - pts_target
+      - pis_literature
   pts_evidence_postprocess_orphanet:
     depends_on:
       - pts_evidence_orphanet
-      - pts_target
-      - pis_literature
   pts_evidence_clingen:
     depends_on:
       - pis_evidence_clingen
