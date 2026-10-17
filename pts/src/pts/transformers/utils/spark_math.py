@@ -2,7 +2,6 @@
 
 import functools
 import math
-import struct
 from typing import overload
 
 import numpy as np
@@ -115,29 +114,8 @@ def pvalue_exponent(p: pl.Expr) -> pl.Expr:
     return _spark_to_int(spark_log10(p)) - 1
 
 
-def _bits(x: float) -> int:
-    return struct.unpack('<q', struct.pack('<d', x))[0]
-
-
-def _hi(x: float) -> int:
-    return _bits(x) >> 32
-
-
-def _lo(x: float) -> int:
-    return _bits(x) & 0xFFFFFFFF
-
-
-def _from_words(hi: int, lo: int) -> float:
-    return struct.unpack('<d', struct.pack('<Q', ((hi & 0xFFFFFFFF) << 32) | lo))[0]
-
-
-def _clear_lo(x: float) -> float:
-    return _from_words(_hi(x), 0)
-
-
-_BP = (1.0, 1.5)
-_DP_H = (0.0, 5.84962487220764160156e-01)
-_DP_L = (0.0, 1.35003920212974897128e-08)
+_BP_1_5 = 1.5
+_DP_H_1_5, _DP_L_1_5 = 5.84962487220764160156e-01, 1.35003920212974897128e-08
 _L1, _L2, _L3 = 5.99999999999994648725e-01, 4.28571428578550184252e-01, 3.33333329818377432918e-01
 _L4, _L5, _L6 = 2.72728123808534006489e-01, 2.30660745775561754067e-01, 2.06975017800338417784e-01
 _P1, _P2, _P3 = 1.66666666666666019037e-01, -2.77777777770155933842e-03, 6.61375632143793436117e-05
@@ -148,48 +126,34 @@ _CP, _CP_H, _CP_L = 9.61796693925975554329e-01, 9.61796700954437255859e-01, -7.0
 _TWO53 = 9007199254740992.0
 
 
-@functools.cache
-def strict_pow(x: float, y: float) -> float:
-    """Java's `StrictMath.pow` (fdlibm `e_pow.c`), parity-tested for `x = 10` and an integer `y`."""
-    if y == 0:
-        return 1.0
-    if y == 1:
-        return x
-    if y == -1:
-        return 1.0 / x
-    if y == 2:
-        return x * x
-    if y == 0.5:
-        return math.sqrt(x)
-    ix = _hi(x) & 0x7FFFFFFF
-    iy = _hi(y) & 0x7FFFFFFF
-    if iy > 0x41E00000:
-        return math.inf if (x > 1) == (y > 0) else 0.0
-    ax = x
-    n = 0
-    if ix < 0x00100000:
-        ax *= _TWO53
-        n -= 53
-        ix = _hi(ax)
-    n += (ix >> 20) - 0x3FF
+def _clear_lo(x: np.ndarray) -> np.ndarray:
+    return (x.view(np.int64) & ~0xFFFFFFFF).view(np.float64)
+
+
+def _fdlibm_pow(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """The fdlibm `e_pow.c` core for finite `x > 0` and finite `y` with `|y| <= 2**31`."""
+    subnormal = x < 2.0**-1022
+    ax = np.where(subnormal, x * _TWO53, x)
+    ix, lx = _words(ax)
+    n = np.where(subnormal, -53, 0) + (ix >> 20) - 0x3FF
     j = ix & 0x000FFFFF
     ix = j | 0x3FF00000
-    if j <= 0x3988E:
-        k = 0
-    elif j < 0xBB67A:
-        k = 1
-    else:
-        k = 0
-        n += 1
-        ix -= 0x00100000
-    ax = _from_words(ix, _lo(ax))
+    k = ((j > 0x3988E) & (j < 0xBB67A)).astype(np.int64)
+    wrap = j >= 0xBB67A
+    n = np.where(wrap, n + 1, n)
+    ix = np.where(wrap, ix - 0x00100000, ix)
+    ax = _join_words(ix, lx)
+    one_half = k == 1
+    bp = np.where(one_half, _BP_1_5, 1.0)
+    dp_h = np.where(one_half, _DP_H_1_5, 0.0)
+    dp_l = np.where(one_half, _DP_L_1_5, 0.0)
 
-    u = ax - _BP[k]
-    v = 1.0 / (ax + _BP[k])
+    u = ax - bp
+    v = 1.0 / (ax + bp)
     ss = u * v
     s_h = _clear_lo(ss)
-    t_h = _from_words(((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18), 0)
-    t_l = ax - (t_h - _BP[k])
+    t_h = _join_words(((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18), np.zeros_like(ix))
+    t_l = ax - (t_h - bp)
     s_l = v * ((u - s_h * t_h) - s_h * t_l)
     s2 = ss * ss
     r = s2 * s2 * (_L1 + s2 * (_L2 + s2 * (_L3 + s2 * (_L4 + s2 * (_L5 + s2 * _L6)))))
@@ -202,34 +166,32 @@ def strict_pow(x: float, y: float) -> float:
     p_h = _clear_lo(u + v)
     p_l = v - (p_h - u)
     z_h = _CP_H * p_h
-    z_l = _CP_L * p_h + p_l * _CP + _DP_L[k]
-    t = float(n)
-    t1 = _clear_lo(((z_h + z_l) + _DP_H[k]) + t)
-    t2 = z_l - (((t1 - t) - _DP_H[k]) - z_h)
+    z_l = _CP_L * p_h + p_l * _CP + dp_l
+    t = n.astype(np.float64)
+    t1 = _clear_lo(((z_h + z_l) + dp_h) + t)
+    t2 = z_l - (((t1 - t) - dp_h) - z_h)
 
     y1 = _clear_lo(y)
     p_l = (y - y1) * t1 + y * t2
     p_h = y1 * t1
     z = p_l + p_h
-    j = _hi(z)
-    i = _lo(z)
-    if j >= 0x40900000:
-        if ((j - 0x40900000) | i) != 0 or p_l + _OVT > z - p_h:
-            return math.inf
-    elif (j & 0x7FFFFFFF) >= 0x4090CC00:
-        if ((j & 0xFFFFFFFF) - 0xC090CC00) | i != 0 or p_l <= z - p_h:
-            return 0.0
+    j, i = _words(z)
+    high = j >= 0x40900000
+    overflow = high & ((((j - 0x40900000) | i) != 0) | (p_l + _OVT > z - p_h))
+    underflow = (
+        ~high
+        & ((j & 0x7FFFFFFF) >= 0x4090CC00)
+        & (((((j & 0xFFFFFFFF) - 0xC090CC00) | i) != 0) | (p_l <= z - p_h))
+    )
     i = j & 0x7FFFFFFF
     k = (i >> 20) - 0x3FF
-    n = 0
-    if i > 0x3FE00000:
-        n = j + (0x00100000 >> (k + 1))
-        k = ((n & 0x7FFFFFFF) >> 20) - 0x3FF
-        t = _from_words(n & ~(0x000FFFFF >> k), 0)
-        n = ((n & 0x000FFFFF) | 0x00100000) >> (20 - k)
-        if j < 0:
-            n = -n
-        p_h -= t
+    scaled = i > 0x3FE00000
+    m = j + (0x00100000 >> np.clip(k + 1, 0, 20))
+    k = np.clip(((m & 0x7FFFFFFF) >> 20) - 0x3FF, 0, 20)
+    t = _join_words(m & ~(0x000FFFFF >> k), np.zeros_like(m))
+    m = ((m & 0x000FFFFF) | 0x00100000) >> (20 - k)
+    n = np.where(scaled, np.where(j < 0, -m, m), 0)
+    p_h = np.where(scaled, p_h - t, p_h)
     t = _clear_lo(p_l + p_h)
     u = t * _POW_LG2_H
     v = (p_l - (t - p_h)) * _POW_LG2 + t * _POW_LG2_L
@@ -239,10 +201,45 @@ def strict_pow(x: float, y: float) -> float:
     t1 = z - t * (_P1 + t * (_P2 + t * (_P3 + t * (_P4 + t * _P5))))
     r = (z * t1) / (t1 - 2.0) - (w + z * w)
     z = 1.0 - (r - z)
-    j = _hi(z) + (n << 20)
-    if (j >> 20) <= 0:
-        return math.ldexp(z, n)
-    return _from_words(j, _lo(z))
+    hz, lz = _words(z)
+    j = hz + (n << 20)
+    result = np.where((j >> 20) <= 0, np.ldexp(z, n.astype(np.int32)), _join_words(j, lz))
+    return np.where(overflow, np.inf, np.where(underflow, 0.0, result))
+
+
+def _strict_pow(x: float, y: np.ndarray) -> np.ndarray:
+    """Java's `StrictMath.pow(x, y)` element-wise over `y`, for a finite `x > 0` other than 1."""
+    if not (math.isfinite(x) and x > 0 and x != 1):
+        raise ValueError(f'unsupported base {x}')
+    with np.errstate(all='ignore'):
+        iy = _words(y)[0] & 0x7FFFFFFF
+        huge = iy > 0x41E00000
+        core = ~huge & ~np.isin(y, [0.0, 1.0, -1.0, 2.0, 0.5])
+        values = np.full(len(y), np.nan)
+        values[core] = _fdlibm_pow(np.full(core.sum(), x), y[core])
+        values[huge] = np.where((x > 1) == (y[huge] > 0), np.inf, 0.0)
+        values[np.isnan(y)] = np.nan
+        for special, value in ((0.0, 1.0), (1.0, x), (-1.0, 1.0 / x), (2.0, x * x), (0.5, math.sqrt(x))):
+            values[y == special] = value
+    return values
+
+
+@functools.cache
+def strict_pow(x: float, y: float) -> float:
+    """Java's `StrictMath.pow` (fdlibm `e_pow.c`) for a finite `x > 0` other than 1."""
+    return float(_strict_pow(x, np.array([y], dtype=np.float64))[0])
+
+
+def spark_pow(base: float, exponent: pl.Expr) -> pl.Expr:
+    """Spark's `pow(base, exponent)` (java's `StrictMath.pow`) for a finite `base > 0` other than 1."""
+
+    def power(series: pl.Series) -> pl.Series:
+        values = _strict_pow(base, series.cast(pl.Float64).fill_null(0.0).to_numpy())
+        out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
+        nulls = np.flatnonzero(series.is_null().to_numpy())
+        return out.scatter(nulls, None) if len(nulls) else out
+
+    return exponent.map_batches(power, return_dtype=pl.Float64, is_elementwise=True)
 
 
 def _divide_by_power_of_ten(columns: pl.Series) -> pl.Series:
@@ -313,19 +310,31 @@ def normalise_mantissa(mantissa: pl.Expr, exponent: pl.Expr) -> tuple[pl.Expr, p
 
 
 @overload
-def substitute_zero_pvalues(frame: pl.DataFrame, column: str, label: str | None = None) -> pl.DataFrame: ...
-@overload
-def substitute_zero_pvalues(frame: pl.LazyFrame, column: str, label: str | None = None) -> pl.LazyFrame: ...
 def substitute_zero_pvalues(
-    frame: pl.DataFrame | pl.LazyFrame, column: str, label: str | None = None
+    frame: pl.DataFrame, column: str, label: str | None = None, scope: pl.DataFrame | pl.LazyFrame | None = None
+) -> pl.DataFrame: ...
+@overload
+def substitute_zero_pvalues(
+    frame: pl.LazyFrame, column: str, label: str | None = None, scope: pl.DataFrame | pl.LazyFrame | None = None
+) -> pl.LazyFrame: ...
+def substitute_zero_pvalues(
+    frame: pl.DataFrame | pl.LazyFrame,
+    column: str,
+    label: str | None = None,
+    scope: pl.DataFrame | pl.LazyFrame | None = None,
 ) -> pl.DataFrame | pl.LazyFrame:
-    """Replace a p-value of 0.0 with the frame's smallest p-value above 0, null if there is none.
+    """Replace a p-value of 0.0 with the smallest p-value above 0 in `scope`, null if there is none.
 
-    The count is logged under `label`, the column name by default.
+    `scope` is the frame itself by default. The count of zeros in `scope` is logged under `label`,
+    the column name by default.
     """
     pvalue = pl.col(column)
     zeros, minimum = (
-        frame.lazy().select((pvalue == 0.0).sum(), pvalue.filter(pvalue > 0.0).min().alias('minimum')).collect().row(0)
+        (frame if scope is None else scope)
+        .lazy()
+        .select((pvalue == 0.0).sum(), pvalue.filter(pvalue > 0.0).min().alias('minimum'))
+        .collect(engine='streaming')
+        .row(0)
     )
     if not zeros:
         return frame

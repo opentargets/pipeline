@@ -15,6 +15,7 @@ from pts.transformers.utils.spark_math import (
     pvalue_mantissa,
     round_half_up,
     spark_log10,
+    spark_pow,
     strict_pow,
     substitute_zero_pvalues,
 )
@@ -110,6 +111,41 @@ def test_strict_pow_matches_spark(spark) -> None:
         .collect()
     )
     assert [_key(strict_pow(10.0, float(k))) for k in exponents] == [_key(r.p) for r in rows]
+
+
+def _pow_exponents() -> list[float | None]:
+    rng = random.Random(20261019)
+    values: list[float | None] = [float(f'{rng.uniform(0, 400):.{rng.randint(1, 9)}f}') for _ in range(20000)]
+    values += [float(f'{rng.uniform(1, 10):.5f}e-{rng.randint(1, 9)}') for _ in range(2000)]
+    values += [rng.uniform(-1100, 1100) for _ in range(2000)]
+    values += [0.0, -0.0, 1.0, -1.0, 2.0, 0.5, -0.5, 400.0, 323.3, 323.31, 307.5, 307.65, 90.0033, 9.36597e-08]
+    values += [2.0**31, -(2.0**31), 2.0**31 + 1, 1e300, -1e300, 5e-324, math.nan, math.inf, -math.inf, None]
+    return [None if v is None else -v for v in values]
+
+
+@pytest.mark.parametrize('base', [10.0, 2.0, 0.3])
+def test_spark_pow_matches_spark(spark, base: float) -> None:
+    exponents = _pow_exponents()
+    rows = (
+        spark
+        .createDataFrame([(v,) for v in exponents], 'y DOUBLE')
+        .select(f.pow(f.lit(base), f.col('y')).alias('p'))
+        .collect()
+    )
+    out = pl.DataFrame({'y': exponents}, schema={'y': pl.Float64}).select(spark_pow(base, pl.col('y')))
+    assert out.schema == pl.Schema({'y': pl.Float64})
+    mismatches = [
+        (y, _key(r.p), _key(mine))
+        for y, r, mine in zip(exponents, rows, out.to_series().to_list(), strict=True)
+        if _key(r.p) != _key(mine)
+    ]
+    assert mismatches == []
+
+
+def test_spark_pow_is_not_numpy_power() -> None:
+    # 10 ** -23.6442024: numpy's power is one ulp above fdlibm's
+    assert pl.select(spark_pow(10.0, pl.lit(-23.6442024))).item() == 2.268807243217692e-24
+    assert strict_pow(10.0, -23.6442024) == 2.268807243217692e-24
 
 
 def test_exponent_mantissa_match_spark(spark) -> None:
@@ -222,3 +258,17 @@ def test_substitute_zero_pvalues_logs_label() -> None:
     finally:
         logger.remove(sink)
     assert messages == ['There are 2 BRaVa Cauchy evidence with a p-value of 0.0; they take the minimum, 1e-05.\n']
+
+
+def test_substitute_zero_pvalues_counts_and_takes_the_minimum_over_the_scope() -> None:
+    scope = pl.LazyFrame({'p': [0.0, 0.5, 0.0, 1e-30, 1e-5]})
+    frame = scope.filter((pl.col('p') <= 1e-4) | (pl.col('p') == 0.0)).filter(pl.col('p') != 1e-30)
+    messages: list[str] = []
+    sink = logger.add(messages.append, format='{message}')
+    try:
+        out = substitute_zero_pvalues(frame, 'p', label='Genebass', scope=scope)
+    finally:
+        logger.remove(sink)
+    assert isinstance(out, pl.LazyFrame)
+    assert out.collect()['p'].to_list() == [1e-30, 1e-30, 1e-5]
+    assert messages == ['There are 2 Genebass evidence with a p-value of 0.0; they take the minimum, 1e-30.\n']
