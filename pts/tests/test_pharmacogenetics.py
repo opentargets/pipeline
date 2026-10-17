@@ -9,9 +9,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 from loguru import logger
-from pyspark.sql import Row, SparkSession
 
-from pts.pyspark import pharmacogenetics as spark_pgx
 from pts.schemas.pharmacogenetics import PHARMACOGENOMICS
 from pts.transformers import pharmacogenetics as pgx
 from pts.transformers.pharmacogenetics import (
@@ -31,8 +29,6 @@ PGX_SCHEMA = {
     'studyId': pl.String,
 }
 LUT_SCHEMA = {'genotypeAnnotationText': pl.String, 'phenotypeText': pl.List(pl.String)}
-SPARK_PGX_SCHEMA = 'genotypeAnnotationText string, phenotypeText string, phenotypeFromSourceId string, studyId string'
-SPARK_LUT_SCHEMA = 'genotypeAnnotationText string, phenotypeText array<string>'
 
 PGX_ROWS = [
     ('parsed', 'verbose', None, 's1'),
@@ -49,7 +45,6 @@ ENRICH_SCHEMA = {
     'targetFromSourceId': pl.String,
     'drugs': DRUGS,
 }
-SPARK_ENRICH_SCHEMA = 'studyId string, targetFromSourceId string, drugs array<struct<drugFromSource:string>>'
 MOLECULE_SCHEMA = {'id': pl.String, 'name': pl.String}
 MOA_SCHEMA = {'chemblIds': pl.List(pl.String), 'targets': pl.List(pl.String)}
 
@@ -68,17 +63,6 @@ def _rows(df: pl.DataFrame) -> list[tuple]:
     return sorted(df.rows(), key=repr)
 
 
-def _spark_rows(df) -> list[tuple]:
-    def plain(value: object) -> object:
-        if isinstance(value, Row):
-            return value.asDict(recursive=True)
-        if isinstance(value, list):
-            return [plain(v) for v in value]
-        return value
-
-    return sorted((tuple(plain(v) for v in row) for row in df.collect()), key=repr)
-
-
 class TestFindUnparsedTexts:
     def test_texts_missing_from_the_lookup_are_returned_sorted(self, pgx_df, lut_df) -> None:
         assert find_unparsed_texts(pgx_df, lut_df) == ['unparsed a', 'unparsed b']
@@ -88,12 +72,6 @@ class TestFindUnparsedTexts:
             [('parsed', None, None, 's1'), ('parsed empty', None, None, 's2')], schema=PGX_SCHEMA, orient='row'
         )
         assert find_unparsed_texts(df, lut_df) == []
-
-    def test_matches_spark(self, spark: SparkSession, pgx_df, lut_df) -> None:
-        expected = spark_pgx.find_unparsed_texts(
-            spark.createDataFrame(PGX_ROWS, SPARK_PGX_SCHEMA), spark.createDataFrame(LUT_ROWS, SPARK_LUT_SCHEMA)
-        )
-        assert find_unparsed_texts(pgx_df, lut_df) == expected
 
 
 class TestAnnotatePhenotype:
@@ -116,12 +94,16 @@ class TestAnnotatePhenotype:
         assert out.select('studyId', 'phenotypeText').rows() == [('s1', 'a'), ('s1', 'b')]
         assert 'phenotypeFromSourceId' not in out.columns
 
-    def test_matches_spark(self, spark: SparkSession, pgx_df, lut_df) -> None:
-        expected = spark_pgx.annotate_phenotype(
-            spark.createDataFrame(PGX_ROWS, SPARK_PGX_SCHEMA), spark.createDataFrame(LUT_ROWS, SPARK_LUT_SCHEMA)
-        ).select('genotypeAnnotationText', 'studyId', 'phenotypeText')
+    def test_matches_spark_baseline(self, pgx_df, lut_df) -> None:
         out = annotate_phenotype(pgx_df, lut_df).select('genotypeAnnotationText', 'studyId', 'phenotypeText')
-        assert _rows(out) == _spark_rows(expected)
+        # expected rows captured from the removed pyspark implementation
+        assert _rows(out) == [
+            ('parsed empty', 's2', None),
+            ('parsed', 's1', 'increased response'),
+            ('unparsed a', 's4', None),
+            ('unparsed b', 's3', None),
+            (None, 's5', None),
+        ]
 
 
 GENOTYPES = [
@@ -170,14 +152,23 @@ def test_variant_id_trailing_comma_and_extra_tokens() -> None:
     assert by_study == {'s8': ['7_700_A_', '7_700_A_G'], 's9': ['8_800_A_G']}
 
 
-def test_variant_id_matches_spark(spark: SparkSession) -> None:
-    expected = spark_pgx.add_variantid_column(
-        spark.createDataFrame(GENOTYPES, 'genotypeId string, studyId string')
-    ).select('genotypeId', 'studyId', 'variantId')
-    # spark's self join repeats a row once per row sharing its genotypeId; OnToma's dedup collapses them
-    assert _rows(add_variant_id(_genotypes()).select('genotypeId', 'studyId', 'variantId')) == sorted(
-        set(_spark_rows(expected)), key=repr
-    )
+def test_variant_id_matches_spark_baseline() -> None:
+    # expected rows captured from the removed pyspark implementation, deduplicated: spark's self join
+    # repeats a row once per row sharing its genotypeId and OnToma's dedup collapses them
+    assert _rows(add_variant_id(_genotypes()).select('genotypeId', 'studyId', 'variantId')) == [
+        ('1_100_C_C,T', 's1', '1_100_C_T'),
+        ('1_100_C_C,T', 's10', '1_100_C_T'),
+        ('2_200_A_G,T', 's2', '2_200_A_G'),
+        ('2_200_A_G,T', 's2', '2_200_A_T'),
+        ('3_300_G_G', 's3', None),
+        ('4_400_A_', 's5', None),
+        ('5_500_A', 's6', None),
+        ('6_600__G', 's7', None),
+        ('7_700_A_G,', 's8', '7_700_A_'),
+        ('7_700_A_G,', 's8', '7_700_A_G'),
+        ('8_800_A_G_extra', 's9', '8_800_A_G'),
+        (None, 's4', None),
+    ]
 
 
 def _molecules(rows: list[tuple[str | None, str | None]]) -> pl.DataFrame:
@@ -287,12 +278,7 @@ MOA_ROWS = [
 ]
 
 
-def test_enrich_matches_spark(spark: SparkSession) -> None:
-    expected = spark_pgx.enrich_with_drug_and_target_info(
-        spark.createDataFrame(ENRICH_ROWS, SPARK_ENRICH_SCHEMA),
-        spark.createDataFrame(MOLECULE_ROWS, 'id string, name string'),
-        spark.createDataFrame(MOA_ROWS, 'chemblIds array<string>, targets array<string>'),
-    ).select('studyId', 'targetFromSourceId', 'isDirectTarget', 'drugs')
+def test_enrich_matches_spark_baseline() -> None:
     out = enrich_with_drugs(_annotations(ENRICH_ROWS), _molecules(MOLECULE_ROWS), _moa(MOA_ROWS)).select(
         'studyId', 'targetFromSourceId', 'isDirectTarget', 'drugs'
     )
@@ -300,7 +286,19 @@ def test_enrich_matches_spark(spark: SparkSession) -> None:
     def drugs_sorted(rows: list[tuple]) -> list[tuple]:
         return sorted(((*r[:-1], sorted(r[-1], key=repr)) for r in rows), key=repr)
 
-    assert drugs_sorted(out.rows()) == drugs_sorted(_spark_rows(expected))
+    # expected rows captured from the removed pyspark implementation
+    assert drugs_sorted(out.rows()) == [
+        ('s1', 'ENSG1', False, [{'drugFromSource': 'a', 'drugId': 'CHEMBL_A2'}] * 2),
+        ('s1', 'ENSG1', True, [{'drugFromSource': 'b', 'drugId': 'CHEMBL_B'}]),
+        ('s1', 'ENSG1', True, [{'drugFromSource': 'c', 'drugId': 'CHEMBL_C'}]),
+        ('s2', None, False, [{'drugFromSource': 'b', 'drugId': 'CHEMBL_B'}]),
+        (
+            's3',
+            'ENSG2',
+            False,
+            [{'drugFromSource': 'unknown', 'drugId': None}, {'drugFromSource': None, 'drugId': None}],
+        ),
+    ]
 
 
 PUBLISHED_COLUMNS = [

@@ -6,10 +6,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene2phenotype import G2P_INPUT_SCHEMA as SPARK_INPUT_SCHEMA
-from pts.pyspark.gene2phenotype import process_gene2phenotype
 from pts.schemas.gene2phenotype import G2P_INPUT_SCHEMA
 from pts.transformers.evidence.gene2phenotype import (
     DIRECTION_ON_TARGET,
@@ -24,6 +21,18 @@ from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, n
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 
 COLUMNS = list(G2P_INPUT_SCHEMA)
+PARSED_COLUMNS = [
+    'literature',
+    'targetFromSourceId',
+    'studyId',
+    'confidence',
+    'allelicRequirements',
+    'diseaseFromSourceId',
+    'diseaseFromSource',
+    'variantFunctionalConsequenceId',
+    'datasourceId',
+    'datatypeId',
+]
 HEADER = ','.join(f'"{c}"' for c in COLUMNS) + '\n'
 
 
@@ -191,7 +200,7 @@ def test_panel_keys() -> None:
     ]
 
 
-def test_escaped_quote_reads_like_spark(spark: SparkSession, tmp: Path) -> None:
+def test_escaped_quote_matches_spark_baseline(tmp: Path) -> None:
     lines = [
         _line(gene_symbol='A', disease_name='say \\"hi\\" disease', publications='1'),
         _line(gene_symbol='B', disease_name='back\\\\slash disease', variant_consequence='uncertain'),
@@ -201,13 +210,28 @@ def test_escaped_quote_reads_like_spark(spark: SparkSession, tmp: Path) -> None:
     path = _write(tmp / 'panel.csv', *lines)
     raw = parse_gene2phenotype([path]).collect()
     assert raw['diseaseFromSource'].to_list()[:3] == ['say "hi" disease', 'back\\slash disease', 'plain \\n text']
+    # expected rows captured from the removed pyspark implementation
+    assert raw.columns == PARSED_COLUMNS
+    assert raw.rows() == [
+        (['1'], 'A', None, None, None, None, 'say "hi" disease', None, 'gene2phenotype', 'genetic_literature'),
+        (
+            None,
+            'B',
+            None,
+            None,
+            None,
+            None,
+            'back\\slash disease',
+            'SO_0002220',
+            'gene2phenotype',
+            'genetic_literature',
+        ),
+        (None, 'C', None, None, ['AD'], None, 'plain \\n text', None, 'gene2phenotype', 'genetic_literature'),
+        (None, 'D', None, None, None, None, '""unescaped" inner"', None, 'gene2phenotype', 'genetic_literature'),
+    ]
 
-    expected = process_gene2phenotype(spark.read.csv(path, header=True, schema=SPARK_INPUT_SCHEMA))
-    assert sorted(map(repr, raw.rows())) == sorted(map(repr, [tuple(r) for r in expected.collect()]))
-    assert raw.columns == expected.columns
 
-
-def test_parse_matches_spark_on_a_mixed_panel(spark: SparkSession, tmp: Path) -> None:
+def test_parse_matches_spark_baseline_on_a_mixed_panel(tmp: Path) -> None:
     lines = [
         _line(
             g2p_id='G1',
@@ -229,8 +253,25 @@ def test_parse_matches_spark_on_a_mixed_panel(spark: SparkSession, tmp: Path) ->
     ]
     path = _write(tmp / 'panel.csv', *lines)
     raw = parse_gene2phenotype([path]).collect()
-    expected = process_gene2phenotype(spark.read.csv(path, header=True, schema=SPARK_INPUT_SCHEMA))
-    assert raw.rows() == [tuple(r) for r in expected.collect()]
+    # expected rows captured from the removed pyspark implementation
+    assert raw.columns == PARSED_COLUMNS
+    assert raw.rows() == [
+        (
+            ['1', '2', ''],
+            'CFTR',
+            'Developmental',
+            'definitive',
+            ['biallelic'],
+            'MONDO:0009061',
+            'cystic fibrosis',
+            'SO_0002317',
+            'gene2phenotype',
+            'genetic_literature',
+        ),
+        (['\t3'], 'X', None, 'limited', None, None, None, None, 'gene2phenotype', 'genetic_literature'),
+        (None, 'Y', 'Eye', None, None, 'OMIM:5', None, 'SO_0002315', 'gene2phenotype', 'genetic_literature'),
+        (None, 'Z', None, None, None, None, None, None, 'gene2phenotype', 'genetic_literature'),
+    ]
 
 
 def _sources(root: Path, panels: dict[str, list[str]]) -> dict[str, str]:

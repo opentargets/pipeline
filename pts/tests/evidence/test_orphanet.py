@@ -6,10 +6,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
-from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
-from pts.pyspark.orphanet import process_orphanet as spark_process_orphanet
 from pts.transformers.evidence.orphanet import (
     DIRECTION_ON_TARGET,
     DIRECTION_ON_TRAIT,
@@ -236,7 +233,7 @@ def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
     assert failed.height == 0
 
 
-def test_process_matches_spark(spark: SparkSession, tmp_path: Path) -> None:
+def test_process_matches_spark_baseline(tmp_path: Path) -> None:
     raw = _parse(
         tmp_path,
         _disorder(
@@ -251,10 +248,68 @@ def test_process_matches_spark(spark: SparkSession, tmp_path: Path) -> None:
         ),
         _disorder('2', 'd2', _association(kind=GERMLINE, validation='')),
     )
-    schema = StructType([
-        StructField(name, ArrayType(StringType()) if name == 'literature' else StringType()) for name in raw.columns
-    ])
-    expected = spark_process_orphanet(spark.createDataFrame(raw.rows(), schema))
     got = process_orphanet(raw.lazy()).collect()
-    assert got.columns == expected.columns
-    assert got.rows() == [tuple(r) for r in expected.collect()]
+    # expected rows captured from the removed pyspark implementation
+    assert got.columns == [
+        'datasourceId',
+        'datatypeId',
+        'alleleOrigins',
+        'confidence',
+        'diseaseFromSource',
+        'diseaseFromSourceId',
+        'literature',
+        'targetFromSource',
+        'targetFromSourceId',
+        'variantFunctionalConsequenceId',
+    ]
+    origins = ['germline', 'somatic']
+    assert got.rows() == [
+        (
+            'orphanet',
+            'genetic_association',
+            origins,
+            'Assessed',
+            'd1',
+            'Orphanet_1',
+            ['11111', '22222'],
+            'CFTR',
+            'ENSG00000001',
+            'SO_0002054',
+        ),
+        (
+            'orphanet',
+            'genetic_association',
+            origins,
+            'Assessed',
+            'd1',
+            'Orphanet_1',
+            ['5', '4'],
+            'CFTR',
+            'ENSG00000001',
+            'SO_0002053',
+        ),
+        (
+            'orphanet',
+            'genetic_association',
+            origins,
+            'Not yet assessed',
+            'd1',
+            'Orphanet_1',
+            None,
+            'CFTR',
+            'ENSG00000001',
+            None,
+        ),
+        (
+            'orphanet',
+            'genetic_association',
+            origins,
+            'Assessed',
+            'd2',
+            'Orphanet_2',
+            None,
+            'CFTR',
+            'ENSG00000001',
+            None,
+        ),
+    ]

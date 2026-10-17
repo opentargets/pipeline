@@ -127,7 +127,7 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
             # Extracting ensembl gene id from cross references:
             ensembl = []
             xrefs = gene.find('ExternalReferenceList') if gene is not None else None
-            for xref in xrefs or []:
+            for xref in xrefs if xrefs is not None else []:
                 r = xref.find('Reference')
                 if r is not None and r.text and 'ENSG' in r.text:
                     ensembl.append(r.text)
@@ -136,8 +136,6 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
             # Collect evidence:
             orphanet_disorders.append(evidence)
     return orphanet_disorders
-
-
 
 
 def parse_orphanet(path: str) -> pl.LazyFrame:

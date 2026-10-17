@@ -3,28 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import polars as pl
 import pytest
 from loguru import logger
-from pyspark.sql import Row, SparkSession
+from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
-from pts.pyspark.common.impc import (
-    build_gene_mapping,
-    cleanup_model_identifier,
-    process_literature_references,
-    process_ontology_terms,
-)
-from pts.pyspark.common.session import Session
-from pts.pyspark.impc import (
-    _finalise_evidence_strings,
-    _load_impc_datasets_for_evidence,
-    _prepare_impc_datasets_for_evidence,
-    generate_impc_evidence_strings,
-)
+from pts.pyspark.common.impc import cleanup_model_identifier
 from pts.transformers.evidence.impc import (
     DIRECTION_ON_TARGET,
     DIRECTION_ON_TRAIT,
@@ -392,7 +379,7 @@ def test_dedup_logs_tied_partitions() -> None:
     assert '1 of 3 impc evidence partitions tie on the top resourceScore' in '\n'.join(messages)
 
 
-def test_dedup_matches_spark_without_ties(spark: SparkSession, tmp_path: Path) -> None:
+def test_dedup_matches_spark_baseline_without_ties() -> None:
     frame = _frame([
         {'resourceScore': 50.0, 'tag': 'low'},
         {'resourceScore': 70.0, 'tag': 'top'},
@@ -400,11 +387,28 @@ def test_dedup_matches_spark_without_ties(spark: SparkSession, tmp_path: Path) -
         {'resourceScore': 55.0, 'tag': 'null', 'diseaseFromSourceMappedId': None},
         {'resourceScore': 45.0, 'tag': 'null2', 'diseaseFromSourceMappedId': None},
     ])
-    frame.drop(MODEL_ID).write_parquet(tmp_path / 'mapped.parquet')
-    expected = _finalise_evidence_strings(spark.read.parquet(str(tmp_path / 'mapped.parquet')))
     out = deduplicate(frame)
-    assert out.columns == expected.columns
-    assert sorted(map(repr, out.rows())) == sorted(repr(tuple(r)) for r in expected.collect())
+    # expected rows captured from the removed pyspark implementation
+    assert out.columns == [
+        'diseaseFromSource',
+        'targetInModel',
+        'biologicalModelAllelicComposition',
+        'biologicalModelGeneticBackground',
+        'diseaseFromSourceMappedId',
+        'targetFromSourceId',
+        'diseaseFromSourceId',
+        'targetInModelMgiId',
+        'targetInModelEnsemblId',
+        'resourceScore',
+        'tag',
+        'datasourceId',
+        'datatypeId',
+    ]
+    assert sorted(out.rows(), key=repr) == [
+        ('x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 70.0, 'top', 'impc', 'animal_model'),
+        ('x', 'x', 'x', 'x', 'x', 'y', 'x', 'x', 'x', 55.0, 'other', 'impc', 'animal_model'),
+        ('x', 'x', 'x', 'x', None, 'x', 'x', 'x', 'x', 55.0, 'null', 'impc', 'animal_model'),
+    ]
 
 
 def test_score_is_resource_score_over_100_ieee() -> None:
@@ -450,49 +454,118 @@ def test_unique_fields_follow_the_spark_config() -> None:
 def _normalise(value: object) -> object:
     if isinstance(value, list):
         return sorted((_normalise(v) for v in value), key=repr)
-    if isinstance(value, Row):
-        return value.asDict(recursive=True)
     return value
 
 
-def _session(spark: SparkSession) -> SimpleNamespace:
-    return SimpleNamespace(
-        load_data=lambda *args, **kwargs: Session.load_data(SimpleNamespace(spark=spark), *args, **kwargs)
-    )
-
-
-def _spark_parse(spark: SparkSession, source: dict[str, str]) -> tuple[list[str], list[str]]:
-    datasets = _prepare_impc_datasets_for_evidence(_load_impc_datasets_for_evidence(_session(spark), source))
-    mp_terms, hp_terms = process_ontology_terms(datasets['ontology'])
-    gene_mapping = build_gene_mapping(
-        datasets['mgi_gene_id_to_ensembl_mouse_gene_id'],
-        datasets['mouse_to_human_gene'],
-        datasets['hgnc_gene_id_to_ensembl_human_gene_id'],
-    )
-    literature = process_literature_references(
-        datasets['mgi_pubmed'],
-        datasets['disease_model_summary_transformed'],
-        datasets['model_mouse_phenotypes_transformed'],
-    )
-    out = generate_impc_evidence_strings(
-        datasets['model_mouse_phenotypes_transformed'],
-        datasets['mouse_to_human_phenotype'],
-        mp_terms,
-        datasets['disease_model_summary_transformed'],
-        datasets['disease_human_phenotypes_transformed'],
-        hp_terms,
-        gene_mapping,
-        literature,
+MP1 = {'id': 'MP:0000001', 'label': 'mp one'}
+MP2 = {'id': 'MP:0000002', 'label': 'mp two'}
+HP1 = {'id': 'HP:0000001', 'label': 'hp one'}
+HP3 = {'id': 'HP:0000003', 'label': 'hp three'}
+CF = ('involves: 129', 'Cftr<tm1>/Cftr<tm1>', 'Cystic fibrosis', 64.65, 'Cftr', 'ENSMUSG1')
+#: Parsed rows for the mixed inputs, captured from the removed pyspark implementation, lists sorted.
+MIXED_INPUTS_BASELINE = [
+    (
+        'MGI:101',
+        'OMIM:1',
+        'involves: 129',
+        'Cftr<tm1>/Cftr<tm1>',
+        'back\\slash',
+        70.3,
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG1',
+        None,
+        None,
+        None,
+        'MGI:3',
+    ),
+    (
+        'MGI:101',
+        'OMIM:1',
+        'involves: 129',
+        'Cftr<tm1>/Cftr<tm1>',
+        'back\\slash',
+        70.3,
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG2',
+        None,
+        None,
+        None,
+        'MGI:3',
+    ),
+    (
+        'MGI:101',
+        'OMIM:219700',
+        'involves: 129',
+        'Cftr<tm1>/+',
+        'Say "hi", disease',
         41.0,
-    )
-    return out.columns, sorted(repr(tuple(_normalise(v) for v in row)) for row in out.collect())
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG1',
+        [MP2],
+        [HP3],
+        ['', '111'],
+        'MGI:2',
+    ),
+    (
+        'MGI:101',
+        'OMIM:219700',
+        'involves: 129',
+        'Cftr<tm1>/+',
+        'Say "hi", disease',
+        41.0,
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG2',
+        [MP2],
+        [HP3],
+        ['', '111'],
+        'MGI:2',
+    ),
+    ('MGI:101', 'OMIM:219700', *CF, 'ENSG1', [MP1, MP2], [HP1, HP3], ['', '111', '333'], 'MGI:1'),
+    ('MGI:101', 'OMIM:219700', *CF, 'ENSG1', [MP1], [HP1], ['111', '333'], None),
+    ('MGI:101', 'OMIM:219700', *CF, 'ENSG2', [MP1, MP2], [HP1, HP3], ['', '111', '333'], 'MGI:1'),
+    ('MGI:101', 'OMIM:219700', *CF, 'ENSG2', [MP1], [HP1], ['111', '333'], None),
+    (
+        'MGI:101',
+        None,
+        'involves: 129',
+        'Cftr<tm1>/Cftr<tm1>',
+        None,
+        64.65,
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG1',
+        [MP1],
+        None,
+        ['111', '333'],
+        'MGI:6',
+    ),
+    (
+        'MGI:101',
+        None,
+        'involves: 129',
+        'Cftr<tm1>/Cftr<tm1>',
+        None,
+        64.65,
+        'Cftr',
+        'ENSMUSG1',
+        'ENSG2',
+        [MP1],
+        None,
+        ['111', '333'],
+        'MGI:6',
+    ),
+]
 
 
 def _polars_rows(raw: pl.DataFrame) -> list[str]:
     return sorted(repr(tuple(_normalise(v) for v in row)) for row in raw.drop(MODEL_ID).rows())
 
 
-def test_parse_matches_spark_on_mixed_inputs(spark: SparkSession, tmp_path: Path) -> None:
+def test_parse_matches_spark_baseline_on_mixed_inputs(tmp_path: Path) -> None:
     source = _inputs(
         tmp_path,
         solr_disease_model_summary=[
@@ -531,9 +604,22 @@ def test_parse_matches_spark_on_mixed_inputs(spark: SparkSession, tmp_path: Path
         ],
     )
     raw = parse_impc(source, 41).collect()
-    columns, expected = _spark_parse(spark, source)
-    assert raw.drop(MODEL_ID).columns == columns
-    assert _polars_rows(raw) == expected
+    assert raw.drop(MODEL_ID).columns == [
+        'targetInModelMgiId',
+        'diseaseFromSourceId',
+        'biologicalModelGeneticBackground',
+        'biologicalModelAllelicComposition',
+        'diseaseFromSource',
+        'resourceScore',
+        'targetInModel',
+        'targetInModelEnsemblId',
+        'targetFromSourceId',
+        'diseaseModelAssociatedModelPhenotypes',
+        'diseaseModelAssociatedHumanPhenotypes',
+        'literature',
+        'biologicalModelId',
+    ]
+    assert _polars_rows(raw) == sorted(map(repr, MIXED_INPUTS_BASELINE))
     assert raw.height == 10
 
 

@@ -163,7 +163,7 @@ def enrich_with_drugs(
             .fill_null(False)
         )
         .drop('drugTargetIds')
-        .unique([ROW_ID, 'drug'], maintain_order=True)
+        .unique([ROW_ID, 'drug'], keep='first', maintain_order=True)
     )
     kept = [c for c in exploded.columns if c not in {ROW_ID, 'isDirectTarget', 'drug', 'drugFromSource', 'drugId'}]
     return (

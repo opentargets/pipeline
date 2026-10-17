@@ -8,10 +8,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 from loguru import logger
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as f
 
-from pts.pyspark.panel_app import PanelAppEvidenceGenerator
 from pts.transformers.evidence.panel_app import (
     OMIM_RE,
     OTHER_RE,
@@ -35,7 +32,6 @@ COLUMNS = [
     'Mode of inheritance',
     'Phenotypes',
 ]
-SPARK = PanelAppEvidenceGenerator
 #: Arabic-Indic digits one to six, which Java's `\d` does not match.
 ARABIC_DIGITS = ''.join(chr(0x0661 + i) for i in range(6))
 
@@ -126,11 +122,6 @@ def _parse(tmp: Path, rows: list[list[str | None]], panels: list[dict] | None = 
     return parse_panel_app(*_files(tmp, rows, panels)).collect()
 
 
-def _spark_replace(spark: SparkSession, values: list[str | None], pattern: str, replacement: str) -> list[str | None]:
-    df = spark.createDataFrame([(v,) for v in values], 'v string')
-    return [r[0] for r in df.select(f.regexp_replace('v', pattern, replacement)).collect()]
-
-
 def _polars(values: list[str | None]) -> pl.Series:
     return pl.Series('v', values, dtype=pl.String)
 
@@ -176,35 +167,83 @@ def test_regex_replacements_in_order(tmp_path: Path, phenotypes: str, expected: 
     assert raw['cohortPhenotypes'].unique().to_list() == [expected]
 
 
+#: PHENOTYPES each before-split replacement changes, by index, captured from the removed pyspark implementation.
+BEFORE_SPLIT_BASELINE = [
+    {0: 'A (HP:0006574);B'},
+    {1: 'Abruzzo-Erickson syndrome'},
+    {2: 'Deafness, autosomal recessive, 12'},
+    {3: 'Waardenburg syndrome, type 3'},
+    {4: 'Ectrodactyly, ectodermal dysplasia, and cleft lip/palate syndrome, 3'},
+    {5: 'Bladder cancer, somatic, 109800', 7: '123456Abc'},
+    {6: 'Aarskog-Scott syndrome, 305400;Mental retardation, X-linked syndromic 16, 305400', 9: '1234567;Abc'},
+    {10: 'a b', 11: 'x ; y'},
+    {
+        2: 'Deafness, autosomal recessive;12',
+        3: 'Waardenburg syndrome, type;3',
+        4: 'Ectrodactyly, ectodermal dysplasia, and cleft lip/palate syndrome;3',
+        11: 'x ; y',
+        12: 'a;b;c',
+    },
+]
+#: As BEFORE_SPLIT_BASELINE, for the after-split removals.
+AFTER_SPLIT_BASELINE = [
+    {13: 'Disease'},
+    {14: 'Disease'},
+    {13: 'Disease ( number)', 15: 'Disease  number', 16: 'Disease  NUMBER OR DISEASE', 17: 'Disease '},
+    {18: 'Disease', 19: 'Disease'},
+]
+#: (group 1, group 2, phenotype with the match removed) for the PHENOTYPES each ontology regex matches,
+#: captured from the removed pyspark implementation; the rest give ('', '', phenotype).
+OMIM_BASELINE = {
+    0: ('', '000657', 'A (HP4;);B'),
+    5: ('', '109800', '{Bladder cancer, somatic}'),
+    6: ('', '305400', 'Aarskog-Scott syndromeMental retardation, X-linked syndromic 16'),
+    7: ('', '123456', '{}Abc'),
+    9: ('', '123456', '7Abc'),
+    21: ('', '154700', 'Marfan syndrome'),
+    22: ('OMIM', '154700', 'Disease'),
+    23: ('MIM', '154700', 'Disease ()'),
+    27: ('', '000125', 'Disease HP0'),
+    28: ('', '000725', 'Disease, MONDO4'),
+    29: ('', '154700', 'Disease, ORPHA:558'),
+    30: ('', '123456', 'Disease7'),
+    31: ('', '154700', 'Disease'),
+}
+OTHER_BASELINE = {
+    0: ('HP', '0006574', 'A (;);B'),
+    24: ('OrphaNet: ORPHA', '558', 'Disease'),
+    25: ('Orphanet', '558', 'Disease'),
+    26: ('ORPHA', '558', 'Disease'),
+    27: ('HP', '0001250', 'Disease'),
+    28: ('MONDO', '0007254', 'Disease'),
+    29: ('ORPHA', '558', 'Disease 154700'),
+}
+
+
 @pytest.mark.parametrize('index', range(9))
-def test_before_split_replacement_matches_spark(spark: SparkSession, index: int) -> None:
-    assert len(PHENOTYPE_BEFORE_SPLIT) == len(SPARK.PHENOTYPE_BEFORE_SPLIT_RE) == 9
-    old_pattern, old_replacement = list(SPARK.PHENOTYPE_BEFORE_SPLIT_RE.items())[index]
+def test_before_split_replacement_matches_spark_baseline(index: int) -> None:
+    assert len(PHENOTYPE_BEFORE_SPLIT) == len(BEFORE_SPLIT_BASELINE)
     pattern, replacement = PHENOTYPE_BEFORE_SPLIT[index]
-    expected = _spark_replace(spark, PHENOTYPES, old_pattern, old_replacement)
+    expected = [BEFORE_SPLIT_BASELINE[index].get(i, v) for i, v in enumerate(PHENOTYPES)]
     assert _polars(PHENOTYPES).str.replace_all(pattern, replacement).to_list() == expected
 
 
 @pytest.mark.parametrize('index', range(4))
-def test_after_split_removal_matches_spark(spark: SparkSession, index: int) -> None:
-    assert len(PHENOTYPE_AFTER_SPLIT) == len(SPARK.PHENOTYPE_AFTER_SPLIT_RE) == 4
-    expected = _spark_replace(spark, PHENOTYPES, f'({SPARK.PHENOTYPE_AFTER_SPLIT_RE[index]})', '')
+def test_after_split_removal_matches_spark_baseline(index: int) -> None:
+    assert len(PHENOTYPE_AFTER_SPLIT) == len(AFTER_SPLIT_BASELINE)
+    expected = [AFTER_SPLIT_BASELINE[index].get(i, v) for i, v in enumerate(PHENOTYPES)]
     assert _polars(PHENOTYPES).str.replace_all(PHENOTYPE_AFTER_SPLIT[index], '').to_list() == expected
 
 
-@pytest.mark.parametrize(('new', 'old'), [(OMIM_RE, SPARK.OMIM_RE), (OTHER_RE, SPARK.OTHER_RE)])
-def test_ontology_regexes_match_spark(spark: SparkSession, new: str, old: str) -> None:
-    df = spark.createDataFrame([(v,) for v in PHENOTYPES], 'v string')
-    expected = df.select(
-        f.regexp_extract('v', old, 1), f.regexp_extract('v', old, 2), f.regexp_replace('v', f'({old})', '')
-    ).collect()
-    values = _polars(PHENOTYPES)
-    got = pl.DataFrame({'v': values}).select(
-        pl.when(pl.col('v').is_not_null()).then(pl.col('v').str.extract(new, 1).fill_null('')),
-        pl.when(pl.col('v').is_not_null()).then(pl.col('v').str.extract(new, 2).fill_null('')).alias('b'),
-        pl.col('v').str.replace_all(new, '').alias('c'),
+@pytest.mark.parametrize(('regex', 'baseline'), [(OMIM_RE, OMIM_BASELINE), (OTHER_RE, OTHER_BASELINE)])
+def test_ontology_regexes_match_spark_baseline(regex: str, baseline: dict[int, tuple[str, str, str]]) -> None:
+    got = pl.DataFrame({'v': _polars(PHENOTYPES)}).select(
+        pl.when(pl.col('v').is_not_null()).then(pl.col('v').str.extract(regex, 1).fill_null('')),
+        pl.when(pl.col('v').is_not_null()).then(pl.col('v').str.extract(regex, 2).fill_null('')).alias('b'),
+        pl.col('v').str.replace_all(regex, '').alias('c'),
     )
-    assert got.rows() == [tuple(r) for r in expected]
+    expected = [baseline.get(i, ('', '', v) if v is not None else (None, None, None)) for i, v in enumerate(PHENOTYPES)]
+    assert got.rows() == expected
 
 
 def test_null_phenotypes_rows_dropped(tmp_path: Path) -> None:
@@ -292,14 +331,6 @@ PMID_CASES = [
 @pytest.mark.parametrize(('text', 'expected'), PMID_CASES)
 def test_pmid_extraction(text: str | None, expected: list[str] | None) -> None:
     assert pl.select(extract_pmids(pl.lit(text, dtype=pl.String))).to_series().to_list() == [expected]
-
-
-def test_pmid_extraction_matches_spark(spark: SparkSession) -> None:
-    texts = [text for text, _ in PMID_CASES]
-    df = spark.createDataFrame([(t,) for t in texts], 'v string')
-    expected = [r[0] for r in df.select(SPARK(None, None).extract_pubmed_ids(f.col('v'))).collect()]
-    got = pl.DataFrame({'v': _polars(texts)}).select(extract_pmids(pl.col('v'))).to_series().to_list()
-    assert got == expected
 
 
 def test_literature_per_panel_and_symbol_sorted_distinct(tmp_path: Path) -> None:
@@ -398,24 +429,43 @@ def test_nbsp_is_not_trimmed(tmp_path: Path) -> None:
     assert raw['diseaseFromSource'].to_list() == ['\N{NO-BREAK SPACE}Disease\N{NO-BREAK SPACE}', 'Other']
 
 
-def _spark_parse(spark: SparkSession, evidence: str, panels: str) -> tuple[list[str], list[str]]:
-    panelapp_df = spark.read.load(evidence, format='csv', sep='\t', header=True, inferSchema=True)
-    out = SPARK(None, panelapp_df).generate_panelapp_evidence(spark.read.json(panels))
-    rows = []
-    for row in out.withColumn('studyId', f.col('studyId').cast('string')).collect():
-        values = row.asDict()
-        # collect_set order is unspecified; the port sorts
-        if values['literature'] is not None:
-            values['literature'] = sorted(values['literature'])
-        rows.append(repr(tuple(values.values())))
-    return out.columns, sorted(rows)
+PARSED_COLUMNS = [
+    'studyId',
+    'targetFromSourceId',
+    'studyOverview',
+    'confidence',
+    'cohortPhenotypes',
+    'diseaseFromSource',
+    'diseaseFromSourceId',
+    'literature',
+    'allelicRequirements',
+    'datasourceId',
+    'datatypeId',
+]
+PARSED_CONSTANTS = ('genomics_england', 'genetic_literature')
+
+
+def _baseline(
+    study: str,
+    symbol: str,
+    confidence: str,
+    cohort: list[str],
+    disease: str | None,
+    disease_id: str | None,
+    literature: list[str] | None = None,
+    moi: tuple[str, ...] | None = ('BIALLELIC',),
+    name: str = 'Panel one',
+) -> tuple:
+    """One parsed row in PARSED_COLUMNS order."""
+    moi_list = list(moi) if moi is not None else None
+    return (study, symbol, name, confidence, cohort, disease, disease_id, literature, moi_list, *PARSED_CONSTANTS)
 
 
 def _polars_rows(raw: pl.DataFrame) -> list[str]:
     return sorted(repr(r) for r in raw.rows())
 
 
-def test_escaped_quote_reads_like_spark(spark: SparkSession, tmp_path: Path) -> None:
+def test_escaped_quote_matches_spark_baseline(tmp_path: Path) -> None:
     rows = [
         _row(symbol='A', phenotypes='"say \\"hi\\" disease, 154700"'),
         _row(symbol='B', phenotypes='"back\\\\slash disease"'),
@@ -429,12 +479,22 @@ def test_escaped_quote_reads_like_spark(spark: SparkSession, tmp_path: Path) -> 
         'back\\slash disease',
         'plain \\n text',
     ]
-    columns, expected = _spark_parse(spark, evidence, panels)
-    assert raw.columns == columns
-    assert _polars_rows(raw) == expected
+    # expected rows captured from the removed pyspark implementation
+    assert raw.columns == PARSED_COLUMNS
+    assert _polars_rows(raw) == sorted(
+        map(
+            repr,
+            [
+                _baseline('1', 'A', 'green', ['say "hi" disease, 154700'], 'say "hi" disease', 'OMIM:154700'),
+                _baseline('1', 'B', 'green', ['back\\slash disease'], 'back\\slash disease', None),
+                _baseline('1', 'C', 'green', ['plain \\n text'], 'plain \\n text', None),
+                _baseline('1', 'D', 'green', ['"unescaped" inner'], '"unescaped" inner', None, name='quoted name'),
+            ],
+        )
+    )
 
 
-def test_parse_matches_spark_on_a_mixed_file(spark: SparkSession, tmp_path: Path) -> None:
+def test_parse_matches_spark_baseline_on_a_mixed_file(tmp_path: Path) -> None:
     rows = [
         _row(symbol=f'G{i}', panel_id=str(1 + i % 3), confidence=['green', 'amber', 'red'][i % 3], phenotypes=p)
         for i, p in enumerate(PHENOTYPES)
@@ -453,9 +513,52 @@ def test_parse_matches_spark_on_a_mixed_file(spark: SparkSession, tmp_path: Path
     ]
     evidence, panels_path = _files(tmp_path, rows, panels)
     raw = parse_panel_app(evidence, panels_path).collect()
-    columns, expected = _spark_parse(spark, evidence, panels_path)
-    assert raw.columns == columns
-    assert _polars_rows(raw) == expected
+    # expected rows captured from the removed pyspark implementation
+    aarskog = ['Aarskog-Scott syndrome, 305400', 'Mental retardation, X-linked syndromic 16, 305400']
+    m_cohort = ['Disease', 'Disease, 154700', 'Disease (154700)']
+    expected = [
+        _baseline('1', 'G0', 'green', ['A (HP:0006574)', 'B'], 'A', 'HP:0006574', ['1', '2', '3']),
+        _baseline('1', 'G0', 'green', ['A (HP:0006574)', 'B'], 'B', None, ['1', '2', '3']),
+        _baseline('1', 'G12', 'green', ['a', 'b', 'c'], 'a', None),
+        _baseline('1', 'G12', 'green', ['a', 'b', 'c'], 'b', None),
+        _baseline('1', 'G12', 'green', ['a', 'b', 'c'], 'c', None),
+        _baseline('1', 'G15', 'green', ['Disease no OMIM number'], 'Disease  number', None),
+        _baseline('1', 'G18', 'green', ['Disease (PMID: 12345).'], 'Disease', None),
+        _baseline('1', 'G21', 'green', ['Marfan syndrome, 154700'], 'Marfan syndrome', 'OMIM:154700'),
+        _baseline('1', 'G24', 'green', ['Disease, OrphaNet: ORPHA558'], 'Disease', 'ORPHA:558'),
+        _baseline('1', 'G27', 'green', ['Disease HP:0001250'], 'Disease', 'HP:0001250'),
+        _baseline('1', 'G3', 'green', ['Waardenburg syndrome, type 3'], 'Waardenburg syndrome, type 3', None, ['00']),
+        _baseline('1', 'G30', 'green', ['Disease 1234567'], 'Disease7', 'OMIM:123456'),
+        _baseline('1', 'G33', 'green', ['Disease ' + ARABIC_DIGITS], 'Disease ' + ARABIC_DIGITS, None),
+        _baseline('1', 'G6', 'green', aarskog, 'Aarskog-Scott syndrome', 'OMIM:305400'),
+        _baseline('1', 'G6', 'green', aarskog, 'Mental retardation, X-linked syndromic 16', 'OMIM:305400'),
+        _baseline('1', 'G9', 'green', ['1234567', 'Abc'], '7', 'OMIM:123456'),
+        _baseline('1', 'G9', 'green', ['1234567', 'Abc'], 'Abc', None),
+        _baseline('1', 'M', 'green', m_cohort, 'Disease', 'OMIM:154700', moi=None),
+        _baseline('1', 'M', 'green', m_cohort, 'Disease', None, moi=None),
+        _baseline('1', 'Q', 'green', ['?x', 'y'], 'y', None),
+        _baseline('2', 'G1', 'amber', ['Abruzzo-Erickson syndrome'], 'Abruzzo-Erickson syndrome', None, ['5']),
+        _baseline('2', 'G10', 'amber', ['a '], 'a', None),
+        _baseline('2', 'G13', 'amber', ['Disease (no OMIM number)'], 'Disease', None),
+        _baseline('2', 'G16', 'amber', ['Disease NO OMIM NUMBER OR DISEASE'], 'Disease  NUMBER OR DISEASE', None),
+        _baseline('2', 'G19', 'amber', ['Disease from PMID 12345'], 'Disease', None),
+        _baseline('2', 'G22', 'amber', ['Disease OMIM:154700'], 'Disease', 'OMIM:154700'),
+        _baseline('2', 'G25', 'amber', ['Disease, Orphanet_558'], 'Disease', 'Orphanet:558'),
+        _baseline('2', 'G28', 'amber', ['Disease, MONDO_0007254'], 'Disease', 'MONDO:0007254'),
+        _baseline('2', 'G31', 'amber', ['Disease #154700:.'], 'Disease', 'OMIM:154700'),
+        _baseline(
+            '2',
+            'G4',
+            'amber',
+            ['Ectrodactyly, ectodermal dysplasia, and cleft lip/palate syndrome, 3'],
+            'Ectrodactyly, ectodermal dysplasia, and cleft lip/palate syndrome, 3',
+            None,
+        ),
+        _baseline('2', 'G7', 'amber', ['123456', 'Abc'], 'Abc', None),
+        _baseline('2', 'G7', 'amber', ['123456', 'Abc'], None, 'OMIM:123456'),
+    ]
+    assert raw.columns == PARSED_COLUMNS
+    assert _polars_rows(raw) == sorted(map(repr, expected))
 
 
 def _sources(root: Path, rows: list[list[str | None]], panels: list[dict] | None = None) -> dict[str, str]:
