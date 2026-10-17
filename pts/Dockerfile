@@ -2,7 +2,7 @@ FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /uvx /bin/
 
 RUN apt-get update && \
-  apt-get install -y --no-install-recommends jq git && \
+  apt-get install -y --no-install-recommends git && \
   rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

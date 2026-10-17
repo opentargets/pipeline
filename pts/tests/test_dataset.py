@@ -6,10 +6,11 @@ import gzip
 import json
 from pathlib import Path
 
+import openpyxl
 import polars as pl
 import pytest
 
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, scan_datasets, write_dataset
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -328,3 +329,30 @@ def test_scan_datasets_ignores_success_markers_and_crc_sidecars(tmp_path: Path) 
     frame = scan_datasets(str(tmp_path / 'evidence_*')).collect()
 
     assert frame['targetId'].to_list() == ['t1']
+
+
+def test_read_spreadsheet_gives_strings_like_pandas(tmp_path: Path) -> None:
+    columns = {
+        'd': ['x', None, ' '],
+        'a': [1, 2, 3],
+        'b': [1.5, None, 2.0],
+        'c': [True, False, None],
+        'm': [1.0, '-', 'NaN'],
+        'n': ['NA', 'n/a', ' NA'],
+    }
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    ws.append(list(columns))
+    for row in zip(*columns.values(), strict=True):
+        ws.append(list(row))
+    wb.save(tmp_path / 'cells.xlsx')
+
+    df = read_spreadsheet(str(tmp_path / 'cells.xlsx'), 'S')
+
+    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
+    assert df.rows() == [
+        ('x', '1', '1.5', '1', '1', None),
+        (None, '2', None, '0', '-', None),
+        (' ', '3', '2.0', None, None, ' NA'),
+    ]

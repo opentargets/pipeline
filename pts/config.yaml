@@ -283,10 +283,8 @@ steps:
 
   #: CHEMICAL PROBES STEP :#########################################################################
   chemical_probes:
-    - name: pyspark chemical probes
-      pyspark: chemical_probes
-      settings:
-        partition_count: 2
+    - name: transform chemical probes
+      transformer: chemical_probes
       source:
         probes_excel: input/target/chemicalprobes/probes.xlsx
         drugs_csv: input/target/chemicalprobes/probes_links.csv
@@ -297,8 +295,8 @@ steps:
 
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
-    - name: pyspark coding_variant view
-      pyspark: coding_variant
+    - name: transform coding_variant view
+      transformer: coding_variant
       source:
         variant: output/variant
         target: output/target
@@ -345,113 +343,43 @@ steps:
       transformer: so
   ##################################################################################################
 
-  #: PRE_TARGET STEP :##############################################################################
-  pre_target:
-    - name: unzip subcellular location
-      source: input/target/hpa/subcellular_location.tsv.zip
-      destination: intermediate/target/hpa/subcellular_location.tsv
-    - name: gzip subcellular location
-      requires:
-        - unzip subcellular location
-      source: intermediate/target/hpa/subcellular_location.tsv
-      destination: intermediate/target/hpa/subcellular_location.tsv.gz
-
-    - name: csv_to_parquet subcellular location ssl
-      source: input/target/hpa/subcellular_locations_ssl.tsv
-      destination: intermediate/target/hpa/subcellular_locations_ssl.parquet
-      separator: "\t"
-
-    # gnomAD ships the constraint metrics bgzip-compressed. Converting to parquet
-    # here keeps the decompression off the spark cluster; `infer_schema: false`
-    # preserves the raw text the target step parses itself.
-    - name: csv_to_parquet gnomad constraint metrics
-      source: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
-      destination: intermediate/target/gnomad/constraint_metrics.parquet
-      separator: "\t"
-      infer_schema: false
-
-    - name: download ensembl
-      source: input/target/ensembl/homo_sapiens.json
-    - name: transform ensembl
-      requires:
-        - download ensembl
-      transformer: ensembl
-      source: input/target/ensembl/homo_sapiens.json
-      destination: intermediate/target/ensembl/homo_sapiens.parquet
-
-    - name: explode_glob homology
-      glob: input/target/homologue/gene_dictionary/*.json
-      do:
-        - name: transform ${match_stem} to parquet
-          source: ${uri}
-          destination: intermediate/target/homologue/gene_dictionary/${match_path}/${match_stem}.parquet
-          transformer: homology
-
-    - name: transform uniprot
-      transformer: uniprot
-      source: input/target/uniprot/uniprot.txt.gz
-      destination: intermediate/target/uniprot/uniprot.parquet
-
-    - name: transform chembl_target_class_dump
-      transformer: chembl_target_class_dump
-      source: input/chembl/chembl.tar.gz
-      destination:
-        target_dictionary: intermediate/chembl/target_dictionary.parquet
-        target_components: intermediate/chembl/target_components.parquet
-        component_sequences: intermediate/chembl/component_sequences.parquet
-        component_class: intermediate/chembl/component_class.parquet
-        protein_classification: intermediate/chembl/protein_classification.parquet
-  ##################################################################################################
-
-  #: TARGET STEP (pyspark) :#######################################################################
+  #: TARGET STEP :##################################################################################
   target:
-    - name: pyspark target
-      pyspark: target
-      settings:
-        partition_count: 3
+    - name: transform target
+      transformer: target
       source:
-        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
-        gene_code: input/target/gencode/gencode.gff3.gz
-        genetic_constraints: intermediate/target/gnomad/constraint_metrics.parquet
+        ensembl: input/ensembl/homo_sapiens
+        chembl: input/chembl/chembl.tar.gz
         gene_ontology_human: input/target/go/goa_human.gaf.gz
         gene_ontology_rna: input/target/go/goa_human_rna.gaf.gz
         gene_ontology_rna_lookup: input/target/go/ensembl.tsv
         gene_ontology_eco_lookup: input/target/go/goa_human_eco.gpa.gz
+        gnomad: input/target/gnomad/gnomad_constraint_metrics.tsv.bgz
         hallmarks: input/target/hallmarks/cosmic-hallmarks.tsv.gz
         hgnc: input/target/genenames/hgnc_complete_set.json
-        hpa: intermediate/target/hpa/subcellular_location.tsv.gz
-        hpa_sl: intermediate/target/hpa/subcellular_locations_ssl.parquet
+        hpa: input/target/hpa/subcellular_location.tsv.zip
+        hpa_sl: input/target/hpa/subcellular_locations_ssl.tsv
         ncbi: input/target/ncbi/Homo_sapiens.gene_info.gz
         reactome_etl: output/reactome
         reactome_pathways: input/target/reactome/Ensembl2Reactome.txt
-        uniprot: intermediate/target/uniprot/uniprot.parquet
+        uniprot: input/target/uniprot/uniprot.txt.gz
         uniprot_ssl: input/target/uniprot/uniprot-ssl.tsv.gz
-        target_dictionary: intermediate/chembl/target_dictionary.parquet
-        target_components: intermediate/chembl/target_components.parquet
-        component_sequences: intermediate/chembl/component_sequences.parquet
-        component_class: intermediate/chembl/component_class.parquet
-        protein_classification: intermediate/chembl/protein_classification.parquet
       destination: output/target
   ##################################################################################################
 
   #: TRANSCRIPT STEP :#################################################################################
   transcript:
-    - name: pyspark transcript
-      pyspark: transcript
-      settings:
-        partition_count: 2
+    - name: transform transcript
+      transformer: transcript
       source:
-        gene_code: input/target/gencode/gencode.gff3.gz
-        ensembl: intermediate/target/ensembl/homo_sapiens.parquet
+        ensembl: input/ensembl/homo_sapiens
       destination: output/transcript
   ##################################################################################################
 
   #: TARGET_SAFETY_EVENT STEP :##########################################################################
   target_safety_event:
-    - name: pyspark target_safety_event
-      pyspark: target_safety_event
-      settings:
-        partition_count: 2
+    - name: transform target_safety_event
+      transformer: target_safety_event
       source:
         adverse_events: input/target/safety/adverse_effects.tsv
         safety_risks: input/target/safety/safety_risks.tsv
@@ -466,10 +394,8 @@ steps:
 
   #: TARGET_TRACTABILITY STEP :#########################################################################
   target_tractability:
-    - name: pyspark target_tractability
-      pyspark: target_tractability
-      settings:
-        partition_count: 2
+    - name: transform target_tractability
+      transformer: target_tractability
       source:
         tractability: input/target/tractability/tractability.tsv
         target: output/target
@@ -478,16 +404,29 @@ steps:
 
   #: HOMOLOGY STEP :#####################################################################################
   homology:
-    - name: pyspark homology
-      pyspark: homology
-      settings:
-        partition_count: 2
+    - name: transform homology
+      transformer: homology
       source:
-        homology_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
-        homology_coding_proteins: input/target/homologue/homologies/*.tsv.gz
-        homology_gene_dictionary: intermediate/target/homologue/gene_dictionary/*.parquet
+        species_dictionary: input/target/homologue/species_EnsemblVertebrates.txt
+        homologies: input/target/homologue/homologies
+        ensembl: input/ensembl
         target: output/target
       destination: output/homology
+      settings:
+        ensembl_species:
+          - caenorhabditis_elegans
+          - canis_lupus_familiaris
+          - cavia_porcellus
+          - danio_rerio
+          - drosophila_melanogaster
+          - macaca_mulatta
+          - mus_musculus
+          - oryctolagus_cuniculus
+          - pan_troglodytes
+          - rattus_norvegicus
+          - sus_scrofa
+          - xenopus_tropicalis
+          - homo_sapiens
   ##################################################################################################
 
   #: TARGET_VIEW STEP :##################################################################################
@@ -508,8 +447,8 @@ steps:
 
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
   target_gene_essentiality:
-    - name: pyspark gene_essentiality
-      pyspark: gene_essentiality
+    - name: transform gene_essentiality
+      transformer: gene_essentiality
       source:
         models: input/target/gene-essentiality/depmap/Model.csv
         essential_genes: input/target/gene-essentiality/depmap/CRISPRInferredCommonEssentials.csv
@@ -522,7 +461,6 @@ steps:
       destination: output/target_essentiality
       settings:
         keep_only_essentials: false
-        partition_count: 4
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
@@ -786,7 +724,7 @@ steps:
       transformer: drug_mechanism_of_action
       source:
         chembl: input/chembl/chembl.tar.gz
-        target: intermediate/target/ensembl/homo_sapiens.parquet
+        target: output/target
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
@@ -896,8 +834,8 @@ steps:
 
   #: TARGET_PRIORITISATION STEP :###################################################################
   target_prioritisation:
-    - name: pyspark target_prioritisation
-      pyspark: target_prioritisation
+    - name: transform target_prioritisation
+      transformer: target_prioritisation
       source:
         targets: output/target
         tractability: output/target_tractability
@@ -911,8 +849,6 @@ steps:
         uniprot_slterms: input/target_prioritisation/uniprot_locations.tsv.gz
         mouse_pheno_scores: input/target_prioritisation/mouse_pheno_scores.csv
       destination: output/target_prioritisation
-      properties:
-        spark.driver.memory: 16g
   ##################################################################################################
 
   #: ASSOCIATION STEP :#############################################################################
@@ -1564,8 +1500,8 @@ steps:
 
   #: SEARCH_EBI STEP :##############################################################################
   search_ebi:
-    - name: pyspark search_ebi
-      pyspark: search_ebi
+    - name: transform search_ebi
+      transformer: search_ebi
       source:
         disease: output/disease
         target: output/target
@@ -1574,8 +1510,6 @@ steps:
       destination:
         associations: view/search_ebi_associations
         evidence: view/search_ebi_evidence
-      properties:
-        spark.driver.memory: 8g
   ##################################################################################################
 
   #: LITERATURE STEPS (run on pts_literature cluster) :#############################################
