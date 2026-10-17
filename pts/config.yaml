@@ -559,13 +559,18 @@ steps:
 
   #: EVIDENCE_ORPHANET STEP :#######################################################################
   evidence_orphanet:
-    - name: pyspark orphanet
-      pyspark: orphanet
+    - name: transform evidence.orphanet
+      transformer: evidence.orphanet
       source:
         evidence: input/evidence/orphanet.xml
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/orphanet.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/orphanet
+        evidence: output/evidence_orphanet
   ##################################################################################################
 
   #: EVIDENCE_CLINGEN STEP :#######################################################################
