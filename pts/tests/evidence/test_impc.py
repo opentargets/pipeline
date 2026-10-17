@@ -356,6 +356,19 @@ def test_dedup_tie_is_deterministic() -> None:
     assert first.equals(second)
 
 
+def test_dedup_output_order_does_not_depend_on_input_order() -> None:
+    # one model and gene fanned out to several human genes and mapped diseases, all tied on score
+    rows = [
+        {'resourceScore': 70.0, 'targetFromSourceId': t, 'diseaseFromSourceMappedId': d}
+        for t in ['ENSG3', 'ENSG1', 'ENSG2']
+        for d in ['EFO_2', None, 'EFO_1']
+    ] + [{'resourceScore': 90.0, 'targetFromSourceId': 'ENSG9'}]
+    first = deduplicate(_frame(rows))
+    assert first.height == 10
+    for seed in range(5):
+        assert deduplicate(_frame(rows).sample(fraction=1.0, shuffle=True, seed=seed)).equals(first)
+
+
 def test_tie_break_order() -> None:
     assert TIE_BREAK == [MODEL_ID, 'diseaseFromSourceId', 'targetInModelMgiId', 'targetInModelEnsemblId']
 

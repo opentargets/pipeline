@@ -264,7 +264,12 @@ def deduplicate(evidence: pl.DataFrame) -> pl.DataFrame:
     logger.info(f'{tied} of {groups} impc evidence partitions tie on the top resourceScore')
     return (
         evidence
-        .sort(['resourceScore', *TIE_BREAK], descending=[True] + [False] * len(TIE_BREAK), nulls_last=True)
+        # the unique fields make the output order total
+        .sort(
+            ['resourceScore', *TIE_BREAK, *UNIQUE_FIELDS],
+            descending=[True] + [False] * (len(TIE_BREAK) + len(UNIQUE_FIELDS)),
+            nulls_last=True,
+        )
         .unique(subset=UNIQUE_FIELDS, keep='first', maintain_order=True)
         .drop(MODEL_ID, strict=False)
         .with_columns(datasourceId=pl.lit('impc'), datatypeId=pl.lit('animal_model'))

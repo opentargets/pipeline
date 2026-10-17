@@ -102,6 +102,15 @@ def test_disease_lut_keeps_duplicate_rows(tmp_path: Path) -> None:
     assert sorted(build_disease_lut(path)['diseaseFromSourceMappedId']) == ['EFO_1', 'EFO_1', 'OLD_1']
 
 
+def test_disease_lut_order_does_not_depend_on_input_order(tmp_path: Path) -> None:
+    rows = {'id': ['EFO_2', 'EFO_1', 'EFO_3'], 'obsoleteTerms': [['OLD'], ['OLD', 'OLD_1'], None]}
+    reversed_rows = {k: v[::-1] for k, v in rows.items()}
+
+    lut = build_disease_lut(_disease(tmp_path / 'a', rows))
+    assert lut.equals(build_disease_lut(_disease(tmp_path / 'b', reversed_rows)))
+    assert lut.filter(pl.col('diseaseFromSourceMappedId') == 'OLD')['diseaseId'].to_list() == ['EFO_1', 'EFO_2']
+
+
 # --------------------------------------------------------------------------- target
 
 
@@ -121,6 +130,21 @@ def test_target_lut_keys_on_every_identifier(tmp_path: Path) -> None:
     assert set(lut['targetFromSourceId']) == {'ENSG1', 'P1', 'P2', 'ABC1'}
     assert set(lut['TSorOncogene']) == {'oncogene'}
     assert set(lut['biotype']) == {'protein_coding'}
+
+
+def test_target_lut_order_does_not_depend_on_input_order(tmp_path: Path) -> None:
+    rows = {
+        'id': ['ENSG2', 'ENSG1', 'ENSG3'],
+        'biotype': ['protein_coding'] * 3,
+        'approvedSymbol': ['SYM', 'SYM', 'OTHER'],
+        'proteinIds': [[{'id': 'P1', 'source': 'uniprot'}], [{'id': 'P1', 'source': 'uniprot'}], None],
+        'hallmarks': [None] * 3,
+    }
+    reversed_rows = {k: v[::-1] for k, v in rows.items()}
+
+    lut = build_target_lut(_target(tmp_path / 'a', rows))
+    assert lut.equals(build_target_lut(_target(tmp_path / 'b', reversed_rows)))
+    assert lut.filter(pl.col('targetFromSourceId') == 'SYM')['targetId'].to_list() == ['ENSG1', 'ENSG2']
 
 
 def test_target_lut_deduplicates_repeated_identifiers(tmp_path: Path) -> None:
@@ -514,6 +538,15 @@ class TestValidateDiseases:
         assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_DISEASE]]
 
 
+    def test_fan_out_follows_lookup_order(self) -> None:
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['OLD'] * 50 + ['EFO_9'] * 50, 'n': list(range(100))})
+        for ids in (['EFO_1', 'EFO_2', 'EFO_3'], ['EFO_3', 'EFO_1', 'EFO_2']):
+            lut = pl.DataFrame({'diseaseFromSourceMappedId': ['OLD'] * 3, 'diseaseId': ids})
+            out = Evidence(lf).validate_diseases(lut).lf.collect()
+            assert out['n'].to_list() == [n for n in range(50) for _ in ids] + list(range(50, 100))
+            assert out['diseaseId'].to_list()[:150] == ids * 50
+
+
 class TestValidateTarget:
     def test_invalid_target_is_flagged(self) -> None:
         lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'NOPE']})
@@ -523,6 +556,14 @@ class TestValidateTarget:
         out = Evidence(lf).validate_target(lut).lf.collect()
         assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_TARGET]]
         assert 'biotype' not in out.columns
+
+    def test_fan_out_follows_lookup_order(self) -> None:
+        lf = pl.LazyFrame({'targetFromSourceId': ['SYM'] * 50 + ['NOPE'] * 50, 'n': list(range(100))})
+        for ids in (['T1', 'T2', 'T3'], ['T3', 'T1', 'T2']):
+            lut = pl.DataFrame({'targetId': ids, 'biotype': ['protein_coding'] * 3, 'targetFromSourceId': ['SYM'] * 3})
+            out = Evidence(lf).validate_target(lut).lf.collect()
+            assert out['n'].to_list() == [n for n in range(50) for _ in ids] + list(range(50, 100))
+            assert out['targetId'].to_list()[:150] == ids * 50
 
     def test_invalid_biotype_is_flagged(self) -> None:
         lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'ENSG2']})

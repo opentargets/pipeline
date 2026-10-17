@@ -138,7 +138,7 @@ def _join_matching_spark_order(lf: pl.LazyFrame, other: pl.LazyFrame, on: str, h
     """
     left_columns = lf.collect_schema().names()
     right_only = [c for c in other.collect_schema().names() if c != on]
-    joined = lf.join(other, on=on, how=how, maintain_order='left')
+    joined = lf.join(other, on=on, how=how, maintain_order='left_right')
     return joined.select(on, *[c for c in left_columns if c != on], *right_only)
 
 
