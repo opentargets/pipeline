@@ -338,15 +338,7 @@ class TestRenderForHashStringAndList:
 
 
 class TestRenderForHashFloat:
-    """Float64 is the one leaf type this module deliberately does NOT render like spark.
-
-    Spark uses java's `Double.toString`, which switches to scientific notation outside
-    `0.001 <= |x| < 1e7`; polars' cast does not. Reproducing java cost a per-element python UDF,
-    measured 56x slower than the native cast, for a guarantee only the evidence `id` consumed --
-    and matching the release's ids is not a requirement. So the contract here is no longer
-    "matches spark" but FAITHFUL and DETERMINISTIC: every finite double round-trips, so distinct
-    values keep distinct renderings and the de-duplication hash still ranks rows meaningfully.
-    """
+    """Float64 renders as java's `Double.toString` (spark parity in `tests/test_spark_strings.py`)."""
 
     @pytest.mark.parametrize(
         ('value', 'expected'),
@@ -362,34 +354,31 @@ class TestRenderForHashFloat:
         ],
     )
     def test_renders_the_common_range_exactly_as_spark_does(self, value: float, expected: str) -> None:
-        # Inside 0.001 <= |x| < 1e7 the native cast and java agree, so these renderings are
-        # unchanged from the measured spark values (task-8-report.md). 89% of real float values in
-        # the staged evidence outputs fall in this range.
         df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
         assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == [expected]
 
     @pytest.mark.parametrize(
-        ('value', 'spark_renders', 'we_render'),
+        ('value', 'spark_renders'),
         [
-            (1e-10, '1.0E-10', '1e-10'),
-            (0.0001, '1.0E-4', '0.0001'),
-            (10000000.0, '1.0E7', '10000000.0'),
-            (123456789.123, '1.23456789123E8', '123456789.123'),
-            (1e15, '1.0E15', '1000000000000000.0'),
+            (1e-10, '1.0E-10'),
+            (0.0001, '1.0E-4'),
+            (10000000.0, '1.0E7'),
+            (123456789.123, '1.23456789123E8'),
+            (1e15, '1.0E15'),
         ],
     )
-    def test_diverges_from_spark_outside_the_common_range(
-        self, value: float, spark_renders: str, we_render: str
-    ) -> None:
-        # Pinned as an intended divergence rather than left implicit -- the spark renderings are
-        # the measured ones this used to produce. If a future change makes these match spark
-        # again, that is a signal the slow UDF has crept back in.
+    def test_renders_scientific_notation_as_spark_does(self, value: float, spark_renders: str) -> None:
         df = pl.DataFrame({'v': [value]}, schema={'v': pl.Float64})
+        assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == [spark_renders]
 
-        rendered = df.select(render_for_hash('v', pl.Float64).alias('o'))['o'][0]
+    def test_float_hash_rendering_is_java(self) -> None:
+        df = pl.DataFrame({'v': [1e-5]}, schema={'v': pl.Float64})
+        assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == ['1.0E-5']
 
-        assert rendered == we_render
-        assert rendered != spark_renders
+    def test_float32_is_widened_to_a_double(self) -> None:
+        df = pl.DataFrame({'v': [0.1, 1e-5]}, schema={'v': pl.Float32})
+        got = df.select(render_for_hash('v', pl.Float32).alias('o'))['o'].to_list()
+        assert got == ['0.10000000149011612', '9.999999747378752E-6']
 
     def test_null_stays_null(self) -> None:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})
@@ -683,14 +672,12 @@ class TestHarmonisation:
 
 
 class TestSparkParityForCastToString:
-    """Direct spark-vs-polars checks for `render_for_hash`, for the dtypes that still match.
+    """Direct spark-vs-polars checks for `render_for_hash`.
 
     Runs both engines against the same data and diffs the output, rather than pinning a
     hand-copied expected string that could quietly drift from real spark.
 
-    `Float64` is absent on purpose: it is rendered with polars' native cast now and diverges from
-    spark outside `0.001 <= |x| < 1e7`. That divergence is pinned as intended in
-    `TestRenderForHashFloat` instead.
+    `Float64` leaves are checked against spark in `tests/test_spark_strings.py`.
     """
 
     def test_list_string_matches_spark(self, spark) -> None:

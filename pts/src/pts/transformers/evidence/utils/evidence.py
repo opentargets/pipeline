@@ -242,7 +242,7 @@ class Evidence:
     def validate_uniqueness(self) -> Evidence:
         """Flag every row but one within each `id`, ordered by a content hash.
 
-        The hash input follows spark's, though it no longer produces spark's digest -- see below:
+        The hash input follows spark's:
 
         * `id` is included in the hash. Spark iterates `self.df.columns`, which by this point
           already includes `id` (added by `assign_evidence_identifier`); an earlier version of
@@ -257,13 +257,8 @@ class Evidence:
           order. That ordering also reaches the published parquet, so it is now load-bearing for
           the output's column order regardless of its spark provenance.
 
-        The digests are NOT byte-identical to spark's any more: `render_for_hash` renders
-        `Float64` with polars' native cast rather than java's `Double.toString`, so any row
-        carrying a double outside `0.001 <= |x| < 1e7` hashes differently than spark would. That
-        is deliberate -- matching the release's ids is not a requirement, and the UDF it replaced
-        was 56x slower. What the ranking still needs, and has, is DETERMINISM: the same content
-        always yields the same digest, and distinct content yields distinct digests, so the
-        survivor is stable across runs.
+        The digests match spark's except for a row carrying a double java 17 does not render
+        shortest (see `java_double_to_string`).
 
         Returns:
             Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within

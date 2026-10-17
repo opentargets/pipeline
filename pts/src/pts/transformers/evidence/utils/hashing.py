@@ -6,6 +6,8 @@ from typing import Any
 
 import polars as pl
 
+from pts.transformers.utils.spark_strings import java_double_to_string
+
 
 class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condition, not an error type
     """A dtype `render_for_hash` has no rendering for.
@@ -22,7 +24,7 @@ class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condit
 
 
 def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
-    """Render a String/Int64/Boolean/Float64 leaf as a string, for hashing.
+    """Render a String/Int64/Boolean/Float64/Float32 leaf as a string, for hashing.
 
     Nulls are preserved (not substituted) here -- the caller decides whether a null means "the
     whole column is null" (real `None`, `render_for_hash`'s job) or "a nested element/field
@@ -32,17 +34,8 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     long-to-string and boolean-to-string agree digit-for-digit and `true`/`false`-for-`true`/
     `false` with `.cast(pl.String)`.
 
-    FLOAT64 DOES NOT MATCH SPARK, deliberately. Spark renders a double with java's
-    `Double.toString`, which switches to scientific notation outside `0.001 <= |x| < 1e7` --
-    polars' cast does not, so e.g. `1e-5` is `'1.0E-5'` in spark and `'0.00001'` here. That was
-    reproduced by a per-element python UDF until matching the release's evidence `id` stopped
-    being a requirement; the UDF measured 56x slower than the native cast (8.64s against 0.16s
-    per 4M doubles) and 11% of real float values in the staged outputs fall outside the range
-    where the two agree, so it was doing real work on real data for a guarantee nothing consumes.
-
-    What the rendering must still be is FAITHFUL and DETERMINISTIC: it round-trips to the same
-    double (`float(rendered) == value` for every finite value, including subnormals), so distinct
-    values keep distinct renderings and the de-duplication hash still ranks rows meaningfully.
+    Float64 renders as java's `Double.toString`, as spark does (`java_double_to_string`);
+    Float32 is widened to a double first.
 
     Args:
         expr: the leaf expression to render.
@@ -56,7 +49,9 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     Raises:
         UnsupportedIdentifierField: for a dtype this function has not been measured against.
     """
-    if dtype in (pl.String, pl.Int64, pl.Boolean, pl.Float64):
+    if dtype in (pl.Float64, pl.Float32):
+        return java_double_to_string(expr.cast(pl.Float64))
+    if dtype in (pl.String, pl.Int64, pl.Boolean):
         return expr.cast(pl.String)
     msg = f'render_for_hash: unsupported scalar dtype {dtype!r} for column {name!r}'
     raise UnsupportedIdentifierField(msg)
@@ -111,18 +106,13 @@ def render_for_hash(name: str, dtype: pl.DataType) -> pl.Expr:
     (`literature`, `urls`, `qualityControls`, ...). `validate_uniqueness` hashes EVERY column, so
     some hand-written rendering of the nested shapes is unavoidable.
 
-    The contract is FAITHFUL and DETERMINISTIC, not spark-identical -- matching the release's
-    evidence ids is not a requirement. Distinct values must keep distinct renderings, or the
-    de-duplication hash stops ranking rows meaningfully and the surviving row among a set of
-    duplicates becomes arbitrary.
-
-    Most shapes DO still render exactly as spark's `CAST(x AS STRING)` does, measured against real
-    spark (task-8-report.md / task-9-report.md) rather than assumed -- the renderings were written
-    for parity and kept because they are as good as any other stable choice:
+    Every shape renders as spark's `CAST(x AS STRING)` does, measured against real spark
+    (task-8-report.md / task-9-report.md) rather than assumed:
 
     * String: identity cast.
     * `Int64`, `Boolean`: identical rendering in both engines -- see `_cast_scalar_to_string`.
-    * `Float64`: deliberately NOT spark's rendering -- see `_cast_scalar_to_string`.
+    * `Float64`: java's `Double.toString` -- see `java_double_to_string` for where java 17 is
+      not shortest and this is.
     * `List(...)`: spark renders `['1','2']` as `'[1, 2]'`, `[]` as `'[]'`, a null list as null,
       and a null *element* -- of any supported element type, not just String -- as the literal
       token `null`.
