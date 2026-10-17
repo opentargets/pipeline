@@ -11,6 +11,7 @@ from otter.config.model import Config
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
+from pts.transformers.utils.spark_strings import regexp_extract
 
 ALTERATIONTYPE2FUNCTIONCSQ: dict[str, str | None] = {
     # TODO: Map BIA
@@ -98,11 +99,6 @@ def initcap(value: pl.Expr) -> pl.Expr:
         .list.eval(pl.element().str.slice(0, 1).str.to_uppercase() + pl.element().str.slice(1))
         .list.join(' ')
     )
-
-
-def regexp_extract(value: pl.Expr, pattern: str, group: int) -> pl.Expr:
-    """Spark's `regexp_extract`: the group's match, empty if there is none, null for a null value."""
-    return pl.when(value.is_not_null()).then(value.str.extract(pattern, group).fill_null(''))
 
 
 def explode_alterations(frame: pl.DataFrame) -> pl.DataFrame:

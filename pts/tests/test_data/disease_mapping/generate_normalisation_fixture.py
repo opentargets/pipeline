@@ -1,7 +1,8 @@
 """Regenerate `normalisation.parquet`: OnToma's own spark expressions and spark-nlp pipeline over a label sample.
 
-The test suite runs without spark-nlp, so the polars port of OnToma is checked against this
-recorded output instead. Rerun after bumping ontoma or spark-nlp, then rerun the tests:
+The test suite cannot run the real spark-nlp pipeline, which needs its jar from Maven and Java
+17+, so the polars port of OnToma is checked against this recorded output instead. Rerun after
+bumping ontoma or spark-nlp, then rerun the tests:
 
     cd pts && JAVA_HOME=<java 17+> PYSPARK_PYTHON=$PWD/.venv/bin/python \\
         uv run python tests/test_data/disease_mapping/generate_normalisation_fixture.py <disease index parquet>

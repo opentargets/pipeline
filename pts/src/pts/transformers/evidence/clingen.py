@@ -17,7 +17,7 @@ from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
-from pts.transformers.utils.disease_mapping.query import spark_trim
+from pts.transformers.utils.spark_strings import spark_trim
 
 #: The file's columns, in order. Its own header row sits among the rows skipped below.
 COLUMNS = [
@@ -118,5 +118,5 @@ def clingen(
         parse_clingen(source['evidence']),
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
-    )
-    run_evidence(raw, CLINGEN, disease=source['disease'], target=source['target'], destination=destination)
+    ).collect()
+    run_evidence(raw.lazy(), CLINGEN, disease=source['disease'], target=source['target'], destination=destination)

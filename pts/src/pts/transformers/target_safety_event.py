@@ -20,6 +20,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.spark_strings import spark_trim
 from pts.transformers.utils.target import ensg_lookup
 
 EVIDENCE_UNIQUE_COLUMNS = ['id', 'targetFromSourceId', 'event', 'eventId', 'datasource', 'effects', 'literature', 'url']
@@ -67,11 +68,6 @@ AE_STUDY_TYPES = {
 
 def _null() -> pl.Expr:
     return pl.lit(None, dtype=pl.String)
-
-
-def _trim(expr: pl.Expr) -> pl.Expr:
-    """Strip spaces only, as spark's `trim` does."""
-    return expr.str.strip_chars(' ')
 
 
 def _as_int_text(expr: pl.Expr) -> pl.Expr:
@@ -151,7 +147,7 @@ def process_aop(aopwiki_df: pl.DataFrame) -> pl.DataFrame:
         .select(
             'id',
             # data bug: some events have the substring "NA" at the start
-            _trim(pl.col('event').str.replace(r'^NA', '')).alias('event'),
+            spark_trim(pl.col('event').str.replace(r'^NA', '')).alias('event'),
             'eventId',
             'datasource',
             'url',
@@ -210,7 +206,7 @@ def process_adverse_events(adverse_events_df: pl.DataFrame) -> pl.DataFrame:
 def process_brennan(brennan_df: pl.DataFrame) -> pl.DataFrame:
     """Process the Brennan input JSON prepared by the Target Safety team."""
     direction = pl.col('effects').struct.field('direction')
-    event_id = _trim(pl.col('eventId'))
+    event_id = spark_trim(pl.col('eventId'))
     return brennan_df.rechunk().select(
         'id',
         'event',
@@ -254,7 +250,7 @@ def process_safety_risk(safety_risk_df: pl.DataFrame) -> pl.DataFrame:
 def process_toxcast(toxcast_df: pl.DataFrame) -> pl.DataFrame:
     """Process the ToxCast input table, keyed by gene symbol rather than ENSG id."""
     return toxcast_df.select(
-        _trim(pl.col('official_symbol')).alias('targetFromSourceId'),
+        spark_trim(pl.col('official_symbol')).alias('targetFromSourceId'),
         pl.col('biological_process_target').alias('event'),
         'eventId',
         _biosample(
@@ -321,7 +317,7 @@ def clean_phenotype_to_describe_safety_event(phenotype: pl.Expr) -> pl.Expr:
     pattern = rf'^({JAVA_DOT}*?)(?:{CONTEXT_STOP_WORDS}{JAVA_DOT}*)?{JAVA_END}'
     removed = phenotype.str.replace_all(WORDS_TO_REMOVE, '')
     extracted = pl.when(removed.is_not_null()).then(removed.str.extract(pattern, 1).fill_null(''))
-    cleaned = _trim(extracted.str.replace_all(f'{JAVA_WHITESPACE}+', ' '))
+    cleaned = spark_trim(extracted.str.replace_all(f'{JAVA_WHITESPACE}+', ' '))
     for original, replacement in PHENOTYPE_REPLACEMENTS.items():
         cleaned = pl.when(cleaned == original).then(pl.lit(replacement)).otherwise(cleaned)
     return cleaned

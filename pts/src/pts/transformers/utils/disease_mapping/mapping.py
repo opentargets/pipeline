@@ -45,8 +45,8 @@ from pts.transformers.utils.disease_mapping.query import (
     clean_disease_label,
     determine_track,
     format_identifier,
-    spark_trim,
 )
+from pts.transformers.utils.spark_strings import spark_trim
 
 EntityKind = Literal['label', 'id']
 

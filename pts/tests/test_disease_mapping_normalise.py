@@ -1,8 +1,9 @@
 """Tests for the polars port of OnToma's query preparation and label normalisation.
 
-`test_data/ontoma/normalisation.parquet` holds what OnToma's spark expressions and spark-nlp
-pipeline return for a sample of disease index labels and fixed edge cases; see the generator next
-to it. The suite has no spark-nlp, so that recorded output is the reference.
+`test_data/disease_mapping/normalisation.parquet` holds what OnToma's spark expressions and
+spark-nlp pipeline return for a sample of disease index labels and fixed edge cases; see the
+generator next to it. Running the real pipeline needs the spark-nlp jar from Maven and Java 17+,
+which the suite does not have, so that recorded output is the reference.
 """
 
 from pathlib import Path
@@ -23,8 +24,8 @@ from pts.transformers.utils.disease_mapping.query import (
     clean_disease_label,
     determine_track,
     format_identifier,
-    spark_trim,
 )
+from pts.transformers.utils.spark_strings import spark_trim
 
 FIXTURE = Path(__file__).parent / 'test_data' / 'disease_mapping' / 'normalisation.parquet'
 
