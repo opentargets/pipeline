@@ -208,8 +208,8 @@ def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) ->
     Blanks and `pandas.read_excel`'s default missing-value strings are null, and whitespace is kept.
     With `infer_types`, each column is typed first, as `pandas.read_excel` does, and booleans are
     '1'/'0'; without it, each cell is rendered on its own, as `pandas.read_excel(dtype=str)` does:
-    an integral number without a fraction, a boolean as 'True'/'False'. The workbook is read whole
-    through `StorageHandle`.
+    an integral number without a fraction, a boolean as 'True'/'False'. A sheet with only a header
+    gives its columns and no rows. The workbook is read whole through `StorageHandle`.
 
     Args:
         path: location of the workbook.
@@ -222,8 +222,17 @@ def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) ->
     with StorageHandle(path).open('rb') as f:
         data = f.read()
     sheet = pl.read_excel(
-        io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None if infer_types else 0
+        io.BytesIO(data),
+        sheet_name=sheet_name,
+        engine='openpyxl',
+        infer_schema_length=None if infer_types else 0,
+        raise_if_empty=False,
     )
+    if sheet.width == 0:
+        header = pl.read_excel(
+            io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=0, has_header=False
+        )
+        return pl.DataFrame(schema=dict.fromkeys(header.row(0), pl.String))
     strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
     return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
 

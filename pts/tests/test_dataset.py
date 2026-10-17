@@ -388,3 +388,17 @@ def test_spreadsheet_strings_match_old_reader(tmp_path: Path) -> None:
     assert df.rows() == [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
     assert df['integral'].to_list() == ['5', '0.01', '0.0001', '0', '1000000000000000']
     assert df['flag'].to_list() == ['True', 'False', None, 'True', 'False']
+
+
+@pytest.mark.parametrize('infer_types', [True, False])
+def test_read_spreadsheet_with_a_header_only(tmp_path: Path, infer_types: bool) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    ws.append(['a', 'b'])
+    wb.save(tmp_path / 'header.xlsx')
+
+    df = read_spreadsheet(str(tmp_path / 'header.xlsx'), 'S', infer_types=infer_types)
+
+    assert df.schema == pl.Schema({'a': pl.String, 'b': pl.String})
+    assert df.height == 0
