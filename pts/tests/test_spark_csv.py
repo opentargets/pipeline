@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 from pyspark.sql import SparkSession
 
-from pts.transformers.utils.spark_csv import read_spark_csv
+from pts.transformers.utils.spark_csv import read_spark_csv, spark_csv_double, spark_csv_int
 
 COLUMNS = ['x', 'y', 'z']
 
@@ -206,3 +206,25 @@ def test_empty_columns_raises(tmp_path: Path) -> None:
     path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
     with pytest.raises(ValueError, match='empty'):
         read_spark_csv(str(path), columns=[])
+
+
+#: field texts for the typed parsers; none holds the separator.
+TYPED_FIELDS = [
+    '1', '+5', '-3', '007', ' 5', '5 ', '5.0', '5.', '.5', '1e3', '1E+2', '1.0f', '2.5d', '2.5D ', '0x1p3', 'abc',
+    '1,5', '2147483647', '2147483648', '-2147483648', '-2147483649', 'NaN', '-NaN', '+NaN', 'nan', 'Inf', '-Inf',
+    '+Inf', 'inf', 'Infinity', '-Infinity', '+Infinity', ' Infinity', 'infinity', '-0.0', '1e-400', '1e400',
+    '4.9e-324', '1.7976931348623157e308', '\u0661',
+]  # fmt: skip
+
+
+def test_typed_fields_parse_like_spark(spark: SparkSession, tmp_path: Path) -> None:
+    path = tmp_path / 'typed.csv'
+    path.write_text('i\td\n' + ''.join(f'{v}\t{v}\n' for v in TYPED_FIELDS), encoding='utf-8')
+    expected = spark.read.csv(str(path), header=True, sep='\t', schema='i INT, d DOUBLE').collect()
+    parsed = read_spark_csv(str(path), separator='\t').select(
+        spark_csv_int(pl.col('i')).alias('i'), spark_csv_double(pl.col('d')).alias('d')
+    )
+    assert parsed.schema == pl.Schema({'i': pl.Int32, 'd': pl.Float64})
+    assert [(f, i, repr(d)) for f, (i, d) in zip(TYPED_FIELDS, parsed.rows(), strict=True)] == [
+        (f, r['i'], repr(r['d'])) for f, r in zip(TYPED_FIELDS, expected, strict=True)
+    ]
