@@ -7,7 +7,7 @@ scratchpad:
   string_version: '12.0'
 
 steps:
-  #: LOF CURATION
+  #: LOF CURATION STEP :############################################################################
   lof_curation:
     - name: transform LoF curation annotations
       source: input/lof_curation/curation.csv
