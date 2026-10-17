@@ -789,7 +789,7 @@ class TestValidateUniqueness:
         ev = Evidence(lf)
         schema = ev.lf.collect_schema()
         parts = [render_for_hash(name, schema[name]).fill_null('null') for name in schema.names()]
-        contents = ev.lf.select(pl.concat_str(parts).alias('_content'), 'v').collect()
+        contents = ev.lf.select(pl.concat_str(parts, separator='\x01').alias('_content'), 'v').collect()
         digests = {row['v']: hashlib.sha256(row['_content'].encode()).hexdigest() for row in contents.to_dicts()}
         expected_survivor = min(digests, key=lambda v: digests[v])
 
@@ -829,12 +829,28 @@ class TestValidateUniqueness:
         # does NOT mean including it is a no-op -- sha256 ordering is not preserved under a
         # constant infix (measured: excluding id changed the survivor in 48.1% of 2,000 sampled
         # partitions). id='a', v='1'/'2' is a concrete case where the two schemes disagree: hashing
-        # 'a1'/'a2' (id included) picks '2' as the lower hash, hashing '1'/'2' alone (id excluded,
+        # 'a', '3' (id included) picks '3' as the lower hash, hashing '1'/'3' alone (id excluded,
         # the old behaviour) picks '1' -- so this fails if id were ever dropped from the hash again.
-        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
+        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '3']})
         out = Evidence(lf).validate_uniqueness().lf.collect()
         flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
-        assert flagged == {'1': True, '2': False}
+        assert flagged == {'1': True, '3': False}
+
+    def test_fields_are_joined_with_spark_separator(self) -> None:
+        # ('ab', 'c') and ('a', 'bc') only hash differently with a separator between fields;
+        # joined by U+0001, ('ab', 'c') has the lower digest and survives.
+        lf = pl.LazyFrame({'id': ['x', 'x'], 'p': ['a', 'ab'], 'q': ['bc', 'c']})
+        ev = Evidence(lf)
+        schema = ev.lf.collect_schema()
+        parts = [render_for_hash(name, schema[name]).fill_null('null') for name in schema.names()]
+        contents = ev.lf.select(pl.concat_str(parts, separator='\x01')).collect().to_series().to_list()
+        assert contents == ['x\x01a\x01bc\x01[]', 'x\x01ab\x01c\x01[]']
+        digests = [hashlib.sha256(c.encode()).hexdigest() for c in contents]
+        assert digests[1] < digests[0]
+
+        out = ev.validate_uniqueness().lf.collect()
+        flagged = {row['p']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
+        assert flagged == {'a': True, 'ab': False}
 
     def test_missing_id_raises_clearly(self) -> None:
         # Fix round 1, minor: pyspark's @required_columns(['id']) was never ported; without an

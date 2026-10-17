@@ -209,17 +209,17 @@ def test_json_column_order_decides_the_uniqueness_survivor(tmp_path: Path) -> No
     """
     rows = [
         {'keyField': 'same', 'zCol': 'a', 'aCol': 'a'},
-        {'keyField': 'same', 'zCol': 'c', 'aCol': 'a'},
+        {'keyField': 'same', 'zCol': 'g', 'aCol': 'a'},
     ]
     lf = _read_json_evidence(_write_json_gz(tmp_path / 'evidence.json.gz', rows))
     assert lf.collect_schema().names() == ['keyField', 'zCol', 'aCol']
 
     survivor = Evidence(lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
     flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in survivor.to_dicts()}
-    assert flagged == {'a': True, 'c': False}  # 'c' survives in file order
+    assert flagged == {'a': True, 'g': False}  # 'g' survives in file order
 
     # Sorted into spark's alphabetical order, the SAME two rows pick the OTHER survivor.
     spark_order_lf = lf.select(sorted(lf.collect_schema().names()))
     spark_order = Evidence(spark_order_lf).assign_evidence_identifier(['keyField']).validate_uniqueness().lf.collect()
     spark_flagged = {row['zCol']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in spark_order.to_dicts()}
-    assert spark_flagged == {'a': False, 'c': True}
+    assert spark_flagged == {'a': False, 'g': True}
