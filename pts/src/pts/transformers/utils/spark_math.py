@@ -242,6 +242,57 @@ def spark_pow(base: float, exponent: pl.Expr) -> pl.Expr:
     return exponent.map_batches(power, return_dtype=pl.Float64, is_elementwise=True)
 
 
+_EXP_O_THRESHOLD, _EXP_U_THRESHOLD = 7.09782712893383973096e02, -7.45133219101941108420e02
+_INVLN2 = 1.44269504088896338700e00
+_E1, _E2, _E3 = 1.66666666666666019037e-01, -2.77777777770155933842e-03, 6.61375632143793436117e-05
+_E4, _E5 = -1.65339022054652515390e-06, 4.13813679705723846039e-08
+_TWOM1000 = 9.33263618503218878990e-302
+
+
+def _fdlibm_exp(x: np.ndarray) -> np.ndarray:
+    """The fdlibm `e_exp.c` (java's `StrictMath.exp`)."""
+    hx = _words(x)[0]
+    negative = hx < 0
+    hx = hx & 0x7FFFFFFF
+    sign = np.where(negative, -1.0, 1.0)
+    near = (hx > 0x3FD62E42) & (hx < 0x3FF0A2B2)
+    far = hx >= 0x3FF0A2B2
+    bounded = np.where(np.isfinite(x) & (np.abs(x) < 1000.0), x, 0.0)
+    k = np.where(
+        near,
+        np.where(negative, -1, 1),
+        np.where(far, np.trunc(_INVLN2 * bounded + 0.5 * sign).astype(np.int64), 0),
+    )
+    t = k.astype(np.float64)
+    hi = np.where(near, x - sign * _LN2_HI, x - t * _LN2_HI)
+    lo = np.where(near, sign * _LN2_LO, t * _LN2_LO)
+    reduced = np.where(near | far, hi - lo, x)
+    t = reduced * reduced
+    c = reduced - t * (_E1 + t * (_E2 + t * (_E3 + t * (_E4 + t * _E5))))
+    unscaled = 1.0 - ((reduced * c) / (c - 2.0) - reduced)
+    y = 1.0 - ((lo - (reduced * c) / (2.0 - c)) - hi)
+    hy, ly = _words(y)
+    scaled = np.where(
+        k >= -1021, _join_words(hy + (k << 20), ly), _join_words(hy + ((k + 1000) << 20), ly) * _TWOM1000
+    )
+    result = np.where(k == 0, np.where(hx < 0x3E300000, 1.0 + x, unscaled), scaled)
+    result = np.where(x > _EXP_O_THRESHOLD, np.inf, np.where(x < _EXP_U_THRESHOLD, 0.0, result))
+    return np.where(np.isnan(x), np.nan, result)
+
+
+def spark_exp(expr: pl.Expr) -> pl.Expr:
+    """Spark's `exp` (java's `StrictMath.exp`, fdlibm)."""
+
+    def exp(series: pl.Series) -> pl.Series:
+        with np.errstate(all='ignore'):
+            values = _fdlibm_exp(series.cast(pl.Float64).fill_null(0.0).to_numpy())
+        out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
+        nulls = np.flatnonzero(series.is_null().to_numpy())
+        return out.scatter(nulls, None) if len(nulls) else out
+
+    return expr.map_batches(exp, return_dtype=pl.Float64, is_elementwise=True)
+
+
 def _divide_by_power_of_ten(columns: pl.Series) -> pl.Series:
     """Spark's `value / pow(10, exponent)`: IEEE division, null for a zero divisor."""
     value = columns.struct.field('value')

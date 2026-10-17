@@ -14,6 +14,7 @@ from pts.transformers.utils.spark_math import (
     pvalue_exponent,
     pvalue_mantissa,
     round_half_up,
+    spark_exp,
     spark_log10,
     spark_pow,
     strict_pow,
@@ -146,6 +147,37 @@ def test_spark_pow_is_not_numpy_power() -> None:
     # 10 ** -23.6442024: numpy's power is one ulp above fdlibm's
     assert pl.select(spark_pow(10.0, pl.lit(-23.6442024))).item() == 2.268807243217692e-24
     assert strict_pow(10.0, -23.6442024) == 2.268807243217692e-24
+
+
+def _exp_arguments() -> list[float | None]:
+    rng = random.Random(20261020)
+    values: list[float | None] = [
+        float(f'{rng.uniform(-20, 20):.{rng.randint(1, 9)}f}') for _ in range(20000)
+    ]
+    values += [rng.uniform(-750, 712) for _ in range(5000)]
+    values += [rng.uniform(-1.1, 1.1) for _ in range(2000)]
+    values += [0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 0.3465735902799726, 0.34657359027997264, 1.0397207708399179]
+    values += [1e-9, -1e-9, 3.7e-9, 1e-300, 5e-324, 7.09782712893383973096e02, 709.79, -745.13321910194110842]
+    values += [-745.2, -708.4, -708.3964185322641, -720.5, 2.0**-28, -(2.0**-28), math.nan, math.inf, -math.inf, None]
+    return values
+
+
+def test_spark_exp_matches_spark(spark) -> None:
+    arguments = _exp_arguments()
+    rows = spark.createDataFrame([(v,) for v in arguments], 'x DOUBLE').select(f.exp('x').alias('e')).collect()
+    out = pl.DataFrame({'x': arguments}, schema={'x': pl.Float64}).select(spark_exp(pl.col('x')))
+    assert out.schema == pl.Schema({'x': pl.Float64})
+    mismatches = [
+        (x, _key(r.e), _key(mine))
+        for x, r, mine in zip(arguments, rows, out.to_series().to_list(), strict=True)
+        if _key(r.e) != _key(mine)
+    ]
+    assert mismatches == []
+
+
+def test_spark_exp_is_not_numpy_exp() -> None:
+    # exp(2.1): numpy's is one ulp above fdlibm's
+    assert pl.select(spark_exp(pl.lit(2.1))).item() == 8.16616991256765
 
 
 def test_exponent_mantissa_match_spark(spark) -> None:
