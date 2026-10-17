@@ -202,22 +202,28 @@ def scan_datasets(
     return pl.concat(frames, how='diagonal_relaxed')
 
 
-def read_spreadsheet(path: str, sheet_name: str) -> pl.DataFrame:
+def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) -> pl.DataFrame:
     """Read one sheet of an Excel workbook with every cell as a string.
 
-    Blanks and `pandas.read_excel`'s default missing-value strings are null, booleans are '1'/'0',
-    and whitespace is kept. The workbook is read whole through `StorageHandle`.
+    Blanks and `pandas.read_excel`'s default missing-value strings are null, and whitespace is kept.
+    With `infer_types`, each column is typed first, as `pandas.read_excel` does, and booleans are
+    '1'/'0'; without it, each cell is rendered on its own, as `pandas.read_excel(dtype=str)` does:
+    an integral number without a fraction, a boolean as 'True'/'False'. The workbook is read whole
+    through `StorageHandle`.
 
     Args:
         path: location of the workbook.
         sheet_name: sheet to read.
+        infer_types: type each column before rendering it as text.
 
     Returns:
         DataFrame with one string column per sheet column.
     """
     with StorageHandle(path).open('rb') as f:
         data = f.read()
-    sheet = pl.read_excel(io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None)
+    sheet = pl.read_excel(
+        io.BytesIO(data), sheet_name=sheet_name, engine='openpyxl', infer_schema_length=None if infer_types else 0
+    )
     strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
     return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
 

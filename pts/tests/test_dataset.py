@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import datetime
 import gzip
 import json
 from pathlib import Path
 
 import openpyxl
+import pandas as pd
 import polars as pl
 import pytest
 
+from pts.pyspark.common.utils import _cell_to_string
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, scan_datasets, write_dataset
 
 
@@ -356,3 +359,32 @@ def test_read_spreadsheet_gives_strings_like_pandas(tmp_path: Path) -> None:
         (None, '2', None, '0', '-', None),
         (' ', '3', '2.0', None, None, ' NA'),
     ]
+
+
+def test_spreadsheet_strings_match_old_reader(tmp_path: Path) -> None:
+    """Without type inference, the strings of `pd.read_excel(dtype=str)`, as gene burden read them."""
+    columns = {
+        'integral': [5.0, 0.01, 0.0001, -0.0, 1e15],
+        'floats': [1.5e-08, 2e-05, 0.1 + 0.2, 1 / 3, 5e-320],
+        'flag': [True, False, None, True, False],
+        'number_flag': [1.0, 0.0, 1, None, 1.0],
+        'text': ['-', 'na', 'NA', ' a ', 'NaN'],
+        'numeric_text': ['5', '5.0', 'inf', '1e-05', 'singleton'],
+        'blank': [None, 'x', None, None, ''],
+        'when': [datetime.datetime(2020, 1, 2), datetime.date(2021, 3, 4), None, None, None],
+    }
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    ws.append(list(columns))
+    for row in zip(*columns.values(), strict=True):
+        ws.append(list(row))
+    wb.save(tmp_path / 'cells.xlsx')
+    old = pd.read_excel(tmp_path / 'cells.xlsx', sheet_name='S', dtype=str).astype(object).map(_cell_to_string)
+
+    df = read_spreadsheet(str(tmp_path / 'cells.xlsx'), 'S', infer_types=False)
+
+    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
+    assert df.rows() == [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
+    assert df['integral'].to_list() == ['5', '0.01', '0.0001', '0', '1000000000000000']
+    assert df['flag'].to_list() == ['True', 'False', None, 'True', 'False']
