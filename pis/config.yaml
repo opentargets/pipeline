@@ -729,7 +729,7 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
-  #: LOF_CURATION VARIANT ANNOTATIONS :##############################################################
+  #: LOF_CURATION VARIANT ANNOTATIONS STEP :########################################################
   lof_curation:
     - name: copy LoF curation raw data
       source: gs://otar013-ppp/OTAR2075_lof_curation/curation_results_OT_21-01-25.csv

@@ -25,16 +25,13 @@ import polars_hash as plh
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.utils.hashing import render_for_hash
+from pts.transformers.utils.variant_identifier import VARIANT_HASH_LENGTH, hash_long_variant_ids
 
 QC_COLUMN = 'qualityControls'
 
 #: Columns considered when dating evidence, in `resolve_evidence_date` -- mirrors pyspark's
 #: `Evidence.EVIDENCE_DATE_COLUMNS`.
 DATE_COLUMNS = ['publicationDate', 'curationDate', 'studyStartDate', 'releaseDate', 'evidenceDate']
-
-#: `variantId` length above which `hash_long_variant_identifiers` hashes it -- mirrors pyspark's
-#: `Evidence.VARIANT_HASH_LENGHT` (kept the correct spelling here; the pyspark name is a typo).
-VARIANT_HASH_LENGTH = 300
 
 
 class EvidenceFlags(StrEnum):
@@ -435,32 +432,9 @@ class Evidence:
         """
         if 'variantId' not in self.lf.collect_schema().names():
             return self
-        variant_id = pl.col('variantId')
-        pattern = r'^([0-9XYMT]{1,2})_([0-9]+)_([ACGTN]+)_([ACGTN]+)$'
-
-        def _spark_like_extract(group: int) -> pl.Expr:
-            # Spark's `regexp_extract` returns the EMPTY STRING on a non-match; polars'
-            # `str.extract` returns null (measured, task-9-report.md). So in spark the
-            # `chr.isNull() | pos.isNull()` branch below is reachable ONLY when `variantId`
-            # itself is null -- reproduced by extracting null only for a null input, and '' for
-            # anything else (a match with no captured group, or no match at all).
-            return (
-                pl.when(variant_id.is_null())
-                .then(None)
-                .otherwise(variant_id.str.extract(pattern, group).fill_null(''))
-            )
-
-        chrom = _spark_like_extract(1)
-        position = _spark_like_extract(2)
-        digest = plh.col('variantId').nchash.md5()
         return Evidence(
             self.lf.with_columns(
-                pl.when(chrom.is_null() | position.is_null())
-                .then(pl.lit('OTVAR_') + digest)
-                .when(variant_id.str.len_chars() > VARIANT_HASH_LENGTH)
-                .then(pl.concat_str([pl.lit('OTVAR'), chrom, position, digest], separator='_'))
-                .otherwise(variant_id)
-                .alias('variantId')
+                hash_long_variant_ids(pl.col('variantId'), threshold=VARIANT_HASH_LENGTH).alias('variantId')
             )
         )
 
