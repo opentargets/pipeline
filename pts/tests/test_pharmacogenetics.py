@@ -153,8 +153,7 @@ def test_variant_id_trailing_comma_and_extra_tokens() -> None:
 
 
 def test_variant_id_matches_spark_baseline() -> None:
-    # expected rows captured from the removed pyspark implementation, deduplicated: spark's self join
-    # repeats a row once per row sharing its genotypeId and OnToma's dedup collapses them
+    # expected rows captured from the removed pyspark implementation
     assert _rows(add_variant_id(_genotypes()).select('genotypeId', 'studyId', 'variantId')) == [
         ('1_100_C_C,T', 's1', '1_100_C_T'),
         ('1_100_C_C,T', 's10', '1_100_C_T'),
@@ -209,6 +208,15 @@ def test_is_direct_target_null_is_false() -> None:
         'other target': False,
         'unknown drug': False,
     }
+
+
+def test_is_direct_target_with_a_null_among_the_targets() -> None:
+    out = enrich_with_drugs(
+        _annotations([('s1', 'ENSG1', [{'drugFromSource': 'b'}])]),
+        _molecules([('CHEMBL_B', 'b')]),
+        _moa([(['CHEMBL_B'], [None, 'ENSG1'])]),
+    )
+    assert out['isDirectTarget'].to_list() == [True]
 
 
 def test_rows_without_drugs_are_dropped_and_counted() -> None:
@@ -417,11 +425,41 @@ def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
     assert json.loads(Path(destination['unparsed_texts']).read_text()) == []
 
 
+def test_shared_and_duplicate_alt_genotypes_give_one_row_each(tmp_path: Path) -> None:
+    records = [
+        {**CLINPGX_RECORD, 'studyId': 's1', 'genotypeId': '1_100_C_T,T'},
+        {**CLINPGX_RECORD, 'studyId': 's2', 'genotypeId': '1_100_C_T,T'},
+    ]
+    source = _write_inputs(
+        tmp_path / 'in', records, [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}]
+    )
+    destination = _destination(tmp_path)
+    pharmacogenetics(source, destination, {}, None)
+    out = _read_output(destination['associations'])
+    assert sorted(out.select('studyId', 'variantId').rows()) == [('s1', '1_100_C_T'), ('s2', '1_100_C_T')]
+
+
+def test_missing_column_in_a_non_empty_input_raises(tmp_path: Path) -> None:
+    record = {k: v for k, v in CLINPGX_RECORD.items() if k != 'drugs'}
+    source = _write_inputs(tmp_path / 'in', [record], [{'genotypeAnnotationText': 'parsed', 'phenotypeText': []}])
+    with pytest.raises(ValueError, match="'drugs'"):
+        pharmacogenetics(source, _destination(tmp_path), {}, None)
+
+
+def test_missing_column_in_a_non_empty_phenotypes_lookup_raises(tmp_path: Path) -> None:
+    source = _write_inputs(tmp_path / 'in', [CLINPGX_RECORD], [{'genotypeAnnotationText': 'parsed'}])
+    with pytest.raises(ValueError, match="'phenotypeText'"):
+        pharmacogenetics(source, _destination(tmp_path), {}, None)
+
+
 class TestStep:
     """The step writes the unparsed texts and warns, without calling any external API."""
 
     def _run(self, monkeypatch, tmp_path, rows: list[tuple]) -> tuple[list[str], list[str]]:
-        records = [dict(zip(PGX_SCHEMA, row, strict=True)) for row in rows]
+        records = [
+            {**dict(zip(PGX_SCHEMA, row, strict=True)), 'genotypeId': None, 'drugs': None, 'targetFromSourceId': None}
+            for row in rows
+        ]
         source = _write_inputs(
             tmp_path / 'in', records, [{'genotypeAnnotationText': t, 'phenotypeText': p} for t, p in LUT_ROWS]
         )

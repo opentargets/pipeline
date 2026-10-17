@@ -1,9 +1,8 @@
 """ClinPGx pharmacogenetics.
 
-Polars port of the `pyspark pharmacogenetics` step. Each annotation gets the phenotypes curated
-from its text, a variant id from its genotype, the EFO mapping of its phenotype through
-`add_efo_mapping`, and ChEMBL ids for its drugs, flagged when the drug acts on the annotation's
-target.
+Each annotation gets the phenotypes curated from its text, a variant id from its genotype, the EFO
+mapping of its phenotype through `add_efo_mapping`, and ChEMBL ids for its drugs, flagged when the
+drug acts on the annotation's target.
 """
 
 from __future__ import annotations
@@ -28,8 +27,19 @@ ROW_ID = '_operationalRowId'
 _TEXT = 'genotypeAnnotationText'
 
 
-def _with_schema_columns(df: pl.DataFrame, schema: pl.Schema) -> pl.DataFrame:
-    """Add the schema's columns absent from `df` as nulls, and type those read as all-null."""
+#: The ClinPGx annotation columns the step derives its output from.
+_CLINPGX_REQUIRED = (_TEXT, 'genotypeId', 'drugs', 'targetFromSourceId')
+
+
+def _with_schema_columns(df: pl.DataFrame, schema: pl.Schema, required: tuple[str, ...]) -> pl.DataFrame:
+    """Add the schema's columns absent from `df` as nulls, and type those read as all-null.
+
+    Raises:
+        ValueError: if a non-empty `df` lacks any of the `required` columns.
+    """
+    missing = [name for name in required if name not in df.columns]
+    if df.height and missing:
+        raise ValueError(f'input lacks required columns: {missing}')
     return df.with_columns(
         pl.lit(None, dtype).alias(name) if name not in df.columns else pl.col(name).cast(dtype)
         for name, dtype in schema.items()
@@ -43,14 +53,15 @@ def _read_clinpgx(path: str) -> pl.DataFrame:
     if path.endswith('.gz'):
         data = gzip.decompress(data)
     df = pl.read_ndjson(io.BytesIO(data), infer_schema_length=None) if data.strip() else pl.DataFrame()
-    return _with_schema_columns(df, CLINPGX_SCHEMA)
+    return _with_schema_columns(df, CLINPGX_SCHEMA, _CLINPGX_REQUIRED)
 
 
 def _read_phenotypes(path: str) -> pl.DataFrame:
     """The lookup, a JSON array of records."""
     data, _ = StorageHandle(path).read()
     df = pl.read_json(io.BytesIO(data), infer_schema_length=None)
-    return _with_schema_columns(df, PHENOTYPES_SCHEMA).select(PHENOTYPES_SCHEMA.names()).cast(PHENOTYPES_SCHEMA)
+    df = _with_schema_columns(df, PHENOTYPES_SCHEMA, tuple(PHENOTYPES_SCHEMA))
+    return df.select(PHENOTYPES_SCHEMA.names()).cast(PHENOTYPES_SCHEMA)
 
 
 def find_unparsed_texts(annotations: pl.DataFrame, lut: pl.DataFrame) -> list[str]:
