@@ -317,20 +317,56 @@ def test_literature_per_panel_and_symbol_sorted_distinct(tmp_path: Path) -> None
     ]
 
 
-def test_all_zero_pmids_and_omim_matches_are_logged(tmp_path: Path) -> None:
+def test_all_zero_pmids_and_omim_matches_are_logged_on_evidence_rows(tmp_path: Path) -> None:
     messages: list[str] = []
     sink = logger.add(lambda m: messages.append(str(m)), format='{message}')
     try:
         _parse(
             tmp_path,
-            [_row(phenotypes='Disease, 154700;Other 1234567;None'), _row(symbol='BRCA1')],
-            [_panel(1, {'CFTR': ['00, 000, 0, 1'], 'BRCA1': ['00']})],
+            [
+                _row(phenotypes='Disease, 154700;Other 1234567;Again 1234567;None'),
+                _row(symbol='BRCA1'),
+                _row(symbol='Q', phenotypes='?Gone 154700;?Gone 1234567'),
+                _row(symbol='RED', confidence='red', phenotypes='Red 154700'),
+            ],
+            [_panel(1, {'CFTR': ['00, 000, 0, 1'], 'BRCA1': ['00'], 'NOROW': ['00']})],
         )
     finally:
         logger.remove(sink)
-    text = ''.join(messages)
-    assert '3 all-zero PMIDs' in text
-    assert '2 phenotypes with an OMIM id, 1 of them cut from a longer number' in text
+    text = '\n'.join(messages)
+    assert '3 evidence strings with an OMIM id, 2 of them six digits of a longer number' in text
+    assert '5 evidence strings with an all-zero PMID' in text
+
+
+def test_panels_without_gene_symbol_raise(tmp_path: Path) -> None:
+    panel = _panel(1, {'CFTR': ['1']})
+    panel['genes'][0]['gene_data'] = {'symbol': 'CFTR'}
+    with pytest.raises(ValueError, match='gene_symbol'):
+        _parse(tmp_path, [_row()], [panel])
+
+
+def test_panels_without_publications_raise(tmp_path: Path) -> None:
+    panel = _panel(1, {'CFTR': ['1']})
+    del panel['genes'][0]['publications']
+    with pytest.raises(ValueError, match='publications'):
+        _parse(tmp_path, [_row()], [panel])
+
+
+def test_panels_without_id_raise(tmp_path: Path) -> None:
+    panel = _panel(1, {'CFTR': ['1']})
+    panel['panel_id'] = panel.pop('id')
+    with pytest.raises(ValueError, match='id'):
+        _parse(tmp_path, [_row()], [panel])
+
+
+def test_non_integer_panel_id_raises(tmp_path: Path) -> None:
+    with pytest.raises(pl.exceptions.InvalidOperationError):
+        _parse(tmp_path, [_row(panel_id='1a')])
+
+
+def test_panel_id_beyond_int32(tmp_path: Path) -> None:
+    raw = _parse(tmp_path, [_row(panel_id='3000000000')], [_panel(3_000_000_000, {'CFTR': ['1']})])
+    assert raw.select('studyId', 'literature').rows() == [('3000000000', ['1'])]
 
 
 def test_study_id_is_string(tmp_path: Path) -> None:

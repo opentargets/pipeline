@@ -5,7 +5,7 @@ import polars as pl
 #: The PanelApp TSV columns the step reads, typed as spark's `inferSchema` reads them.
 PANEL_APP_INPUT_SCHEMA = pl.Schema({
     'Symbol': pl.String,
-    'Panel Id': pl.Int32,
+    'Panel Id': pl.Int64,
     'Panel Name': pl.String,
     'Panel Version': pl.Float64,
     'Panel Status': pl.String,

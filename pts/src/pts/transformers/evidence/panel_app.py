@@ -49,6 +49,9 @@ PHENOTYPE_AFTER_SPLIT = [
     r'[( ]*(from )?PMID:? *[0-9]+[ ).]*',
 ]
 
+#: Working column: the OMIM id is six digits of a longer number.
+_LONGER_NUMBER = '_omimInLongerNumber'
+
 _LEADING = r'[ ,-]*'
 _SEPARATOR = r'[:_ #]*'
 _TRAILING = r'[:.]*'
@@ -109,8 +112,39 @@ def parse_literature(panels: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def _read_panel_app(path: str) -> pl.LazyFrame:
+    """The TSV's used columns; a `Panel Id` that is not an integer raises, other bad values are null."""
     columns = list(PANEL_APP_INPUT_SCHEMA)
-    return read_spark_csv(path, separator='\t').lazy().select(columns).cast(PANEL_APP_INPUT_SCHEMA, strict=False)
+    return (
+        read_spark_csv(path, separator='\t')
+        .lazy()
+        .select(columns)
+        .cast({'Panel Id': PANEL_APP_INPUT_SCHEMA['Panel Id']}, strict=True)
+        .cast(PANEL_APP_INPUT_SCHEMA, strict=False)
+    )
+
+
+def _read_panels(path: str) -> pl.DataFrame:
+    """The panels' used fields.
+
+    Raises:
+        ValueError: if the file has panels but no `id`, or genes but no `gene_symbol` or no `publications`.
+    """
+    panels = scan_dataset(path, format='ndjson', schema=PANELS_SCHEMA).collect()
+    genes = panels.select(pl.col('genes').explode()).filter(pl.col('genes').is_not_null()).unnest('genes')
+    missing = [
+        name
+        for name, frame, column in [
+            ('id', panels, pl.col('id')),
+            ('genes', panels, pl.col('genes')),
+            ('gene_data.gene_symbol', genes, pl.col('gene_data').struct.field('gene_symbol')),
+            ('publications', genes, pl.col('publications')),
+        ]
+        if frame.height and frame.select(column.is_null().all()).item()
+    ]
+    if missing:
+        msg = f'panels in {path} carry no {missing}'
+        raise ValueError(msg)
+    return panels
 
 
 def _phenotypes(panel_app: pl.LazyFrame) -> pl.LazyFrame:
@@ -152,6 +186,8 @@ def _phenotypes(panel_app: pl.LazyFrame) -> pl.LazyFrame:
 def _with_omim(phenotypes: pl.LazyFrame) -> pl.LazyFrame:
     """Extract the OMIM id, prefer it to the other id, and clean up the label; drop `?` labels and duplicates."""
     omim_id = regexp_extract(pl.col('diseaseFromSource'), OMIM_RE, 2)
+    # the leftmost OMIM match is the first six digits of the first run of six or more
+    longer_number = pl.col('diseaseFromSource').str.extract('([0-9]{6,})', 1).str.len_chars() > 6
     label = spark_trim(pl.col('diseaseFromSource').str.replace_all(OMIM_RE, '').str.replace_all(r'\(\)', ''))
     return (
         phenotypes
@@ -160,6 +196,7 @@ def _with_omim(phenotypes: pl.LazyFrame) -> pl.LazyFrame:
                 pl.when(omim_id != '').then(pl.concat_str(pl.lit('OMIM:'), omim_id)), pl.col('ontology')
             ),
             diseaseFromSource=pl.when(label != '').then(label),
+            **{_LONGER_NUMBER: (omim_id != '') & longer_number.fill_null(False)},
         )
         .drop('ontology')
         .filter(~(pl.col('diseaseFromSource').is_not_null() & pl.col('diseaseFromSource').str.starts_with('?')))
@@ -173,26 +210,19 @@ def _with_omim(phenotypes: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def _log_omim_matches(phenotypes: pl.DataFrame) -> None:
-    label = pl.col('diseaseFromSource')
-    counts = phenotypes.select(
-        matched=label.str.contains(OMIM_RE).sum(),
-        longer=(label.str.extract('([0-9]{6,})', 1).str.len_chars() > 6).sum(),
-    ).row(0)
-    logger.info(f'{counts[0]} phenotypes with an OMIM id, {counts[1]} of them cut from a longer number')
+def _log_ruling_counts(evidence: pl.DataFrame, longer_number: int) -> None:
+    omim = evidence.select(pl.col('diseaseFromSourceId').str.starts_with('OMIM:').sum()).item()
+    logger.info(f'{omim} evidence strings with an OMIM id, {longer_number} of them six digits of a longer number')
+    zeros = evidence.select(pl.col('literature').list.eval(pl.element().str.contains('^0+$')).list.any().sum()).item()
+    logger.info(f'{zeros} evidence strings with an all-zero PMID in their literature')
 
 
 def parse_panel_app(evidence: str, panels: str) -> pl.LazyFrame:
     """Raw PanelApp evidence from the gene list TSV and the panels JSON lines, before disease mapping."""
-    phenotypes = _phenotypes(_read_panel_app(evidence)).collect()
-    _log_omim_matches(phenotypes)
-    literature = parse_literature(scan_dataset(panels, format='ndjson', schema=PANELS_SCHEMA)).collect()
-    zeros = literature.select(pl.col('literature').list.eval(pl.element().str.contains('^0+$')).list.sum().sum()).item()
-    logger.info(f'{zeros} all-zero PMIDs kept in the literature references')
-    return (
-        _with_omim(phenotypes.lazy())
-        .with_columns(pl.col('Panel Id').cast(pl.Int64))
-        .join(literature.lazy(), on=['Panel Id', 'Symbol'], how='left', maintain_order='left')
+    literature = parse_literature(_read_panels(panels).lazy())
+    rows = (
+        _with_omim(_phenotypes(_read_panel_app(evidence)))
+        .join(literature, on=['Panel Id', 'Symbol'], how='left', maintain_order='left')
         .select(
             studyId=pl.col('Panel Id').cast(pl.String),
             targetFromSourceId=pl.col('Symbol'),
@@ -207,9 +237,13 @@ def parse_panel_app(evidence: str, panels: str) -> pl.LazyFrame:
             .then(pl.concat_list('Mode of inheritance')),
             datasourceId=pl.lit('genomics_england'),
             datatypeId=pl.lit('genetic_literature'),
+            **{_LONGER_NUMBER: pl.col(_LONGER_NUMBER)},
         )
-        .unique(maintain_order=True)
+        .collect()
     )
+    raw = rows.drop(_LONGER_NUMBER).unique(maintain_order=True)
+    _log_ruling_counts(raw, rows.filter(pl.col(_LONGER_NUMBER)).drop(_LONGER_NUMBER).unique().height)
+    return raw.lazy()
 
 
 def panel_app(
