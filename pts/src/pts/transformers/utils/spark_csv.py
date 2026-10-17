@@ -28,12 +28,14 @@ def _quoted(line: str, i: int, separator: str) -> tuple[str, int]:
     while i < n:
         c = line[i]
         if closing:
-            if c == separator or c <= ' ':
+            blanks_end = i
+            while blanks_end < n and line[blanks_end] <= ' ' and line[blanks_end] != separator:
+                blanks_end += 1
+            if blanks_end == n or line[blanks_end] == separator:
                 out.pop()
-                end = line.find(separator, i)
-                return ''.join(out), n if end < 0 else end
+                return ''.join(out), blanks_end
             if c != QUOTE:
-                # an unescaped quote: the field is text from its opening quote to the next separator
+                # unescaped quote or text after the closing quote: raw text from the opening quote
                 end = line.find(separator, i)
                 end = n if end < 0 else end
                 return QUOTE + ''.join(out) + line[i:end], end
@@ -100,8 +102,9 @@ def read_spark_csv(
     Blank lines are skipped. A field is null when it is empty and unquoted, or equals one of
     `null_values` (default `['']`, so a quoted `""` is null too). Rows are cut or padded with null to
     the width of `new_columns`, or of the header. A quoted field closes at its quote followed by a
-    separator, whitespace or the line end; `\"` and `\\` inside it are escapes, and any other
-    backslash is kept. Text after the closing quote, other than whitespace, is not pinned.
+    separator or the line end, with or without whitespace between; `\"` and `\\` inside it are
+    escapes, and any other backslash is kept. Any other text after the closing quote makes the field
+    the raw text from its opening quote to the next separator.
 
     Args:
         path: the file to read.
@@ -115,7 +118,7 @@ def read_spark_csv(
     """
     nulls = [''] if null_values is None else null_values
     with StorageHandle(path).open('rb') as f:
-        text = f.read().decode('utf-8', errors='replace').removeprefix('﻿')
+        text = f.read().decode('utf-8', errors='replace').removeprefix('\ufeff')
     lines = (line for line in _LINE_END.split(text) if not _BLANK.match(line))
 
     names = new_columns
