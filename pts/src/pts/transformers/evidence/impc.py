@@ -1,9 +1,9 @@
 """IMPC mouse model evidence.
 
-Polars port of the `pyspark impc` parser together with its `evidence_postprocess` step. Mouse
-models are linked to human genes through MGI and HGNC, and to diseases by the phenotypes they
-share. Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by
-id; then only the top-scoring evidence of each model, gene and disease is kept.
+Parses the IMPC mouse model files into evidence and post-processes it. Mouse models are linked to
+human genes through MGI and HGNC, and to diseases by the phenotypes they share. Diseases are mapped
+with the OnToma lookup tables through `add_efo_mapping`, by label and by id; then only the
+top-scoring evidence of each model, gene and disease is kept.
 """
 
 from __future__ import annotations
@@ -258,11 +258,9 @@ def deduplicate(evidence: pl.DataFrame) -> pl.DataFrame:
     datasource and datatype.
     """
     top = pl.col('resourceScore') == pl.col('resourceScore').max().over(UNIQUE_FIELDS)
-    candidates = evidence.drop(MODEL_ID, strict=False).unique().filter(top)
+    candidates = evidence.filter(top).drop(MODEL_ID, strict=False).unique()
     tied = candidates.group_by(UNIQUE_FIELDS).len().filter(pl.col('len') > 1).height
-    groups = evidence.select(UNIQUE_FIELDS).unique().height
-    logger.info(f'{tied} of {groups} impc evidence partitions tie on the top resourceScore')
-    return (
+    deduplicated = (
         evidence
         # the unique fields make the output order total
         .sort(
@@ -274,6 +272,8 @@ def deduplicate(evidence: pl.DataFrame) -> pl.DataFrame:
         .drop(MODEL_ID, strict=False)
         .with_columns(datasourceId=pl.lit('impc'), datatypeId=pl.lit('animal_model'))
     )
+    logger.info(f'{tied} of {deduplicated.height} impc evidence partitions tie on the top resourceScore')
+    return deduplicated
 
 
 def impc(

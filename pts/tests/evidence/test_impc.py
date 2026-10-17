@@ -223,7 +223,6 @@ def test_score_cutoff_drops_below_and_null(tmp_path: Path) -> None:
             summary(model='MGI:1', score='41'),
             summary(model='MGI:2', score='40.99'),
             summary(model='MGI:3', score=None),
-            summary(model='MGI:4', score='not a number'),
             summary(model='MGI:5', score='100'),
         ],
     )
@@ -364,9 +363,31 @@ def test_dedup_output_order_does_not_depend_on_input_order() -> None:
         for d in ['EFO_2', None, 'EFO_1']
     ] + [{'resourceScore': 90.0, 'targetFromSourceId': 'ENSG9'}]
     first = deduplicate(_frame(rows))
-    assert first.height == 10
+    assert first.select('targetFromSourceId', 'diseaseFromSourceMappedId').rows() == [
+        ('ENSG9', 'x'),
+        ('ENSG1', 'EFO_1'),
+        ('ENSG2', 'EFO_1'),
+        ('ENSG3', 'EFO_1'),
+        ('ENSG1', 'EFO_2'),
+        ('ENSG2', 'EFO_2'),
+        ('ENSG3', 'EFO_2'),
+        ('ENSG1', None),
+        ('ENSG2', None),
+        ('ENSG3', None),
+    ]
     for seed in range(5):
         assert deduplicate(_frame(rows).sample(fraction=1.0, shuffle=True, seed=seed)).equals(first)
+
+
+def test_dedup_nan_score_ranks_highest() -> None:
+    out = deduplicate(
+        _frame([
+            {'resourceScore': 70.0, 'tag': 'number'},
+            {'resourceScore': float('nan'), 'tag': 'nan'},
+            {'resourceScore': None, 'tag': 'null'},
+        ])
+    )
+    assert out['tag'].to_list() == ['nan']
 
 
 def test_tie_break_order() -> None:
@@ -695,6 +716,13 @@ def test_unmapped_disease_lands_in_failed_evidence(tmp_path: Path) -> None:
 
 
 def test_empty_inputs_write_empty_outputs(tmp_path: Path) -> None:
-    valid, failed = _run(tmp_path, **{key: [] for key in DEFAULTS})
+    valid, failed = _run(tmp_path / 'empty', **{key: [] for key in DEFAULTS})
+    full_valid, full_failed = _run(
+        tmp_path / 'full',
+        solr_disease_model_summary=[summary(), summary(model='MGI:2#hom', disease='OMIM:9', term='nothing at all')],
+    )
     assert valid.height == 0
     assert failed.height == 0
+    assert (full_valid.height, full_failed.height) == (1, 1)
+    assert valid.schema == full_valid.schema
+    assert failed.schema == full_failed.schema
