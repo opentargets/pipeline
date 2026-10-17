@@ -9,15 +9,91 @@ import numpy as np
 import polars as pl
 from loguru import logger
 
-from pts.transformers.evidence.utils.expressions import divide, log10
+from pts.transformers.evidence.utils.expressions import divide
 from pts.transformers.utils.spark_strings import java_double_to_string
 
 _INT_MAX = 2**31 - 1
 
 
+_TWO54 = 1.80143985094819840000e16
+_LN2_HI, _LN2_LO = 6.93147180369123816490e-01, 1.90821492927058770002e-10
+_LG1, _LG2, _LG3 = 6.666666666666735130e-01, 3.999999999940941908e-01, 2.857142874366239149e-01
+_LG4, _LG5, _LG6 = 2.222219843214978396e-01, 1.818357216161805012e-01, 1.531383769920937332e-01
+_LG7 = 1.479819860511658591e-01
+_IVLN10 = 4.34294481903251816668e-01
+_LOG10_2HI, _LOG10_2LO = 3.01029995663611771306e-01, 3.69423907715893078616e-13
+
+
+def _words(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    bits = x.view(np.int64)
+    return bits >> 32, bits & 0xFFFFFFFF
+
+
+def _join_words(hi: np.ndarray, lo: np.ndarray) -> np.ndarray:
+    return (((hi & 0xFFFFFFFF) << 32) | lo).view(np.float64)
+
+
+def _fdlibm_log(x: np.ndarray) -> np.ndarray:
+    """The fdlibm `e_log.c` for normal `x` in `[1, 2)` or `[0.5, 1)`."""
+    hx, lx = _words(x)
+    k = (hx >> 20) - 1023
+    hx = hx & 0x000FFFFF
+    i = (hx + 0x95F64) & 0x100000
+    x = _join_words(hx | (i ^ 0x3FF00000), lx)
+    k = k + (i >> 20)
+    f = x - 1.0
+    dk = k.astype(np.float64)
+    small = (0x000FFFFF & (2 + hx)) < 3
+    r_small = f * f * (0.5 - 0.33333333333333333 * f)
+    small_result = np.where(
+        f == 0.0,
+        np.where(k == 0, 0.0, dk * _LN2_HI + dk * _LN2_LO),
+        np.where(k == 0, f - r_small, dk * _LN2_HI - ((r_small - dk * _LN2_LO) - f)),
+    )
+    s = f / (2.0 + f)
+    z = s * s
+    w = z * z
+    t1 = w * (_LG2 + w * (_LG4 + w * _LG6))
+    t2 = z * (_LG1 + w * (_LG3 + w * (_LG5 + w * _LG7)))
+    r = t2 + t1
+    hfsq = 0.5 * f * f
+    wide = ((hx - 0x6147A) | (0x6B851 - hx)) > 0
+    wide_result = np.where(
+        k == 0,
+        f - (hfsq - s * (hfsq + r)),
+        dk * _LN2_HI - ((hfsq - (s * (hfsq + r) + dk * _LN2_LO)) - f),
+    )
+    narrow_result = np.where(k == 0, f - s * (f - r), dk * _LN2_HI - ((s * (f - r) - dk * _LN2_LO) - f))
+    return np.where(small, small_result, np.where(wide, wide_result, narrow_result))
+
+
+def _fdlibm_log10(x: np.ndarray) -> np.ndarray:
+    """The fdlibm `e_log10.c` (java's `StrictMath.log10`) for finite `x > 0`."""
+    subnormal = x < 2.0**-1022
+    x = np.where(subnormal, x * _TWO54, x)
+    hx, lx = _words(x)
+    k = np.where(subnormal, -54, 0) + (hx >> 20) - 1023
+    i = (k < 0).astype(np.int64)
+    y = (k + i).astype(np.float64)
+    normalised = _join_words((hx & 0x000FFFFF) | ((0x3FF - i) << 20), lx)
+    z = y * _LOG10_2LO + _IVLN10 * _fdlibm_log(normalised)
+    return z + y * _LOG10_2HI
+
+
+def _strict_log10(series: pl.Series) -> pl.Series:
+    x = series.cast(pl.Float64).to_numpy()
+    values = np.full(len(x), np.nan)
+    finite = (x > 0) & np.isfinite(x)
+    values[finite] = _fdlibm_log10(x[finite])
+    values[x == np.inf] = np.inf
+    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
+    nulls = np.flatnonzero(series.is_null().to_numpy() | (x <= 0) | (x == -np.inf))
+    return out.scatter(nulls, None) if len(nulls) else out
+
+
 def spark_log10(expr: pl.Expr) -> pl.Expr:
-    """Spark's `log10` through libm: null for a value `<= 0`, NaN for NaN."""
-    return pl.when(expr > 0).then(log10(expr)).when(expr.is_nan()).then(pl.lit(math.nan))
+    """Spark's `log10` (fdlibm, as java's `StrictMath`): null for a value `<= 0`, NaN for NaN."""
+    return expr.map_batches(_strict_log10, return_dtype=pl.Float64, is_elementwise=True)
 
 
 def _spark_to_int(expr: pl.Expr) -> pl.Expr:
@@ -66,7 +142,7 @@ _L1, _L2, _L3 = 5.99999999999994648725e-01, 4.28571428578550184252e-01, 3.333333
 _L4, _L5, _L6 = 2.72728123808534006489e-01, 2.30660745775561754067e-01, 2.06975017800338417784e-01
 _P1, _P2, _P3 = 1.66666666666666019037e-01, -2.77777777770155933842e-03, 6.61375632143793436117e-05
 _P4, _P5 = -1.65339022054652515390e-06, 4.13813679705723846039e-08
-_LG2, _LG2_H, _LG2_L = 6.93147180559945286227e-01, 6.93147182464599609375e-01, -1.90465429995776804525e-09
+_POW_LG2, _POW_LG2_H, _POW_LG2_L = 6.93147180559945286227e-01, 6.93147182464599609375e-01, -1.90465429995776804525e-09
 _OVT = 8.0085662595372944372e-17
 _CP, _CP_H, _CP_L = 9.61796693925975554329e-01, 9.61796700954437255859e-01, -7.02846165095275826516e-09
 _TWO53 = 9007199254740992.0
@@ -74,7 +150,7 @@ _TWO53 = 9007199254740992.0
 
 @functools.cache
 def strict_pow(x: float, y: float) -> float:
-    """Java's `StrictMath.pow` (fdlibm `e_pow.c`) for a finite `x > 0`, `x != 1`, and a finite `y`."""
+    """Java's `StrictMath.pow` (fdlibm `e_pow.c`), parity-tested for `x = 10` and an integer `y`."""
     if y == 0:
         return 1.0
     if y == 1:
@@ -155,8 +231,8 @@ def strict_pow(x: float, y: float) -> float:
             n = -n
         p_h -= t
     t = _clear_lo(p_l + p_h)
-    u = t * _LG2_H
-    v = (p_l - (t - p_h)) * _LG2 + t * _LG2_L
+    u = t * _POW_LG2_H
+    v = (p_l - (t - p_h)) * _POW_LG2 + t * _POW_LG2_L
     z = u + v
     w = v - (z - u)
     t = z * z
@@ -237,17 +313,24 @@ def normalise_mantissa(mantissa: pl.Expr, exponent: pl.Expr) -> tuple[pl.Expr, p
 
 
 @overload
-def substitute_zero_pvalues(frame: pl.DataFrame, column: str) -> pl.DataFrame: ...
+def substitute_zero_pvalues(frame: pl.DataFrame, column: str, label: str | None = None) -> pl.DataFrame: ...
 @overload
-def substitute_zero_pvalues(frame: pl.LazyFrame, column: str) -> pl.LazyFrame: ...
-def substitute_zero_pvalues(frame: pl.DataFrame | pl.LazyFrame, column: str) -> pl.DataFrame | pl.LazyFrame:
-    """Replace a p-value of 0.0 with the frame's smallest p-value above 0, null if there is none."""
+def substitute_zero_pvalues(frame: pl.LazyFrame, column: str, label: str | None = None) -> pl.LazyFrame: ...
+def substitute_zero_pvalues(
+    frame: pl.DataFrame | pl.LazyFrame, column: str, label: str | None = None
+) -> pl.DataFrame | pl.LazyFrame:
+    """Replace a p-value of 0.0 with the frame's smallest p-value above 0, null if there is none.
+
+    The count is logged under `label`, the column name by default.
+    """
     pvalue = pl.col(column)
     zeros, minimum = (
         frame.lazy().select((pvalue == 0.0).sum(), pvalue.filter(pvalue > 0.0).min().alias('minimum')).collect().row(0)
     )
     if not zeros:
         return frame
-    logger.warning(f'{zeros} rows with {column} 0.0 take the smallest non-zero value, {minimum}')
+    logger.warning(
+        f'There are {zeros} {label or column} evidence with a p-value of 0.0; they take the minimum, {minimum}.'
+    )
     dtype = frame.collect_schema()[column]
     return frame.with_columns(pl.when(pvalue == 0.0).then(pl.lit(minimum, dtype=dtype)).otherwise(pvalue).alias(column))

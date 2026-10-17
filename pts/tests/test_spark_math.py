@@ -6,6 +6,7 @@ import random
 import polars as pl
 import pyspark.sql.functions as f
 import pytest
+from loguru import logger
 
 from pts.pyspark.gene_burden import _substitute_zero_pvalues
 from pts.transformers.utils.spark_math import (
@@ -52,6 +53,52 @@ def _spark_exponent_mantissa(spark, values: list[float | None]) -> tuple[list, l
 def test_spark_log10_is_null_for_non_positive() -> None:
     out = pl.select(spark_log10(pl.lit(pl.Series([100.0, 0.0, -0.0, -1.0, math.nan, math.inf, None])))).to_series()
     assert [_key(v) for v in out.to_list()] == ['2.0', None, None, None, 'nan', 'inf', None]
+
+
+def _ulps(value: float, steps: int) -> float:
+    direction = math.inf if steps > 0 else 0.0
+    for _ in range(abs(steps)):
+        value = math.nextafter(value, direction)
+    return value
+
+
+def _edge(power: float, target: float, sign: int) -> float:
+    """The farthest double from `power`, in `sign`'s direction, whose libm log10 is still `target`."""
+    if math.log10(power) != target:
+        return power
+    step = 1
+    while math.log10(_ulps(power, sign * step)) == target:
+        step *= 2
+    low, high = step // 2, step
+    while high - low > 1:
+        middle = (low + high) // 2
+        if math.log10(_ulps(power, sign * middle)) == target:
+            low = middle
+        else:
+            high = middle
+    return _ulps(power, sign * low)
+
+
+def _log10_edges() -> list[float]:
+    values = []
+    for k in range(324):
+        power = float(f'1e{-k}')
+        for edge in (_edge(power, -float(k), 1), _edge(power, -float(k), -1)):
+            values += [_ulps(edge, step) for step in range(-4, 5)]
+    rng = random.Random(20261018)
+    return values + [10 ** rng.uniform(-323, 1) for _ in range(5000)]
+
+
+def test_spark_log10_matches_spark_at_integer_edges(spark) -> None:
+    values = _log10_edges()
+    rows = spark.createDataFrame([(v,) for v in values], 'p DOUBLE').select(f.log10('p').alias('l')).collect()
+    out = pl.DataFrame({'p': values}).select(spark_log10(pl.col('p')))
+    mismatches = [
+        (v, _key(r.l), _key(mine))
+        for v, r, mine in zip(values, rows, out.to_series().to_list(), strict=True)
+        if _key(r.l) != _key(mine)
+    ]
+    assert mismatches == []
 
 
 def test_strict_pow_matches_spark(spark) -> None:
@@ -165,3 +212,13 @@ def test_substitute_zero_pvalues(spark, pvalues: list[float | None], lazy: bool)
     out = out.lazy().collect()
     assert out.schema == frame.schema
     assert [_key(v) for v in out['p'].to_list()] == [_key(r.p) for r in sorted(rows, key=lambda r: r.i)]
+
+
+def test_substitute_zero_pvalues_logs_label() -> None:
+    messages: list[str] = []
+    sink = logger.add(messages.append, format='{message}')
+    try:
+        substitute_zero_pvalues(pl.DataFrame({'p': [0.0, 0.0, 1e-5]}), 'p', label='BRaVa Cauchy')
+    finally:
+        logger.remove(sink)
+    assert messages == ['There are 2 BRaVa Cauchy evidence with a p-value of 0.0; they take the minimum, 1e-05.\n']
