@@ -8,7 +8,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.schemas.target import HGNC_DOC
-from pts.target.hgnc import build_hgnc, read_hgnc
+from pts.transformers.target.hgnc import build_hgnc, read_hgnc
 from tests.target.rows import rows
 
 DOCS = [

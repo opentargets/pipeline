@@ -38,7 +38,7 @@ OUTPUT_SCHEMA = {
     'exons': pl.List(EXON),
 }
 
-#: `pts.ensembl.transcripts` output, as the contract states it.
+#: `pts.transformers.utils.ensembl.transcripts` output, as the contract states it.
 TX_SCHEMA = {
     'geneId': pl.String,
     'transcriptId': pl.String,
@@ -51,7 +51,7 @@ TX_SCHEMA = {
     'attributes': pl.List(ATTRIBUTE),
     'exons': pl.List(EXON),
 }
-#: `pts.ensembl.translation_xrefs` output, as the contract states it.
+#: `pts.transformers.utils.ensembl.translation_xrefs` output, as the contract states it.
 XREF_SCHEMA = {
     'transcriptId': pl.String,
     'translationId': pl.String,

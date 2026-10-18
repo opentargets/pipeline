@@ -8,8 +8,8 @@ from pathlib import Path
 import polars as pl
 
 from pts.schemas.target import LOCATION, UNIPROT_ENTRY
-from pts.target.hpa import build_hpa
-from pts.target.uniprot import _parse_record, build_uniprot, read_uniprot, read_uniprot_ssl
+from pts.transformers.target.hpa import build_hpa
+from pts.transformers.target.uniprot import _parse_record, build_uniprot, read_uniprot, read_uniprot_ssl
 from tests.target.rows import rows
 
 MINIMAL_ENTRY = """\

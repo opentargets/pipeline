@@ -6,7 +6,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from pts.target.hpa import build_hpa, read_hpa, read_hpa_ssl
+from pts.transformers.target.hpa import build_hpa, read_hpa, read_hpa_ssl
 from tests.target.rows import rows
 
 HPA_HEADER = 'Gene\tGene name\tReliability\tMain location\tAdditional location\tExtracellular location'

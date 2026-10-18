@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.target.reactome import ENSEMBL2REACTOME_COLUMNS, build_reactome, read_reactome_pathways
+from pts.transformers.target.reactome import ENSEMBL2REACTOME_COLUMNS, build_reactome, read_reactome_pathways
 from tests.target.rows import rows
 
 LINES = [

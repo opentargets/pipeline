@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.target.lists import flatten_distinct, tag, union
+from pts.transformers.target.lists import flatten_distinct, tag, union
 
 LISTS = pl.DataFrame(
     {

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.target.constraint import COLUMNS, RANK, build_constraint, ntile, read_constraint
+from pts.transformers.target.constraint import COLUMNS, RANK, build_constraint, ntile, read_constraint
 from tests.target.rows import rows
 
 METRICS = [c for c in COLUMNS if c not in ('gene_id', 'canonical', 'transcript_type', RANK)]

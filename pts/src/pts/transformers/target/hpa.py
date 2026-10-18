@@ -8,7 +8,7 @@ import zipfile
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.target.lists import union
+from pts.transformers.target.lists import union
 from pts.transformers.utils.dataset import scan_dataset
 
 HPA_SOURCES = {

@@ -13,8 +13,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts import ensembl
 from pts.schemas.transcript import transcript as transcript_schema
+from pts.transformers.utils import ensembl
 from pts.transformers.utils.dataset import write_dataset
 
 #: Attribute code, label and value of each static flag, in output order.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 
 from pts.schemas.target import TARGET
-from pts.target.lists import flatten_distinct, union
+from pts.transformers.target.lists import flatten_distinct, union
 
 #: Lists `uniprot_by_gene` gathers from a gene's UniProt entries.
 UNIPROT_LISTS = [

@@ -13,9 +13,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.ensembl import CoreDump, gene_names
 from pts.schemas.homology import homology_schema, orthologs_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.ensembl import CoreDump, gene_names
 from pts.transformers.utils.spark_casts import cast_double
 
 DEFAULT_HGNC_ORTHOLOG_SPECIES = [

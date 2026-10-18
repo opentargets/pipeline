@@ -59,7 +59,7 @@ exon = pl.Struct({
 """One exon of a transcript."""
 
 gene_names = pl.Schema({'id': pl.String(), 'name': pl.String()})
-"""Output of `pts.ensembl.queries.gene_names`."""
+"""Output of `pts.transformers.utils.ensembl.queries.gene_names`."""
 
 genes = pl.Schema({
     'id': pl.String(),
@@ -72,7 +72,7 @@ genes = pl.Schema({
     'approvedSymbol': pl.String(),
     'canonicalTranscriptId': pl.String(),
 })
-"""Output of `pts.ensembl.queries.genes`."""
+"""Output of `pts.transformers.utils.ensembl.queries.genes`."""
 
 transcripts = pl.Schema({
     'geneId': pl.String(),
@@ -86,7 +86,7 @@ transcripts = pl.Schema({
     'attributes': pl.List(attribute),
     'exons': pl.List(exon),
 })
-"""Output of `pts.ensembl.queries.transcripts`."""
+"""Output of `pts.transformers.utils.ensembl.queries.transcripts`."""
 
 translation_xrefs = pl.Schema({
     'transcriptId': pl.String(),
@@ -97,4 +97,4 @@ translation_xrefs = pl.Schema({
     'alphafold': pl.List(pl.String()),
     'signalp': pl.List(pl.String()),
 })
-"""Output of `pts.ensembl.queries.translation_xrefs`."""
+"""Output of `pts.transformers.utils.ensembl.queries.translation_xrefs`."""

@@ -18,7 +18,7 @@ from pts.schemas.target import (
     TARGET,
     TARGET_CLASS,
 )
-from pts.target.assemble import (
+from pts.transformers.target.assemble import (
     add_ncbi_synonyms,
     add_protein_classification,
     add_tss,
@@ -29,7 +29,7 @@ from pts.target.assemble import (
     remove_redundant_xrefs,
     uniprot_by_gene,
 )
-from pts.target.ensembl import ensembl_genes
+from pts.transformers.target.ensembl import ensembl_genes
 from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
 from tests.target.rows import rows
 
