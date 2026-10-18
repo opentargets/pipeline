@@ -253,11 +253,11 @@ steps:
     depends_on:
       - pis_evidence_gene_burden
       - pts_ontoma
+      - pts_target
+      - pis_literature
   pts_evidence_postprocess_gene_burden:
     depends_on:
       - pts_evidence_gene_burden
-      - pts_target
-      - pis_literature
   pts_evidence_clinical_precedence:
     depends_on:
       - pts_clinical_report
