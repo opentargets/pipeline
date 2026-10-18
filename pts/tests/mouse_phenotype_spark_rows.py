@@ -2,6 +2,13 @@
 
 Captured by running the pyspark step (as of eb13b8ab) on those fixtures. OUTPUT and EXCLUDED are
 (columns, rows) with the lists of structs sorted by their JSON form and literature sorted.
+
+To regenerate, check out 0a957f83^ and, in a spark test, run on `_sources(tmp_path)` the old
+`_prepare_impc_datasets_for_mouse_phenotypes(_load_impc_datasets_for_mouse_phenotypes(...))`,
+`generate_mouse_phenotypes_dataset` with `_create_mp_classification`, then
+`filter_mouse_phenotypes_by_target` against the fixture targets; normalise with `_spark_rows`.
+CLASSES is `_create_mp_classification` on the ontology of `test_mp_classes_match_spark`
+(the `diamond` fixture plus its extra nodes and edges), collected and sorted as tuples.
 """
 
 CLASSES = [('MP:0000002', 'MP:0000002', 'term 2'),
