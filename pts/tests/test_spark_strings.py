@@ -6,7 +6,7 @@ import struct
 
 import polars as pl
 
-from pts.transformers.utils.spark_strings import java_double_to_string, regexp_extract, spark_trim
+from pts.transformers.utils.spark_strings import java_double_to_string, regexp_extract, spark_trim, spark_upper
 
 DOUBLES = [
     0.0,
@@ -133,3 +133,11 @@ def test_java_double_to_string_keeps_null() -> None:
 def test_java_double_to_string_broadcasts_a_scalar() -> None:
     assert pl.select(java_double_to_string(pl.lit(1.5e-9))).to_series().to_list() == ['1.5E-9']
     assert pl.select(java_double_to_string(pl.lit(2.5))).to_series().to_list() == ['2.5']
+
+
+def test_spark_upper_matches_spark(spark) -> None:
+    labels = ['Straße', 'ﬁx', 'İı', 'ΟΔΟΣ ς', 'a\ua7d3b', '\ua7cf\ua7d5', '\U00016ebb\U00016ed3', '', None]
+    labels += [chr(c) for c in range(0x80, 0x20000) if not 0xD800 <= c <= 0xDFFF]
+    rows = spark.createDataFrame([(v,) for v in labels], 'v string').selectExpr('upper(v) AS u').collect()
+    out = pl.select(spark_upper(pl.lit(pl.Series(labels, dtype=pl.String)))).to_series().to_list()
+    assert out == [r['u'] for r in rows]
