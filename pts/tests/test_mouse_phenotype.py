@@ -2,19 +2,10 @@
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import polars as pl
 import pytest
 
-from pts.pyspark.common.session import Session
-from pts.pyspark.mouse_phenotype import (
-    _create_mp_classification,
-    _load_impc_datasets_for_mouse_phenotypes,
-    _prepare_impc_datasets_for_mouse_phenotypes,
-    filter_mouse_phenotypes_by_target,
-    generate_mouse_phenotypes_dataset,
-)
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
 from pts.transformers.mouse_phenotype import (
     GROUP_KEYS,
@@ -25,6 +16,7 @@ from pts.transformers.mouse_phenotype import (
     read_mp_classes,
     split_by_target,
 )
+from tests.mouse_phenotype_spark_rows import CLASSES, EXCLUDED, OUTPUT
 
 OBO = 'http://purl.obolibrary.org/obo/'
 COLUMNS = ['modelPhenotypeId', 'modelPhenotypeClassId', 'modelPhenotypeClassLabel']
@@ -130,7 +122,7 @@ def test_unlabelled_class_label_is_null():
     assert _rows(mp_classes(ontology)) == {(_id(2), _id(2), None)}
 
 
-def test_mp_classes_match_spark(spark, diamond):
+def test_mp_classes_match_spark_golden(diamond):
     graph = diamond['graphs'][0]
     short = {'pred': 'is_a', 'obj': 'MP:0000001'}
     ontology = _ontology(
@@ -159,10 +151,8 @@ def test_mp_classes_match_spark(spark, diamond):
             {'sub': f'{OBO}MP_0000012', 'pred': 'is_a', 'obj': 'MP:0000010'},
         ],
     )
-    old = _create_mp_classification(ontology, SimpleNamespace(spark=spark))
-    expected = sorted(tuple(r) for r in old.collect())
     got = sorted(mp_classes(ontology).iter_rows())
-    assert got == expected
+    assert got == CLASSES
     assert (_id(7), _id(7), None) in got
     assert (_id(9), _id(9), '') in got
 
@@ -340,44 +330,18 @@ def _normalise(row: dict) -> dict:
     }
 
 
-def _spark_rows(df) -> tuple[list[str], list[dict]]:
-    return df.columns, sorted((_normalise(r.asDict(recursive=True)) for r in df.collect()), key=_key)
-
-
 def _polars_rows(df: pl.DataFrame) -> tuple[list[str], list[dict]]:
     return df.columns, sorted((_normalise(r) for r in df.to_dicts()), key=_key)
 
 
-class _Session:
-    """The old step's `Session` over the test spark session."""
-
-    load_data = Session.load_data
-
-    def __init__(self, spark) -> None:
-        self.spark = spark
-
-
-def test_step_matches_spark(spark, tmp_path: Path):
-    source = _sources(tmp_path / 'src')
-    session = _Session(spark)
-    datasets = _prepare_impc_datasets_for_mouse_phenotypes(_load_impc_datasets_for_mouse_phenotypes(session, source))
-    old = generate_mouse_phenotypes_dataset(
-        datasets['disease_model_summary_transformed'],
-        datasets['gene_mapping'],
-        datasets['model_mouse_phenotypes_transformed'],
-        datasets['mp_terms'],
-        datasets['literature'],
-        _create_mp_classification(datasets['mp_ontology'], session),
-    )
-    old_output, old_excluded = filter_mouse_phenotypes_by_target(old, spark.read.parquet(source['target']))
-
+def test_step_matches_spark_golden(tmp_path: Path):
     destination = _destination(tmp_path / 'out')
-    mouse_phenotype(source, destination, {}, None)
+    mouse_phenotype(_sources(tmp_path / 'src'), destination, {}, None)
     output = pl.read_parquet(destination['output'])
     excluded = pl.read_parquet(destination['excluded'])
 
-    assert _polars_rows(output) == _spark_rows(old_output)
-    assert _polars_rows(excluded) == _spark_rows(old_excluded)
+    assert _polars_rows(output) == OUTPUT
+    assert _polars_rows(excluded) == EXCLUDED
     # the fixture reaches every case it is built for
     assert {m['id'] for models in output['biologicalModels'] for m in models} == {'MGI:1', 'MGI:2', 'MGI:7', None}
     assert set(output['modelPhenotypeLabel']) == {'two', 'three', 'four', 'four again'}

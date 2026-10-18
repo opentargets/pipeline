@@ -11,7 +11,6 @@ from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
-from pts.pyspark.common.impc import cleanup_model_identifier
 from pts.transformers.evidence.impc import (
     DIRECTION_ON_TARGET,
     DIRECTION_ON_TRAIT,
@@ -303,7 +302,7 @@ def test_biological_model_id_matches_spark(spark: SparkSession) -> None:
         r[0]
         for r in spark
         .createDataFrame([(m,) for m in models], 'm string')
-        .select(cleanup_model_identifier(f.col('m')))
+        .select(f.expr(r"CASE WHEN split(m, '#')[0] RLIKE '^MGI:\\d+$' THEN split(m, '#')[0] END"))
         .collect()
     ]
     df = pl.DataFrame({'m': models}, schema={'m': pl.String})

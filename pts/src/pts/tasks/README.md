@@ -3,8 +3,8 @@
 The `pyspark` task can be used to launch pyspark jobs. They are local jobs for now, but we'll add
 dataproc cluster support.
 
-The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a pyspark job port of
-[the scala ETL's `mouse_phenotype` step](https://github.com/opentargets-archive/platform-etl-backend/blob/0e95e7cefb605ce2a0b15ee53f396134cc3bc471/src/main/scala/io/opentargets/etl/backend/MousePhenotype.scala).
+The file [baseline_expression_harmonise.py](../pyspark/baseline_expression_harmonise.py) is an example of a
+pyspark job.
 
 
 ## Launching
@@ -12,7 +12,7 @@ The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a 
 Just like any other Otter app:
 
 ```sh
-$ uv run pts -s mouse_phenotype
+$ uv run pts -s baseline_expression_dice
 ```
 
 
@@ -28,15 +28,16 @@ release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
 pool: 8
 
 steps:
-  mouse_phenotype:
-    - name: pyspark separate into output and excluded
+  baseline_expression_dice:
+    - name: pyspark baseline expression harmonise dice
+      pyspark: baseline_expression_harmonise
       source:
-        target: output/target
-        mouse_phenotype: input/mouse_phenotype/mouse_phenotypes.json.gz
+        dice_directory: input/baseline_expression/bulkRNAseq/DICE
+        mapping_path: input/baseline_expression/bulkRNAseq/DICE/DICE_ontology_mapping.txt
       destination:
-        output: output/mouse_phenotype
-        excluded: excluded/mouse_phenotype
-      pyspark: mouse_phenotype
+        baseline_expression: intermediate/baseline_expression/unaggregated/DICE/celltype
+      settings:
+        harmoniser: dice
 ```
 
 You pass either a `str` or a `dict[str, str]` to both `source` and `destination`, and a `pyspark`
@@ -56,5 +57,5 @@ This can be used to develop and test locally with data in the host.
 > [!NOTE]
 >
 > GCS Support is still a bit flimsy, and the application must be launched with:
-> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s mouse_phenotype`
+> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s baseline_expression_dice`
 > to specify a credentials file and project. We'll fix that in the future.
