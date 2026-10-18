@@ -1,4 +1,4 @@
-"""Polars equivalent of PySpark Evidence's variant identifier hashing."""
+"""Polars helpers for variant identifiers and scores."""
 
 import polars as pl
 import polars_hash as plh
@@ -6,6 +6,45 @@ import polars_hash as plh
 from pts.transformers.utils.spark_strings import regexp_extract
 
 VARIANT_HASH_LENGTH = 300
+
+
+def min_max_scaler(
+    column: pl.Expr,
+    min_value: float,
+    max_value: float,
+    minimum: float = 0.0,
+    maximum: float = 1.0,
+) -> pl.Expr:
+    """Linearly rescale a column to a new range without clipping values.
+
+    Uses the scaling formula described by scikit-learn's MinMaxScaler with
+    explicitly supplied input bounds. The input bounds must be distinct.
+    See https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.MinMaxScaler.html.
+
+    Args:
+        column: Column expression to rescale.
+        min_value: Minimum value of the original range.
+        max_value: Maximum value of the original range.
+        minimum: Minimum value of the new range. Defaults to 0.0.
+        maximum: Maximum value of the new range. Defaults to 1.0.
+
+    Returns:
+        Rescaled column expression. Null values remain null.
+
+    Examples:
+        Scale to the default range, preserving nulls and extrapolating beyond bounds.
+
+        >>> frame = pl.DataFrame({'score': [0.0, 5.0, 10.0, 20.0, None]})
+        >>> frame.select(min_max_scaler(pl.col('score'), 0.0, 10.0)).to_series().to_list()
+        [0.0, 0.5, 1.0, 2.0, None]
+
+        Use a custom output range in a lazy query.
+
+        >>> scaled = frame.lazy().select(min_max_scaler(pl.col('score'), 0.0, 10.0, -1.0, 1.0))
+        >>> scaled.collect().to_series().to_list()
+        [-1.0, 0.0, 1.0, 3.0, None]
+    """
+    return (column - min_value) / (max_value - min_value) * (maximum - minimum) + minimum
 
 
 def hash_long_variant_ids(variant_id: pl.Expr, threshold: int = VARIANT_HASH_LENGTH) -> pl.Expr:
