@@ -6,6 +6,7 @@ import datetime
 import gzip
 import json
 from pathlib import Path
+from typing import Any
 
 import openpyxl
 import pandas as pd
@@ -373,21 +374,64 @@ def test_spreadsheet_strings_match_old_reader(tmp_path: Path) -> None:
         'blank': [None, 'x', None, None, ''],
         'when': [datetime.datetime(2020, 1, 2), datetime.date(2021, 3, 4), None, None, None],
     }
+    rows = [list(columns), *(list(row) for row in zip(*columns.values(), strict=True))]
+    # a blank row between data rows, and blank rows before a formatted but empty trailing cell
+    rows[3:3] = [[None] * len(columns)]
+    path = _write_sheet(tmp_path / 'cells.xlsx', rows)
+    trailing = openpyxl.load_workbook(path)
+    trailing['S'].cell(row=len(rows) + 3, column=1).number_format = '0.00'
+    trailing['S'].cell(row=len(rows) + 3, column=1).value = ''
+    trailing.save(path)
+
+    df = read_spreadsheet(path, 'S', infer_types=False)
+
+    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
+    assert (df.columns, df.rows()) == _old_reader(path)
+    assert df.height == 6
+    assert df.row(2) == (None,) * len(columns)
+    assert df['integral'].to_list() == ['5', '0.01', None, '0.0001', '0', '1000000000000000']
+    assert df['flag'].to_list() == ['True', 'False', None, None, 'True', 'False']
+
+
+def _write_sheet(path: Path, rows: list[list[Any]], *, start: str = 'A1') -> str:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = 'S'
-    ws.append(list(columns))
-    for row in zip(*columns.values(), strict=True):
-        ws.append(list(row))
-    wb.save(tmp_path / 'cells.xlsx')
-    old = pd.read_excel(tmp_path / 'cells.xlsx', sheet_name='S', dtype=str).astype(object).map(_cell_to_string)
+    origin = ws[start]
+    for i, row in enumerate(rows):
+        for j, value in enumerate(row):
+            if value is not None:
+                ws.cell(row=origin.row + i, column=origin.column + j, value=value)
+    wb.save(path)
+    return str(path)
 
-    df = read_spreadsheet(str(tmp_path / 'cells.xlsx'), 'S', infer_types=False)
 
-    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
-    assert df.rows() == [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
-    assert df['integral'].to_list() == ['5', '0.01', '0.0001', '0', '1000000000000000']
-    assert df['flag'].to_list() == ['True', 'False', None, 'True', 'False']
+def _old_reader(path: str) -> tuple[list[str], list[tuple[str | None, ...]]]:
+    """Gene burden's old reader: `pd.read_excel(dtype=str)` then `_cell_to_string`."""
+    old = pd.read_excel(path, sheet_name='S', dtype=str).astype(object).map(_cell_to_string)
+    rows = [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
+    return [str(c) for c in old.columns], rows
+
+
+@pytest.mark.parametrize(
+    ('rows', 'start'),
+    [
+        pytest.param([[None, None], ['a', 'b'], [1, 'x']], 'A1', id='blank_header_row'),
+        pytest.param([['a', 'b'], [None, None], [1, 'x'], [2, 'y']], 'A1', id='blank_row_under_header'),
+        pytest.param([['a', 'b'], [1, 'x'], [None, None], [None, None], ['note', None]], 'A1', id='footnote'),
+        pytest.param([['a', 'b'], [1, 'x'], ['NA', 'nan'], [2, 'y']], 'A1', id='missing_value_row'),
+        pytest.param([['a', 'b'], [1, 'x']], 'C3', id='offset_table'),
+        pytest.param([['a', 'a', None, 'a.1', 'b'], [1, 2, 3, 4, None]], 'A1', id='header_names'),
+        pytest.param([['a', 'b'], [1e20, '#DIV/0!'], [2**53 + 2.0, '#N/A']], 'A1', id='big_numbers_and_errors'),
+        pytest.param([['a', 'b', None], ['x', None, None], ['y', 'z', None]], 'A1', id='short_rows'),
+    ],
+)
+def test_spreadsheet_layout_matches_old_reader(tmp_path: Path, rows: list[list[Any]], start: str) -> None:
+    path = _write_sheet(tmp_path / 'layout.xlsx', rows, start=start)
+
+    df = read_spreadsheet(path, 'S', infer_types=False)
+
+    assert (df.columns, df.rows()) == _old_reader(path)
 
 
 @pytest.mark.parametrize('infer_types', [True, False])

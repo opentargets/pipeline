@@ -28,7 +28,9 @@ import io
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import openpyxl
 import polars as pl
+from openpyxl.cell.cell import TYPE_ERROR, TYPE_NUMERIC
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
@@ -202,6 +204,60 @@ def scan_datasets(
     return pl.concat(frames, how='diagonal_relaxed')
 
 
+def _pandas_cell(cell: Any) -> Any:
+    """A cell's value as `pandas.read_excel` takes it: blank '', an error null, an integral number an int."""
+    if cell.value is None:
+        return ''
+    if cell.data_type == TYPE_ERROR:
+        return None
+    if cell.data_type == TYPE_NUMERIC and int(cell.value) == cell.value:
+        return int(cell.value)
+    return cell.value
+
+
+def _pandas_header(names: list[str]) -> list[str]:
+    """`pandas.read_excel`'s column names: a blank one `Unnamed: <i>`, a repeat `<name>.<n>`, named ones first."""
+    columns = [name or f'Unnamed: {i}' for i, name in enumerate(names)]
+    counts: dict[str, int] = {}
+    for i in [i for i, name in enumerate(names) if name] + [i for i, name in enumerate(names) if not name]:
+        original = column = columns[i]
+        count = counts.get(column, 0)
+        while count > 0:
+            counts[original] = count + 1
+            column = f'{original}.{count}'
+            count = count + 1 if column in columns else counts.get(column, 0)
+        columns[i] = column
+        counts[column] = count + 1
+    return columns
+
+
+def _sheet_as_pandas_text(data: bytes, sheet_name: str) -> pl.DataFrame:
+    """The sheet's cells as `pandas.read_excel(dtype=str)` renders them, before its missing values.
+
+    The first row is the header, blank or not; a blank row is kept, unless no row with a value follows.
+    """
+    workbook = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True, keep_links=False)
+    try:
+        sheet = workbook[sheet_name]
+        sheet.reset_dimensions()
+        rows = []
+        for row in sheet.rows:
+            values = [_pandas_cell(cell) for cell in row]
+            while values and values[-1] == '':
+                values.pop()
+            rows.append(values)
+    finally:
+        workbook.close()
+    while rows and not rows[-1]:
+        rows.pop()
+    if not rows:
+        raise ValueError(f'sheet {sheet_name} is empty')
+    width = max(len(row) for row in rows)
+    text = [[None if v is None else str(v) for v in row + [''] * (width - len(row))] for row in rows]
+    columns = _pandas_header([name or '' for name in text[0]])
+    return pl.DataFrame(text[1:], schema=dict.fromkeys(columns, pl.String), orient='row')
+
+
 def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) -> pl.DataFrame:
     """Read one sheet of an Excel workbook with every cell as a string.
 
@@ -221,11 +277,14 @@ def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) ->
     """
     with StorageHandle(path).open('rb') as f:
         data = f.read()
+    if not infer_types:
+        strings = _sheet_as_pandas_text(data, sheet_name)
+        return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
     sheet = pl.read_excel(
         io.BytesIO(data),
         sheet_name=sheet_name,
         engine='openpyxl',
-        infer_schema_length=None if infer_types else 0,
+        infer_schema_length=None,
         raise_if_empty=False,
     )
     if sheet.width == 0:
