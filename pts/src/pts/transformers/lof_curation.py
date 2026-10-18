@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from pts.schemas.variant_annotation import variant_annotation_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
-from pts.transformers.utils.variant_identifier import hash_long_variant_ids
+from pts.transformers.utils.variant import hash_long_variant_ids
 
 LOF_ASSESSMENTS: dict[str, tuple[str, float]] = {
     'lof': ('Assessed to cause LoF', 1.0),
@@ -87,7 +87,8 @@ def _transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
     if result.is_empty():
         raise ValueError('LoF curation input is empty')
     result = result.with_columns(
-        pl.when(pl.col('chromosome').is_null() | pl.col('position').is_null())
+        pl
+        .when(pl.col('chromosome').is_null() | pl.col('position').is_null())
         .then(pl.lit('OTVAR_') + plh.col('variantId').nchash.md5())
         .otherwise(hash_long_variant_ids(pl.col('variantId')))
         .alias('variantId')
