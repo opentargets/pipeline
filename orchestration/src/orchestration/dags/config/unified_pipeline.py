@@ -103,9 +103,8 @@ class UnifiedPipelineConfig:
         spark_nlp_version = up.get('spark_nlp_version')
         if not spark_nlp_version:
             raise ValueError(
-                'spark_nlp_version is missing from unified_pipeline.yaml; the pts and '
-                'pts_literature clusters need it to resolve the Spark-NLP jar they '
-                'load via spark.jars.'
+                'spark_nlp_version is missing from unified_pipeline.yaml; the pts cluster '
+                'needs it to resolve the Spark-NLP jar it loads via spark.jars.'
             )
 
         boot_image_keys = ('dataproc_image_version_pts', 'dataproc_image_version_gentropy', 'cos_image')
@@ -126,7 +125,7 @@ class UnifiedPipelineConfig:
                 'dataproc_image_version_pts': boot_images['dataproc_image_version_pts'],
                 'dataproc_image_version_gentropy': boot_images['dataproc_image_version_gentropy'],
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
-                # Lets the pts / pts_literature clusters point spark.jars at the
+                # Lets the pts cluster point spark.jars at the
                 # version-pinned Spark-NLP fat jar in the pipelines bucket.
                 'spark_nlp_version': spark_nlp_version,
                 'pts_init_action_uri': self.pts_init_action_uri,
@@ -158,7 +157,7 @@ class UnifiedPipelineConfig:
         self.pts_boot_disk_size = 30
         """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
 
-        # Spark-NLP fat jar. Clusters that use OnToma (pts, pts_literature) load
+        # Spark-NLP fat jar. The pts cluster (clinical_report) loads
         # it via spark.jars instead of resolving the package from Maven Central
         # on every spark-submit (see opentargets/issues#4453). Orchestration
         # stages the version-pinned jar from John Snow Labs into the pipelines
