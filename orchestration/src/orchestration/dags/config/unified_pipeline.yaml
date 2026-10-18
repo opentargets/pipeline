@@ -272,9 +272,6 @@ steps:
     depends_on:
       - pis_evidence_orphanet
       - pts_ontoma
-  pts_evidence_postprocess_orphanet:
-    depends_on:
-      - pts_evidence_orphanet
       - pts_target
       - pis_literature
   pts_evidence_clingen:
@@ -286,19 +283,12 @@ steps:
     depends_on:
       - pis_impc
       - pts_ontoma
-  pts_evidence_postprocess_impc:
-    num_partitions: 100
-    depends_on:
-      - pts_evidence_impc
       - pts_target
       - pis_literature
   pts_evidence_panel_app:
     depends_on:
       - pis_evidence_panel_app
       - pts_ontoma
-  pts_evidence_postprocess_panel_app:
-    depends_on:
-      - pts_evidence_panel_app
       - pts_target
       - pis_literature
   pts_evidence_crispr_screens:
@@ -311,9 +301,6 @@ steps:
     depends_on:
       - pis_evidence_gene2phenotype
       - pts_ontoma
-  pts_evidence_postprocess_gene2phenotype:
-    depends_on:
-      - pts_evidence_gene2phenotype
       - pts_target
       - pis_literature
   pts_evidence_intogen:
@@ -370,7 +357,7 @@ steps:
   pts_association:
     ppp_only: false
     depends_on:
-      - pts_evidence_postprocess_impc
+      - pts_evidence_impc
       - pts_evidence_europepmc
       - pts_evidence_gwas_credible_sets
       - pts_evidence_expression_atlas
@@ -383,9 +370,9 @@ steps:
       - pts_evidence_clinvar
       - pts_evidence_clinvar_somatic
       - pts_evidence_postprocess_gene_burden
-      - pts_evidence_postprocess_gene2phenotype
-      - pts_evidence_postprocess_panel_app
-      - pts_evidence_postprocess_orphanet
+      - pts_evidence_gene2phenotype
+      - pts_evidence_panel_app
+      - pts_evidence_orphanet
       - pts_evidence_intogen
       - pts_evidence_reactome
       - pts_evidence_uniprot_literature

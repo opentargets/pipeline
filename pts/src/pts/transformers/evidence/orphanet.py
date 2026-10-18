@@ -1,15 +1,25 @@
-"""Evidence parser for Orphanet's gene-disease associations."""
+"""Evidence from Orphanet's gene-disease associations.
+
+Parses Orphanet's gene-disease XML into evidence and post-processes it.
+Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by id.
+"""
+
+from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from itertools import chain
 from typing import Any
 
+import polars as pl
 from loguru import logger
-from pyspark.sql import DataFrame, Row
-from pyspark.sql.functions import array_distinct, col, create_map, lit, split
+from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 
-from pts.pyspark.common.ontology import add_efo_mapping
-from pts.pyspark.common.session import Session
+from pts.schemas.orphanet import ORPHANET_SCHEMA
+from pts.transformers.evidence.utils.datasource import EvidenceDatasource
+from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
+from pts.transformers.evidence.utils.luts import build_luts
+from pts.transformers.evidence.utils.ontology import add_efo_mapping
+from pts.transformers.evidence.utils.run import write_evidence
 
 # The rest of the types are assigned to -> germline for allele origins
 EXCLUDED_ASSOCIATIONTYPES = [
@@ -29,32 +39,20 @@ CONSEQUENCE_MAP = {
     'Disease-causing germline mutation(s) (gain of function) in': 'SO_0002053',
 }
 
-
-def orphanet(
-    source: dict[str, str],
-    destination: str,
-    settings: dict[str, Any],
-    properties: dict[str, str],
-) -> None:
-    spark = Session(app_name='orphanet', properties=properties)
-
-    logger.info(f'parse XML from {source["evidence"]} into a list of dictionaries')
-    orphanet_disorders = parse_orphanet_xml(spark.spark.read.text(source['evidence'], wholetext=True).collect()[0][0])
-    orphanet_df = spark.spark.createDataFrame(Row(**x) for x in orphanet_disorders)
-
-    logger.info('process evidence strings')
-    evidence_df = process_orphanet(orphanet_df)
-
-    logger.info('add EFO mappings')
-    evidence_df = add_efo_mapping(
-        spark=spark.spark,
-        evidence_df=evidence_df,
-        disease_label_lut_path=source['ontoma_disease_label_lut'],
-        disease_id_lut_path=source['ontoma_disease_id_lut'],
-    )
-
-    logger.info(f'write evidence strings to {destination}')
-    evidence_df.write.mode('overwrite').parquet(destination)
+ORPHANET = EvidenceDatasource(
+    datasource_id='orphanet',
+    unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'diseaseFromSourceId'],
+    score=confidence_score({'Assessed': 1.0, 'Not yet assessed': 0.5}),
+)
+DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
+DIRECTION_ON_TARGET = (
+    pl
+    .when(pl.col('variantFunctionalConsequenceId') == 'SO_0002053')
+    .then(pl.lit('GoF'))
+    .when(pl.col('variantFunctionalConsequenceId') == 'SO_0002054')
+    .then(pl.lit('LoF'))
+    .otherwise(None)
+)
 
 
 def _text(el: ET.Element | None, path: str) -> str | None:
@@ -129,7 +127,7 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
             # Extracting ensembl gene id from cross references:
             ensembl = []
             xrefs = gene.find('ExternalReferenceList') if gene is not None else None
-            for xref in xrefs or []:
+            for xref in xrefs if xrefs is not None else []:
                 r = xref.find('Reference')
                 if r is not None and r.text and 'ENSG' in r.text:
                     ensembl.append(r.text)
@@ -140,29 +138,63 @@ def parse_orphanet_xml(xml_string: str) -> list[dict]:
     return orphanet_disorders
 
 
-def process_orphanet(orphanet_df: DataFrame) -> DataFrame:
-    """The JSON Schema format is applied to the df."""
-    # Map association type to sequence ontology ID:
-    so_mapping_expr = create_map([lit(x) for x in chain(*CONSEQUENCE_MAP.items())])
+def parse_orphanet(path: str) -> pl.LazyFrame:
+    """Raw disorder-gene associations of the Orphanet XML dump, before disease mapping."""
+    text, _ = StorageHandle(path).read()
+    rows = parse_orphanet_xml(text.decode('utf-8'))
+    return pl.DataFrame(rows, schema=ORPHANET_SCHEMA).lazy()
 
+
+def process_orphanet(raw: pl.LazyFrame) -> pl.LazyFrame:
+    """Drop the excluded association types and rows without an Ensembl gene, and shape the evidence columns."""
     return (
-        orphanet_df
-        .filter(~col('associationType').isin(EXCLUDED_ASSOCIATIONTYPES))
-        .filter(~col('targetFromSourceId').isNull())
-        .withColumn(
-            'variantFunctionalConsequenceId',
-            so_mapping_expr[col('associationType')],
-        )
+        raw
+        .filter(pl.col('associationType').is_not_null() & ~pl.col('associationType').is_in(EXCLUDED_ASSOCIATIONTYPES))
+        .filter(pl.col('targetFromSourceId').is_not_null())
         .select(
-            lit('orphanet').alias('datasourceId'),
-            lit('genetic_association').alias('datatypeId'),
-            split(lit('germline,somatic'), ',').alias('alleleOrigins'),
-            'confidence',
-            'diseaseFromSource',
-            'diseaseFromSourceId',
-            array_distinct(col('literature')).alias('literature'),
-            'targetFromSource',
-            'targetFromSourceId',
-            'variantFunctionalConsequenceId',
+            datasourceId=pl.lit('orphanet'),
+            datatypeId=pl.lit('genetic_association'),
+            alleleOrigins=pl.lit(['germline', 'somatic'], dtype=pl.List(pl.String)),
+            confidence=pl.col('confidence'),
+            diseaseFromSource=pl.col('diseaseFromSource'),
+            diseaseFromSourceId=pl.col('diseaseFromSourceId'),
+            literature=pl.col('literature').list.unique(maintain_order=True),
+            targetFromSource=pl.col('targetFromSource'),
+            targetFromSourceId=pl.col('targetFromSourceId'),
+            variantFunctionalConsequenceId=pl
+            .col('associationType')
+            .replace_strict(CONSEQUENCE_MAP, default=None, return_dtype=pl.String),
         )
     )
+
+
+def orphanet(
+    source: dict[str, str],
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Generate and post-process Orphanet evidence.
+
+    Args:
+        source: `evidence` XML file, `ontoma_disease_label_lut`, `ontoma_disease_id_lut`, `disease`,
+            `target` and `literature` locations.
+        destination: `evidence` and `failed_evidence` output directories.
+        settings: unused.
+        config: unused.
+    """
+    logger.info(f'parse orphanet XML from {source["evidence"]}')
+    raw = add_efo_mapping(
+        process_orphanet(parse_orphanet(source['evidence'])),
+        disease_label_lut_path=source['ontoma_disease_label_lut'],
+        disease_id_lut_path=source['ontoma_disease_id_lut'],
+    ).collect()
+    luts = build_luts(raw.lazy(), disease=source['disease'], target=source['target'], literature=source['literature'])
+    evidence = (
+        ORPHANET
+        .postprocess(raw.lazy(), luts)
+        .assign_direction_on_trait(DIRECTION_ON_TRAIT)
+        .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
+        .hash_long_variant_identifiers()
+    )
+    write_evidence(evidence, destination)

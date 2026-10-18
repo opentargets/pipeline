@@ -102,6 +102,15 @@ def test_disease_lut_keeps_duplicate_rows(tmp_path: Path) -> None:
     assert sorted(build_disease_lut(path)['diseaseFromSourceMappedId']) == ['EFO_1', 'EFO_1', 'OLD_1']
 
 
+def test_disease_lut_order_does_not_depend_on_input_order(tmp_path: Path) -> None:
+    rows = {'id': ['EFO_2', 'EFO_1', 'EFO_3'], 'obsoleteTerms': [['OLD'], ['OLD', 'OLD_1'], None]}
+    reversed_rows = {k: v[::-1] for k, v in rows.items()}
+
+    lut = build_disease_lut(_disease(tmp_path / 'a', rows))
+    assert lut.equals(build_disease_lut(_disease(tmp_path / 'b', reversed_rows)))
+    assert lut.filter(pl.col('diseaseFromSourceMappedId') == 'OLD')['diseaseId'].to_list() == ['EFO_1', 'EFO_2']
+
+
 # --------------------------------------------------------------------------- target
 
 
@@ -121,6 +130,21 @@ def test_target_lut_keys_on_every_identifier(tmp_path: Path) -> None:
     assert set(lut['targetFromSourceId']) == {'ENSG1', 'P1', 'P2', 'ABC1'}
     assert set(lut['TSorOncogene']) == {'oncogene'}
     assert set(lut['biotype']) == {'protein_coding'}
+
+
+def test_target_lut_order_does_not_depend_on_input_order(tmp_path: Path) -> None:
+    rows = {
+        'id': ['ENSG2', 'ENSG1', 'ENSG3'],
+        'biotype': ['protein_coding'] * 3,
+        'approvedSymbol': ['SYM', 'SYM', 'OTHER'],
+        'proteinIds': [[{'id': 'P1', 'source': 'uniprot'}], [{'id': 'P1', 'source': 'uniprot'}], None],
+        'hallmarks': [None] * 3,
+    }
+    reversed_rows = {k: v[::-1] for k, v in rows.items()}
+
+    lut = build_target_lut(_target(tmp_path / 'a', rows))
+    assert lut.equals(build_target_lut(_target(tmp_path / 'b', reversed_rows)))
+    assert lut.filter(pl.col('targetFromSourceId') == 'SYM')['targetId'].to_list() == ['ENSG1', 'ENSG2']
 
 
 def test_target_lut_deduplicates_repeated_identifiers(tmp_path: Path) -> None:
@@ -514,6 +538,15 @@ class TestValidateDiseases:
         assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_DISEASE]]
 
 
+    def test_fan_out_follows_lookup_order(self) -> None:
+        lf = pl.LazyFrame({'diseaseFromSourceMappedId': ['OLD'] * 50 + ['EFO_9'] * 50, 'n': list(range(100))})
+        for ids in (['EFO_1', 'EFO_2', 'EFO_3'], ['EFO_3', 'EFO_1', 'EFO_2']):
+            lut = pl.DataFrame({'diseaseFromSourceMappedId': ['OLD'] * 3, 'diseaseId': ids})
+            out = Evidence(lf).validate_diseases(lut).lf.collect()
+            assert out['n'].to_list() == [n for n in range(50) for _ in ids] + list(range(50, 100))
+            assert out['diseaseId'].to_list()[:150] == ids * 50
+
+
 class TestValidateTarget:
     def test_invalid_target_is_flagged(self) -> None:
         lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'NOPE']})
@@ -523,6 +556,14 @@ class TestValidateTarget:
         out = Evidence(lf).validate_target(lut).lf.collect()
         assert out[QC_COLUMN].to_list() == [[], [EvidenceFlags.INVALID_TARGET]]
         assert 'biotype' not in out.columns
+
+    def test_fan_out_follows_lookup_order(self) -> None:
+        lf = pl.LazyFrame({'targetFromSourceId': ['SYM'] * 50 + ['NOPE'] * 50, 'n': list(range(100))})
+        for ids in (['T1', 'T2', 'T3'], ['T3', 'T1', 'T2']):
+            lut = pl.DataFrame({'targetId': ids, 'biotype': ['protein_coding'] * 3, 'targetFromSourceId': ['SYM'] * 3})
+            out = Evidence(lf).validate_target(lut).lf.collect()
+            assert out['n'].to_list() == [n for n in range(50) for _ in ids] + list(range(50, 100))
+            assert out['targetId'].to_list()[:150] == ids * 50
 
     def test_invalid_biotype_is_flagged(self) -> None:
         lf = pl.LazyFrame({'targetFromSourceId': ['ENSG1', 'ENSG2']})
@@ -587,10 +628,7 @@ class TestAssignEvidenceIdentifier:
         assert out['id'][0] == out['id'][1]
 
     def test_no_unique_field_present_hashes_the_empty_string_like_spark(self) -> None:
-        # pl.concat_str([]) raises ComputeError on an empty expression list; spark's
-        # concat_ws('') over zero columns is well-defined and yields '', so the id must be
-        # sha1(''), not a crash. Unreachable with today's config.yaml, but a raw ComputeError
-        # leaking out of assign_evidence_identifier would be a real regression if that changes.
+        # spark's concat_ws over no columns yields '', so the id is sha1('').
         lf = pl.LazyFrame({'targetId': ['T1']})
         out = Evidence(lf).assign_evidence_identifier(['doesNotExist']).lf.collect()
         assert out['id'][0] == 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
@@ -771,25 +809,12 @@ class TestValidateUniqueness:
         assert sum(flagged) == 1
 
     def test_survivor_matches_an_independently_computed_content_hash(self) -> None:
-        # Fix round 1: a purely positional over('id') (or any implementation that doesn't
-        # actually rank by content) would pass a self-comparison test like "rerun and check the
-        # same row wins" without ever computing a real hash. This instead computes the expected
-        # winner independently via hashlib.sha256 over the exact content string this method
-        # builds, and asserts the actual survivor matches that computation, not just itself.
-        #
-        # Fix round 2, minor: the content string is built via render_for_hash over the real
-        # `collect_schema()`, the same way validate_uniqueness itself builds it -- not a
-        # hand-written approximation. An earlier version hand-wrote 'a1'/'a2' as the content,
-        # silently omitting `qualityControls` (the real content is 'a1[]'/'a2[]'); both happened
-        # to pick survivor '2' anyway, so the test passed by coincidence, not because it actually
-        # caught a wrong rendering or column order -- it could not have failed against either.
-        # Only the HASHING is independent (hashlib, not chash.sha2_256); the content string must
-        # match what's actually hashed, or this test drifts from the code it's meant to pin.
+        # the survivor has the lowest sha256, computed with hashlib, of the row's rendered content
         lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
         ev = Evidence(lf)
         schema = ev.lf.collect_schema()
         parts = [render_for_hash(name, schema[name]).fill_null('null') for name in schema.names()]
-        contents = ev.lf.select(pl.concat_str(parts).alias('_content'), 'v').collect()
+        contents = ev.lf.select(pl.concat_str(parts, separator='\x01').alias('_content'), 'v').collect()
         digests = {row['v']: hashlib.sha256(row['_content'].encode()).hexdigest() for row in contents.to_dicts()}
         expected_survivor = min(digests, key=lambda v: digests[v])
 
@@ -825,16 +850,27 @@ class TestValidateUniqueness:
         assert sum(EvidenceFlags.DUPLICATED in qc for qc in out[QC_COLUMN]) == 1
 
     def test_id_column_itself_is_included_in_the_content_hash(self) -> None:
-        # Fix round 1, Critical 2(a): id constant within the id-partitioned window being ranked
-        # does NOT mean including it is a no-op -- sha256 ordering is not preserved under a
-        # constant infix (measured: excluding id changed the survivor in 48.1% of 2,000 sampled
-        # partitions). id='a', v='1'/'2' is a concrete case where the two schemes disagree: hashing
-        # 'a1'/'a2' (id included) picks '2' as the lower hash, hashing '1'/'2' alone (id excluded,
-        # the old behaviour) picks '1' -- so this fails if id were ever dropped from the hash again.
-        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '2']})
+        # with id in the hash '3' survives; without it '1' would
+        lf = pl.LazyFrame({'id': ['a', 'a'], 'v': ['1', '3']})
         out = Evidence(lf).validate_uniqueness().lf.collect()
         flagged = {row['v']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
-        assert flagged == {'1': True, '2': False}
+        assert flagged == {'1': True, '3': False}
+
+    def test_fields_are_joined_with_spark_separator(self) -> None:
+        # ('ab', 'c') and ('a', 'bc') only hash differently with a separator between fields;
+        # joined by U+0001, ('ab', 'c') has the lower digest and survives.
+        lf = pl.LazyFrame({'id': ['x', 'x'], 'p': ['a', 'ab'], 'q': ['bc', 'c']})
+        ev = Evidence(lf)
+        schema = ev.lf.collect_schema()
+        parts = [render_for_hash(name, schema[name]).fill_null('null') for name in schema.names()]
+        contents = ev.lf.select(pl.concat_str(parts, separator='\x01')).collect().to_series().to_list()
+        assert contents == ['x\x01a\x01bc\x01[]', 'x\x01ab\x01c\x01[]']
+        digests = [hashlib.sha256(c.encode()).hexdigest() for c in contents]
+        assert digests[1] < digests[0]
+
+        out = ev.validate_uniqueness().lf.collect()
+        flagged = {row['p']: EvidenceFlags.DUPLICATED in row[QC_COLUMN] for row in out.to_dicts()}
+        assert flagged == {'a': True, 'ab': False}
 
     def test_missing_id_raises_clearly(self) -> None:
         # Fix round 1, minor: pyspark's @required_columns(['id']) was never ported; without an
