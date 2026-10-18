@@ -344,6 +344,13 @@ def test_confidence_respects_null_elements_in_quality_controls(qc, expected):
     assert result == getattr(cs.CredibleSetConfidenceClasses, expected).value
 
 
+def diseases(measurements=(), other=()):
+    """Build a disease index filing `measurements` under the measurement therapeutic area."""
+    rows = [{'id': term, 'therapeuticAreas': [cs.MEASUREMENT_THERAPEUTIC_AREA]} for term in measurements]
+    rows += [{'id': term, 'therapeuticAreas': ['EFO_0000651']} for term in other]
+    return pl.DataFrame(rows, schema={'id': pl.String, 'therapeuticAreas': pl.List(pl.String)}).lazy()
+
+
 def studies(rows):
     """Build typed study annotations used for replication."""
     from pts.schemas.study import study_schema
@@ -396,7 +403,46 @@ def test_gwas_replication_matches_entire_disease_set(left, right, expected):
         {'studyLocusId': 'cs1', 'studyId': 's1', 'variantId': '1_100_A_C'},
         {'studyLocusId': 'cs2', 'studyId': 's2', 'variantId': '1_100_A_C'},
     ])
-    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study))] == [expected, expected]
+    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study, diseases()))] == [
+        expected,
+        expected,
+    ]
+
+
+@pytest.mark.parametrize(
+    ('left', 'right', 'expected'),
+    [
+        (['M1', 'M2'], ['M2'], True),
+        (['M1'], ['M2'], False),
+        (['M1', 'D1'], ['M2', 'D1'], True),
+        (['M1', 'D1', 'D2'], ['D1'], False),
+        (['M1', 'D1'], ['M1'], False),
+        (['D1', 'D2'], ['D2', 'D1'], True),
+        (['UNINDEXED', 'D1'], ['D1'], False),
+    ],
+    ids=[
+        'measurements-share-one',
+        'measurements-disjoint',
+        'measurements-dropped-diseases-match',
+        'measurements-dropped-diseases-differ',
+        'diseases-vs-measurement-only',
+        'diseases-in-any-order',
+        'unindexed-term-is-a-disease',
+    ],
+)
+def test_gwas_replication_matches_on_the_kind_of_terms(left, right, expected):
+    """Measurements replicate one at a time; diseases replicate as a whole list."""
+    study = studies([
+        {'studyId': 's1', 'studyType': 'gwas', 'diseaseIds': left, 'pubmedId': 'p1'},
+        {'studyId': 's2', 'studyType': 'gwas', 'diseaseIds': right, 'pubmedId': 'p2'},
+    ])
+    frame = credible_sets([
+        {'studyLocusId': 'cs1', 'studyId': 's1', 'variantId': '1_100_A_C'},
+        {'studyLocusId': 'cs2', 'studyId': 's2', 'variantId': '1_100_A_C'},
+    ])
+    disease = diseases(measurements=['M1', 'M2'], other=['D1', 'D2'])
+    result = flags(cs.qc_replication(frame, study, disease))
+    assert [cs.QualityFlag.REPLICATED in qc for qc in result] == [expected, expected]
 
 
 @pytest.mark.parametrize(
@@ -424,7 +470,10 @@ def test_gwas_replication_collapses_identical_evidence(difference, expected):
         {'studyLocusId': 'cs1', 'studyId': 's1', 'variantId': '1_100_A_C'},
         {'studyLocusId': 'cs2', 'studyId': 's2', 'variantId': '1_100_A_C'},
     ])
-    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study))] == [expected, expected]
+    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study, diseases()))] == [
+        expected,
+        expected,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -444,7 +493,10 @@ def test_molqtl_replication_matches_gene_across_studies(gene_left, gene_right, e
         {'studyLocusId': 'cs1', 'studyId': 's1', 'variantId': '1_100_A_C'},
         {'studyLocusId': 'cs2', 'studyId': 's2', 'variantId': '1_100_A_C'},
     ])
-    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study))] == [expected, expected]
+    assert [cs.QualityFlag.REPLICATED in qc for qc in flags(cs.qc_replication(frame, study, diseases()))] == [
+        expected,
+        expected,
+    ]
 
 
 def test_replication_null_variants_never_match():
@@ -453,7 +505,7 @@ def test_replication_null_variants_never_match():
         {'studyId': 's2', 'studyType': 'eqtl', 'geneId': 'gene'},
     ])
     frame = credible_sets([{'studyLocusId': 'cs1', 'studyId': 's1'}, {'studyLocusId': 'cs2', 'studyId': 's2'}])
-    assert flags(cs.qc_replication(frame, study)) == [[], []]
+    assert flags(cs.qc_replication(frame, study, diseases())) == [[], []]
 
 
 def test_credible_set_step_filters_before_deduplication_and_replication(tmp_path):
@@ -497,6 +549,7 @@ def test_credible_set_step_filters_before_deduplication_and_replication(tmp_path
     frames = {
         'study': studies(study_rows).collect(),
         'target': pl.DataFrame({'id': ['gene'], 'tss': [100], 'genomicLocation': [{'chromosome': '1'}]}),
+        'disease': diseases().collect(),
         'credible_set': credible_sets([
             top_hit,
             valid,
