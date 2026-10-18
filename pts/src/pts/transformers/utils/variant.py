@@ -78,3 +78,43 @@ def hash_long_variant_ids(variant_id: pl.Expr, threshold: int = VARIANT_HASH_LEN
         .then(pl.concat_str(pl.lit('OTVAR'), chrom, position, digest, separator='_'))
         .otherwise(variant_id)
     )
+
+
+def hash_variant_index_ids(
+    variant_id: pl.Expr,
+    chromosome: pl.Expr,
+    position: pl.Expr,
+    threshold: int = VARIANT_HASH_LENGTH,
+) -> pl.Expr:
+    """Hash identifiers following Gentropy's VariantIndex rules.
+
+    Unlike `hash_long_variant_ids`, coordinates come from their own columns and IDs
+    are hashed at the threshold length. Missing coordinates give OTVAR_<md5>; long
+    IDs keep their coordinates as OTVAR_<chromosome>_<position>_<md5>. Null IDs
+    remain null. Thresholds count characters, not UTF-8 bytes.
+
+    Examples:
+        >>> import hashlib
+        >>> frame = pl.DataFrame({
+        ...     'variantId': ['short', 'abcdefghij', 'missing', None],
+        ...     'chromosome': ['1', '2', None, None],
+        ...     'position': [1, 2, 3, None],
+        ... })
+        >>> ids = hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 10)
+        >>> frame.select(ids).to_series().to_list() == [
+        ...     'short',
+        ...     'OTVAR_2_2_' + hashlib.md5(b'abcdefghij').hexdigest(),
+        ...     'OTVAR_' + hashlib.md5(b'missing').hexdigest(),
+        ...     None,
+        ... ]
+        True
+    """
+    digest = plh.concat_str(variant_id).nchash.md5()
+    return (
+        pl
+        .when(chromosome.is_null() | position.is_null())
+        .then(pl.concat_str(pl.lit('OTVAR_'), digest))
+        .when(variant_id.str.len_chars() >= threshold)
+        .then(pl.concat_str(pl.lit('OTVAR'), chromosome, position, digest, separator='_'))
+        .otherwise(variant_id)
+    )

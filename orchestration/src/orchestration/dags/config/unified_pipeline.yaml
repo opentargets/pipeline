@@ -123,6 +123,9 @@ steps:
   pts_variant:
     depends_on:
       - pis_variant
+      - gentropy_variant_annotation
+    depends_on_ppp:
+      - pts_variant_ppp
   pts_reactome:
     depends_on:
       - pis_reactome
@@ -153,7 +156,7 @@ steps:
       - pts_target
   pts_coding_variant:
     depends_on:
-      - gentropy_variant
+      - pts_variant
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
@@ -459,7 +462,7 @@ steps:
   pts_search:
     depends_on:
       - pts_association
-      - gentropy_variant
+      - pts_variant
       - pts_drug_molecule
       - pts_target
       - pts_disease
@@ -528,16 +531,9 @@ steps:
   gentropy_variant_annotation:
     depends_on:
       - pts_variant_partition
-  gentropy_variant:
-    depends_on:
-      - gentropy_variant_annotation
-      - pis_variant
-      - pts_variant
-    depends_on_ppp:
-      - pts_variant_ppp
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation
-      - gentropy_variant
+      - pts_variant
       - gentropy_enhancer_to_gene
       - pts_interaction
