@@ -21,6 +21,15 @@ LOF_ASSESSMENTS: dict[str, tuple[str, float]] = {
 }
 
 
+def normalise_lof_score(assessment: pl.Expr) -> pl.Expr:
+    """Map curated verdicts to ordinal scores; unknown verdicts remain null."""
+    return assessment.replace_strict(
+        {verdict: score for verdict, (_, score) in LOF_ASSESSMENTS.items()},
+        default=None,
+        return_dtype=pl.Float64,
+    )
+
+
 class LofCurationSettings(BaseModel):
     """LoF ingestion has no configurable transformation options."""
 
@@ -66,14 +75,7 @@ def _transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
                     pl.lit(None, dtype=pl.Float32).alias('score'),
                     pl.lit(None, dtype=pl.String).alias('assessmentFlag'),
                     pl.lit(None, dtype=pl.String).alias('targetId'),
-                    pl
-                    .col('assessment')
-                    .replace_strict(
-                        {verdict: score for verdict, (_, score) in LOF_ASSESSMENTS.items()},
-                        default=None,
-                        return_dtype=pl.Float64,
-                    )
-                    .alias('normalisedScore'),
+                    normalise_lof_score(pl.col('assessment')).alias('normalisedScore'),
                 )
             ).alias('variantEffect'),
             pl.concat_str(

@@ -1,0 +1,26 @@
+---
+steps:
+  # Overrides replace whole lists, so the FoldX task is repeated here.
+  variant:
+    - name: transform FoldX annotations
+      source: input/variant/foldx
+      destination: intermediate/variant/foldx
+      transformer: foldx
+      settings:
+        plddt_threshold: 0.7
+
+    - name: transform variant index
+      requires:
+        - transform FoldX annotations
+      transformer: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - input/variant/gnomad
+          - intermediate/variant/lof_curation
+        amino_acid_annotations:
+          - intermediate/variant/foldx
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
