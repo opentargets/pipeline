@@ -12,6 +12,7 @@ from pyspark.sql import functions as f
 
 from pts.transformers.evidence.encore import ENCORE
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
+from pts.transformers.utils.spark_math import spark_log10
 
 # ------------------------------------------------------------------------------------------------
 # Exact parity with the SQL on main for the scores rewritten since the case table was measured.
@@ -61,3 +62,12 @@ def test_log10_rescaled_score_matches_spark_bit_for_bit(
     got = pl.DataFrame({'p': values}, schema={'p': pl.Float64})
     score = log10_rescaled_score(pl.col('p'), out_min, weak_ref, strong_ref)
     assert _same(got.select(score.alias('s'))['s'].to_list(), expected)
+
+
+@pytest.mark.parametrize(('weak_ref', 'strong_ref'), [(weak, strong) for _, weak, strong in SCORE_PARAMETERS])
+def test_log10_rescaled_score_reference_logs_match_spark(
+    spark: SparkSession, weak_ref: float, strong_ref: float
+) -> None:
+    expected = spark.createDataFrame([(weak_ref,), (strong_ref,)], 'p DOUBLE').select(f.log10('p').alias('l')).collect()
+    got = pl.select(spark_log10(pl.lit(pl.Series([weak_ref, strong_ref])))).to_series().to_list()
+    assert got == [row.l for row in expected]

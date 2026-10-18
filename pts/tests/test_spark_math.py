@@ -64,17 +64,21 @@ def _ulps(value: float, steps: int) -> float:
     return value
 
 
+def _log10(value: float) -> float:
+    return pl.select(spark_log10(pl.lit(value, dtype=pl.Float64))).item()
+
+
 def _edge(power: float, target: float, sign: int) -> float:
-    """The farthest double from `power`, in `sign`'s direction, whose libm log10 is still `target`."""
-    if math.log10(power) != target:
+    """The farthest double from `power`, in `sign`'s direction, whose `spark_log10` is still `target`."""
+    if _log10(power) != target:
         return power
     step = 1
-    while math.log10(_ulps(power, sign * step)) == target:
+    while _log10(_ulps(power, sign * step)) == target:
         step *= 2
     low, high = step // 2, step
     while high - low > 1:
         middle = (low + high) // 2
-        if math.log10(_ulps(power, sign * middle)) == target:
+        if _log10(_ulps(power, sign * middle)) == target:
             low = middle
         else:
             high = middle
@@ -85,8 +89,9 @@ def _log10_edges() -> list[float]:
     values = []
     for k in range(324):
         power = float(f'1e{-k}')
-        for edge in (_edge(power, -float(k), 1), _edge(power, -float(k), -1)):
-            values += [_ulps(edge, step) for step in range(-4, 5)]
+        for sign in (1, -1):
+            edge = _edge(power, -float(k), sign)
+            values += [edge, _ulps(edge, sign)]
     rng = random.Random(20261018)
     return values + [10 ** rng.uniform(-323, 1) for _ in range(5000)]
 
