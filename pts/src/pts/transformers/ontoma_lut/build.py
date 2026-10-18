@@ -31,7 +31,7 @@ DISEASE_IDS = (
     ('obsoleteXRefs', 0.997, 'obsolete_crossref'),
 )
 #: `filter_disease_crossrefs`: an uppercased id containing any of these is dropped.
-IRRELEVANT_CROSSREF_PREFIXES = [
+IRRELEVANT_CROSSREF_PREFIXES = (
     'PMID',
     'DOI:',
     'ORCID',
@@ -41,7 +41,7 @@ IRRELEVANT_CROSSREF_PREFIXES = [
     'HTTP',
     'QUANT',
     'UM-BBD_PATHWAYID',
-]
+)
 
 _CURATION_ID = rf'^http{JAVA_DOT}+/([0-9A-Za-z_]+_[0-9A-Za-z_]+){JAVA_END}'
 _NUMBERED_ITEM = rf'^[12]\){JAVA_END}'
@@ -94,7 +94,7 @@ def disease_id_lut(disease: pl.DataFrame) -> pl.DataFrame:
     return _raw_lut(
         _entities(disease, DISEASE_IDS)
         .with_columns(entityLabel=label)
-        .filter(~pl.col('entityLabel').str.contains_any(IRRELEVANT_CROSSREF_PREFIXES))
+        .filter(~pl.col('entityLabel').str.contains_any(list(IRRELEVANT_CROSSREF_PREFIXES)))
         .with_columns(
             entityLabel=format_identifier(pl.col('entityLabel')),
             nlpPipelineTrack=pl.lit('symbol'),
@@ -110,7 +110,7 @@ def _remapped_ids(disease: pl.DataFrame) -> pl.DataFrame:
         disease_id_lut(disease)
         .filter(pl.col('entityScore') == pl.col('entityScore').max().over('entityLabel'))
         .group_by('entityLabel')
-        .agg(pl.col('entityId').unique())
+        .agg(pl.col('entityId').drop_nulls().unique())
         .filter(pl.col('entityId').list.len() == 1)
         .select(
             pl.col('entityId').list.first(),

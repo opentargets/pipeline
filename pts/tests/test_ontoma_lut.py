@@ -82,6 +82,8 @@ DISEASE = pl.DataFrame(
         ),
         ('MONDO_0000003', None, None, None, None, None, None, ['Orphanet_100', 'OMIM:245000'], None),
         ('MONDO_0000004', ' ', [], [], [], [], [], [], []),
+        ('MONDO_0000010', None, None, None, None, None, None, ['DOID:10'], None),
+        (None, 'no id', None, None, None, None, None, ['DOID:10'], None),
     ],
     schema=DISEASE_SCHEMA,
     orient='row',
@@ -115,6 +117,7 @@ CURATION = pl.DataFrame(
         ('http://x/é_1', 'unicode word'),
         ('http\r/EFO_0000002', 'carriage return'),
         ('http://x/ORPHANET_558', 'orphanet'),
+        ('http://x/DOID_10', 'label one'),
     ],
     schema={'SEMANTIC_TAG': pl.String, 'PROPERTY_VALUE': pl.String},
     orient='row',
@@ -127,7 +130,8 @@ def spark_disease(spark):
 
 
 def _rows(lut) -> list[tuple]:
-    return sorted(tuple(r) for r in lut.df.select(*RAW_ENTITY_LUT.names()).collect())
+    rows = (tuple(r) for r in lut.df.select(*RAW_ENTITY_LUT.names()).collect())
+    return sorted(rows, key=lambda row: [(value is not None, value) for value in row])
 
 
 def test_disease_label_lut_matches_ontoma(spark_disease) -> None:
@@ -148,6 +152,7 @@ def test_curation_label_lut_matches_ontoma(spark, spark_disease) -> None:
     ids = {(label, entity_id) for entity_id, label, *_ in expected}
     assert ('remapped by rank', 'MONDO_0000003') in ids
     assert ('obsolete label', 'MONDO_0000001') in ids
+    assert ('label one', 'MONDO_0000010') in ids
     assert not {label for _, label in ids} & {'two-id label', 'no match', 'unicode word', 'carriage return', '1)'}
 
 
