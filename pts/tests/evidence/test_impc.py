@@ -11,20 +11,18 @@ from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
-from pts.pyspark.common.impc import cleanup_model_identifier
 from pts.transformers.evidence.impc import (
     DIRECTION_ON_TARGET,
     DIRECTION_ON_TRAIT,
     IMPC,
-    MODEL_ID,
     SOURCES,
     TIE_BREAK,
     UNIQUE_FIELDS,
-    biological_model_id,
     deduplicate,
     impc,
     parse_impc,
 )
+from pts.transformers.impc_common import MODEL_ID, biological_model_id
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 
@@ -304,7 +302,7 @@ def test_biological_model_id_matches_spark(spark: SparkSession) -> None:
         r[0]
         for r in spark
         .createDataFrame([(m,) for m in models], 'm string')
-        .select(cleanup_model_identifier(f.col('m')))
+        .select(f.expr(r"CASE WHEN split(m, '#')[0] RLIKE '^MGI:\\d+$' THEN split(m, '#')[0] END"))
         .collect()
     ]
     df = pl.DataFrame({'m': models}, schema={'m': pl.String})

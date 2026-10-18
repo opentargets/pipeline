@@ -140,3 +140,69 @@ def test_empty_file_has_no_rows(tmp_path: Path) -> None:
 def test_all_columns_are_strings(tmp_path: Path) -> None:
     path = _write(tmp_path / 'in.csv', 'x,y,z\n1,2.5,true\n')
     assert set(read_spark_csv(str(path)).dtypes) == {pl.String}
+
+
+SUBSET_TEXT = 'a,b,c\n1,"x\\"y",3\n4,5\n"6",,8,9,10\n,"",\n7,8,9,"q,r",s\n'
+
+
+def test_columns_equal_full_read_selected(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    assert read_spark_csv(str(path), columns=['c', 'a']).equals(read_spark_csv(str(path)).select('c', 'a'))
+
+
+def test_columns_with_new_columns_select_by_new_name(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    kwargs = {'new_columns': ['p', 'q', 'r', 's']}
+    subset = read_spark_csv(str(path), columns=['s', 'q'], **kwargs)
+    assert subset.equals(read_spark_csv(str(path), **kwargs).select('s', 'q'))
+
+
+def test_columns_select_renamed_header(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', 'a,,A\n1,2,3\n')
+    assert read_spark_csv(str(path), columns=['_c1', 'A2']).rows() == [('2', '3')]
+
+
+def test_unknown_column_raises(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    with pytest.raises(ValueError, match='nope'):
+        read_spark_csv(str(path), columns=['a', 'nope'])
+
+
+def test_columns_of_header_only_file(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', 'a,b,c\n')
+    got = read_spark_csv(str(path), columns=['c', 'a'])
+    assert got.columns == ['c', 'a']
+    assert got.height == 0
+    assert set(got.dtypes) == {pl.String}
+
+
+def test_columns_of_empty_file(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', '')
+    with pytest.raises(ValueError, match='a'):
+        read_spark_csv(str(path), columns=['a'])
+    got = read_spark_csv(str(path), new_columns=COLUMNS, columns=['z'])
+    assert got.columns == ['z']
+    assert got.height == 0
+
+
+def test_columns_select_positional_names_of_headerless_file(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', '1,2,3\n4,5\n')
+    got = read_spark_csv(str(path), has_header=False, columns=['_c2', '_c0'])
+    assert got.rows() == [('3', '1'), (None, '4')]
+
+
+def test_columns_select_suffixed_duplicate_header_names(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', 'a,A,b\n1,2,3\n')
+    assert read_spark_csv(str(path), columns=['A1', 'a0']).rows() == [('2', '1')]
+
+
+def test_repeated_column_raises(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    with pytest.raises(ValueError, match="'a'"):
+        read_spark_csv(str(path), columns=['a', 'b', 'a'])
+
+
+def test_empty_columns_raises(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    with pytest.raises(ValueError, match='empty'):
+        read_spark_csv(str(path), columns=[])

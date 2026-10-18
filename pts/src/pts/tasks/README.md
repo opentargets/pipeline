@@ -3,8 +3,8 @@
 The `pyspark` task can be used to launch pyspark jobs. They are local jobs for now, but we'll add
 dataproc cluster support.
 
-The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a pyspark job port of
-[the scala ETL's `mouse_phenotype` step](https://github.com/opentargets-archive/platform-etl-backend/blob/0e95e7cefb605ce2a0b15ee53f396134cc3bc471/src/main/scala/io/opentargets/etl/backend/MousePhenotype.scala).
+The file [openfda.py](../pyspark/openfda.py) is an example of a pyspark job port of
+the scala ETL's OpenFDA step.
 
 
 ## Launching
@@ -12,7 +12,7 @@ The file [mouse_phenotype.py](../pyspark/mouse_phenotype.py) is an example of a 
 Just like any other Otter app:
 
 ```sh
-$ uv run pts -s mouse_phenotype
+$ uv run pts -s openfda
 ```
 
 
@@ -28,21 +28,26 @@ release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
 pool: 8
 
 steps:
-  mouse_phenotype:
-    - name: pyspark separate into output and excluded
+  openfda:
+    - name: pyspark openfda
+      pyspark: openfda
       source:
-        target: output/target
-        mouse_phenotype: input/mouse_phenotype/mouse_phenotypes.json.gz
+        drug_molecule: output/drug_molecule
+        fda_data: intermediate/openfda/*.parquet
+        blacklisted_events: input/openfda/blacklisted_events.txt
       destination:
-        output: output/mouse_phenotype
-        excluded: excluded/mouse_phenotype
-      pyspark: mouse_phenotype
+        fda_unfiltered: intermediate/openfda_adverse_drug_reactions
+        fda_results: output/openfda_significant_adverse_drug_reactions
+      settings:
+        montecarlo_permutations: 500
+        montecarlo_percentile: 0.95
 ```
 
 You pass either a `str` or a `dict[str, str]` to both `source` and `destination`, and a `pyspark`
 which is a method name inside a python file with the same name under `pts.pyspark` package.
 
-You can also pass a `properties` `dict[str, str]` with extra configuration for Spark.
+You can also pass a `settings` `dict` for the job, and a `properties` `dict[str, str]` with extra
+configuration for Spark.
 
 
 ## Path support
@@ -56,5 +61,5 @@ This can be used to develop and test locally with data in the host.
 > [!NOTE]
 >
 > GCS Support is still a bit flimsy, and the application must be launched with:
-> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s mouse_phenotype`
+> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s openfda`
 > to specify a credentials file and project. We'll fix that in the future.
