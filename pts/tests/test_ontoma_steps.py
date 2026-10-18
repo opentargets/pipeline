@@ -111,6 +111,33 @@ def test_steps_refuse_existing_destination(
     assert {key: _read(path).rows() for key, path in destination.items()} == first
 
 
+def test_ontoma_step_with_only_second_destination_present_writes_nothing(
+    source: dict[str, str], tmp_path: Path
+) -> None:
+    destination = {
+        'disease_label_lut': str(tmp_path / 'out' / 'label.parquet'),
+        'disease_id_lut': str(tmp_path / 'out' / 'id.parquet'),
+    }
+    Path(destination['disease_id_lut']).mkdir(parents=True)
+
+    with pytest.raises(ValueError, match=r'id\.parquet') as error:
+        ontoma(source, destination, None, None)
+    assert 'label.parquet' not in str(error.value)
+    assert not Path(destination['disease_label_lut']).exists()
+
+
+def test_ontoma_step_names_every_existing_destination(source: dict[str, str], tmp_path: Path) -> None:
+    destination = {
+        'disease_label_lut': str(tmp_path / 'out' / 'label.parquet'),
+        'disease_id_lut': str(tmp_path / 'out' / 'id.parquet'),
+    }
+    for path in destination.values():
+        Path(path).mkdir(parents=True)
+
+    with pytest.raises(ValueError, match=r'label\.parquet.*id\.parquet'):
+        ontoma(source, destination, None, None)
+
+
 def test_empty_inputs_write_empty_luts(tmp_path: Path) -> None:
     source = _inputs(
         tmp_path / 'in',

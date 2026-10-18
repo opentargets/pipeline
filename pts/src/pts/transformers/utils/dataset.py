@@ -25,7 +25,7 @@ cannot do rather than half-doing it.
 from __future__ import annotations
 
 import io
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
 import openpyxl
@@ -350,6 +350,28 @@ def write_dataset(
     sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
 
 
+def check_destinations_absent(paths: Iterable[str]) -> None:
+    """Fail fast if anything already exists at any of `paths`.
+
+    Raises:
+        ValueError: naming every existing path.
+    """
+    existing = []
+    for path in paths:
+        try:
+            StorageHandle(path).stat()
+        except NotFoundError:
+            continue
+        existing.append(path)
+    if existing:
+        msg = (
+            f'{", ".join(map(repr, existing))} already exists; write_dataset never overwrites. '
+            '`pl.PartitionBy` only adds parts, so writing there would leave the previous run behind. '
+            'Remove it first.'
+        )
+        raise ValueError(msg)
+
+
 def sink_dataset(
     frame: pl.LazyFrame | pl.DataFrame,
     path: str,
@@ -371,17 +393,7 @@ def sink_dataset(
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
     """
-    try:
-        StorageHandle(path).stat()
-    except NotFoundError:
-        pass
-    else:
-        msg = (
-            f'{path!r} already exists; write_dataset never overwrites. `pl.PartitionBy` only adds '
-            'parts, so writing here would leave the previous run behind. Remove it first.'
-        )
-        raise ValueError(msg)
-
+    check_destinations_absent([path])
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     return lf.sink_parquet(
         pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),

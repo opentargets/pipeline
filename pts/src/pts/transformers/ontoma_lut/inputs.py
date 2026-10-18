@@ -13,9 +13,9 @@ CURATIONS = {
 }
 
 
-def load_dataset(path: str) -> pl.DataFrame:
-    """Read a parquet dataset."""
-    return scan_dataset(path).collect()
+def load_dataset(path: str, columns: tuple[str, ...]) -> pl.DataFrame:
+    """Read `columns` of a parquet dataset."""
+    return scan_dataset(path).select(columns).collect()
 
 
 def curation_label_luts(source: dict[str, str], disease: pl.DataFrame) -> list[pl.DataFrame]:

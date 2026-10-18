@@ -14,7 +14,13 @@ import pandas as pd
 import polars as pl
 import pytest
 
-from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import (
+    check_destinations_absent,
+    read_spreadsheet,
+    scan_dataset,
+    scan_datasets,
+    write_dataset,
+)
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -480,3 +486,16 @@ def test_read_spreadsheet_with_a_header_only(tmp_path: Path, infer_types: bool) 
 
     assert df.schema == pl.Schema({'a': pl.String, 'b': pl.String})
     assert df.height == 0
+
+
+def test_check_destinations_absent_names_every_existing_path(tmp_path: Path) -> None:
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'c').mkdir()
+    paths = [str(tmp_path / name) for name in 'abc']
+
+    with pytest.raises(ValueError, match='already exists') as error:
+        check_destinations_absent(paths)
+    assert str(tmp_path / 'a') in str(error.value)
+    assert str(tmp_path / 'b') not in str(error.value)
+    assert str(tmp_path / 'c') in str(error.value)
+    check_destinations_absent([str(tmp_path / 'b')])
