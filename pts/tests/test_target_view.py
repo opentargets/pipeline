@@ -6,10 +6,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.pyspark.target_view import target_view as spark_target_view
 from pts.schemas.target import TARGET
-from pts.schemas.target_view import TARGET_VIEW
+from pts.schemas.target_view import TARGET_VIEW, VIEW_COLUMNS
 from pts.transformers.target_view import target_view
+from tests.target_view_spark_rows import EMPTY_TRANSCRIPT, NULLED_BY_EMPTY, OUTPUT
 
 EXON = pl.Struct({'exonId': pl.String, 'chromosome': pl.String, 'start': pl.Int64, 'end': pl.Int64, 'strand': pl.Int32})
 FLAG = pl.Struct({'label': pl.String, 'value': pl.String})
@@ -290,23 +290,17 @@ def _rows(df: pl.DataFrame) -> list[dict]:
     return sorted((_normalise(r) for r in df.to_dicts()), key=_key)
 
 
-def _spark(tmp_path: Path, rows: dict[str, list[dict]] = ROWS) -> pl.DataFrame:
-    destination = str(tmp_path / 'spark')
-    spark_target_view(
-        _write(tmp_path / 'spark_src', rows), destination, {'partition_count': 1}, {'spark.jars.packages': ''}
-    )
-    return pl.read_parquet(f'{destination}/*.parquet')
+def _view_rows(df: pl.DataFrame) -> list[dict]:
+    return _rows(df.select('id', *VIEW_COLUMNS))
 
 
-def test_matches_spark(spark, tmp_path: Path):
-    expected = _spark(tmp_path)
+def test_matches_spark_golden(tmp_path: Path):
     result = _run(tmp_path)
 
-    assert result.schema == expected.schema
-    assert _rows(result) == _rows(expected)
+    assert _view_rows(result) == OUTPUT
     # the fixture reaches every case it is built for
-    by_id = {row['id']: row for row in expected.to_dicts()}
-    assert expected['id'].to_list().count('ENSG5') == 2
+    by_id = {row['id']: row for row in result.to_dicts()}
+    assert result['id'].to_list().count('ENSG5') == 2
     assert by_id['ENSG5']['canonicalExons'] == ['10', '20', '300', '400']
     assert by_id['ENSG6']['canonicalExons'] == [None, None, None, '5', '3', '4', '7', None]
     assert by_id['ENSG1']['canonicalExons'] == ['100', '150', '100', '200', '100', '200', '500', '600']
@@ -314,8 +308,7 @@ def test_matches_spark(spark, tmp_path: Path):
     assert by_id['ENSG4']['canonicalExons'] is None
     assert by_id['ENSG7']['canonicalExons'] is None
     assert by_id['ENSG3']['canonicalTranscript'] is None
-    assert by_id['ENSG1']['transcriptIds'] is not None
-    assert sorted(by_id['ENSG1']['transcriptIds']) == ['ENST11', 'ENST12', 'ENST13']
+    assert by_id['ENSG1']['transcriptIds'] == ['ENST11', 'ENST12', 'ENST13']
     assert len(by_id['ENSG1']['transcripts']) == 4
     reviewed = {t['transcriptId']: (t['uniprotId'], t['isUniprotReviewed']) for t in by_id['ENSG1']['transcripts']}
     assert reviewed == {'ENST11': ('P1', True), 'ENST12': ('A2', True), 'ENST13': (None, None), None: (None, False)}
@@ -327,22 +320,38 @@ def test_matches_spark(spark, tmp_path: Path):
     assert by_id[None]['transcripts'] is None
 
 
-@pytest.mark.parametrize('empty', list(INPUT_SCHEMAS))
-def test_empty_input_matches_spark(spark, tmp_path: Path, empty: str):
-    rows = ROWS | {empty: []}
-    expected = _spark(tmp_path, rows)
-    result = _run(tmp_path, rows)
+@pytest.mark.parametrize('empty', list(NULLED_BY_EMPTY))
+def test_empty_input_nulls_its_columns(tmp_path: Path, empty: str):
+    result = _run(tmp_path, ROWS | {empty: []})
+    expected = [{k: None if k in NULLED_BY_EMPTY[empty] else v for k, v in row.items()} for row in OUTPUT]
 
-    assert result.schema == expected.schema
-    assert _rows(result) == _rows(expected)
+    assert result.schema == TARGET_VIEW
+    assert _view_rows(result) == sorted(expected, key=_key)
 
 
-def test_null_priority_among_homologues_raises_like_spark(spark, tmp_path: Path):
+def test_empty_transcript_matches_spark_golden(tmp_path: Path):
+    result = _run(tmp_path, ROWS | {'transcript': []})
+
+    assert result.schema == TARGET_VIEW
+    assert _view_rows(result) == EMPTY_TRANSCRIPT
+
+
+def test_empty_target_writes_no_rows(tmp_path: Path):
+    result = _run(tmp_path, ROWS | {'target': []})
+
+    assert result.schema == TARGET_VIEW
+    assert result.is_empty()
+
+
+def test_null_priority_among_homologues_raises(tmp_path: Path):
     rows = ROWS | {'homology': [_homologue('ENSG1', 'G0', 0), _homologue('ENSG1', 'GN', None)]}
-    with pytest.raises(Exception, match='COMPARATOR_RETURNS_NULL'):
-        _spark(tmp_path, rows)
     with pytest.raises(ValueError, match='without a priority'):
         _run(tmp_path, rows)
+
+
+def test_target_columns_pass_through(tmp_path: Path):
+    result = _run(tmp_path).select(list(TARGET)).unique(maintain_order=True)
+    assert result.equals(pl.DataFrame(ROWS['target'], schema=TARGET))
 
 
 def test_schema_is_published(tmp_path: Path):
