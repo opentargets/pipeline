@@ -255,9 +255,6 @@ steps:
       - pts_ontoma
       - pts_target
       - pis_literature
-  pts_evidence_postprocess_gene_burden:
-    depends_on:
-      - pts_evidence_gene_burden
   pts_evidence_clinical_precedence:
     depends_on:
       - pts_clinical_report
@@ -369,7 +366,7 @@ steps:
       - pts_evidence_crispr_screens
       - pts_evidence_clinvar
       - pts_evidence_clinvar_somatic
-      - pts_evidence_postprocess_gene_burden
+      - pts_evidence_gene_burden
       - pts_evidence_gene2phenotype
       - pts_evidence_panel_app
       - pts_evidence_orphanet
