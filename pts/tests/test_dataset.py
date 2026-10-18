@@ -434,6 +434,31 @@ def test_spreadsheet_layout_matches_old_reader(tmp_path: Path, rows: list[list[A
     assert (df.columns, df.rows()) == _old_reader(path)
 
 
+@pytest.mark.parametrize(
+    'rows',
+    [
+        pytest.param([['title'], ['a', None, 'b'], [None, 'x', None], [1, 2.5, 'NA'], ['note']], id='multi_row_header'),
+        pytest.param([[None, None], ['a', 'b'], [None, None], [1e-8, True]], id='blank_rows'),
+        pytest.param([['a', 'a', None], [5.0, '-', 'n/a']], id='repeated_names'),
+    ],
+)
+def test_spreadsheet_without_a_header_matches_old_reader(tmp_path: Path, rows: list[list[Any]]) -> None:
+    """Every row as data, as `pd.read_excel(header=None, dtype=str)` reads it."""
+    path = _write_sheet(tmp_path / 'raw.xlsx', rows)
+
+    df = read_spreadsheet(path, 'S', infer_types=False, has_header=False)
+
+    old = pd.read_excel(path, sheet_name='S', header=None, dtype=str).astype(object).map(_cell_to_string)
+    assert df.columns == [f'column_{i + 1}' for i in range(old.shape[1])]
+    assert df.rows() == [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
+
+
+def test_spreadsheet_without_a_header_needs_text_mode(tmp_path: Path) -> None:
+    path = _write_sheet(tmp_path / 'raw.xlsx', [['a'], [1]])
+    with pytest.raises(ValueError, match='infer_types'):
+        read_spreadsheet(path, 'S', has_header=False)
+
+
 @pytest.mark.parametrize('infer_types', [True, False])
 def test_read_spreadsheet_with_a_header_only(tmp_path: Path, infer_types: bool) -> None:
     wb = openpyxl.Workbook()

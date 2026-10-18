@@ -231,10 +231,11 @@ def _pandas_header(names: list[str]) -> list[str]:
     return columns
 
 
-def _sheet_as_pandas_text(data: bytes, sheet_name: str) -> pl.DataFrame:
+def _sheet_as_pandas_text(data: bytes, sheet_name: str, *, has_header: bool) -> pl.DataFrame:
     """The sheet's cells as `pandas.read_excel(dtype=str)` renders them, before its missing values.
 
-    The first row is the header, blank or not; a blank row is kept, unless no row with a value follows.
+    With `has_header`, the first row is the header, blank or not; without it, the columns are
+    `column_1`, `column_2`, ... A blank row is kept, unless no row with a value follows.
     """
     workbook = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True, keep_links=False)
     try:
@@ -254,31 +255,44 @@ def _sheet_as_pandas_text(data: bytes, sheet_name: str) -> pl.DataFrame:
         raise ValueError(f'sheet {sheet_name} is empty')
     width = max(len(row) for row in rows)
     text = [[None if v is None else str(v) for v in row + [''] * (width - len(row))] for row in rows]
+    if not has_header:
+        return pl.DataFrame(text, schema=[(f'column_{i + 1}', pl.String) for i in range(width)], orient='row')
     columns = _pandas_header([name or '' for name in text[0]])
     return pl.DataFrame(text[1:], schema=dict.fromkeys(columns, pl.String), orient='row')
 
 
-def read_spreadsheet(path: str, sheet_name: str, *, infer_types: bool = True) -> pl.DataFrame:
+def read_spreadsheet(
+    path: str, sheet_name: str, *, infer_types: bool = True, has_header: bool = True
+) -> pl.DataFrame:
     """Read one sheet of an Excel workbook with every cell as a string.
 
     Blanks and `pandas.read_excel`'s default missing-value strings are null, and whitespace is kept.
     With `infer_types`, each column is typed first, as `pandas.read_excel` does, and booleans are
     '1'/'0'; without it, each cell is rendered on its own, as `pandas.read_excel(dtype=str)` does:
     an integral number without a fraction, a boolean as 'True'/'False'. A sheet with only a header
-    gives its columns and no rows. The workbook is read whole through `StorageHandle`.
+    gives its columns and no rows. Without `has_header`, every row is data and the columns are
+    `column_1`, `column_2`, ..., as `pandas.read_excel(header=None, dtype=str)` reads it. The
+    workbook is read whole through `StorageHandle`.
 
     Args:
         path: location of the workbook.
         sheet_name: sheet to read.
         infer_types: type each column before rendering it as text.
+        has_header: the first row names the columns; only without `infer_types`.
 
     Returns:
         DataFrame with one string column per sheet column.
+
+    Raises:
+        ValueError: if `has_header` is false and `infer_types` true.
     """
+    if not has_header and infer_types:
+        msg = 'a sheet without a header is read only with infer_types=False'
+        raise ValueError(msg)
     with StorageHandle(path).open('rb') as f:
         data = f.read()
     if not infer_types:
-        strings = _sheet_as_pandas_text(data, sheet_name)
+        strings = _sheet_as_pandas_text(data, sheet_name, has_header=has_header)
         return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
     sheet = pl.read_excel(
         io.BytesIO(data),
