@@ -12,6 +12,9 @@ from pts.schemas.credible_set import credible_set_schema
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import valid_rows
 
+#: Disease index therapeutic area that marks a term as a measurement rather than a disease.
+MEASUREMENT_THERAPEUTIC_AREA = 'EFO_0001444'
+
 
 class QualityFlag(StrEnum):
     """Quality control flags recorded on credible sets."""
@@ -75,6 +78,7 @@ class CredibleSetSource(BaseModel):
     credible_set: list[str]
     study: str
     target: str
+    disease: str
 
 
 class CredibleSetDestination(BaseModel):
@@ -349,18 +353,61 @@ def validate_unique_study_locus_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def qc_replication(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag surviving loci replicated on the full disease set or the measured gene."""
+def replication_keys(gwas_studies: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
+    """Build the disease keys a GWAS study replicates on, by the kind of its terms.
+
+    Measurements are mostly mapped together with context (an interaction partner, the
+    population, a treatment) rather than with a second trait, so:
+
+    - only measurements: one key per measurement, so any one shared measurement is enough;
+    - measurements and diseases: the measurements are set aside and the sorted remaining
+      diseases form a single key;
+    - only diseases: the sorted full list of diseases forms a single key.
+
+    A term counts as a measurement when the disease index files it under the measurement
+    therapeutic area; a term missing from the disease index counts as a disease.
+    """
+    measurements = (
+        disease
+        .filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT_THERAPEUTIC_AREA))
+        .select(pl.col('id').alias('_term'), pl.lit(True).alias('_is_measurement'))
+        .unique()
+    )
+    terms = (
+        gwas_studies
+        .select('studyId', pl.col('diseaseIds').alias('_term'))
+        .explode('_term')
+        .drop_nulls('_term')
+        .unique()
+        .join(measurements, on='_term', how='left')
+    )
+    with_diseases = (
+        terms
+        .filter(pl.col('_is_measurement').is_null())
+        .group_by('studyId')
+        .agg(pl.col('_term').sort().alias('_disease_set'))
+    )
+    measurements_only = terms.join(with_diseases, on='studyId', how='anti').select(
+        'studyId', pl.concat_list('_term').alias('_disease_set')
+    )
+    return pl.concat([with_diseases, measurements_only])
+
+
+def qc_replication(frame: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag surviving loci replicated on a GWAS replication key or the measured gene.
+
+    GWAS keys come from `replication_keys`. Two GWAS studies reporting the same cohorts,
+    publication and LD population structure are the same evidence, so they count once.
+    """
     logger.info('Assessing replication among surviving credible sets')
     loci = frame.select('studyLocusId', 'studyId', 'variantId')
     gwas_studies = study.filter((pl.col('studyType') == 'gwas') & (pl.col('diseaseIds').list.len() > 0)).select(
-        'studyId',
-        pl.col('diseaseIds').list.unique().list.sort().alias('_disease_set'),
-        'cohorts',
-        'pubmedId',
-        'ldPopulationStructure',
+        'studyId', 'diseaseIds', 'cohorts', 'pubmedId', 'ldPopulationStructure'
     )
-    gwas = loci.join(gwas_studies, on='studyId', how='inner')
+    keyed_studies = gwas_studies.drop('diseaseIds').join(
+        replication_keys(gwas_studies, disease), on='studyId', how='inner'
+    )
+    gwas = loci.join(keyed_studies, on='studyId', how='inner')
     independent = gwas.select('variantId', '_disease_set', 'cohorts', 'pubmedId', 'ldPopulationStructure').unique()
     replicated_gwas = (
         independent
@@ -393,8 +440,8 @@ def credible_set(
     """Validate and annotate credible sets, separating accepted and excluded records.
 
     Args:
-        source: Credible set input paths under `credible_set`, plus `study` and
-            `target` lookup paths.
+        source: Credible set input paths under `credible_set`, plus `study`,
+            `target` and `disease` lookup paths.
         destination: Dataset paths under `output` and `excluded`.
         settings: Genomic distance under `trans_qtl_threshold` and QC reason
             names under `invalid_qc_reasons`.
@@ -405,6 +452,7 @@ def credible_set(
     options = CredibleSetSettings.model_validate(settings)
     study = scan_dataset(sources.study)
     target = scan_dataset(sources.target)
+    disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
     result = (
         scan_datasets(sources.credible_set, schema=credible_set_schema)
         .pipe(qc_mhc_region)
@@ -427,7 +475,7 @@ def credible_set(
     )
     accepted = (
         unique.valid
-        .pipe(qc_replication, study)
+        .pipe(qc_replication, study, disease)
         .select(credible_set_schema.names())
         .sort('chromosome', 'position', nulls_last=False)
     )
