@@ -1065,47 +1065,6 @@ steps:
         failed_evidence: excluded/evidence/reactome
         evidence: output/evidence_reactome
 
-  evidence_postprocess_gene_burden:
-    - name: pyspark evidence_postprocess
-      pyspark: evidence_postprocess
-      source:
-        evidence_path: intermediate/evidence/gene_burden.parquet
-        target_path: output/target
-        disease_path: output/disease
-        publication_date_lut: input/literature/literature_export
-      destination:
-        failed_evidence: excluded/evidence/gene_burden
-        evidence: output/evidence_gene_burden
-      settings:
-        partition_count: 1
-        evidence_format: parquet
-        datasource_id: gene_burden
-        score_expression: >-
-          CASE
-            WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL
-            WHEN resourceScore <= 0 THEN 1.0
-            ELSE LEAST(1.0, GREATEST(0.25,
-              (1.0 - 0.25) * (log10(resourceScore) - log10(1e-7)) / (log10(1e-17) - log10(1e-7)) + 0.25
-            ))
-          END
-        unique_fields:
-          - targetId
-          - targetFromSourceId
-          - diseaseId
-          - datasourceId
-          - ancestryId
-          - diseaseFromSource
-          - statisticalMethod
-          - projectId
-        direction_on_trait_expression: |
-          CASE WHEN oddsRatio > 1.0 THEN 'risk'
-          WHEN oddsRatio < 1.0 THEN 'protect'
-          WHEN beta > 0.0 THEN 'risk'
-          WHEN beta < 0.0 THEN 'protect'
-          END
-        direction_on_target_expression: |
-          'LoF'
-
   evidence_europepmc:
     - name: transform evidence.europepmc
       transformer: evidence.europepmc

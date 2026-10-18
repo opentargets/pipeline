@@ -8,7 +8,6 @@ import pyspark.sql.functions as f
 import pytest
 from loguru import logger
 
-from pts.pyspark.gene_burden import _substitute_zero_pvalues
 from pts.transformers.utils.spark_math import (
     normalise_mantissa,
     pvalue_exponent,
@@ -270,26 +269,24 @@ def test_normalise_mantissa() -> None:
 
 
 @pytest.mark.parametrize(
-    'pvalues',
+    ('pvalues', 'expected'),
     [
-        [0.0, 1e-5, 3e-300, 0.0, 0.5, None],
-        [1e-5, 3e-300, None],
-        [0.0, 0.0],
-        [0.0, -0.0, math.nan, 2e-10],
+        ([0.0, 1e-5, 3e-300, 0.0, 0.5, None], ['3e-300', '1e-05', '3e-300', '3e-300', '0.5', None]),
+        ([1e-5, 3e-300, None], ['1e-05', '3e-300', None]),
+        ([0.0, 0.0], [None, None]),
+        ([0.0, -0.0, math.nan, 2e-10], ['2e-10', '2e-10', 'nan', '2e-10']),
     ],
     ids=['zeros', 'no_zeros', 'all_zero', 'nan_and_negative_zero'],
 )
 @pytest.mark.parametrize('lazy', [False, True], ids=['eager', 'lazy'])
-def test_substitute_zero_pvalues(spark, pvalues: list[float | None], lazy: bool) -> None:
-    rows = _substitute_zero_pvalues(
-        spark.createDataFrame([(i, v) for i, v in enumerate(pvalues)], 'i INT, p DOUBLE'), 'p', 'test'
-    ).collect()
+def test_substitute_zero_pvalues(pvalues: list[float | None], expected: list[str | None], lazy: bool) -> None:
     frame = pl.DataFrame({'i': range(len(pvalues)), 'p': pvalues}, schema={'i': pl.Int32, 'p': pl.Float64})
     out = substitute_zero_pvalues(frame.lazy() if lazy else frame, 'p')
     assert isinstance(out, pl.LazyFrame) == lazy
     out = out.lazy().collect()
     assert out.schema == frame.schema
-    assert [_key(v) for v in out['p'].to_list()] == [_key(r.p) for r in sorted(rows, key=lambda r: r.i)]
+    # expected values captured from the removed pyspark implementation
+    assert [_key(v) for v in out['p'].to_list()] == expected
 
 
 def test_substitute_zero_pvalues_logs_label() -> None:

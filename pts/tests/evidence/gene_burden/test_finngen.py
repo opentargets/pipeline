@@ -8,15 +8,13 @@ from typing import Any
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import process_finngen_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.finngen import parse_finngen
 from pts.transformers.utils.spark_math import strict_pow
 from tests.evidence.gene_burden.fixtures import MANIFEST, write_finngen
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.spark_rows import multiset
+from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 
 def _line(**fields: str) -> dict[str, str]:
@@ -154,7 +152,7 @@ def test_unreadable_log10p_is_dropped(tmp_path: Path, log10p: str) -> None:
     assert _parse(tmp_path, [_line(LOG10P=log10p)]).height == 0
 
 
-def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
+def test_matches_spark_baseline(tmp_path: Path) -> None:
     lines = [
         _line(),
         _line(),
@@ -170,12 +168,45 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     manifest = [*MANIFEST, {'phenocode': 'DUP', 'phenostring': 'One'}, {'phenocode': 'DUP', 'phenostring': 'Two'}]
     results, phenos = write_finngen(tmp_path, lines, manifest)
 
-    old = process_finngen_gene_burden(
-        spark.read.csv(results, header=True, sep='\t', inferSchema=True), spark.read.json(phenos), 'R12'
-    )
-    columns = old.columns
-    old_rows = [row.asDict(recursive=True) for row in old.collect()]
     new = parse_finngen(results, phenos, release='R12').collect()
+
+    # expected rows captured from the removed pyspark implementation
+    constant = {
+        'datasourceId': 'gene_burden',
+        'ancestry': 'finnish',
+        'ancestryId': 'HANCESTRO_0321',
+        'cohortId': 'FinnGen R12',
+        'datatypeId': 'genetic_association',
+        'projectId': 'FinnGen',
+        'literature': ['36653562'],
+        'releaseVersion': 'R12',
+        'statisticalMethod': 'LoF burden',
+        'statisticalMethodOverview': 'Burden test carried out with LoF variants with MAF smaller than 1%.',
+        'studySampleSize': 500348,
+    }
+    varying = [
+        'beta',
+        'betaConfidenceIntervalLower',
+        'betaConfidenceIntervalUpper',
+        'diseaseFromSource',
+        'diseaseFromSourceId',
+        'resourceScore',
+        'pValueExponent',
+        'pValueMantissa',
+        'targetFromSourceId',
+    ]
+    rows = [
+        (0.5, 0.25, 0.75, 'Type 2 diabetes', 'T2D', 3.1622776601683795e-09, -9, 3.162, 'GENE1'),
+        (-0.0125, -0.2625, 0.2375, 'Type 2 diabetes', 'T2D', 1e-08, -9, 10.0, 'GENE2'),
+        (0.5, 0.25, 0.75, 'Type 2 diabetes', 'T2D', 0.0, None, None, 'GENE3'),
+        (0.5, 0.25, 0.75, None, 'UNKNOWN', 2.2387211385684567e-308, -308, 2.239, 'GENE4'),
+        (0.5, 0.25, 0.75, 'Asthma', 'ASTHMA', 2.268807243217692e-24, -24, 2.269, 'GENE5'),
+        (0.5, 0.499999, 0.500001, 'Type 2 diabetes', 'T2D', 9.924302650467869e-91, -91, 9.924, 'GENE8'),
+        (0.5, 0.25, 0.75, 'Two', 'DUP', 7.525636042729348e-05, -5, 7.526, 'GENE9'),
+        (0.5, 0.25, 0.75, 'One', 'DUP', 7.525636042729348e-05, -5, 7.526, 'GENE9'),
+    ]
+    old_rows = expand(constant, varying, rows)
+    columns = list(old_rows[0])
 
     absent = [
         'allelicRequirements',

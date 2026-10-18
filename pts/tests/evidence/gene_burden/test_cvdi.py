@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-import pandas as pd
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import process_cvdi_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.cvdi import parse_cvdi
 from tests.evidence.gene_burden.fixtures import CVDI_CUTOFFS, CVDI_MASKS, cvdi_row, write_cvdi
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.spark_rows import multiset
+from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 LOF = 'LOF (MAF<0.1%)'
 LOF_M08 = 'LOF + missense0.8 (MAF<0.1%)'
@@ -31,12 +27,8 @@ URL = (
     '&file=600Traits.csv&gene={}&pageid=600_traits_app'
 )
 
-#: Ruling 6: an integral odds ratio or bound, the old regexes' (oddsRatio, lower, upper) and the fixed ones.
-INTEGRAL_ODDS = {
-    'ENSG10': ('2 [1.77; 2.25]', (1.77, 1.77, 2.25), (2.0, 1.77, 2.25)),
-    'ENSG11': ('74.78 [58.86; 95]', (74.78, 58.86, None), (74.78, 58.86, 95.0)),
-    'ENSG12': ('2.49 [2; 3.11]', (2.49, None, 3.11), (2.49, 2.0, 3.11)),
-}
+#: Ruling 6: an integral odds ratio or bound, by gene.
+INTEGRAL_ODDS = {'ENSG10': '2 [1.77; 2.25]', 'ENSG11': '74.78 [58.86; 95]', 'ENSG12': '2.49 [2; 3.11]'}
 ODDS_COLUMNS = ['oddsRatio', 'oddsRatioConfidenceIntervalLower', 'oddsRatioConfidenceIntervalUpper']
 
 
@@ -241,7 +233,7 @@ def test_odds_ratio_and_ci(tmp_path: Path, text: str | None, expected: tuple[flo
 
 
 def test_odds_ratios_unlike_the_old_regexes_counted(tmp_path: Path) -> None:
-    rows = [_lof({'Gene ID Ensembl': gene, (LOF, 'OR [95%CI]'): text}) for gene, (text, _, _) in INTEGRAL_ODDS.items()]
+    rows = [_lof({'Gene ID Ensembl': gene, (LOF, 'OR [95%CI]'): text}) for gene, text in INTEGRAL_ODDS.items()]
     rows.append(_lof({'Gene ID Ensembl': 'ENSG13', (LOF, 'OR [95%CI]'): '3 [2; 4]'}))
     rows.append(_lof({'Gene ID Ensembl': 'ENSG14', (LOF, 'OR [95%CI]'): '3 [2; 4]', (LOF, 'Meta P-value'): 0.5}))
     # repeated rows are counted once, as the old step dropped duplicates before the cutoff
@@ -321,16 +313,6 @@ def test_a_sheet_without_rows_gives_an_empty_frame(tmp_path: Path) -> None:
     assert rows.schema == GENE_BURDEN_PARSED
 
 
-def _old(spark: SparkSession, path: str) -> list[dict[str, Any]]:
-    """The old step's reads and parser."""
-    associations = pd.read_excel(path, sheet_name='ST6', skiprows=1, header=[0, 1, 2], skipfooter=1)
-    cutoffs = pd.read_excel(path, sheet_name='ST3', skiprows=1, header=[0, 1], skipfooter=1)
-    old = process_cvdi_gene_burden(
-        SimpleNamespace(spark=spark), associations[['phenotype', 'Gene ID Ensembl', 'Gene', 'ALL ancestry']], cutoffs
-    )
-    return [row.asDict(recursive=True) for row in old.collect()]
-
-
 PARITY_ROWS = [
     _lof(),
     _lof(),
@@ -354,21 +336,75 @@ PARITY_ROWS = [
 ]
 
 
-Fixes = dict[tuple[str, str], dict[str, tuple[Any, Any]]]
-
-
-def _compare(
-    spark: SparkSession, path: str, fixes: Fixes, added: set[str]
-) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]], pl.DataFrame]:
-    """The new rows and the old ones, `fixes` applied: (target, method) to column to (old, new) value.
-
-    New rows of the `added` methods are left out of the comparison and returned on their own.
-    """
-    old_rows = _old(spark, path)
-    columns = list(old_rows[0])
-    assert not {row['statisticalMethod'] for row in old_rows} & added
+def test_matches_spark_baseline(tmp_path: Path) -> None:
+    footer = ['Asthma', 'ENSG9', 'G9', 1, '2.5 [1.5; 3.5]', 1e-20]
+    integral = [_lof({'Gene ID Ensembl': g, (LOF, 'OR [95%CI]'): text}) for g, text in INTEGRAL_ODDS.items()]
+    lowercase = [
+        _lof({'Gene ID Ensembl': 'ENSG20', (LOF, 'Meta P-value'): None, (M05, 'Meta P-value'): 1e-9}),
+        _lof({'Gene ID Ensembl': 'ENSG21', (M02, 'Meta P-value'): 1e-9, (M02, 'OR [95%CI]'): '3 [2; 4.5]'}),
+    ]
+    path = write_cvdi(
+        tmp_path,
+        [*PARITY_ROWS, *integral, *lowercase],
+        CUTOFFS_WITH_M02,
+        masks=[*CVDI_MASKS, M02],
+        footer=footer,
+    )
     everything = parse_cvdi(path).collect()
+    added = {M05, M02}
     new = everything.filter(~pl.col('statisticalMethod').is_in(added))
+
+    # expected rows captured from the removed pyspark implementation, ruling 6 applied
+    link = [{'niceName': NICE_NAME, 'url': URL.format('G1')}]
+    no_link = [{'niceName': NICE_NAME, 'url': None}]
+    cauchy_overview = 'Combined test after combining mask-specific using Cauchy distribution.'
+    lof_m08_overview = (
+        'Mixed-effects test carried out with LOF and predicted-deleterious missense variants (missense score > 0.8) '
+        'with a MAF smaller than 0.1%.'
+    )
+    constant = {
+        'datasourceId': 'gene_burden',
+        'datatypeId': 'genetic_association',
+        'projectId': 'CVDI Human Disease Portal',
+        'cohortId': 'UK Biobank 450k/All of Us/MGB',
+        'studySampleSize': 748879,
+        'literature': ['39210047'],
+    }
+    varying = [
+        'diseaseFromSource',
+        'targetFromSourceId',
+        'resourceScore',
+        'studyCasesWithQualifyingVariants',
+        *ODDS_COLUMNS,
+        'statisticalMethod',
+        'statisticalMethodOverview',
+        'urls',
+        'pValueExponent',
+        'pValueMantissa',
+    ]
+    rows = [
+        ('Type 2 diabetes', 'ENSG1', 2.5e-09, 12, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        ('Type 2 diabetes', 'ENSG2', 1e-06, 12, None, None, None, LOF, LOF_OVERVIEW, link, -7, 10.0),
+        (None, 'ENSG5', 2.5e-09, 2147483647, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, no_link, -9, 2.5),
+        ('Type 2 diabetes', 'ENSG6', 1e-09, 7, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -10, 10.0),
+        ('Cardiac pacemaker/device in situ', 'ENSG7', 5e-320, 12, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -320, 5.0),
+        ('Type 2 diabetes', 'ENSG8', 2.5e-09, None, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        ('Type 2 diabetes', 'ENSG15', 2.5e-09, 1, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        # ruling 6: the old regexes gave (1.77, 1.77, 2.25)
+        ('Type 2 diabetes', 'ENSG10', 2.5e-09, 12, 2.0, 1.77, 2.25, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        # ruling 6: the old regexes gave (74.78, 58.86, None)
+        ('Type 2 diabetes', 'ENSG11', 2.5e-09, 12, 74.78, 58.86, 95.0, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        # ruling 6: the old regexes gave (2.49, None, 3.11)
+        ('Type 2 diabetes', 'ENSG12', 2.5e-09, 12, 2.49, 2.0, 3.11, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        ('Type 2 diabetes', 'ENSG21', 2.5e-09, 12, 2.5, 1.5, 3.5, LOF, LOF_OVERVIEW, link, -9, 2.5),
+        ('Type 2 diabetes', 'ENSG3', 0.0, None, None, None, None, 'Cauchy', cauchy_overview, link, None, None),
+        ('Type 2 diabetes', 'ENSG4', 1e-12, None, None, None, None, 'Cauchy', cauchy_overview, link, -13, 10.0),
+        ('Type 2 diabetes', 'ENSG1', 1e-08, None, 13.84, 7.67, 25.1, LOF_M08, lof_m08_overview, link, -9, 10.0),
+        ('Type 2 diabetes', 'ENSG15', 0.0, None, None, None, None, LOF_M08, lof_m08_overview, link, None, None),
+    ]
+    old_rows = expand(constant, varying, rows)
+    columns = list(old_rows[0])
+
     absent = sorted(set(new.columns) - set(columns))
     assert absent == sorted([
         'allelicRequirements',
@@ -384,38 +420,10 @@ def _compare(
         'studyCases',
     ])
     assert new.select(absent).null_count().row(0) == (new.height,) * len(absent)
-    fixed = []
-    for row in old_rows:
-        changes = fixes.get((row['targetFromSourceId'], row['statisticalMethod']), {})
-        assert {column: row[column] for column in changes} == {column: old for column, (old, _) in changes.items()}
-        fixed.append(row | {column: new for column, (_, new) in changes.items()})
+    assert multiset(new.rows(named=True), columns) == multiset(old_rows, columns)
+    # ruling 8: masks the old step dropped
     extra = everything.filter(pl.col('statisticalMethod').is_in(added))
-    return multiset(new.rows(named=True), columns), multiset(fixed, columns), extra
-
-
-@pytest.mark.filterwarnings('ignore:dropping on a non-lexsorted multi-index')
-def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
-    footer = ['Asthma', 'ENSG9', 'G9', 1, '2.5 [1.5; 3.5]', 1e-20]
-    integral = [_lof({'Gene ID Ensembl': g, (LOF, 'OR [95%CI]'): text}) for g, (text, _, _) in INTEGRAL_ODDS.items()]
-    lowercase = [
-        _lof({'Gene ID Ensembl': 'ENSG20', (LOF, 'Meta P-value'): None, (M05, 'Meta P-value'): 1e-9}),
-        _lof({'Gene ID Ensembl': 'ENSG21', (M02, 'Meta P-value'): 1e-9, (M02, 'OR [95%CI]'): '3 [2; 4.5]'}),
-    ]
-    path = write_cvdi(
-        tmp_path,
-        [*PARITY_ROWS, *integral, *lowercase],
-        CUTOFFS_WITH_M02,
-        masks=[*CVDI_MASKS, M02],
-        footer=footer,
-    )
-    fixes = {
-        (gene, LOF): {c: (o, n) for c, o, n in zip(ODDS_COLUMNS, old, new, strict=True) if o != n}
-        for gene, (_, old, new) in INTEGRAL_ODDS.items()
-    }
-    new, old, added = _compare(spark, path, fixes, {M05, M02})
-    assert len(old) == 15
-    assert new == old
-    assert added.select('targetFromSourceId', 'statisticalMethod', *ODDS_COLUMNS).rows() == [
+    assert extra.select('targetFromSourceId', 'statisticalMethod', *ODDS_COLUMNS).rows() == [
         ('ENSG21', M02, 3.0, 2.0, 4.5),
         ('ENSG20', M05, None, None, None),
     ]

@@ -40,7 +40,7 @@ from tests.evidence.gene_burden.fixtures import (
 )
 from tests.evidence.gene_burden.logs import logged
 
-# the old evidence_postprocess_gene_burden settings
+# the removed evidence_postprocess_gene_burden settings
 SPARK_SCORE = """
     CASE
       WHEN resourceScore IS NULL OR isnan(resourceScore) THEN NULL

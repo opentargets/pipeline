@@ -8,12 +8,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import openpyxl
 import pandas as pd
 import polars as pl
 import pytest
 
-from pts.pyspark.common.utils import _cell_to_string
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, scan_datasets, write_dataset
 
 
@@ -404,6 +404,15 @@ def _write_sheet(path: Path, rows: list[list[Any]], *, start: str = 'A1') -> str
                 ws.cell(row=origin.row + i, column=origin.column + j, value=value)
     wb.save(path)
     return str(path)
+
+
+def _cell_to_string(value: Any) -> str | None:
+    """A pandas cell as gene burden's old reader passed it to spark: booleans as '1'/'0', blanks as null."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, bool | np.bool_):
+        return '1' if value else '0'
+    return str(value)
 
 
 def _old_reader(path: str) -> tuple[list[str], list[tuple[str | None, ...]]]:

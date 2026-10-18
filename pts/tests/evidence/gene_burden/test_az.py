@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import process_az_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED, GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import AZ_METHOD_DESCRIPTIONS, parse_az
 from tests.evidence.gene_burden.fixtures import (
@@ -19,7 +18,7 @@ from tests.evidence.gene_burden.fixtures import (
     write_az,
 )
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.spark_rows import multiset
+from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 NICE_NAME = 'AstraZeneca PheWAS Portal'
 
@@ -230,7 +229,7 @@ def test_empty_inputs_give_an_empty_union(tmp_path: Path) -> None:
     assert rows.schema == GENE_BURDEN_PARSED
 
 
-def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
+def test_matches_spark_baseline(tmp_path: Path) -> None:
     binary = [
         _binary(),
         _binary(),
@@ -258,20 +257,297 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         ',https://null-name',
     ]
     paths = write_az(tmp_path, binary, quantitative, genes, phenotypes)
-
-    old = process_az_gene_burden(
-        spark.read.option('mergeSchema', True).parquet(paths[0]),
-        spark.read.option('mergeSchema', True).parquet(paths[1]),
-        spark.read.csv(paths[2], header=False, schema='gene STRING, link STRING'),
-        spark.read.csv(paths[3], header=False, schema='diseaseFromSource STRING, url STRING'),
-    )
-    columns = old.columns
-    old_rows = [row.asDict(recursive=True) for row in old.collect()]
-    for row in old_rows:
-        # ruling 3: no link gives null urls, not a struct with a null url
-        if row['urls'] == [{'url': None, 'niceName': NICE_NAME}]:
-            row['urls'] = None
     new = parse_az(*paths).collect()
+
+    # expected rows captured from the removed pyspark implementation, ruling 3 applied
+    ptv = 'Burden test carried out with PTVs with a MAF smaller than 0.1%.'
+    flexdmg = 'Burden test carried out with damaging variants with a MAF smaller than 0.01%.'
+    rec = 'Burden test carried out with non-synonymous recessive variants with a MAF smaller than 1%.'
+    link_a, link_b, link_1, link_2 = (
+        [{'url': url, 'niceName': NICE_NAME}]
+        for url in (
+            'https://azphewas.com/phenotypeView/a',
+            'https://azphewas.com/phenotypeView/b',
+            'https://a/1',
+            'https://a/2',
+        )
+    )
+    constant = {
+        'datasourceId': 'gene_burden',
+        'datatypeId': 'genetic_association',
+        'ancestry': 'EUR',
+        'ancestryId': 'HANCESTRO_0005',
+        'literature': ['34375979'],
+        'projectId': NICE_NAME,
+        'cohortId': 'UK Biobank 470k',
+        'releaseVersion': 'release-1',
+    }
+    varying = [
+        'allelicRequirements',
+        'targetFromSourceId',
+        'diseaseFromSource',
+        'pValueMantissa',
+        'pValueExponent',
+        'beta',
+        'betaConfidenceIntervalLower',
+        'betaConfidenceIntervalUpper',
+        'oddsRatio',
+        'oddsRatioConfidenceIntervalLower',
+        'oddsRatioConfidenceIntervalUpper',
+        'resourceScore',
+        'studySampleSize',
+        'studyCases',
+        'studyCasesWithQualifyingVariants',
+        'statisticalMethod',
+        'statisticalMethodOverview',
+        'urls',
+    ]
+    rows = [
+        # ruling 3: no link gives null urls
+        (
+            ['dominant'],
+            'ENSG13',
+            None,
+            2.0,
+            -8,
+            0.25,
+            0.125,
+            0.375,
+            None,
+            None,
+            None,
+            2e-08,
+            5000,
+            5000,
+            50,
+            'flexdmg',
+            flexdmg,
+            None,
+        ),
+        (
+            ['dominant'],
+            'ENSG3',
+            'Disease A',
+            5.0,
+            -320,
+            None,
+            None,
+            None,
+            12.508500099182129,
+            math.nan,
+            None,
+            5e-320,
+            1000,
+            100,
+            10,
+            'ptv',
+            ptv,
+            link_a,
+        ),
+        # ruling 3: no link gives null urls
+        (
+            ['dominant'],
+            'ENSG6',
+            'Unlinked',
+            5.0,
+            -320,
+            None,
+            None,
+            None,
+            math.inf,
+            1.5,
+            3.5,
+            5e-320,
+            1000,
+            100,
+            10,
+            'ptv',
+            ptv,
+            None,
+        ),
+        (
+            ['dominant'],
+            'ENSG5',
+            'Disease A',
+            3.0,
+            -9,
+            None,
+            None,
+            None,
+            2.5,
+            1.5,
+            3.5,
+            3.0000005e-09,
+            12,
+            None,
+            7,
+            'ptv',
+            ptv,
+            link_a,
+        ),
+        (
+            ['dominant'],
+            'ENSG12',
+            'Trait B',
+            10.0,
+            -9,
+            0.25,
+            0.125,
+            0.375,
+            None,
+            None,
+            None,
+            9.9995e-09,
+            None,
+            None,
+            -5,
+            'flexdmg',
+            flexdmg,
+            link_b,
+        ),
+        (
+            ['dominant'],
+            'ENSG1',
+            'Disease A',
+            10.0,
+            -10,
+            None,
+            None,
+            None,
+            2.5,
+            1.5,
+            3.5,
+            1e-09,
+            1000,
+            100,
+            10,
+            'ptv',
+            ptv,
+            link_a,
+        ),
+        (
+            ['dominant'],
+            'ENSG9',
+            'Disease A',
+            2.5,
+            -8,
+            None,
+            None,
+            None,
+            0.0,
+            1.5,
+            3.5,
+            2.5e-08,
+            1000,
+            100,
+            10,
+            'unknownModel',
+            'unknownModel',
+            link_a,
+        ),
+        (
+            ['dominant'],
+            'ENSG11',
+            'Trait B',
+            2.0,
+            -8,
+            -0.3579588234424591,
+            1.5,
+            None,
+            None,
+            None,
+            None,
+            2e-08,
+            5000,
+            5000,
+            50,
+            'flexdmg',
+            flexdmg,
+            link_b,
+        ),
+        (
+            ['dominant'],
+            'ENSG10',
+            'Twice',
+            10.0,
+            -10,
+            None,
+            None,
+            None,
+            math.inf,
+            0.0,
+            3.5,
+            1e-09,
+            1000,
+            100,
+            10,
+            'ptv',
+            ptv,
+            link_2,
+        ),
+        (
+            ['dominant'],
+            'ENSG10',
+            'Twice',
+            10.0,
+            -10,
+            None,
+            None,
+            None,
+            math.inf,
+            0.0,
+            3.5,
+            1e-09,
+            1000,
+            100,
+            10,
+            'ptv',
+            ptv,
+            link_1,
+        ),
+        (
+            ['recessive'],
+            'ENSG4',
+            'Disease A',
+            10.0,
+            -9,
+            None,
+            None,
+            None,
+            1.0000001192092896,
+            1.5,
+            3.5,
+            1e-08,
+            1000,
+            100,
+            10,
+            'rec',
+            rec,
+            link_a,
+        ),
+        (
+            ['dominant'],
+            'ENSG2',
+            'Trait B',
+            2.0,
+            -8,
+            0.25,
+            0.125,
+            0.375,
+            None,
+            None,
+            None,
+            2e-08,
+            5000,
+            5000,
+            50,
+            'flexdmg',
+            flexdmg,
+            link_b,
+        ),
+    ]
+    old_rows = expand(constant, varying, rows)
+    columns = list(old_rows[0])
 
     absent = ['sex', 'diseaseFromSourceId', 'curatedDiseaseFromSourceMappedId']
     assert set(new.columns) - set(columns) == set(absent)

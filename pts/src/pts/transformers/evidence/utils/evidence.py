@@ -1,12 +1,12 @@
 """Evidence post-processing in polars: harmonisation through scoring and direction of effect.
 
-Polars port of `pts.pyspark.evidence_utils.evidence.Evidence`. `Evidence`'s methods each return a
+Polars port of the removed pyspark `Evidence`. `Evidence`'s methods each return a
 new `Evidence`, so a caller can chain the full sequence -- `validate_diseases` ->
 `validate_target` -> `validate_datasource` -> `assign_evidence_identifier` ->
 `validate_uniqueness` -> `resolve_publication_date` ->
 `resolve_evidence_date` -> `calculate_evidence_score` -> `assign_direction_on_trait` ->
 `assign_direction_on_target` -> `hash_long_variant_identifiers` -> `valid()`/`invalid()` -- exactly
-as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class. The shared recipe
+as the removed pyspark post-processing step chained the pyspark class. The shared recipe
 (`postprocess`) stops at `calculate_evidence_score`; the steps after it belong to the datasources
 that use them.
 

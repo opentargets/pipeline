@@ -1,4 +1,4 @@
-"""Rows of the old Spark and the new polars parsers in one comparable form."""
+"""Rows of the removed Spark parsers, captured as literals, and the new polars parsers in one comparable form."""
 
 from __future__ import annotations
 
@@ -18,3 +18,8 @@ def _canonical(value: Any) -> Any:
 def multiset(rows: list[dict[str, Any]], columns: list[str]) -> list[tuple[Any, ...]]:
     """The rows' `columns` as sorted tuples: floats by repr, structs by field name."""
     return sorted((tuple(_canonical(row[c]) for c in columns) for row in rows), key=repr)
+
+
+def expand(constant: dict[str, Any], columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
+    """Each row of `columns` values as a dict, with the `constant` columns added."""
+    return [constant | dict(zip(columns, row, strict=True)) for row in rows]

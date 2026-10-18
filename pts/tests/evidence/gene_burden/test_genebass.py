@@ -8,14 +8,12 @@ from typing import Any
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import process_genebass_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.genebass import parse_genebass
 from tests.evidence.gene_burden.fixtures import genebass_row, write_genebass
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.spark_rows import multiset
+from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 
 def _parse(tmp: Path, *files: list[dict[str, Any]]) -> pl.DataFrame:
@@ -160,7 +158,7 @@ def test_no_significant_rows_give_an_empty_frame(tmp_path: Path) -> None:
     assert rows.schema == GENE_BURDEN_PARSED
 
 
-def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
+def test_matches_spark_baseline(tmp_path: Path) -> None:
     files = [
         [
             genebass_row(),
@@ -181,10 +179,118 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     ]
     path = write_genebass(tmp_path, *files)
 
-    old = process_genebass_gene_burden(spark.read.option('mergeSchema', True).parquet(path))
-    columns = old.columns
-    old_rows = [row.asDict(recursive=True) for row in old.collect()]
     new = parse_genebass(path).collect()
+
+    # expected rows captured from the removed pyspark implementation
+    plof = 'Burden test carried out with rare pLOF variants.'
+    missense_lc = (
+        'Burden test carried out with rare missense variants including low-confidence pLOF and in-frame indels.'
+    )
+    constant = {
+        'datasourceId': 'gene_burden',
+        'datatypeId': 'genetic_association',
+        'ancestry': 'EUR',
+        'ancestryId': 'HANCESTRO_0005',
+        'projectId': 'Genebass',
+        'cohortId': 'UK Biobank 450k',
+        'literature': ['36778668'],
+    }
+    varying = [
+        'targetFromSourceId',
+        'diseaseFromSource',
+        'diseaseFromSourceId',
+        'pValueMantissa',
+        'pValueExponent',
+        'beta',
+        'betaConfidenceIntervalLower',
+        'betaConfidenceIntervalUpper',
+        'resourceScore',
+        'studySampleSize',
+        'studyCases',
+        'statisticalMethod',
+        'statisticalMethodOverview',
+    ]
+    rows = [
+        ('ENSG1', 'White blood cell count', '30000', 2.0, -9, 0.25, 0.125, 0.375, 2e-09, 10000, 1000, 'pLoF', plof),
+        (
+            'ENSG2',
+            'White blood cell count',
+            '30000',
+            5.498,
+            -320,
+            0.25,
+            0.125,
+            0.375,
+            5.498e-320,
+            1000,
+            1000,
+            'pLoF',
+            plof,
+        ),
+        (
+            'ENSG3',
+            'White blood cell count',
+            '30000',
+            10.0,
+            -9,
+            0.0,
+            -0.125,
+            0.125,
+            1e-08,
+            10000,
+            1000,
+            'missense|LC',
+            missense_lc,
+        ),
+        (
+            'ENSG4',
+            'White blood cell count',
+            '30000',
+            6.7,
+            -7,
+            math.nan,
+            math.nan,
+            math.nan,
+            6.7e-07,
+            10000,
+            1000,
+            'synonymous',
+            'Burden test carried out with rare synonymous variants.',
+        ),
+        (
+            'ENSG5',
+            'White blood cell count',
+            '30000',
+            5.498,
+            -320,
+            0.25,
+            None,
+            None,
+            5.498e-320,
+            10000,
+            1000,
+            'pLoF|missense|LC',
+            'Burden test carried out with pLOF or missense variants.',
+        ),
+        ('ENSG9', None, '30000', 10.0, -9, 0.25, 0.125, 0.375, 9.9995e-09, None, None, 'new', 'new'),
+        (
+            'ENSG10',
+            'White blood cell count',
+            None,
+            3.0,
+            -9,
+            math.inf,
+            math.inf,
+            math.inf,
+            3.0000005e-09,
+            10000,
+            1000,
+            'pLoF',
+            plof,
+        ),
+    ]
+    old_rows = expand(constant, varying, rows)
+    columns = list(old_rows[0])
 
     absent = [
         'allelicRequirements',

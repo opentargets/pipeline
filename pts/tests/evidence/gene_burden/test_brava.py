@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import polars as pl
 import pytest
-from pyspark.sql import SparkSession
 
-from pts.pyspark.gene_burden import _excel_sheet_to_spark, process_brava_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
-from pts.transformers.evidence.gene_burden.brava import parse_brava
+from pts.transformers.evidence.gene_burden.brava import _sample_size_lookup, parse_brava
 from tests.evidence.gene_burden.fixtures import (
     GROUP,
     PVALUE,
@@ -22,7 +19,7 @@ from tests.evidence.gene_burden.fixtures import (
     write_brava,
 )
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.spark_rows import multiset
+from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 
 def _granular(**fields: Any) -> dict[str, Any]:
@@ -140,6 +137,25 @@ def test_ancestry_groups_of_the_sample_sizes(tmp_path: Path) -> None:
     }
 
 
+def test_pooled_less_european_is_non_european(tmp_path: Path) -> None:
+    groups = ['ALL', 'EUR', 'non_EUR']
+    rows = _parse(
+        tmp_path,
+        s12=[_cauchy(**{GROUP: g}) for g in groups],
+        s13=[_cauchy(**{'Gene ID': 'ENSG1', 'Phenotype ID': 'T2Diab', GROUP: g}) for g in groups],
+    )
+    sizes = {gene: [_sizes(rows)[gene, f'Cauchy.{g}'][0] for g in groups] for gene in ('ENSG1', 'ENSG2')}
+    assert sizes == {'ENSG1': [2120, 2000, 120], 'ENSG2': [6400, 6000, 400]}
+
+
+def test_the_sample_size_lookup_key_is_unique() -> None:
+    def strings(rows: list[dict[str, Any]]) -> pl.DataFrame:
+        return pl.DataFrame([{k: str(v) for k, v in row.items()} for row in rows])
+
+    lookup = _sample_size_lookup(strings(S4_ROWS), strings(S5_ROWS))
+    assert lookup.height == lookup.select('Phenotype ID', 'Ancestry Group').n_unique() == 9
+
+
 def test_sums_over_missing_values_are_null(tmp_path: Path) -> None:
     rows = _parse(
         tmp_path,
@@ -248,7 +264,7 @@ def test_duplicates_are_dropped(tmp_path: Path) -> None:
     assert _parse(tmp_path, s14=[_granular(), _granular(Gene='other symbol')]).height == 1
 
 
-def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
+def test_matches_spark_baseline(tmp_path: Path) -> None:
     path = write_brava(
         tmp_path,
         s14=[
@@ -289,13 +305,207 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
             {'Phenotype ID': 'T2Diab', 'Ancestry': 'SAS', 'Biobank': 'x', 'N cases': 'na', 'N controls': '7.0'},
         ],
     )
-    session = SimpleNamespace(spark=spark)
-
-    sheets = ('Table S4', 'Table S5', 'Table S12', 'Table S13', 'Table S14', 'Table S15')
-    old = process_brava_gene_burden(*(_excel_sheet_to_spark(session, path, sheet) for sheet in sheets))
-    columns = old.columns
-    old_rows = [row.asDict(recursive=True) for row in old.collect()]
     new = parse_brava(path).collect()
+
+    # expected rows captured from the removed pyspark implementation
+    burden = (
+        'Burden test carried out with pLoF variants with a MAF smaller than 0.1%, meta-analyzed across BRaVa biobanks.'
+    )
+    skat = (
+        'SKAT test carried out with pLoF variants with a MAF smaller than 0.01%, meta-analyzed across BRaVa biobanks.'
+    )
+    cauchy = 'Cauchy combination test aggregating Burden and SKAT/SKAT-O results across variant masks and MAF cutoffs.'
+    constant = {
+        'datasourceId': 'gene_burden',
+        'datatypeId': 'genetic_association',
+        'projectId': 'BRaVa Consortium',
+        'cohortId': 'BRaVa Consortium',
+        'literature': ['42238450'],
+    }
+    varying = [
+        'targetFromSourceId',
+        'diseaseFromSource',
+        'ancestry',
+        'ancestryId',
+        'resourceScore',
+        'pValueExponent',
+        'pValueMantissa',
+        'beta',
+        'betaConfidenceIntervalLower',
+        'betaConfidenceIntervalUpper',
+        'statisticalMethod',
+        'statisticalMethodOverview',
+        'studySampleSize',
+        'studyCases',
+    ]
+    rows = [
+        (
+            'ENSG1',
+            'Height',
+            'European',
+            'HANCESTRO_0005',
+            2.5e-09,
+            -9,
+            2.5,
+            0.5,
+            0.375,
+            0.625,
+            'Burden.pLoF.0.001.EUR',
+            burden,
+            6000,
+            None,
+        ),
+        (
+            'ENSG3',
+            'Type 2 diabetes',
+            None,
+            None,
+            1e-08,
+            -9,
+            10.0,
+            0.5,
+            0.375,
+            0.625,
+            'Burden.pLoF.0.001.ALL',
+            burden,
+            6400,
+            None,
+        ),
+        (None, None, None, None, None, None, None, None, None, None, '', None, None, None),
+        (
+            'ENSG4',
+            'Type 2 diabetes',
+            'non-European',
+            None,
+            2.5e-09,
+            -9,
+            2.5,
+            None,
+            None,
+            None,
+            'SKAT.pLoF.0.0001.non_EUR',
+            skat,
+            400,
+            None,
+        ),
+        (
+            'ENSG1',
+            'Type 2 diabetes',
+            'European',
+            'HANCESTRO_0005',
+            2.5e-09,
+            -9,
+            2.5,
+            0.5,
+            0.375,
+            0.625,
+            'Burden.pLoF.0.001.EUR',
+            burden,
+            2000,
+            300,
+        ),
+        (
+            'ENSG5',
+            'Type 2 diabetes',
+            'Central and South Asian',
+            None,
+            5e-320,
+            -320,
+            5.0,
+            0.0,
+            -0.125,
+            0.125,
+            'Burden.pLoF.0.001.SAS',
+            burden,
+            None,
+            None,
+        ),
+        (
+            'ENSG6',
+            'Type 2 diabetes',
+            'European',
+            'HANCESTRO_0005',
+            2.5e-09,
+            -9,
+            2.5,
+            0.5,
+            0.375,
+            0.625,
+            '1e-05.EUR',
+            None,
+            2000,
+            300,
+        ),
+        (
+            'ENSG7',
+            'Type 2 diabetes',
+            'Middle Eastern',
+            'HANCESTRO_0852',
+            5e-320,
+            -320,
+            5.0,
+            None,
+            None,
+            None,
+            'Burden.pLoF.0.001.MID',
+            burden,
+            20,
+            5,
+        ),
+        (
+            'ENSG8',
+            'Type 2 diabetes',
+            'African',
+            'HANCESTRO_0010',
+            2.5e-09,
+            -9,
+            2.5,
+            0.5,
+            None,
+            None,
+            'Burden.pLoF.0.001.AFR',
+            burden,
+            None,
+            None,
+        ),
+        ('ENSG2', 'Height', None, None, 4e-12, -12, 4.0, None, None, None, 'Cauchy.ALL', cauchy, 6400, None),
+        (None, None, None, None, None, None, None, None, None, None, None, cauchy, None, None),
+        (
+            'ENSG9',
+            'Height',
+            'European',
+            'HANCESTRO_0005',
+            4e-12,
+            -12,
+            4.0,
+            None,
+            None,
+            None,
+            'Cauchy.EUR',
+            cauchy,
+            6000,
+            None,
+        ),
+        (
+            'ENSG10',
+            'Height',
+            'non-European',
+            None,
+            4e-12,
+            -12,
+            4.0,
+            None,
+            None,
+            None,
+            'Cauchy.non_EUR',
+            cauchy,
+            120,
+            35,
+        ),
+        ('ENSG11', 'Height', None, None, 1e-08, -9, 10.0, None, None, None, None, cauchy, None, None),
+    ]
+    old_rows = expand(constant, varying, rows)
+    columns = list(old_rows[0])
 
     absent = [
         'allelicRequirements',
