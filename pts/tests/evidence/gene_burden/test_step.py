@@ -309,11 +309,6 @@ def _run(tmp: Path, curated: list[str], genebass: list[dict[str, Any]] | None = 
     return pl.read_parquet(destination['evidence']), pl.read_parquet(destination['failed_evidence'])
 
 
-def _score(p: float) -> float:
-    scaled = 0.75 * (math.log10(p) - math.log10(1e-7)) / (math.log10(1e-17) - math.log10(1e-7)) + 0.25
-    return min(1.0, max(0.25, scaled))
-
-
 def test_maps_scores_and_splits_valid_from_failed(tmp_path: Path) -> None:
     valid, failed = _run(
         tmp_path,
@@ -332,7 +327,11 @@ def test_maps_scores_and_splits_valid_from_failed(tmp_path: Path) -> None:
         ('mapped', 'ENSG1', 'EFO_0000002', 'risk', 'LoF', '2020-05-01'),
         ('pLoF', 'ENSG1', 'EFO_0000003', 'risk', 'LoF', None),
     ]
-    assert valid.sort('statisticalMethod')['score'].to_list() == [_score(1.5e-9), _score(1.5e-9), _score(2e-9)]
+    assert valid.sort('statisticalMethod')['score'].to_list() == [
+        0.3867931555708239,
+        0.3867931555708239,
+        0.3774227503252014,
+    ]
     assert valid['id'].n_unique() == 3
     assert failed['statisticalMethod'].to_list() == ['unmapped']
 
