@@ -184,13 +184,15 @@ def cvdi_row(**cells: Any) -> dict[Any, Any]:
     return row | cells
 
 
-def _st6(rows: Sequence[dict[Any, Any]], masks: Sequence[str], footer: list[Any]) -> list[list[Any]]:
+def _st6(
+    rows: Sequence[dict[Any, Any]], masks: Sequence[str], footer: list[Any], *, cauchy: bool
+) -> list[list[Any]]:
     """ST6 as the sheet lays it out: a title, three header rows (ancestry, mask, field), the rows, a footnote.
 
     The `EUR ancestry` group repeats the first mask with values that would pass every cutoff.
     """
     groups = [*(('ALL ancestry', mask, field) for mask in masks for field in CVDI_FIELDS)]
-    groups += [('ALL ancestry', 'Cauchy', 'Cauchy P-value')]
+    groups += [('ALL ancestry', 'Cauchy', 'Cauchy P-value')] if cauchy else []
     groups += [('EUR ancestry', masks[0], field) for field in CVDI_FIELDS]
     levels: list[list[Any]] = [list(CVDI_INDEX), [None] * 3, [None] * 3]
     for i, group in enumerate(groups):
@@ -212,6 +214,7 @@ def write_cvdi(
     *,
     masks: Sequence[str] = CVDI_MASKS,
     footer: list[Any] | None = None,
+    cauchy: bool = True,
 ) -> str:
     """The CVDI workbook: ST6 associations and ST3 cutoffs, whose other cohorts' cutoffs are all 0.5."""
     cohorts = ['UKB', 'AoU', 'MGB', 'META (no correction)', 'META (overlap corrected)']
@@ -223,7 +226,7 @@ def write_cvdi(
         ['FDR: false discovery rate.'],
     ]
     footer = ['Associations are significant at FDR 1%.'] if footer is None else footer
-    return write_rows(tmp / 'cvdi.xlsx', {'ST3': st3, 'ST6': _st6(st6, masks, footer)})
+    return write_rows(tmp / 'cvdi.xlsx', {'ST3': st3, 'ST6': _st6(st6, masks, footer, cauchy=cauchy)})
 
 
 ST9_COLUMNS = [

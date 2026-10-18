@@ -165,6 +165,29 @@ def test_numeric_cells_cast_as_spark(tmp_path: Path) -> None:
     ]
 
 
+def test_boolean_cells_cast_as_the_old_typed_read(tmp_path: Path) -> None:
+    rows = _parse(
+        tmp_path,
+        _lof({(LOF, 'cMAC'): True}),
+        _lof({'Gene ID Ensembl': 'ENSG2', (LOF, 'Meta P-value'): False}),
+    )
+    assert rows.select('targetFromSourceId', 'studyCasesWithQualifyingVariants', 'resourceScore').rows() == [
+        ('ENSG1', 1, 2.5e-9),
+        ('ENSG2', 12, 0.0),
+    ]
+
+
+def test_boolean_cutoffs_cast_as_the_old_typed_read(tmp_path: Path) -> None:
+    cutoffs = [(label, mask, True if mask == LOF else cutoff) for label, mask, cutoff in CVDI_CUTOFFS]
+    rows = _parse(tmp_path, _lof({(LOF, 'Meta P-value'): 0.5}), cutoffs=cutoffs)
+    assert rows.select('statisticalMethod', 'resourceScore').rows() == [(LOF, 0.5)]
+
+
+def test_a_missing_field_fails(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match='Cauchy P-value'):
+        _parse(tmp_path, _lof(), cauchy=False)
+
+
 def test_header_repeats_and_rows_without_a_gene_id_are_dropped(tmp_path: Path) -> None:
     rows = _parse(
         tmp_path,
@@ -221,7 +244,8 @@ def test_odds_ratios_unlike_the_old_regexes_counted(tmp_path: Path) -> None:
     rows = [_lof({'Gene ID Ensembl': gene, (LOF, 'OR [95%CI]'): text}) for gene, (text, _, _) in INTEGRAL_ODDS.items()]
     rows.append(_lof({'Gene ID Ensembl': 'ENSG13', (LOF, 'OR [95%CI]'): '3 [2; 4]'}))
     rows.append(_lof({'Gene ID Ensembl': 'ENSG14', (LOF, 'OR [95%CI]'): '3 [2; 4]', (LOF, 'Meta P-value'): 0.5}))
-    _, log = logged(lambda: _parse(tmp_path, _lof(), *rows))
+    # repeated rows are counted once, as the old step dropped duplicates before the cutoff
+    _, log = logged(lambda: _parse(tmp_path, _lof(), *rows, rows[0], rows[3]))
     assert '2 CVDI odds ratios and 4 confidence interval bounds (2 lower, 2 upper) differ from the old regexes' in log
 
 
@@ -265,6 +289,7 @@ def test_masks_matched_only_case_insensitively_counted(tmp_path: Path) -> None:
             _lof({(M05, 'Meta P-value'): 5e-8, (M02, 'Meta P-value'): 1e-8}),
             _lof({'Gene ID Ensembl': 'ENSG2', (M05, 'Meta P-value'): 1e-9}),
             _lof({'Gene ID Ensembl': 'ENSG3', (M05, 'Meta P-value'): 1e-7}),
+            _lof({'Gene ID Ensembl': 'ENSG2', (M05, 'Meta P-value'): 1e-9}),
             masks=[*CVDI_MASKS, M02],
             cutoffs=CUTOFFS_WITH_M02,
         )
@@ -273,6 +298,11 @@ def test_masks_matched_only_case_insensitively_counted(tmp_path: Path) -> None:
         '3 significant CVDI rows from masks matched to a cutoff only case-insensitively, by mask: '
         'missense0.2 (MAF<0.001%): 1, missense0.5 (MAF<0.001%): 2'
     ) in log
+
+
+def test_no_case_insensitive_match_counted(tmp_path: Path) -> None:
+    _, log = logged(lambda: _parse(tmp_path, _lof()))
+    assert '0 significant CVDI rows from masks matched to a cutoff only case-insensitively\n' in log
 
 
 def test_a_mask_without_a_cutoff_is_dropped(tmp_path: Path) -> None:
@@ -320,6 +350,7 @@ PARITY_ROWS = [
     _lof({'Gene ID Ensembl': 'ENSG6', (LOF, 'Meta P-value'): '1e-9', (LOF, 'cMAC'): '7.9'}),
     _lof({'Gene ID Ensembl': 'ENSG7', 'phenotype': 'Cardiac_pacemaker/device_in_situ', (LOF, 'Meta P-value'): 5e-320}),
     _lof({'Gene ID Ensembl': 'ENSG8', (LOF, 'cMAC'): 'na', (LOF_M08, 'Meta P-value'): 'NA'}),
+    _lof({'Gene ID Ensembl': 'ENSG15', (LOF, 'cMAC'): True, (LOF_M08, 'Meta P-value'): False}),
 ]
 
 
@@ -362,6 +393,7 @@ def _compare(
     return multiset(new.rows(named=True), columns), multiset(fixed, columns), extra
 
 
+@pytest.mark.filterwarnings('ignore:dropping on a non-lexsorted multi-index')
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     footer = ['Asthma', 'ENSG9', 'G9', 1, '2.5 [1.5; 3.5]', 1e-20]
     integral = [_lof({'Gene ID Ensembl': g, (LOF, 'OR [95%CI]'): text}) for g, (text, _, _) in INTEGRAL_ODDS.items()]
@@ -381,7 +413,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         for gene, (_, old, new) in INTEGRAL_ODDS.items()
     }
     new, old, added = _compare(spark, path, fixes, {M05, M02})
-    assert len(old) == 13
+    assert len(old) == 15
     assert new == old
     assert added.select('targetFromSourceId', 'statisticalMethod', *ODDS_COLUMNS).rows() == [
         ('ENSG21', M02, 3.0, 2.0, 4.5),

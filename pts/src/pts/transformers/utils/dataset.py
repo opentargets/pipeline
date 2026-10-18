@@ -271,7 +271,8 @@ def read_spreadsheet(
     '1'/'0'; without it, each cell is rendered on its own, as `pandas.read_excel(dtype=str)` does:
     an integral number without a fraction, a boolean as 'True'/'False'. A sheet with only a header
     gives its columns and no rows. Without `has_header`, every row is data and the columns are
-    `column_1`, `column_2`, ..., as `pandas.read_excel(header=None, dtype=str)` reads it. The
+    `column_1`, `column_2`, ..., as `pandas.read_excel(header=None, dtype=str)` reads it; header
+    rows the caller takes from those rows have had the missing-value strings nulled too. The
     workbook is read whole through `StorageHandle`.
 
     Args:

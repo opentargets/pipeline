@@ -46,6 +46,9 @@ URL_SUFFIX = '&pageid=600_traits_app'
 
 _INDEX = ['phenotype', 'Gene ID Ensembl', 'Gene']
 _FIELDS = ['cMAC', 'OR [95%CI]', 'Meta P-value', 'Cauchy P-value']
+_NUMBERS = ['cMAC', 'Meta P-value', 'Cauchy P-value', 'P cutoff']
+#: A boolean cell, as the old typed read cast it.
+_BOOLEANS = {'True': '1', 'False': '0'}
 _ANCESTRY = 'ALL ancestry'
 _OTHER_COHORTS = ['AoU', 'UKB', 'META (no correction)', 'MGB']
 _NUMBER = r'([0-9]+(?:\.[0-9]+)?)'
@@ -104,8 +107,11 @@ def _associations(path: str) -> pl.DataFrame:
     associations = pl.concat(
         [rows.select(*index, *fields(method), method_name=pl.lit(method)) for method in methods], how='diagonal'
     )
-    missing = [pl.lit(None, dtype=pl.String).alias(field) for field in _FIELDS if field not in associations.columns]
-    return associations.with_columns(missing)
+    missing = [field for field in _FIELDS if field not in associations.columns]
+    if missing:
+        msg = f'CVDI ST6 has no {missing} under {_ANCESTRY!r}'
+        raise ValueError(msg)
+    return associations
 
 
 def _cutoffs(path: str) -> pl.DataFrame:
@@ -161,9 +167,10 @@ def _log_case_insensitive_matches(significant: pl.DataFrame) -> None:
         .sort('method_name')
         .rows()
     )
+    by_mask = f', by mask: {", ".join(f"{mask}: {n}" for mask, n in counts)}' if counts else ''
     logger.info(
         f'{sum(n for _, n in counts)} significant CVDI rows from masks matched to a cutoff only '
-        f'case-insensitively, by mask: {", ".join(f"{mask}: {n}" for mask, n in counts)}'
+        f'case-insensitively{by_mask}'
     )
 
 
@@ -190,8 +197,10 @@ def parse_cvdi(path: str) -> pl.LazyFrame:
             how='inner',
             maintain_order='left',
         )
+        .unique(maintain_order=True, keep='first')
         .filter((gene_id != 'Gene ID Ensembl') & gene_id.is_not_null())
-        .with_columns(cast_double(c) for c in ('cMAC', 'Meta P-value', 'Cauchy P-value', 'P cutoff'))
+        .with_columns(pl.col(_NUMBERS).replace(_BOOLEANS))
+        .with_columns(cast_double(c) for c in _NUMBERS)
         .with_columns(
             resourceScore=pl
             .when(pl.col('method_name') == 'Cauchy')
