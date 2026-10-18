@@ -261,10 +261,8 @@ steps:
 
   #: MOUSE_PHENOTYPES STEP :########################################################################
   mouse_phenotype:
-    - name: pyspark generate from IMPC and validate with target
-      pyspark: mouse_phenotype
-      settings:
-        partition_count: 1
+    - name: transform IMPC into mouse phenotypes and validate with target
+      transformer: mouse_phenotype
       source:
         target: output/target
         # IMPC source files
