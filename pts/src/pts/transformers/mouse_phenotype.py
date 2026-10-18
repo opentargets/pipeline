@@ -105,8 +105,8 @@ def generate_mouse_phenotypes(
     gene_mapping: pl.DataFrame,
     model_mouse: pl.DataFrame,
     mp_terms: pl.DataFrame,
-    literature: pl.DataFrame,
-    mp_classes: pl.DataFrame,
+    model_literature: pl.DataFrame,
+    classes: pl.DataFrame,
 ) -> pl.DataFrame:
     """One row per mouse gene, human target and MP term, with its models and the term's classes.
 
@@ -116,8 +116,8 @@ def generate_mouse_phenotypes(
         gene_mapping: `gene_mapping` of the MGI and HGNC files.
         model_mouse: `model_mouse_phenotypes`.
         mp_terms: `mp_id` and `mp_term` of the IMPC ontology.
-        literature: the PMIDs per `MODEL_ID` and `targetInModelMgiId`.
-        mp_classes: `mp_classes`.
+        model_literature: the PMIDs per `MODEL_ID` and `targetInModelMgiId`.
+        classes: `mp_classes`.
 
     Returns:
         `MOUSE_PHENOTYPE` rows sorted by `GROUP_KEYS`, their lists sorted.
@@ -136,9 +136,9 @@ def generate_mouse_phenotypes(
         .join(gene_mapping, on='targetInModelMgiId', how='inner', maintain_order='left')
         .join(model_mouse, on=MODEL_ID, how='inner', maintain_order='left')
         .join(mp_terms, on='mp_id', how='inner', maintain_order='left')
-        .join(literature, on=[MODEL_ID, 'targetInModelMgiId'], how='left', maintain_order='left')
+        .join(model_literature, on=[MODEL_ID, 'targetInModelMgiId'], how='left', maintain_order='left')
         .rename({'mp_id': 'modelPhenotypeId', 'mp_term': 'modelPhenotypeLabel'})
-        .join(mp_classes, on='modelPhenotypeId', how='inner', maintain_order='left')
+        .join(classes, on='modelPhenotypeId', how='inner', maintain_order='left')
         .with_columns(biologicalModelId=biological_model_id(pl.col(MODEL_ID)))
         .group_by(GROUP_KEYS)
         .agg(
