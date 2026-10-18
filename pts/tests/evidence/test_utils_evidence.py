@@ -375,10 +375,11 @@ class TestRenderForHashFloat:
         df = pl.DataFrame({'v': [1e-5]}, schema={'v': pl.Float64})
         assert df.select(render_for_hash('v', pl.Float64).alias('o'))['o'].to_list() == ['1.0E-5']
 
-    def test_float32_is_widened_to_a_double(self) -> None:
-        df = pl.DataFrame({'v': [0.1, 1e-5]}, schema={'v': pl.Float32})
-        got = df.select(render_for_hash('v', pl.Float32).alias('o'))['o'].to_list()
-        assert got == ['0.10000000149011612', '9.999999747378752E-6']
+    def test_float32_raises(self) -> None:
+        # spark renders a float with Float.toString (1.1f is '1.1'); widening it to a double would not
+        df = pl.DataFrame({'v': [1.1]}, schema={'v': pl.Float32})
+        with pytest.raises(UnsupportedIdentifierField, match='Float32'):
+            df.select(render_for_hash('v', pl.Float32).alias('o'))
 
     def test_null_stays_null(self) -> None:
         df = pl.DataFrame({'v': [None]}, schema={'v': pl.Float64})

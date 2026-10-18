@@ -26,7 +26,7 @@ class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condit
 
 
 def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
-    """Render a String/Int64/Boolean/Float64/Float32 leaf as a string, for hashing.
+    """Render a String/Int64/Boolean/Float64 leaf as a string, for hashing.
 
     Nulls are preserved (not substituted) here -- the caller decides whether a null means "the
     whole column is null" (real `None`, `render_for_hash`'s job) or "a nested element/field
@@ -36,9 +36,8 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     long-to-string and boolean-to-string agree digit-for-digit and `true`/`false`-for-`true`/
     `false` with `.cast(pl.String)`.
 
-    Float64 renders as java's `Double.toString`, as spark does (`java_double_to_string`);
-    Float32 is widened to a double first, so a Float32 column outside the evidence schema does not
-    render as spark's `Float.toString`.
+    Float64 renders as java's `Double.toString`, as spark does (`java_double_to_string`). Float32
+    raises: spark renders it with `Float.toString`, which nothing here reproduces.
 
     Args:
         expr: the leaf expression to render.
@@ -52,8 +51,8 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     Raises:
         UnsupportedIdentifierField: for a dtype this function has not been measured against.
     """
-    if dtype in (pl.Float64, pl.Float32):
-        return java_double_to_string(expr.cast(pl.Float64))
+    if dtype == pl.Float64:
+        return java_double_to_string(expr)
     if dtype in (pl.String, pl.Int64, pl.Boolean):
         return expr.cast(pl.String)
     msg = f'render_for_hash: unsupported scalar dtype {dtype!r} for column {name!r}'
@@ -114,8 +113,8 @@ def render_for_hash(name: str, dtype: pl.DataType) -> pl.Expr:
 
     * String: identity cast.
     * `Int64`, `Boolean`: identical rendering in both engines -- see `_cast_scalar_to_string`.
-    * `Float64`: java's `Double.toString` -- see `java_double_to_string` for where java 17 is
-      not shortest and this is.
+    * `Float64`: java's `Double.toString` -- see `java_double_to_string` for the doubles above
+      `2**63` where java 17 is not shortest and this is.
     * `List(...)`: spark renders `['1','2']` as `'[1, 2]'`, `[]` as `'[]'`, a null list as null,
       and a null *element* -- of any supported element type, not just String -- as the literal
       token `null`.

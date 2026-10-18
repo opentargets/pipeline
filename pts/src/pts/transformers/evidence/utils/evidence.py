@@ -258,8 +258,8 @@ class Evidence:
           the output's column order regardless of its spark provenance.
 
         The digests match spark's on JDK 17, the release's JVM, whose `Double.toString` renders the
-        doubles, except for a row carrying a double java 17 does not render shortest (see
-        `java_double_to_string`).
+        doubles, except for a row carrying one of the doubles above `2**63` that java 17 does not
+        render shortest (see `java_double_to_string`).
 
         Returns:
             Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within

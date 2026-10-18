@@ -94,9 +94,36 @@ def test_java_double_to_string_matches_spark_on_random_doubles(spark) -> None:
     assert mismatches == []
 
 
+def _signed(values: list[float]) -> list[float]:
+    return values + [-v for v in values]
+
+
+def _mismatches(spark, values: list[float]) -> list[tuple[float, str | None, str | None]]:
+    pairs = zip(values, _java(values), _spark_cast(spark, values), strict=True)
+    return [(v, j, s) for v, j, s in pairs if j != s]
+
+
+def test_java_double_to_string_matches_spark_on_every_power_of_two(spark) -> None:
+    powers = [math.ldexp(1.0, e) for e in range(-1074, 1024)]
+    assert _java([2.0**-24, 2.0**-1074]) == ['5.9604644775390625E-8', '4.9E-324']
+    assert _mismatches(spark, _signed(powers)) == []
+
+
+def test_java_double_to_string_matches_spark_next_to_every_power_of_two(spark) -> None:
+    powers = [math.ldexp(1.0, e) for e in range(-1074, 1024)]
+    neighbours = [math.nextafter(p, 0.0) for p in powers] + [math.nextafter(p, math.inf) for p in powers]
+    assert _mismatches(spark, _signed([v for v in neighbours if v not in (0.0, math.inf)])) == []
+
+
+def test_java_double_to_string_matches_spark_on_the_smallest_subnormals(spark) -> None:
+    assert _mismatches(spark, _signed([math.ldexp(float(n), -1074) for n in range(1, 4096)])) == []
+
+
 def test_java_double_to_string_is_shortest_where_java_17_is_not(spark) -> None:
-    assert _spark_cast(spark, [4.9e-324]) == ['4.9E-324']
-    assert _java([4.9e-324]) == ['5.0E-324']
+    # above 2**63 only: a long overflow in java's digit loop, and a candidate exactly half a gap away
+    values = [2.4255049468349816e25, 1.50073856281376e19]
+    assert _spark_cast(spark, values) == ['2.4255049468349815E25', '1.5007385628137599E19']
+    assert _java(values) == ['2.4255049468349816E25', '1.50073856281376E19']
 
 
 def test_java_double_to_string_keeps_null() -> None:
