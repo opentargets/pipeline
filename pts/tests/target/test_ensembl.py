@@ -1,10 +1,10 @@
-"""The ensembl builder, from the `pts.ensembl` query frames."""
+"""The ensembl builder, from the `pts.transformers.utils.ensembl` query frames."""
 
 from __future__ import annotations
 
 import polars as pl
 
-from pts.target.ensembl import ensembl_genes
+from pts.transformers.target.ensembl import ensembl_genes
 from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
 from tests.target.rows import rows
 

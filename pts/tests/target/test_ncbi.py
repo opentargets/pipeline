@@ -5,7 +5,7 @@ from __future__ import annotations
 import gzip
 from pathlib import Path
 
-from pts.target.ncbi import build_ncbi, read_ncbi
+from pts.transformers.target.ncbi import build_ncbi, read_ncbi
 from tests.target.rows import rows
 
 HEADER = '#tax_id\tGeneID\tSymbol\tLocusTag\tSynonyms\tdbXrefs\tchromosome\tOther_designations'

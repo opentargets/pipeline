@@ -10,7 +10,7 @@ import polars as pl
 import pytest
 from otter.storage.synchronous.google import GoogleStorage
 
-from pts.ensembl import CoreDump, CoreDumpError
+from pts.transformers.utils.ensembl import CoreDump, CoreDumpError
 from tests.ensembl_fixtures import write_dump, write_gz
 
 DDL = """\

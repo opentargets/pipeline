@@ -8,7 +8,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.schemas.target import ID_SOURCE
-from pts.target.go import build_go, read_tsv
+from pts.transformers.target.go import build_go, read_tsv
 from tests.target.rows import rows
 
 

@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from loguru import logger
 
-from pts.target.chembl_class import TABLES, build_protein_classification, flatten_protein_classification
+from pts.transformers.target.chembl_class import TABLES, build_protein_classification, flatten_protein_classification
 from tests.target.rows import rows
 
 DTYPES = {

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.ensembl import CoreDump
+from pts.transformers.utils.ensembl import CoreDump
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
 

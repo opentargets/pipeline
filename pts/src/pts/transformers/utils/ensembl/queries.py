@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.ensembl.core import CoreDump
 from pts.schemas import ensembl_core as schema
+from pts.transformers.utils.ensembl.core import CoreDump
 
 CANONICAL_CHROMOSOMES = [str(i) for i in range(1, 23)] + ['X', 'Y', 'MT']
 

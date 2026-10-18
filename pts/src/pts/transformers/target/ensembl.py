@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.ensembl import CANONICAL_CHROMOSOMES, CoreDump, genes, transcripts, translation_xrefs
-from pts.target.lists import tag, union
+from pts.transformers.target.lists import tag, union
+from pts.transformers.utils.ensembl import CANONICAL_CHROMOSOMES, CoreDump, genes, transcripts, translation_xrefs
 
 TEC = '[Tt][Ee][Cc]'
 
@@ -19,9 +19,9 @@ def ensembl_genes(genes: pl.DataFrame, transcripts: pl.DataFrame, translation_xr
     """One row per gene.
 
     Args:
-        genes: `pts.ensembl.genes`.
-        transcripts: `pts.ensembl.transcripts`.
-        translation_xrefs: `pts.ensembl.translation_xrefs`.
+        genes: `pts.transformers.utils.ensembl.genes`.
+        transcripts: `pts.transformers.utils.ensembl.transcripts`.
+        translation_xrefs: `pts.transformers.utils.ensembl.translation_xrefs`.
 
     Returns:
         [id, biotype, approvedName, genomicLocation, approvedSymbol, proteinIds, signalP,

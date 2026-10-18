@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.target.hallmarks import COLUMNS, build_hallmarks, read_hallmarks
+from pts.transformers.target.hallmarks import COLUMNS, build_hallmarks, read_hallmarks
 from tests.target.rows import rows
 
 HEADER = 'GENE_SYMBOL\tCELL_TYPE\tPUBMED_PMID\tHALLMARK\tIMPACT\tDESCRIPTION\tCELL_LINE'

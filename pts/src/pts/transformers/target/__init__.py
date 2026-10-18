@@ -2,7 +2,7 @@
 
 Assembles the target index from the Ensembl core database dump and the HGNC, UniProt, ChEMBL,
 Gene Ontology, HPA, gnomAD, COSMIC hallmarks, NCBI and Reactome inputs. The per-source frames are
-built in `pts.target`.
+built in `pts.transformers.target`.
 """
 
 from __future__ import annotations
@@ -12,12 +12,12 @@ from typing import Any
 from loguru import logger
 from otter.config.model import Config
 
-from pts.ensembl import CoreDump
 from pts.postgres import read_dump_tables
-from pts.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
-from pts.target.assemble import assemble
-from pts.target.ensembl import build_ensembl
+from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
+from pts.transformers.target.assemble import assemble
+from pts.transformers.target.ensembl import build_ensembl
 from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.ensembl import CoreDump
 
 
 def target(

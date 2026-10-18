@@ -7,9 +7,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.ensembl import CoreDump, gene_names, genes, transcripts, translation_xrefs
-from pts.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.schemas import ensembl_core as schema
+from pts.transformers.utils.ensembl import CoreDump, gene_names, genes, transcripts, translation_xrefs
+from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
 #: Table name to (columns in DDL order, rows). `None` is written as the dump's `\N`. Each table
