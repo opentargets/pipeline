@@ -9,7 +9,7 @@ import polars as pl
 from pts.schemas.impc import MGI_PUBMED_COLUMNS
 from pts.transformers.utils.spark_csv import read_spark_csv
 
-#: Working column: the source model id, kept until deduplication.
+#: Working column: the model id.
 MODEL_ID = 'model_id'
 
 #: Java's `$` also matches before a final line terminator.
@@ -90,7 +90,7 @@ def literature(mgi_pubmed: pl.LazyFrame, summary: pl.LazyFrame, model_mouse: pl.
 
 
 def read_impc_csv(path: str, **options: Any) -> pl.LazyFrame:
-    """A spark-written CSV, lazily; `options` go to `read_spark_csv`."""
+    """A CSV read as Spark reads it, returned as a LazyFrame; `options` go to `read_spark_csv`."""
     return read_spark_csv(path, **options).lazy()
 
 

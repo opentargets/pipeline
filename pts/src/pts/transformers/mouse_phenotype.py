@@ -177,7 +177,7 @@ def mouse_phenotype(
     logger.info('load impc data for mouse phenotypes')
     summary = read_impc_csv(
         source['solr_disease_model_summary'],
-        columns=['model_id', 'model_description', 'model_genetic_background', 'marker_id'],
+        columns=[MODEL_ID, 'model_description', 'model_genetic_background', 'marker_id'],
     ).select(
         MODEL_ID,
         biologicalModelAllelicComposition=pl.col('model_description'),

@@ -261,7 +261,7 @@ steps:
 
   #: MOUSE_PHENOTYPES STEP :########################################################################
   mouse_phenotype:
-    - name: transform IMPC into mouse phenotypes and validate with target
+    - name: transform IMPC into mouse phenotypes split by target
       transformer: mouse_phenotype
       source:
         target: output/target
