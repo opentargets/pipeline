@@ -64,6 +64,11 @@ DRUG_LABELS = (
 #: Drug cross-reference sources whose ids are labels.
 DRUG_LABEL_CROSSREF_SOURCES = ('DailyMed', 'USAN', 'EMA')
 
+#: The columns each builder reads.
+DISEASE_COLUMNS = tuple(dict.fromkeys(['id', *(c for c, *_ in DISEASE_LABELS), *(c for c, *_ in DISEASE_IDS)]))
+TARGET_COLUMNS = ('id', *(c for c, *_ in TARGET_LABELS))
+DRUG_COLUMNS = ('id', 'name', 'tradeNames', 'synonyms', 'crossReferences')
+
 _CURATION_ID = rf'^http{JAVA_DOT}+/([0-9A-Za-z_]+_[0-9A-Za-z_]+){JAVA_END}'
 _NUMBERED_ITEM = rf'^[12]\){JAVA_END}'
 _JAVA_SPACE = r' \t\n\x0B\f\r'
@@ -188,7 +193,7 @@ def _synonyms(source: str) -> pl.Expr:
 def _combination_product(label: pl.Expr) -> pl.Expr:
     """`extract_combination_product`: `Y` of an `X component of Y` label, cleaned, else empty."""
     product = regexp_extract(label, _COMBINATION_PRODUCT, 1)
-    product = product.str.replace(rf'^[{_JAVA_SPACE}/,;:-]+', '').str.replace(rf'[{_JAVA_SPACE}/,;:-]+{JAVA_END}', '')
+    product = product.str.replace(rf'^[{_JAVA_SPACE}/,;:-]+', '').str.replace(rf'[{_JAVA_SPACE}/,;:-]+\z', '')
     return spark_trim(product.str.replace_all(rf'[{_JAVA_SPACE}]+', ' '))
 
 

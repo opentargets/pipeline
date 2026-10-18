@@ -5,9 +5,9 @@ from typing import Any
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.ontoma_lut.build import build_lut, disease_id_lut, disease_label_lut
+from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, build_lut, disease_id_lut, disease_label_lut
 from pts.transformers.ontoma_lut.inputs import curation_label_luts, load_dataset
-from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, write_dataset
 
 
 def ontoma(
@@ -24,8 +24,9 @@ def ontoma(
         settings: unused.
         config: unused.
     """
+    check_destinations_absent([destination['disease_label_lut'], destination['disease_id_lut']])
     logger.info(f'load data from: {source}')
-    disease = load_dataset(source['disease_index'])
+    disease = load_dataset(source['disease_index'], DISEASE_COLUMNS)
 
     logger.info(f'save disease label lookup table to {destination["disease_label_lut"]}')
     write_dataset(
