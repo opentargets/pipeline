@@ -140,3 +140,29 @@ def test_empty_file_has_no_rows(tmp_path: Path) -> None:
 def test_all_columns_are_strings(tmp_path: Path) -> None:
     path = _write(tmp_path / 'in.csv', 'x,y,z\n1,2.5,true\n')
     assert set(read_spark_csv(str(path)).dtypes) == {pl.String}
+
+
+SUBSET_TEXT = 'a,b,c\n1,"x\\"y",3\n4,5\n"6",,8,9,10\n,"",\n'
+
+
+def test_columns_equal_full_read_selected(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    assert read_spark_csv(str(path), columns=['c', 'a']).equals(read_spark_csv(str(path)).select('c', 'a'))
+
+
+def test_columns_with_new_columns_select_by_new_name(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    kwargs = {'new_columns': ['p', 'q', 'r', 's']}
+    subset = read_spark_csv(str(path), columns=['s', 'q'], **kwargs)
+    assert subset.equals(read_spark_csv(str(path), **kwargs).select('s', 'q'))
+
+
+def test_columns_select_renamed_header(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', 'a,,A\n1,2,3\n')
+    assert read_spark_csv(str(path), columns=['_c1', 'A2']).rows() == [('2', '3')]
+
+
+def test_unknown_column_raises(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'in.csv', SUBSET_TEXT)
+    with pytest.raises(ValueError, match='nope'):
+        read_spark_csv(str(path), columns=['a', 'nope'])

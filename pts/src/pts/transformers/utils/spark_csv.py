@@ -7,6 +7,7 @@ differs on each, so a source read by spark in the old steps is read with this.
 
 from __future__ import annotations
 
+import itertools
 import re
 
 import polars as pl
@@ -96,6 +97,7 @@ def read_spark_csv(
     has_header: bool = True,
     new_columns: list[str] | None = None,
     null_values: list[str] | None = None,
+    columns: list[str] | None = None,
 ) -> pl.DataFrame:
     r"""Read a CSV file as Spark's reader does with its defaults; every column is a string.
 
@@ -112,9 +114,13 @@ def read_spark_csv(
         has_header: whether the first non-blank line is a header, which is dropped when `new_columns` is given.
         new_columns: names for the columns by position.
         null_values: strings that read as null.
+        columns: the names to keep, after header renaming or `new_columns`; the result has them in this order.
 
     Returns:
         DataFrame of strings.
+
+    Raises:
+        ValueError: if a name in `columns` is not a column.
     """
     nulls = [''] if null_values is None else null_values
     with StorageHandle(path).open('rb') as f:
@@ -127,13 +133,24 @@ def read_spark_csv(
         header = [] if first is None else _fields(first, separator)
         if names is None:
             names = _safe_names(header, nulls)
-    rows = [_fields(line, separator) for line in lines]
+    rows = (_fields(line, separator) for line in lines)
     if names is None:
-        names = [f'_c{i}' for i in range(len(rows[0]) if rows else 0)]
+        first_row = next(rows, None)
+        names = [f'_c{i}' for i in range(0 if first_row is None else len(first_row))]
+        rows = itertools.chain([] if first_row is None else [first_row], rows)
     width = len(names)
+
+    if columns is None:
+        keep = list(range(width))
+    else:
+        unknown = [c for c in columns if c not in names]
+        if unknown:
+            raise ValueError(f'columns not in the file: {unknown}')
+        keep = [names.index(c) for c in columns]
+        names = columns
 
     def clean(value: str | None) -> str | None:
         return None if value is None or value in nulls else value
 
-    padded = [[clean(v) for v in row[:width]] + [None] * (width - len(row)) for row in rows]
+    padded = [[clean(row[i]) if i < len(row) else None for i in keep] for row in rows]
     return pl.DataFrame(padded, schema=dict.fromkeys(names, pl.String), orient='row')
