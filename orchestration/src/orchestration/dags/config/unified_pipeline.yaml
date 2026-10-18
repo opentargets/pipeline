@@ -92,14 +92,14 @@ steps:
   pis_evidence_intogen:
   pis_evidence_ppp:
     ppp_only: true
-  pis_gnomad:
+  pis_variant:
   pis_gwas:
   pis_gwas_ppp:
     ppp_only: true
   pis_go:
   pis_interaction:
   pis_heritability:
-  pis_lof_curation:
+  pis_variant_ppp:
     ppp_only: true
   pis_l2g:
   pis_l2g_predefined_test_for_split:
@@ -116,10 +116,13 @@ steps:
   pis_target:
   pis_target_prioritisation:
   # PTS STEPS
-  pts_lof_curation:
+  pts_variant_ppp:
     ppp_only: true
     depends_on:
-      - pis_lof_curation
+      - pis_variant_ppp
+  pts_variant:
+    depends_on:
+      - pis_variant
   pts_reactome:
     depends_on:
       - pis_reactome
@@ -528,9 +531,10 @@ steps:
   gentropy_variant:
     depends_on:
       - gentropy_variant_annotation
-      - pis_gnomad
+      - pis_variant
+      - pts_variant
     depends_on_ppp:
-      - pts_lof_curation
+      - pts_variant_ppp
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation

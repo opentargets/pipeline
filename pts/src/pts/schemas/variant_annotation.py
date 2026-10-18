@@ -22,3 +22,9 @@ variant_annotation_schema = pl.Schema({
     'variantEffect': variant_effect_dtype,
     'variantDescription': pl.String,
 })
+
+amino_acid_variant_schema = pl.Schema({
+    'uniprotAccession': pl.String,
+    'aminoAcidChange': pl.String,
+    'variantEffect': variant_effect_dtype,
+})
