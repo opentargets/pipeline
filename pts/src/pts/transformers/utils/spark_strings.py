@@ -8,6 +8,21 @@ def spark_trim(expr: pl.Expr) -> pl.Expr:
     return expr.str.strip_chars(' ')
 
 
+def _decimal_digits(text: pl.Expr, marker: str) -> tuple[pl.Expr, pl.Expr]:
+    """Unsigned `<mantissa>[<marker><n>]` text as its significant digits and the decimal exponent of the first."""
+    split = text.str.split_exact(marker, 1)
+    mantissa = split.struct.field('field_0')
+    digits = mantissa.str.replace('.', '', literal=True)
+    significant = digits.str.strip_chars_start('0')
+    exponent = (
+        mantissa.str.find('.', literal=True).fill_null(mantissa.str.len_chars()).cast(pl.Int32)
+        - 1
+        - (digits.str.len_chars() - significant.str.len_chars()).cast(pl.Int32)
+        + split.struct.field('field_1').cast(pl.Int32, strict=False).fill_null(0)
+    )
+    return significant, exponent
+
+
 def java_double_to_string(expr: pl.Expr) -> pl.Expr:
     """Spark's `CAST(double AS STRING)`: java's `Double.toString`, null-preserving.
 
@@ -19,16 +34,7 @@ def java_double_to_string(expr: pl.Expr) -> pl.Expr:
     rendered = expr.cast(pl.String)
     magnitude = expr.abs()
     scientific_range = ((magnitude < 1e-3) | (magnitude >= 1e7)) & (magnitude > 0)
-    split = pl.when(scientific_range).then(rendered.str.strip_chars_start('-')).str.split_exact('e', 1)
-    mantissa = split.struct.field('field_0')
-    digits = mantissa.str.replace('.', '', literal=True)
-    significant = digits.str.strip_chars_start('0')
-    exponent = (
-        mantissa.str.find('.', literal=True).fill_null(mantissa.str.len_chars()).cast(pl.Int32)
-        - 1
-        - (digits.str.len_chars() - significant.str.len_chars()).cast(pl.Int32)
-        + split.struct.field('field_1').cast(pl.Int32).fill_null(0)
-    )
+    significant, exponent = _decimal_digits(pl.when(scientific_range).then(rendered.str.strip_chars_start('-')), 'e')
     is_long = (magnitude >= 2.0**53) & (magnitude < 2.0**63)
     dropped = pl.when(magnitude >= 2.0**61).then(2).when(magnitude >= 2.0**58).then(1).otherwise(0)
     scale = pl.lit(10, dtype=pl.Int64).pow(dropped)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import numpy as np
 import polars as pl
+
+from pts.transformers.utils.spark_math import divide, spark_log10
 
 
 def confidence_score(mapping: dict[str, float]) -> pl.Expr:
@@ -18,22 +19,6 @@ def confidence_score(mapping: dict[str, float]) -> pl.Expr:
 def direction_when_disease_present(value: str) -> pl.Expr:
     """`CASE WHEN diseaseId IS NOT NULL THEN '<value>' END` -- shared by several direction fields."""
     return pl.when(pl.col('diseaseId').is_not_null()).then(pl.lit(value)).otherwise(None)
-
-
-def _true_divide(series: pl.Series, divisor: float) -> pl.Series:
-    values = series.cast(pl.Float64).to_numpy() / divisor
-    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
-    nulls = np.flatnonzero(series.is_null().to_numpy())
-    return out.scatter(nulls, None) if len(nulls) else out
-
-
-def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
-    """Divide by a constant with IEEE division, keeping nulls and NaN.
-
-    Polars 2 does not divide exactly: `x / 10` differs from spark in the last bit for about a third
-    of values.
-    """
-    return expr.map_batches(lambda s: _true_divide(s, divisor), return_dtype=pl.Float64, is_elementwise=True)
 
 
 def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
@@ -54,8 +39,6 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
         weak_ref: the value that scores `out_min`.
         strong_ref: the value that scores `1.0`.
     """
-    from pts.transformers.utils.spark_math import spark_log10  # spark_math imports `divide`
-
     refs = pl.Series([weak_ref, strong_ref], dtype=pl.Float64)
     log_weak, log_strong = pl.select(spark_log10(pl.lit(refs))).to_series().to_list()
     rescaled = divide((1.0 - out_min) * (spark_log10(value) - log_weak), log_strong - log_weak) + out_min

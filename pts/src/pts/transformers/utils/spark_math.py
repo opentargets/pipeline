@@ -2,16 +2,47 @@
 
 import functools
 import math
+from collections.abc import Callable
 from typing import overload
 
 import numpy as np
 import polars as pl
 from loguru import logger
 
-from pts.transformers.evidence.utils.expressions import divide
-from pts.transformers.utils.spark_strings import java_double_to_string
+from pts.transformers.utils.spark_strings import _decimal_digits, java_double_to_string
 
 _INT_MAX = 2**31 - 1
+
+
+def _float_series(name: str, values: np.ndarray, nulls: np.ndarray) -> pl.Series:
+    """`values` as a Float64 series, NaN kept, null where `nulls` is set."""
+    out = pl.Series(name, values, dtype=pl.Float64, nan_to_null=False)
+    positions = np.flatnonzero(nulls)
+    return out.scatter(positions, None) if len(positions) else out
+
+
+def _numpy_elementwise(
+    series: pl.Series,
+    fn: Callable[[np.ndarray], np.ndarray],
+    null_where: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> pl.Series:
+    """`fn` over `series` as Float64 numpy (a null read as 0.0), null where the input or `null_where` is."""
+    x = series.cast(pl.Float64).fill_null(0.0).to_numpy()
+    with np.errstate(all='ignore'):
+        values = fn(x)
+    nulls = series.is_null().to_numpy()
+    return _float_series(series.name, values, nulls if null_where is None else nulls | null_where(x))
+
+
+def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
+    """Divide by a constant with IEEE division, keeping nulls and NaN.
+
+    Polars 2 does not divide exactly: `x / 10` differs from spark in the last bit for about a third
+    of values.
+    """
+    return expr.map_batches(
+        lambda s: _numpy_elementwise(s, lambda x: x / divisor), return_dtype=pl.Float64, is_elementwise=True
+    )
 
 
 _TWO54 = 1.80143985094819840000e16
@@ -79,20 +110,21 @@ def _fdlibm_log10(x: np.ndarray) -> np.ndarray:
     return z + y * _LOG10_2HI
 
 
-def _strict_log10(series: pl.Series) -> pl.Series:
-    x = series.cast(pl.Float64).to_numpy()
+def _strict_log10(x: np.ndarray) -> np.ndarray:
     values = np.full(len(x), np.nan)
     finite = (x > 0) & np.isfinite(x)
     values[finite] = _fdlibm_log10(x[finite])
     values[x == np.inf] = np.inf
-    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
-    nulls = np.flatnonzero(series.is_null().to_numpy() | (x <= 0) | (x == -np.inf))
-    return out.scatter(nulls, None) if len(nulls) else out
+    return values
 
 
 def spark_log10(expr: pl.Expr) -> pl.Expr:
     """Spark's `log10` (fdlibm, as java's `StrictMath`): null for a value `<= 0`, NaN for NaN."""
-    return expr.map_batches(_strict_log10, return_dtype=pl.Float64, is_elementwise=True)
+    return expr.map_batches(
+        lambda s: _numpy_elementwise(s, _strict_log10, lambda x: (x <= 0) | (x == -np.inf)),
+        return_dtype=pl.Float64,
+        is_elementwise=True,
+    )
 
 
 def spark_double_to_int(expr: pl.Expr) -> pl.Expr:
@@ -223,14 +255,9 @@ def strict_pow(x: float, y: float) -> float:
 
 def spark_pow(base: float, exponent: pl.Expr) -> pl.Expr:
     """Spark's `pow(base, exponent)` (java's `StrictMath.pow`) for a finite `base > 0` other than 1."""
-
-    def power(series: pl.Series) -> pl.Series:
-        values = _strict_pow(base, series.cast(pl.Float64).fill_null(0.0).to_numpy())
-        out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
-        nulls = np.flatnonzero(series.is_null().to_numpy())
-        return out.scatter(nulls, None) if len(nulls) else out
-
-    return exponent.map_batches(power, return_dtype=pl.Float64, is_elementwise=True)
+    return exponent.map_batches(
+        lambda s: _numpy_elementwise(s, lambda y: _strict_pow(base, y)), return_dtype=pl.Float64, is_elementwise=True
+    )
 
 
 _EXP_O_THRESHOLD, _EXP_U_THRESHOLD = 7.09782712893383973096e02, -7.45133219101941108420e02
@@ -273,15 +300,7 @@ def _fdlibm_exp(x: np.ndarray) -> np.ndarray:
 
 def spark_exp(expr: pl.Expr) -> pl.Expr:
     """Spark's `exp` (java's `StrictMath.exp`, fdlibm)."""
-
-    def exp(series: pl.Series) -> pl.Series:
-        with np.errstate(all='ignore'):
-            values = _fdlibm_exp(series.cast(pl.Float64).fill_null(0.0).to_numpy())
-        out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
-        nulls = np.flatnonzero(series.is_null().to_numpy())
-        return out.scatter(nulls, None) if len(nulls) else out
-
-    return expr.map_batches(exp, return_dtype=pl.Float64, is_elementwise=True)
+    return expr.map_batches(lambda s: _numpy_elementwise(s, _fdlibm_exp), return_dtype=pl.Float64, is_elementwise=True)
 
 
 def _divide_by_power_of_ten(columns: pl.Series) -> pl.Series:
@@ -292,9 +311,7 @@ def _divide_by_power_of_ten(columns: pl.Series) -> pl.Series:
     divisor = exponent.replace_strict(powers, default=None, return_dtype=pl.Float64).to_numpy()
     with np.errstate(all='ignore'):
         values = value.cast(pl.Float64).to_numpy() / divisor
-    out = pl.Series(columns.name, values, dtype=pl.Float64, nan_to_null=False)
-    nulls = np.flatnonzero((value.is_null() | exponent.is_null()).to_numpy() | (divisor == 0))
-    return out.scatter(nulls, None) if len(nulls) else out
+    return _float_series(columns.name, values, (value.is_null() | exponent.is_null()).to_numpy() | (divisor == 0))
 
 
 def pvalue_mantissa(p: pl.Expr) -> pl.Expr:
@@ -310,17 +327,7 @@ def round_half_up(expr: pl.Expr, scale: int) -> pl.Expr:
 
     NaN and infinities are kept; a result of zero is `0.0`, never `-0.0`.
     """
-    text = java_double_to_string(expr).str.strip_chars_start('-')
-    split = text.str.split_exact('E', 1)
-    mantissa = split.struct.field('field_0')
-    digits = mantissa.str.replace('.', '', literal=True)
-    significant = digits.str.strip_chars_start('0')
-    exponent = (
-        mantissa.str.find('.', literal=True).cast(pl.Int32)
-        - 1
-        - (digits.str.len_chars() - significant.str.len_chars()).cast(pl.Int32)
-        + split.struct.field('field_1').cast(pl.Int32, strict=False).fill_null(0)
-    )
+    significant, exponent = _decimal_digits(java_double_to_string(expr).str.strip_chars_start('-'), 'E')
     kept_length = exponent + 1 + scale
     kept = significant.str.slice(0, kept_length.clip(0)).replace('', '0').cast(pl.Int64, strict=False) + (
         significant.str.slice(kept_length.clip(0), 1) >= '5'
