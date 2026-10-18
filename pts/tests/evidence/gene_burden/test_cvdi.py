@@ -14,13 +14,16 @@ from pyspark.sql import SparkSession
 from pts.pyspark.gene_burden import process_cvdi_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.cvdi import parse_cvdi
-from tests.evidence.gene_burden.fixtures import CVDI_CUTOFFS, cvdi_row, write_cvdi
+from tests.evidence.gene_burden.fixtures import CVDI_CUTOFFS, CVDI_MASKS, cvdi_row, write_cvdi
 from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
 LOF = 'LOF (MAF<0.1%)'
 LOF_M08 = 'LOF + missense0.8 (MAF<0.1%)'
 M05 = 'missense0.5 (MAF<0.001%)'
+M02 = 'missense0.2 (MAF<0.001%)'
+#: ST3 names the lowercase ST6 masks capitalised.
+CUTOFFS_WITH_M02 = [*CVDI_CUTOFFS[:4], (None, 'Missense0.2 (MAF<0.001%)', 3e-8), *CVDI_CUTOFFS[4:]]
 NICE_NAME = 'Broad CVDI Human Disease Portal'
 LOF_OVERVIEW = 'Mixed-effects test carried out with LOF variants with a MAF smaller than 0.1%.'
 URL = (
@@ -237,6 +240,41 @@ def test_methods_in_sorted_order(tmp_path: Path) -> None:
     ]
 
 
+def test_masks_matched_case_insensitively(tmp_path: Path) -> None:
+    rows = _parse(
+        tmp_path,
+        _lof({(LOF, 'Meta P-value'): None, (M05, 'Meta P-value'): 5e-8, (M02, 'Meta P-value'): 1e-8}),
+        _lof({'Gene ID Ensembl': 'ENSG2', (LOF, 'Meta P-value'): None, (M05, 'Meta P-value'): 6e-8}),
+        masks=[*CVDI_MASKS, M02],
+        cutoffs=CUTOFFS_WITH_M02,
+    )
+    overview = (
+        'Mixed-effects test carried out with predicted-deleterious missense variants (missense score > {}) '
+        'with a MAF smaller than 0.001%.'
+    )
+    assert rows.select('targetFromSourceId', 'statisticalMethod', 'statisticalMethodOverview').rows() == [
+        ('ENSG1', M02, overview.format('0.2')),
+        ('ENSG1', M05, overview.format('0.5')),
+    ]
+
+
+def test_masks_matched_only_case_insensitively_counted(tmp_path: Path) -> None:
+    _, log = logged(
+        lambda: _parse(
+            tmp_path,
+            _lof({(M05, 'Meta P-value'): 5e-8, (M02, 'Meta P-value'): 1e-8}),
+            _lof({'Gene ID Ensembl': 'ENSG2', (M05, 'Meta P-value'): 1e-9}),
+            _lof({'Gene ID Ensembl': 'ENSG3', (M05, 'Meta P-value'): 1e-7}),
+            masks=[*CVDI_MASKS, M02],
+            cutoffs=CUTOFFS_WITH_M02,
+        )
+    )
+    assert (
+        '3 significant CVDI rows from masks matched to a cutoff only case-insensitively, by mask: '
+        'missense0.2 (MAF<0.001%): 1, missense0.5 (MAF<0.001%): 2'
+    ) in log
+
+
 def test_a_mask_without_a_cutoff_is_dropped(tmp_path: Path) -> None:
     cutoffs = [c for c in CVDI_CUTOFFS if c[1] != LOF_M08]
     rows = _parse(tmp_path, _lof({(LOF_M08, 'Meta P-value'): 1e-9}), cutoffs=cutoffs)
@@ -288,11 +326,18 @@ PARITY_ROWS = [
 Fixes = dict[tuple[str, str], dict[str, tuple[Any, Any]]]
 
 
-def _compare(spark: SparkSession, path: str, fixes: Fixes) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
-    """The new rows and the old ones, `fixes` applied: (target, method) to column to (old, new) value."""
+def _compare(
+    spark: SparkSession, path: str, fixes: Fixes, added: set[str]
+) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]], pl.DataFrame]:
+    """The new rows and the old ones, `fixes` applied: (target, method) to column to (old, new) value.
+
+    New rows of the `added` methods are left out of the comparison and returned on their own.
+    """
     old_rows = _old(spark, path)
     columns = list(old_rows[0])
-    new = parse_cvdi(path).collect()
+    assert not {row['statisticalMethod'] for row in old_rows} & added
+    everything = parse_cvdi(path).collect()
+    new = everything.filter(~pl.col('statisticalMethod').is_in(added))
     absent = sorted(set(new.columns) - set(columns))
     assert absent == sorted([
         'allelicRequirements',
@@ -313,17 +358,32 @@ def _compare(spark: SparkSession, path: str, fixes: Fixes) -> tuple[list[tuple[A
         changes = fixes.get((row['targetFromSourceId'], row['statisticalMethod']), {})
         assert {column: row[column] for column in changes} == {column: old for column, (old, _) in changes.items()}
         fixed.append(row | {column: new for column, (_, new) in changes.items()})
-    return multiset(new.rows(named=True), columns), multiset(fixed, columns)
+    extra = everything.filter(pl.col('statisticalMethod').is_in(added))
+    return multiset(new.rows(named=True), columns), multiset(fixed, columns), extra
 
 
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     footer = ['Asthma', 'ENSG9', 'G9', 1, '2.5 [1.5; 3.5]', 1e-20]
     integral = [_lof({'Gene ID Ensembl': g, (LOF, 'OR [95%CI]'): text}) for g, (text, _, _) in INTEGRAL_ODDS.items()]
-    path = write_cvdi(tmp_path, [*PARITY_ROWS, *integral], footer=footer)
+    lowercase = [
+        _lof({'Gene ID Ensembl': 'ENSG20', (LOF, 'Meta P-value'): None, (M05, 'Meta P-value'): 1e-9}),
+        _lof({'Gene ID Ensembl': 'ENSG21', (M02, 'Meta P-value'): 1e-9, (M02, 'OR [95%CI]'): '3 [2; 4.5]'}),
+    ]
+    path = write_cvdi(
+        tmp_path,
+        [*PARITY_ROWS, *integral, *lowercase],
+        CUTOFFS_WITH_M02,
+        masks=[*CVDI_MASKS, M02],
+        footer=footer,
+    )
     fixes = {
         (gene, LOF): {c: (o, n) for c, o, n in zip(ODDS_COLUMNS, old, new, strict=True) if o != n}
         for gene, (_, old, new) in INTEGRAL_ODDS.items()
     }
-    new, old = _compare(spark, path, fixes)
-    assert len(old) == 12
+    new, old, added = _compare(spark, path, fixes, {M05, M02})
+    assert len(old) == 13
     assert new == old
+    assert added.select('targetFromSourceId', 'statisticalMethod', *ODDS_COLUMNS).rows() == [
+        ('ENSG21', M02, 3.0, 2.0, 4.5),
+        ('ENSG20', M05, None, None, None),
+    ]

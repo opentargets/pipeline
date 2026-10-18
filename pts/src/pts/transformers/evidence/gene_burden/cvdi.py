@@ -28,6 +28,14 @@ METHOD_DESCRIPTIONS = {
         'Mixed-effects test carried out with LOF and predicted-deleterious missense variants '
         '(missense score > 0.5) with a MAF smaller than 0.1%.'
     ),
+    'missense0.5 (MAF<0.001%)': (
+        'Mixed-effects test carried out with predicted-deleterious missense variants '
+        '(missense score > 0.5) with a MAF smaller than 0.001%.'
+    ),
+    'missense0.2 (MAF<0.001%)': (
+        'Mixed-effects test carried out with predicted-deleterious missense variants '
+        '(missense score > 0.2) with a MAF smaller than 0.001%.'
+    ),
     'Cauchy': 'Combined test after combining mask-specific using Cauchy distribution.',
 }
 URL_PREFIX = (
@@ -143,11 +151,28 @@ def _with_odds_ratios(significant: pl.DataFrame) -> pl.DataFrame:
     return parsed
 
 
+def _log_case_insensitive_matches(significant: pl.DataFrame) -> None:
+    """Count the significant rows whose mask matches its cutoff's only case-insensitively."""
+    counts = (
+        significant
+        .filter(pl.col('method_name') != pl.col('Mask'))
+        .group_by('method_name')
+        .len()
+        .sort('method_name')
+        .rows()
+    )
+    logger.info(
+        f'{sum(n for _, n in counts)} significant CVDI rows from masks matched to a cutoff only '
+        f'case-insensitively, by mask: {", ".join(f"{mask}: {n}" for mask, n in counts)}'
+    )
+
+
 def parse_cvdi(path: str) -> pl.LazyFrame:
     """CVDI gene burden evidence (PMID 39210047): the significant pan-ancestry results of ST6.
 
-    A mask's result is significant at or below its FDR 1% p-value cutoff in ST3; the Cauchy
-    combination is scored by its own p-value, every mask by the meta-analysis one.
+    A mask's result is significant at or below its FDR 1% p-value cutoff in ST3, whose mask names
+    differ from ST6's in case; the Cauchy combination is scored by its own p-value, every mask by
+    the meta-analysis one.
 
     Args:
         path: the supplementary tables workbook.
@@ -158,7 +183,13 @@ def parse_cvdi(path: str) -> pl.LazyFrame:
     gene_id = pl.col('Gene ID Ensembl')
     significant = (
         _associations(path)
-        .join(_cutoffs(path), left_on='method_name', right_on='Mask', how='inner', maintain_order='left')
+        .with_columns(mask=pl.col('method_name').str.to_lowercase())
+        .join(
+            _cutoffs(path).with_columns(mask=pl.col('Mask').str.to_lowercase()),
+            on='mask',
+            how='inner',
+            maintain_order='left',
+        )
         .filter((gene_id != 'Gene ID Ensembl') & gene_id.is_not_null())
         .with_columns(cast_double(c) for c in ('cMAC', 'Meta P-value', 'Cauchy P-value', 'P cutoff'))
         .with_columns(
@@ -169,6 +200,7 @@ def parse_cvdi(path: str) -> pl.LazyFrame:
         )
         .filter(pl.col('resourceScore') <= pl.col('P cutoff'))
     )
+    _log_case_insensitive_matches(significant)
     significant = _with_odds_ratios(significant)
     score = pl.col('resourceScore')
     return (
