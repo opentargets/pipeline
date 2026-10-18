@@ -16,15 +16,14 @@ from pts.transformers.evidence.impc import (
     DIRECTION_ON_TARGET,
     DIRECTION_ON_TRAIT,
     IMPC,
-    MODEL_ID,
     SOURCES,
     TIE_BREAK,
     UNIQUE_FIELDS,
-    biological_model_id,
     deduplicate,
     impc,
     parse_impc,
 )
+from pts.transformers.impc_common import MODEL_ID, biological_model_id
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 

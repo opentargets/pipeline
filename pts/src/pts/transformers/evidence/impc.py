@@ -14,13 +14,23 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA, MGI_PUBMED_COLUMNS
+from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present, divide
 from pts.transformers.evidence.utils.luts import build_luts
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
 from pts.transformers.evidence.utils.run import write_evidence
-from pts.transformers.utils.spark_csv import read_spark_csv
+from pts.transformers.impc_common import (
+    MODEL_ID,
+    biological_model_id,
+    model_mouse_phenotypes,
+    ontology_terms,
+    phenotype_ids,
+    read_gene_mapping,
+    read_impc_csv,
+    read_mgi_pubmed,
+)
+from pts.transformers.impc_common import literature as build_literature
 
 #: The `source` keys of the IMPC inputs.
 SOURCES = [
@@ -34,9 +44,6 @@ SOURCES = [
     'mouse_gene_mappings',
     'mouse_pubmed_refs',
 ]
-
-#: Working column: the source model id, kept until deduplication.
-MODEL_ID = 'model_id'
 
 #: Evidence fields of which only the top-scoring row is kept.
 UNIQUE_FIELDS = [
@@ -69,9 +76,6 @@ IMPC = EvidenceDatasource(
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = direction_when_disease_present('LoF')
 
-#: Java's `$` also matches before a final line terminator.
-_MGI_MODEL_RE = r'^MGI:[0-9]+(?:\r\n|[\n\r\x{0085}\x{2028}\x{2029}])?$'
-
 #: Evidence columns in the order the spark step produced them.
 _EVIDENCE_COLUMNS = [
     'targetInModelMgiId',
@@ -90,84 +94,8 @@ _EVIDENCE_COLUMNS = [
 ]
 
 
-def biological_model_id(model_id: pl.Expr) -> pl.Expr:
-    """The model id before its first `#`, if it is an MGI id; null otherwise."""
-    cleaned = model_id.str.split('#').list.first()
-    return pl.when(cleaned.str.contains(_MGI_MODEL_RE)).then(cleaned)
-
-
-def _explode_non_empty(lf: pl.LazyFrame, column: str) -> pl.LazyFrame:
-    """Spark's `explode`: rows with a null or empty list are dropped."""
-    return lf.filter(pl.col(column).list.len() > 0).explode(column)
-
-
-def _phenotype_ids(lf: pl.LazyFrame, column: str, prefix: str, id_column: str) -> pl.LazyFrame:
-    """One row per `<prefix>:<digits>` id in `column`; rows without one are dropped."""
-    return _explode_non_empty(
-        lf.with_columns(pl.col(column).str.extract_all(f'{prefix}:[0-9]+').alias(id_column)), id_column
-    )
-
-
-def _ontology_terms(ontology: pl.LazyFrame, name: str) -> pl.LazyFrame:
-    prefix = name.lower()
-    return ontology.filter(pl.col('ontology') == name).select(
-        pl.col('phenotype_id').alias(f'{prefix}_id'), pl.col('phenotype_term').alias(f'{prefix}_term')
-    )
-
-
 def _phenotype_set(id_column: str, term_column: str) -> pl.Expr:
     return pl.struct(pl.col(id_column).alias('id'), pl.col(term_column).alias('label')).unique().sort()
-
-
-def _gene_mapping(mgi: pl.LazyFrame, mouse_to_human: pl.LazyFrame, hgnc: pl.LazyFrame) -> pl.LazyFrame:
-    """MGI gene id to mouse symbol, mouse Ensembl id and human Ensembl id, through HGNC."""
-    return (
-        mgi
-        .select(
-            targetInModelMgiId=pl.col('1. MGI accession id'),
-            targetInModel=pl.col('3. marker symbol'),
-            targetInModelEnsemblId=pl.col('11. Ensembl gene id'),
-        )
-        .filter(pl.col('targetInModelEnsemblId').is_not_null())
-        .join(
-            mouse_to_human.select(targetInModelMgiId=pl.col('gene_id'), hgnc_gene_id=pl.col('hgnc_gene_id')),
-            on='targetInModelMgiId',
-            how='inner',
-            maintain_order='left',
-        )
-        .join(
-            hgnc.select(hgnc_gene_id=pl.col('hgnc_id'), targetFromSourceId=pl.col('ensembl_gene_id')),
-            on='hgnc_gene_id',
-            how='inner',
-            maintain_order='left',
-        )
-        .filter(pl.col('targetFromSourceId').is_not_null())
-        .select('targetInModelMgiId', 'targetInModel', 'targetInModelEnsemblId', 'targetFromSourceId')
-    )
-
-
-def _literature(mgi_pubmed: pl.LazyFrame, summary: pl.LazyFrame, model_mouse: pl.LazyFrame) -> pl.LazyFrame:
-    """Sorted distinct PMIDs per model and MGI gene, from the gene's references for the model's phenotypes."""
-    references = mgi_pubmed.with_columns(pl.col('literature', 'targetInModelMgiId').str.split('|'))
-    references = _explode_non_empty(_explode_non_empty(references, 'literature'), 'targetInModelMgiId')
-    return (
-        summary
-        .select(MODEL_ID, 'targetInModelMgiId')
-        .unique(maintain_order=True)
-        .join(model_mouse, on=MODEL_ID, how='inner', maintain_order='left')
-        .join(
-            references.select('mp_id', 'literature', 'targetInModelMgiId').unique(maintain_order=True),
-            on=['targetInModelMgiId', 'mp_id'],
-            how='inner',
-            maintain_order='left',
-        )
-        .group_by(MODEL_ID, 'targetInModelMgiId')
-        .agg(pl.col('literature').unique().sort())
-    )
-
-
-def _read(path: str, **options: Any) -> pl.LazyFrame:
-    return read_spark_csv(path, **options).lazy()
 
 
 def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
@@ -177,16 +105,14 @@ def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
         source: the `SOURCES` locations.
         score_cutoff: the lowest `resourceScore` kept; a null score is dropped.
     """
-    model_mouse = _phenotype_ids(_read(source['solr_mouse_model']), 'model_phenotypes', 'MP', 'mp_id').select(
-        MODEL_ID, 'mp_id'
-    )
+    model_mouse = model_mouse_phenotypes(source['solr_mouse_model'])
     disease_human = (
-        _phenotype_ids(_read(source['solr_disease']), 'disease_phenotypes', 'HP', 'hp_id')
+        phenotype_ids(read_impc_csv(source['solr_disease']), 'disease_phenotypes', 'HP', 'hp_id')
         .select('disease_id', 'hp_id')
         .unique(maintain_order=True)
     )
     summary = (
-        _read(source['solr_disease_model_summary'])
+        read_impc_csv(source['solr_disease_model_summary'])
         .select(list(DISEASE_MODEL_SUMMARY_SCHEMA))
         .cast(DISEASE_MODEL_SUMMARY_SCHEMA, strict=False)
         .select(
@@ -200,24 +126,10 @@ def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
         )
         .unique(maintain_order=True)
     )
-    ontology = _read(source['solr_ontology'])
-    mp_terms, hp_terms = _ontology_terms(ontology, 'MP'), _ontology_terms(ontology, 'HP')
-    gene_mapping = _gene_mapping(
-        _read(source['mouse_gene_mappings'], separator='\t', null_values=['null']),
-        _read(source['solr_gene_gene']),
-        _read(source['hgnc_gene_mappings'], separator='\t', null_values=['null']),
-    )
-    literature = _literature(
-        _read(
-            source['mouse_pubmed_refs'],
-            separator='\t',
-            has_header=False,
-            new_columns=MGI_PUBMED_COLUMNS,
-            null_values=['null'],
-        ),
-        summary,
-        model_mouse,
-    )
+    ontology = read_impc_csv(source['solr_ontology'])
+    mp_terms, hp_terms = ontology_terms(ontology, 'MP'), ontology_terms(ontology, 'HP')
+    gene_mapping = read_gene_mapping(source)
+    literature = build_literature(read_mgi_pubmed(source['mouse_pubmed_refs']), summary, model_mouse)
 
     model_phenotypes = (
         model_mouse
@@ -226,7 +138,7 @@ def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
         .agg(diseaseModelAssociatedModelPhenotypes=_phenotype_set('mp_id', 'mp_term'))
     )
     model_human = model_mouse.join(
-        _read(source['solr_ontology_ontology']), on='mp_id', how='inner', maintain_order='left'
+        read_impc_csv(source['solr_ontology_ontology']), on='mp_id', how='inner', maintain_order='left'
     ).select(MODEL_ID, 'hp_id')
     human_phenotypes = (
         summary
