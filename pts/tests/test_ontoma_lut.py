@@ -4,10 +4,16 @@
 
 import polars as pl
 import pytest
-from ontoma import DiseaseCuration, OpenTargetsDisease
+from ontoma import DiseaseCuration, OpenTargetsDisease, OpenTargetsDrug, OpenTargetsTarget
 
 from pts.schemas.ontoma_lut import RAW_ENTITY_LUT
-from pts.transformers.ontoma_lut.build import curation_label_lut, disease_id_lut, disease_label_lut
+from pts.transformers.ontoma_lut.build import (
+    curation_label_lut,
+    disease_id_lut,
+    disease_label_lut,
+    drug_label_lut,
+    target_label_lut,
+)
 
 DISEASE_SCHEMA = pl.Schema({
     'id': pl.String,
@@ -123,6 +129,116 @@ CURATION = pl.DataFrame(
     orient='row',
 )
 
+LABEL_SOURCE = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
+TARGET_SCHEMA = pl.Schema({
+    'id': pl.String,
+    'approvedName': pl.String,
+    'approvedSymbol': pl.String,
+    'nameSynonyms': LABEL_SOURCE,
+    'symbolSynonyms': LABEL_SOURCE,
+    'proteinIds': pl.List(pl.Struct({'id': pl.String, 'source': pl.String})),
+    'obsoleteNames': LABEL_SOURCE,
+    'obsoleteSymbols': LABEL_SOURCE,
+})
+_LABEL_SOURCE_DDL = 'array<struct<label:string,source:string>>'
+TARGET_DDL = (
+    f'id string, approvedName string, approvedSymbol string, nameSynonyms {_LABEL_SOURCE_DDL}, '
+    f'symbolSynonyms {_LABEL_SOURCE_DDL}, proteinIds array<struct<id:string,source:string>>, '
+    f'obsoleteNames {_LABEL_SOURCE_DDL}, obsoleteSymbols {_LABEL_SOURCE_DDL}'
+)
+
+
+def _labels(*labels: str | None) -> list[dict | None]:
+    return [{'label': label, 'source': 's'} for label in labels]
+
+
+TARGET = pl.DataFrame(
+    [
+        (
+            'ENSG01',
+            ' tumor necrosis factor α ',
+            'TNF',
+            [*_labels('TNF-α', 'cachectin', None, '', ' '), None],
+            _labels('TNFA', 'TNFSF2', 'Straße'),
+            [{'id': 'P01375', 'source': 'uniprot_swissprot'}, {'id': None, 'source': 'x'}, None],
+            _labels('tumour necrosis factor-β', 'Papillon-Lefèvre'),
+            _labels('TNFA', 'ΑΣ'),
+        ),
+        ('ENSG02', None, None, None, None, None, None, None),
+        ('ENSG03', '', ' ', [], [], [], [], []),
+        ('ENSG04', 'shared name', 'TNF', None, _labels('TNF'), None, None, None),
+        (None, 'no id', 'NOID', None, None, None, None, None),
+    ],
+    schema=TARGET_SCHEMA,
+    orient='row',
+)
+
+DRUG_SCHEMA = pl.Schema({
+    'id': pl.String,
+    'name': pl.String,
+    'synonyms': LABEL_SOURCE,
+    'tradeNames': LABEL_SOURCE,
+    'crossReferences': pl.List(pl.Struct({'source': pl.String, 'ids': pl.List(pl.String)})),
+})
+DRUG_DDL = (
+    f'id string, name string, synonyms {_LABEL_SOURCE_DDL}, tradeNames {_LABEL_SOURCE_DDL}, '
+    'crossReferences array<struct<source:string,ids:array<string>>>'
+)
+
+
+def _sourced(source: str | None, *labels: str | None) -> list[dict]:
+    return [{'label': label, 'source': source} for label in labels]
+
+
+DRUG = pl.DataFrame(
+    [
+        (
+            'CHEMBL1',
+            'IVACAFTOR',
+            [
+                *_sourced('ChEMBL', 'Ivacaftor component of symkevi', 'VX-770', ' β-ivacaftor ', None),
+                *_sourced('AACT', 'kalydeco', 'VX-770', 'Ivacaftor COMPONENT OF  Trikafta ;- '),
+                *_sourced('other', 'ignored synonym'),
+                *_sourced(None, 'null source synonym'),
+                None,
+            ],
+            [
+                *_sourced(
+                    'ChEMBL', 'Kalydeco', 'a component of b component of  //Orkambi,, ', 'Ivacaftor component of'
+                ),
+                *_sourced('ChEMBL', 'x component of y\n', 'x component of \tz\x0b', 'x component of nbsp\u00a0'),
+                *_sourced('ChEMBL', 'x component of a\u2028b', 'x Component Of   spaced    product  ', None),
+            ],
+            [
+                {'source': 'DailyMed', 'ids': ['ivacaftor%20tablets', 'kalydeco']},
+                {'source': 'USAN', 'ids': ['IVACAFTOR%20%20X']},
+                {'source': 'EMA', 'ids': ['https://ema.europa.eu/en/medicines/human/EPAR/kalydeco', 'no-epar', None]},
+                {'source': 'INN', 'ids': ['9123']},
+                {'source': 'drugbank', 'ids': ['DB08820']},
+                {'source': None, 'ids': ['null source']},
+                None,
+            ],
+        ),
+        ('CHEMBL2', 'CHEMBL2', [], [], None),
+        ('CHEMBL3', 'chembl3', None, None, [{'source': 'DailyMed', 'ids': ['kept%20too']}]),
+        ('CHEMBL4', 'ChEMBL4', _sourced('AACT', 'aact only'), None, None),
+        ('CHEMBL5', 'CHEMBL5', None, _sourced('ChEMBL', 'Brand'), [{'source': 'EMA', 'ids': None}]),
+        ('CHEMBL6', 'CHEMBL6', _sourced('other', 'other only'), [None], [{'source': 'USAN', 'ids': ['x']}]),
+        ('CHEMBL7', None, _sourced('ChEMBL', 'nameless'), None, None),
+        ('CHEMBL8', None, None, None, None),
+        (
+            'CHEMBL9',
+            ' Ñandú ',
+            None,
+            None,
+            [{'source': 'USAN', 'ids': ['lost']}, {'source': 'DailyMed', 'ids': None}, {'source': 'EMA', 'ids': []}],
+        ),
+        (None, 'no id', None, _sourced('ChEMBL', 'no id component of product'), None),
+    ],
+    schema=DRUG_SCHEMA,
+    orient='row',
+)
+
 
 @pytest.fixture(scope='module')
 def spark_disease(spark):
@@ -156,10 +272,29 @@ def test_curation_label_lut_matches_ontoma(spark, spark_disease) -> None:
     assert not {label for _, label in ids} & {'two-id label', 'no match', 'unicode word', 'carriage return', '1)'}
 
 
-@pytest.mark.parametrize('build', [disease_label_lut, disease_id_lut])
-def test_schema_is_raw_entity_lut(build) -> None:
-    assert build(DISEASE).schema == RAW_ENTITY_LUT
-    assert build(DISEASE.clear()).schema == RAW_ENTITY_LUT
+def test_target_label_lut_matches_ontoma(spark) -> None:
+    out = target_label_lut(TARGET)
+    expected = _rows(OpenTargetsTarget.as_label_lut(spark.createDataFrame(TARGET.rows(), TARGET_DDL)))
+    assert out.rows() == expected
+    assert not {row for row in expected if row[0] in {'ENSG02', 'ENSG03'}}
+
+
+def test_drug_label_lut_matches_ontoma(spark) -> None:
+    out = drug_label_lut(DRUG)
+    expected = _rows(OpenTargetsDrug.as_label_lut(spark.createDataFrame(DRUG.rows(), DRUG_DDL)))
+    assert out.rows() == expected
+    labels = {(entity_id, label) for entity_id, label, *_ in expected}
+    assert {('CHEMBL1', 'symkevi'), ('CHEMBL1', 'Trikafta'), ('CHEMBL4', 'ChEMBL4'), ('CHEMBL6', 'CHEMBL6')} <= labels
+    assert not {entity_id for entity_id, _ in labels} & {'CHEMBL2', 'CHEMBL3', 'CHEMBL8'}
+
+
+@pytest.mark.parametrize(
+    ('build', 'frame'),
+    [(disease_label_lut, DISEASE), (disease_id_lut, DISEASE), (target_label_lut, TARGET), (drug_label_lut, DRUG)],
+)
+def test_schema_is_raw_entity_lut(build, frame) -> None:
+    assert build(frame).schema == RAW_ENTITY_LUT
+    assert build(frame.clear()).schema == RAW_ENTITY_LUT
 
 
 def test_curation_schema_is_raw_entity_lut() -> None:
