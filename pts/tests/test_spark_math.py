@@ -14,6 +14,7 @@ from pts.transformers.utils.spark_math import (
     pvalue_exponent,
     pvalue_mantissa,
     round_half_up,
+    spark_double_to_int,
     spark_exp,
     spark_log10,
     spark_pow,
@@ -178,6 +179,15 @@ def test_spark_exp_matches_spark(spark) -> None:
 def test_spark_exp_is_not_numpy_exp() -> None:
     # exp(2.1): numpy's is one ulp above fdlibm's
     assert pl.select(spark_exp(pl.lit(2.1))).item() == 8.16616991256765
+
+
+def test_spark_double_to_int_matches_spark(spark) -> None:
+    values: list[float | None] = [0.0, -0.0, 0.9, -0.9, 10.0, 2147483647.9, 2147483648.0, -2147483649.0]
+    values += [3e9, -3e9, 1e300, math.nan, math.inf, -math.inf, None]
+    rows = spark.createDataFrame([(v,) for v in values], 'x DOUBLE').select(f.col('x').cast('int').alias('i')).collect()
+    out = pl.DataFrame({'x': values}, schema={'x': pl.Float64}).select(spark_double_to_int(pl.col('x')))
+    assert out.schema == pl.Schema({'x': pl.Int32})
+    assert out.to_series().to_list() == [r.i for r in rows]
 
 
 def test_exponent_mantissa_match_spark(spark) -> None:

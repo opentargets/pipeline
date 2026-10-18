@@ -95,23 +95,14 @@ def spark_log10(expr: pl.Expr) -> pl.Expr:
     return expr.map_batches(_strict_log10, return_dtype=pl.Float64, is_elementwise=True)
 
 
-def _spark_to_int(expr: pl.Expr) -> pl.Expr:
-    """Spark's non-ANSI `CAST(double AS INT)`: truncated, NaN 0, infinities clamped to the Int32 range."""
-    return (
-        pl
-        .when(expr.is_nan())
-        .then(pl.lit(0, dtype=pl.Int32))
-        .when(expr == math.inf)
-        .then(pl.lit(_INT_MAX, dtype=pl.Int32))
-        .when(expr == -math.inf)
-        .then(pl.lit(-_INT_MAX - 1, dtype=pl.Int32))
-        .otherwise(expr.cast(pl.Int32, strict=False))
-    )
+def spark_double_to_int(expr: pl.Expr) -> pl.Expr:
+    """Spark's non-ANSI `CAST(double AS INT)`: truncated, NaN 0, clamped to the Int32 range."""
+    return expr.fill_nan(0.0).clip(-_INT_MAX - 1, _INT_MAX).cast(pl.Int32)
 
 
 def pvalue_exponent(p: pl.Expr) -> pl.Expr:
     """`CAST(log10(p) AS INT) - 1` as spark computes it, Int32."""
-    return _spark_to_int(spark_log10(p)) - 1
+    return spark_double_to_int(spark_log10(p)) - 1
 
 
 _BP_1_5 = 1.5
