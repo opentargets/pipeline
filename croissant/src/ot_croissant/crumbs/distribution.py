@@ -1,9 +1,9 @@
 """Croissant distribution metadata for an Open Targets Platform data release."""
 
 from mlcroissant import FileObject, FileSet
-from pyspark.sql import SparkSession
 
 from ot_croissant.curation import DistributionCuration
+from ot_croissant.schema import partition_columns
 
 
 class PlatformOutputDistribution:
@@ -16,9 +16,6 @@ class PlatformOutputDistribution:
         self.distribution = []
         self.contained_in = []
         self.curation = DistributionCuration()
-
-        self.spark = SparkSession.builder.getOrCreate()
-        self.spark_context = self.spark.sparkContext
 
         super().__init__()
 
@@ -98,7 +95,7 @@ class PlatformOutputDistribution:
             dataset_id = path.split('/')[-1]
 
             # Get columns the dataset is partitioned by:
-            partitioned_by = self._partitioned_by(path)
+            partitioned_by = partition_columns(path)
 
             # The includes depends on if the dataset has hyve partition:
             includes = [f'{dataset_id}/**/*.parquet'] if len(partitioned_by) > 0 else [f'{dataset_id}/*.parquet']
@@ -127,31 +124,3 @@ class PlatformOutputDistribution:
 
             self.distribution.append(fileset)
         return self
-
-    def _partitioned_by(self, path: str) -> list[str]:
-        """Check if the dataset has hive partition via interacting with spark context.
-
-        Args:
-            path (str): path to the dataset
-
-        Returns:
-            list[str]: List of columns the dataset is partitioned by
-        """
-        # List all files and folders in the path
-        spark_context_jvm = self.spark_context._jvm
-        spark_context_jsc = self.spark_context._jsc
-        if spark_context_jvm is None or spark_context_jsc is None:
-            raise RuntimeError('spark context is not available')
-        fs = spark_context_jvm.org.apache.hadoop.fs.FileSystem.get(spark_context_jsc.hadoopConfiguration())
-        p = spark_context_jvm.org.apache.hadoop.fs.Path(path)
-        statuses = fs.listStatus(p)
-
-        # Find folders with '=' in their name (Hive partition folders)
-        partition_cols = []
-        for status in statuses:
-            name = status.getPath().getName()
-            if status.isDirectory() and '=' in name:
-                col = name.split('=')[0]
-                partition_cols.append(col)
-
-        return list(set(partition_cols))
