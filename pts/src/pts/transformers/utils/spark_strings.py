@@ -40,7 +40,7 @@ def java_double_to_string(expr: pl.Expr) -> pl.Expr:
     scale = pl.lit(10, dtype=pl.Int64).pow(dropped)
     whole = pl.when(is_long).then(magnitude.cast(pl.Int64, strict=False))
     long_digits = (whole // scale + (whole % scale * 2 >= scale).cast(pl.Int64)).cast(pl.String)
-    exponent = pl.when(is_long).then(long_digits.str.len_chars().cast(pl.Int32) - 1 + dropped).otherwise(exponent)
+    exponent = pl.coalesce(long_digits.str.len_chars().cast(pl.Int32) - 1 + dropped, exponent)
     significant = pl.coalesce(long_digits, significant).str.strip_chars_end('0').str.pad_end(2, '0')
     scientific = pl.concat_str(
         pl.when(expr < 0).then(pl.lit('-')).otherwise(pl.lit('')),

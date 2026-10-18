@@ -256,6 +256,10 @@ def test_round_half_up_uses_decimal_repr() -> None:
     assert pl.DataFrame({'v': [2.675]}).select(round_half_up(pl.col('v'), 2)).item() == 2.68
 
 
+def test_round_half_up_broadcasts_a_scalar() -> None:
+    assert pl.select(round_half_up(pl.lit(1.0005), 3)).to_series().to_list() == [1.001]
+
+
 def test_normalise_mantissa() -> None:
     frame = pl.DataFrame(
         {'m': [10.0, 9.999, None, 10.001, math.nan], 'e': [-9, -9, None, -5, -1]},

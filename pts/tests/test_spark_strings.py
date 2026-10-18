@@ -1,6 +1,8 @@
 """Tests for the polars equivalents of spark's string functions."""
 
 import math
+import random
+import struct
 
 import polars as pl
 
@@ -59,6 +61,39 @@ def test_java_double_to_string_matches_spark(spark) -> None:
     assert _java(DOUBLES) == _spark_cast(spark, DOUBLES)
 
 
+def _from_bits(bits: int) -> float:
+    return struct.unpack('<d', struct.pack('<Q', bits))[0]
+
+
+def _random_doubles() -> list[float]:
+    """Seeded doubles below 2**63 in magnitude: random bits, subnormals, integers, decimals, the notation edges."""
+    rng = random.Random(20261018)
+    values: list[float] = []
+    while len(values) < 2000:
+        value = _from_bits(rng.getrandbits(64))
+        if math.isfinite(value) and abs(value) < 2.0**63:
+            values.append(value)
+    values += [_from_bits(rng.getrandbits(52) | rng.getrandbits(1) << 63) for _ in range(500)]
+    values += [float(rng.randint(-(2**62), 2**62) >> rng.randint(0, 61)) for _ in range(1000)]
+    values += [float(f'{rng.randint(1, 99999)}e{rng.randint(-12, 12)}') for _ in range(500)]
+    for edge in (1e-3, -1e-3, 1e7, -1e7):
+        values += [edge * (1 + rng.uniform(-1e-6, 1e-6)) for _ in range(250)]
+        below, above = edge, edge
+        for _ in range(20):
+            values.append(below)
+            below = math.nextafter(below, 0.0)
+            above = math.nextafter(above, math.copysign(math.inf, edge))
+            values.append(above)
+    return values
+
+
+def test_java_double_to_string_matches_spark_on_random_doubles(spark) -> None:
+    values = _random_doubles()
+    pairs = zip(values, _java(values), _spark_cast(spark, values), strict=True)
+    mismatches = [(v, j, s) for v, j, s in pairs if j != s]
+    assert mismatches == []
+
+
 def test_java_double_to_string_is_shortest_where_java_17_is_not(spark) -> None:
     assert _spark_cast(spark, [4.9e-324]) == ['4.9E-324']
     assert _java([4.9e-324]) == ['5.0E-324']
@@ -66,3 +101,8 @@ def test_java_double_to_string_is_shortest_where_java_17_is_not(spark) -> None:
 
 def test_java_double_to_string_keeps_null() -> None:
     assert _java([None, 1e-5]) == [None, '1.0E-5']
+
+
+def test_java_double_to_string_broadcasts_a_scalar() -> None:
+    assert pl.select(java_double_to_string(pl.lit(1.5e-9))).to_series().to_list() == ['1.5E-9']
+    assert pl.select(java_double_to_string(pl.lit(2.5))).to_series().to_list() == ['2.5']
