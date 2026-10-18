@@ -188,6 +188,23 @@ def test_qt_truthiness(tmp_path: Path, qt: Any, quantitative: bool) -> None:
     assert (row['beta'] is not None, row['oddsRatio'] is not None) == (quantitative, not quantitative)
 
 
+def test_qt_column_mixing_booleans_and_numbers(tmp_path: Path) -> None:
+    st9 = [
+        _st9(**{'Gene ID': 'ENSG1', 'QT': True}),
+        _st9(**{'Gene ID': 'ENSG2', 'QT': 1}),
+        _st9(**{'Gene ID': 'ENSG3', 'QT': False}),
+        _st9(**{'Gene ID': 'ENSG4', 'QT': 0}),
+    ]
+    rows = _parse(tmp_path, st9, [], []).sort('targetFromSourceId')
+    reported = rows.select('targetFromSourceId', pl.col('beta').is_not_null(), pl.col('oddsRatio').is_not_null())
+    assert reported.rows() == [
+        ('ENSG1', True, False),
+        ('ENSG2', True, False),
+        ('ENSG3', False, True),
+        ('ENSG4', False, True),
+    ]
+
+
 def test_infinite_log10p_takes_the_minimum_over_every_sheet(tmp_path: Path) -> None:
     rows, log = logged(
         lambda: _parse(

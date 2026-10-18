@@ -138,6 +138,26 @@ def test_normalised_rows_that_meet_are_one_counted() -> None:
     assert '2 normalised rows merged with an identical row, by project: Genebass: 1, REGENERON: 1' in log
 
 
+def test_normalised_rows_without_a_project_that_meet_are_counted() -> None:
+    union, log = logged(
+        lambda: assemble([
+            _parsed(
+                {'projectId': None, 'pValueMantissa': 10.0, 'pValueExponent': -9},
+                {'projectId': 'REGENERON', 'pValueMantissa': 10.0, 'pValueExponent': -9},
+            ),
+            _parsed(
+                {'projectId': None, 'pValueMantissa': 1.0, 'pValueExponent': -8},
+                {'projectId': 'REGENERON', 'pValueMantissa': 1.0, 'pValueExponent': -8},
+            ),
+        ])
+    )
+    assert union.select('projectId', 'pValueMantissa', 'pValueExponent').rows() == [
+        (None, 1.0, -8),
+        ('REGENERON', 1.0, -8),
+    ]
+    assert '2 normalised rows merged with an identical row, by project: REGENERON: 1, None: 1' in log
+
+
 # disease mapping
 
 
