@@ -31,6 +31,7 @@ def to_int(col: pl.Expr) -> pl.Expr:
 def _float_text(col: pl.Expr) -> pl.Expr:
     """Text as spark's float and double casts read it: trimmed, a `d`/`f` suffix dropped, signed `nan` null."""
     value = col.str.strip_chars(SPARK_CAST_TRIM)
+    # java's decimal syntax, as `spark_csv._JAVA_DECIMAL` reads it
     number = value.str.replace(r'^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)[dDfF]$', '$1')
     signed_nan = value.str.contains(r'^[+-][nN][aA][nN]$') & ~value.str.contains(r'^[+-]NaN$')
     return pl.when(~signed_nan).then(number)

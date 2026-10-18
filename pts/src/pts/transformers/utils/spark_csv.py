@@ -27,6 +27,7 @@ _ASCII_INT = r'^[+-]?[0-9]+$'
 #: `Integer.parseInt` takes any unicode decimal digit
 _JAVA_INT = r'^[+-]?\d+$'
 _INT32_MIN, _INT32_MAX = -(2**31), 2**31 - 1
+#: java's decimal syntax, as `spark_casts._float_text` reads it
 _JAVA_DECIMAL = r'^([+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)[fFdD]?$'
 _JAVA_HEX = r'^([+-]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)[pP][+-]?[0-9]+)[fFdD]?$'
 

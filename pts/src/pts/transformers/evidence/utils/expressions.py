@@ -29,9 +29,9 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
 
     * null or NaN input stays null.
     * a non-positive value saturates to the strongest score, 1.0.
-    * otherwise, linearly interpolate in log10 space (spark's fdlibm `log10`) between `weak_ref` (-> `out_min`) and
-      `strong_ref` (-> 1.0), then clamp back to `[out_min, 1.0]` for values past either reference
-      point -- spark's `LEAST(1.0, GREATEST(out_min, ...))`.
+    * otherwise, linearly interpolate in log10 space (spark's fdlibm `log10`) between `weak_ref`
+      (-> `out_min`) and `strong_ref` (-> 1.0), then clamp back to `[out_min, 1.0]` for values
+      past either reference point -- spark's `LEAST(1.0, GREATEST(out_min, ...))`.
 
     Args:
         value: the column to rescale.

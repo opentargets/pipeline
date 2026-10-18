@@ -20,6 +20,8 @@ class UnsupportedIdentifierField(ValueError):  # noqa: N818 -- reads as a condit
     render exactly like java, and low-popcount subnormals) were removed once matching the release's
     evidence `id` stopped being a requirement: they killed whole datasources over a digit in an
     identifier nobody diffs.
+
+    Doubles render with JDK 17's `Double.toString`, the release's JVM (`java_double_to_string`).
     """
 
 
@@ -35,7 +37,8 @@ def _cast_scalar_to_string(expr: pl.Expr, dtype: Any, name: str) -> pl.Expr:
     `false` with `.cast(pl.String)`.
 
     Float64 renders as java's `Double.toString`, as spark does (`java_double_to_string`);
-    Float32 is widened to a double first.
+    Float32 is widened to a double first, so a Float32 column outside the evidence schema does not
+    render as spark's `Float.toString`.
 
     Args:
         expr: the leaf expression to render.
