@@ -32,14 +32,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from functools import partial
 from typing import Literal
 
 import polars as pl
 import polars.selectors as cs
 
 from pts.transformers.utils.dataset import scan_dataset
-from pts.transformers.utils.disease_mapping.normalise import normalise
+from pts.transformers.utils.disease_mapping.normalise import normalise_batch
 from pts.transformers.utils.disease_mapping.query import (
     alternative_translations,
     clean_disease_label,
@@ -84,12 +83,6 @@ def read_entity_lut(path: str) -> pl.LazyFrame:
     return scan_dataset(path).select('entityKind', 'entityType', NORMALISED_COLUMN, 'entityIds')
 
 
-def _normalise_batch(batch: pl.Series, w: _Working) -> pl.Series:
-    labels = batch.struct.field(w.label).to_list()
-    tracks = batch.struct.field(w.track).to_list()
-    return pl.Series([normalise(label, track) for label, track in zip(labels, tracks, strict=True)], dtype=pl.String)
-
-
 def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
     """`OnToma._extract_query_entity_labels`."""
     entity = pl.col(w.entity)
@@ -130,10 +123,9 @@ def _normalise_query(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
         .select(w.label, w.track)
         .unique()
         .with_columns(
-            pl
-            .struct(w.label, w.track)
-            .map_batches(partial(_normalise_batch, w=w), return_dtype=pl.String)
-            .alias(w.normalised),
+            pl.map_batches([w.label, w.track], lambda series: normalise_batch(*series), return_dtype=pl.String).alias(
+                w.normalised
+            ),
         )
     )
     return query.join(distinct, on=[w.label, w.track], how='left')

@@ -12,7 +12,6 @@ import pytest
 from ontoma import DiseaseCuration, OpenTargetsDisease, OpenTargetsDrug, OpenTargetsTarget, spark_nlp_coordinate
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
-from pts.transformers.ontoma_lut import build as build_module
 from pts.transformers.ontoma_lut.build import (
     build_lut,
     curation_label_lut,
@@ -22,6 +21,7 @@ from pts.transformers.ontoma_lut.build import (
     target_label_lut,
 )
 from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.disease_mapping import normalise as normalise_module
 
 DISEASE_SCHEMA = pl.Schema({
     'id': pl.String,
@@ -371,6 +371,21 @@ def test_types_ranked_separately() -> None:
     }
 
 
+def test_null_scores_rank_last() -> None:
+    lut = build_lut([
+        _raw(
+            ('MONDO_1', 'Foo', 0.5, 'term', 'name', 'DS', 'label'),
+            ('MONDO_2', 'foo', None, 'term', 'name', 'DS', 'label'),
+            ('ENSG01', 'Foo', None, 'term', 'name', 'GP', 'label'),
+            ('ENSG02', 'foo', None, 'term', 'name', 'GP', 'label'),
+        )
+    ])
+    assert _ids(lut) == {
+        ('label', 'DS', 'foo'): [('MONDO_1', 'name')],
+        ('label', 'GP', 'foo'): [('ENSG01', 'name'), ('ENSG02', 'name')],
+    }
+
+
 def test_each_label_normalised_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
@@ -378,7 +393,7 @@ def test_each_label_normalised_once(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append((label, track))
         return label.lower()
 
-    monkeypatch.setattr(build_module, 'normalise', normalise)
+    monkeypatch.setattr(normalise_module, 'normalise', normalise)
     build_lut([
         _raw(
             ('MONDO_1', 'Foo', 1.0, 'term', 'name', 'DS', 'label'), ('MONDO_2', 'Foo', 1.0, 'term', 'name', 'DS', 'id')

@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
-from pts.transformers.utils.disease_mapping.normalise import normalise
+from pts.transformers.utils.disease_mapping.normalise import normalise_batch
 from pts.transformers.utils.disease_mapping.query import (
     JAVA_DOT,
     JAVA_END,
@@ -247,12 +247,6 @@ def drug_label_lut(drug: pl.DataFrame) -> pl.DataFrame:
     return _label_lut(entities.with_columns(nlpPipelineTrack=pl.lit('symbol')), 'CD')
 
 
-def _normalise_batch(batch: pl.Series) -> pl.Series:
-    labels = batch.struct.field('entityLabel').to_list()
-    tracks = batch.struct.field('nlpPipelineTrack').to_list()
-    return pl.Series([normalise(label, track) for label, track in zip(labels, tracks, strict=True)], dtype=pl.String)
-
-
 def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
     """`OnToma(spark, entity_lut_list)`: each normalised label or id with the ids of its top-scored rows."""
     key = ENTITY_LUT.names()[:3]
@@ -262,8 +256,8 @@ def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
         .select('entityLabel', 'nlpPipelineTrack')
         .unique()
         .with_columns(
-            entityLabelNormalised=pl.struct('entityLabel', 'nlpPipelineTrack').map_batches(
-                _normalise_batch, return_dtype=pl.String
+            entityLabelNormalised=pl.map_batches(
+                ['entityLabel', 'nlpPipelineTrack'], lambda series: normalise_batch(*series), return_dtype=pl.String
             )
         )
     )
@@ -272,7 +266,7 @@ def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
         lut
         .join(normalised, on=['entityLabel', 'nlpPipelineTrack'], how='inner')
         .filter(pl.col('entityLabelNormalised').str.len_chars() > 0)
-        # dense_rank 1 by score desc, nulls last
+        # dense_rank 1 by score desc, nulls last; unlike Spark only when NaN is mixed with numbers
         .filter(score.eq_missing(score.max().over(key)))
         .group_by(key)
         .agg(pl.struct('entityId', 'entitySource').unique().sort().alias('entityIds'))
