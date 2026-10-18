@@ -16,7 +16,7 @@ PTS = yaml.safe_load(PTS_CONFIG.read_text())['steps']
 DAG = yaml.safe_load(DAG_CONFIG.read_text())['steps']
 EVIDENCE_STEPS = sorted(name for name in DAG if name.startswith('pts_evidence_'))
 LITERATURE_PREFIXES = ('input/literature', 'intermediate/literature')
-DIRECT_ONLY_STEPS = [*EVIDENCE_STEPS, 'pts_l2g', 'pts_association']
+DIRECT_ONLY_STEPS = [*EVIDENCE_STEPS, 'pts_l2g', 'pts_association', 'pts_target_view']
 
 
 def dependencies(name: str) -> set[str]:

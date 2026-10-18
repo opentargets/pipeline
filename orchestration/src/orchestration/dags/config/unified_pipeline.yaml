@@ -430,7 +430,6 @@ steps:
 
   pts_target_view:
     depends_on:
-      - pts_target
       - pts_homology
       - pts_target_tractability
       - pts_target_safety_event
