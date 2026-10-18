@@ -25,7 +25,7 @@ import polars_hash as plh
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.utils.hashing import render_for_hash
-from pts.transformers.utils.variant_identifier import VARIANT_HASH_LENGTH, hash_long_variant_ids
+from pts.transformers.utils.variant import VARIANT_HASH_LENGTH, hash_long_variant_ids
 
 QC_COLUMN = 'qualityControls'
 
