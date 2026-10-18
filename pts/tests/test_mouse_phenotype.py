@@ -109,13 +109,43 @@ def test_read_mp_classes(diamond, tmp_path: Path):
     assert read_mp_classes(str(path)).equals(mp_classes(diamond))
 
 
+def test_unlabelled_class_label_is_null():
+    ontology = _ontology([_node(1, 'root'), _node(2, None)], [_edge(2, 1)])
+    assert _rows(mp_classes(ontology)) == {(_id(2), _id(2), None)}
+
+
 def test_mp_classes_match_spark(spark, diamond):
     graph = diamond['graphs'][0]
+    short = {'pred': 'is_a', 'obj': 'MP:0000001'}
     ontology = _ontology(
-        graph['nodes'] + [_node(f'{OBO}UBERON_1', 'other'), _node(6, None), _node(6, 'six')],
+        graph['nodes']
+        + [
+            _node(f'{OBO}UBERON_1', 'other'),
+            _node(6, None),
+            _node(6, 'six'),
+            _node(7, None),
+            _node(8, 'eight'),
+            {'id': f'{OBO}MP_0000009'},
+            _node('MP:0000010', 'ten'),
+        ],
         graph['edges']
-        + [_edge(6, 5), _edge(6, 1), {'sub': f'{OBO}UBERON_1', 'pred': 'is_a', 'obj': f'{OBO}MP_0000003'}],
+        + [
+            _edge(6, 5),
+            _edge(6, 1),
+            {'sub': f'{OBO}UBERON_1', 'pred': 'is_a', 'obj': f'{OBO}MP_0000003'},
+            # root and a non-root term written both as short ids and as IRIs
+            {**short, 'sub': 'MP:0000007'},
+            {**short, 'sub': f'{OBO}MP_0000009'},
+            {**short, 'sub': 'MP:0000011'},
+            {'sub': 'MP:0000008', 'pred': 'is_a', 'obj': f'{OBO}MP_0000001'},
+            {'sub': 'MP:0000010', 'pred': 'is_a', 'obj': f'{OBO}MP_0000002'},
+            {'sub': f'{OBO}MP_0000010', 'pred': 'is_a', 'obj': 'MP:0000003'},
+            {'sub': f'{OBO}MP_0000012', 'pred': 'is_a', 'obj': 'MP:0000010'},
+        ],
     )
     old = _create_mp_classification(ontology, SimpleNamespace(spark=spark))
     expected = sorted(tuple(r) for r in old.collect())
-    assert sorted(mp_classes(ontology).iter_rows()) == expected
+    got = sorted(mp_classes(ontology).iter_rows())
+    assert got == expected
+    assert (_id(7), _id(7), None) in got
+    assert (_id(9), _id(9), '') in got
