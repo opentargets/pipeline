@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import polars as pl
 
@@ -38,27 +36,6 @@ def divide(expr: pl.Expr, divisor: float) -> pl.Expr:
     return expr.map_batches(lambda s: _true_divide(s, divisor), return_dtype=pl.Float64, is_elementwise=True)
 
 
-def _true_log10(series: pl.Series) -> pl.Series:
-    x = series.cast(pl.Float64).to_numpy()
-    # Not np.log10: on AVX512 CPUs numpy dispatches float64 log10 to SVML, which is only 4-ulp
-    # accurate, so results would depend on the host. math.log10 is libm on every machine.
-    values = np.full(len(x), np.nan)
-    positive = x > 0
-    values[positive] = [math.log10(v) for v in x[positive].tolist()]
-    values[x == 0] = -np.inf
-    out = pl.Series(series.name, values, dtype=pl.Float64, nan_to_null=False)
-    nulls = np.flatnonzero(series.is_null().to_numpy())
-    return out.scatter(nulls, None) if len(nulls) else out
-
-
-def log10(expr: pl.Expr) -> pl.Expr:
-    """Base-10 logarithm through libm (`math.log10`), keeping nulls and NaN.
-
-    Polars 2 `Expr.log10` differs from libm in the last bit for about half of all values.
-    """
-    return expr.map_batches(_true_log10, return_dtype=pl.Float64, is_elementwise=True)
-
-
 def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong_ref: float) -> pl.Expr:
     """Rescale a p-value-like `value` onto `[out_min, 1.0]` in log10 space, clamped.
 
@@ -67,7 +44,7 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
 
     * null or NaN input stays null.
     * a non-positive value saturates to the strongest score, 1.0.
-    * otherwise, linearly interpolate in log10 space between `weak_ref` (-> `out_min`) and
+    * otherwise, linearly interpolate in log10 space (spark's fdlibm `log10`) between `weak_ref` (-> `out_min`) and
       `strong_ref` (-> 1.0), then clamp back to `[out_min, 1.0]` for values past either reference
       point -- spark's `LEAST(1.0, GREATEST(out_min, ...))`.
 
@@ -77,9 +54,11 @@ def log10_rescaled_score(value: pl.Expr, out_min: float, weak_ref: float, strong
         weak_ref: the value that scores `out_min`.
         strong_ref: the value that scores `1.0`.
     """
-    log_weak = math.log10(weak_ref)
-    log_strong = math.log10(strong_ref)
-    rescaled = divide((1.0 - out_min) * (log10(value) - log_weak), log_strong - log_weak) + out_min
+    from pts.transformers.utils.spark_math import spark_log10  # spark_math imports `divide`
+
+    refs = pl.Series([weak_ref, strong_ref], dtype=pl.Float64)
+    log_weak, log_strong = pl.select(spark_log10(pl.lit(refs))).to_series().to_list()
+    rescaled = divide((1.0 - out_min) * (spark_log10(value) - log_weak), log_strong - log_weak) + out_min
     return (
         pl
         .when(value.is_null() | value.is_nan())
