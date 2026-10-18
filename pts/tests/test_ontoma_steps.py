@@ -1,0 +1,138 @@
+"""Tests for the polars OnToma lookup-table steps."""
+
+from pathlib import Path
+
+import polars as pl
+import pytest
+
+from pts.schemas.ontoma_lut import ENTITY_LUT
+from pts.transformers.ontoma_lut.build import (
+    build_lut,
+    curation_label_lut,
+    disease_id_lut,
+    disease_label_lut,
+    drug_label_lut,
+    target_label_lut,
+)
+from pts.transformers.ontoma_lut.literature_ontoma import literature_ontoma
+from pts.transformers.ontoma_lut.ontoma import ontoma
+from pts.transformers.utils.spark_csv import read_spark_csv
+from tests.test_ontoma_lut import DISEASE, DISEASE_SCHEMA, DRUG, DRUG_SCHEMA, TARGET, TARGET_SCHEMA
+
+CURATION_SOURCES = {
+    'ot_disease_curation': 'ot_curation',
+    'eva_clinvar': 'eva_clinvar',
+    'clinvar_xrefs': 'clinvar_xrefs',
+}
+CURATION_SCHEMA = {'SEMANTIC_TAG': pl.String, 'PROPERTY_VALUE': pl.String}
+CURATION = pl.DataFrame(
+    {
+        'SEMANTIC_TAG': ['http://www.ebi.ac.uk/efo/EFO_0000002', 'http://x/MONDO_0000001'],
+        'PROPERTY_VALUE': ['Papillon Lefevre', 'CF curated'],
+    }
+)
+
+
+def _write(frame: pl.DataFrame, path: Path) -> str:
+    path.mkdir(parents=True)
+    frame.write_parquet(path / 'part.parquet')
+    return str(path)
+
+
+def _inputs(
+    root: Path, disease: pl.DataFrame, target: pl.DataFrame, drug: pl.DataFrame, curation: pl.DataFrame
+) -> dict[str, str]:
+    source = {
+        'disease_index': _write(disease, root / 'disease'),
+        'target_index': _write(target, root / 'target'),
+        'drug_index': _write(drug, root / 'drug'),
+    }
+    for key in CURATION_SOURCES:
+        curation.write_csv(root / f'{key}.tsv', separator='\t')
+        source[key] = str(root / f'{key}.tsv')
+    return source
+
+
+def _curated(source: dict[str, str], disease: pl.DataFrame) -> list[pl.DataFrame]:
+    return [
+        curation_label_lut(read_spark_csv(source[key], separator='\t'), name, disease)
+        for key, name in CURATION_SOURCES.items()
+    ]
+
+
+def _read(path: str) -> pl.DataFrame:
+    return pl.read_parquet(Path(path) / '*.parquet')
+
+
+@pytest.fixture
+def source(tmp_path: Path) -> dict[str, str]:
+    return _inputs(tmp_path / 'in', DISEASE, TARGET, DRUG, CURATION)
+
+
+def test_ontoma_step_writes_both_luts(source: dict[str, str], tmp_path: Path) -> None:
+    destination = {
+        'disease_label_lut': str(tmp_path / 'out' / 'label.parquet'),
+        'disease_id_lut': str(tmp_path / 'out' / 'id.parquet'),
+    }
+    ontoma(source, destination, None, None)
+
+    label = _read(destination['disease_label_lut'])
+    ids = _read(destination['disease_id_lut'])
+    assert label.schema == ENTITY_LUT
+    assert ids.schema == ENTITY_LUT
+    assert label.rows() == build_lut([disease_label_lut(DISEASE), *_curated(source, DISEASE)]).rows()
+    assert ids.rows() == build_lut([disease_id_lut(DISEASE)]).rows()
+    assert label.height > 0
+    assert ids.height > 0
+
+
+def test_literature_ontoma_step_writes_one_lut(source: dict[str, str], tmp_path: Path) -> None:
+    destination = {'disease_target_drug_label_lut': str(tmp_path / 'out' / 'lit.parquet')}
+    literature_ontoma(source, destination, None, None)
+
+    lut = _read(destination['disease_target_drug_label_lut'])
+    expected = build_lut([
+        disease_label_lut(DISEASE),
+        *_curated(source, DISEASE),
+        target_label_lut(TARGET),
+        drug_label_lut(DRUG),
+    ])
+    assert lut.schema == ENTITY_LUT
+    assert lut.rows() == expected.rows()
+    assert lut.height > 0
+
+
+@pytest.mark.parametrize(
+    ('run', 'keys'),
+    [(ontoma, ['disease_label_lut', 'disease_id_lut']), (literature_ontoma, ['disease_target_drug_label_lut'])],
+)
+def test_steps_refuse_existing_destination(run, keys: list[str], source: dict[str, str], tmp_path: Path) -> None:
+    destination = {key: str(tmp_path / 'out' / f'{key}.parquet') for key in keys}
+    run(source, destination, None, None)
+    first = {key: _read(path).rows() for key, path in destination.items()}
+
+    with pytest.raises(ValueError):
+        run(source, destination, None, None)
+    assert {key: _read(path).rows() for key, path in destination.items()} == first
+
+
+def test_empty_inputs_write_empty_luts(tmp_path: Path) -> None:
+    source = _inputs(
+        tmp_path / 'in',
+        pl.DataFrame(schema=DISEASE_SCHEMA),
+        pl.DataFrame(schema=TARGET_SCHEMA),
+        pl.DataFrame(schema=DRUG_SCHEMA),
+        pl.DataFrame(schema=CURATION_SCHEMA),
+    )
+    destination = {
+        'disease_label_lut': str(tmp_path / 'out' / 'label.parquet'),
+        'disease_id_lut': str(tmp_path / 'out' / 'id.parquet'),
+    }
+    literature = {'disease_target_drug_label_lut': str(tmp_path / 'out' / 'lit.parquet')}
+    ontoma(source, destination, None, None)
+    literature_ontoma(source, literature, None, None)
+
+    for path in (*destination.values(), *literature.values()):
+        lut = _read(path)
+        assert lut.schema == ENTITY_LUT
+        assert lut.height == 0
