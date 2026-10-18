@@ -21,6 +21,8 @@ def test_validation_inputs_follow_the_run(monkeypatch, ppp, step, kind):
     for name in PLATFORM_ONLY:
         assert (f'input/molqtl/{kind}/{name}' in sources) is not ppp
     assert task['source']['target'] == 'output/target'
+    if step == 'credible_set':
+        assert task['source']['disease'] == 'output/disease'
 
 
 def test_validation_steps_run_in_pts():
@@ -28,4 +30,4 @@ def test_validation_steps_run_in_pts():
     for step in ('study', 'credible_set', 'enhancer_to_gene'):
         assert f'pts_{step}' in config.steps('pts_')
         assert f'gentropy_{step}' not in config.steps()
-    assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study', 'pts_target']
+    assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study', 'pts_target', 'pts_disease']
