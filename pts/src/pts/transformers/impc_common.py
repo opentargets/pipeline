@@ -35,6 +35,7 @@ def phenotype_ids(lf: pl.LazyFrame, column: str, prefix: str, id_column: str) ->
 
 
 def ontology_terms(ontology: pl.LazyFrame, name: str) -> pl.LazyFrame:
+    """The ids and terms of one ontology, as `<name>_id` and `<name>_term` in lower case."""
     prefix = name.lower()
     return ontology.filter(pl.col('ontology') == name).select(
         pl.col('phenotype_id').alias(f'{prefix}_id'), pl.col('phenotype_term').alias(f'{prefix}_term')
@@ -89,6 +90,7 @@ def literature(mgi_pubmed: pl.LazyFrame, summary: pl.LazyFrame, model_mouse: pl.
 
 
 def read_impc_csv(path: str, **options: Any) -> pl.LazyFrame:
+    """A spark-written CSV, lazily; `options` go to `read_spark_csv`."""
     return read_spark_csv(path, **options).lazy()
 
 
@@ -102,6 +104,7 @@ def read_gene_mapping(source: dict[str, str]) -> pl.LazyFrame:
 
 
 def read_mgi_pubmed(path: str) -> pl.LazyFrame:
+    """The headerless MGI PubMed references, named by `MGI_PUBMED_COLUMNS`."""
     return read_impc_csv(
         path,
         separator='\t',

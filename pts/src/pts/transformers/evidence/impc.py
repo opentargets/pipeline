@@ -23,6 +23,7 @@ from pts.transformers.evidence.utils.run import write_evidence
 from pts.transformers.impc_common import (
     MODEL_ID,
     biological_model_id,
+    literature,
     model_mouse_phenotypes,
     ontology_terms,
     phenotype_ids,
@@ -30,7 +31,6 @@ from pts.transformers.impc_common import (
     read_impc_csv,
     read_mgi_pubmed,
 )
-from pts.transformers.impc_common import literature as build_literature
 
 #: The `source` keys of the IMPC inputs.
 SOURCES = [
@@ -129,7 +129,7 @@ def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
     ontology = read_impc_csv(source['solr_ontology'])
     mp_terms, hp_terms = ontology_terms(ontology, 'MP'), ontology_terms(ontology, 'HP')
     gene_mapping = read_gene_mapping(source)
-    literature = build_literature(read_mgi_pubmed(source['mouse_pubmed_refs']), summary, model_mouse)
+    model_literature = literature(read_mgi_pubmed(source['mouse_pubmed_refs']), summary, model_mouse)
 
     model_phenotypes = (
         model_mouse
@@ -156,7 +156,7 @@ def parse_impc(source: dict[str, str], score_cutoff: float) -> pl.LazyFrame:
         .join(gene_mapping, on='targetInModelMgiId', how='inner', maintain_order='left')
         .join(model_phenotypes, on=MODEL_ID, how='left', maintain_order='left')
         .join(human_phenotypes, on=[MODEL_ID, 'disease_id'], how='left', maintain_order='left')
-        .join(literature, on=[MODEL_ID, 'targetInModelMgiId'], how='left', maintain_order='left')
+        .join(model_literature, on=[MODEL_ID, 'targetInModelMgiId'], how='left', maintain_order='left')
         .rename({'disease_id': 'diseaseFromSourceId', 'disease_term': 'diseaseFromSource'})
         .with_columns(biologicalModelId=biological_model_id(pl.col(MODEL_ID)))
         .select(*_EVIDENCE_COLUMNS, MODEL_ID)
