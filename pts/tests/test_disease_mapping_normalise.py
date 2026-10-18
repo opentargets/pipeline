@@ -1,18 +1,20 @@
 """Tests for the polars port of OnToma's query preparation and label normalisation.
 
 `test_data/disease_mapping/normalisation.parquet` holds what OnToma's spark expressions and
-spark-nlp pipeline return for a sample of disease index labels and fixed edge cases; see the
-generator next to it. Running the real pipeline needs the spark-nlp jar from Maven and Java 17+,
+spark-nlp pipeline return for a sample of disease index labels and fixed edge cases. It was
+recorded with OnToma 2.7.1 and spark-nlp 7.0.0 by a generator script removed along with the
+OnToma dependency. Running the real pipeline needs the spark-nlp jar from Maven and Java 17+,
 which the suite does not have, so that recorded output is the reference.
 """
 
+import hashlib
 from pathlib import Path
 
 import polars as pl
 import pytest
-from ontoma.nlp_pipeline import NLPPipeline
 
 from pts.transformers.utils.disease_mapping.normalise import (
+    GOOGLE_STOP_WORDS,
     STOP_WORDS,
     normalise,
     normalise_symbol,
@@ -109,6 +111,10 @@ def test_null_label_expressions_stay_null() -> None:
     assert df.row(0) == ('term', None, None)
 
 
-def test_stop_words_match_ontoma() -> None:
-    # the lookup tables were normalised with OnToma's list; a change there must be mirrored here
-    assert set(NLPPipeline.all_stop_words) == STOP_WORDS
+def test_stop_words_are_pinned() -> None:
+    # the lookup tables were normalised with OnToma 2.7.1's list; any change here must be deliberate
+    assert len(GOOGLE_STOP_WORDS) == 172
+    assert len(STOP_WORDS) == 344
+    assert {"can't", "Can't", 'the', 'The', 'yourselves'} <= STOP_WORDS
+    digest = hashlib.sha256(' '.join(sorted(STOP_WORDS)).encode()).hexdigest()
+    assert digest == 'b8724f002cd7073cd1c22b4b6b3b173acb71a8c39d88919b627ce0535f2a3bb8'

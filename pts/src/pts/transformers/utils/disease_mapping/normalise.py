@@ -37,7 +37,7 @@ from functools import cache
 import polars as pl
 
 #: `ontoma.nlp_pipeline.NLPPipeline.google_stop_words`, in OnToma's form so the two compare by eye;
-#: a test keeps the copy in step.
+#: a test pins the copy.
 _GOOGLE_STOP_WORDS_TEXT = (
     "about above after again against all am an and any are aren't as at be because "
     "been before being below between both but by can't cannot could couldn't did didn't do does doesn't doing "
