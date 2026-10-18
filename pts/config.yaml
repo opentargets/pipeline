@@ -23,6 +23,21 @@ steps:
       transformer: foldx
       settings:
         plddt_threshold: 0.7
+
+    - name: transform variant index
+      requires:
+        - transform FoldX annotations
+      transformer: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - input/variant/gnomad
+        amino_acid_annotations:
+          - intermediate/variant/foldx
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

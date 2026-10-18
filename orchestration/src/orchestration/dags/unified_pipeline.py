@@ -377,9 +377,6 @@ with DAG(
             'gentropy_variant_annotation': {
                 'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
             },
-            'gentropy_variant': {
-                'step.variant_index_path': gsp('gentropy_variant', 'step.variant_index_path'),
-            },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
             },
