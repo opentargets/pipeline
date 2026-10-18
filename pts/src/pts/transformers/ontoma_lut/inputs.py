@@ -13,7 +13,7 @@ CURATIONS = {
 }
 
 
-def read_parquet(path: str) -> pl.DataFrame:
+def load_dataset(path: str) -> pl.DataFrame:
     """Read a parquet dataset."""
     return scan_dataset(path).collect()
 
