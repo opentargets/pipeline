@@ -640,6 +640,17 @@ steps:
       destination: input/interaction/string-interactions.txt.gz
   ##################################################################################################
 
+  #: VARIANT STEP :################################################################################
+  variant:
+    - name: copy_many FoldX raw export
+      sources: gs://otar013-ppp/OTAR2081_foldx/exported/2024.12.10_foldx_energy.parquet/*.parquet
+      destination: input/variant/foldx
+
+    - name: copy_many gnomad variant index
+      sources: gs://gnomad_data_2/v4.1/variant_index/*.parquet
+      destination: input/variant/gnomad
+  ##################################################################################################
+
   #: ENCODE STEP :##################################################################################
   encode:
     - name: copy chromosome contigs
@@ -667,12 +678,6 @@ steps:
       source_list_file: input/encode/rE2G/source_list_file.txt
       destination: input/encode/rE2G/datasets
   ##################################################################################################
-
-  #: GNOMAD VARIANT STEP ANNOTATIONS :##############################################################
-  gnomad:
-    - name: copy_many gnomad variant index
-      sources: gs://gnomad_data_2/v4.1/variant_index/*.parquet
-      destination: input/variant/gnomad
 
   #: GWAS STEP :######################################################################################
   gwas:
@@ -741,11 +746,12 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
-  #: LOF_CURATION VARIANT ANNOTATIONS STEP :########################################################
-  lof_curation:
+  #: VARIANT PPP STEP :############################################################################
+  variant_ppp:
     - name: copy LoF curation raw data
       source: gs://otar013-ppp/OTAR2075_lof_curation/curation_results_OT_21-01-25.csv
-      destination: input/lof_curation/curation.csv
+      destination: input/variant/lof_curation/curation.csv
+  ##################################################################################################
 
   #: L2G STEP :#####################################################################################
   l2g:
