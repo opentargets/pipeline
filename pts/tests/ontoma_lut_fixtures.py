@@ -15,11 +15,6 @@ DISEASE_SCHEMA = pl.Schema({
     'dbXRefs': pl.List(pl.String),
     'obsoleteXRefs': pl.List(pl.String),
 })
-DISEASE_DDL = (
-    'id string, name string, exactSynonyms array<string>, narrowSynonyms array<string>, '
-    'broadSynonyms array<string>, relatedSynonyms array<string>, obsoleteTerms array<string>, '
-    'dbXRefs array<string>, obsoleteXRefs array<string>'
-)
 
 DISEASE = pl.DataFrame(
     [
@@ -129,12 +124,6 @@ TARGET_SCHEMA = pl.Schema({
     'obsoleteNames': LABEL_SOURCE,
     'obsoleteSymbols': LABEL_SOURCE,
 })
-_LABEL_SOURCE_DDL = 'array<struct<label:string,source:string>>'
-TARGET_DDL = (
-    f'id string, approvedName string, approvedSymbol string, nameSynonyms {_LABEL_SOURCE_DDL}, '
-    f'symbolSynonyms {_LABEL_SOURCE_DDL}, proteinIds array<struct<id:string,source:string>>, '
-    f'obsoleteNames {_LABEL_SOURCE_DDL}, obsoleteSymbols {_LABEL_SOURCE_DDL}'
-)
 
 
 def _labels(*labels: str | None) -> list[dict | None]:
@@ -169,10 +158,6 @@ DRUG_SCHEMA = pl.Schema({
     'tradeNames': LABEL_SOURCE,
     'crossReferences': pl.List(pl.Struct({'source': pl.String, 'ids': pl.List(pl.String)})),
 })
-DRUG_DDL = (
-    f'id string, name string, synonyms {_LABEL_SOURCE_DDL}, tradeNames {_LABEL_SOURCE_DDL}, '
-    'crossReferences array<struct<source:string,ids:array<string>>>'
-)
 
 
 def _sourced(source: str | None, *labels: str | None) -> list[dict]:

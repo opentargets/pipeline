@@ -5,6 +5,7 @@ import random
 import struct
 
 import polars as pl
+import pytest
 
 from pts.transformers.utils.spark_strings import java_double_to_string, regexp_extract, spark_trim, spark_upper
 
@@ -135,7 +136,31 @@ def test_java_double_to_string_broadcasts_a_scalar() -> None:
     assert pl.select(java_double_to_string(pl.lit(2.5))).to_series().to_list() == ['2.5']
 
 
+#: Java 17's `toUpperCase` of the labels `spark_upper` special-cases; the 28 code points newer than its Unicode 13
+#: (U+A7CF, U+A7D3, U+A7D5 and U+16EBB-U+16ED3) are left as they are.
+JAVA_17_UPPER = {
+    'Straße': 'STRASSE',
+    'ﬁx': 'FIX',
+    'İı': 'İI',
+    'ΟΔΟΣ ς': 'ΟΔΟΣ Σ',
+    'aꟓb': 'AꟓB',
+    '꟏ꟕ': '꟏ꟕ',
+    '\U00016ebb\U00016ed3': '\U00016ebb\U00016ed3',
+    **{chr(c): chr(c) for c in (0xA7CF, 0xA7D3, 0xA7D5, *range(0x16EBB, 0x16ED4))},
+}
+
+
+def test_spark_upper_is_java_17_upper_case() -> None:
+    labels = [*JAVA_17_UPPER, '', None]
+    out = pl.select(spark_upper(pl.lit(pl.Series(labels, dtype=pl.String)))).to_series().to_list()
+    assert out == [*JAVA_17_UPPER.values(), '', None]
+    assert len({c for c in JAVA_17_UPPER if len(c) == 1}) == 28
+
+
 def test_spark_upper_matches_spark(spark) -> None:
+    java_version = spark._jvm.java.lang.System.getProperty('java.version')
+    if not java_version.startswith('17.'):
+        pytest.skip(f'spark_upper emulates Java 17, the JVM here is {java_version}')
     labels = ['Straße', 'ﬁx', 'İı', 'ΟΔΟΣ ς', 'a\ua7d3b', '\ua7cf\ua7d5', '\U00016ebb\U00016ed3', '', None]
     labels += [chr(c) for c in range(0x80, 0x20000) if not 0xD800 <= c <= 0xDFFF]
     rows = spark.createDataFrame([(v,) for v in labels], 'v string').selectExpr('upper(v) AS u').collect()

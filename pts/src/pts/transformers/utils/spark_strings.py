@@ -17,7 +17,7 @@ _JAVA_17_UNCASED = r'[\x{a7cf}\x{a7d3}\x{a7d5}\x{16ebb}-\x{16ed3}]'
 
 
 def spark_upper(expr: pl.Expr) -> pl.Expr:
-    """Spark's `upper`: java 17's full Unicode uppercasing, which polars' differs from only on `_JAVA_17_UNCASED`."""
+    """Spark's `upper`: Java 17's full Unicode uppercasing, which polars' differs from only on `_JAVA_17_UNCASED`."""
     chars = expr.str.extract_all('(?s).')
     kept = chars.list.eval(
         pl.when(pl.element().str.contains(_JAVA_17_UNCASED))

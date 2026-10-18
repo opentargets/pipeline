@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 from ontoma import spark_nlp_coordinate
 
-from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
+from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.ontoma_lut.build import (
     build_lut,
     curation_label_lut,
@@ -173,15 +173,15 @@ def test_lut_schema_and_order() -> None:
     raw = [disease_label_lut(DISEASE), disease_id_lut(DISEASE), target_label_lut(TARGET), drug_label_lut(DRUG)]
     lut = build_lut(raw)
     assert lut.schema == ENTITY_LUT
-    assert lut.equals(lut.sort(ENTITY_LUT.names()[:3]))
-    assert lut.select(ENTITY_LUT.names()[:3]).is_unique().all()
+    assert lut.equals(lut.sort(list(ENTITY_LUT_KEY)))
+    assert lut.select(list(ENTITY_LUT_KEY)).is_unique().all()
     assert lut['entityIds'].equals(lut['entityIds'].list.sort())
     assert build_lut([frame.clear() for frame in raw]).schema == ENTITY_LUT
 
 
-_SPARK_NLP_JAR = (
-    Path.home() / '.ivy2.5.2' / 'jars' / (spark_nlp_coordinate().replace(':', '_', 1).replace(':', '-') + '.jar')
-)
+_SPARK_NLP_JAR_NAME = spark_nlp_coordinate().replace(':', '_', 1).replace(':', '-') + '.jar'
+_SPARK_NLP_JAR_GLOB = f'.ivy2*/jars/{_SPARK_NLP_JAR_NAME}'
+_SPARK_NLP_JARS = list(Path.home().glob(_SPARK_NLP_JAR_GLOB))
 
 # OnToma's constructor needs spark-nlp in the driver JVM, which the shared test session has not loaded.
 _ONTOMA = """
@@ -229,7 +229,7 @@ def _raw_luts() -> list[pl.DataFrame]:
 
 
 needs_spark_nlp = pytest.mark.skipif(
-    not _SPARK_NLP_JAR.exists(), reason=f'spark-nlp is not in the ivy cache: {_SPARK_NLP_JAR}'
+    not _SPARK_NLP_JARS, reason=f'spark-nlp is not in the ivy cache: no ~/{_SPARK_NLP_JAR_GLOB}'
 )
 
 

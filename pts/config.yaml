@@ -711,9 +711,8 @@ steps:
         disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
 
-  # This is split so that we don't run into circularity issues
-  # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_target_safety_event → pts_pharmacogenetics.
+  # Split from ontoma so that the disease tables don't wait on target: pts_literature_ontoma needs
+  # pts_target, and pts_target_safety_event → pts_pharmacogenetics needs pts_ontoma.
   literature_ontoma:
     - name: transform disease target drug lookup table for ontoma
       transformer: ontoma_lut.literature_ontoma

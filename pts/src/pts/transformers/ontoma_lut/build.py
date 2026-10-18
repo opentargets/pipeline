@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
+from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.utils.disease_mapping.normalise import normalise_batch
 from pts.transformers.utils.disease_mapping.query import (
     JAVA_DOT,
@@ -249,7 +249,7 @@ def drug_label_lut(drug: pl.DataFrame) -> pl.DataFrame:
 
 def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
     """`OnToma(spark, entity_lut_list)`: each normalised label or id with the ids of its top-scored rows."""
-    key = ENTITY_LUT.names()[:3]
+    key = list(ENTITY_LUT_KEY)
     lut = pl.concat(frame.select(RAW_ENTITY_LUT.names()) for frame in raw)
     normalised = (
         lut
@@ -266,7 +266,7 @@ def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
         lut
         .join(normalised, on=['entityLabel', 'nlpPipelineTrack'], how='inner')
         .filter(pl.col('entityLabelNormalised').str.len_chars() > 0)
-        # dense_rank 1 by score desc, nulls last; unlike Spark only when NaN is mixed with numbers
+        # rank 1 of dense_rank by score desc; nulls rank last
         .filter(score.eq_missing(score.max().over(key)))
         .group_by(key)
         .agg(pl.struct('entityId', 'entitySource').unique().sort().alias('entityIds'))

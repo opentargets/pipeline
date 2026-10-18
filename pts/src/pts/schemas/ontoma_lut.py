@@ -20,3 +20,4 @@ ENTITY_LUT = pl.Schema({
     'entityLabelNormalised': pl.String,
     'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
 })
+ENTITY_LUT_KEY = ('entityKind', 'entityType', 'entityLabelNormalised')
