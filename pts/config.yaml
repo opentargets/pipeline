@@ -429,10 +429,8 @@ steps:
 
   #: TARGET_VIEW STEP :##################################################################################
   target_view:
-    - name: pyspark target_view
-      pyspark: target_view
-      settings:
-        partition_count: 3
+    - name: transform target_view
+      transformer: target_view
       source:
         target: output/target
         homology: output/homology
