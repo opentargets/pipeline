@@ -270,12 +270,12 @@ with DAG(
         # instead of being resolved from Maven Central on every spark-submit.
         # Resolved from the rendered spark.jars value against the `staged_jars`
         # registry, so every such jar on every cluster (currently the Spark-NLP
-        # fat jar on `pts` and `pts_literature`) is covered automatically; a GCS
+        # fat jar on `pts`) is covered automatically; a GCS
         # jar with no registered source fails the DAG at parse time.
         #
         # One task per destination object, not per step and not per cluster: the
         # steps of a cluster share the one object, and so do the clusters —
-        # `pts` and `pts_literature` point spark.jars at the same jar. Staging per
+        # any clusters that point spark.jars at the same jar share it. Staging per
         # step meant ~60 tasks racing to download the same ~629 MB artifact; per
         # cluster still left two, and two unsynchronised writers can replace the
         # object with a new generation while a cluster created by the other one is

@@ -120,7 +120,8 @@ def literature_publication_match(
         source: ``pub_id_lut``, ``epmc_publication``, ``ontoma_disease_target_drug_label_lut``.
         destination: ``match_valid``, ``match_failed``.
         settings: optional ``date_prefix`` (str), ``repartition`` (int) for the
-            EPMC read, and ``match_valid_coalesce`` / ``match_failed_coalesce``
+            EPMC read, ``label_mapping_partitions`` (int) for the label mapping
+            stage, and ``match_valid_coalesce`` / ``match_failed_coalesce``
             (int) for the output partition count of each write.
         properties: Spark properties forwarded to the session.
     """
@@ -148,10 +149,10 @@ def literature_publication_match(
 
     logger.info('extract matches and map labels')
     match_mapped = publication.extract_matches().map_labels(
-        session=spark,
         label_lut_path=source['ontoma_disease_target_drug_label_lut'],
         label_col_name='label',
         type_col_name='type',
+        label_mapping_partitions=settings.get('label_mapping_partitions'),
     )
     # consumed by match_disambiguated and the isMapped==False filter
     match_mapped.df.persist()

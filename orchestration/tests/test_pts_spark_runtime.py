@@ -68,6 +68,12 @@ def test_staged_spark_nlp_jar_is_the_scala_2_13_build(config: UnifiedPipelineCon
     assert Path(dst).name.startswith('spark-nlp-assembly_2.13-'), dst
 
 
+def test_only_the_generic_pts_cluster_loads_the_spark_nlp_jar(pts_clusters: dict[str, dict]) -> None:
+    """Literature maps labels with polars; clinical_report on the generic cluster is the one spark-nlp user."""
+    loading = {n for n, c in pts_clusters.items() if 'spark-nlp' in c['properties'].get('spark:spark.jars', '')}
+    assert loading == {'pts'}
+
+
 def test_spark_nlp_jar_matches_the_pts_python_package(config: UnifiedPipelineConfig) -> None:
     """The jar the clusters load and the spark-nlp the init action installs must be one version.
 

@@ -1371,6 +1371,7 @@ steps:
       settings:
         date_prefix: ''
         repartition: 25000
+        label_mapping_partitions: 768
         match_valid_coalesce: 600
         match_failed_coalesce: 530
       properties:
@@ -1387,6 +1388,7 @@ steps:
         'spark.dynamicAllocation.executorIdleTimeout': '7200s'
         'spark.dynamicAllocation.shuffleTracking.enabled': 'true'
         'spark.dynamicAllocation.shuffleTracking.timeout': '7200s'
+        'spark.executorEnv.POLARS_MAX_THREADS': '1'
 
   literature_entity_lut:
     - name: pyspark literature entity lut
