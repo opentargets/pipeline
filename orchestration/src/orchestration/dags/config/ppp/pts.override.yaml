@@ -24,3 +24,90 @@ steps:
         output: output/variant
       settings:
         hash_threshold: 300
+
+  # PPP validates its own study and credible-set inputs instead of the platform molQTL sources.
+  study:
+    - name: transform validate study
+      source:
+        study:
+          - input/gwas/study/gcca
+          - input/gwas/study/gcss_pics
+          - input/gwas/study/gcss_susie
+          - input/gwas/study/finngen
+          - input/molqtl/study/ukb_ppp_eur
+          - input/molqtl/study/sle_map
+          # GWAS PPP
+          - input/gwas/study/finngen_ukb_mvp
+          # molQTL PPP
+          - input/molqtl/study/eqtl_catalogue/r8
+          - input/molqtl/study/otar2077/microglia
+          - input/molqtl/study/eQTLGen/single_cell_eqtl
+          - input/molqtl/study/eQTLGen/coeqtl
+          - input/molqtl/study/deCODE_proteomics
+        target: output/target
+        disease: output/disease
+        biosample: output/biosample
+        heritability: input/heritability_estimate
+      destination:
+        output: output/study
+        excluded: excluded/study
+      transformer: study
+      settings:
+        invalid_qc_reasons:
+          - UNRESOLVED_TARGET
+          - UNRESOLVED_DISEASE
+          - UNKNOWN_STUDY_TYPE
+          - DUPLICATED_STUDY
+          - UNKNOWN_BIOSAMPLE
+          - FAILED_MEAN_BETA_CHECK
+          - FAILED_PZ_CHECK
+          - FAILED_GC_LAMBDA_CHECK
+          - NO_OT_CURATION
+          - CASE_CASE_STUDY_DESIGN
+          - DEPRECATED_PROJECT
+        deprecated_project_ids:
+          - GTEx
+
+  credible_set:
+    - name: transform validate credible set
+      source:
+        credible_set:
+          - input/gwas/credible_set/gcca
+          - input/gwas/credible_set/gcss_pics
+          - input/gwas/credible_set/gcss_susie
+          - input/gwas/credible_set/finngen
+          - input/molqtl/credible_set/ukb_ppp_eur
+          - input/molqtl/credible_set/sle_map
+          # GWAS PPP
+          - input/gwas/credible_set/finngen_ukb_mvp
+          # molQTL PPP
+          - input/molqtl/credible_set/eqtl_catalogue/r8
+          - input/molqtl/credible_set/otar2077/microglia
+          - input/molqtl/credible_set/eQTLGen/single_cell_eqtl
+          - input/molqtl/credible_set/eQTLGen/coeqtl
+          - input/molqtl/credible_set/deCODE_proteomics
+        study: output/study
+        target: output/target
+      destination:
+        output: output/credible_set
+        excluded: excluded/credible_set
+      transformer: credible_set
+      settings:
+        trans_qtl_threshold: 5000000
+        invalid_qc_reasons:
+          - DUPLICATED_STUDYLOCUS_ID
+          - AMBIGUOUS_STUDY
+          - MISSING_STUDY
+          - NO_GENOMIC_LOCATION_FLAG
+          - COMPOSITE_FLAG
+          - INCONSISTENCY_FLAG
+          - SUBSIGNIFICANT_FLAG
+          - LD_CLUMPED
+          - IN_MHC
+          - REDUNDANT_PICS_TOP_HIT
+          - EXPLAINED_BY_SUSIE
+          - WINDOW_CLUMPED
+          - NON_MAPPED_VARIANT_FLAG
+          - INVALID_VARIANT_IDENTIFIER
+          - INVALID_CHROMOSOME
+          - TOP_HIT_AND_SUMMARY_STATS
