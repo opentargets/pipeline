@@ -1,13 +1,7 @@
 """Tests for the polars port of OnToma's lookup-table builders, checked against OnToma's output on the same fixtures."""
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 import polars as pl
 import pytest
-from ontoma import spark_nlp_coordinate
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.ontoma_lut.build import (
@@ -18,7 +12,6 @@ from pts.transformers.ontoma_lut.build import (
     drug_label_lut,
     target_label_lut,
 )
-from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.disease_mapping import normalise as normalise_module
 from tests.ontoma_lut_fixtures import CURATION, DISEASE, DRUG, TARGET
 from tests.ontoma_lut_spark_rows import (
@@ -179,45 +172,6 @@ def test_lut_schema_and_order() -> None:
     assert build_lut([frame.clear() for frame in raw]).schema == ENTITY_LUT
 
 
-_SPARK_NLP_JAR_NAME = spark_nlp_coordinate().replace(':', '_', 1).replace(':', '-') + '.jar'
-_SPARK_NLP_JAR_GLOB = f'.ivy2*/jars/{_SPARK_NLP_JAR_NAME}'
-_SPARK_NLP_JARS = list(Path.home().glob(_SPARK_NLP_JAR_GLOB))
-
-# OnToma's constructor needs spark-nlp in the driver JVM, which the shared test session has not loaded.
-_ONTOMA = """
-import sys
-import traceback
-from pathlib import Path
-
-import pyspark.sql.functions as f
-from ontoma import OnToma, spark_nlp_coordinate
-from pyspark.sql import SparkSession
-
-root = Path(sys.argv[1])
-spark = (
-    SparkSession.builder.master('local[1]')
-    .config('spark.jars.packages', spark_nlp_coordinate())
-    .config('spark.sql.shuffle.partitions', '1')
-    .getOrCreate()
-)
-try:
-    loaded = OnToma(spark, cache_dir=str(root / 'polars_lut'))
-    query = spark.createDataFrame([('Cystic fibrosis',), (' Mucoviscidosis ',)], 'label string')
-    loaded.map_entities(query, 'mapped', 'label', 'label', type_col=f.lit('DS')).write.parquet(str(root / 'mapped'))
-except Exception:
-    (root / 'load_error.txt').write_text(traceback.format_exc())
-"""
-
-
-@pytest.fixture(scope='module')
-def ontoma(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    root = tmp_path_factory.mktemp('ontoma')
-    write_dataset(build_lut(_raw_luts()), str(root / 'polars_lut'))
-    env = {**os.environ, 'PYSPARK_PYTHON': sys.executable}
-    subprocess.run([sys.executable, '-c', _ONTOMA, str(root)], check=True, env=env)
-    return root
-
-
 def _raw_luts() -> list[pl.DataFrame]:
     return [
         disease_label_lut(DISEASE),
@@ -228,19 +182,6 @@ def _raw_luts() -> list[pl.DataFrame]:
     ]
 
 
-needs_spark_nlp = pytest.mark.skipif(
-    not _SPARK_NLP_JARS, reason=f'spark-nlp is not in the ivy cache: no ~/{_SPARK_NLP_JAR_GLOB}'
-)
-
-
 def test_build_lut_matches_ontoma() -> None:
     assert len(LUT) > 50
     assert build_lut(_raw_luts()).rows() == LUT
-
-
-@pytest.mark.slow
-@needs_spark_nlp
-def test_ontoma_loads_polars_lut(ontoma: Path) -> None:
-    assert not (ontoma / 'load_error.txt').exists(), (ontoma / 'load_error.txt').read_text()
-    mapped = pl.read_parquet(ontoma / 'mapped' / '*.parquet').sort('label')
-    assert mapped.rows() == [(' Mucoviscidosis ', ['MONDO_0000001']), ('Cystic fibrosis', ['MONDO_0000001'])]

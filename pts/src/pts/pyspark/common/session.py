@@ -4,7 +4,6 @@ import os
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from ontoma import spark_nlp_coordinate
 from pyspark.conf import SparkConf
 from pyspark.sql import SparkSession
 
@@ -62,9 +61,6 @@ class Session:
                     'https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/4.0.4/'
                     'gcs-connector-4.0.4-shaded.jar'
                 ),
-                # spark-nlp, for literature_publication_match; on Dataproc the clusters load the
-                # staged fat jar instead
-                'spark.jars.packages': spark_nlp_coordinate(),
                 'spark.sql.adaptive.enabled': 'true',
                 'spark.sql.adaptive.coalescePartitions.enabled': 'true',
                 'spark.serializer': 'org.apache.spark.serializer.KryoSerializer',

@@ -47,14 +47,7 @@ def pts_session():
 
     Scope: session -> start once per test run, stop at the end.
     """
-    # Use small resources in CI if desired:
-    props = {
-        # no test runs OnToma, so skip resolving spark-nlp and its ~600 MB of
-        # dependencies from Maven Central
-        'spark.jars.packages': '',
-    }
-
-    s = Session(app_name='pts-test', properties=props)
+    s = Session(app_name='pts-test')
     try:
         yield s
     finally:
