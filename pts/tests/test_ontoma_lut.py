@@ -200,6 +200,8 @@ DRUG = pl.DataFrame(
                 *_sourced('AACT', 'kalydeco', 'VX-770', 'Ivacaftor COMPONENT OF  Trikafta ;- '),
                 *_sourced('other', 'ignored synonym'),
                 *_sourced(None, 'null source synonym'),
+                *_sourced('ChEMBL', 'a component of b\r\n', 'a component of c\r', 'A COMPONENT OF e\u0085'),
+                *_sourced('ChEMBL', 'a \u212aomponent of d', 'a component of \u017f x'),
                 None,
             ],
             [

@@ -42,15 +42,15 @@ IRRELEVANT_CROSSREF_PREFIXES = (
     'QUANT',
     'UM-BBD_PATHWAYID',
 )
-#: (column, entityScore, entitySource, nlpPipelineTrack) of each target label `OpenTargetsTarget.as_label_lut` reads.
+#: (column, struct field, entityScore, entitySource, nlpPipelineTrack) of each `OpenTargetsTarget.as_label_lut` label.
 TARGET_LABELS = (
-    ('approvedName', 1.0, 'approved_name', 'term'),
-    ('approvedSymbol', 1.0, 'approved_symbol', 'symbol'),
-    ('nameSynonyms', 0.999, 'name_synonym', 'term'),
-    ('symbolSynonyms', 0.999, 'symbol_synonym', 'symbol'),
-    ('proteinIds', 0.999, 'protein_id', 'symbol'),
-    ('obsoleteNames', 0.998, 'obsolete_name', 'term'),
-    ('obsoleteSymbols', 0.998, 'obsolete_symbol', 'symbol'),
+    ('approvedName', None, 1.0, 'approved_name', 'term'),
+    ('approvedSymbol', None, 1.0, 'approved_symbol', 'symbol'),
+    ('nameSynonyms', 'label', 0.999, 'name_synonym', 'term'),
+    ('symbolSynonyms', 'label', 0.999, 'symbol_synonym', 'symbol'),
+    ('proteinIds', 'id', 0.999, 'protein_id', 'symbol'),
+    ('obsoleteNames', 'label', 0.998, 'obsolete_name', 'term'),
+    ('obsoleteSymbols', 'label', 0.998, 'obsolete_symbol', 'symbol'),
 )
 #: (column, entityScore, entitySource) of each drug label `OpenTargetsDrug.as_label_lut` reads, all on the symbol track.
 DRUG_LABELS = (
@@ -169,13 +169,11 @@ def curation_label_lut(curation: pl.DataFrame, source: str, disease: pl.DataFram
 def target_label_lut(target: pl.DataFrame) -> pl.DataFrame:
     """`OpenTargetsTarget.as_label_lut`: target names, symbols, synonyms and protein ids, each in both translations."""
     labels = target.with_columns(
-        pl.col(column).list.eval(pl.element().struct.field('id' if column == 'proteinIds' else 'label'))
-        for column, *_ in TARGET_LABELS
-        if isinstance(target.schema[column], pl.List)
+        pl.col(column).list.eval(pl.element().struct.field(field)) for column, field, *_ in TARGET_LABELS if field
     )
     entities = pl.concat(
         _entities(labels, ((column, score, source),)).with_columns(nlpPipelineTrack=pl.lit(track))
-        for column, score, source, track in TARGET_LABELS
+        for column, _, score, source, track in TARGET_LABELS
     )
     return _label_lut(entities, 'GP')
 
