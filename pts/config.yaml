@@ -79,7 +79,7 @@ steps:
           - input/molqtl/study/otar2077/IBDverse
           - input/molqtl/study/GTEx_v10
           - input/molqtl/study/ukb_ppp_eur
-        target: intermediate/target/ensembl/homo_sapiens.parquet
+        target: output/target
         disease: output/disease
         biosample: output/biosample
         heritability: input/heritability_estimate
