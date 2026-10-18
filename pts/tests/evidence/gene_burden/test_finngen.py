@@ -10,13 +10,13 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import process_finngen_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.finngen import parse_finngen
 from pts.transformers.utils.spark_math import strict_pow
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
 COLUMNS = ['PHENO', 'CHROM', 'GENPOS', 'ID', 'ALLELE0', 'ALLELE1', 'A1FREQ', 'N', 'TEST', 'BETA', 'SE', 'CHISQ']
@@ -59,16 +59,6 @@ def _write(tmp: Path, lines: list[dict[str, str]], manifest: list[dict[str, Any]
 
 def _parse(tmp: Path, lines: list[dict[str, str]], manifest: list[dict[str, Any]] | None = None) -> pl.DataFrame:
     return parse_finngen(*_write(tmp, lines, manifest), release='R12').collect()
-
-
-def _logged(run: Any) -> tuple[Any, str]:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        result = run()
-    finally:
-        logger.remove(sink)
-    return result, ''.join(messages)
 
 
 def test_output_has_the_parsed_schema(tmp_path: Path) -> None:
@@ -134,7 +124,7 @@ def test_duplicated_phenocode_multiplies_rows(tmp_path: Path) -> None:
 
 
 def test_underflow_gives_a_zero_score_and_null_exponent(tmp_path: Path) -> None:
-    rows, log = _logged(lambda: _parse(tmp_path, [_line(LOG10P='400'), _line(ID='GENE2.m', LOG10P='323.31')]))
+    rows, log = logged(lambda: _parse(tmp_path, [_line(LOG10P='400'), _line(ID='GENE2.m', LOG10P='323.31')]))
     underflow, subnormal = rows.sort('targetFromSourceId').rows(named=True)
     assert (underflow['resourceScore'], underflow['pValueMantissa'], underflow['pValueExponent']) == (0.0, None, None)
     assert subnormal['resourceScore'] == strict_pow(10.0, -323.31) > 0.0

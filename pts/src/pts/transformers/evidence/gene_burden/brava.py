@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, to_parsed
+from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, lookup, to_parsed
 from pts.transformers.utils.dataset import read_spreadsheet
 from pts.transformers.utils.spark_casts import cast_double, to_int
 from pts.transformers.utils.spark_frames import spark_distinct
@@ -47,10 +47,6 @@ ANCESTRY_IDS = {
 
 _CAUCHY_PVALUE = 'Min P-value of significant Cauchy associations'
 _KEYS = ['Phenotype ID', 'Ancestry Group']
-
-
-def _lookup(expr: pl.Expr, mapping: dict[str, str]) -> pl.Expr:
-    return expr.replace_strict(mapping, default=None, return_dtype=pl.String)
 
 
 def _spark_sum(column: str) -> pl.Expr:
@@ -105,14 +101,14 @@ def _granular(sheet: pl.DataFrame) -> pl.DataFrame:
         betaConfidenceIntervalLower=beta - pl.col('SE Burden'),
         betaConfidenceIntervalUpper=beta + pl.col('SE Burden'),
         statisticalMethod=pl.concat_str(
-            'class', _lookup(pl.col('Mask'), MASK_ABBREVIATIONS), 'max MAF', group, separator='.', ignore_nulls=True
+            'class', lookup(pl.col('Mask'), MASK_ABBREVIATIONS), 'max MAF', group, separator='.', ignore_nulls=True
         ),
         statisticalMethodOverview=pl.concat_str(
             'class',
             pl.lit(' test carried out with '),
-            _lookup(pl.col('Mask'), MASK_DESCRIPTIONS),
+            lookup(pl.col('Mask'), MASK_DESCRIPTIONS),
             pl.lit(' '),
-            _lookup(pl.col('max MAF'), MAF_DESCRIPTIONS),
+            lookup(pl.col('max MAF'), MAF_DESCRIPTIONS),
             pl.lit(', meta-analyzed across BRaVa biobanks.'),
         ),
     )
@@ -153,7 +149,7 @@ def parse_brava(path: str) -> pl.LazyFrame:
         name: read_spreadsheet(path, f'Table {name}', infer_types=False)
         for name in ('S4', 'S5', 'S12', 'S13', 'S14', 'S15')
     }
-    lookup = _sample_size_lookup(sheets['S4'], sheets['S5']).drop_nulls(_KEYS)
+    sample_sizes = _sample_size_lookup(sheets['S4'], sheets['S5']).drop_nulls(_KEYS)
     associations = pl.concat(
         [_granular(sheets['S14']), _granular(sheets['S15']), _cauchy(sheets['S12']), _cauchy(sheets['S13'])],
         how='diagonal',
@@ -171,8 +167,8 @@ def parse_brava(path: str) -> pl.LazyFrame:
             literature=pl.lit(['42238450']),
             targetFromSourceId=pl.col('Gene ID'),
             diseaseFromSource=pl.col('Description'),
-            ancestry=_lookup(group, ANCESTRY_LABELS),
-            ancestryId=_lookup(group, ANCESTRY_IDS),
+            ancestry=lookup(group, ANCESTRY_LABELS),
+            ancestryId=lookup(group, ANCESTRY_IDS),
             resourceScore=score,
             pValueExponent=pvalue_exponent(score),
             pValueMantissa=pvalue_mantissa(score),
@@ -182,7 +178,7 @@ def parse_brava(path: str) -> pl.LazyFrame:
             statisticalMethod=pl.col('statisticalMethod'),
             statisticalMethodOverview=pl.col('statisticalMethodOverview'),
         )
-        .join(lookup, on=_KEYS, how='left', validate='m:1', maintain_order='left')
+        .join(sample_sizes, on=_KEYS, how='left', validate='m:1', maintain_order='left')
         .pipe(to_parsed)
         .pipe(spark_distinct)
         .lazy()

@@ -8,13 +8,13 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import _excel_sheet_to_spark, process_genes_and_health_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.genes_and_health import parse_genes_and_health
 from pts.transformers.utils.spark_math import spark_exp, strict_pow
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 from tests.evidence.gene_burden.workbook import write_workbook
 
@@ -100,16 +100,6 @@ def _write(tmp: Path, st9: Rows, st13: Rows, st15: Rows) -> str:
 
 def _parse(tmp: Path, st9: Rows, st13: Rows, st15: Rows) -> pl.DataFrame:
     return parse_genes_and_health(_write(tmp, st9, st13, st15)).collect()
-
-
-def _logged(run: Any) -> tuple[Any, str]:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        result = run()
-    finally:
-        logger.remove(sink)
-    return result, ''.join(messages)
 
 
 def _exp(value: float) -> float:
@@ -225,7 +215,7 @@ def test_qt_truthiness(tmp_path: Path, qt: Any, quantitative: bool) -> None:
 
 
 def test_infinite_log10p_takes_the_minimum_over_every_sheet(tmp_path: Path) -> None:
-    rows, log = _logged(
+    rows, log = logged(
         lambda: _parse(
             tmp_path,
             [_st9(LOG10P=9.5)],
@@ -322,6 +312,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         [
             _st9(),
             _st9(),
+            {},
             _st9(**{'Gene ID': 'ENSG10', 'BETA': 2.1, 'QT': 1.0, 'LOG10P': 23.6442024}),
             _st9(**{'Gene ID': 'ENSG11', 'TEST': 'ADD-SKATO', 'Variant Mask': 'B', 'Freq': 0.001, 'BETA': 'NAN'}),
             _st9(**{'Gene ID': 'ENSG12', 'TEST': None, 'Freq': 'Singleton', 'N': '44000.0', 'QT': 'TRUE'}),
@@ -330,11 +321,13 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         ],
         [
             _st13(),
+            {},
             _st13(**{'Gene ID': 'ENSG20', 'QT': False, 'LOG10P': 'Infinity', 'Mask': None, 'BETA': 1.25}),
             _st13(**{'Gene ID': 'ENSG21', 'N UKB': '400000.0', 'Freq': 0.01, 'Variant Mask': 'D', 'LOG10P': 7.3}),
         ],
         [
             _st15(),
+            {},
             _st15(**{'Gene ID': 'ENSG30', 'Significant REC P-value': 'Suggestive'}),
             _st15(**{'Gene ID': 'ENSG31', 'Variant consequence': 'synonymous'}),
             _st15(**{'Gene ID': 'ENSG32', 'QT': True, 'Number of Cases': 'na', 'Recessive log(OR)': 0.75}),
@@ -353,5 +346,5 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     absent = ['releaseVersion', 'urls', 'sex']
     assert set(new.columns) - set(columns) == set(absent)
     assert new.select(absent).null_count().row(0) == (new.height,) * len(absent)
-    assert len(old_rows) == 12
+    assert len(old_rows) == 14
     assert multiset(new.rows(named=True), columns) == multiset(old_rows, columns)

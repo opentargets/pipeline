@@ -7,12 +7,12 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import process_az_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED, GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import AZ_METHOD_DESCRIPTIONS, parse_az
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
 BINARY_COLUMNS = [
@@ -101,16 +101,6 @@ def _parse(tmp: Path, *args: Any, **kwargs: Any) -> pl.DataFrame:
     return parse_az(*_inputs(tmp, *args, **kwargs)).collect()
 
 
-def _logged(run: Any) -> tuple[Any, str]:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        result = run()
-    finally:
-        logger.remove(sink)
-    return result, ''.join(messages)
-
-
 def test_parsed_schema_is_the_union_with_the_curated_id_in_place_of_the_mapped_id() -> None:
     assert list(GENE_BURDEN_PARSED.dtypes()) == list(GENE_BURDEN_UNION.dtypes())
     assert [n for n in GENE_BURDEN_PARSED if n not in GENE_BURDEN_UNION] == ['curatedDiseaseFromSourceMappedId']
@@ -184,7 +174,7 @@ def test_raw_mantissa_at_a_power_of_ten(tmp_path: Path) -> None:
 
 
 def test_zero_pvalue_takes_the_smallest_positive_pvalue(tmp_path: Path) -> None:
-    rows, log = _logged(
+    rows, log = logged(
         lambda: _parse(
             tmp_path,
             [_binary(pValue='0'), _binary(Gene='ENSG3', pValue='3e-9'), _binary(Gene='ENSG4', pValue='1e-12')],
@@ -237,7 +227,7 @@ def test_release_version_empty_without_a_match(tmp_path: Path) -> None:
 
 
 def test_missing_phenotype_link_gives_null_urls(tmp_path: Path) -> None:
-    rows, log = _logged(
+    rows, log = logged(
         lambda: _parse(
             tmp_path,
             [_binary(), _binary(Phenotype='Unlinked'), _binary(Phenotype='Empty link')],

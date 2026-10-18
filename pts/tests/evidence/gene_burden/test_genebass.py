@@ -8,12 +8,12 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import process_genebass_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.genebass import parse_genebass
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
 SCHEMA = {
@@ -63,16 +63,6 @@ def _write(tmp: Path, *files: list[dict[str, Any]]) -> str:
 
 def _parse(tmp: Path, *files: list[dict[str, Any]]) -> pl.DataFrame:
     return parse_genebass(_write(tmp, *files)).collect()
-
-
-def _logged(run: Any) -> tuple[Any, str]:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        result = run()
-    finally:
-        logger.remove(sink)
-    return result, ''.join(messages)
 
 
 def test_output_has_the_parsed_schema(tmp_path: Path) -> None:
@@ -148,7 +138,7 @@ def test_trait_type_filter(tmp_path: Path, trait_type: str | None, kept: bool) -
 
 def test_zero_pvalue_minimum_is_over_the_whole_input(tmp_path: Path) -> None:
     # the minimum comes from a categorical row in another file, dropped afterwards
-    rows, log = _logged(
+    rows, log = logged(
         lambda: _parse(
             tmp_path,
             [_row(Pvalue_Burden=0.0), _row(gene_id='ENSG2', Pvalue_Burden=1e-10)],

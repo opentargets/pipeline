@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, to_parsed
+from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, lookup, to_parsed
 from pts.transformers.utils.dataset import read_spreadsheet
 from pts.transformers.utils.spark_casts import cast_double, to_int
 from pts.transformers.utils.spark_frames import spark_distinct
@@ -39,10 +39,6 @@ GNH_MAF_DESC = {
 _SOUTH_ASIAN = ('Pakistani and Bangladeshi', 'HANCESTRO_0006')
 
 
-def _lookup(expr: pl.Expr, mapping: dict[str, str]) -> pl.Expr:
-    return expr.replace_strict(mapping, default=None, return_dtype=pl.String)
-
-
 def _is_quantitative() -> pl.Expr:
     return pl.col('QT').str.to_lowercase().is_in(['true', '1', '1.0']).fill_null(value=False)
 
@@ -51,9 +47,9 @@ def _method_overview(test: pl.Expr, suffix: str) -> pl.Expr:
     return pl.concat_str(
         test,
         pl.lit(' test carried out with '),
-        _lookup(pl.col('Variant Mask'), GNH_VARIANT_MASK_DESC),
+        lookup(pl.col('Variant Mask'), GNH_VARIANT_MASK_DESC),
         pl.lit(' '),
-        _lookup(pl.col('Freq').str.to_lowercase(), GNH_MAF_DESC),
+        lookup(pl.col('Freq').str.to_lowercase(), GNH_MAF_DESC),
         pl.lit(suffix),
     )
 
@@ -82,7 +78,7 @@ def _additive(st9: pl.DataFrame) -> pl.DataFrame:
         studyCases=pl.lit(None, dtype=pl.Int32),
         studyCasesWithQualifyingVariants=pl.lit(None, dtype=pl.Int32),
         statisticalMethod=pl.concat_str('TEST', 'Mask', separator='_', ignore_nulls=True),
-        statisticalMethodOverview=_method_overview(_lookup(pl.col('TEST'), GNH_TEST_DESC), '.'),
+        statisticalMethodOverview=_method_overview(lookup(pl.col('TEST'), GNH_TEST_DESC), '.'),
     )
 
 

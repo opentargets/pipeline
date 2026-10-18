@@ -12,6 +12,11 @@ DATASOURCE_ID = 'gene_burden'
 DATATYPE_ID = 'genetic_association'
 
 
+def lookup(expr: pl.Expr, mapping: dict[str, str]) -> pl.Expr:
+    """Spark's `create_map(...)[expr]`: the mapped value, null for a missing or null key."""
+    return expr.replace_strict(mapping, default=None, return_dtype=pl.String)
+
+
 @overload
 def to_parsed(frame: pl.DataFrame) -> pl.DataFrame: ...
 @overload

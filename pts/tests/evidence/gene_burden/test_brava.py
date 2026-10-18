@@ -9,12 +9,12 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import _excel_sheet_to_spark, process_brava_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.brava import parse_brava
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 from tests.evidence.gene_burden.workbook import write_workbook
 
@@ -100,16 +100,6 @@ def _write(
 
 def _parse(tmp: Path, **sheets: Sheet) -> pl.DataFrame:
     return parse_brava(_write(tmp, **sheets)).collect()
-
-
-def _logged(run: Any) -> tuple[Any, str]:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        result = run()
-    finally:
-        logger.remove(sink)
-    return result, ''.join(messages)
 
 
 def _sizes(rows: pl.DataFrame) -> dict[tuple[str, str], tuple[int | None, int | None]]:
@@ -234,7 +224,7 @@ def test_rows_without_a_phenotype_never_join(tmp_path: Path) -> None:
 
 
 def test_zero_pvalues_take_the_minimum_of_their_own_sheet(tmp_path: Path) -> None:
-    rows, log = _logged(
+    rows, log = logged(
         lambda: _parse(
             tmp_path,
             s14=[_granular(Pvalue=0.0), _granular(**{'Gene ID': 'ENSG4', 'Pvalue': 3e-9})],
@@ -308,6 +298,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         s14=[
             _granular(**{'Phenotype ID': 'Height', 'Description': 'Height', 'Pvalue': 0.0}),
             _granular(**{'Phenotype ID': 'Height', 'Gene ID': 'ENSG3', 'Pvalue': 1e-8, 'meta analyzed': 'ALL'}),
+            {},
             _granular(**{
                 'Phenotype ID': 'Height',
                 'Gene ID': 'ENSG4',
@@ -328,6 +319,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         ],
         s12=[
             _cauchy(),
+            {},
             _cauchy(**{'Gene ID': 'ENSG9', GROUP: 'EUR', PVALUE: 0.0}),
         ],
         s13=[
@@ -337,6 +329,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         s4=[
             *S4_ROWS,
             S4_ROWS[0],
+            {},
             {'Phenotype ID': 'T2Diab', 'Ancestry': 'SAS', 'Biobank': 'x', 'N cases': 'na', 'N controls': '7.0'},
         ],
     )
@@ -362,5 +355,5 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     ]
     assert set(new.columns) - set(columns) == set(absent)
     assert new.select(absent).null_count().row(0) == (new.height,) * len(absent)
-    assert len(old_rows) == 12
+    assert len(old_rows) == 14
     assert multiset(new.rows(named=True), columns) == multiset(old_rows, columns)
