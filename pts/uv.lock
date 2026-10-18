@@ -2107,7 +2107,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.12.0rc14"
+version = "26.12.0rc15"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
