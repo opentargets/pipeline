@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import pyspark.sql.functions as f
 from loguru import logger
 
-from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
@@ -16,9 +15,6 @@ from pts.pyspark.literature_utils.label_mapping import MAPPED_LABELS_DDL, map_la
 
 if TYPE_CHECKING:
     from pyspark.sql.types import StructType
-
-#: Partitions for the distinct labels sent to the polars mapping, one task each.
-LABEL_MAPPING_PARTITIONS = 768
 
 
 @dataclass
@@ -39,30 +35,35 @@ class Match(Dataset):
 
     def map_labels(
         self: Match,
-        session: Session,
         label_lut_path: str,
         label_col_name: str,
-        type_col_name: str
+        type_col_name: str,
+        label_mapping_partitions: int | None = None,
     ) -> MatchMapped:
         """Maps labels using the provided label lookup table.
 
         If there are multiple mappings, the results are exploded accordingly.
 
         Args:
-            session (Session): Spark Session object; unused, kept for the signature.
             label_lut_path (str): Path to the label lookup table.
             label_col_name (str): Name of the column containing the label.
             type_col_name (str): Name of the column containing the label type.
+            label_mapping_partitions (int | None): Partitions, one task each, for the distinct labels sent to
+                the mapping; no repartition when unset.
 
         Returns:
             MatchMapped: Dataset with mapped labels.
         """
         logger.info(f'map labels with the lookup table at {label_lut_path}')
-        mapped_labels = (
+        distinct_labels = (
             self.df
             .select(f.col(label_col_name).alias('label'), f.col(type_col_name).alias('type'))
             .distinct()
-            .repartition(LABEL_MAPPING_PARTITIONS)
+        )
+        if label_mapping_partitions:
+            distinct_labels = distinct_labels.repartition(label_mapping_partitions)
+        mapped_labels = (
+            distinct_labels
             .mapInArrow(map_label_batches(label_lut_path), MAPPED_LABELS_DDL)
             .alias('mapped')
         )

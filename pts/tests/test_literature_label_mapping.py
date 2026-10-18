@@ -2,7 +2,6 @@
 
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -50,10 +49,10 @@ def _sorted(rows: list[tuple]) -> list[tuple]:
     return sorted(rows, key=lambda row: [(value is not None, repr(value)) for value in row])
 
 
-def _map_labels(spark, rows: list[dict], lut_path: str) -> MatchMapped:
+def _map_labels(spark, rows: list[dict], lut_path: str, **kwargs) -> MatchMapped:
     df = spark.createDataFrame(rows, Match.get_schema())
     return Match(_df=df, _schema=Match.get_schema()).map_labels(
-        session=SimpleNamespace(spark=spark), label_lut_path=lut_path, label_col_name='label', type_col_name='type'
+        label_lut_path=lut_path, label_col_name='label', type_col_name='type', **kwargs
     )
 
 
@@ -99,6 +98,11 @@ def test_map_labels_matches_ontoma(spark, lut_path: str) -> None:
     assert ends == {(label, start, start + len(label or '')) for _, _, label, _, start, *_ in MAPPED}
     constants = mapped.df.select(*CONSTANTS).distinct().collect()
     assert [row.asDict() for row in constants] == [CONSTANTS]
+
+
+def test_map_labels_with_label_mapping_partitions(spark, lut_path: str) -> None:
+    mapped = _map_labels(spark, match_rows(), lut_path, label_mapping_partitions=4)
+    assert _sorted(_mapped_rows(mapped)) == _sorted(MAPPED)
 
 
 def test_map_labels_schema(spark, lut_path: str) -> None:
