@@ -74,7 +74,7 @@ def _flag(condition: pl.Expr, flag: EvidenceFlags) -> pl.Expr:
 def _harmonise_expr(expr: pl.Expr, source_dtype: Any, target_dtype: Any) -> pl.Expr:
     """Cast one column/field expression from `source_dtype` to `target_dtype`.
 
-    Mirrors `pts.pyspark.common.cast_to_schema.cast_column_to_target_type`: a `List(Struct)` is
+    Mirrors the removed pyspark `cast_column_to_target_type`: a `List(Struct)` is
     recast element-by-element, a `Struct` is rebuilt in the target's field order (a field the
     target has but the source lacks becomes null, a field the source has but the target lacks is
     dropped), and anything else is a plain non-strict cast -- spark's cast yields null on an
@@ -143,7 +143,7 @@ def _join_matching_spark_order(lf: pl.LazyFrame, other: pl.LazyFrame, on: str, h
 
 
 def _require_id_column(schema_names: list[str], method_name: str) -> None:
-    """Raise clearly if `id` is missing, mirroring pyspark's `@required_columns(['id'])`.
+    """Raise clearly if `id` is missing, mirroring the removed pyspark `@required_columns(['id'])`.
 
     Neither `validate_uniqueness` nor `resolve_publication_date` ported that decorator; without
     this, a missing `id` leaked a raw, unhelpful `ColumnNotFoundError` from deep inside the
