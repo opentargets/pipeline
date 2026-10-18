@@ -46,7 +46,7 @@ class Match(Dataset):
         If there are multiple mappings, the results are exploded accordingly.
 
         Args:
-            session (Session): Spark Session object.
+            session (Session): Spark Session object; unused, kept for the signature.
             label_lut_path (str): Path to the label lookup table.
             label_col_name (str): Name of the column containing the label.
             type_col_name (str): Name of the column containing the label type.
@@ -64,6 +64,7 @@ class Match(Dataset):
         )
         mapped_matches = (
             self.df
+            .distinct()
             .alias('match')
             .join(
                 mapped_labels,
@@ -74,7 +75,6 @@ class Match(Dataset):
                 how='inner',
             )
             .select('match.*', 'mapped.entityLabelNormalised', 'mapped.entityIds')
-            .distinct()
         )
 
         logger.info('explode results')

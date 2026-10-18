@@ -32,6 +32,8 @@ def spark():
         .config('spark.sql.shuffle.partitions', '1')
         # as Session and the pts clusters do: Spark 4 defaults ANSI mode on
         .config('spark.sql.ansi.enabled', 'false')
+        # as the literature_publication_match step does
+        .config('spark.executorEnv.POLARS_MAX_THREADS', '1')
         .getOrCreate()
     )
     spark_session.sparkContext.setLogLevel('ERROR')

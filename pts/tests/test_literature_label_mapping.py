@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from pyspark.errors import PythonException
 
 from pts.pyspark.literature_utils.dataset.match import Match
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
@@ -182,7 +183,7 @@ def test_unreadable_lut_fails(spark, tmp_path: Path, kind: str, error: str) -> N
     if kind == 'empty':
         path.mkdir()
     mapped = _map_labels(spark, match_rows()[:3], str(path))
-    with pytest.raises(Exception, match=error):
+    with pytest.raises(PythonException, match=error):
         mapped.df.collect()
 
 
