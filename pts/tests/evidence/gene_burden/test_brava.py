@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,36 +13,16 @@ from pyspark.sql import SparkSession
 from pts.pyspark.gene_burden import _excel_sheet_to_spark, process_brava_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.brava import parse_brava
+from tests.evidence.gene_burden.fixtures import (
+    GROUP,
+    PVALUE,
+    S4_ROWS,
+    S5_ROWS,
+    Sheet,
+    write_brava,
+)
 from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
-from tests.evidence.gene_burden.workbook import write_workbook
-
-S4_COLUMNS = ['Phenotype ID', 'Ancestry', 'Biobank', 'N cases', 'N controls']
-S5_COLUMNS = ['Phenotype ID', 'Ancestry', 'Biobank', 'N']
-GRANULAR_COLUMNS = [
-    'Gene', 'Gene ID', 'Description', 'Phenotype ID', 'meta analyzed', 'class', 'Mask', 'max MAF', 'Pvalue',
-    'BETA Burden', 'SE Burden',
-]  # fmt: skip
-GROUP = 'Cauchy combination with minimum P-value'
-PVALUE = 'Min P-value of significant Cauchy associations'
-CAUCHY_COLUMNS = ['Gene', 'Gene ID', 'Description', 'Phenotype ID', GROUP, PVALUE]
-
-Sheet = Sequence[dict[str, Any]]
-
-# Binary contributions: two biobanks for EUR, one each for AFR and MID.
-S4_ROWS = [
-    {'Phenotype ID': 'T2Diab', 'Ancestry': 'EUR', 'Biobank': 'uk-biobank', 'N cases': 100, 'N controls': 900},
-    {'Phenotype ID': 'T2Diab', 'Ancestry': 'EUR', 'Biobank': 'all-of-us', 'N cases': 200, 'N controls': 800},
-    {'Phenotype ID': 'T2Diab', 'Ancestry': 'AFR', 'Biobank': 'all-of-us', 'N cases': 30, 'N controls': 70},
-    {'Phenotype ID': 'T2Diab', 'Ancestry': 'MID', 'Biobank': 'ccpm', 'N cases': 5, 'N controls': 15},
-]
-# Quantitative contributions: 'all-of-us' is listed twice, identically, as Table S5 does.
-S5_ROWS = [
-    {'Phenotype ID': 'Height', 'Ancestry': 'EUR', 'Biobank': 'uk-biobank', 'N': 5000},
-    {'Phenotype ID': 'Height', 'Ancestry': 'EUR', 'Biobank': 'all-of-us', 'N': 1000},
-    {'Phenotype ID': 'Height', 'Ancestry': 'EUR', 'Biobank': 'all-of-us', 'N': 1000},
-    {'Phenotype ID': 'Height', 'Ancestry': 'AFR', 'Biobank': 'all-of-us', 'N': 400},
-]
 
 
 def _granular(**fields: Any) -> dict[str, Any]:
@@ -75,31 +54,8 @@ def _cauchy(**fields: Any) -> dict[str, Any]:
     return row | fields
 
 
-def _write(
-    tmp: Path,
-    *,
-    s14: Sheet = (),
-    s15: Sheet = (),
-    s12: Sheet = (),
-    s13: Sheet = (),
-    s4: Sheet = S4_ROWS,
-    s5: Sheet = S5_ROWS,
-) -> str:
-    return write_workbook(
-        tmp / 'brava.xlsx',
-        {
-            'Table S4': (S4_COLUMNS, s4),
-            'Table S5': (S5_COLUMNS, s5),
-            'Table S12': (CAUCHY_COLUMNS, list(s12)),
-            'Table S13': (CAUCHY_COLUMNS, list(s13)),
-            'Table S14': (GRANULAR_COLUMNS, list(s14)),
-            'Table S15': (GRANULAR_COLUMNS, list(s15)),
-        },
-    )
-
-
 def _parse(tmp: Path, **sheets: Sheet) -> pl.DataFrame:
-    return parse_brava(_write(tmp, **sheets)).collect()
+    return parse_brava(write_brava(tmp, **sheets)).collect()
 
 
 def _sizes(rows: pl.DataFrame) -> dict[tuple[str, str], tuple[int | None, int | None]]:
@@ -293,7 +249,7 @@ def test_duplicates_are_dropped(tmp_path: Path) -> None:
 
 
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
-    path = _write(
+    path = write_brava(
         tmp_path,
         s14=[
             _granular(**{'Phenotype ID': 'Height', 'Description': 'Height', 'Pvalue': 0.0}),

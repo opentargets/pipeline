@@ -14,22 +14,9 @@ from pts.pyspark.gene_burden import _excel_sheet_to_spark, process_genes_and_hea
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.genes_and_health import parse_genes_and_health
 from pts.transformers.utils.spark_math import spark_exp, strict_pow
+from tests.evidence.gene_burden.fixtures import Rows, write_genes_and_health
 from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
-from tests.evidence.gene_burden.workbook import write_workbook
-
-ST9_COLUMNS = [
-    'Gene', 'Gene ID', 'Phenotype', 'EFO ID', 'QT', 'TEST', 'Mask', 'Variant Mask', 'Freq', 'N', 'BETA', 'SE',
-    'LOG10P',
-]  # fmt: skip
-ST13_COLUMNS = [
-    'Gene', 'Gene ID', 'Phenotype', 'EFO ID', 'QT', 'Mask', 'Variant Mask', 'Freq', 'N G&H', 'N UKB', 'BETA', 'SE',
-    'LOG10P',
-]  # fmt: skip
-ST15_COLUMNS = [
-    'Gene', 'Gene ID', 'Phenotype', 'EFO ID', 'QT', 'Variant consequence', 'Number for ExWAS', 'Number of Cases',
-    'Biallelic Carriers', 'Recessive log(OR)', 'Recessive p-value', 'Significant REC P-value',
-]  # fmt: skip
 
 
 def _st9(**fields: Any) -> dict[str, Any]:
@@ -88,18 +75,8 @@ def _st15(**fields: Any) -> dict[str, Any]:
     return row | fields
 
 
-Rows = list[dict[str, Any]]
-
-
-def _write(tmp: Path, st9: Rows, st13: Rows, st15: Rows) -> str:
-    return write_workbook(
-        tmp / 'genes_health.xlsx',
-        {'ST9': (ST9_COLUMNS, st9), 'ST13': (ST13_COLUMNS, st13), 'ST15': (ST15_COLUMNS, st15)},
-    )
-
-
 def _parse(tmp: Path, st9: Rows, st13: Rows, st15: Rows) -> pl.DataFrame:
-    return parse_genes_and_health(_write(tmp, st9, st13, st15)).collect()
+    return parse_genes_and_health(write_genes_and_health(tmp, st9, st13, st15)).collect()
 
 
 def _exp(value: float) -> float:
@@ -307,7 +284,7 @@ def test_duplicates_are_dropped(tmp_path: Path) -> None:
 
 
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
-    path = _write(
+    path = write_genes_and_health(
         tmp_path,
         [
             _st9(),

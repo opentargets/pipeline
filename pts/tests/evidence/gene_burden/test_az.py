@@ -12,19 +12,15 @@ from pyspark.sql import SparkSession
 from pts.pyspark.gene_burden import process_az_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED, GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import AZ_METHOD_DESCRIPTIONS, parse_az
+from tests.evidence.gene_burden.fixtures import (
+    BINARY_COLUMNS,
+    GENE_LINK,
+    QUANTITATIVE_COLUMNS,
+    write_az,
+)
 from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
-BINARY_COLUMNS = [
-    'Gene', 'Phenotype', 'CollapsingModel', 'Type', 'pValue', 'Category', 'nSamples', 'BinNcases', 'BinQVcases',
-    'BinNcontrols', 'BinQVcontrols', 'BinCaseFreq', 'BinCtrlFreq', 'BinOddsRatio', 'BinOddsRatioLCI',
-    'BinOddsRatioUCI',
-]  # fmt: skip
-QUANTITATIVE_COLUMNS = [
-    'Gene', 'Phenotype', 'CollapsingModel', 'Type', 'pValue', 'Category', 'nSamples', 'YesQV', 'NoQV',
-    'ConCaseMedian', 'ConCtrMedian', 'beta', 'ConBetaSe', 'LCI', 'UCI',
-]  # fmt: skip
-GENE_LINK = 'https://azphewas.com/geneView/{}/GENE/glr/binary'
 NICE_NAME = 'AstraZeneca PheWAS Portal'
 
 
@@ -65,40 +61,8 @@ def _quantitative(**fields: str) -> dict[str, str | None]:
     return {c: row.get(c) for c in QUANTITATIVE_COLUMNS}
 
 
-def _write_parquet(path: Path, rows: list[dict[str, str | None]], columns: list[str]) -> str:
-    path.mkdir(parents=True)
-    pl.DataFrame(rows, schema=dict.fromkeys(columns, pl.String)).write_parquet(path / 'part-00000.parquet')
-    return str(path)
-
-
-def _write_lines(path: Path, lines: list[str]) -> str:
-    path.write_text(''.join(f'{line}\n' for line in lines))
-    return str(path)
-
-
-def _inputs(
-    tmp: Path,
-    binary: list[dict[str, str | None]],
-    quantitative: list[dict[str, str | None]],
-    genes: list[str] | None = None,
-    phenotypes: list[str] | None = None,
-) -> tuple[str, str, str, str]:
-    genes = [f'ENSG1,{GENE_LINK.format("release-1")}'] if genes is None else genes
-    phenotypes = (
-        ['Disease A,https://azphewas.com/phenotypeView/a', 'Trait B,https://azphewas.com/phenotypeView/b']
-        if (phenotypes is None)
-        else phenotypes
-    )
-    return (
-        _write_parquet(tmp / 'binary', binary, BINARY_COLUMNS),
-        _write_parquet(tmp / 'quantitative', quantitative, QUANTITATIVE_COLUMNS),
-        _write_lines(tmp / 'genes.csv', genes),
-        _write_lines(tmp / 'phenotypes.csv', phenotypes),
-    )
-
-
 def _parse(tmp: Path, *args: Any, **kwargs: Any) -> pl.DataFrame:
-    return parse_az(*_inputs(tmp, *args, **kwargs)).collect()
+    return parse_az(*write_az(tmp, *args, **kwargs)).collect()
 
 
 def test_parsed_schema_is_the_union_with_the_curated_id_in_place_of_the_mapped_id() -> None:
@@ -293,7 +257,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         'Twice,https://a/2',
         ',https://null-name',
     ]
-    paths = _inputs(tmp_path, binary, quantitative, genes, phenotypes)
+    paths = write_az(tmp_path, binary, quantitative, genes, phenotypes)
 
     old = process_az_gene_burden(
         spark.read.option('mergeSchema', True).parquet(paths[0]),

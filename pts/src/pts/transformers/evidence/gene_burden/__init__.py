@@ -72,24 +72,35 @@ def parse_sub_sources(source: dict[str, str], settings: dict[str, Any]) -> list[
     ]
 
 
-def _counts_by_project(frame: pl.DataFrame, condition: pl.Expr) -> str:
-    counts = frame.filter(condition).group_by('projectId').len().sort('projectId', nulls_last=True)
-    return ', '.join(f'{project}: {n}' for project, n in counts.iter_rows())
+def _project_counts(frame: pl.DataFrame) -> dict[str | None, int]:
+    return dict(frame.group_by('projectId').len().iter_rows())
+
+
+def _format_counts(counts: dict[str | None, int]) -> str:
+    projects = sorted((p for p, n in counts.items() if n), key=lambda p: (p is None, p or ''))
+    return ', '.join(f'{project}: {counts[project]}' for project in projects)
 
 
 def assemble(parsed: list[pl.LazyFrame]) -> pl.DataFrame:
     """The distinct union of the sub-sources, every mantissa of 10 or more normalised.
 
-    The normalised rows are counted by `projectId` and logged.
+    The normalised rows, and those of them merged with an identical row by the distinct, are
+    counted by `projectId` and logged.
     """
     union = pl.concat(parsed, how='diagonal_relaxed').collect()
-    shifted = (pl.col('pValueMantissa') >= 10) & ~pl.col('pValueMantissa').is_nan()
+    shifted = union.filter((pl.col('pValueMantissa') >= 10) & ~pl.col('pValueMantissa').is_nan())
     logger.info(
-        f'{union.filter(shifted).height} p-value mantissas of 10 or more normalised, by project: '
-        f'{_counts_by_project(union, shifted)}'
+        f'{shifted.height} p-value mantissas of 10 or more normalised, by project: '
+        f'{_format_counts(_project_counts(shifted))}'
     )
     mantissa, exponent = normalise_mantissa(pl.col('pValueMantissa'), pl.col('pValueExponent'))
-    return spark_distinct(union.with_columns(mantissa.alias('pValueMantissa'), exponent.alias('pValueExponent')))
+    distinct = spark_distinct(union.with_columns(mantissa.alias('pValueMantissa'), exponent.alias('pValueExponent')))
+    before, after = _project_counts(spark_distinct(union)), _project_counts(distinct)
+    merged = {project: n - after.get(project, 0) for project, n in before.items()}
+    logger.info(
+        f'{sum(merged.values())} normalised rows merged with an identical row, by project: {_format_counts(merged)}'
+    )
+    return distinct
 
 
 def check_union(frame: pl.DataFrame) -> pl.DataFrame:
@@ -117,7 +128,7 @@ def map_diseases(union: pl.DataFrame, disease_label_lut: str, disease_id_lut: st
     overridden = mapped_id.is_not_null() & curated_id.is_not_null() & (mapped_id != curated_id)
     logger.info(
         f'{mapped.filter(overridden).height} source disease ids overridden by the mapping, by project: '
-        f'{_counts_by_project(mapped, overridden)}'
+        f'{_format_counts(_project_counts(mapped.filter(overridden)))}'
     )
     coalesced = mapped.with_columns(pl.coalesce(mapped_id, curated_id).alias(MAPPED_ID_COLUMN))
     return check_union(coalesced.drop(CURATED_ID_COLUMN))

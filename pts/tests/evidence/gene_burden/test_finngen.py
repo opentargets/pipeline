@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
-import json
 import math
 from pathlib import Path
 from typing import Any
@@ -16,15 +14,9 @@ from pts.pyspark.gene_burden import process_finngen_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.finngen import parse_finngen
 from pts.transformers.utils.spark_math import strict_pow
+from tests.evidence.gene_burden.fixtures import MANIFEST, write_finngen
 from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
-
-COLUMNS = ['PHENO', 'CHROM', 'GENPOS', 'ID', 'ALLELE0', 'ALLELE1', 'A1FREQ', 'N', 'TEST', 'BETA', 'SE', 'CHISQ']
-COLUMNS += ['LOG10P', 'EXTRA']
-MANIFEST = [
-    {'phenocode': 'T2D', 'phenostring': 'Type 2 diabetes', 'num_cases': 1000, 'hasRisteys': None},
-    {'phenocode': 'ASTHMA', 'phenostring': 'Asthma', 'num_cases': 2000, 'hasRisteys': True},
-]
 
 
 def _line(**fields: str) -> dict[str, str]:
@@ -48,17 +40,8 @@ def _line(**fields: str) -> dict[str, str]:
     return row
 
 
-def _write(tmp: Path, lines: list[dict[str, str]], manifest: list[dict[str, Any]] | None = None) -> tuple[str, str]:
-    text = '\t'.join(COLUMNS) + '\n' + ''.join('\t'.join(row[c] for c in COLUMNS) + '\n' for row in lines)
-    results = tmp / 'finngen.txt.gz'
-    results.write_bytes(gzip.compress(text.encode()))
-    phenos = tmp / 'phenos'
-    phenos.write_text(json.dumps(MANIFEST if manifest is None else manifest))
-    return str(results), str(phenos)
-
-
 def _parse(tmp: Path, lines: list[dict[str, str]], manifest: list[dict[str, Any]] | None = None) -> pl.DataFrame:
-    return parse_finngen(*_write(tmp, lines, manifest), release='R12').collect()
+    return parse_finngen(*write_finngen(tmp, lines, manifest), release='R12').collect()
 
 
 def test_output_has_the_parsed_schema(tmp_path: Path) -> None:
@@ -102,7 +85,7 @@ def test_columns(tmp_path: Path) -> None:
 
 
 def test_cohort_is_r12_whatever_the_release(tmp_path: Path) -> None:
-    row = parse_finngen(*_write(tmp_path, [_line()]), release='R13').collect().row(0, named=True)
+    row = parse_finngen(*write_finngen(tmp_path, [_line()]), release='R13').collect().row(0, named=True)
     assert (row['cohortId'], row['releaseVersion']) == ('FinnGen R12', 'R13')
 
 
@@ -185,7 +168,7 @@ def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
         _line(ID='GENE9.Mask1.0.01', LOG10P='4.123456789', PHENO='DUP'),
     ]
     manifest = [*MANIFEST, {'phenocode': 'DUP', 'phenostring': 'One'}, {'phenocode': 'DUP', 'phenostring': 'Two'}]
-    results, phenos = _write(tmp_path, lines, manifest)
+    results, phenos = write_finngen(tmp_path, lines, manifest)
 
     old = process_finngen_gene_burden(
         spark.read.csv(results, header=True, sep='\t', inferSchema=True), spark.read.json(phenos), 'R12'

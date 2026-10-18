@@ -25,15 +25,17 @@ from pts.transformers.evidence.gene_burden import (
 from pts.transformers.evidence.gene_burden.common import to_parsed
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
+from tests.evidence.gene_burden.fixtures import (
+    curated_line,
+    genebass_row,
+    write_az,
+    write_brava,
+    write_curated,
+    write_finngen,
+    write_genebass,
+    write_genes_and_health,
+)
 from tests.evidence.gene_burden.logs import logged
-from tests.evidence.gene_burden.test_az import _inputs as write_az
-from tests.evidence.gene_burden.test_brava import _write as write_brava
-from tests.evidence.gene_burden.test_curated import _line as curated_line
-from tests.evidence.gene_burden.test_curated import _write as write_curated
-from tests.evidence.gene_burden.test_finngen import _write as write_finngen
-from tests.evidence.gene_burden.test_genebass import _row as genebass_row
-from tests.evidence.gene_burden.test_genebass import _write as write_genebass
-from tests.evidence.gene_burden.test_genes_and_health import _write as write_genes_and_health
 
 # the old evidence_postprocess_gene_burden settings
 SPARK_SCORE = """
@@ -108,12 +110,29 @@ def test_mantissa_normalised_per_source_counted() -> None:
     assert 'REGENERON: 2' in log
 
 
-def test_normalised_rows_that_meet_are_one() -> None:
-    union = assemble([
-        _parsed({'pValueMantissa': 10.0, 'pValueExponent': -9}),
-        _parsed({'pValueMantissa': 1.0, 'pValueExponent': -8}),
-    ])
-    assert union.select('pValueMantissa', 'pValueExponent').rows() == [(1.0, -8)]
+def test_normalised_rows_that_meet_are_one_counted() -> None:
+    union, log = logged(
+        lambda: assemble([
+            _parsed(
+                {'projectId': 'REGENERON', 'pValueMantissa': 10.0, 'pValueExponent': -9},
+                {'projectId': 'REGENERON', 'pValueMantissa': 10.0, 'pValueExponent': -12},
+                {'projectId': 'Genebass', 'pValueMantissa': 10.0, 'pValueExponent': -9},
+                {'projectId': 'Genebass', 'pValueMantissa': 10.0, 'pValueExponent': -9},
+            ),
+            _parsed(
+                {'projectId': 'REGENERON', 'pValueMantissa': 1.0, 'pValueExponent': -8},
+                {'projectId': 'Genebass', 'pValueMantissa': 1.0, 'pValueExponent': -8},
+                {'projectId': 'AZ', 'pValueMantissa': 1.0, 'pValueExponent': -8},
+            ),
+        ])
+    )
+    assert union.select('projectId', 'pValueMantissa', 'pValueExponent').rows() == [
+        ('REGENERON', 1.0, -8),
+        ('REGENERON', 1.0, -11),
+        ('Genebass', 1.0, -8),
+        ('AZ', 1.0, -8),
+    ]
+    assert '2 normalised rows merged with an identical row, by project: Genebass: 1, REGENERON: 1' in log
 
 
 # disease mapping
@@ -316,6 +335,6 @@ def test_empty_sub_source_writes_outputs(tmp_path: Path) -> None:
     assert (empty_valid.height, empty_failed.height, valid.height, failed.height) == (0, 0, 1, 1)
     assert empty_valid.schema == valid.schema
     assert empty_failed.schema == failed.schema
-    for column in ('pValueExponent', 'studySampleSize', 'directionOnTrait', 'directionOnTarget', 'score'):
+    for column in ('pValueExponent', 'studySampleSize', 'urls', 'directionOnTrait', 'directionOnTarget', 'score'):
         assert empty_valid.schema[column] == evidence_schema[column]
     assert 'curatedDiseaseFromSourceMappedId' not in empty_valid.columns
