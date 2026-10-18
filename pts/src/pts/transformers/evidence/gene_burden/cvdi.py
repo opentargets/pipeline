@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+from loguru import logger
 
 from pts.transformers.evidence.gene_burden.common import DATASOURCE_ID, DATATYPE_ID, to_parsed
 from pts.transformers.utils.dataset import read_spreadsheet
@@ -39,6 +40,10 @@ _INDEX = ['phenotype', 'Gene ID Ensembl', 'Gene']
 _FIELDS = ['cMAC', 'OR [95%CI]', 'Meta P-value', 'Cauchy P-value']
 _ANCESTRY = 'ALL ancestry'
 _OTHER_COHORTS = ['AoU', 'UKB', 'META (no correction)', 'MGB']
+_NUMBER = r'([0-9]+(?:\.[0-9]+)?)'
+_ODDS_RATIO = rf'^{_NUMBER} \[{_NUMBER}; {_NUMBER}\]$'
+_ODDS_COLUMNS = ['oddsRatio', 'oddsRatioConfidenceIntervalLower', 'oddsRatioConfidenceIntervalUpper']
+_OLD_ODDS_PATTERNS = [r'([0-9]+\.[0-9]+)', r'\[([0-9]+\.[0-9]+)', r'; ([0-9]+\.[0-9]+)\]']
 
 #: Each sheet column's header names, top level first; column `i` is `column_{i + 1}`.
 Header = list[tuple[str, ...]]
@@ -115,6 +120,29 @@ def _cutoffs(path: str) -> pl.DataFrame:
     )
 
 
+def _with_odds_ratios(significant: pl.DataFrame) -> pl.DataFrame:
+    """The odds ratio and its confidence interval, from `OR [95%CI]`'s `OR [lower; upper]`; else null.
+
+    The rows where the old regexes, which take the first decimal and miss integral values, read
+    them differently are counted.
+    """
+    odds = pl.col('OR [95%CI]')
+    parsed = significant.with_columns(
+        odds.str.extract(_ODDS_RATIO, group).cast(pl.Float64).alias(column)
+        for group, column in enumerate(_ODDS_COLUMNS, start=1)
+    )
+    old = parsed.select(
+        regexp_extract(odds, pattern, 1).cast(pl.Float64, strict=False).ne_missing(pl.col(column)).sum().alias(column)
+        for pattern, column in zip(_OLD_ODDS_PATTERNS, _ODDS_COLUMNS, strict=True)
+    )
+    ratios, lower, upper = old.row(0)
+    logger.info(
+        f'{ratios} CVDI odds ratios and {lower + upper} confidence interval bounds ({lower} lower, {upper} upper) '
+        'differ from the old regexes'
+    )
+    return parsed
+
+
 def parse_cvdi(path: str) -> pl.LazyFrame:
     """CVDI gene burden evidence (PMID 39210047): the significant pan-ancestry results of ST6.
 
@@ -141,11 +169,12 @@ def parse_cvdi(path: str) -> pl.LazyFrame:
         )
         .filter(pl.col('resourceScore') <= pl.col('P cutoff'))
     )
-    odds = pl.col('OR [95%CI]')
+    significant = _with_odds_ratios(significant)
     score = pl.col('resourceScore')
     return (
         significant
         .select(
+            *_ODDS_COLUMNS,
             datasourceId=pl.lit(DATASOURCE_ID),
             datatypeId=pl.lit(DATATYPE_ID),
             projectId=pl.lit(PROJECT_ID),
@@ -155,13 +184,6 @@ def parse_cvdi(path: str) -> pl.LazyFrame:
             studySampleSize=pl.lit(748879),
             resourceScore=score,
             studyCasesWithQualifyingVariants=spark_double_to_int(pl.col('cMAC')),
-            oddsRatio=regexp_extract(odds, r'([0-9]+\.[0-9]+)', 1).cast(pl.Float64, strict=False),
-            oddsRatioConfidenceIntervalLower=regexp_extract(odds, r'\[([0-9]+\.[0-9]+)', 1).cast(
-                pl.Float64, strict=False
-            ),
-            oddsRatioConfidenceIntervalUpper=regexp_extract(odds, r'; ([0-9]+\.[0-9]+)\]', 1).cast(
-                pl.Float64, strict=False
-            ),
             statisticalMethod=pl.col('method_name'),
             statisticalMethodOverview=pl.col('method_name').replace(METHOD_DESCRIPTIONS),
             urls=pl.concat_list(

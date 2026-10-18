@@ -8,12 +8,14 @@ from typing import Any
 
 import pandas as pd
 import polars as pl
+import pytest
 from pyspark.sql import SparkSession
 
 from pts.pyspark.gene_burden import process_cvdi_gene_burden
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.cvdi import parse_cvdi
 from tests.evidence.gene_burden.fixtures import CVDI_CUTOFFS, cvdi_row, write_cvdi
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import multiset
 
 LOF = 'LOF (MAF<0.1%)'
@@ -25,6 +27,14 @@ URL = (
     'https://hugeamp.org:8000/research.html?ancestry=mixed&cohort=UKB_450k_AoU_250k_MGB_53k_META_overlapcorrected'
     '&file=600Traits.csv&gene={}&pageid=600_traits_app'
 )
+
+#: Ruling 6: an integral odds ratio or bound, the old regexes' (oddsRatio, lower, upper) and the fixed ones.
+INTEGRAL_ODDS = {
+    'ENSG10': ('2 [1.77; 2.25]', (1.77, 1.77, 2.25), (2.0, 1.77, 2.25)),
+    'ENSG11': ('74.78 [58.86; 95]', (74.78, 58.86, None), (74.78, 58.86, 95.0)),
+    'ENSG12': ('2.49 [2; 3.11]', (2.49, None, 3.11), (2.49, 2.0, 3.11)),
+}
+ODDS_COLUMNS = ['oddsRatio', 'oddsRatioConfidenceIntervalLower', 'oddsRatioConfidenceIntervalUpper']
 
 
 def _lof(cells: dict[Any, Any] | None = None) -> dict[Any, Any]:
@@ -186,18 +196,30 @@ def test_strings(tmp_path: Path) -> None:
     ]
 
 
-def test_odds_ratio_and_ci_by_regex(tmp_path: Path) -> None:
-    rows = _parse(
-        tmp_path,
-        _lof({(LOF, 'OR [95%CI]'): '13.84 [7.67; 25.1]'}),
-        _lof({'Gene ID Ensembl': 'ENSG2', (LOF, 'OR [95%CI]'): 'NA [NA; NA]'}),
-        _lof({'Gene ID Ensembl': 'ENSG3', (LOF, 'OR [95%CI]'): None}),
-    )
-    assert rows.select('oddsRatio', 'oddsRatioConfidenceIntervalLower', 'oddsRatioConfidenceIntervalUpper').rows() == [
-        (13.84, 7.67, 25.1),
-        (None, None, None),
-        (None, None, None),
-    ]
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        pytest.param('2 [1.77; 2.25]', (2.0, 1.77, 2.25), id='integral_odds_ratio'),
+        pytest.param('74.78 [58.86; 95]', (74.78, 58.86, 95.0), id='integral_upper'),
+        pytest.param('2.49 [2; 3.11]', (2.49, 2.0, 3.11), id='integral_lower'),
+        pytest.param('13.84 [7.67; 25.1]', (13.84, 7.67, 25.1), id='decimals'),
+        pytest.param('NA [NA; NA]', (None, None, None), id='na'),
+        pytest.param(None, (None, None, None), id='null'),
+        pytest.param('2.5 [1.5;3.5]', (None, None, None), id='no_space'),
+        pytest.param('2.5 [1.5; 3.5] ', (None, None, None), id='trailing_space'),
+    ],
+)
+def test_odds_ratio_and_ci(tmp_path: Path, text: str | None, expected: tuple[float | None, ...]) -> None:
+    rows = _parse(tmp_path, _lof({(LOF, 'OR [95%CI]'): text}))
+    assert rows.select(ODDS_COLUMNS).row(0) == expected
+
+
+def test_odds_ratios_unlike_the_old_regexes_counted(tmp_path: Path) -> None:
+    rows = [_lof({'Gene ID Ensembl': gene, (LOF, 'OR [95%CI]'): text}) for gene, (text, _, _) in INTEGRAL_ODDS.items()]
+    rows.append(_lof({'Gene ID Ensembl': 'ENSG13', (LOF, 'OR [95%CI]'): '3 [2; 4]'}))
+    rows.append(_lof({'Gene ID Ensembl': 'ENSG14', (LOF, 'OR [95%CI]'): '3 [2; 4]', (LOF, 'Meta P-value'): 0.5}))
+    _, log = logged(lambda: _parse(tmp_path, _lof(), *rows))
+    assert '2 CVDI odds ratios and 4 confidence interval bounds (2 lower, 2 upper) differ from the old regexes' in log
 
 
 def test_methods_in_sorted_order(tmp_path: Path) -> None:
@@ -263,7 +285,11 @@ PARITY_ROWS = [
 ]
 
 
-def _compare(spark: SparkSession, path: str) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+Fixes = dict[tuple[str, str], dict[str, tuple[Any, Any]]]
+
+
+def _compare(spark: SparkSession, path: str, fixes: Fixes) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+    """The new rows and the old ones, `fixes` applied: (target, method) to column to (old, new) value."""
     old_rows = _old(spark, path)
     columns = list(old_rows[0])
     new = parse_cvdi(path).collect()
@@ -282,12 +308,22 @@ def _compare(spark: SparkSession, path: str) -> tuple[list[tuple[Any, ...]], lis
         'studyCases',
     ])
     assert new.select(absent).null_count().row(0) == (new.height,) * len(absent)
-    return multiset(new.rows(named=True), columns), multiset(old_rows, columns)
+    fixed = []
+    for row in old_rows:
+        changes = fixes.get((row['targetFromSourceId'], row['statisticalMethod']), {})
+        assert {column: row[column] for column in changes} == {column: old for column, (old, _) in changes.items()}
+        fixed.append(row | {column: new for column, (_, new) in changes.items()})
+    return multiset(new.rows(named=True), columns), multiset(fixed, columns)
 
 
 def test_matches_spark(tmp_path: Path, spark: SparkSession) -> None:
     footer = ['Asthma', 'ENSG9', 'G9', 1, '2.5 [1.5; 3.5]', 1e-20]
-    path = write_cvdi(tmp_path, PARITY_ROWS, footer=footer)
-    new, old = _compare(spark, path)
-    assert len(old) == 9
+    integral = [_lof({'Gene ID Ensembl': g, (LOF, 'OR [95%CI]'): text}) for g, (text, _, _) in INTEGRAL_ODDS.items()]
+    path = write_cvdi(tmp_path, [*PARITY_ROWS, *integral], footer=footer)
+    fixes = {
+        (gene, LOF): {c: (o, n) for c, o, n in zip(ODDS_COLUMNS, old, new, strict=True) if o != n}
+        for gene, (_, old, new) in INTEGRAL_ODDS.items()
+    }
+    new, old = _compare(spark, path, fixes)
+    assert len(old) == 12
     assert new == old
