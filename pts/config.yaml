@@ -493,8 +493,8 @@ steps:
 
   #: EVIDENCE_GENE_BURDEN STEP :####################################################################
   evidence_gene_burden:
-    - name: pyspark gene_burden
-      pyspark: gene_burden
+    - name: transform evidence.gene_burden
+      transformer: evidence.gene_burden
       source:
         az_binary: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-binary
         az_quantitative: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-quantitative
@@ -502,14 +502,19 @@ steps:
         az_phenotypes: input/evidence/gene_burden/astrazeneca/azphewas_com_phenotypes_UK_Biobank_470k.csv
         finngen: input/evidence/gene_burden/finngen/finngen.txt.gz
         finngen_phenotypes: input/evidence/gene_burden/finngen/phenos
-        genebass: input/evidence/gene_burden/genebass/**.parquet
+        genebass: input/evidence/gene_burden/genebass
         cvdi: input/evidence/gene_burden/cvdi.xlsx
         genes_and_health: input/evidence/gene_burden/genes_health.xlsx
         brava: input/evidence/gene_burden/brava.xlsx
         curated_studies: input/ot_curation/gene_burden/curated_evidence.tsv
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
-      destination: intermediate/evidence/gene_burden.parquet
+        target: output/target
+        disease: output/disease
+        literature: input/literature/literature_export
+      destination:
+        failed_evidence: excluded/evidence/gene_burden
+        evidence: output/evidence_gene_burden
       settings:
         finngen_release: R12
   ##################################################################################################
