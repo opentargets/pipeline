@@ -12,6 +12,21 @@ def spark_trim(expr: pl.Expr) -> pl.Expr:
     return expr.str.strip_chars(' ')
 
 
+#: Lowercase letters newer than java 17's Unicode 13, which java leaves as they are and polars uppercases.
+_JAVA_17_UNCASED = r'[\x{a7cf}\x{a7d3}\x{a7d5}\x{16ebb}-\x{16ed3}]'
+
+
+def spark_upper(expr: pl.Expr) -> pl.Expr:
+    """Spark's `upper`: Java 17's full Unicode uppercasing, which polars' differs from only on `_JAVA_17_UNCASED`."""
+    chars = expr.str.extract_all('(?s).')
+    kept = chars.list.eval(
+        pl.when(pl.element().str.contains(_JAVA_17_UNCASED))
+        .then(pl.element())
+        .otherwise(pl.element().str.to_uppercase())
+    ).list.join('')
+    return pl.when(expr.str.contains(_JAVA_17_UNCASED)).then(kept).otherwise(expr.str.to_uppercase())
+
+
 def _decimal_digits(text: pl.Expr, marker: str) -> tuple[pl.Expr, pl.Expr]:
     """Unsigned `<mantissa>[<marker><n>]` text as its significant digits and the decimal exponent of the first."""
     split = text.str.split_exact(marker, 1)

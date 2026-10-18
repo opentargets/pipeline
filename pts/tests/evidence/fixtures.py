@@ -7,6 +7,8 @@ from pathlib import Path
 
 import polars as pl
 
+from pts.schemas.ontoma_lut import ENTITY_LUT
+
 TARGET_SCHEMA = {
     'id': pl.String,
     'biotype': pl.String,
@@ -57,18 +59,10 @@ def write_literature(path: Path, dates: dict[str, str]) -> str:
     return str(path)
 
 
-ONTOMA_LUT_SCHEMA = {
-    'entityKind': pl.String,
-    'entityType': pl.String,
-    'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
-}
-
-
 def write_ontoma_lut(path: Path, kind: str, label: str, entity_id: str) -> str:
     """One-row OnToma disease look-up table: `label` is the already normalised key."""
     path.mkdir(parents=True)
     pl.DataFrame(
-        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name'}])], schema=ONTOMA_LUT_SCHEMA, orient='row'
+        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name'}])], schema=ENTITY_LUT, orient='row'
     ).write_parquet(path / 'part-0.parquet')
     return str(path)

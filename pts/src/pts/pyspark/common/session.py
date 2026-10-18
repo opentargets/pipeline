@@ -62,7 +62,7 @@ class Session:
                     'https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/4.0.4/'
                     'gcs-connector-4.0.4-shaded.jar'
                 ),
-                # spark-nlp, for the OnToma steps; on Dataproc the clusters load the
+                # spark-nlp, for literature_publication_match; on Dataproc the clusters load the
                 # staged fat jar instead
                 'spark.jars.packages': spark_nlp_coordinate(),
                 'spark.sql.adaptive.enabled': 'true',

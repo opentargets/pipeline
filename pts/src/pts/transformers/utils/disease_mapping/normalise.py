@@ -34,6 +34,8 @@ import re
 from collections.abc import Callable
 from functools import cache
 
+import polars as pl
+
 #: `ontoma.nlp_pipeline.NLPPipeline.google_stop_words`, in OnToma's form so the two compare by eye;
 #: a test keeps the copy in step.
 _GOOGLE_STOP_WORDS_TEXT = (
@@ -266,3 +268,9 @@ def normalise(label: str | None, track: str | None) -> str | None:
     if track == 'symbol':
         return normalise_symbol(label)
     raise ValueError(f'unknown NLP pipeline track: {track!r}')
+
+
+def normalise_batch(labels: pl.Series, tracks: pl.Series) -> pl.Series:
+    """`normalise` each label on the track beside it."""
+    pairs = zip(labels.to_list(), tracks.to_list(), strict=True)
+    return pl.Series([normalise(label, track) for label, track in pairs], dtype=pl.String)

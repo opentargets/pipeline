@@ -1,4 +1,4 @@
-"""Polars port of OnToma's entity mapping, against lookup tables OnToma built on spark."""
+"""Polars port of OnToma's entity mapping, against the lookup tables built by the `ontoma_lut` steps."""
 
 from pts.transformers.utils.disease_mapping.mapping import map_entities, read_entity_lut
 

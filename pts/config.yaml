@@ -700,8 +700,8 @@ steps:
 
   #: ONTOMA STEPS :##################################################################################
   ontoma:
-    - name: pyspark ontoma generate lookup tables
-      pyspark: ontoma_lut_generation
+    - name: transform disease lookup tables for ontoma
+      transformer: ontoma_lut.ontoma
       source:
         disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
@@ -711,12 +711,11 @@ steps:
         disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
 
-  # This is split so that we don't run into circularity issues
-  # pts_ontoma currently lists pts_target as a dependency, while pts_target indirectly depends back
-  # on pts_ontoma through pts_target_safety_event → pts_pharmacogenetics.
+  # Split from ontoma so that the disease tables don't wait on target: pts_literature_ontoma needs
+  # pts_target, and pts_target_safety_event → pts_pharmacogenetics needs pts_ontoma.
   literature_ontoma:
-    - name: pyspark literature ontoma lut generation
-      pyspark: literature_ontoma_lut_generation
+    - name: transform disease target drug lookup table for ontoma
+      transformer: ontoma_lut.literature_ontoma
       source:
         disease_index: output/disease
         ot_disease_curation: input/ontoma/ot_disease_curation.tsv
