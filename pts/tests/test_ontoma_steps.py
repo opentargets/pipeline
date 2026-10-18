@@ -7,18 +7,10 @@ import polars as pl
 import pytest
 
 from pts.schemas.ontoma_lut import ENTITY_LUT
-from pts.transformers.ontoma_lut.build import (
-    build_lut,
-    curation_label_lut,
-    disease_id_lut,
-    disease_label_lut,
-    drug_label_lut,
-    target_label_lut,
-)
 from pts.transformers.ontoma_lut.literature_ontoma import literature_ontoma
 from pts.transformers.ontoma_lut.ontoma import ontoma
-from pts.transformers.utils.spark_csv import read_spark_csv
 from tests.ontoma_lut_fixtures import DISEASE, DISEASE_SCHEMA, DRUG, DRUG_SCHEMA, TARGET, TARGET_SCHEMA
+from tests.ontoma_lut_spark_rows import STEP_DISEASE_ID, STEP_DISEASE_LABEL, STEP_LITERATURE
 
 CURATION_SOURCES = {
     'ot_disease_curation': 'ot_curation',
@@ -60,13 +52,6 @@ def _inputs(
     return source
 
 
-def _curated(source: dict[str, str], disease: pl.DataFrame) -> list[pl.DataFrame]:
-    return [
-        curation_label_lut(read_spark_csv(source[key], separator='\t'), name, disease)
-        for key, name in CURATION_SOURCES.items()
-    ]
-
-
 def _read(path: str) -> pl.DataFrame:
     return pl.read_parquet(Path(path) / '*.parquet')
 
@@ -87,8 +72,8 @@ def test_ontoma_step_writes_both_luts(source: dict[str, str], tmp_path: Path) ->
     ids = _read(destination['disease_id_lut'])
     assert label.schema == ENTITY_LUT
     assert ids.schema == ENTITY_LUT
-    assert label.rows() == build_lut([disease_label_lut(DISEASE), *_curated(source, DISEASE)]).rows()
-    assert ids.rows() == build_lut([disease_id_lut(DISEASE)]).rows()
+    assert label.rows() == STEP_DISEASE_LABEL
+    assert ids.rows() == STEP_DISEASE_ID
     assert label.height > 0
     assert ids.height > 0
 
@@ -112,15 +97,8 @@ def test_literature_ontoma_step_writes_one_lut(source: dict[str, str], tmp_path:
     literature_ontoma(source, destination, None, None)
 
     lut = _read(destination['disease_target_drug_label_lut'])
-    expected = build_lut([
-        disease_label_lut(DISEASE),
-        *_curated(source, DISEASE),
-        target_label_lut(TARGET),
-        drug_label_lut(DRUG),
-    ])
     assert lut.schema == ENTITY_LUT
-    assert lut.rows() == expected.rows()
-    assert lut.height > 0
+    assert lut.rows() == STEP_LITERATURE
 
 
 @pytest.mark.parametrize(

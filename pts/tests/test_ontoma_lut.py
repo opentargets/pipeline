@@ -1,4 +1,4 @@
-"""Tests for the polars port of OnToma's lookup-table builders, checked against OnToma itself."""
+"""Tests for the polars port of OnToma's lookup-table builders, checked against OnToma's output on the same fixtures."""
 
 import os
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from ontoma import DiseaseCuration, OpenTargetsDisease, OpenTargetsDrug, OpenTargetsTarget, spark_nlp_coordinate
+from ontoma import spark_nlp_coordinate
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
 from pts.transformers.ontoma_lut.build import (
@@ -20,61 +20,43 @@ from pts.transformers.ontoma_lut.build import (
 )
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.disease_mapping import normalise as normalise_module
-from tests.ontoma_lut_fixtures import (
-    CURATION,
-    DISEASE,
-    DISEASE_DDL,
-    DRUG,
-    DRUG_DDL,
-    TARGET,
-    TARGET_DDL,
+from tests.ontoma_lut_fixtures import CURATION, DISEASE, DRUG, TARGET
+from tests.ontoma_lut_spark_rows import (
+    CURATION_LABEL,
+    DISEASE_ID,
+    DISEASE_LABEL,
+    DRUG_LABEL,
+    LUT,
+    TARGET_LABEL,
 )
 
 
-@pytest.fixture(scope='module')
-def spark_disease(spark):
-    return spark.createDataFrame(DISEASE.rows(), DISEASE_DDL)
+def test_disease_label_lut_matches_ontoma() -> None:
+    assert disease_label_lut(DISEASE).rows() == DISEASE_LABEL
 
 
-def _rows(lut) -> list[tuple]:
-    rows = (tuple(r) for r in lut.df.select(*RAW_ENTITY_LUT.names()).collect())
-    return sorted(rows, key=lambda row: [(value is not None, value) for value in row])
+def test_disease_id_lut_matches_ontoma() -> None:
+    assert disease_id_lut(DISEASE).rows() == DISEASE_ID
 
 
-def test_disease_label_lut_matches_ontoma(spark_disease) -> None:
-    out = disease_label_lut(DISEASE)
-    assert out.rows() == _rows(OpenTargetsDisease.as_label_lut(spark_disease))
-
-
-def test_disease_id_lut_matches_ontoma(spark_disease) -> None:
-    out = disease_id_lut(DISEASE)
-    assert out.rows() == _rows(OpenTargetsDisease.as_id_lut(spark_disease))
-
-
-def test_curation_label_lut_matches_ontoma(spark, spark_disease) -> None:
+def test_curation_label_lut_matches_ontoma() -> None:
     out = curation_label_lut(CURATION, 'ot_curation', DISEASE)
-    curation = spark.createDataFrame(CURATION.rows(), 'SEMANTIC_TAG string, PROPERTY_VALUE string')
-    expected = _rows(DiseaseCuration.as_label_lut(curation, 'ot_curation', spark_disease, True))
-    assert out.rows() == expected
-    ids = {(label, entity_id) for entity_id, label, *_ in expected}
+    assert out.rows() == CURATION_LABEL
+    ids = {(label, entity_id) for entity_id, label, *_ in CURATION_LABEL}
     assert ('remapped by rank', 'MONDO_0000003') in ids
     assert ('obsolete label', 'MONDO_0000001') in ids
     assert ('label one', 'MONDO_0000010') in ids
     assert not {label for _, label in ids} & {'two-id label', 'no match', 'unicode word', 'carriage return', '1)'}
 
 
-def test_target_label_lut_matches_ontoma(spark) -> None:
-    out = target_label_lut(TARGET)
-    expected = _rows(OpenTargetsTarget.as_label_lut(spark.createDataFrame(TARGET.rows(), TARGET_DDL)))
-    assert out.rows() == expected
-    assert not {row for row in expected if row[0] in {'ENSG02', 'ENSG03'}}
+def test_target_label_lut_matches_ontoma() -> None:
+    assert target_label_lut(TARGET).rows() == TARGET_LABEL
+    assert not {row for row in TARGET_LABEL if row[0] in {'ENSG02', 'ENSG03'}}
 
 
-def test_drug_label_lut_matches_ontoma(spark) -> None:
-    out = drug_label_lut(DRUG)
-    expected = _rows(OpenTargetsDrug.as_label_lut(spark.createDataFrame(DRUG.rows(), DRUG_DDL)))
-    assert out.rows() == expected
-    labels = {(entity_id, label) for entity_id, label, *_ in expected}
+def test_drug_label_lut_matches_ontoma() -> None:
+    assert drug_label_lut(DRUG).rows() == DRUG_LABEL
+    labels = {(entity_id, label) for entity_id, label, *_ in DRUG_LABEL}
     assert {('CHEMBL1', 'symkevi'), ('CHEMBL1', 'Trikafta'), ('CHEMBL4', 'ChEMBL4'), ('CHEMBL6', 'CHEMBL6')} <= labels
     assert not {entity_id for entity_id, _ in labels} & {'CHEMBL2', 'CHEMBL3', 'CHEMBL8'}
 
@@ -208,7 +190,7 @@ import traceback
 from pathlib import Path
 
 import pyspark.sql.functions as f
-from ontoma import DiseaseCuration, OnToma, OpenTargetsDisease, OpenTargetsDrug, OpenTargetsTarget, spark_nlp_coordinate
+from ontoma import OnToma, spark_nlp_coordinate
 from pyspark.sql import SparkSession
 
 root = Path(sys.argv[1])
@@ -217,18 +199,6 @@ spark = (
     .config('spark.jars.packages', spark_nlp_coordinate())
     .config('spark.sql.shuffle.partitions', '1')
     .getOrCreate()
-)
-disease = spark.read.parquet(str(root / 'disease'))
-OnToma(
-    spark,
-    [
-        OpenTargetsDisease.as_label_lut(disease),
-        OpenTargetsDisease.as_id_lut(disease),
-        DiseaseCuration.as_label_lut(spark.read.parquet(str(root / 'curation')), 'ot_curation', disease, True),
-        OpenTargetsTarget.as_label_lut(spark.read.parquet(str(root / 'target'))),
-        OpenTargetsDrug.as_label_lut(spark.read.parquet(str(root / 'drug'))),
-    ],
-    cache_dir=str(root / 'ontoma_lut'),
 )
 try:
     loaded = OnToma(spark, cache_dir=str(root / 'polars_lut'))
@@ -242,9 +212,6 @@ except Exception:
 @pytest.fixture(scope='module')
 def ontoma(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp('ontoma')
-    for name, frame in (('disease', DISEASE), ('curation', CURATION), ('target', TARGET), ('drug', DRUG)):
-        (root / name).mkdir()
-        frame.write_parquet(root / name / 'part.parquet')
     write_dataset(build_lut(_raw_luts()), str(root / 'polars_lut'))
     env = {**os.environ, 'PYSPARK_PYTHON': sys.executable}
     subprocess.run([sys.executable, '-c', _ONTOMA, str(root)], check=True, env=env)
@@ -266,18 +233,9 @@ needs_spark_nlp = pytest.mark.skipif(
 )
 
 
-@pytest.mark.slow
-@needs_spark_nlp
-def test_build_lut_matches_ontoma(ontoma: Path) -> None:
-    expected = (
-        pl
-        .read_parquet(ontoma / 'ontoma_lut' / '*.parquet')
-        .cast(ENTITY_LUT)
-        .with_columns(pl.col('entityIds').list.sort())
-        .sort(ENTITY_LUT.names()[:3])
-    )
-    assert expected.height > 50
-    assert build_lut(_raw_luts()).rows() == expected.rows()
+def test_build_lut_matches_ontoma() -> None:
+    assert len(LUT) > 50
+    assert build_lut(_raw_luts()).rows() == LUT
 
 
 @pytest.mark.slow

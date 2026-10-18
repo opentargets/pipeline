@@ -1,8 +1,8 @@
 """Polars port of `OnToma.map_entities`: resolve labels and ids against an OnToma lookup table.
 
-The lookup tables themselves are still built by OnToma on spark (`pyspark ontoma_lut_generation`);
-only the query side is ported. It must normalise exactly as the tables were, so it is tied to the
-spark-nlp version that built them -- see `pts.transformers.utils.disease_mapping.normalise`.
+The lookup tables are built by `pts.transformers.ontoma_lut`; only the query side of OnToma is ported
+here. It must normalise exactly as the tables were, so it is tied to the spark-nlp version they
+follow -- see `pts.transformers.utils.disease_mapping.normalise`.
 
 Behaviour kept from OnToma on purpose, because it is observable in the output:
 
