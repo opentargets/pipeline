@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
 from loguru import logger
-from ontoma import OnToma
 
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
+from pts.pyspark.literature_utils.label_mapping import MAPPED_LABELS_DDL, map_label_batches
 
 if TYPE_CHECKING:
     from pyspark.sql.types import StructType
@@ -54,18 +54,27 @@ class Match(Dataset):
         Returns:
             MatchMapped: Dataset with mapped labels.
         """
-        logger.info(f'load label lookup table from {label_lut_path}')
-        label_lut = OnToma(spark=session.spark, cache_dir=label_lut_path)
-
-        logger.info('map labels')
-        mapped_matches = label_lut.map_entities(
-            df=self.df,
-            result_col_name='entityIds',
-            entity_col_name=label_col_name,
-            entity_kind='label',
-            type_col_name=type_col_name,
-            include_normalised_entities=True,
-            include_entity_source=True
+        logger.info(f'map labels with the lookup table at {label_lut_path}')
+        mapped_labels = (
+            self.df
+            .select(f.col(label_col_name).alias('label'), f.col(type_col_name).alias('type'))
+            .distinct()
+            .mapInArrow(map_label_batches(label_lut_path), MAPPED_LABELS_DDL)
+            .alias('mapped')
+        )
+        mapped_matches = (
+            self.df
+            .alias('match')
+            .join(
+                mapped_labels,
+                on=(
+                    f.col(f'match.{label_col_name}').eqNullSafe(f.col('mapped.label'))
+                    & f.col(f'match.{type_col_name}').eqNullSafe(f.col('mapped.type'))
+                ),
+                how='inner',
+            )
+            .select('match.*', 'mapped.entityLabelNormalised', 'mapped.entityIds')
+            .distinct()
         )
 
         logger.info('explode results')
