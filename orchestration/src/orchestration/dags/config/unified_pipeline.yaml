@@ -522,7 +522,7 @@ steps:
     num_partitions: 200
     depends_on:
       - gentropy_credible_set
-  gentropy_variant_partition:
+  pts_variant_partition:
     depends_on:
       - pts_pharmacogenetics
       - gentropy_credible_set
@@ -530,7 +530,7 @@ steps:
       - pis_evidence_eva
   gentropy_variant_annotation:
     depends_on:
-      - gentropy_variant_partition
+      - pts_variant_partition
   gentropy_variant:
     depends_on:
       - gentropy_variant_annotation
