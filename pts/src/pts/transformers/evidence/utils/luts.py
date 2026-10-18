@@ -1,6 +1,6 @@
 """Look up tables used to validate evidence.
 
-Polars port of `pts.pyspark.evidence_utils.validation_lut.LookUpTables`. Every builder
+Polars port of the removed pyspark `LookUpTables`. Every builder
 below was diffed against the spark implementation on the real 26.06 release: disease
 54,961 rows, target 511,837 rows and the publication table over three of the export's
 56 parts, all exact matches including `TSorOncogene`. `build_publication_lut` was

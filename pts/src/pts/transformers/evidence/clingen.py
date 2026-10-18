@@ -1,6 +1,6 @@
 """ClinGen gene-disease validity evidence.
 
-Polars port of the `pyspark clingen` parser together with its `evidence_postprocess` step.
+Polars port of the `pyspark clingen` parser together with its post-processing step.
 Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by
 MONDO id.
 """

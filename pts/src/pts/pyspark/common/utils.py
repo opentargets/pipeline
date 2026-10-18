@@ -1,15 +1,12 @@
 import importlib.resources as pkg_resources
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Mapping
 from enum import Enum
-from functools import wraps
-from typing import Any, TypeVar, cast
+from typing import Any
 
-import numpy as np
-import pandas as pd
 import polars as pl
 import pyspark.sql.functions as f
-from pyspark.sql import Column, DataFrame, SparkSession
+from pyspark.sql import Column, DataFrame
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -28,8 +25,6 @@ from pyspark.sql.types import (
 )
 
 from pts import schemas
-
-F = TypeVar('F', bound=Callable[..., Any])
 
 # The inverse of the spark->polars mapping that `pts/schemas/evidence.json` used to be read
 # through, kept exhaustive over that mapping so a schema round-trips unchanged.
@@ -93,64 +88,6 @@ def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> 
         flag_condition,
         f.array_sort(f.array_distinct(f.array_union(qc, f.array(f.lit(flag_text.value))))),
     ).otherwise(qc)
-
-
-def required_columns(cols: Iterable[str]) -> Callable[[F], F]:
-    """Decorator to ensure that all required columns are present in the DataFrame (`self.df`) before executing a method.
-
-    This decorator is typically used inside ETL pipeline classes that
-    hold a Spark DataFrame as an attribute (`self.df`). If any of the
-    required columns are missing, it raises a `ValueError` before
-    calling the decorated method.
-
-    Args:
-        cols (Iterable[str]):
-            A list or iterable of required column names that must exist
-            in `self.df.columns`.
-
-    Returns:
-        Callable[[F], F]:
-            The decorated function with column presence validation.
-
-    Raises:
-        ValueError: If any required column is missing from `self.df.columns`.
-
-
-    Example:
-        >>> class EvidenceETL:
-        ...     def __init__(self, df: DataFrame) -> None:
-        ...         self.df = df
-        ...     @required_columns(["gene_id", "pvalue"])
-        ...     def score(self) -> DataFrame:
-        ...         return self.df.withColumn("score", self.df.pvalue * 2)
-        >>> test_df = spark.createDataFrame([('a',),], ['test_col'])
-        >>> etl = EvidenceETL(test_df)
-        >>> etl.score()  # Raises ValueError if 'gene_id' or 'pvalue' is missing
-        Traceback (most recent call last):
-        ...
-        ValueError: Columns ['gene_id', 'pvalue'] required by "score" are missing. Available columns: ['test_col']
-    """
-
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(self, *args: Any, **kwargs: Any) -> Any:
-            if not hasattr(self, 'df') or not isinstance(self.df, DataFrame):
-                func_name = getattr(func, '__name__', repr(func))
-                raise AttributeError(f'Function "{func_name}" expects "self.df" to be a Spark DataFrame.')
-
-            data_cols = self.df.columns
-            missing = [col for col in cols if col not in data_cols]
-            if missing:
-                func_name = getattr(func, '__name__', repr(func))
-                raise ValueError(
-                    f'Columns {missing} required by "{func_name}" are missing. Available columns: {sorted(data_cols)}'
-                )
-
-            return func(self, *args, **kwargs)
-
-        return cast(F, wrapper)
-
-    return decorator
 
 
 def parse_spark_schema(schema_json: str) -> StructType:
@@ -258,31 +195,3 @@ def maybe_repartition(df: DataFrame, n: int | None) -> DataFrame:
     return df
 
 
-def _cell_to_string(value: Any) -> str | None:
-    if pd.isna(value):
-        return None
-    if isinstance(value, bool | np.bool_):
-        return '1' if value else '0'
-    return str(value)
-
-
-def pandas_to_spark_strings(spark: SparkSession, pdf: pd.DataFrame, columns: list[str] | None = None) -> DataFrame:
-    """Convert a pandas frame to Spark with every cell as a string and blanks as null.
-
-    Arrow rejects a column that mixes numbers and text, so spreadsheet cells cross as
-    strings and the caller casts the columns it uses. Booleans become '1'/'0', so a
-    one-hot flag casts to a number either way.
-
-    Args:
-        spark: Spark session.
-        pdf: pandas frame, e.g. a sheet from ``pd.read_excel``.
-        columns: Columns to keep. All columns when omitted.
-
-    Returns:
-        DataFrame with one nullable string column per kept column.
-    """
-    if columns is not None:
-        pdf = pdf[columns]
-    values = pdf.astype(object).map(_cell_to_string)
-    schema = StructType([StructField(c, StringType(), True) for c in values.columns])
-    return spark.createDataFrame(values, schema=schema)

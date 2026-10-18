@@ -2,55 +2,17 @@
 
 from __future__ import annotations
 
-import math
 import random
-import warnings
 from math import isnan
 
 import polars as pl
+import pytest
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
 from pts.transformers.evidence.encore import ENCORE
-from pts.transformers.evidence.utils.expressions import log10
-
-
-def test_log10_is_libm_log10() -> None:
-    rng = random.Random(0)
-    values = [10 ** rng.uniform(-12, 3) for _ in range(5000)] + [float('inf')]
-    got = pl.DataFrame({'x': values}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
-    assert got == [math.log10(v) for v in values]
-
-
-def test_log10_keeps_null_nan_zero_and_one() -> None:
-    edge = pl.DataFrame({'x': [None, float('nan'), 0.0, 1.0]}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
-    assert edge[0] is None
-    assert isnan(edge[1])
-    assert edge[2] == float('-inf')
-    assert edge[3] == 0.0
-
-
-def test_log10_accepts_integer_and_float32_input() -> None:
-    ints = pl.DataFrame({'x': [1, 10, 1000, None]}, schema={'x': pl.Int64}).select(log10(pl.col('x')).alias('y'))['y']
-    assert ints.dtype == pl.Float64
-    assert ints.to_list() == [0.0, 1.0, 3.0, None]
-    floats = pl.DataFrame({'x': [10.0, 100.0]}, schema={'x': pl.Float32}).select(log10(pl.col('x')).alias('y'))['y']
-    assert floats.dtype == pl.Float64
-    assert floats.to_list() == [1.0, 2.0]
-
-
-def test_log10_of_a_negative_is_nan_without_a_warning() -> None:
-    with warnings.catch_warnings():
-        warnings.simplefilter('error')
-        got = pl.DataFrame({'x': [-1.0, 0.0]}).select(log10(pl.col('x')).alias('y'))['y'].to_list()
-    assert isnan(got[0])
-    assert got[1] == float('-inf')
-
-
-def test_log10_of_an_all_null_column_is_all_null() -> None:
-    got = pl.DataFrame({'x': [None, None]}, schema={'x': pl.Float64}).select(log10(pl.col('x')).alias('y'))['y']
-    assert got.to_list() == [None, None]
-
+from pts.transformers.evidence.utils.expressions import log10_rescaled_score
+from pts.transformers.utils.spark_math import spark_log10
 
 # ------------------------------------------------------------------------------------------------
 # Exact parity with the SQL on main for the scores rewritten since the case table was measured.
@@ -78,3 +40,34 @@ def test_encore_score_matches_spark_bit_for_bit(spark: SparkSession) -> None:
     expected = _spark_scores(spark, 'geneticInteractionScore', values, 'DOUBLE', ENCORE_SQL)
     got = pl.DataFrame({'geneticInteractionScore': values}, schema={'geneticInteractionScore': pl.Float64})
     assert _same(got.select(ENCORE.score.alias('s'))['s'].to_list(), expected)
+
+
+SCORE_PARAMETERS = [(0.25, 1e-7, 1e-17), (0.0, 0.5, 0.005), (0.25, 0.1, 1e-10), (0.0, 1.0, 1e-10)]
+
+
+@pytest.mark.parametrize(('out_min', 'weak_ref', 'strong_ref'), SCORE_PARAMETERS)
+def test_log10_rescaled_score_matches_spark_bit_for_bit(
+    spark: SparkSession, out_min: float, weak_ref: float, strong_ref: float
+) -> None:
+    rng = random.Random(0)
+    values = [None, float('nan'), float('inf'), 0.0, -0.0, -1.0, 1.0, 0.5, 1e-310, weak_ref, strong_ref, 1e-300]
+    values += [10 ** rng.uniform(-300, 0) for _ in range(3000)]
+    values += [10 ** rng.uniform(-20, 0) for _ in range(3000)]
+    sql = (
+        f'CASE WHEN p IS NULL OR isnan(p) THEN NULL WHEN p <= 0 THEN 1.0 ELSE '
+        f'LEAST(1.0, GREATEST({out_min!r}, (1.0 - {out_min!r}) * (log10(p) - log10(CAST({weak_ref!r} AS DOUBLE))) '
+        f'/ (log10(CAST({strong_ref!r} AS DOUBLE)) - log10(CAST({weak_ref!r} AS DOUBLE))) + {out_min!r})) END'
+    )
+    expected = _spark_scores(spark, 'p', values, 'DOUBLE', sql)
+    got = pl.DataFrame({'p': values}, schema={'p': pl.Float64})
+    score = log10_rescaled_score(pl.col('p'), out_min, weak_ref, strong_ref)
+    assert _same(got.select(score.alias('s'))['s'].to_list(), expected)
+
+
+@pytest.mark.parametrize(('weak_ref', 'strong_ref'), [(weak, strong) for _, weak, strong in SCORE_PARAMETERS])
+def test_log10_rescaled_score_reference_logs_match_spark(
+    spark: SparkSession, weak_ref: float, strong_ref: float
+) -> None:
+    expected = spark.createDataFrame([(weak_ref,), (strong_ref,)], 'p DOUBLE').select(f.log10('p').alias('l')).collect()
+    got = pl.select(spark_log10(pl.lit(pl.Series([weak_ref, strong_ref])))).to_series().to_list()
+    assert got == [row.l for row in expected]

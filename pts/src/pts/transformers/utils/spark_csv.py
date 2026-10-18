@@ -8,10 +8,13 @@ differs on each, so a source read by spark in the old steps is read with this.
 from __future__ import annotations
 
 import itertools
+import math
 import re
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
+
+from pts.transformers.utils.spark_casts import SPARK_CAST_TRIM
 
 QUOTE = '"'
 ESCAPE = '\\'
@@ -19,6 +22,14 @@ ESCAPE = '\\'
 _LINE_END = re.compile(r'\r\n|\r|\n')
 #: java's `String.trim` characters: everything up to and including the space.
 _BLANK = re.compile(r'[\x00- ]*\Z')
+
+_ASCII_INT = r'^[+-]?[0-9]+$'
+#: `Integer.parseInt` takes any unicode decimal digit
+_JAVA_INT = r'^[+-]?\d+$'
+_INT32_MIN, _INT32_MAX = -(2**31), 2**31 - 1
+#: java's decimal syntax, as `spark_casts._float_text` reads it
+_JAVA_DECIMAL = r'^([+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)[fFdD]?$'
+_JAVA_HEX = r'^([+-]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)[pP][+-]?[0-9]+)[fFdD]?$'
 
 
 def _quoted(line: str, i: int, separator: str) -> tuple[str, int]:
@@ -159,3 +170,64 @@ def read_spark_csv(
 
     padded = [[clean(row[i]) if i < len(row) else None for i in keep] for row in rows]
     return pl.DataFrame(padded, schema=dict.fromkeys(names, pl.String), orient='row')
+
+
+def _java_int(text: str) -> int | None:
+    """Unicode decimal digits as an int, null outside the Int32 range."""
+    value = int(text)
+    return value if _INT32_MIN <= value <= _INT32_MAX else None
+
+
+def _unicode_ints(texts: pl.Series) -> pl.Series:
+    """The texts of non-ASCII decimal digits as Int32, null elsewhere."""
+    unicode = (texts.str.contains(_JAVA_INT) & ~texts.str.contains(_ASCII_INT)).fill_null(False)
+    out = pl.Series(texts.name, [None] * len(texts), dtype=pl.Int32)
+    rows = unicode.arg_true()
+    if rows.is_empty():
+        return out
+    return out.scatter(rows, pl.Series([_java_int(t) for t in texts.gather(rows).to_list()], dtype=pl.Int32))
+
+
+def spark_csv_int(field: pl.Expr) -> pl.Expr:
+    """An IntegerType field as Spark's CSV reader parses it (java's `Integer.parseInt`), null if it fails, Int32."""
+    return (
+        pl
+        .when(field.str.contains(_ASCII_INT))
+        .then(field.str.strip_prefix('+').cast(pl.Int64, strict=False).cast(pl.Int32, strict=False))
+        .when(field.str.contains(_JAVA_INT))
+        .then(field.map_batches(_unicode_ints, return_dtype=pl.Int32, is_elementwise=True))
+    )
+
+
+def _from_hex(texts: pl.Series) -> pl.Series:
+    """Hexadecimal float texts as doubles, null for null."""
+    values = texts.to_list()
+    return pl.Series(texts.name, [None if t is None else float.fromhex(t) for t in values], dtype=pl.Float64)
+
+
+def spark_csv_double(field: pl.Expr) -> pl.Expr:
+    """A DoubleType field as Spark's CSV reader parses it, null if it fails, Float64.
+
+    `NaN`, `Inf` and `-Inf` are Spark's own tokens; anything else goes through java's
+    `Double.parseDouble`: trimmed, an optional `f`/`d` suffix, signed `NaN` and `Infinity`, and
+    hexadecimal floats.
+    """
+    trimmed = field.str.strip_chars(SPARK_CAST_TRIM)
+    return (
+        pl
+        .when(field == 'NaN')
+        .then(pl.lit(math.nan))
+        .when(field == 'Inf')
+        .then(pl.lit(math.inf))
+        .when(field == '-Inf')
+        .then(pl.lit(-math.inf))
+        .when(trimmed.str.contains(r'^[+-]?NaN$'))
+        .then(pl.lit(math.nan))
+        .when(trimmed.str.contains(r'^\+?Infinity$'))
+        .then(pl.lit(math.inf))
+        .when(trimmed == '-Infinity')
+        .then(pl.lit(-math.inf))
+        .when(trimmed.str.contains(_JAVA_HEX))
+        .then(trimmed.str.extract(_JAVA_HEX, 1).map_batches(_from_hex, return_dtype=pl.Float64, is_elementwise=True))
+        .otherwise(trimmed.str.extract(_JAVA_DECIMAL, 1).cast(pl.Float64, strict=False))
+    )

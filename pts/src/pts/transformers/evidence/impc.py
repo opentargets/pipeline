@@ -16,7 +16,7 @@ from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
-from pts.transformers.evidence.utils.expressions import direction_when_disease_present, divide
+from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
 from pts.transformers.evidence.utils.run import write_evidence
@@ -31,6 +31,7 @@ from pts.transformers.impc_common import (
     read_impc_csv,
     read_mgi_pubmed,
 )
+from pts.transformers.utils.spark_math import divide
 
 #: The `source` keys of the IMPC inputs.
 SOURCES = [

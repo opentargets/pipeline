@@ -1,12 +1,12 @@
 """Evidence post-processing in polars: harmonisation through scoring and direction of effect.
 
-Polars port of `pts.pyspark.evidence_utils.evidence.Evidence`. `Evidence`'s methods each return a
+Polars port of the removed pyspark `Evidence`. `Evidence`'s methods each return a
 new `Evidence`, so a caller can chain the full sequence -- `validate_diseases` ->
 `validate_target` -> `validate_datasource` -> `assign_evidence_identifier` ->
 `validate_uniqueness` -> `resolve_publication_date` ->
 `resolve_evidence_date` -> `calculate_evidence_score` -> `assign_direction_on_trait` ->
 `assign_direction_on_target` -> `hash_long_variant_identifiers` -> `valid()`/`invalid()` -- exactly
-as `pts/src/pts/pyspark/evidence_postprocess.py` chains the pyspark class. The shared recipe
+as the removed pyspark post-processing step chained the pyspark class. The shared recipe
 (`postprocess`) stops at `calculate_evidence_score`; the steps after it belong to the datasources
 that use them.
 
@@ -74,7 +74,7 @@ def _flag(condition: pl.Expr, flag: EvidenceFlags) -> pl.Expr:
 def _harmonise_expr(expr: pl.Expr, source_dtype: Any, target_dtype: Any) -> pl.Expr:
     """Cast one column/field expression from `source_dtype` to `target_dtype`.
 
-    Mirrors `pts.pyspark.common.cast_to_schema.cast_column_to_target_type`: a `List(Struct)` is
+    Mirrors the removed pyspark `cast_column_to_target_type`: a `List(Struct)` is
     recast element-by-element, a `Struct` is rebuilt in the target's field order (a field the
     target has but the source lacks becomes null, a field the source has but the target lacks is
     dropped), and anything else is a plain non-strict cast -- spark's cast yields null on an
@@ -143,7 +143,7 @@ def _join_matching_spark_order(lf: pl.LazyFrame, other: pl.LazyFrame, on: str, h
 
 
 def _require_id_column(schema_names: list[str], method_name: str) -> None:
-    """Raise clearly if `id` is missing, mirroring pyspark's `@required_columns(['id'])`.
+    """Raise clearly if `id` is missing, mirroring the removed pyspark `@required_columns(['id'])`.
 
     Neither `validate_uniqueness` nor `resolve_publication_date` ported that decorator; without
     this, a missing `id` leaked a raw, unhelpful `ColumnNotFoundError` from deep inside the
@@ -242,7 +242,7 @@ class Evidence:
     def validate_uniqueness(self) -> Evidence:
         """Flag every row but one within each `id`, ordered by a content hash.
 
-        The hash input follows spark's, though it no longer produces spark's digest -- see below:
+        The hash input follows spark's:
 
         * `id` is included in the hash. Spark iterates `self.df.columns`, which by this point
           already includes `id` (added by `assign_evidence_identifier`); an earlier version of
@@ -257,13 +257,9 @@ class Evidence:
           order. That ordering also reaches the published parquet, so it is now load-bearing for
           the output's column order regardless of its spark provenance.
 
-        The digests are NOT byte-identical to spark's any more: `render_for_hash` renders
-        `Float64` with polars' native cast rather than java's `Double.toString`, so any row
-        carrying a double outside `0.001 <= |x| < 1e7` hashes differently than spark would. That
-        is deliberate -- matching the release's ids is not a requirement, and the UDF it replaced
-        was 56x slower. What the ranking still needs, and has, is DETERMINISM: the same content
-        always yields the same digest, and distinct content yields distinct digests, so the
-        survivor is stable across runs.
+        The digests match spark's on JDK 17, the release's JVM, whose `Double.toString` renders the
+        doubles, except for a row carrying one of the doubles above `2**63` that java 17 does not
+        render shortest (see `java_double_to_string`).
 
         Returns:
             Evidence with `EvidenceFlags.DUPLICATED` set on every row but the survivor within

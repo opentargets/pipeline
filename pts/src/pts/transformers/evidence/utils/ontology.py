@@ -1,6 +1,6 @@
 """Map evidence diseases to EFO with OnToma lookup tables.
 
-Polars port of `pts.pyspark.common.ontology.add_efo_mapping`.
+Polars port of the removed pyspark `add_efo_mapping`.
 """
 
 from __future__ import annotations
