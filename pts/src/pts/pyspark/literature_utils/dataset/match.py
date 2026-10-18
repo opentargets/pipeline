@@ -17,6 +17,9 @@ from pts.pyspark.literature_utils.label_mapping import MAPPED_LABELS_DDL, map_la
 if TYPE_CHECKING:
     from pyspark.sql.types import StructType
 
+#: Partitions for the distinct labels sent to the polars mapping, one task each.
+LABEL_MAPPING_PARTITIONS = 768
+
 
 @dataclass
 class Match(Dataset):
@@ -59,6 +62,7 @@ class Match(Dataset):
             self.df
             .select(f.col(label_col_name).alias('label'), f.col(type_col_name).alias('type'))
             .distinct()
+            .repartition(LABEL_MAPPING_PARTITIONS)
             .mapInArrow(map_label_batches(label_lut_path), MAPPED_LABELS_DDL)
             .alias('mapped')
         )
