@@ -120,7 +120,7 @@ def read_spark_csv(
         DataFrame of strings.
 
     Raises:
-        ValueError: if a name in `columns` is not a column.
+        ValueError: if `columns` is empty, repeats a name, or names something that is not a column.
     """
     nulls = [''] if null_values is None else null_values
     with StorageHandle(path).open('rb') as f:
@@ -143,6 +143,11 @@ def read_spark_csv(
     if columns is None:
         keep = list(range(width))
     else:
+        if not columns:
+            raise ValueError('columns is empty')
+        repeated = sorted({c for c in columns if columns.count(c) > 1})
+        if repeated:
+            raise ValueError(f'columns repeated: {repeated}')
         unknown = [c for c in columns if c not in names]
         if unknown:
             raise ValueError(f'columns not in the file: {unknown}')
