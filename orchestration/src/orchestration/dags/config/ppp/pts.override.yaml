@@ -80,6 +80,7 @@ steps:
           - input/molqtl/credible_set/deCODE_proteomics
         study: output/study
         target: output/target
+        disease: output/disease
       destination:
         output: output/credible_set
         excluded: excluded/credible_set
