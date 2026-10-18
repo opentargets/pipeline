@@ -95,25 +95,6 @@ steps:
       # OUTPUTS
       step.coloc_path: '{{release_uri}}/output/colocalisation'
 
-  variant_partition:
-    params:
-      step: variant_to_vcf
-      step.partition_size: 2_000 # approximate num of variants per partition!
-      step.session.write_mode: overwrite
-      # INPUTS
-      step.source_paths:
-        - '{{release_uri}}/input/evidence/uniprot_variants.json.gz'
-        - '{{release_uri}}/input/evidence/eva.json.gz'
-        - '{{release_uri}}/output/pharmacogenomics'
-        - '{{release_uri}}/output/credible_set'
-      step.source_formats:
-        - json
-        - json
-        - parquet
-        - parquet
-      # OUTPUTS
-      step.output_path: '{{release_uri}}/intermediate/variant_partition'
-
   variant_annotation:
     cluster: false
     google_batch_index_specs:

@@ -374,9 +374,6 @@ with DAG(
             'gentropy_colocalisation': {
                 'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
             },
-            'gentropy_variant_partition': {
-                'step.output_path': gsp('gentropy_variant_partition', 'step.output_path'),
-            },
             'gentropy_variant_annotation': {
                 'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
             },
