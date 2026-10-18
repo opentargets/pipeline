@@ -16,6 +16,7 @@ from pts.schemas.gene_burden import GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import parse_az
 from pts.transformers.evidence.gene_burden.brava import parse_brava
 from pts.transformers.evidence.gene_burden.curated import parse_curated
+from pts.transformers.evidence.gene_burden.cvdi import parse_cvdi
 from pts.transformers.evidence.gene_burden.finngen import parse_finngen
 from pts.transformers.evidence.gene_burden.genebass import parse_genebass
 from pts.transformers.evidence.gene_burden.genes_and_health import parse_genes_and_health
@@ -67,6 +68,7 @@ def parse_sub_sources(source: dict[str, str], settings: dict[str, Any]) -> list[
         parse_curated(source['curated_studies']),
         parse_genebass(source['genebass']),
         parse_finngen(source['finngen'], source['finngen_phenotypes'], settings['finngen_release']),
+        parse_cvdi(source['cvdi']),
         parse_genes_and_health(source['genes_and_health']),
         parse_brava(source['brava']),
     ]
@@ -144,9 +146,9 @@ def gene_burden(
 
     Args:
         source: the sub-source inputs (`az_binary`, `az_quantitative`, `az_genes`, `az_phenotypes`,
-            `curated_studies`, `genebass`, `finngen`, `finngen_phenotypes`, `genes_and_health`,
-            `brava`), `ontoma_disease_label_lut`, `ontoma_disease_id_lut`, `disease`, `target` and
-            `literature` locations.
+            `curated_studies`, `genebass`, `finngen`, `finngen_phenotypes`, `cvdi`,
+            `genes_and_health`, `brava`), `ontoma_disease_label_lut`, `ontoma_disease_id_lut`,
+            `disease`, `target` and `literature` locations.
         destination: `evidence` and `failed_evidence` output directories.
         settings: `finngen_release`, the FinnGen `releaseVersion`.
         config: unused.

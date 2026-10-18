@@ -19,3 +19,15 @@ def write_workbook(path: Path, sheets: dict[str, tuple[list[str], list[dict[str,
             sheet.append([row.get(column) for column in columns])
     workbook.save(path)
     return str(path)
+
+
+def write_rows(path: Path, sheets: dict[str, list[list[Any]]]) -> str:
+    """Write one sheet per entry, a row per list; None is a blank cell."""
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    for name, rows in sheets.items():
+        sheet = workbook.create_sheet(name)
+        for row in rows:
+            sheet.append(row)
+    workbook.save(path)
+    return str(path)

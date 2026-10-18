@@ -21,16 +21,19 @@ from pts.transformers.evidence.gene_burden import (
     check_union,
     gene_burden,
     map_diseases,
+    parse_sub_sources,
 )
 from pts.transformers.evidence.gene_burden.common import to_parsed
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 from tests.evidence.gene_burden.fixtures import (
     curated_line,
+    cvdi_row,
     genebass_row,
     write_az,
     write_brava,
     write_curated,
+    write_cvdi,
     write_finngen,
     write_genebass,
     write_genes_and_health,
@@ -256,7 +259,12 @@ def test_direction_on_target_is_lof_on_every_row() -> None:
 # the step
 
 
-def _sources(root: Path, curated: list[str], genebass: list[dict[str, Any]] | None = None) -> dict[str, str]:
+def _sources(
+    root: Path,
+    curated: list[str],
+    genebass: list[dict[str, Any]] | None = None,
+    cvdi: list[dict[Any, Any]] | None = None,
+) -> dict[str, str]:
     root.mkdir(parents=True)
     az_binary, az_quantitative, az_genes, az_phenotypes = write_az(root, [], [])
     finngen, finngen_phenotypes = write_finngen(root, [])
@@ -268,6 +276,7 @@ def _sources(root: Path, curated: list[str], genebass: list[dict[str, Any]] | No
         'finngen': finngen,
         'finngen_phenotypes': finngen_phenotypes,
         'genebass': write_genebass(root, genebass or []),
+        'cvdi': write_cvdi(root, cvdi or []),
         'genes_and_health': write_genes_and_health(root, [], [], []),
         'brava': write_brava(root),
         'curated_studies': write_curated(root / 'curated_evidence.tsv', *curated),
@@ -277,6 +286,21 @@ def _sources(root: Path, curated: list[str], genebass: list[dict[str, Any]] | No
         'target': write_target(root / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'G1', 'ENSG2': 'G2'}),
         'literature': write_literature(root / 'literature', {'12345': '2020-05-01'}),
     }
+
+
+def test_sub_sources_in_the_old_union_order(tmp_path: Path) -> None:
+    cvdi = [cvdi_row() | {('LOF (MAF<0.1%)', 'Meta P-value'): 1e-9}]
+    sources = _sources(tmp_path / 'src', [curated_line()], [genebass_row()], cvdi)
+    frames = parse_sub_sources(sources, {'finngen_release': 'R12'})
+    assert [frame.collect()['projectId'].unique().to_list() for frame in frames] == [
+        [],
+        ['REGENERON'],
+        ['Genebass'],
+        [],
+        ['CVDI Human Disease Portal'],
+        [],
+        [],
+    ]
 
 
 def _run(tmp: Path, curated: list[str], genebass: list[dict[str, Any]] | None = None) -> tuple[pl.DataFrame, ...]:

@@ -11,7 +11,7 @@ from typing import Any
 import polars as pl
 
 from pts.schemas.gene_burden import CURATED_INPUT_COLUMNS
-from tests.evidence.gene_burden.workbook import write_workbook
+from tests.evidence.gene_burden.workbook import write_rows, write_workbook
 
 BINARY_COLUMNS = [
     'Gene', 'Phenotype', 'CollapsingModel', 'Type', 'pValue', 'Category', 'nSamples', 'BinNcases', 'BinQVcases',
@@ -156,6 +156,74 @@ def write_finngen(
     phenos = tmp / 'phenos'
     phenos.write_text(json.dumps(MANIFEST if manifest is None else manifest))
     return str(results), str(phenos)
+
+
+CVDI_INDEX = ['phenotype', 'Gene ID Ensembl', 'Gene']
+
+
+CVDI_FIELDS = ['cMAC', 'OR [95%CI]', 'Meta P-value']
+
+
+CVDI_MASKS = ['LOF (MAF<0.1%)', 'LOF + missense0.8 (MAF<0.1%)', 'missense0.5 (MAF<0.001%)']
+
+
+# ST3's FDR1% block names one label, then FDR5% follows.
+CVDI_CUTOFFS = [
+    ('FDR1%', 'LOF (MAF<0.1%)', 1e-6),
+    (None, 'LOF + missense0.8 (MAF<0.1%)', 2e-7),
+    (None, 'Missense0.5 (MAF<0.001%)', 5e-8),
+    (None, 'Cauchy', 3e-7),
+    ('FDR5%', 'LOF (MAF<0.1%)', 1e-3),
+    (None, 'Cauchy', 1e-3),
+]
+
+
+def cvdi_row(**cells: Any) -> dict[Any, Any]:
+    """An ST6 row: `phenotype`, `Gene ID Ensembl` and `Gene`, plus `(mask, field)` cells."""
+    row: dict[Any, Any] = {'phenotype': 'Type_2_diabetes', 'Gene ID Ensembl': 'ENSG1', 'Gene': 'G1'}
+    return row | cells
+
+
+def _st6(rows: Sequence[dict[Any, Any]], masks: Sequence[str], footer: list[Any]) -> list[list[Any]]:
+    """ST6 as the sheet lays it out: a title, three header rows (ancestry, mask, field), the rows, a footnote.
+
+    The `EUR ancestry` group repeats the first mask with values that would pass every cutoff.
+    """
+    groups = [*(('ALL ancestry', mask, field) for mask in masks for field in CVDI_FIELDS)]
+    groups += [('ALL ancestry', 'Cauchy', 'Cauchy P-value')]
+    groups += [('EUR ancestry', masks[0], field) for field in CVDI_FIELDS]
+    levels: list[list[Any]] = [list(CVDI_INDEX), [None] * 3, [None] * 3]
+    for i, group in enumerate(groups):
+        for level, name in enumerate(group):
+            levels[level].append(name if i == 0 or groups[i - 1][: level + 1] != group[: level + 1] else None)
+    eur = {('EUR ancestry', masks[0], 'cMAC'): 99, ('EUR ancestry', masks[0], 'Meta P-value'): 1e-300}
+    eur[('EUR ancestry', masks[0], 'OR [95%CI]')] = '9.99 [9.99; 9.99]'
+    data = [
+        [row.get(c) for c in CVDI_INDEX] + [(row | eur).get(g if g[0] == 'EUR ancestry' else g[1:]) for g in groups]
+        for row in rows
+    ]
+    return [['Supplementary Table 6. Significant gene-trait associations'], *levels, *data, footer]
+
+
+def write_cvdi(
+    tmp: Path,
+    st6: Sequence[dict[Any, Any]] = (),
+    cutoffs: Sequence[tuple[str | None, str, Any]] = CVDI_CUTOFFS,
+    *,
+    masks: Sequence[str] = CVDI_MASKS,
+    footer: list[Any] | None = None,
+) -> str:
+    """The CVDI workbook: ST6 associations and ST3 cutoffs, whose other cohorts' cutoffs are all 0.5."""
+    cohorts = ['UKB', 'AoU', 'MGB', 'META (no correction)', 'META (overlap corrected)']
+    st3 = [
+        ['Supplementary Table 3. P-value cutoffs'],
+        [None, None, *cohorts],
+        ['Significance cutoff', 'Mask', *(['P cutoff'] * len(cohorts))],
+        *([label, mask, 0.5, 0.5, 0.5, 0.5, cutoff] for label, mask, cutoff in cutoffs),
+        ['FDR: false discovery rate.'],
+    ]
+    footer = ['Associations are significant at FDR 1%.'] if footer is None else footer
+    return write_rows(tmp / 'cvdi.xlsx', {'ST3': st3, 'ST6': _st6(st6, masks, footer)})
 
 
 ST9_COLUMNS = [
