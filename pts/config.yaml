@@ -127,6 +127,7 @@ steps:
           - input/molqtl/credible_set/ukb_ppp_eur
         study: output/study
         target: output/target
+        disease: output/disease
       destination:
         output: output/credible_set
         excluded: excluded/credible_set
