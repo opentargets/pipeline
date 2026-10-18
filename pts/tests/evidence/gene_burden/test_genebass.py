@@ -112,6 +112,22 @@ def test_zero_pvalue_minimum_is_over_the_whole_input(tmp_path: Path) -> None:
     assert 'There are 1 Genebass evidence with a p-value of 0.0; they take the minimum, 1e-30.' in log
 
 
+def test_zero_pvalue_takes_a_categorical_minimum(tmp_path: Path) -> None:
+    rows = _parse(
+        tmp_path,
+        [
+            genebass_row(Pvalue_Burden=0.0, BETA_Burden=-0.5, SE_Burden=0.25),
+            genebass_row(gene_id='ENSG2', trait_type='categorical', Pvalue_Burden=2.5e-30),
+            genebass_row(gene_id='ENSG3', Pvalue_Burden=3e-30),
+        ],
+    )
+    # 2.5e-30: CAST(log10 AS INT) - 1 = -29 - 1, mantissa 2.5e-30 / 1e-30
+    assert rows.sort('targetFromSourceId').select(
+        'targetFromSourceId', 'resourceScore', 'pValueMantissa', 'pValueExponent', 'beta',
+        'betaConfidenceIntervalLower', 'betaConfidenceIntervalUpper',
+    ).rows() == [('ENSG1', 2.5e-30, 2.5, -30, -0.5, -0.75, -0.25), ('ENSG3', 3e-30, 3.0, -30, 0.25, 0.125, 0.375)]
+
+
 def test_zero_pvalue_without_a_significant_minimum_is_dropped(tmp_path: Path) -> None:
     assert _parse(tmp_path, [genebass_row(Pvalue_Burden=0.0), genebass_row(Pvalue_Burden=0.01)]).height == 0
 

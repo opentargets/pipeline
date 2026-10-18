@@ -7,11 +7,11 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from loguru import logger
 
 from pts.schemas.gene_burden import CURATED_INPUT_COLUMNS, GENE_BURDEN_PARSED
 from pts.transformers.evidence.gene_burden.curated import parse_curated
 from tests.evidence.gene_burden.fixtures import HEADER, curated_line, write_curated
+from tests.evidence.gene_burden.logs import logged
 from tests.evidence.gene_burden.spark_rows import expand, multiset
 
 
@@ -44,25 +44,22 @@ def test_curated_disease_id_is_kept_apart_from_the_mapped_id(tmp_path: Path) -> 
 
 
 def test_float_case_counts_parse(tmp_path: Path) -> None:
-    messages: list[str] = []
-    sink = logger.add(messages.append, format='{message}')
-    try:
-        rows = _parse(
+    parsed, log = logged(
+        lambda: _parse(
             tmp_path,
             curated_line(targetFromSourceId='A', studyCases='13885.0', studyCasesWithQualifyingVariants='12.0'),
             curated_line(targetFromSourceId='B', studyCases='1.5', studyCasesWithQualifyingVariants='x'),
             curated_line(targetFromSourceId='C', studyCases='42', studyCasesWithQualifyingVariants='7.00'),
             curated_line(targetFromSourceId='D'),
-        ).sort('targetFromSourceId')
-    finally:
-        logger.remove(sink)
+        )
+    )
+    rows = parsed.sort('targetFromSourceId')
     assert rows.select('studyCases', 'studyCasesWithQualifyingVariants').rows() == [
         (13885, 12),
         (None, None),
         (42, 7),
         (None, None),
     ]
-    log = ''.join(messages)
     assert '1 curated evidence have studyCases written as N.0, read as N' in log
     assert '2 curated evidence have studyCasesWithQualifyingVariants written as N.0, read as N' in log
 

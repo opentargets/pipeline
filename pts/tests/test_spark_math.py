@@ -149,6 +149,14 @@ def test_spark_pow_is_not_numpy_power() -> None:
     assert strict_pow(10.0, -23.6442024) == 2.268807243217692e-24
 
 
+@pytest.mark.parametrize('base', [1 + 2**-30, 1 - 2**-22])
+def test_strict_pow_raises_for_a_huge_exponent_on_a_base_near_one(base: float) -> None:
+    with pytest.raises(ValueError, match='unsupported exponent'):
+        strict_pow(base, 2.0**40)
+    assert strict_pow(base, 2.0**70) == (math.inf if base > 1 else 0.0)
+    assert strict_pow(base, -(2.0**70)) == (0.0 if base > 1 else math.inf)
+
+
 def _exp_arguments() -> list[float | None]:
     rng = random.Random(20261020)
     values: list[float | None] = [

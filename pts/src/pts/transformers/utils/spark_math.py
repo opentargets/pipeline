@@ -231,12 +231,17 @@ def _fdlibm_pow(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def _strict_pow(x: float, y: np.ndarray) -> np.ndarray:
-    """Java's `StrictMath.pow(x, y)` element-wise over `y`, for a finite `x > 0` other than 1."""
+    """Java's `StrictMath.pow(x, y)` element-wise over `y`, for a finite `x > 0` other than 1.
+
+    A `2**31 < |y| <= 2**64` with `x` in `[1 - 2**-21, 1 + 2**-20)` is not ported and raises.
+    """
     if not (math.isfinite(x) and x > 0 and x != 1):
         raise ValueError(f'unsupported base {x}')
     with np.errstate(all='ignore'):
         iy = _words(y)[0] & 0x7FFFFFFF
         huge = iy > 0x41E00000
+        if _words(np.array([x]))[0][0] in (0x3FEFFFFF, 0x3FF00000) and np.any(huge & (iy <= 0x43F00000)):
+            raise ValueError(f'unsupported exponent above 2**31 for base {x}')
         core = ~huge & ~np.isin(y, [0.0, 1.0, -1.0, 2.0, 0.5])
         values = np.full(len(y), np.nan)
         values[core] = _fdlibm_pow(np.full(core.sum(), x), y[core])
@@ -374,8 +379,8 @@ def substitute_zero_pvalues(
 ) -> pl.DataFrame | pl.LazyFrame:
     """Replace a p-value of 0.0 with the smallest p-value above 0 in `scope`, null if there is none.
 
-    `scope` is the frame itself by default. The count of zeros in `scope` is logged under `label`,
-    the column name by default.
+    `scope` is the frame itself by default; `frame` must be a subset of its rows. The count of zeros
+    in `scope` is logged under `label`, the column name by default.
     """
     pvalue = pl.col(column)
     zeros, minimum = (
