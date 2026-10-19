@@ -229,23 +229,6 @@ def test_write_accepts_a_lazyframe(tmp_path: Path) -> None:
     assert pl.read_parquet(sorted(Path(path).glob('*.parquet'))).height == 2
 
 
-@pytest.mark.parametrize('empty', [False, True])
-def test_write_single_file_retains_dataset_directory(tmp_path: Path, empty: bool) -> None:
-    """Single-file outputs retain the directory layout even for excluded datasets with no rows."""
-    frame = pl.DataFrame({'id': ['a', 'b']})
-    if empty:
-        frame = frame.clear()
-    path = tmp_path / 'dataset'
-
-    write_dataset(frame.lazy(), str(path), single_file=True, approximate_bytes_per_file=1)
-
-    parts = list(path.glob('*.parquet'))
-    assert len(parts) == 1
-    assert_frame_equal(pl.read_parquet(parts[0]), frame)
-    if not empty:
-        assert _codecs(parts[0]) == {'ZSTD'}
-
-
 def test_write_splits_when_over_the_threshold(tmp_path: Path) -> None:
     path = str(tmp_path / 'ds')
     frame = pl.DataFrame({'a': list(range(200_000))})
@@ -580,17 +563,3 @@ def test_scan_datasets_declared_schema_rejects_invalid_inputs(
 
     with pytest.raises(pl.exceptions.SchemaError):
         scan_datasets(paths, schema=pl.Schema({'id': pl.String})).collect()
-
-
-def test_single_file_sink_remains_lazy(tmp_path):
-    """The migration's single-file option preserves main's deferred sink contract."""
-    from pts.transformers.utils.dataset import sink_dataset
-
-    destination = tmp_path / 'lazy-single-file'
-    frame = pl.DataFrame({'value': [1, 2]})
-    sink = sink_dataset(frame, str(destination), single_file=True)
-    assert not destination.exists()
-    sink.collect()
-    parts = list(destination.glob('*.parquet'))
-    assert len(parts) == 1
-    assert pl.read_parquet(parts[0]).equals(frame)

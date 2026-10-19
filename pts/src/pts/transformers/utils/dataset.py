@@ -348,11 +348,8 @@ def write_dataset(
     path: str,
     *,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
-    single_file: bool = False,
 ) -> None:
-    """Write one dataset as a directory of zstd Parquet parts.
-
-    Parts use approximate size limits by default; `single_file=True` writes one part.
+    """Write one dataset as a directory of size-capped zstd parquet parts.
 
     Always a directory, never a single named file, so no dataset can outgrow its layout as it
     grows.
@@ -378,12 +375,11 @@ def write_dataset(
         path: destination directory, used as given -- never a parent or a derived path.
         approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
-        single_file: Write exactly one Parquet part, bypassing size-based splitting.
 
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
     """
-    sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file, single_file=single_file).collect()
+    sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
 
 
 def check_destinations_absent(paths: Iterable[str]) -> None:
@@ -413,7 +409,6 @@ def sink_dataset(
     path: str,
     *,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
-    single_file: bool = False,
 ) -> pl.LazyFrame:
     """Plan the `write_dataset` write of one dataset without running it.
 
@@ -423,7 +418,6 @@ def sink_dataset(
         frame: the data to write; a `DataFrame` is made lazy so there is one code path.
         path: destination directory, used as given.
         approximate_bytes_per_file: target part size, as in `write_dataset`.
-        single_file: Write exactly one Parquet part when the sink is collected.
 
     Returns:
         The lazy sink; nothing is written until it is collected.
@@ -433,8 +427,6 @@ def sink_dataset(
     """
     check_destinations_absent([path])
     lf = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
-    if single_file:
-        return lf.sink_parquet(f'{path.rstrip("/")}/00000000.parquet', compression='zstd', mkdir=True, lazy=True)
     return lf.sink_parquet(
         pl.PartitionBy(path, approximate_bytes_per_file=approximate_bytes_per_file),
         compression='zstd',
