@@ -14,6 +14,7 @@ from pts.transformers.clinical.datasets import (
 )
 from pts.transformers.clinical.helpers import filter_df, union_dfs
 from pts.transformers.clinical.llm_workflow import run_extraction
+from pts.transformers.clinical.mapping import map_entities
 from pts.transformers.clinical.ner import extract_disease_entities, extract_drug_entities
 from pts.transformers.clinical.providers.aact import extract_clinical_report as extract_aact_clinical_report
 from pts.transformers.clinical.providers.aact import replace_with_llm_indications
@@ -63,6 +64,7 @@ __all__ = [
     'extract_ttd_indication',
     'filter_df',
     'llm_workflow',
+    'map_entities',
     'parse_batch_results',
     'parse_pmda_approvals',
     'replace_with_llm_indications',
