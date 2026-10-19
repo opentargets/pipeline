@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from orchestration.operators.gce import GCLOUD_IMAGE, ComputeEngineRunContainerizedWorkloadSensor
+from orchestration.operators.gce import GCLOUD_IMAGE, OUTPUT_FILTER, ComputeEngineRunContainerizedWorkloadSensor
 
 
 @pytest.fixture
@@ -31,6 +31,25 @@ def test_startup_script_runs_gcloud_from_the_pinned_image(script: str) -> None:
     assert images == [GCLOUD_IMAGE, GCLOUD_IMAGE]
     assert 'gcloud storage cp' in script
     assert ':latest' not in script
+
+
+def test_workload_output_is_filtered(script: str) -> None:
+    """The container's output goes through the filter, after the container command."""
+    assert f'2>&1 | {OUTPUT_FILTER}' in script
+
+
+def test_output_filter_splits_progress_bars_and_keeps_the_exit_code() -> None:
+    """A long carriage-return progress bar leaves no line over 64 KiB, other output survives, and the
+    workload's exit code is the pipeline's."""
+    bar = r"""printf ' 63%%|=====     | %d/5365 [00:11<00:06]\r' "$i" """
+    workload = f"printf 'start\\n'; for i in $(seq 1 20000); do {bar}; done; printf 'end\\n'; exit 3"
+    result = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail; ( {workload} ) 2>&1 | {OUTPUT_FILTER}'],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 3
+    assert result.stdout.splitlines() == ['start', 'end']
 
 
 def test_startup_script_is_valid_bash(script: str) -> None:
