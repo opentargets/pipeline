@@ -4,32 +4,42 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from enum import StrEnum
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 import huggingface_hub.constants as hf_constants
 import pdfplumber
 import polars as pl
 import torch
 from loguru import logger
-from mira.dataset import ClinicalReport
-from mira.provider.aact import extract_clinical_report as extract_aact_clinical_report
-from mira.provider.chembl.drug_warnings import extract_clinical_report as extract_drug_warning_clinical_report
-from mira.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
-from mira.provider.ema import extract_clinical_report as extract_ema_clinical_report
-from mira.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
-from mira.provider.pmda import parse_pmda_approvals
-from mira.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
-from mira.provider.ttd import extract_indication as extract_ttd_indication
-from mira.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
-from mira.utils.polars_helpers import filter_df, union_dfs
-from mira.utils.spark_helpers import spark_session
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from pts.postgres import read_dump_tables
+from pts.transformers.clinical import (
+    ClinicalReport,
+    ClinicalReportType,
+    ClinicalSource,
+    ClinicalStageCategory,
+    extract_aact_clinical_report,
+    extract_chembl_clinical_report,
+    extract_disease_entities,
+    extract_drug_warning_clinical_report,
+    extract_ema_clinical_report,
+    extract_pmda_clinical_report,
+    extract_ttd_clinical_report,
+    extract_ttd_indication,
+    filter_df,
+    map_entities,
+    parse_pmda_approvals,
+    union_dfs,
+)
+from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 
 CHEMBL_SCHEMA_NAME = 'public'
 
@@ -82,6 +92,39 @@ AACT_TABLES = {
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
+EMA_SHEET_NAME = 'Medicine'
+
+OUTPUT_COLUMNS = (
+    'id',
+    'clinicalStage',
+    'origin',
+    'type',
+    'source',
+    'provider',
+    'drugs',
+    'countries',
+    'trialDescription',
+    'phaseFromSource',
+    'trialOfficialTitle',
+    'trialSponsor',
+    'diseases',
+    'trialLiterature',
+    'sideEffects',
+    'trialPhase',
+    'trialWhyStopped',
+    'trialStudyType',
+    'qualityControls',
+    'trialPrimaryPurpose',
+    'title',
+    'trialNumberOfArms',
+    'trialOverallStatus',
+    'year',
+    'trialStopReasonCategories',
+    'url',
+    'trialStartDate',
+)
+"""The columns of `output/clinical_report`, in their published order."""
+
 
 class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
@@ -93,7 +136,10 @@ class ClinicalReportFlags(StrEnum):
 
 
 def clinical_report(
-    source: dict[str, str], destination: dict[str, str], settings: dict[str, str], properties: dict[str, str]
+    source: dict[str, str],
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
 ) -> None:
     """Generate clinical report dataset from ChEMBL molecules and disease data.
 
@@ -101,11 +147,12 @@ def clinical_report(
         source: Dictionary containing paths to input data
         destination: Dictionary containing paths to output data:
             - output: Path to write clinical reports (output/clinical_report)
-        settings: Dictionary containing step variables
-        properties: Dictionary containing Spark properties
+        settings: Dictionary containing step variables:
+            - ner_batch_size: batch size of the drug NER
+        config: Config object, for the scratch space of the dump restores
     """
     with offline_hf_models(source['models']):
-        _clinical_report(source, destination, settings)
+        _clinical_report(source, destination, settings, config)
 
 
 @contextmanager
@@ -139,16 +186,19 @@ def offline_hf_models(models_uri: str) -> Generator[Path]:
             hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE = previous
 
 
-def _clinical_report(source: dict[str, str], destination: dict[str, str], settings: dict[str, str]) -> None:
+def _clinical_report(
+    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
+) -> None:
     logger.info(f'source paths: {source}')
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
-    # The restores use no Spark, so the session starts after them rather than
-    # sitting idle. No `scratch_root`: a pyspark step gets no `Config`, and
-    # /mnt/disks/work is not mounted on the Dataproc master.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
-        str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY
+        str(source['chembl']),
+        CHEMBL_TABLES,
+        schema_name=CHEMBL_SCHEMA_NAME,
+        order_by=CHEMBL_ORDER_BY,
+        scratch_root=config.work_path,
     )
     chembl_indication = chembl_tables['drug_indication']
     chembl_indication_references = chembl_tables['indication_refs']
@@ -163,6 +213,7 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
         schema_name=AACT_SCHEMA_NAME,
         archive_member=AACT_ARCHIVE_MEMBER,
         order_by=AACT_ORDER_BY,
+        scratch_root=config.work_path,
     )
     aact_studies = aact_tables['studies']
     aact_interventions = aact_tables['interventions']
@@ -172,15 +223,14 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     aact_summaries = aact_tables['brief_summaries']
     aact_lead_sponsors = aact_tables['sponsors'].filter(pl.col('lead_or_collaborator') == 'lead')
 
-    spark = spark_session()
-    molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
-    disease_index_spark = spark.read.parquet(source['disease'])
+    molecule_index = scan_dataset(source['chembl_molecule']).select(DRUG_COLUMNS).collect()
+    disease_index = scan_dataset(source['disease']).select(DISEASE_COLUMNS).collect()
     llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
-    pmda_pdf_handler = StorageHandle(source['pmda'])
-    pmda_pdf = pdfplumber.open(pmda_pdf_handler.open('rb'))
-    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), spark=spark)
+    pmda_bytes, _ = StorageHandle(source['pmda']).read()
+    pmda_pdf = pdfplumber.open(BytesIO(pmda_bytes))
+    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), extract_diseases=extract_disease_entities)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
@@ -235,9 +285,7 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     ttd_txt_lines = ttd_txt_handler.open('r').read().split('\n')
     ttd_indications = extract_ttd_indication(ttd_txt_lines)
     ttd = extract_ttd_clinical_report(indications=ttd_indications)
-    ema_excel_handler = StorageHandle(source['ema'])
-    ema_excel = ema_excel_handler.open('rb').read()
-    ema = extract_ema_clinical_report(ema_excel, spark)
+    ema = extract_ema_clinical_report(read_ema_sheet(source['ema']), extract_diseases=extract_disease_entities)
 
     reports = union_dfs([
         pmda.df,
@@ -250,20 +298,15 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     ])
     logger.info('reports generated. map entities...')
     output = (
-        ClinicalReport
-        .map_entities(
-            spark=spark,
+        map_report_entities(
             reports=reports,
-            disease_index=disease_index_spark,
-            drug_index=molecule_index_spark,
+            disease_index=disease_index,
+            drug_index=molecule_index,
             chembl_curation=chembl_curation,
-            drug_column_name='drugFromSource',
-            disease_column_name='diseaseFromSource',
-            ner_extract_drug=True,
             ner_batch_size=int(settings['ner_batch_size']),
             ner_cache_path=source['ner_cache_path'],
         )
-        .pipe(validate_disease, disease_index=scan_dataset(source['disease']).select('id', 'obsoleteTerms').collect())
+        .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
@@ -274,7 +317,95 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     )
 
     logger.info(f'destination paths: {destination}')
-    write_dataset(output.df, destination['output'])
+    write_dataset(order_output_columns(output.df), destination['output'])
+
+
+def read_ema_sheet(path: str) -> pl.DataFrame:
+    """The EMA list of medicines, every cell a string, the sheet's banner row as column names.
+
+    Args:
+        path: the EMA medicines workbook.
+
+    Returns:
+        The `Medicine` sheet, with the real column names in its first row.
+    """
+    return read_spreadsheet(path, EMA_SHEET_NAME, infer_types=False)
+
+
+def map_report_entities(
+    reports: pl.DataFrame,
+    disease_index: pl.DataFrame,
+    drug_index: pl.DataFrame,
+    chembl_curation: pl.DataFrame | None,
+    ner_batch_size: int,
+    ner_cache_path: str | None,
+) -> ClinicalReport:
+    """Map the drugs and diseases of each report to ids.
+
+    Args:
+        reports: the reports of every provider.
+        disease_index: disease index, with `DISEASE_COLUMNS`.
+        drug_index: drug molecules, with `DRUG_COLUMNS`.
+        chembl_curation: ChEMBL's clinical trial curation.
+        ner_batch_size: batch size of the drug NER.
+        ner_cache_path: the drug NER cache, read and rewritten.
+
+    Returns:
+        ClinicalReport with the ids found.
+    """
+    exploded_reports = (
+        reports
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
+        .unnest(['drugs', 'diseases'])
+    )
+
+    mapped_exploded_reports = map_entities(
+        exploded_reports,
+        disease_index,
+        drug_index,
+        chembl_curation,
+        ner_cache_path=ner_cache_path,
+        ner_batch_size=ner_batch_size,
+    )
+
+    mapped_reports = (
+        mapped_exploded_reports
+        .with_columns(
+            disease=pl.when(
+                pl.any_horizontal(pl.col('diseaseFromSource').is_not_null(), pl.col('diseaseId').is_not_null())
+            ).then(pl.struct(pl.col('diseaseFromSource'), pl.col('diseaseId'))),
+            drug=pl.when(
+                pl.any_horizontal(pl.col('drugFromSource').is_not_null(), pl.col('drugId').is_not_null())
+            ).then(pl.struct(pl.col('drugFromSource'), pl.col('drugId'))),
+        )
+        .drop(['diseaseFromSource', 'drugFromSource', 'diseaseId', 'drugId'])
+        .unique()
+    )
+
+    return ClinicalReport(
+        df=(
+            mapped_reports
+            .group_by([c for c in mapped_reports.columns if c not in ['disease', 'drug']])
+            .agg(
+                pl.col('disease').drop_nulls().unique().alias('diseases'),
+                pl.col('drug').drop_nulls().unique().alias('drugs'),
+            )
+            .with_columns(pl.when(pl.col(c).list.len() > 0).then(pl.col(c)) for c in ['diseases', 'drugs'])
+        )
+    )
+
+
+def order_output_columns(reports: pl.DataFrame) -> pl.DataFrame:
+    """The reports' columns in the published order of `output/clinical_report`.
+
+    Raises:
+        ValueError: if the reports have a column `output/clinical_report` does not.
+    """
+    extra = [c for c in reports.columns if c not in OUTPUT_COLUMNS]
+    if extra:
+        raise ValueError(f'columns not in output/clinical_report: {extra}')
+    return reports.select(OUTPUT_COLUMNS)
 
 
 def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:
