@@ -791,10 +791,6 @@ steps:
       service_tier: auto
       concurrency: 75
       shard_size: 200
-      publications:
-        # see PublicationsSpec — this fetches abstracts for every trial, not
-        # only cache misses, so it needs its own cache before a full run
-        enabled: false
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################

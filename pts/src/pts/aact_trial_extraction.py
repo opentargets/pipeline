@@ -1,4 +1,4 @@
-"""Mira-backed implementation of the :py:mod:`pts.tasks.llm_extract` task."""
+"""Implementation of the :py:mod:`pts.tasks.llm_extract` task."""
 
 from __future__ import annotations
 
@@ -13,20 +13,19 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 from loguru import logger
-from mira.provider.aact import extract_clinical_report
-from mira.provider.aact.llm_extractor import (
-    build_prompts,
-    fetch_publications,
-    parse_batch_results,
-    sample_report,
-)
-from mira.workflows import llm as llm_workflow
-from mira.workflows.llm import run_extraction
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
 from pts.postgres import read_dump_tables
 from pts.result_cache import METADATA_SCHEMA, cache_key, read_cache, write_cache
+from pts.transformers.clinical import (
+    build_prompts,
+    extract_aact_clinical_report,
+    llm_workflow,
+    parse_batch_results,
+    run_extraction,
+    sample_report,
+)
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -61,11 +60,11 @@ AACT_TABLES = {
 }
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 LLM_WORKFLOW_PATCH_LOCK = Lock()
-"""Serialises temporary patches to Mira's module globals."""
+"""Serialises temporary patches to the LLM workflow's module globals."""
 
 
 class _AsyncioWithClientCleanup:
-    """Delegate asyncio within Mira while closing clients on the same event loop."""
+    """Delegate asyncio within the LLM workflow while closing clients on the same event loop."""
 
     def __init__(self, module: Any, clients: list[Any]) -> None:
         self._module = module
@@ -103,7 +102,7 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
         scratch_root=scratch_root,
     )
 
-    report = extract_clinical_report(
+    report = extract_aact_clinical_report(
         studies=tables['studies'].select('nct_id', 'study_type', 'phase', 'official_title'),
         interventions=tables['interventions'],
         conditions=tables['conditions'],
@@ -117,10 +116,9 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
     return sample_report(report.df, sample_size)
 
 
-def prompts_for(report: pl.DataFrame, schema_digest: str, *, max_publications: int, enabled: bool) -> pl.DataFrame:
+def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
     """Render one prompt per trial and derive its cache key."""
-    publications = fetch_publications(report, max_publications=max_publications, enabled=enabled)
-    prompts = build_prompts(report, trial_fields=TRIAL_FIELDS, publications_map=publications)
+    prompts = build_prompts(report, trial_fields=TRIAL_FIELDS)
 
     return (
         pl
@@ -145,7 +143,7 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str, 
     trials the model failed on are simply absent from the result, and
     therefore absent from the cache. The next run tries them again. Nothing
     records that they failed — see :py:func:`pts.result_cache.cached_map`.
-    Mira's diagnostics are appended to ``errors``.
+    The workflow's diagnostics are appended to ``errors``.
     """
     prompts = shard.select('id', 'prompt').to_dicts()
     if len(prompts) == 1:
@@ -237,16 +235,16 @@ def _stage_batch_results(uri: str, local: str, config: Config) -> int:
 
 
 def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
-    """Call Mira outside Otter's already-running event loop.
+    """Call the LLM workflow outside Otter's already-running event loop.
 
     Otter invokes task methods from an asyncio loop, while the synchronous
-    Mira's entry point owns its loop via ``asyncio.run``. Running it in
+    workflow's entry point owns its loop via ``asyncio.run``. Running it in
     a short-lived worker thread gives it a thread-local loop without changing
-    either library's public API.
+    Otter's or the workflow's API.
     """
 
     def run_with_full_schema_inference() -> pl.DataFrame | None:
-        # Mira's default inference samples only the first 100 model
+        # The workflow's default inference samples only the first 100 model
         # responses. Later validated nested values can then disagree with that
         # inferred schema, losing the whole shard before cached_map can stage it.
         with LLM_WORKFLOW_PATCH_LOCK:

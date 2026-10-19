@@ -8,21 +8,22 @@ from time import sleep
 from types import SimpleNamespace
 from typing import Any, cast
 
-import mira.workflows.llm as llm_workflow
 import polars as pl
 import pytest
 
 from pts import aact_trial_extraction
 from pts.aact_trial_extraction import _run_extraction_in_thread
-from pts.tasks.llm_extract import LlmExtract, LlmExtractSpec, _schema_cache_uri
+from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
+from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow
 
 
-def test_registering_tasks_does_not_import_mira() -> None:
+def test_registering_tasks_does_not_import_heavy_deps() -> None:
     script = (
         'import sys\n'
         'from otter.task.task_registry import TaskRegistry\n'
         "TaskRegistry(None, None).register('pts.tasks')\n"
-        "print(sorted({m.split('.')[0] for m in sys.modules} & {'mira', 'ontoma', 'torch', 'transformers'}))\n"
+        "heavy = {'openai', 'torch', 'transformers', 'mira', 'ontoma'}\n"
+        "print(sorted({m.split('.')[0] for m in sys.modules} & heavy))\n"
     )
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, check=False)
 
@@ -30,11 +31,84 @@ def test_registering_tasks_does_not_import_mira() -> None:
     assert result.stdout.strip() == '[]'
 
 
+def test_default_system_prompt_is_packaged() -> None:
+    task = LlmExtract(
+        LlmExtractSpec(
+            name='llm_extract test',
+            source={'aact': 'aact.zip'},
+            destination={},
+            cache_uri='cache',
+            snapshot='snapshot',
+        ),
+        SimpleNamespace(config=None),
+    )
+
+    assert DEFAULT_SYSTEM_PROMPT == ('pts.transformers.clinical.prompts', 'aact_llm.txt')
+    assert task._system_prompt().startswith('You extract drug-indication evidence for Open Targets')
+
+
+def test_default_model_class_is_the_extraction_schema() -> None:
+    spec = LlmExtractSpec(
+        name='llm_extract test', source={'aact': 'aact.zip'}, destination={}, cache_uri='cache', snapshot='snapshot'
+    )
+
+    assert spec.model_class == 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
+    assert _import_class(spec.model_class) is ClinicalReportExtractionSchema
+
+
+def test_prompts_without_publications_match_mira() -> None:
+    report = pl.DataFrame({
+        'id': ['nct00000001', 'nct00000002', 'nct00000003'],
+        'trialOfficialTitle': ['A Phase 2 Study of Aspirin', None, 'Étude: Sézary syndrome & K&L'],
+        'trialDescription': ['Tests aspirin\nfor headache.', 'Brief only', None],
+        'trialDetailedDescription': [None, 'Detailed protocol.', 'Multi\nline'],
+        'trialPhase': ['PHASE2', None, 'PHASE1'],
+        'drugs': [
+            [{'drugFromSource': 'aspirin', 'drugId': None}, {'drugFromSource': 'ibuprofen', 'drugId': None}],
+            [{'drugFromSource': None, 'drugId': 'CHEMBL1'}],
+            None,
+        ],
+    })
+
+    prompts = aact_trial_extraction.prompts_for(report, 'schema-digest')
+
+    # mira 1.0.5 build_prompts with publications disabled, via prompts_for
+    assert prompts.to_dicts() == [
+        {
+            'id': 'nct00000001',
+            'prompt': (
+                'Trial ID: nct00000001\nOfficial Title: A Phase 2 Study of Aspirin\nDescription: Tests aspirin\n'
+                'for headache.\nDetailed Description: null\nInterventions: aspirin; ibuprofen'
+            ),
+            'prompt_sha256': 'ad34534226e9e4bb74e1da9ef5f65fdd9f08d19c5094131f18ca2da120524e6e',
+            'cache_key': '70aa829644d9d4ecc7c0321e741bb39395c02927bba67d48cc2504d1a59f5a63',
+        },
+        {
+            'id': 'nct00000002',
+            'prompt': (
+                'Trial ID: nct00000002\nOfficial Title: null\nDescription: Brief only\n'
+                'Detailed Description: Detailed protocol.'
+            ),
+            'prompt_sha256': '0f484a99130e21f5ccc612919f6f43c6f02ea56fce20755c5a31397c352af305',
+            'cache_key': 'fed716ad4c120a80fb03717e3efd1421b2269739e7b0295361bcb30fb883a498',
+        },
+        {
+            'id': 'nct00000003',
+            'prompt': (
+                'Trial ID: nct00000003\nOfficial Title: Étude: Sézary syndrome & K&L\nDescription: null\n'
+                'Detailed Description: Multi\nline'
+            ),
+            'prompt_sha256': '7ea74f612091f04407ad77ecd516b3f9bcf2ab17652951b586c8d12dc9fb4533',
+            'cache_key': '036c247a2c2191d29218239672b8731d579d212b471063002cca004c80a0ad16',
+        },
+    ]
+
+
 def test_schema_cache_uri_namespaces_the_cache_by_schema() -> None:
     assert _schema_cache_uri('gs://bucket/cache/', 'schema-digest') == 'gs://bucket/cache/schema-digest'
 
 
-def test_trial_report_passes_detailed_description_to_mira(
+def test_trial_report_passes_detailed_description_to_the_aact_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tables = {
@@ -57,7 +131,7 @@ def test_trial_report_passes_detailed_description_to_mira(
         return SimpleNamespace(df=pl.DataFrame({'id': ['nct1']}))
 
     monkeypatch.setattr(aact_trial_extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
-    monkeypatch.setattr(aact_trial_extraction, 'extract_clinical_report', fake_extract_clinical_report)
+    monkeypatch.setattr(aact_trial_extraction, 'extract_aact_clinical_report', fake_extract_clinical_report)
     monkeypatch.setattr(aact_trial_extraction, 'sample_report', lambda report, sample_size: report)
 
     aact_trial_extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
@@ -151,7 +225,7 @@ def test_run_extraction_closes_async_client_before_loop_shutdown(
 
     result = _run_extraction_in_thread(
         prompts=[{'id': 'a', 'prompt': 'prompt'}, {'id': 'b', 'prompt': 'prompt'}],
-        model_class='mira.schemas.ClinicalReportExtractionSchema',
+        model_class='pts.transformers.clinical.schemas.ClinicalReportExtractionSchema',
         system_prompt_path=str(prompt_path),
         model='test-model',
         openai_key='test-key',

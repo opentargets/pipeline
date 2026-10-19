@@ -6,14 +6,14 @@ from typing import Any
 import polars as pl
 import polars_hash as plh
 from loguru import logger
-from mira.dataset.clinical_indication import (
+from otter.config.model import Config
+
+from pts.transformers.clinical import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
     ClinicalStageCategory,
 )
-from otter.config.model import Config
-
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 

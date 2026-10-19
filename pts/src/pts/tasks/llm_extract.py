@@ -1,15 +1,15 @@
 """Task that extracts structured drug and disease evidence from clinical trials with an LLM.
 
-The extraction itself lives in ``mira``; this task is the part that
+The extraction itself lives in :py:mod:`pts.transformers.clinical`; this task is the part that
 makes it repeatable — it builds one prompt per trial, asks
 :py:mod:`pts.result_cache` for the ones that have not been extracted yet, and
 publishes the result as a typed parquet the release can read directly.
 
 Cache identity is the trial ID and the JSON schema the model is held to. The
-prompt hash is retained as audit metadata, but prompt text, publications, the
+prompt hash is retained as audit metadata, but prompt text, the
 model and system instructions do not invalidate an accepted extraction.
 
-The mira-backed work lives in :py:mod:`pts.aact_trial_extraction`.
+The extraction work lives in :py:mod:`pts.aact_trial_extraction`.
 """
 
 from __future__ import annotations
@@ -31,30 +31,13 @@ from pydantic import BaseModel
 
 from pts.result_cache import cached_map
 
-DEFAULT_SYSTEM_PROMPT = ('mira.prompts', 'aact_llm.txt')
-"""Packaged system prompt, versioned with the pinned ``mira`` dependency."""
+DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
+"""Packaged system prompt."""
 
 
 def _schema_cache_uri(cache_uri: str, schema_digest: str) -> str:
     """Return the cache namespace for one response schema."""
     return f'{cache_uri.rstrip("/")}/{schema_digest}'
-
-
-class PublicationsSpec(BaseModel):
-    """Whether to enrich prompts with Europe PMC abstracts."""
-
-    enabled: bool = False
-    """Enrich prompts with abstracts.
-
-        .. warning:: This fetches abstracts for *every* trial, not only the ones
-            that missed the cache, because prompts are built before the cache
-            lookup. It is the one part of this step that does not get cheaper as
-            the cache fills. Give it its own
-            :py:func:`pts.result_cache.cached_map` keyed on pmid before turning it
-            on for a full run. Publication data is not part of the extraction
-            cache identity."""
-    max_publications: int = 1
-    """Abstracts per trial."""
 
 
 class LlmExtractSpec(Spec):
@@ -77,7 +60,7 @@ class LlmExtractSpec(Spec):
         DAG. Never put the key itself in config."""
     model: str = 'gpt-5-nano-2025-08-07'
     """OpenAI model. Not part of the cache key."""
-    model_class: str = 'mira.schemas.ClinicalReportExtractionSchema'
+    model_class: str = 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
     """Dotted path to the pydantic model the response is validated against. Its
         JSON schema is part of the cache key."""
     system_prompt: str | None = None
@@ -95,8 +78,6 @@ class LlmExtractSpec(Spec):
         task resumes rather than paying for the same calls twice."""
     sample_size: int | None = None
     """Extract a random sample only. For dry runs; leave unset in production."""
-    publications: PublicationsSpec = PublicationsSpec()
-    """Europe PMC enrichment."""
     legacy_batch_results: str | None = None
     """Optional one-off directory of legacy OpenAI Batch API results to seed the cache,
         relative to the release root."""
@@ -138,12 +119,7 @@ class LlmExtract(Task):
 
         archive = StorageHandle(str(self.spec.source['aact']), config=self.context.config).absolute
         report = aact_trial_extraction.trial_report(archive, self.context.config.work_path, self.spec.sample_size)
-        prompts = aact_trial_extraction.prompts_for(
-            report,
-            schema_digest,
-            max_publications=self.spec.publications.max_publications,
-            enabled=self.spec.publications.enabled,
-        )
+        prompts = aact_trial_extraction.prompts_for(report, schema_digest)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
         if self.spec.legacy_batch_results:

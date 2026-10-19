@@ -1,0 +1,115 @@
+"""Extraction of clinical reports from ChEMBL drug/indications dataset."""
+
+import polars as pl
+import polars_hash as plh
+
+from pts.transformers.clinical.datasets import APPROVAL_SOURCES, ClinicalReport
+from pts.transformers.clinical.schemas import (
+    ClinicalProvider,
+    ClinicalReportOrigin,
+    ClinicalReportType,
+    ClinicalStageCategory,
+)
+
+
+def extract_clinical_report(
+    drug_indication: pl.DataFrame,
+    molecule_dictionary: pl.DataFrame,
+    indication_refs: pl.DataFrame,
+) -> ClinicalReport:
+    """Extract clinical reports from the curation ChEMBL does for drugs and clinical candidates.
+
+    Sources include: FDA, EMA, WHO ATC, ClinicalTrials.gov, INN, USAN.
+
+    Args:
+        drug_indication: `drug_indication` table from ChEMBL
+        molecule_dictionary: `molecule_dictionary` table from ChEMBL
+        indication_refs: `indication_refs` table from ChEMBL
+
+    Returns:
+        ClinicalReport: Dataset with drug/indication relationships
+    """
+    reports = (
+        drug_indication
+        .join(molecule_dictionary, 'molregno')
+        .join(indication_refs, 'drugind_id')
+        .filter(pl.col('efo_id').is_not_null())
+        # Some EMA references that are duplicated
+        .filter(~pl.col('ref_url').str.starts_with('www'))
+        .select(
+            # INN references list multiple drugs, we split them so that a single report
+            # corresponds to a single drug-indication pair
+            id=(
+                pl
+                .when(pl.col('ref_type') == 'INN')
+                .then(
+                    plh.concat_str(
+                        pl.col('ref_id'),
+                        pl.lit('/'),
+                        pl.col('efo_term'),
+                        pl.lit('/'),
+                        pl.col('pref_name'),
+                    ).str.split(',')
+                )
+                .otherwise(pl.col('ref_id').str.split(','))
+            ),
+            phaseFromSource=(
+                pl
+                .when(pl.col('ref_type').is_in(APPROVAL_SOURCES))
+                .then(pl.lit(ClinicalStageCategory.APPROVAL))
+                .when(pl.col('ref_type').is_in(['INN', 'USAN']))
+                .then(pl.lit(ClinicalStageCategory.UNKNOWN))
+                .otherwise(
+                    pl.col('max_phase_for_ind').cast(pl.Float16).cast(pl.String)
+                )  # TODO: report to ChEMBL - ClinicalTrials phase won't be accurate
+            ),
+            origin=(
+                pl
+                .when(pl.col('ref_type') == 'ClinicalTrials')
+                .then(pl.lit(ClinicalReportOrigin.CLINICAL_TRIAL))
+                .when(pl.col('ref_type') == 'DailyMed')
+                .then(pl.lit(ClinicalReportOrigin.DRUG_LABEL))
+                .when(pl.col('ref_type').is_in(['FDA', 'EMA']))
+                .then(pl.lit(ClinicalReportOrigin.REGULATORY))
+                .otherwise(pl.lit(ClinicalReportOrigin.CURATED_RESOURCE))
+            ),
+            url=(
+                pl
+                .when(pl.col('ref_type') == 'ClinicalTrials')
+                .then(pl.concat_str(pl.lit('https://clinicaltrials.gov/study/'), pl.col('ref_id')))
+                .otherwise(pl.col('ref_url'))
+            ),
+            provider=pl.lit(ClinicalProvider.CHEMBL.value),
+            source=pl.col('ref_type'),
+            disease=pl.struct(
+                pl.col('efo_id').str.replace(':', '_').alias('diseaseId'),
+                pl.col('efo_term').str.to_lowercase().alias('diseaseFromSource'),
+            ),
+            drug=pl.struct(
+                pl.col('pref_name').alias('drugFromSource'),
+                pl.col('chembl_id').alias('drugId'),
+            ),
+            type=pl.lit(ClinicalReportType.INDICATION.value),
+        )
+        .explode('id', empty_as_null=True)
+        .with_columns(
+            id=(
+                # ID is hashed when it does not relate to the representation in the primary source
+                pl
+                .when(pl.col('source').is_in(['INN', 'FDA', 'USAN']))
+                .then(plh.col('id').chash.sha2_256())
+                # For DalyMed, EMA, ATC - ID remains the original value (can be queried in the primary sources)
+                .otherwise(pl.col('id'))
+            )
+        )
+        .unique()
+    )
+
+    return ClinicalReport(
+        df=(
+            reports.group_by([c for c in reports.columns if c not in ['disease', 'drug']]).agg(
+                pl.col('disease').unique().alias('diseases'),
+                pl.col('drug').unique().alias('drugs'),
+            )
+        )
+    )
