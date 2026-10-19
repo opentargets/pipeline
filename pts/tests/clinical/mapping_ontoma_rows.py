@@ -43,9 +43,13 @@ MAPPED = [
     ('NCT11', 'Study Drug X', 'Disease Y', 'CHEMBL_CURATED', 'EFO_CURATED_2'),
     ('NCT12', 'Aspirin', 'Cystic fibrosis', 'CHEMBL_CURATED', 'EFO_CURATED_3'),
     ('NCT13', 'Study Drug X', 'Cystic fibrosis', None, 'MONDO_0009061'),
+    ('NCT14', '', '', None, None),
+    ('NCT15', 'Aspirin', 'Kalydeco', 'CHEMBL25', None),
+    ('NCT16', 'Kalydeco', 'Cystic fibrosis', 'CHEMBL2010601', 'MONDO_0009061'),
 ]
 
 NER_CACHE_WRITTEN = [
+    ('', []),
     ('Ivacaftor 150 mg tablet', ['ivacaftor']),
     ('Study Drug X', ['unmapped extraction']),
     ('aspirin + kalydeco', ['Aspirin', 'kalydeco']),
@@ -55,6 +59,7 @@ NER_CACHE_WRITTEN = [
 ]
 
 NER_EXTRACTED_LABELS = [
+    '',
     'Ivacaftor 150 mg tablet',
     'Study Drug X',
     'aspirin + kalydeco',

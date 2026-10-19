@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from pts.transformers.clinical import map_entities
@@ -95,6 +97,21 @@ def test_ner_cache_hit_not_recomputed(tmp_path: Path, ner_calls: list[list[str]]
     assert mapped.select('drugId', 'diseaseId').rows() == [('CHEMBL25', 'MONDO_0009061')]
     assert ner_calls == []
     assert Path(cache).read_bytes() == before
+
+
+def test_ner_cache_written_by_pandas_is_read(tmp_path: Path, ner_calls: list[list[str]]) -> None:
+    path = tmp_path / 'ner.parquet'
+    table = pa.table(
+        {
+            'query_label': pa.array(['aspirin tabs'], type=pa.large_string()),
+            'extracted_drugs': pa.array([['acetylsalicylic acid']], type=pa.list_(pa.large_string())),
+        },
+        metadata={b'pandas': b'{"index_columns": [], "columns": []}'},
+    )
+    pq.write_table(table, path)
+    mapped = _map(_reports(('NCT09', 'aspirin tabs', 'Cystic fibrosis', None, None)), str(path))
+    assert mapped.select('drugId').item() == 'CHEMBL25'
+    assert ner_calls == []
 
 
 def test_ner_cache_miss_computed_and_written(tmp_path: Path, ner_calls: list[list[str]]) -> None:
