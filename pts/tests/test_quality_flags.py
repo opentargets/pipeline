@@ -3,6 +3,7 @@
 from enum import StrEnum
 
 import polars as pl
+import pytest
 from polars.testing import assert_frame_equal
 
 from pts.transformers.utils.quality_flags import valid_rows
@@ -61,3 +62,15 @@ def test_valid_rows_preserves_schema_for_empty_input():
     result = valid_rows(frame, [Flag.INVALID])
     assert_frame_equal(result.valid.collect(), frame.collect())
     assert_frame_equal(result.invalid.collect(), frame.collect())
+
+
+@pytest.mark.parametrize('flags', [[Flag.INVALID], []], ids=['with-exclusions', 'no-exclusions'])
+def test_valid_rows_accepts_untyped_all_empty_quality_controls(flags):
+    """A QC column holding only empty and null lists is inferred as List(Null); all rows are valid."""
+    frame = pl.LazyFrame({'id': ['empty', 'null'], 'qualityControls': [[], None]})
+    assert frame.collect_schema()['qualityControls'] == pl.List(pl.Null)
+
+    result = valid_rows(frame, flags)
+
+    assert result.valid.collect()['id'].to_list() == ['empty', 'null']
+    assert result.invalid.collect().is_empty()

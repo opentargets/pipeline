@@ -557,3 +557,17 @@ def test_scan_datasets_declared_schema_rejects_invalid_inputs(
 
     with pytest.raises(pl.exceptions.SchemaError):
         scan_datasets(paths, schema=pl.Schema({'id': pl.String})).collect()
+
+
+@pytest.mark.parametrize('selection', ['list', 'glob'])
+def test_scan_datasets_declared_schema_keeps_late_ndjson_fields(tmp_path: Path, selection: str) -> None:
+    """A field first seen after the inference window survives when a schema is declared."""
+    directory = tmp_path / 'dataset_a'
+    directory.mkdir()
+    rows = [{'id': str(i)} for i in range(200)] + [{'id': 'late', 'late': 'KEEP'}]
+    (directory / 'part.json').write_text('\n'.join(json.dumps(row) for row in rows))
+    paths = [str(directory)] if selection == 'list' else str(tmp_path / 'dataset_*')
+
+    result = scan_datasets(paths, format='ndjson', schema=pl.Schema({'id': pl.String, 'late': pl.String}))
+
+    assert result.collect()['late'].drop_nulls().to_list() == ['KEEP']
