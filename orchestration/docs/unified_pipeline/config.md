@@ -66,8 +66,6 @@ component run by it owns its configuration:
     Stage (PTS)
 - [`gentropy.yaml`](../../../orchestration/src/orchestration/dags/config/gentropy.yaml) -
     configuration for the Platform Genetics (Gentropy)
-- [`gentropy.overrides.yaml`](../../../orchestration/src/orchestration/dags/config/ppp/gentropy.overrides.yaml) -
-    PPP overrides for the Platform Genetics (Gentropy)
 
 Typically the configuration file has to have at least the `steps` key defined that
 marks all of the pipeline steps that should be executed within the pipeline run.

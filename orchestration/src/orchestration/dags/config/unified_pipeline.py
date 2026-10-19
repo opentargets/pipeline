@@ -92,10 +92,6 @@ class UnifiedPipelineConfig:
         )
         """The internal configuration for GENTROPY steps."""
 
-        if self.is_ppp:
-            self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
-        """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
-
         # Without this the sentinel substitution fails with a bare
         # `TypeError: replace() argument 2 must be str, not None` that breaks the
         # import of the whole DAG — PIS and GENTROPY stages included — while

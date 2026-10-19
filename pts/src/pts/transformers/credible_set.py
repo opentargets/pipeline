@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import credible_set_schema
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
-from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
+from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
 #: Disease index therapeutic area that marks a term as a measurement rather than a disease.
 MEASUREMENT_THERAPEUTIC_AREA = 'EFO_0001444'
@@ -318,26 +318,30 @@ def flag_trans_qtls(
     return frame.drop('isTransQtl').join(annotations, on='studyLocusId', how='left')
 
 
-def validate_unique_study_locus_id(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag duplicate IDs after other exclusions, keeping the smallest credible set.
+def validate_unique_study_locus_id(frame: pl.LazyFrame, eligible: pl.Expr | None = None) -> pl.LazyFrame:
+    """Flag duplicate IDs among eligible rows, keeping the smallest credible set.
 
-    Equal-sized sets use a stable content hash so separate output executions agree.
+    `eligible` limits the check to rows not already excluded: other rows are never
+    flagged and never count as duplicates, so the check runs in the same pass as the
+    earlier QC instead of on a second copy of the valid rows. Equal-sized sets use a
+    stable content hash so separate output executions agree.
     """
     logger.info('Validating credible set identifier uniqueness')
     ranked = (
         frame
         .with_row_index('_input_order')
         .with_columns(
+            (pl.lit(True) if eligible is None else eligible.fill_null(False)).alias('_eligible'),
             pl.col('locus').list.len().fill_null(-1).alias('_locus_size'),
             pl.struct(frame.collect_schema().names()).hash(seed=0).alias('_tie_breaker'),
         )
         .sort(['_locus_size', '_tie_breaker', '_input_order'])
-        .with_columns(pl.int_range(pl.len()).over('studyLocusId').alias('_duplicate_rank'))
+        .with_columns(pl.int_range(pl.len()).over('studyLocusId', '_eligible').alias('_duplicate_rank'))
     )
     return (
-        flag_rows(ranked, pl.col('_duplicate_rank') > 0, QualityFlag.DUPLICATED_STUDYLOCUS_ID)
+        flag_rows(ranked, pl.col('_eligible') & (pl.col('_duplicate_rank') > 0), QualityFlag.DUPLICATED_STUDYLOCUS_ID)
         .sort('_input_order')
-        .drop('_input_order', '_locus_size', '_tie_breaker', '_duplicate_rank')
+        .drop('_input_order', '_eligible', '_locus_size', '_tie_breaker', '_duplicate_rank')
     )
 
 
@@ -409,6 +413,9 @@ def qc_replication(frame: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFra
         'studyId', 'geneId'
     )
     qtl = loci.join(qtl_studies, on='studyId', how='inner')
+    # molQTL replication counts credible sets, not distinct studies, as in Gentropy: one
+    # study with two credible sets for the same lead variant and gene (e.g. SuSiE and
+    # SuSiE-inf) counts as replicated.
     replicated_qtl = qtl.group_by('variantId', 'geneId').len().filter(pl.col('len') >= 2).select('variantId', 'geneId')
     qtl_ids = qtl.join(replicated_qtl, on=['variantId', 'geneId'], how='inner').select('studyLocusId')
     replicated = pl.concat([gwas_ids, qtl_ids]).unique().with_columns(pl.lit(True).alias('_replicated'))
@@ -441,7 +448,7 @@ def credible_set(
     study = scan_dataset(sources.study)
     target = scan_dataset(sources.target)
     disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
-    result = (
+    validated = (
         scan_datasets(sources.credible_set, schema=credible_set_schema)
         .pipe(qc_mhc_region)
         .pipe(validate_chromosome_label)
@@ -454,20 +461,19 @@ def credible_set(
         .pipe(assign_confidence)
         .pipe(flag_trans_qtls, study, target, options.trans_qtl_threshold)
         .select(credible_set_schema.names())
+        # Duplicate IDs are checked among rows the earlier QC keeps, in the same pass, so
+        # the dataset is materialised once rather than again for its valid subset.
+        .pipe(validate_unique_study_locus_id, ~has_excluded_flag(options.invalid_qc_reasons))
         .collect()
-        .lazy()
-        .pipe(valid_rows, options.invalid_qc_reasons)
     )
-    unique = (
-        result.valid.pipe(validate_unique_study_locus_id).collect().lazy().pipe(valid_rows, options.invalid_qc_reasons)
-    )
+    result = valid_rows(validated.lazy(), options.invalid_qc_reasons)
     accepted = (
-        unique.valid
+        result.valid
         .pipe(qc_replication, study, disease)
         .select(credible_set_schema.names())
         .sort('chromosome', 'position', nulls_last=False)
     )
-    excluded = pl.concat([result.invalid, unique.invalid.select(credible_set_schema.names())], how='vertical')
+    excluded = result.invalid
     logger.info(
         'Writing accepted credible sets to {} and excluded credible sets to {}',
         destinations.output,

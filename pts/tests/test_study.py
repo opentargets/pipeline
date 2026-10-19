@@ -313,16 +313,30 @@ def test_quality_flags_are_sorted_and_not_duplicated_when_validation_is_repeated
     assert result['qualityControls'].to_list() == [sorted(['a', 'z', str(QualityFlag.UNKNOWN_STUDY_TYPE)])]
 
 
-def test_deconvolute_studies_null_mapping_takes_precedence_with_legacy_spark_size():
-    """Spark's legacy null array size is -1, so a null mapping outranks a populated one."""
+@pytest.mark.parametrize('unmapped', [None, []], ids=['null', 'empty'])
+def test_deconvolute_studies_prefers_records_with_mapped_traits(unmapped):
+    """A record without mapped traits must not win granularity over a populated one."""
     result = deconvolute_studies(
         studies_frame([
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['a'], 'traitFromSource': 'populated'},
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': None, 'traitFromSource': 'null mapping'},
+            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['a', 'b'], 'traitFromSource': 'broad'},
+            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['a'], 'traitFromSource': 'specific'},
+            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': unmapped, 'traitFromSource': 'unmapped'},
+        ])
+    ).collect()
+    assert result['traitFromSourceMappedIds'].to_list() == [['a']]
+    assert result['traitFromSource'].to_list() == ['specific']
+
+
+def test_deconvolute_studies_without_any_mapped_traits_keeps_every_candidate():
+    """With no mapped traits anywhere, every record stays a candidate, as before."""
+    result = deconvolute_studies(
+        studies_frame([
+            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': None, 'traitFromSource': 'first'},
+            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': None, 'traitFromSource': 'last'},
         ])
     ).collect()
     assert result['traitFromSourceMappedIds'].to_list() == [None]
-    assert result['traitFromSource'].to_list() == ['null mapping']
+    assert result['traitFromSource'].to_list() == ['last']
 
 
 def heritability_frame(rows):
@@ -387,17 +401,15 @@ def test_collect_heritability_preserves_null_estimates_as_named_entries():
     assert entries[0]['QCCheckName'] == 'LDSC_SNP-h2'
 
 
-def test_collect_heritability_preserves_duplicate_successful_join_rows():
-    """Two successful source rows produce two study rows instead of silently deduplicating."""
+@pytest.mark.parametrize('order', [[0.5, 1.0], [1.0, 0.5]], ids=['ascending', 'descending'])
+def test_collect_heritability_keeps_one_estimate_per_study(order):
+    """Several successful LDSC runs for a study never duplicate it; the choice ignores input order."""
     result = collect_heritability(
         studies_frame([{'studyId': 's'}]),
-        heritability_frame([
-            {'studyId': 's', 'runStatus': 'success', 'h2': 0.5},
-            {'studyId': 's', 'runStatus': 'success', 'h2': 1.0},
-        ]),
+        heritability_frame([{'studyId': 's', 'runStatus': 'success', 'h2': value} for value in order]),
     ).collect()
-    assert result.height == 2
-    assert sorted(row[0]['QCCheckValue'] for row in result['sumstatQCValues'].to_list()) == [0.5, 1.0]
+    assert result.height == 1
+    assert result['sumstatQCValues'].to_list()[0][0]['QCCheckValue'] == 0.5
 
 
 def test_study_source_requires_heritability_path():

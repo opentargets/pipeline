@@ -14,33 +14,19 @@ def target_frame(rows):
         schema={
             'id': pl.String,
             'tss': pl.Int64,
-            'canonicalTranscript': pl.Struct({'strand': pl.String, 'start': pl.Int64, 'end': pl.Int64}),
             'genomicLocation': pl.Struct({'strand': pl.Int64, 'start': pl.Int64, 'end': pl.Int64}),
         },
     ).lazy()
 
 
 @pytest.mark.parametrize(
-    ('preferred', 'ct_strand', 'ct_start', 'ct_end', 'gl_strand', 'expected'),
-    [
-        (9, '+', 100, 200, 1, 9),
-        (None, '+', 100, 200, 1, 100),
-        (None, '-', 100, 200, 1, 200),
-        (None, '+', None, 200, 1, 300),
-        (None, '?', 100, 200, -1, 400),
-        (None, None, None, None, 1, 300),
-        (None, None, None, None, 0, None),
-    ],
+    ('preferred', 'strand', 'expected'),
+    [(9, 1, 9), (None, 1, 300), (None, -1, 400), (None, 0, None), (None, None, None)],
 )
-def test_tss_priority(preferred, ct_strand, ct_start, ct_end, gl_strand, expected):
-    """Preferred, canonical and genomic coordinates follow strand-specific priority."""
+def test_tss_priority(preferred, strand, expected):
+    """The preferred TSS wins; otherwise the strand-aware genomic start or end."""
     target = target_frame([
-        {
-            'id': 'ENSG1',
-            'tss': preferred,
-            'canonicalTranscript': {'strand': ct_strand, 'start': ct_start, 'end': ct_end},
-            'genomicLocation': {'strand': gl_strand, 'start': 300, 'end': 400},
-        }
+        {'id': 'ENSG1', 'tss': preferred, 'genomicLocation': {'strand': strand, 'start': 300, 'end': 400}}
     ])
     result = tss_lut(target)
     assert isinstance(result, pl.LazyFrame)
@@ -50,25 +36,22 @@ def test_tss_priority(preferred, ct_strand, ct_start, ct_end, gl_strand, expecte
     )
 
 
+def test_tss_ignores_canonical_transcript():
+    """A canonical transcript (PTS types its strand Int32) is not used for the TSS."""
+    target = target_frame([{'id': 'ENSG1', 'tss': None, 'genomicLocation': {'strand': 1, 'start': 300, 'end': 400}}])
+    canonical = pl.Struct({'strand': pl.Int32, 'start': pl.Int64, 'end': pl.Int64})
+    target = target.with_columns(
+        pl.lit({'strand': -1, 'start': 1, 'end': 2}, dtype=canonical).alias('canonicalTranscript')
+    )
+    assert tss_lut(target).collect().to_dicts() == [{'geneId': 'ENSG1', 'tss': 300}]
+
+
 def test_tss_preserves_duplicate_targets_and_null_structs():
     """Lookup must retain duplicate records and null coordinates."""
-    target = target_frame([{'id': 'ENSG1', 'tss': None, 'canonicalTranscript': None, 'genomicLocation': None}] * 2)
+    target = target_frame([{'id': 'ENSG1', 'tss': None, 'genomicLocation': None}] * 2)
     assert tss_lut(target).collect().to_dicts() == [{'geneId': 'ENSG1', 'tss': None}] * 2
 
 
 def test_empty_tss_lookup_schema():
     """Empty input still yields the lookup contract."""
     assert tss_lut(target_frame([])).collect_schema() == pl.Schema({'geneId': pl.String, 'tss': pl.Int64})
-
-
-@pytest.mark.parametrize(('preferred', 'strand', 'expected'), [(9, 1, 9), (None, 1, 300), (None, -1, 400)])
-def test_tss_without_canonical_transcript(preferred, strand, expected):
-    target = target_frame([
-        {
-            'id': 'ENSG1',
-            'tss': preferred,
-            'canonicalTranscript': None,
-            'genomicLocation': {'strand': strand, 'start': 300, 'end': 400},
-        }
-    ]).drop('canonicalTranscript')
-    assert tss_lut(target).collect().to_dicts() == [{'geneId': 'ENSG1', 'tss': expected}]

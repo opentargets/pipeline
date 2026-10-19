@@ -72,7 +72,7 @@ def test_parse_output_contract():
         'biosampleFromSourceId': None,
         'biosampleId': 'CL_1',
         'studyId': 'study',
-        'intervalId': hashlib.md5(b'1100200ENSG1studyenhancer').hexdigest(),
+        'intervalId': hashlib.md5(b'1|100|200|ENSG1|study|enhancer').hexdigest(),
         'qualityControls': [],
     }
 
@@ -99,6 +99,17 @@ def test_distance_to_tss(tss, interval_type, distance):
     assert row['distanceToTss'] == distance
 
 
+def test_interval_ids_do_not_collide_across_column_boundaries():
+    """chr1:12-345 and chr11:2-345 concatenate alike without a separator but must differ."""
+    ids = [
+        parse_enhancer_to_gene(raw_frame(chromosome=chromosome, start=start, end='345'), mapping(), targets())
+        .collect()
+        .row(0, named=True)['intervalId']
+        for chromosome, start in [('chr1', '12'), ('chr11', '2')]
+    ]
+    assert ids[0] != ids[1]
+
+
 def test_missing_lookups_and_null_identifier_component():
     """Unknown identifiers retain evidence with null annotations."""
     row = (
@@ -108,7 +119,7 @@ def test_missing_lookups_and_null_identifier_component():
     )
     assert row['distanceToTss'] is None
     assert row['biosampleId'] is None
-    assert row['intervalId'] == hashlib.md5(b'1100200Nonestudyenhancer').hexdigest()
+    assert row['intervalId'] == hashlib.md5(b'1|100|200|None|study|enhancer').hexdigest()
 
 
 def test_duplicate_lookup_rows_preserve_join_multiplicity():
@@ -404,7 +415,7 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
     assert excluded['distanceToTss'].to_list() == [51]
     assert valid['qualityControls'].to_list() == [[]]
     assert excluded['qualityControls'].to_list() == [[QualityFlag.SCORE_OUTSIDE_BOUNDS.value]]
-    assert valid['intervalId'].to_list() == [hashlib.md5(b'1100200ENSG1studyenhancer').hexdigest()]
+    assert valid['intervalId'].to_list() == [hashlib.md5(b'1|100|200|ENSG1|study|enhancer').hexdigest()]
     assert excluded['resourceScore'].to_list() == [
         [{'name': 'DNase', 'value': 2.5}, {'name': 'HiC_contacts', 'value': 3.25}]
     ]
