@@ -50,7 +50,7 @@ def _patch_factory(monkeypatch: pytest.MonkeyPatch, pipelines: dict[str, FakePip
 @pytest.fixture
 def warnings() -> Iterator[list[str]]:
     messages: list[str] = []
-    sink = logger.add(lambda m: messages.append(str(m)), level='WARNING', format='{message}')
+    sink = logger.add(lambda m: messages.append(str(m).strip()), level='WARNING', format='{message}')
     yield messages
     logger.remove(sink)
 
@@ -103,7 +103,7 @@ def test_disease_failure_yields_empty_and_counts(monkeypatch: pytest.MonkeyPatch
     out = extract_disease_entities(pl.Series(['a', 'bad', 'worse', 'bad']))
 
     assert out.to_list() == [['gout'], [], [], []]
-    assert any('2' in m and 'disease' in m.lower() for m in warnings)
+    assert any('disease ner failed for 2 of 3 distinct texts' in m for m in warnings)
 
 
 def _drug_pipelines(
@@ -163,4 +163,21 @@ def test_drug_batch_failure_yields_empty_and_counts(monkeypatch: pytest.MonkeyPa
     out = extract_drug_entities(pl.Series(['a', 'b', 'c']), batch_size=1)
 
     assert out.to_list() == [['aspirin'], [], ['ibuprofen']]
-    assert any('1' in m and 'drug' in m.lower() for m in warnings)
+    assert warnings == ['BioBERT failed for 1 of 3 texts']
+
+
+def test_drug_after_biobert_batch_failure_keeps_regex_hits_and_runs_drugtemist(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
+) -> None:
+    pipelines = _drug_pipelines(
+        biobert={},
+        drugtemist={'b': [_ent('FARMACO', 'Rescued')]},
+        fail_on={'xmab', 'b'},
+    )
+    _patch_factory(monkeypatch, pipelines)
+
+    out = extract_drug_entities(pl.Series(['xmab', 'b']), batch_size=8)
+
+    assert out.to_list() == [['xmab'], ['rescued']]
+    assert pipelines[DRUGTEMIST_MODEL].calls == [['b']]
+    assert warnings == ['BioBERT failed for 2 of 2 texts']

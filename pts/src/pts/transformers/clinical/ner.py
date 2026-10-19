@@ -144,17 +144,18 @@ def _process_batch_tiered(
     biobert_pipeline: Callable[..., Any],
     drugtemist_pipeline: Callable[..., Any],
     batch_size: int,
-) -> tuple[list[list[str]], int]:
+) -> tuple[list[list[str]], int, int, int]:
     all_results: list[list[str] | None] = []
     fallback_texts: list[str] = []
     fallback_indices: list[int] = []
-    failures = 0
+    biobert_failures = 0
+    drugtemist_failures = 0
 
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]
         regex_results = [_extract_with_regex(text, DRUG_NAME_PATTERNS) if text else set() for text in batch]
         biobert_results, failed = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS)
-        failures += failed
+        biobert_failures += failed
         for offset, (regex_drugs, biobert_drugs, text) in enumerate(
             zip(regex_results, biobert_results, batch, strict=True)
         ):
@@ -173,11 +174,12 @@ def _process_batch_tiered(
             batch = fallback_texts[start : start + batch_size]
             indices = fallback_indices[start : start + batch_size]
             drugtemist_results, failed = _extract_entities_from_batch(batch, drugtemist_pipeline, DRUGTEMIST_LABELS)
-            failures += failed
+            drugtemist_failures += failed
             for index, drugs in zip(indices, drugtemist_results, strict=True):
                 all_results[index] = sorted(drugs)
 
-    return [r if r is not None else [] for r in all_results], failures
+    results = [r if r is not None else [] for r in all_results]
+    return results, biobert_failures, drugtemist_failures, len(fallback_texts)
 
 
 def extract_drug_entities(labels: pl.Series, batch_size: int) -> pl.Series:
@@ -188,10 +190,14 @@ def extract_drug_entities(labels: pl.Series, batch_size: int) -> pl.Series:
         logger.info(f'extracting drug entities from {len(distinct)} distinct texts (batch_size={batch_size})')
         biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
         drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
-        extracted, failures = _process_batch_tiered(distinct, biobert, drugtemist, batch_size)
+        extracted, biobert_failed, drugtemist_failed, fallback = _process_batch_tiered(
+            distinct, biobert, drugtemist, batch_size
+        )
         results = dict(zip(distinct, extracted, strict=True))
-        if failures:
-            logger.warning(f'drug ner failed for {failures} texts; their results are empty')
+        if biobert_failed:
+            logger.warning(f'BioBERT failed for {biobert_failed} of {len(distinct)} texts')
+        if drugtemist_failed:
+            logger.warning(f'DrugTEMIST failed for {drugtemist_failed} of {fallback} texts')
     return pl.Series(
         labels.name,
         [results.get(t, []) if t is not None else [] for t in labels.to_list()],
