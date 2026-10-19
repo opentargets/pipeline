@@ -518,14 +518,12 @@ steps:
   pts_gene_sets:
     depends_on:
       - pts_go
-      - pts_reactome
       - pts_target
 
   pts_search_facet:
     depends_on:
       - pts_disease
       - pts_gene_sets
-      - pts_target
       - pts_target_tractability
 
   pts_interaction:
