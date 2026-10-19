@@ -23,6 +23,7 @@
   },
   {
     "id": "entityIds",
-    "description": "Targets annotated to the term or to any of its descendants"
+    "description": "Targets annotated to the term or to any of its descendants",
+    "foreign_key": "target/id"
   }
 ]
