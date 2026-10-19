@@ -14,30 +14,6 @@ def normalize_variant_effects(frame: pl.LazyFrame) -> pl.LazyFrame:
     score = item.struct.field('score').cast(pl.Float64)
     assessment = item.struct.field('assessment')
     method = item.struct.field('method')
-    inverted = 1 - score
-    rounded = 1 - score.round(2, mode='half_away_from_zero')
-    sift = (
-        pl
-        .when((rounded >= 0.95) & (assessment == 'deleterious'))
-        .then(min_max_scaler(inverted, 0.95, 1, 0.5, 1))
-        .when((rounded >= 0.95) & (assessment == 'deleterious_low_confidence'))
-        .then(min_max_scaler(inverted, 0.95, 1, 0, 0.5))
-        .when((rounded <= 0.95) & (assessment == 'tolerated_low_confidence'))
-        .then(min_max_scaler(inverted, 0, 0.95, -0.5, 0))
-        .when((rounded <= 0.95) & (assessment == 'tolerated'))
-        .then(min_max_scaler(inverted, 0, 0.95, -1, -0.5))
-    )
-    polyphen = (
-        pl
-        .when(assessment == 'unknown')
-        .then(None)
-        .when(score <= 0.446)
-        .then(min_max_scaler(score, 0, 0.446, -1, -0.25))
-        .when(score <= 0.908)
-        .then(min_max_scaler(score, 0.446, 0.908, -0.25, 0.25))
-        .when(score > 0.908)
-        .then(min_max_scaler(score, 0.908, 1, 0.25, 1))
-    )
     alpha = (
         pl
         .when(score < 0.06)
@@ -82,10 +58,6 @@ def normalize_variant_effects(frame: pl.LazyFrame) -> pl.LazyFrame:
         pl
         .when(method == 'LOFTEE')
         .then(assessment.replace_strict({'HC': 1.0, 'LC': 0.85}, default=None))
-        .when(method == 'SIFT')
-        .then(sift)
-        .when(method == 'PolyPhen')
-        .then(polyphen)
         .when(method == 'AlphaMissense')
         .then(alpha)
         .when(method == 'CADD')

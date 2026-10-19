@@ -190,8 +190,6 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations() -> None:
                 swissprot=['P1.2'],
                 trembl=['P2.1'],
                 lof='HC',
-                sift_score=0.1,
-                polyphen_score=0.2,
             )
         ],
         colocated_variants=[
@@ -213,8 +211,7 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations() -> None:
     assert t['distanceFromFootprint'] == 0
     assert t['distanceFromTss'] == 234
     assert t['uniprotAccessions'] == ['P1', 'P2']
-    assert t['siftPrediction'] == pytest.approx(0.1)
-    assert t['polyphenPrediction'] == pytest.approx(0.2)
+    assert 'siftPrediction' not in t and 'polyphenPrediction' not in t
     assert (
         result['variantDescription']
         == 'Missense variant overlapping with GENE1, causing amino-acid change: A12B with moderate impact.'
@@ -227,10 +224,6 @@ def test_all_predictors_and_first_alpha_missense() -> None:
         transcript_consequences=[
             transcript(
                 cadd_phred=10,
-                polyphen_score=0.2,
-                polyphen_prediction='benign',
-                sift_score=0.1,
-                sift_prediction='deleterious',
                 lof='HC',
                 lof_filter='flag',
                 conservation=3,
@@ -239,10 +232,6 @@ def test_all_predictors_and_first_alpha_missense() -> None:
             transcript(
                 gene_id='g2',
                 cadd_phred=20,
-                polyphen_score=0.9,
-                polyphen_prediction='damaging',
-                sift_score=0.9,
-                sift_prediction='tolerated',
                 lof='LC',
                 conservation=5,
                 alphamissense={'am_class': 'benign', 'am_pathogenicity': 0.9},
@@ -250,10 +239,8 @@ def test_all_predictors_and_first_alpha_missense() -> None:
         ]
     )
     effects = {e['method']: e for e in result['variantEffect']}
-    assert list(effects) == ['CADD', 'PolyPhen', 'SIFT', 'LOFTEE', 'GERP', 'AlphaMissense', 'VEP']
+    assert list(effects) == ['CADD', 'LOFTEE', 'GERP', 'AlphaMissense', 'VEP']
     assert effects['CADD']['score'] == 20
-    assert effects['SIFT']['score'] == pytest.approx(0.9)
-    assert effects['PolyPhen']['assessment'] == 'damaging'
     assert effects['LOFTEE']['assessment'] == 'LC'
     assert effects['GERP']['score'] == 5
     assert effects['AlphaMissense']['targetId'] == 'ENSG1'

@@ -42,7 +42,6 @@ sed '1s/^CHROM/#CHROM/' "${INPUT_DIR}/${INPUT_FILE}" | \
     --output_file "${OUTPUT_DIR}/${OUTPUT_FILE}" \
     --json \
     --dir_plugins "${CACHE_DIR}/VEP_plugins" \
-    --sift b \
     --fasta "${CACHE_DIR}/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" \
     --mane_select \
     --appris \
