@@ -29,12 +29,13 @@ clusters:
       - '{{pts_init_action_uri}}'
 
   # The variant index (PySpark, ported from Gentropy) joins the VEP output with gnomAD and
-  # FoldX; Gentropy ran it on 32 n1-highmem-16 workers. Start smaller with autoscaling.
+  # FoldX; Gentropy ran it on 32 n1-highmem-16 workers. Start with half, as a fixed primary
+  # pool: the shared autoscaling policy pins primaries at 2 and only adds spot secondaries,
+  # which lose shuffle data on preemption.
   pts_variant:
     image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1
     num_workers: 16
-    autoscaling_policy: otg-etl-25-secondary
     worker_machine_type: n1-highmem-16
     master_machine_type: n1-highmem-16
     master_disk_size: 512
