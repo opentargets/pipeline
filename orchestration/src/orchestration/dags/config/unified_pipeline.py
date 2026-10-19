@@ -143,22 +143,6 @@ class UnifiedPipelineConfig:
         self.pts_boot_disk_size = 30
         """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
 
-        self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
-        """GCS prefix under which orchestration stages Spark jars for PTS clusters.
-
-            Any GCS jar a PTS cluster references (via spark.jars) must have a
-            registered upstream source in `staged_jars`, or the DAG fails.
-        """
-        self.staged_jars: dict[str, str] = {}
-        """Registry of jars orchestration stages: staged destination URI -> source URL.
-
-            Add an entry here to have a new jar staged automatically for any PTS
-            cluster that references it in spark.jars. Only the PTS stage resolves
-            spark.jars against this registry; GENTROPY builds its clusters without
-            consulting it, so a GCS jar on a gentropy cluster is neither staged nor
-            rejected.
-        """
-
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'
         self.gentropy_cluster_init_script_uri = (
@@ -196,7 +180,7 @@ class UnifiedPipelineConfig:
         """Return the environment variables for a PTS step.
 
         Polars 2 spills to disk when a query outgrows its memory budget. By default
-        it spills into the OS temp dir, which on these vms is the 10 GB boot disk: a
+        it spills into the OS temp dir, which on these vms is the 30 GB boot disk: a
         spill fills it and the step can hang instead of failing. Point it at the
         work disk instead (polars creates the directory), and pin the disk budget
         explicitly rather than rely on the polars default.
