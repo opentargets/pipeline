@@ -269,9 +269,8 @@ with DAG(
         # bucket (skipped when already there), then read from GCS at submit time
         # instead of being resolved from Maven Central on every spark-submit.
         # Resolved from the rendered spark.jars value against the `staged_jars`
-        # registry, so every such jar on every cluster (currently the Spark-NLP
-        # fat jar on `pts`) is covered automatically; a GCS
-        # jar with no registered source fails the DAG at parse time.
+        # registry, so every such jar on every cluster is covered automatically;
+        # a GCS jar with no registered source fails the DAG at parse time.
         #
         # One task per destination object, not per step and not per cluster: the
         # steps of a cluster share the one object, and so do the clusters —

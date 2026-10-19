@@ -1,6 +1,6 @@
 """Tests for ``UploadRemoteFileOperator``.
 
-The operator stages a large remote artifact (the ~629 MB Spark-NLP fat jar) into
+The operator stages a large remote artifact, such as a Spark fat jar, into
 GCS once per cluster. Its two risky behaviours are ``skip_if_exists`` — which
 must not trust an object just because the name matches — and cleanup of the
 temporary download, which is big enough to fill a worker's disk across retries.
@@ -15,8 +15,8 @@ import requests
 
 from orchestration.operators.gcs import UploadRemoteFileOperator
 
-DST = 'gs://opentargets-pipelines/up/pts/jars/spark-nlp-assembly-6.1.5.jar'
-SRC = 'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/spark-nlp-assembly-6.1.5.jar'
+DST = 'gs://opentargets-pipelines/up/pts/jars/example-assembly-1.2.3.jar'
+SRC = 'https://example.org/jars/example-assembly-1.2.3.jar'
 PAYLOAD = b'jar-bytes'
 
 
@@ -241,7 +241,7 @@ def test_download_without_content_length_is_uploaded(gcs, http):
 
 
 def test_temp_file_is_removed_on_failure(gcs, http):
-    """The ~629 MB download must not survive a failed attempt."""
+    """A large download must not survive a failed attempt."""
     _download(http, PAYLOAD, len(PAYLOAD) + 500)
 
     created: list[Path] = []

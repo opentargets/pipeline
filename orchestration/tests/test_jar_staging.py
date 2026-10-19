@@ -13,9 +13,9 @@ import pytest
 from orchestration.utils import resolve_jar_staging
 
 PREFIX = 'gs://opentargets-pipelines/up/pts/jars/'
-NLP_DST = f'{PREFIX}spark-nlp-assembly-6.1.5.jar'
-NLP_SRC = 'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/spark-nlp-assembly-6.1.5.jar'
-REGISTRY = {NLP_DST: NLP_SRC}
+JAR_DST = f'{PREFIX}example-assembly-1.2.3.jar'
+JAR_SRC = 'https://example.org/jars/example-assembly-1.2.3.jar'
+REGISTRY = {JAR_DST: JAR_SRC}
 
 # A jar baked into the Dataproc image, referenced by an absolute local path —
 # the shape gentropy uses for hail in clusters.yaml `step_job_properties`.
@@ -24,7 +24,7 @@ IMAGE_JAR = '/opt/conda/miniconda3/lib/python3.11/site-packages/hail/backend/hai
 
 def test_registered_jar_is_staged():
     """A jar present in the registry resolves to its (src, dst) pair."""
-    assert resolve_jar_staging(NLP_DST, REGISTRY, PREFIX) == [(NLP_SRC, NLP_DST)]
+    assert resolve_jar_staging(JAR_DST, REGISTRY, PREFIX) == [(JAR_SRC, JAR_DST)]
 
 
 def test_non_gcs_jar_is_ignored():
@@ -52,15 +52,15 @@ def test_unregistered_gcs_jar_outside_prefix_raises():
 
 def test_mistyped_prefix_raises_and_names_the_expected_prefix():
     """A near-miss path is the likeliest mistake, so it must not fall through."""
-    typo = 'gs://opentargets-pipelines/up/pts/jar/spark-nlp-assembly-6.1.5.jar'
+    typo = 'gs://opentargets-pipelines/up/pts/jar/example-assembly-1.2.3.jar'
     with pytest.raises(ValueError, match='managed jar prefix'):
         resolve_jar_staging(typo, REGISTRY, PREFIX)
 
 
 def test_comma_separated_mixed_list():
     """Multiple jars: each resolved independently; image-local ones drop out."""
-    spark_jars = f'{NLP_DST}, {IMAGE_JAR}'
-    assert resolve_jar_staging(spark_jars, REGISTRY, PREFIX) == [(NLP_SRC, NLP_DST)]
+    spark_jars = f'{JAR_DST}, {IMAGE_JAR}'
+    assert resolve_jar_staging(spark_jars, REGISTRY, PREFIX) == [(JAR_SRC, JAR_DST)]
 
 
 def test_empty_and_whitespace_yield_nothing():

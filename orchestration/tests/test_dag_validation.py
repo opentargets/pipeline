@@ -5,6 +5,7 @@ from typing import cast
 from airflow.models import DagBag
 
 from orchestration.operators.dataproc import CreateClusterOperator
+from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor
 from orchestration.operators.gcs import UploadFileOperator
 
 
@@ -58,7 +59,6 @@ def test_each_staged_jar_has_exactly_one_task(dag_bag: DagBag) -> None:
     """
     tasks = _stage_jar_tasks(dag_bag)
     destinations = [str(t.dst_uri) for t in tasks]
-    assert destinations, 'expected the pts cluster to stage its Spark-NLP jar'
     assert len(destinations) == len(set(destinations)), (
         f'a destination is staged by more than one task: {sorted(destinations)}'
     )
@@ -67,13 +67,12 @@ def test_each_staged_jar_has_exactly_one_task(dag_bag: DagBag) -> None:
 def test_staged_jars_gate_every_step_of_the_clusters_that_use_them(dag_bag: DagBag) -> None:
     """A cluster must not be created before the jar it loads has been staged.
 
-    Clusters that declare no ``spark.jars`` (pts_openfda, pts_association) stage
-    nothing and are rightly ungated; but if any step of a cluster is gated, every
-    step of that cluster must be — each step creates the cluster itself.
+    Clusters that declare no ``spark.jars`` stage nothing and are rightly ungated;
+    but if any step of a cluster is gated, every step of that cluster must be —
+    each step creates the cluster itself.
     """
     dag = dag_bag.dags['unified_pipeline']
     gated = {d for t in _stage_jar_tasks(dag_bag) for d in t.downstream_task_ids}
-    assert gated, 'expected jar staging to gate some cluster creation'
 
     creates = [t.task_id for t in dag.tasks if t.task_id.split('.')[-1].startswith('create_cluster_')]
     staged_cluster_types = {t.split('create_cluster_')[-1] for t in gated}
@@ -99,6 +98,18 @@ def test_pts_init_action_is_uploaded_before_every_pts_cluster(dag_bag: DagBag) -
         cluster_config = cast(dict, cast(CreateClusterOperator, dag.get_task(task_id)).cluster_config)
         actions = cluster_config['initialization_actions']
         assert [a['executable_file'] for a in actions] == [str(upload.dst_uri)], task_id
+
+
+def test_clinical_report_runs_on_a_vm(dag_bag: DagBag) -> None:
+    """clinical_report runs in a pts container on its own VM, with no cluster."""
+    dag = dag_bag.dags['unified_pipeline']
+    group = [t.task_id for t in dag.tasks if t.task_id.startswith('pts_clinical_report.')]
+    assert not [t for t in group if '.create_cluster_' in t], group
+    run = cast(
+        ComputeEngineRunContainerizedWorkloadSensor,
+        dag.get_task('pts_clinical_report.run_pts_clinical_report'),
+    )
+    assert run.machine_type == 'n2d-standard-16'
 
 
 def test_staged_jar_tasks_retry(dag_bag: DagBag) -> None:

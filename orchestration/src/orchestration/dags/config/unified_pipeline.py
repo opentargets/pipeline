@@ -96,17 +96,6 @@ class UnifiedPipelineConfig:
             self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
         """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
 
-        # Without this the sentinel substitution fails with a bare
-        # `TypeError: replace() argument 2 must be str, not None` that breaks the
-        # import of the whole DAG — PIS and GENTROPY stages included — while
-        # `staged_jars` quietly registers a `spark-nlp-assembly-None.jar`.
-        spark_nlp_version = up.get('spark_nlp_version')
-        if not spark_nlp_version:
-            raise ValueError(
-                'spark_nlp_version is missing from unified_pipeline.yaml; the pts cluster '
-                'needs it to resolve the Spark-NLP jar it loads via spark.jars.'
-            )
-
         boot_image_keys = ('dataproc_image_version_pts', 'dataproc_image_version_gentropy', 'cos_image')
         boot_images = {k: up.get(k) for k in boot_image_keys}
         if missing := [k for k, v in boot_images.items() if not v]:
@@ -125,9 +114,6 @@ class UnifiedPipelineConfig:
                 'dataproc_image_version_pts': boot_images['dataproc_image_version_pts'],
                 'dataproc_image_version_gentropy': boot_images['dataproc_image_version_gentropy'],
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
-                # Lets the pts cluster point spark.jars at the
-                # version-pinned Spark-NLP fat jar in the pipelines bucket.
-                'spark_nlp_version': spark_nlp_version,
                 'pts_init_action_uri': self.pts_init_action_uri,
             },
         )
@@ -157,30 +143,13 @@ class UnifiedPipelineConfig:
         self.pts_boot_disk_size = 30
         """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
 
-        # Spark-NLP fat jar. The pts cluster (clinical_report) loads
-        # it via spark.jars instead of resolving the package from Maven Central
-        # on every spark-submit (see opentargets/issues#4453). Orchestration
-        # stages the version-pinned jar from John Snow Labs into the pipelines
-        # bucket before cluster creation (idempotent), and the clusters read it
-        # from there.
         self.staged_jar_prefix = 'gs://opentargets-pipelines/up/pts/jars/'
         """GCS prefix under which orchestration stages Spark jars for PTS clusters.
 
             Any GCS jar a PTS cluster references (via spark.jars) must have a
             registered upstream source in `staged_jars`, or the DAG fails.
         """
-        # The pts clusters run Spark 4, so they need the Scala 2.13 build. John Snow
-        # Labs publishes it under the same basename as the Scala 2.12 build, only
-        # in a `scala-2.13/` folder, so the staged copy carries the Scala version in
-        # its name: a 2.12 jar already staged for the same release cannot be
-        # mistaken for it.
-        spark_nlp_src = f'scala-2.13/spark-nlp-assembly-{spark_nlp_version}.jar'
-        spark_nlp_dst = f'spark-nlp-assembly_2.13-{spark_nlp_version}.jar'
-        self.staged_jars: dict[str, str] = {
-            f'{self.staged_jar_prefix}{spark_nlp_dst}': (
-                f'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/{spark_nlp_src}'
-            ),
-        }
+        self.staged_jars: dict[str, str] = {}
         """Registry of jars orchestration stages: staged destination URI -> source URL.
 
             Add an entry here to have a new jar staged automatically for any PTS
