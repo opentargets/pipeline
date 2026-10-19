@@ -14,7 +14,8 @@ import pytest
 from pts import aact_trial_extraction
 from pts.aact_trial_extraction import _run_extraction_in_thread
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
-from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow
+from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow, parse_batch_results
+from tests.clinical.test_llm_extraction import TestParseSingleRecord
 
 
 def test_registering_tasks_does_not_import_heavy_deps() -> None:
@@ -263,19 +264,28 @@ def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
     assert errors_path.read_text() == '{"id":"nct1"}\n{"id":"nct2"}\n'
 
 
-def test_legacy_batch_results_are_staged_with_their_relative_paths(tmp_path: Path) -> None:
-    source = tmp_path / 'legacy'
-    (source / 'batch_2').mkdir(parents=True)
-    (source / 'batch_1_output.jsonl').write_text('one')
-    (source / 'batch_2' / 'batch_2_output.jsonl').write_text('two')
-    (source / 'batch_1_input.jsonl').write_text('ignored')
-    staged = tmp_path / 'staged'
+def _legacy_line(record_id: str) -> str:
+    return TestParseSingleRecord.SAMPLE_LINE.replace('nct00031889', record_id)
 
-    count = aact_trial_extraction._stage_batch_results(str(source), str(staged), None)
 
-    files = {str(p.relative_to(staged)): p.read_text() for p in staged.rglob('*') if p.is_file()}
-    assert files == {'batch_1_output.jsonl': 'one', 'batch_2/batch_2_output.jsonl': 'two'}
-    assert count == 2
+def test_parse_batch_results_reads_nested_output_files(tmp_path: Path) -> None:
+    (tmp_path / 'batch_2').mkdir()
+    (tmp_path / 'batch_1_output.jsonl').write_text(_legacy_line('nct1') + '\n')
+    (tmp_path / 'batch_2' / 'batch_2_output.jsonl').write_text(
+        _legacy_line('nct2') + '\n\nnot json\n' + _legacy_line('nct3') + '\n'
+    )
+    (tmp_path / 'batch_1_input.jsonl').write_text(_legacy_line('ignored') + '\n')
+
+    result = parse_batch_results(str(tmp_path), cast(Any, None))
+
+    assert sorted(result.df['id'].to_list()) == ['nct1', 'nct2', 'nct3']
+
+
+def test_parse_batch_results_raises_when_no_output_files(tmp_path: Path) -> None:
+    (tmp_path / 'batch_1_input.jsonl').write_text('ignored')
+
+    with pytest.raises(ValueError, match=r'No \*_output\.jsonl files found'):
+        parse_batch_results(str(tmp_path), cast(Any, None))
 
 
 def test_seed_legacy_cache_names_the_configured_path_when_nothing_is_staged(tmp_path: Path) -> None:

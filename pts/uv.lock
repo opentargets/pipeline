@@ -1986,7 +1986,6 @@ name = "pts"
 version = "26.12.0rc21"
 source = { editable = "." }
 dependencies = [
-    { name = "fsspec" },
     { name = "loguru" },
     { name = "networkx" },
     { name = "numpy" },
@@ -2038,7 +2037,6 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "cellex", marker = "extra == 'baseline-expression'", git = "https://github.com/perslab/CELLEX?rev=119c7ca" },
-    { name = "fsspec", specifier = ">=2026.9.0" },
     { name = "gcsfs", marker = "extra == 'baseline-expression'", specifier = ">=2026.2.0" },
     { name = "huggingface-hub", marker = "extra == 'nlp'", specifier = ">=2.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },

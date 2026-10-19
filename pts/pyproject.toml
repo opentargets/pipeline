@@ -23,7 +23,6 @@ dependencies = [
   "pixeltable-pgserver>=0.6,<0.7",
   "networkx>=3.6.1",
   "openai>=3.26.0",
-  "fsspec>=2026.9.0",
 ]
 
 [dependency-groups]
