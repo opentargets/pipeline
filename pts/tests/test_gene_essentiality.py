@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import http.server
 import io
+import re
+import threading
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 import pytest
+from otter.storage.synchronous.http import HTTPStorage
 
 from pts.transformers.gene_essentiality import (
     aggregate,
@@ -412,6 +416,69 @@ def test_keep_only_essentials_setting(tmp_path):
 def test_full_output_and_schema(tmp_path):
     got = run(tmp_path)
     assert got.schema == OUTPUT_SCHEMA
+    assert got.rows() == [('ENSG_A', True, GENEA_TISSUES), ('ENSG_B', False, GENEB_TISSUES)]
+
+
+class RangeHandler(http.server.BaseHTTPRequestHandler):
+    """Serves the files of `directory` with byte ranges, which polars needs for a remote scan."""
+
+    directory: Path
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+    def do_HEAD(self) -> None:
+        self.send(body=False)
+
+    def do_GET(self) -> None:
+        self.send(body=True)
+
+    def send(self, body: bool) -> None:
+        data = (self.directory / self.path.lstrip('/')).read_bytes()
+        start, end = 0, len(data) - 1
+        if match := re.fullmatch(r'bytes=(\d+)-(\d*)', self.headers.get('Range', '')):
+            start, end = int(match[1]), int(match[2] or end)
+        self.send_response(206 if 'Range' in self.headers else 200)
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(end - start + 1))
+        self.send_header('Content-Range', f'bytes {start}-{end}/{len(data)}')
+        self.end_headers()
+        if body:
+            self.wfile.write(data[start : end + 1])
+
+
+def widen(text: str, after: int, n: int = 6000) -> str:
+    """Insert `n` empty gene columns after column `after`, pushing the header past 64 KiB."""
+    lines = []
+    for i, line in enumerate(text.splitlines()):
+        fields = line.split(',')
+        filler = [f'FILLER{j} ({j})' for j in range(n)] if i == 0 else [''] * n
+        lines.append(','.join(fields[:after] + filler + fields[after:]))
+    return '\n'.join(lines) + '\n'
+
+
+def test_wide_header_on_remote_storage_keeps_every_column(tmp_path, monkeypatch):
+    files = {
+        'gene_effects': widen(FILES['gene_effects'], 1),
+        'mutation_damaging': widen(FILES['mutation_damaging'], 6),
+    }
+    source = write_inputs(tmp_path, files)
+    handler = type('Handler', (RangeHandler,), {'directory': tmp_path})
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    # otter streams GCS objects but not HTTP ones, so HTTP stands in for GCS via the local copy
+    def local_open(self, location: str, mode: str = 'r'):
+        return (tmp_path / Path(location).name).open(mode)
+
+    monkeypatch.setattr(HTTPStorage, 'open', local_open)
+    url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        remote = {name: f'{url}/{Path(path).name}' if name != 'target' else path for name, path in source.items()}
+        gene_essentiality(remote, str(tmp_path / 'out'), {'keep_only_essentials': False}, None)
+    finally:
+        server.shutdown()
+    got = pl.read_parquet(sorted((tmp_path / 'out').glob('*.parquet')))
     assert got.rows() == [('ENSG_A', True, GENEA_TISSUES), ('ENSG_B', False, GENEB_TISSUES)]
 
 

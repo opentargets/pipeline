@@ -6,11 +6,14 @@ resolves gene symbols to ENSG ids against the target dataset. Symbols with no ma
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Any
 
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
@@ -37,6 +40,13 @@ def to_float32(column: str) -> pl.Expr:
     """Parse a numeric string as spark's CSV reader does, then narrow it to Float32."""
     text = pl.col(column).str.strip_chars(BLANK).str.replace(r'([0-9.])[dDfF]$', '${1}')
     return text.cast(pl.Float64, strict=False).cast(pl.Float32)
+
+
+def scan_strings(path: str) -> pl.LazyFrame:
+    """Lazily read a DepMap CSV with every column as a string, taking the column names from its header line."""
+    with StorageHandle(path).open('rb') as f:
+        header = next(csv.reader(io.TextIOWrapper(f, encoding='utf-8')))
+    return scan_dataset(path, format='csv', schema=dict.fromkeys(header, pl.String), null_values=[''])
 
 
 def read_models(models: pl.LazyFrame) -> pl.LazyFrame:
@@ -215,11 +225,7 @@ def gene_essentiality(
     """
     keep_only_essentials = (settings or {}).get('keep_only_essentials', True)
     logger.debug(f'loading data from: {source}')
-    frames = {
-        name: scan_dataset(path, format='csv', infer_schema=False, null_values=[''])
-        for name, path in source.items()
-        if name != 'target'
-    }
+    frames = {name: scan_strings(path) for name, path in source.items() if name != 'target'}
     target = scan_dataset(source['target']).select('id', 'approvedSymbol', 'proteinIds')
     screens = build_screens(**frames, keep_only_essentials=keep_only_essentials)
     result = resolve_target_ids(aggregate(screens), ensg_lookup(target)).sort('targetId')
