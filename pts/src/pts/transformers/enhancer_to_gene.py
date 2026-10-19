@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
-from pts.transformers.utils.quality_flags import valid_rows
+from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 from pts.transformers.utils.target import tss_lut
 
 
@@ -80,9 +80,7 @@ class EnhancerToGeneSettings(BaseModel):
     @classmethod
     def resolve_qc_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the QC flags."""
-        if isinstance(value, list):
-            return [QualityFlag.__members__.get(item, item) if isinstance(item, str) else item for item in value]
-        return value
+        return resolve_flag_names(QualityFlag, value)
 
     @model_validator(mode='after')
     def validate_score_bounds(self) -> Self:
@@ -189,24 +187,10 @@ def parse_enhancer_to_gene(
     ).match_to_schema(enhancer_to_gene_schema)
 
 
-def _flag(frame: pl.LazyFrame, condition: pl.Expr, flag: QualityFlag) -> pl.LazyFrame:
-    """Append a sorted, unique QC flag, initializing missing or null QC lists."""
-    if 'qualityControls' not in frame.collect_schema():
-        frame = frame.with_columns(pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'))
-    qc = pl.col('qualityControls').fill_null([])
-    return frame.with_columns(
-        pl
-        .when(condition)
-        .then(pl.concat_list(qc, pl.lit([flag.value])).list.unique().list.sort())
-        .otherwise(qc)
-        .alias('qualityControls')
-    )
-
-
 def validate_datasource_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag data sources other than E2G."""
     logger.info('Validating enhancer-to-gene data sources')
-    return _flag(frame, pl.col('datasourceId') != E2G.datasource_id, QualityFlag.UNKNOWN_PROJECT_ID)
+    return flag_rows(frame, pl.col('datasourceId') != E2G.datasource_id, QualityFlag.UNKNOWN_PROJECT_ID)
 
 
 def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.LazyFrame:
@@ -218,12 +202,12 @@ def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.Laz
         pl.col('start').alias('_contig_start'),
         pl.col('end').alias('_contig_end'),
     )
-    result = _flag(
+    result = flag_rows(
         frame.join(lookup, on='chromosome', how='left'),
         pl.col('_contig_start').is_null() | pl.col('_contig_end').is_null(),
         QualityFlag.INVALID_CHROMOSOME,
     )
-    return _flag(
+    return flag_rows(
         result,
         (pl.col('start') < pl.col('_contig_start')) | (pl.col('end') > pl.col('_contig_end')),
         QualityFlag.INVALID_RANGE,
@@ -238,19 +222,19 @@ def validate_target(frame: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame:
         pl.col('genomicLocation').struct.field('chromosome').alias('_gene_chromosome'),
         pl.lit(True).alias('_target_found'),
     )
-    result = _flag(
+    result = flag_rows(
         frame.join(lookup, on='geneId', how='left'), pl.col('_target_found').is_null(), QualityFlag.UNRESOLVED_TARGET
     )
-    return _flag(result, pl.col('chromosome') != pl.col('_gene_chromosome'), QualityFlag.TRANS_CHROMOSOMAL_EFFECT).drop(
-        '_target_found', '_gene_chromosome'
-    )
+    return flag_rows(
+        result, pl.col('chromosome') != pl.col('_gene_chromosome'), QualityFlag.TRANS_CHROMOSOMAL_EFFECT
+    ).drop('_target_found', '_gene_chromosome')
 
 
 def validate_biosample(frame: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.LazyFrame:
     """Flag biosample IDs absent from the reference index."""
     logger.info('Validating enhancer-to-gene biosamples')
     lookup = biosample.select('biosampleId', pl.lit(True).alias('_biosample_found'))
-    return _flag(
+    return flag_rows(
         frame.join(lookup, on='biosampleId', how='left'),
         pl.col('_biosample_found').is_null(),
         QualityFlag.UNKNOWN_BIOSAMPLE,
@@ -261,15 +245,15 @@ def validate_interval_type(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag unsupported types and multiple non-null types for the same region and gene."""
     logger.info('Validating enhancer-to-gene interval types')
     types = ['promoter', 'enhancer', 'intragenic', 'intergenic', 'genic']
-    result = _flag(frame, ~pl.col('intervalType').is_in(types), QualityFlag.UNKNOWN_INTERVAL_TYPE)
+    result = flag_rows(frame, ~pl.col('intervalType').is_in(types), QualityFlag.UNKNOWN_INTERVAL_TYPE)
     ambiguous = pl.col('intervalType').drop_nulls().n_unique().over(['chromosome', 'start', 'end', 'geneId']) > 1
-    return _flag(result, ambiguous, QualityFlag.AMBIGUOUS_INTERVAL_TYPE)
+    return flag_rows(result, ambiguous, QualityFlag.AMBIGUOUS_INTERVAL_TYPE)
 
 
 def validate_score(frame: pl.LazyFrame, min_score: float, max_score: float) -> pl.LazyFrame:
     """Flag null scores and scores outside the inclusive bounds."""
     logger.info('Validating enhancer-to-gene scores in [{}, {}]', min_score, max_score)
-    return _flag(
+    return flag_rows(
         frame,
         ~pl.col('score').is_between(min_score, max_score) | pl.col('score').is_null(),
         QualityFlag.SCORE_OUTSIDE_BOUNDS,
@@ -280,7 +264,7 @@ def validate_id_has_unique_score(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag interval identities with more than one distinct non-null score."""
     logger.info('Validating enhancer-to-gene score uniqueness')
     columns = ['chromosome', 'start', 'end', 'biosampleId', 'geneId', 'studyId', 'intervalType']
-    return _flag(frame, pl.col('score').drop_nulls().n_unique().over(columns) > 1, QualityFlag.AMBIGUOUS_SCORE)
+    return flag_rows(frame, pl.col('score').drop_nulls().n_unique().over(columns) > 1, QualityFlag.AMBIGUOUS_SCORE)
 
 
 def enhancer_to_gene(

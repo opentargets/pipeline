@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import credible_set_schema
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
-from pts.transformers.utils.quality_flags import valid_rows
+from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
 #: Disease index therapeutic area that marks a term as a measurement rather than a disease.
 MEASUREMENT_THERAPEUTIC_AREA = 'EFO_0001444'
@@ -104,9 +104,7 @@ class CredibleSetSettings(BaseModel):
     @classmethod
     def resolve_qc_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the QC flags."""
-        if isinstance(value, list):
-            return [QualityFlag.__members__.get(item, item) if isinstance(item, str) else item for item in value]
-        return value
+        return resolve_flag_names(QualityFlag, value)
 
 
 def _contains_flag(column: str, flag: str) -> pl.Expr:
@@ -123,22 +121,10 @@ def _contains_flag(column: str, flag: str) -> pl.Expr:
     )
 
 
-def _flag(frame: pl.LazyFrame, condition: pl.Expr, flag: QualityFlag) -> pl.LazyFrame:
-    """Append a QC flag and normalize null QC lists."""
-    qc = pl.col('qualityControls').fill_null([])
-    return frame.with_columns(
-        pl
-        .when(condition)
-        .then(pl.concat_list(qc, pl.lit([flag.value])).list.unique().list.sort())
-        .otherwise(qc)
-        .alias('qualityControls')
-    )
-
-
 def qc_mhc_region(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag lead variants within the inclusive MHC region."""
     logger.info('Flagging credible sets in the MHC region')
-    return _flag(
+    return flag_rows(
         frame, (pl.col('chromosome') == '6') & pl.col('position').is_between(25_726_063, 33_400_556), QualityFlag.IN_MHC
     )
 
@@ -147,7 +133,7 @@ def validate_chromosome_label(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag unsupported chromosome labels, leaving null labels unflagged."""
     logger.info('Validating credible set chromosome labels')
     chromosomes = [str(value) for value in range(1, 23)] + ['X', 'Y', 'XY', 'MT']
-    return _flag(frame, ~pl.col('chromosome').is_in(chromosomes), QualityFlag.INVALID_CHROMOSOME)
+    return flag_rows(frame, ~pl.col('chromosome').is_in(chromosomes), QualityFlag.INVALID_CHROMOSOME)
 
 
 def validate_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
@@ -160,14 +146,16 @@ def validate_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     )
     lookup = study.select('studyId', qc.alias('_study_qc'), pl.lit(True).alias('_study_found'))
     result = frame.join(lookup, on='studyId', how='left')
-    result = _flag(result, pl.col('_study_qc').list.len() > 0, QualityFlag.FLAGGED_STUDY)
-    result = _flag(
+    result = flag_rows(result, pl.col('_study_qc').list.len() > 0, QualityFlag.FLAGGED_STUDY)
+    result = flag_rows(
         result,
         _contains_flag('qualityControls', QualityFlag.TOP_HIT.value)
         & ~_contains_flag('_study_qc', 'Harmonized summary statistics are not available or empty'),
         QualityFlag.TOP_HIT_AND_SUMMARY_STATS,
     )
-    return _flag(result, pl.col('_study_found').is_null(), QualityFlag.MISSING_STUDY).drop('_study_qc', '_study_found')
+    return flag_rows(result, pl.col('_study_found').is_null(), QualityFlag.MISSING_STUDY).drop(
+        '_study_qc', '_study_found'
+    )
 
 
 def annotate_study_type(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
@@ -185,7 +173,7 @@ def qc_redundant_top_hits_from_pics(frame: pl.LazyFrame) -> pl.LazyFrame:
         .group_by('studyId')
         .agg((~_contains_flag('qualityControls', QualityFlag.TOP_HIT.value)).any().alias('_pics_summary'))
     )
-    return _flag(
+    return flag_rows(
         frame.join(lookup, on='studyId', how='left'),
         _contains_flag('qualityControls', QualityFlag.TOP_HIT.value) & pl.col('_pics_summary'),
         QualityFlag.REDUNDANT_PICS_TOP_HIT,
@@ -226,7 +214,7 @@ def qc_explained_by_susie(frame: pl.LazyFrame) -> pl.LazyFrame:
         .unique()
         .with_columns(pl.lit(True).alias('_in_susie'))
     )
-    return _flag(
+    return flag_rows(
         frame.join(overlaps, on='studyLocusId', how='left'),
         pl.col('_in_susie') & ~pl.col('finemappingMethod').is_in(methods),
         QualityFlag.EXPLAINED_BY_SUSIE,
@@ -271,7 +259,7 @@ def qc_abnormal_pips(
     logger.info('Validating credible set PIP totals')
     pips = pl.col('locus').list.eval(pl.element().struct.field('posteriorProbability'))
     total = pl.when(pips.list.eval(pl.element().is_null()).list.any()).then(None).otherwise(pips.list.sum())
-    return _flag(
+    return flag_rows(
         frame, (total < sum_pips_lower_threshold) | (total > sum_pips_upper_threshold), QualityFlag.ABNORMAL_PIPS
     )
 
@@ -347,7 +335,7 @@ def validate_unique_study_locus_id(frame: pl.LazyFrame) -> pl.LazyFrame:
         .with_columns(pl.int_range(pl.len()).over('studyLocusId').alias('_duplicate_rank'))
     )
     return (
-        _flag(ranked, pl.col('_duplicate_rank') > 0, QualityFlag.DUPLICATED_STUDYLOCUS_ID)
+        flag_rows(ranked, pl.col('_duplicate_rank') > 0, QualityFlag.DUPLICATED_STUDYLOCUS_ID)
         .sort('_input_order')
         .drop('_input_order', '_locus_size', '_tie_breaker', '_duplicate_rank')
     )
@@ -424,7 +412,7 @@ def qc_replication(frame: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFra
     replicated_qtl = qtl.group_by('variantId', 'geneId').len().filter(pl.col('len') >= 2).select('variantId', 'geneId')
     qtl_ids = qtl.join(replicated_qtl, on=['variantId', 'geneId'], how='inner').select('studyLocusId')
     replicated = pl.concat([gwas_ids, qtl_ids]).unique().with_columns(pl.lit(True).alias('_replicated'))
-    return _flag(
+    return flag_rows(
         frame.join(replicated, on='studyLocusId', how='left'),
         pl.col('_replicated').is_not_null(),
         QualityFlag.REPLICATED,
