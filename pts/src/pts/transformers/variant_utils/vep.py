@@ -218,8 +218,11 @@ def transcript_consequences(transcripts: pl.Expr) -> pl.Expr:
             field('gene_id').alias('targetId'),
             field('impact').alias('impact'),
             field('lof').cast(pl.String).alias('lofteePrediction'),
-            field('lof').cast(pl.Float32, strict=False).alias('siftPrediction'),
-            field('lof').cast(pl.Float32, strict=False).alias('polyphenPrediction'),
+            # Gentropy fills both from `lof` (only 'HC'/'LC'), so they are always null there.
+            # This intentionally differs: they carry the transcript's SIFT and PolyPhen scores.
+            # PolyPhen stays null until VEP runs with --polyphen (annotate_variants.sh omits it).
+            field('sift_score').cast(pl.Float32).alias('siftPrediction'),
+            field('polyphen_score').cast(pl.Float32).alias('polyphenPrediction'),
             field('consequence_terms')
             .list.eval(pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float32))
             .list.max()
