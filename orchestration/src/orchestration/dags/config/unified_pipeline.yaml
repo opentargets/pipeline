@@ -120,12 +120,13 @@ steps:
     ppp_only: true
     depends_on:
       - pis_variant_ppp
-  pts_variant:
-    # The variant index holds the parsed VEP output (~121 GB of JSON) in memory and sorts
-    # it, and ran out of memory at 133 GB on the default n2d-standard-32.
-    machine_type: n2d-highmem-64
+  pts_foldx:
     depends_on:
       - pis_variant
+  pts_variant:
+    depends_on:
+      - pis_variant
+      - pts_foldx
       - gentropy_variant_annotation
     depends_on_ppp:
       - pts_variant_ppp

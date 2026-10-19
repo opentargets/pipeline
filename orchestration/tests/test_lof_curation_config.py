@@ -19,11 +19,10 @@ def test_lof_ingestion_and_consumer_are_enabled_together(monkeypatch, ppp):
     variant = config.step_definition('pts_variant')
     assert 'pts_variant_ppp' not in variant['depends_on']
     assert 'pts_variant_ppp' in variant['depends_on_ppp']
-    tasks = {task['transformer']: task for task in config.pts.config['steps']['variant']}
-    # Overrides replace whole lists, so PPP must keep FoldX alongside the index.
-    assert tasks['foldx']['destination'] == 'intermediate/variant/foldx'
-    assert tasks['variant']['requires'] == [tasks['foldx']['name']]
-    annotations = tasks['variant']['source']['variant_annotations']
+    [task] = config.pts.config['steps']['variant']
+    assert task['pyspark'] == 'variant'
+    assert task['source']['amino_acid_annotations'] == ['intermediate/variant/foldx']
+    annotations = task['source']['variant_annotations']
     assert 'input/variant/gnomad' in annotations
     assert ('intermediate/variant/lof_curation' in annotations) is ppp
 

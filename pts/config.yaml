@@ -15,19 +15,20 @@ steps:
       transformer: lof_curation
   ##################################################################################################
 
-  #: VARIANT STEP :################################################################################
-  variant:
+  #: FOLDX STEP :##################################################################################
+  foldx:
     - name: transform FoldX annotations
       source: input/variant/foldx
       destination: intermediate/variant/foldx
       transformer: foldx
       settings:
         plddt_threshold: 0.7
+  ##################################################################################################
 
-    - name: transform variant index
-      requires:
-        - transform FoldX annotations
-      transformer: variant
+  #: VARIANT STEP :################################################################################
+  variant:
+    - name: pyspark variant index
+      pyspark: variant
       source:
         vep: intermediate/variant_annotation
         variant_annotations:
@@ -38,6 +39,7 @@ steps:
         output: output/variant
       settings:
         hash_threshold: 300
+        output_partitions: 25
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

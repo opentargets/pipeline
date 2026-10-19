@@ -28,6 +28,28 @@ clusters:
     init_actions_uris:
       - '{{pts_init_action_uri}}'
 
+  # The variant index (PySpark, ported from Gentropy) joins the VEP output with gnomAD and
+  # FoldX; Gentropy ran it on 32 n1-highmem-16 workers. Start smaller with autoscaling.
+  pts_variant:
+    image_version: '{{dataproc_image_version_pts}}'
+    num_masters: 1
+    num_workers: 16
+    autoscaling_policy: otg-etl-25-secondary
+    worker_machine_type: n1-highmem-16
+    master_machine_type: n1-highmem-16
+    master_disk_size: 512
+    worker_disk_size: 512
+    idle_delete_ttl: 3600
+    internal_ip_only: false
+    metadata:
+      PTS_REF: 'pts%40v{{pts_version}}'
+    properties:
+      'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
+      'spark:spark.sql.ansi.enabled': 'false'
+    init_actions_uris:
+      - '{{pts_init_action_uri}}'
+
   gentropy:
     image_version: '{{dataproc_image_version_gentropy}}'
     num_masters: 1
