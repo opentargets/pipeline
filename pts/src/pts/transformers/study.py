@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.study import study_schema
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
-from pts.transformers.utils.quality_flags import valid_rows
+from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
 
 class QualityFlag(StrEnum):
@@ -71,9 +71,7 @@ class StudySettings(BaseModel):
     @classmethod
     def resolve_qc_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the QC flags."""
-        if isinstance(value, list):
-            return [QualityFlag.__members__.get(item, item) if isinstance(item, str) else item for item in value]
-        return value
+        return resolve_flag_names(QualityFlag, value)
 
 
 def disease_lut(disease: pl.LazyFrame) -> pl.LazyFrame:
@@ -89,18 +87,6 @@ def disease_lut(disease: pl.LazyFrame) -> pl.LazyFrame:
         )
         .explode('efo')
         .with_columns(pl.coalesce('efo', 'diseaseId').alias('efo'))
-    )
-
-
-def _flag(studies: pl.LazyFrame, condition: pl.Expr, flag: QualityFlag) -> pl.LazyFrame:
-    """Append a QC flag, preserving existing flags and normalizing null lists."""
-    qc = pl.col('qualityControls').fill_null([])
-    return studies.with_columns(
-        pl
-        .when(condition)
-        .then(pl.concat_list(qc, pl.lit([flag.value])).list.unique().list.sort())
-        .otherwise(qc)
-        .alias('qualityControls')
     )
 
 
@@ -186,7 +172,7 @@ def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
     """Flag study types other than GWAS or types ending in qtl."""
     logger.info('Validating study types')
     supported = (pl.col('studyType') == 'gwas') | pl.col('studyType').str.ends_with('qtl')
-    return _flag(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
+    return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 
 def validate_project_id(studies: pl.LazyFrame, deprecated_project_ids: list[str]) -> pl.LazyFrame:
@@ -194,14 +180,14 @@ def validate_project_id(studies: pl.LazyFrame, deprecated_project_ids: list[str]
     logger.info('Validating deprecated project IDs')
     if not deprecated_project_ids:
         return studies
-    return _flag(studies, pl.col('projectId').is_in(deprecated_project_ids), QualityFlag.DEPRECATED_PROJECT)
+    return flag_rows(studies, pl.col('projectId').is_in(deprecated_project_ids), QualityFlag.DEPRECATED_PROJECT)
 
 
 def validate_target(studies: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame:
     """Flag non-GWAS studies whose gene identifier is absent from the target index."""
     logger.info('Validating study targets')
     lookup = target.select(pl.col('id').alias('geneId'), pl.lit(True).alias('_target_found'))
-    return _flag(
+    return flag_rows(
         studies.join(lookup, on='geneId', how='left'),
         (pl.col('studyType') != 'gwas') & pl.col('_target_found').is_null(),
         QualityFlag.UNRESOLVED_TARGET,
@@ -226,7 +212,7 @@ def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.Laz
             .agg(pl.col('diseaseId').drop_nulls().unique().sort().alias(destination))
         )
         result = result.join(mapped, on='studyId', how='left').with_columns(pl.col(destination).fill_null([]))
-    return _flag(
+    return flag_rows(
         result,
         (pl.col('studyType') == 'gwas') & (pl.col('diseaseIds').list.len() == 0),
         QualityFlag.UNRESOLVED_DISEASE,
@@ -241,7 +227,7 @@ def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.Laz
         'biosampleId',
         pl.lit(True).alias('_biosample_found'),
     )
-    return _flag(
+    return flag_rows(
         studies.drop('biosampleId').join(lookup, on='biosampleFromSourceId', how='left'),
         (pl.col('studyType') != 'gwas') & pl.col('_biosample_found').is_null(),
         QualityFlag.UNKNOWN_BIOSAMPLE,
@@ -251,7 +237,9 @@ def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.Laz
 def validate_analysis_flags(studies: pl.LazyFrame) -> pl.LazyFrame:
     """Flag studies curated as case-case designs."""
     logger.info('Validating study analysis flags')
-    return _flag(studies, pl.col('analysisFlags').list.contains('Case-case study'), QualityFlag.CASE_CASE_STUDY_DESIGN)
+    return flag_rows(
+        studies, pl.col('analysisFlags').list.contains('Case-case study'), QualityFlag.CASE_CASE_STUDY_DESIGN
+    )
 
 
 def validate_ccs(studies: pl.LazyFrame) -> pl.LazyFrame:
@@ -275,7 +263,7 @@ def validate_ccs(studies: pl.LazyFrame) -> pl.LazyFrame:
             QualityFlag.ONE_ONLY_CASE_OR_CONTROL,
         ),
     ]:
-        studies = _flag(studies, condition, flag)
+        studies = flag_rows(studies, condition, flag)
     return studies
 
 
