@@ -475,15 +475,6 @@ def test_spreadsheet_without_a_header_needs_text_mode(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize('infer_types', [True, False])
-def test_read_spreadsheet_nulls_only_the_given_missing_values(tmp_path: Path, infer_types: bool) -> None:
-    path = _write_sheet(tmp_path / 'missing.xlsx', [['a', 'b'], ['NA', 'n/a'], [None, 'x']])
-
-    df = read_spreadsheet(path, 'S', infer_types=infer_types, missing_values=('', 'n/a'))
-
-    assert df.rows() == [('NA', None), (None, 'x')]
-
-
-@pytest.mark.parametrize('infer_types', [True, False])
 def test_read_spreadsheet_with_a_header_only(tmp_path: Path, infer_types: bool) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active

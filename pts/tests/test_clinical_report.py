@@ -379,7 +379,7 @@ READ_EXCEL_ROWS = [
         'Beta',
         'EMEA/H/C/000002',
         'Withdrawn',
-        'N/A',
+        None,
         'betanib',
         None,
         'treatment of copd',
@@ -407,7 +407,7 @@ READ_EXCEL_ROWS = [
         'Authorised',
         None,
         '',
-        'None',
+        None,
         'treatment of copd',
         '01/02/2003',
         'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
@@ -427,7 +427,10 @@ READ_EXCEL_ROWS = [
         '1',
     ),
 ]
-"""`pl.read_excel(<bytes>, sheet_name='Medicine')` of `_ema_workbook`, captured with fastexcel 0.21.0."""
+"""`pl.read_excel(<bytes>, sheet_name='Medicine')` of `_ema_workbook`, captured with fastexcel 0.21.0.
+
+Its 'N/A' and 'None' cells are set to null, as `read_ema_sheet` reads them.
+"""
 
 
 def _ema_workbook(path: Path) -> str:
@@ -450,6 +453,7 @@ def _sorted_reports(reports: ClinicalReport) -> list[dict]:
 
 
 def test_ema_sheet_matches_read_excel(tmp_path: Path) -> None:
+    """The sheet is `pl.read_excel`'s, except missing-value strings ('N/A', 'None', ...), null by design."""
     sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
     read_excel = pl.DataFrame(READ_EXCEL_ROWS, schema=dict.fromkeys(READ_EXCEL_COLUMNS, pl.String), orient='row')
 
@@ -467,6 +471,15 @@ def test_ema_row_without_mesh_or_ner_dropped(tmp_path: Path) -> None:
     reports = extract_ema_clinical_report(sheet, _stub_ner).df
 
     assert sorted(reports['id'].to_list()) == ['emea/h/c/000001', 'emea/h/c/000002', 'emea/h/c/000005']
+
+
+def test_ema_missing_value_inn_falls_back_to_the_active_substance(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+
+    reports = extract_ema_clinical_report(sheet, _stub_ner).df
+
+    drugs = reports.filter(pl.col('id') == 'emea/h/c/000002')['drugs'].to_list()
+    assert drugs == [[{'drugFromSource': 'betanib', 'drugId': None}]]
 
 
 PUBLISHED_COLUMNS = [
