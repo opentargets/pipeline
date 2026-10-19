@@ -14,12 +14,6 @@ from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
 
 
-@pytest.fixture
-def doctest_namespace():
-    """These task tests do not require the shared Spark doctest session."""
-    return {}
-
-
 @pytest.mark.parametrize('source', ['input/study', {'study': 'input/study'}, {'study': ['input/a', 'input/b']}])
 def test_source_shapes(source):
     spec = TransformSpec(name='transform test', transformer='study', source=source, destination='output/study')
