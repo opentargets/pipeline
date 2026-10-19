@@ -20,12 +20,6 @@ from pts.transformers.variant import (
 )
 
 
-@pytest.fixture
-def doctest_namespace():
-    """These Polars tests do not need the Spark doctest session."""
-    return {}
-
-
 def test_variant_configuration_matches_models():
     config = yaml.safe_load((Path(__file__).parents[1] / 'config.yaml').read_text())
     step = next(task for task in config['steps']['variant'] if task['transformer'] == 'variant')
