@@ -14,14 +14,20 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene_sets import gene_sets_schema
-from pts.transformers.search_facet import DEFAULT_CATEGORIES, explode, facet
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.lists import collect_set, explode
+
+GO_SOURCE = 'go'
+REACTOME_SOURCE = 'reactome'
+CHEMBL_TARGET_CLASS_SOURCE = 'chembl_target_class'
 
 GO_NAMESPACES = {
-    'molecular_function': DEFAULT_CATEGORIES['go_f'],
-    'biological_process': DEFAULT_CATEGORIES['go_p'],
-    'cellular_component': DEFAULT_CATEGORIES['go_c'],
+    'molecular_function': 'GO:MF',
+    'biological_process': 'GO:BP',
+    'cellular_component': 'GO:CC',
 }
+REACTOME_CATEGORY = 'Reactome'
+CHEMBL_TARGET_CLASS_CATEGORY = 'ChEMBL Target Class'
 
 
 def with_ancestors(lf: pl.LazyFrame, reference: pl.LazyFrame) -> pl.LazyFrame:
@@ -47,7 +53,7 @@ def _go_hierarchy(go: pl.LazyFrame) -> pl.LazyFrame:
     return go.filter(~pl.col('isObsolete')).select(
         'id',
         'label',
-        pl.lit('go').alias('source'),
+        pl.lit(GO_SOURCE).alias('source'),
         pl.col('namespace').replace_strict(GO_NAMESPACES).alias('category'),
         pl.concat_list('isA', 'partOf').list.set_intersection('ancestors').list.sort().alias('parentIds'),
         'ancestors',
@@ -59,8 +65,8 @@ def _reactome_hierarchy(reactome: pl.LazyFrame) -> pl.LazyFrame:
     return reactome.select(
         'id',
         'label',
-        pl.lit('reactome').alias('source'),
-        pl.lit(DEFAULT_CATEGORIES['pathways']).alias('category'),
+        pl.lit(REACTOME_SOURCE).alias('source'),
+        pl.lit(REACTOME_CATEGORY).alias('category'),
         pl.col('parents').alias('parentIds'),
         'ancestors',
     )
@@ -83,8 +89,8 @@ def _chembl_class_hierarchy(classes: pl.DataFrame) -> pl.LazyFrame:
         classes
         .drop('parent_id')
         .with_columns(
-            pl.lit('chembl_target_class').alias('source'),
-            pl.lit(DEFAULT_CATEGORIES['target_class']).alias('category'),
+            pl.lit(CHEMBL_TARGET_CLASS_SOURCE).alias('source'),
+            pl.lit(CHEMBL_TARGET_CLASS_CATEGORY).alias('category'),
             pl.Series('parentIds', [sorted(graph.successors(i)) for i in ids], dtype=pl.List(pl.String)),
             pl.Series('ancestors', [sorted(nx.descendants(graph, i)) for i in ids], dtype=pl.List(pl.String)),
         )
@@ -101,7 +107,7 @@ def _annotations(target: pl.LazyFrame, column: str, field: str) -> pl.LazyFrame:
 
 def _propagate(annotations: pl.LazyFrame, hierarchy: pl.LazyFrame) -> pl.LazyFrame:
     """Each hierarchy term with the targets annotated to it or a descendant."""
-    targets = facet(with_ancestors(annotations, hierarchy), ['id'], 'targetId')
+    targets = with_ancestors(annotations, hierarchy).group_by('id').agg(collect_set('targetId').alias('entityIds'))
     return hierarchy.drop('ancestors').join(targets, on='id', how='inner')
 
 

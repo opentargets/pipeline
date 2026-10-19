@@ -13,7 +13,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.transformers.gene_sets import CHEMBL_TARGET_CLASS_SOURCE, GO_SOURCE, REACTOME_SOURCE
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.lists import collect_set, explode
 
 DEFAULT_CATEGORIES: dict[str, str] = {
     'disease_name': 'Disease',
@@ -26,25 +28,10 @@ DEFAULT_CATEGORIES: dict[str, str] = {
     'approved_symbol': 'Approved Symbol',
     'approved_name': 'Approved Name',
     'subcellular_location': 'Subcellular Location',
-    'target_class': 'ChEMBL Target Class',
-    'pathways': 'Reactome',
-    'go_f': 'GO:MF',
-    'go_p': 'GO:BP',
-    'go_c': 'GO:CC',
 }
 
 TARGET_COLUMNS = ['label', 'category', 'entityIds', 'datasourceId']
 DISEASE_COLUMNS = ['label', 'category', 'datasourceId', 'entityIds']
-
-
-def explode(lf: pl.LazyFrame, column: str) -> pl.LazyFrame:
-    """Explode a list column, dropping rows whose list is null or empty."""
-    return lf.filter(pl.col(column).list.len() > 0).explode(column)
-
-
-def collect_set(column: str) -> pl.Expr:
-    """Distinct non-null values of a column, sorted."""
-    return pl.col(column).drop_nulls().unique().sort()
 
 
 def facet(lf: pl.LazyFrame, keys: list[str], entity: str) -> pl.LazyFrame:
@@ -128,7 +115,7 @@ def subcellular_location_facets(target: pl.LazyFrame, categories: dict[str, str]
 
 def target_class_facets(gene_sets: pl.LazyFrame) -> pl.LazyFrame:
     """One facet per ChEMBL target class label, merging the class gene sets that share it."""
-    classes = gene_sets.filter(pl.col('source') == 'chembl_target_class').select('label', 'category', 'entityIds')
+    classes = gene_sets.filter(pl.col('source') == CHEMBL_TARGET_CLASS_SOURCE).select('label', 'category', 'entityIds')
     return facet(explode(classes, 'entityIds'), ['label', 'category'], 'entityIds').pipe(null_datasource)
 
 
@@ -152,10 +139,10 @@ def target_facets(
         simple_facet(target, 'id', categories['target_id']),
         simple_facet(target, 'approvedSymbol', categories['approved_symbol']),
         simple_facet(target, 'approvedName', categories['approved_name']),
-        gene_set_facets(gene_sets, 'go'),
+        gene_set_facets(gene_sets, GO_SOURCE),
         subcellular_location_facets(target, categories),
         target_class_facets(gene_sets),
-        gene_set_facets(gene_sets, 'reactome'),
+        gene_set_facets(gene_sets, REACTOME_SOURCE),
         tractability_facets(tractability, categories),
     ]
     return sort_facets(pl.concat([lf.select(TARGET_COLUMNS) for lf in frames]))
@@ -184,7 +171,7 @@ def search_facet(
         source: paths keyed by diseases, targets, gene_sets and tractability.
         destination: paths keyed by targets and diseases.
         settings: an optional categories mapping overriding the default category labels. GO, Reactome
-            and ChEMBL target class facets take their category from the gene sets.
+            and ChEMBL target class facets take their category from the gene sets instead.
         config: unused.
     """
     categories = {**DEFAULT_CATEGORIES, **(settings.get('categories') or {})}
