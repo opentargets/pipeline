@@ -14,12 +14,6 @@ from pts.transformers.variant_utils.annotations import (
 )
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Avoid constructing a Spark session for Polars tests."""
-    return {}
-
-
 def effect(method='VEP', score=1.0, assessment=None):
     """Build one predictor assessment."""
     return {
