@@ -171,7 +171,7 @@ def _read_ner_cache(path: str | None) -> pl.DataFrame:
         try:
             cache = pl.read_parquet(path).select(NER_CACHE_SCHEMA.names()).cast(NER_CACHE_SCHEMA)
         except Exception:
-            logger.info(f'no readable ner cache at {path}, will compute all labels')
+            logger.warning(f'no readable ner cache at {path}, will compute all labels')
         else:
             logger.info(f'loaded ner cache from {path}')
             return cache

@@ -13,6 +13,7 @@ from pts.transformers.clinical.schemas import (
     ExtractedDisease,
     ExtractedDrug,
 )
+from tests.clinical.batch_fixtures import SAMPLE_LINE
 
 
 def test_investigated_drug_required_fields():
@@ -320,7 +321,7 @@ def test_build_prompt_omits_interventions_when_empty():
 class TestParseSingleRecord:
     """Unit tests for _parse_single_record."""
 
-    SAMPLE_LINE = r"""{"id": "batch_req_6a1d6fccc80c8190b99bfd7b4e3af5fc", "custom_id": "nct00031889", "response": {"status_code": 200, "request_id": "039b5f8b-14a7-4df2-ac05-d1432b689a97", "body": {"id": "resp_0b866af5f6b78e2e016a1d6d1815b881978a79910735ecbf3c", "object": "response", "created_at": 1780313368, "status": "completed", "background": false, "error": null, "output": [{"id": "msg_0b866af5f6b78e2e016a1d6d18f5d48197b49a83dc713967b9", "type": "message", "status": "completed", "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": "{\"id\":\"nct00031889\",\"drug_intent\":\"therapeutic\",\"drug_intent_confidence\":0.95,\"primary_indications\":[{\"name\":\"prostate cancer\",\"severity\":null,\"stage\":\"stage IV\",\"onset\":null,\"etiology\":null,\"evidence_quote\":\"treating patients who have stage IV prostate cancer that has been previously treated with hormone therapy or surgery\"}],\"background_conditions\":[{\"name\":\"prostate cancer\",\"severity\":null,\"stage\":null,\"onset\":null,\"etiology\":null,\"evidence_quote\":\"failure of androgen suppression (luteinizing hormone-releasing hormone agonist or orchiectomy) in patients with stage IV prostate cancer\"}],\"investigated_drugs\":[{\"drug\":\"exemestane\",\"route\":\"oral\",\"formulation\":\"tablet\",\"synonyms\":null,\"dosages\":[\"once daily\"],\"evidence_quote\":\"Patients receive oral exemestane once daily.\"},{\"drug\":\"bicalutamide\",\"route\":\"oral\",\"formulation\":\"tablet\",\"synonyms\":null,\"dosages\":[\"once daily\"],\"evidence_quote\":\"Patients receive ... oral bicalutamide once daily.\"}],\"comparator_drugs\":null,\"supportive_drugs\":null,\"conclusion\":null}"}], "role": "assistant"}], "usage": {"input_tokens": 4710, "output_tokens": 258, "total_tokens": 4968}}}}"""  # noqa: E501
+    SAMPLE_LINE = SAMPLE_LINE
 
     # ── happy path ────────────────────────────────────────────────────────────
 

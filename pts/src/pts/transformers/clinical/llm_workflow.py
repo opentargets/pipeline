@@ -112,7 +112,7 @@ def run_extraction(
             )
         )
         if errors:
-            logger.error('Error: %s', errors[0]['error'])
+            logger.error(f'Error: {errors[0]["error"]}')
             raise RuntimeError(errors[0]['error'])
 
         logger.info(
@@ -124,16 +124,11 @@ def run_extraction(
         return None
 
     # ── Batch mode ────────────────────────────────────────────────────────────
-    logger.info(
-        'Running extraction: model=%s  concurrency=%d  service_tier=%s',
-        model,
-        concurrency,
-        service_tier,
-    )
+    logger.info(f'Running extraction: model={model}  concurrency={concurrency}  service_tier={service_tier}')
     extractions, errors = asyncio.run(
         _run_async(prompts, model_cls, system_prompt, model, client, concurrency, service_tier)
     )
-    logger.info('Extraction complete: %d succeeded, %d failed.', len(extractions), len(errors))
+    logger.info(f'Extraction complete: {len(extractions)} succeeded, {len(errors)} failed.')
 
     if errors:
         error_path = Path(errors_dir) / 'errors.jsonl' if errors_dir else Path('errors.jsonl')
@@ -141,13 +136,10 @@ def run_extraction(
 
         for err in errors[:5]:
             logger.error(
-                'Failed  id=%-30s  type=%s  message=%s',
-                err.get('id'),
-                err.get('error_type'),
-                err.get('error_message'),
+                f'Failed  id={err.get("id")!s:<30}  type={err.get("error_type")}  message={err.get("error_message")}'
             )
         if len(errors) > 5:
-            logger.error('... plus %d more errors — see %s', len(errors) - 5, error_path)
+            logger.error(f'... plus {len(errors) - 5} more errors — see {error_path}')
 
     return _extractions_to_df(extractions)
 
@@ -274,10 +266,7 @@ async def _extract_record(
                 'error', {}
             ).get('code', '')
             if is_flex_unavailable and tier != tiers_to_try[-1]:
-                logger.warning(
-                    'Flex capacity unavailable for id=%s — retrying with standard processing.',
-                    entry['id'],
-                )
+                logger.warning(f'Flex capacity unavailable for id={entry["id"]} — retrying with standard processing.')
                 continue  # move to "auto"
 
             return None, {

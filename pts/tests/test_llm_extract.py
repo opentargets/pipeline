@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 import sys
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
@@ -10,12 +11,13 @@ from typing import Any, cast
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts import aact_trial_extraction
 from pts.aact_trial_extraction import _run_extraction_in_thread
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
 from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow, parse_batch_results
-from tests.clinical.test_llm_extraction import TestParseSingleRecord
+from tests.clinical.batch_fixtures import SAMPLE_LINE
 
 
 def test_registering_tasks_does_not_import_heavy_deps() -> None:
@@ -241,6 +243,35 @@ def test_run_extraction_closes_async_client_before_loop_shutdown(
     assert llm_workflow.asyncio is asyncio
 
 
+def test_run_extraction_logs_its_counts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, logged: list[str]) -> None:
+    errors: list[object] = [{'id': f'nct{i}', 'error_type': 'Boom', 'error_message': 'bad'} for i in range(7)]
+
+    async def fake_run_async(*args: object, **kwargs: object) -> tuple[list[object], list[object]]:
+        return [], errors
+
+    monkeypatch.setattr(llm_workflow, 'AsyncOpenAI', lambda **kwargs: _FakeClient())
+    monkeypatch.setattr(llm_workflow, '_run_async', fake_run_async)
+    prompt_path = tmp_path / 'system_prompt.txt'
+    prompt_path.write_text('system prompt')
+
+    _run_extraction_in_thread(
+        prompts=[{'id': 'a', 'prompt': 'prompt'}, {'id': 'b', 'prompt': 'prompt'}],
+        model_class='pts.transformers.clinical.schemas.ClinicalReportExtractionSchema',
+        system_prompt_path=str(prompt_path),
+        model='test-model',
+        openai_key='test-key',
+        service_tier='auto',
+        concurrency=3,
+        max_retries=0,
+        errors_dir=tmp_path,
+    )
+
+    assert 'Running extraction: model=test-model  concurrency=3  service_tier=auto' in logged
+    assert 'Extraction complete: 0 succeeded, 7 failed.' in logged
+    assert any(m.startswith('Failed  id=nct0') and 'type=Boom  message=bad' in m for m in logged)
+    assert any(m.startswith('... plus 2 more errors') for m in logged)
+
+
 def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
     errors_path = tmp_path / 'errors.jsonl'
     task = LlmExtract(
@@ -264,11 +295,19 @@ def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
     assert errors_path.read_text() == '{"id":"nct1"}\n{"id":"nct2"}\n'
 
 
+@pytest.fixture
+def logged() -> Iterator[list[str]]:
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m).strip()), level='INFO', format='{message}')
+    yield messages
+    logger.remove(sink)
+
+
 def _legacy_line(record_id: str) -> str:
-    return TestParseSingleRecord.SAMPLE_LINE.replace('nct00031889', record_id)
+    return SAMPLE_LINE.replace('nct00031889', record_id)
 
 
-def test_parse_batch_results_reads_nested_output_files(tmp_path: Path) -> None:
+def test_parse_batch_results_reads_nested_output_files(tmp_path: Path, logged: list[str]) -> None:
     (tmp_path / 'batch_2').mkdir()
     (tmp_path / 'batch_1_output.jsonl').write_text(_legacy_line('nct1') + '\n')
     (tmp_path / 'batch_2' / 'batch_2_output.jsonl').write_text(
@@ -279,6 +318,7 @@ def test_parse_batch_results_reads_nested_output_files(tmp_path: Path) -> None:
     result = parse_batch_results(str(tmp_path), cast(Any, None))
 
     assert sorted(result.df['id'].to_list()) == ['nct1', 'nct2', 'nct3']
+    assert any(m.startswith('Dropped 1 malformed rows') for m in logged)
 
 
 def test_parse_batch_results_raises_when_no_output_files(tmp_path: Path) -> None:
