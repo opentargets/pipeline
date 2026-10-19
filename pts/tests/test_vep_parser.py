@@ -190,10 +190,12 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations() -> None:
                 swissprot=['P1.2'],
                 trembl=['P2.1'],
                 lof='HC',
+                sift_score=0.1,
+                polyphen_score=0.2,
             )
         ],
         colocated_variants=[
-            {'id': 'rs1', 'var_synonyms': {'OMIM': ['610266.0003'], 'ClinVar': ['RCV123', 'VCV123']}},
+            {'id': 'rs1', 'var_synonyms': {'OMIM': [610266.0003], 'ClinVar': ['RCV123', 'VCV123']}},
             {'id': None},
         ],
     )
@@ -211,7 +213,8 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations() -> None:
     assert t['distanceFromFootprint'] == 0
     assert t['distanceFromTss'] == 234
     assert t['uniprotAccessions'] == ['P1', 'P2']
-    assert t['siftPrediction'] is None and t['polyphenPrediction'] is None
+    assert t['siftPrediction'] == pytest.approx(0.1)
+    assert t['polyphenPrediction'] == pytest.approx(0.2)
     assert (
         result['variantDescription']
         == 'Missense variant overlapping with GENE1, causing amino-acid change: A12B with moderate impact.'
