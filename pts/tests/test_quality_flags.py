@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.utils.quality_flags import valid_rows
+from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
 
 class Flag(StrEnum):
@@ -74,3 +74,44 @@ def test_valid_rows_accepts_untyped_all_empty_quality_controls(flags):
 
     assert result.valid.collect()['id'].to_list() == ['empty', 'null']
     assert result.invalid.collect().is_empty()
+
+
+def test_flag_rows_appends_unique_sorted_flags_and_initialises_lists():
+    frame = pl.LazyFrame({'id': ['a', 'b', 'c', 'd'], 'x': [1, 2, None, 1]})
+
+    once = flag_rows(frame, pl.col('x') == 1, Flag.OTHER)
+    twice = flag_rows(once, pl.col('x') >= 1, Flag.INVALID)
+
+    assert twice.collect()['qualityControls'].to_list() == [
+        ['another invalid reason', 'invalid study'],
+        ['invalid study'],
+        [],
+        ['another invalid reason', 'invalid study'],
+    ]
+    assert flag_rows(once, pl.col('x') == 1, Flag.OTHER).collect().equals(once.collect())
+
+
+def test_flag_rows_accepts_untyped_all_empty_quality_controls():
+    frame = pl.LazyFrame({'qualityControls': [[], None], 'x': [1, 0]})
+
+    result = flag_rows(frame, pl.col('x') == 1, Flag.INVALID).collect()
+
+    assert result['qualityControls'].to_list() == [['invalid study'], []]
+
+
+def test_has_excluded_flag_matches_valid_rows():
+    frame = flagged_frame()
+    marked = frame.with_columns(has_excluded_flag([Flag.INVALID]).alias('excluded')).collect()
+    result = valid_rows(frame, [Flag.INVALID])
+
+    assert marked.filter('excluded')['id'].to_list() == result.invalid.collect()['id'].to_list()
+
+
+def test_resolve_flag_names_maps_names_and_passes_values_through():
+    assert resolve_flag_names(Flag, ['INVALID', 'another invalid reason', Flag.OTHER, 'UNKNOWN']) == [
+        Flag.INVALID,
+        'another invalid reason',
+        Flag.OTHER,
+        'UNKNOWN',
+    ]
+    assert resolve_flag_names(Flag, 'INVALID') == 'INVALID'
