@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
@@ -101,11 +103,15 @@ CONSEQUENCE_SCORES = {
 }
 
 
+VEP_PART = re.compile(r'\.jsonl?(\.gz)?$')
+
+
 def read_vep(path: str) -> pl.LazyFrame:
     """Scan recursive VEP JSON parts with fixed nested types, including gzip parts."""
     handle = StorageHandle(path)
     if handle.stat().is_dir:
-        parts = sorted(handle.glob('**/*.json*'))
+        # VEP writes `<part>.json_warnings.txt` next to its output, so match data files exactly.
+        parts = sorted(part for part in handle.glob('**/*.json*') if VEP_PART.search(part))
         if not parts:
             raise ValueError(f'No VEP JSON files found in {path}')
     else:
