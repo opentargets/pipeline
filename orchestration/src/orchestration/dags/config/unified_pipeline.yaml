@@ -25,7 +25,7 @@ run_name: "do/platform-2610-2"
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.12.0rc3"
-pts_version: "26.12.0rc19"
+pts_version: "26.12.0rc20"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 gentropy_version: "3.4.0-rc.2"
