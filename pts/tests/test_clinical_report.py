@@ -303,7 +303,7 @@ EMA_ROWS = [
         'Beta',
         'EMEA/H/C/000002',
         'Withdrawn',
-        None,
+        'N/A',
         'betanib',
         None,
         'treatment of copd',
@@ -323,6 +323,19 @@ EMA_ROWS = [
         '01/02/2003',
         'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
         None,
+    ],
+    [
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '   ',
+        'None',
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        ' \t ',
     ],
     [
         'Veterinary',
@@ -366,7 +379,7 @@ READ_EXCEL_ROWS = [
         'Beta',
         'EMEA/H/C/000002',
         'Withdrawn',
-        None,
+        'N/A',
         'betanib',
         None,
         'treatment of copd',
@@ -386,6 +399,19 @@ READ_EXCEL_ROWS = [
         '01/02/2003',
         'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
         None,
+    ),
+    (
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '',
+        'None',
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        '',
     ),
     (
         'Veterinary',
@@ -440,7 +466,7 @@ def test_ema_row_without_mesh_or_ner_dropped(tmp_path: Path) -> None:
 
     reports = extract_ema_clinical_report(sheet, _stub_ner).df
 
-    assert sorted(reports['id'].to_list()) == ['emea/h/c/000001', 'emea/h/c/000002']
+    assert sorted(reports['id'].to_list()) == ['emea/h/c/000001', 'emea/h/c/000002', 'emea/h/c/000005']
 
 
 PUBLISHED_COLUMNS = [

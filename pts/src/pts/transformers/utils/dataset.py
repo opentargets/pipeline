@@ -25,7 +25,7 @@ cannot do rather than half-doing it.
 from __future__ import annotations
 
 import io
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Any, Literal
 
 import openpyxl
@@ -262,11 +262,17 @@ def _sheet_as_pandas_text(data: bytes, sheet_name: str, *, has_header: bool) -> 
 
 
 def read_spreadsheet(
-    path: str, sheet_name: str, *, infer_types: bool = True, has_header: bool = True
+    path: str,
+    sheet_name: str,
+    *,
+    infer_types: bool = True,
+    has_header: bool = True,
+    missing_values: Collection[str] = _MISSING_CELL_VALUES,
 ) -> pl.DataFrame:
     """Read one sheet of an Excel workbook with every cell as a string.
 
-    Blanks and `pandas.read_excel`'s default missing-value strings are null, and whitespace is kept.
+    Cells in `missing_values` are null, by default blanks and `pandas.read_excel`'s default
+    missing-value strings, and whitespace is kept.
     With `infer_types`, each column is typed first, as `pandas.read_excel` does, and booleans are
     '1'/'0'; without it, each cell is rendered on its own, as `pandas.read_excel(dtype=str)` does:
     an integral number without a fraction, a boolean as 'True'/'False'. A sheet with only a header
@@ -280,6 +286,7 @@ def read_spreadsheet(
         sheet_name: sheet to read.
         infer_types: type each column before rendering it as text.
         has_header: the first row names the columns; only without `infer_types`.
+        missing_values: cell texts read as null.
 
     Returns:
         DataFrame with one string column per sheet column.
@@ -294,7 +301,7 @@ def read_spreadsheet(
         data = f.read()
     if not infer_types:
         strings = _sheet_as_pandas_text(data, sheet_name, has_header=has_header)
-        return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
+        return strings.with_columns(pl.when(~pl.all().is_in(list(missing_values))).then(pl.all()).name.keep())
     sheet = pl.read_excel(
         io.BytesIO(data),
         sheet_name=sheet_name,
@@ -308,7 +315,7 @@ def read_spreadsheet(
         )
         return pl.DataFrame(schema=dict.fromkeys(header.row(0), pl.String))
     strings = sheet.with_columns(pl.col(pl.Boolean).cast(pl.Int8)).cast(pl.String)
-    return strings.with_columns(pl.when(~pl.all().is_in(_MISSING_CELL_VALUES)).then(pl.all()).name.keep())
+    return strings.with_columns(pl.when(~pl.all().is_in(list(missing_values))).then(pl.all()).name.keep())
 
 
 def write_dataset(
