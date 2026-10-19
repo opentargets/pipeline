@@ -12,12 +12,6 @@ from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.transformers.enhancer_to_gene import E2GConstants, parse_enhancer_to_gene, read_enhancer_to_gene
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Avoid starting Spark for these Polars tests."""
-    return {}
-
-
 def raw_frame(**changes):
     """Provide one unified raw evidence record."""
     row = {

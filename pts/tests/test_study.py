@@ -26,12 +26,6 @@ from pts.transformers.study import (
 )
 
 
-@pytest.fixture
-def doctest_namespace():
-    """These Polars tests do not require the shared Spark doctest session."""
-    return {}
-
-
 class TestDiseaseLut:
     """Canonical and obsolete identifiers retain their lookup semantics."""
 
