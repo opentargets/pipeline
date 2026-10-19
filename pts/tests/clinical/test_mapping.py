@@ -53,13 +53,41 @@ def _map(reports: pl.DataFrame, cache: str | None, curation: pl.DataFrame | None
     return map_entities(reports, DISEASE, DRUG, curation, cache, 8)
 
 
+def _without_preset_fan_out(rows: list[tuple]) -> list[tuple]:
+    """`rows` with each repeat of a row whose report had preset ids dropped."""
+    preset = set(REPORTS.filter(pl.col('drugId').is_not_null() | pl.col('diseaseId').is_not_null())['id'])
+    kept = [row for row in rows if row[0] not in preset]
+    return sorted([*kept, *{row for row in rows if row[0] in preset}], key=lambda row: [(v is None, v) for v in row])
+
+
 def test_map_entities_matches_ontoma(tmp_path: Path, ner_calls: list[list[str]]) -> None:
+    """Mira's rows, except that preset-id rows appear once, unlike mira."""
     cache = _cache(tmp_path / 'ner.parquet')
     mapped = map_entities(REPORTS, DISEASE, DRUG, CHEMBL_CURATION, cache, 8)
     assert mapped.columns == MAPPED_COLUMNS
-    assert _rows(mapped) == MAPPED
+    expected = _without_preset_fan_out(MAPPED)
+    assert len(expected) == len(MAPPED) - 3
+    assert _rows(mapped) == expected
     assert sorted(label for call in ner_calls for label in call) == NER_EXTRACTED_LABELS
     assert _cache_rows(cache) == NER_CACHE_WRITTEN
+
+
+def test_preset_id_row_not_duplicated(ner_calls: list[list[str]]) -> None:
+    reports = _reports(
+        ('NCT05', 'Shared Brand', 'shared syndrome', None, None),
+        ('CHEMBL_IND1', 'Shared Brand', 'shared syndrome', 'CHEMBL_PRESET', 'EFO_PRESET'),
+        ('CHEMBL_IND2', 'Shared Brand', 'shared syndrome', 'CHEMBL_PRESET', None),
+    )
+    mapped = _map(reports, None)
+    assert _rows(mapped.select('id', 'drugId', 'diseaseId')) == [
+        ('CHEMBL_IND1', 'CHEMBL_PRESET', 'EFO_PRESET'),
+        ('CHEMBL_IND2', 'CHEMBL_PRESET', 'EFO_0000001'),
+        ('CHEMBL_IND2', 'CHEMBL_PRESET', 'EFO_0000002'),
+        ('NCT05', 'CHEMBL2', 'EFO_0000001'),
+        ('NCT05', 'CHEMBL2', 'EFO_0000002'),
+        ('NCT05', 'CHEMBL3', 'EFO_0000001'),
+        ('NCT05', 'CHEMBL3', 'EFO_0000002'),
+    ]
 
 
 def test_curation_and_preset_ids_win(tmp_path: Path, ner_calls: list[list[str]]) -> None:

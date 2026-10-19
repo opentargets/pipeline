@@ -320,9 +320,16 @@ def map_entities(
 
     return (
         df
+        .with_columns(
+            pl
+            .when(pl.col(disease_id_column_name).is_null())
+            .then(pl.col(disease_column_name))
+            .alias('__disease_query'),
+            pl.when(pl.col(drug_id_column_name).is_null()).then(pl.col(drug_column_name)).alias('__drug_query'),
+        )
         .join(
             mapping_results.filter(pl.col('entity_type') == 'DS').select(['query_label', 'diseaseIds']),
-            left_on=disease_column_name,
+            left_on='__disease_query',
             right_on='query_label',
             how='left',
             suffix='_disease',
@@ -330,12 +337,13 @@ def map_entities(
         )
         .join(
             mapping_results.filter(pl.col('entity_type') == 'CD').select(['query_label', 'drugIds']),
-            left_on=drug_column_name,
+            left_on='__drug_query',
             right_on='query_label',
             how='left',
             suffix='_drug',
             maintain_order='left',
         )
+        .drop('__disease_query', '__drug_query')
         .explode('diseaseIds', empty_as_null=True)
         .explode('drugIds', empty_as_null=True)
         .rename({'diseaseIds': f'new_{disease_id_column_name}', 'drugIds': f'new_{drug_id_column_name}'})
