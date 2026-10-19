@@ -357,6 +357,6 @@ def study(
         .pipe(valid_rows, options.invalid_qc_reasons)
     )
     logger.info('Writing accepted studies to {}', destinations.output)
-    write_dataset(result.valid, destinations.output, single_file=True)
+    write_dataset(result.valid, destinations.output)
     logger.info('Writing excluded studies to {}', destinations.excluded)
-    write_dataset(result.invalid, destinations.excluded, single_file=True)
+    write_dataset(result.invalid, destinations.excluded)
