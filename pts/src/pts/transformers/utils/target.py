@@ -23,7 +23,11 @@ def ensg_lookup(target: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def tss_lut(target: pl.LazyFrame) -> pl.LazyFrame:
-    """Resolve gene TSS from preferred, canonical transcript, then genomic coordinates."""
+    """Resolve gene TSS from the preferred `tss`, then strand-aware genomic coordinates.
+
+    Gentropy also fell back to the canonical transcript, but the PTS target index has no
+    `canonicalTranscript` column, so that step is not ported.
+    """
     genomic = pl.col('genomicLocation')
     genomic_tss = (
         pl
@@ -32,18 +36,7 @@ def tss_lut(target: pl.LazyFrame) -> pl.LazyFrame:
         .when(genomic.struct.field('strand') == -1)
         .then(genomic.struct.field('end'))
     )
-    candidates = [pl.col('tss')]
-    if 'canonicalTranscript' in target.collect_schema():
-        canonical = pl.col('canonicalTranscript')
-        canonical_tss = (
-            pl
-            .when(canonical.struct.field('strand') == '+')
-            .then(canonical.struct.field('start'))
-            .when(canonical.struct.field('strand') == '-')
-            .then(canonical.struct.field('end'))
-        )
-        candidates.append(canonical_tss)
     return target.select(
         pl.col('id').alias('geneId'),
-        pl.coalesce(*candidates, genomic_tss).cast(pl.Int64).alias('tss'),
+        pl.coalesce(pl.col('tss'), genomic_tss).cast(pl.Int64).alias('tss'),
     )
