@@ -14,6 +14,7 @@ from pts.transformers.clinical.datasets import (
 )
 from pts.transformers.clinical.helpers import filter_df, union_dfs
 from pts.transformers.clinical.llm_workflow import run_extraction
+from pts.transformers.clinical.ner import extract_disease_entities, extract_drug_entities
 from pts.transformers.clinical.providers.aact import extract_clinical_report as extract_aact_clinical_report
 from pts.transformers.clinical.providers.aact import replace_with_llm_indications
 from pts.transformers.clinical.providers.aact_llm import build_prompts, parse_batch_results, sample_report
@@ -53,6 +54,8 @@ __all__ = [
     'build_prompts',
     'extract_aact_clinical_report',
     'extract_chembl_clinical_report',
+    'extract_disease_entities',
+    'extract_drug_entities',
     'extract_drug_warning_clinical_report',
     'extract_ema_clinical_report',
     'extract_pmda_clinical_report',
