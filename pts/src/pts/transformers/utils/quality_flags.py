@@ -19,7 +19,9 @@ def valid_rows(frame: pl.LazyFrame, invalid_flags: Sequence[StrEnum]) -> Validat
     """Split a dataset by configured QC enum values, treating null QC lists as empty."""
     reasons = [flag.value for flag in invalid_flags]
     logger.info('Splitting dataset by {} excluded QC flags', len(reasons))
-    invalid = pl.col('qualityControls').fill_null([]).list.set_intersection(reasons).list.len() > 0
+    # An all-empty QC column can be typed List(Null), which set operations reject.
+    flags = pl.col('qualityControls').cast(pl.List(pl.String)).fill_null([])
+    invalid = flags.list.set_intersection(reasons).list.len() > 0
     return ValidationResult(valid=frame.filter(~invalid), invalid=frame.filter(invalid))
 
 

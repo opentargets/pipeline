@@ -228,7 +228,10 @@ def scan_datasets(
             msg = f'{pattern!r} matched no datasets'
             raise ValueError(msg)
 
-    frames = [scan_dataset(directory, format=format, **options) for directory in directories]
+    # Text readers must parse with the schema: inference sees only the first rows, so a field
+    # that appears later is dropped before any post-scan schema matching could keep it.
+    text_schema = {'schema': schema} if schema is not None and format != 'parquet' else {}
+    frames = [scan_dataset(directory, format=format, **text_schema, **options) for directory in directories]
     if schema is not None:
         frames = [
             frame.match_to_schema(schema, missing_columns='insert', missing_struct_fields='insert') for frame in frames
