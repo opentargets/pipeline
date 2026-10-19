@@ -15,7 +15,7 @@ def test_associated_disease_fields_are_optional() -> None:
 
 
 def test_extraction_schema_digest_matches_mira() -> None:
-    """The LLM extraction cache is namespaced by this digest; a change means a paid re-extraction."""
+    """The extraction schema digest equals the one mira 1.0.5 produced."""
     schema = ClinicalReportExtractionSchema.model_json_schema(by_alias=True)
     digest = hashlib.sha256(json.dumps(schema, sort_keys=True).encode('utf-8')).hexdigest()
 

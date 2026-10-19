@@ -208,6 +208,7 @@ def test_workflow_patches_are_serialised(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_run_extraction_closes_async_client_before_loop_shutdown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    assert aact_trial_extraction.run_extraction is llm_workflow.run_extraction
     client = _FakeClient()
     global_asyncio_run = asyncio.run
 

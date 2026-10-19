@@ -1,6 +1,6 @@
 """Clinical report datasets, providers and the AACT LLM extraction.
 
-Code outside this package imports from here only, never from its submodules.
+Production code outside this package imports from here, not from its submodules.
 """
 
 from pts.transformers.clinical import llm_workflow
