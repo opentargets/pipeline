@@ -3,7 +3,6 @@
 from enum import StrEnum
 
 import polars as pl
-import pytest
 from polars.testing import assert_frame_equal
 
 from pts.transformers.utils.quality_flags import valid_rows
@@ -14,12 +13,6 @@ class Flag(StrEnum):
 
     INVALID = 'invalid study'
     OTHER = 'another invalid reason'
-
-
-@pytest.fixture
-def doctest_namespace():
-    """Polars utility tests do not require the shared Spark session."""
-    return {}
 
 
 def flagged_frame():

@@ -24,12 +24,6 @@ from pts.transformers.utils.dataset import (
 )
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Dataset I/O tests do not require the shared Spark doctest session."""
-    return {}
-
-
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
     """Write one parquet part per frame, the way an upstream step lays a dataset out."""
     directory.mkdir(parents=True, exist_ok=True)
