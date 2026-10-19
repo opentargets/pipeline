@@ -319,12 +319,17 @@ def _divide_by_power_of_ten(columns: pl.Series) -> pl.Series:
     return _float_series(columns.name, values, (value.is_null() | exponent.is_null()).to_numpy() | (divisor == 0))
 
 
+def _rounded_quotient(columns: pl.Series) -> pl.Series:
+    """`_divide_by_power_of_ten` rounded HALF_UP to 3 decimal places."""
+    quotient = _divide_by_power_of_ten(columns)
+    return pl.select(round_half_up(pl.lit(quotient), 3)).to_series().alias(columns.name)
+
+
 def pvalue_mantissa(p: pl.Expr) -> pl.Expr:
     """`round(p / pow(10, exponent), 3)` as spark computes it, with `pvalue_exponent`: 10.0 at a power of ten."""
-    quotient = pl.struct(p.alias('value'), pvalue_exponent(p).alias('exponent')).map_batches(
-        _divide_by_power_of_ten, return_dtype=pl.Float64, is_elementwise=True
+    return pl.struct(p.alias('value'), pvalue_exponent(p).alias('exponent')).map_batches(
+        _rounded_quotient, return_dtype=pl.Float64, is_elementwise=True
     )
-    return round_half_up(quotient, 3)
 
 
 def round_half_up(expr: pl.Expr, scale: int) -> pl.Expr:

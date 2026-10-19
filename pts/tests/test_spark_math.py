@@ -232,6 +232,22 @@ def test_exponent_mantissa_review_focus() -> None:
     assert [_key(v) for v in out['m'].to_list()] == [None, '10.0', '5.0', 'nan', '10.0']
 
 
+def test_mantissa_divides_once_per_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pts.transformers.utils import spark_math
+
+    calls: list[int] = []
+    divide = spark_math._divide_by_power_of_ten
+
+    def counted(columns: pl.Series) -> pl.Series:
+        calls.append(len(columns))
+        return divide(columns)
+
+    monkeypatch.setattr(spark_math, '_divide_by_power_of_ten', counted)
+    out = pl.DataFrame({'p': [1.5e-9, 0.05]}).select(pvalue_mantissa(pl.col('p')))
+    assert out.to_series().to_list() == [1.5, 5.0]
+    assert calls == [2]
+
+
 ROUNDING = [
     1.0005,
     2.675,
