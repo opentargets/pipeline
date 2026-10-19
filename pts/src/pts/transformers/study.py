@@ -9,7 +9,7 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.study import study_schema
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
 
@@ -117,6 +117,7 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
         .drop('_record_key')
     )
     has_summary = pl.col('hasSumstats').fill_null(False).any().over('studyId')
+    trait_count = pl.col('traitFromSourceMappedIds').list.len()
     qc = pl.col('qualityControls').fill_null([])
     prepared = studies.with_columns(
         pl
@@ -124,7 +125,10 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
         .then(qc.list.eval(pl.element().filter(pl.element() != QualityFlag.NO_OT_CURATION.value)))
         .otherwise(qc)
         .alias('qualityControls'),
-        pl.col('traitFromSourceMappedIds').list.len().fill_null(-1).min().over('studyId').alias('_minimum_traits'),
+        # Only records with mapped traits compete for the most granular (fewest) traits.
+        # Gentropy compares size(), where a null list is -1, so a record without mapped
+        # traits always won and the study lost its traits; that is intentionally fixed here.
+        pl.when(trait_count > 0).then(trait_count).min().over('studyId').alias('_minimum_traits'),
         has_summary.alias('_has_summary'),
     ).with_columns(
         pl
@@ -137,7 +141,10 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
         .otherwise(pl.col('qualityControls'))
         .alias('qualityControls')
     )
-    granular = pl.col('traitFromSourceMappedIds').list.len().fill_null(-1) == pl.col('_minimum_traits')
+    # When no record has mapped traits, every record is a candidate, as in Gentropy.
+    granular = (
+        pl.when(pl.col('_minimum_traits').is_null()).then(True).otherwise(trait_count == pl.col('_minimum_traits'))
+    )
     aggregated = {
         'qualityControls': pl
         .col('qualityControls')
@@ -278,7 +285,15 @@ def collect_heritability(studies: pl.LazyFrame, heritability: pl.LazyFrame) -> p
         'mean_chisq': 'LDSC_mean_chisq',
         'lambda_gc': 'LDSC_gc_lambda',
     }
-    annotations = heritability.filter(pl.col('runStatus') == 'success').select(
+    # One estimate per study: several successful LDSC runs for a study would otherwise
+    # duplicate the study in the join (Gentropy joins them all). Keep one, deterministically.
+    successful = (
+        heritability
+        .filter(pl.col('runStatus') == 'success')
+        .sort(['studyId', *fields], nulls_last=True)
+        .unique('studyId', keep='first', maintain_order=True)
+    )
+    annotations = successful.select(
         'studyId',
         pl.concat_list([
             pl.struct(
@@ -325,7 +340,7 @@ def study(
     biosample = scan_dataset(sources.biosample)
     disease = disease_lut(scan_dataset(sources.disease))
     heritability = scan_dataset(sources.heritability)
-    result = (
+    validated = (
         pl
         .concat([
             scan_datasets([path], schema=study_schema).with_columns(pl.lit(rank).alias('_source_rank'))
@@ -342,9 +357,12 @@ def study(
         .pipe(collect_heritability, heritability)
         .pipe(sort_study_collections)
         .select(study_schema.names())
-        .pipe(valid_rows, options.invalid_qc_reasons)
+        .collect()
     )
-    logger.info('Writing accepted studies to {}', destinations.output)
-    write_dataset(result.valid, destinations.output)
-    logger.info('Writing excluded studies to {}', destinations.excluded)
-    write_dataset(result.invalid, destinations.excluded)
+    # Validate once, then write both outputs from the same frame.
+    result = valid_rows(validated.lazy(), options.invalid_qc_reasons)
+    logger.info('Writing accepted studies to {} and excluded studies to {}', destinations.output, destinations.excluded)
+    pl.collect_all([
+        sink_dataset(result.valid, destinations.output),
+        sink_dataset(result.invalid, destinations.excluded),
+    ])

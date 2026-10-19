@@ -374,6 +374,22 @@ def test_unique_locus_keeps_smallest_set(sizes, survivor):
     ]
 
 
+def test_unique_locus_ignores_ineligible_rows():
+    """Rows already excluded are neither flagged nor counted as duplicates."""
+    frame = credible_sets([
+        {
+            'studyLocusId': 'duplicate',
+            'beta': 0.0,
+            'locus': [{'variantId': '1_1_A_C'}],
+            'qualityControls': ['excluded'],
+        },
+        {'studyLocusId': 'duplicate', 'beta': 1.0, 'locus': [{'variantId': f'1_{i}_A_C'} for i in range(3)]},
+    ])
+    eligible = ~pl.col('qualityControls').fill_null([]).list.contains('excluded')
+    rows = cs.validate_unique_study_locus_id(frame, eligible).collect().sort('beta')
+    assert rows['qualityControls'].to_list() == [['excluded'], []]
+
+
 def test_unique_locus_does_not_flag_distinct_identifiers():
     frame = credible_sets([{'studyLocusId': 'a'}, {'studyLocusId': 'b'}])
     assert flags(cs.validate_unique_study_locus_id(frame)) == [[], []]

@@ -12,7 +12,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 from pts.transformers.utils.target import tss_lut
 
@@ -155,9 +155,13 @@ def parse_enhancer_to_gene(
         .otherwise(pl.min_horizontal((pl.col('tss') - pl.col('start')).abs(), (pl.col('tss') - pl.col('end')).abs()))
         .cast(pl.Int32, strict=False)
     )
-    identifier = plh.concat_str([
-        pl.col(column).cast(pl.String).fill_null('None') for column in E2G.identifier_columns
-    ]).nchash.md5()
+    # Gentropy hashed the columns concatenated without a separator, so different intervals
+    # could collide (chromosome '1' + start '12' == chromosome '11' + start '2'). The
+    # separator intentionally changes every intervalId relative to Gentropy.
+    identifier = plh.concat_str(
+        [pl.col(column).cast(pl.String).fill_null('None') for column in E2G.identifier_columns],
+        separator='|',
+    ).nchash.md5()
     return base.select(
         'chromosome',
         'start',
@@ -289,7 +293,7 @@ def enhancer_to_gene(
     biosample = scan_dataset(sources.biosample)
     contig = scan_dataset(sources.chromosome)
     biosample_mapping = scan_dataset(sources.biosample_lut, format='csv', has_header=True)
-    result = (
+    validated = (
         read_enhancer_to_gene(sources.enhancer_to_gene)
         .pipe(parse_enhancer_to_gene, biosample_mapping, target)
         .pipe(validate_datasource_id)
@@ -300,9 +304,16 @@ def enhancer_to_gene(
         .pipe(validate_score, options.min_valid_score, options.max_valid_score)
         .pipe(validate_id_has_unique_score)
         .select(enhancer_to_gene_schema.names())
-        .pipe(valid_rows, options.invalid_qc_reasons)
+        .collect()
     )
-    logger.info('Writing accepted enhancer-to-gene records to {}', destinations.output)
-    write_dataset(result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output)
-    logger.info('Writing excluded enhancer-to-gene records to {}', destinations.excluded)
-    write_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded)
+    # Validate once (every rE2G file is read once), then write both outputs from the frame.
+    result = valid_rows(validated.lazy(), options.invalid_qc_reasons)
+    logger.info(
+        'Writing accepted enhancer-to-gene records to {} and excluded records to {}',
+        destinations.output,
+        destinations.excluded,
+    )
+    pl.collect_all([
+        sink_dataset(result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output),
+        sink_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded),
+    ])
