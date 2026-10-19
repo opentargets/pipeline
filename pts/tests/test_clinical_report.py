@@ -434,13 +434,13 @@ Its 'N/A' and 'None' cells are set to null, as `read_ema_sheet` reads them.
 
 
 def _ema_workbook(path: Path, blank_rows: int = 0) -> str:
-    """The EMA medicines workbook: `blank_rows` blank rows, a banner row, the header, then the medicines."""
+    """The EMA medicines workbook: a banner row, `blank_rows` blank rows, the header, then the medicines."""
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Medicine'
-    for i, row in enumerate([EMA_BANNER, EMA_HEADER, *EMA_ROWS]):
+    for i, row in enumerate([EMA_BANNER, *[[None]] * blank_rows, EMA_HEADER, *EMA_ROWS]):
         for j, value in enumerate(row):
-            sheet.cell(row=blank_rows + i + 1, column=j + 1, value=value)
+            sheet.cell(row=i + 1, column=j + 1, value=value)
     workbook.save(path)
     return str(path)
 
@@ -466,7 +466,7 @@ def test_ema_sheet_matches_read_excel(tmp_path: Path) -> None:
     )
 
 
-def test_ema_sheet_skips_blank_rows_above_the_banner(tmp_path: Path) -> None:
+def test_ema_sheet_skips_blank_rows_below_the_banner(tmp_path: Path) -> None:
     sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx', blank_rows=7))
 
     assert sheet.columns == read_ema_sheet(_ema_workbook(tmp_path / 'plain.xlsx')).columns
