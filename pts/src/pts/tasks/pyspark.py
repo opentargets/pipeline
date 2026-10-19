@@ -10,12 +10,12 @@ from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
+from pts.tasks.paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
+
 PYSPARK_PACKAGE = 'pts.pyspark'
 
-path_or_paths = str | dict[str, str]
-
 pyspark_entrypoint = Callable[
-    [path_or_paths, path_or_paths, dict[str, Any], dict[str, str]],
+    [SourcePaths, DestinationPaths, dict[str, Any], dict[str, str]],
     None,
 ]
 
@@ -33,9 +33,9 @@ class PysparkSpec(Spec):
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
     """
-    source: path_or_paths
-    """A string or a dictionary with the source paths."""
-    destination: path_or_paths
+    source: SourcePaths
+    """A path or a dictionary whose values are paths or lists of paths."""
+    destination: DestinationPaths
     """A string or a dictionary with the destination paths."""
     settings: dict[str, Any] | None = None
     """A dictionary with settings to pass to the pyspark job."""
@@ -68,7 +68,7 @@ class Pyspark(Task):
 
     @report
     def run(self) -> Self:
-        self.srcs = make_absolute(self.spec.source, self.context.config)
+        self.srcs = resolve_source_paths(self.spec.source, self.context.config)
         self.dsts = make_absolute(self.spec.destination, self.context.config)
 
         logger.info(f'source paths: {self.srcs}')
@@ -85,7 +85,7 @@ class Pyspark(Task):
         )
         logger.info('pyspark job completed successfully')
 
-        srcs = list(self.srcs.values()) if isinstance(self.srcs, dict) else self.srcs
+        srcs = flatten_paths(self.srcs)
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
 
