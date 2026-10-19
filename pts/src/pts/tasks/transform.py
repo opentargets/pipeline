@@ -12,7 +12,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.fs import check_destination
 
-from pts.tasks.paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
+from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 

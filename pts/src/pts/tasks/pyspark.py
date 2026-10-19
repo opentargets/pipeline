@@ -10,7 +10,7 @@ from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
-from pts.tasks.paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
+from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
 
 PYSPARK_PACKAGE = 'pts.pyspark'
 
