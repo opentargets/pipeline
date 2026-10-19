@@ -127,3 +127,40 @@ def test_variant_step_merges_annotations_and_amino_acid_predictions(tmp_path):
     assert {'populationName': 'test_population', 'alleleFrequency': 0.125} in row['alleleFrequencies']
     assert row['variantDescription'].endswith('Additional annotation.')
     assert any(effect['method'] == 'FoldX' and effect['score'] == 7.0 for effect in row['variantEffect'])
+
+
+def test_loci_filter_keeps_only_annotations_that_can_match(tmp_path):
+    """Annotating with the loci filter equals annotating with every annotation row."""
+    from pts.transformers.variant_utils.annotations import add_annotation
+
+    long_alt = 'A' * 400
+    annotations = pl.DataFrame(
+        {
+            'variantId': ['1_10_A_T', '1_10_A_G', '2_20_C_G', 'no_coordinates', f'1_30_C_{long_alt}'],
+            'chromosome': ['1', '1', '2', None, '1'],
+            'position': pl.Series([10, 10, 20, None, 30], dtype=pl.Int32),
+            'rsIds': [['rs1'], ['rs2'], ['rs3'], ['rs4'], ['rs5']],
+        },
+    )
+    annotations.write_parquet(tmp_path / 'annotations.parquet')
+    variants = pl.DataFrame(
+        {
+            'variantId': ['1_10_A_T', 'OTVAR_1_30_' + 'x', '3_40_G_A'],
+            'chromosome': ['1', '1', '3'],
+            'position': pl.Series([10, 30, 40], dtype=pl.Int32),
+        },
+        schema={name: variant_schema[name] for name in ('variantId', 'chromosome', 'position')},
+    ).lazy()
+    hashed = read_variant_annotations(str(tmp_path)).filter(pl.col('position') == 30).collect()['variantId'][0]
+    variants = variants.with_columns(pl.col('variantId').replace({'OTVAR_1_30_x': hashed}))
+    loci = variants.select('chromosome', 'position').unique()
+
+    filtered = read_variant_annotations(str(tmp_path), loci=loci).collect()
+    assert sorted(filtered['position'].to_list()) == [10, 10, 30]
+
+    def annotate(source):
+        return variants.pipe(add_annotation, source).collect().sort('variantId')
+
+    assert annotate(read_variant_annotations(str(tmp_path), loci=loci)).equals(
+        annotate(read_variant_annotations(str(tmp_path)))
+    )

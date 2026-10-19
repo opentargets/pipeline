@@ -44,8 +44,19 @@ class VariantSettings(BaseModel):
     hash_threshold: int = Field(default=300, gt=0)
 
 
-def read_variant_annotations(path: str, hash_threshold: int = 300) -> pl.LazyFrame:
-    """Scan recursively partitioned supplementary variant annotations."""
+def read_variant_annotations(
+    path: str,
+    hash_threshold: int = 300,
+    loci: pl.LazyFrame | None = None,
+) -> pl.LazyFrame:
+    """Scan recursively partitioned supplementary variant annotations.
+
+    With `loci` (distinct `chromosome`, `position` pairs), only annotations at those loci
+    are kept, before casting and hashing. Variant identifiers embed their coordinates, so
+    no dropped row could match a variant at the given loci, and rows without coordinates
+    never match variants that have them. gnomAD has ~883M variants against a few million
+    in a release, so this keeps the annotation join to the variants it can annotate.
+    """
     logger.info('Reading supplementary variant annotations from {}', path)
     handle = StorageHandle(path)
     parts = sorted(handle.glob('**/*.parquet')) if handle.stat().is_dir else [path]
@@ -58,6 +69,8 @@ def read_variant_annotations(path: str, hash_threshold: int = 300) -> pl.LazyFra
         missing_columns='insert',
         cast_options=pl.ScanCastOptions(missing_struct_fields='insert'),
     )
+    if loci is not None:
+        frame = frame.join(loci, on=['chromosome', 'position'], how='semi')
     arrays = [pl.col(name).fill_null([]) for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
     return frame.with_columns(arrays).with_columns(
         hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), hash_threshold).alias(
@@ -80,9 +93,13 @@ def variant(
     logger.info('Parsing VEP annotations from {}', sources.vep)
     frame = read_vep(sources.vep).pipe(parse_vep, options.hash_threshold)
     arrays = [pl.col(name).fill_null([]) for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
-    frame = frame.with_columns(arrays)
+    # Parse once with the streaming engine: the JSON input is far larger than the parsed
+    # variants, which every annotation below is then restricted to.
+    frame = frame.with_columns(arrays).collect(engine='streaming').lazy()
+    loci = frame.select('chromosome', 'position').unique()
     for path in sources.variant_annotations:
-        frame = frame.pipe(add_annotation, read_variant_annotations(path, options.hash_threshold)).with_columns(arrays)
+        annotations = read_variant_annotations(path, options.hash_threshold, loci)
+        frame = frame.pipe(add_annotation, annotations).with_columns(arrays)
     for path in sources.amino_acid_annotations:
         logger.info('Reading amino-acid annotations from {}', path)
         annotations = scan_dataset(path).select('uniprotAccession', 'aminoAcidChange', 'variantEffect')
