@@ -18,12 +18,6 @@ from pts.transformers.variant_partition import (
 )
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Avoid creating a Spark session for Polars tests."""
-    return {}
-
-
 def test_as_vcf_df_expands_locus_and_preserves_rsids():
     frame = pl.DataFrame({
         'variantId': ['1_20_A_G', None, '1_20_A_G'],

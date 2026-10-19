@@ -24,13 +24,6 @@ from pts.transformers.variant_utils.vep import (
     vep_prediction,
 )
 
-
-@pytest.fixture
-def doctest_namespace():
-    """Avoid starting Spark for Polars tests."""
-    return {}
-
-
 SAMPLE = Path(__file__).parent / 'test_data' / 'vep_sample.jsonl'
 
 
