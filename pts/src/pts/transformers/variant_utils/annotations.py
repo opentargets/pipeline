@@ -157,7 +157,8 @@ def annotate_with_amino_acid_consequences(frame: pl.LazyFrame, annotation: pl.La
         .list.eval(pl.element().filter(pl.element().struct.field('aminoAcidChange').is_not_null()))
         .list.first()
     )
-    enriched = (
+    keys = ['uniprotAccession', 'aminoAcidChange']
+    keyed = (
         frame
         .with_columns(first.alias('_transcript'))
         .with_columns(
@@ -166,9 +167,13 @@ def annotate_with_amino_acid_consequences(frame: pl.LazyFrame, annotation: pl.La
         )
         .drop('_transcript')
         .explode('uniprotAccession')
-        .join(
-            annotation.rename({'variantEffect': '_annotations'}), on=['uniprotAccession', 'aminoAcidChange'], how='left'
-        )
+    )
+    # Only predictions for substitutions these variants carry can match; restricting first
+    # keeps the join from hashing every prediction (FoldX alone has ~151M).
+    relevant = annotation.join(keyed.select(keys).unique(), on=keys, how='semi')
+    enriched = (
+        keyed
+        .join(relevant.rename({'variantEffect': '_annotations'}), on=keys, how='left')
         .with_columns(
             pl
             .when(pl.col('_annotations').is_not_null())
