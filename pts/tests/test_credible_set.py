@@ -7,12 +7,6 @@ from pts.schemas.credible_set import credible_set_schema
 from pts.transformers import credible_set as cs
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Avoid creating the Spark session for Polars tests."""
-    return {}
-
-
 def credible_sets(rows):
     """Normalize partial records, including nested locus fields."""
     return pl.DataFrame(

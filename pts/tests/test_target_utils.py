@@ -7,12 +7,6 @@ from polars.testing import assert_frame_equal
 from pts.transformers.utils.target import tss_lut
 
 
-@pytest.fixture
-def doctest_namespace():
-    """Avoid the shared Spark doctest fixture for Polars tests."""
-    return {}
-
-
 def target_frame(rows):
     """Build targets with explicit nested dtypes, including all-null cases."""
     return pl.DataFrame(
