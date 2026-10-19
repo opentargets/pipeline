@@ -166,7 +166,8 @@ def annotate_with_amino_acid_consequences(frame: pl.LazyFrame, annotation: pl.La
             pl.col('_transcript').struct.field('uniprotAccessions').alias('uniprotAccession'),
         )
         .drop('_transcript')
-        .explode('uniprotAccession')
+        # Keep variants whose transcript has no UniProt accession, as Gentropy's explode_outer.
+        .explode('uniprotAccession', empty_as_null=True)
     )
     # Only predictions for substitutions these variants carry can match; restricting first
     # keeps the join from hashing every prediction (FoldX alone has ~151M).

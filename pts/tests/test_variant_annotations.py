@@ -228,3 +228,36 @@ def test_hash_uses_character_length():
     assert frame.select(
         hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 2).alias('variantId')
     )['variantId'][0] == ('OTVAR_X_4_' + hashlib.md5('éé'.encode()).hexdigest())
+
+
+def test_amino_acid_annotation_keeps_variants_without_uniprot_accessions():
+    """An amino-acid change with no UniProt accession must not drop the variant."""
+    transcript_type = variant_schema['transcriptConsequences']
+    assert isinstance(transcript_type, pl.List) and isinstance(transcript_type.inner, pl.Struct)
+    blank = dict.fromkeys(field.name for field in transcript_type.inner.fields)
+    frame = pl.DataFrame(
+        {
+            'variantId': ['no_accession', 'null_accession'],
+            'variantEffect': [[effect()], [effect()]],
+            'transcriptConsequences': [
+                [{**blank, 'aminoAcidChange': 'A1T', 'uniprotAccessions': []}],
+                [{**blank, 'aminoAcidChange': 'A1T', 'uniprotAccessions': None}],
+            ],
+        },
+        schema={
+            'variantId': pl.String,
+            'variantEffect': variant_schema['variantEffect'],
+            'transcriptConsequences': transcript_type,
+        },
+    )
+    annotation = pl.DataFrame(
+        {'uniprotAccession': ['P1'], 'aminoAcidChange': ['A1T'], 'variantEffect': [[effect('FoldX')]]},
+        schema={
+            'uniprotAccession': pl.String,
+            'aminoAcidChange': pl.String,
+            'variantEffect': variant_schema['variantEffect'],
+        },
+    )
+    result = annotate_with_amino_acid_consequences(frame.lazy(), annotation.lazy()).collect().sort('variantId')
+    assert result['variantId'].to_list() == ['no_accession', 'null_accession']
+    assert result['variantEffect'].list.len().to_list() == [1, 1]
