@@ -323,7 +323,8 @@ def _clinical_report(
 def read_ema_sheet(path: str) -> pl.DataFrame:
     """The EMA list of medicines, every cell a string, the sheet's banner row as column names.
 
-    Blanks and `read_spreadsheet`'s missing-value strings are null; a whitespace-only cell is ''.
+    Blank rows above the banner are skipped. Blanks and `read_spreadsheet`'s missing-value strings are null;
+    a whitespace-only cell is ''.
 
     Args:
         path: the EMA medicines workbook.
@@ -331,7 +332,10 @@ def read_ema_sheet(path: str) -> pl.DataFrame:
     Returns:
         The `Medicine` sheet, with the real column names in its first row.
     """
-    sheet = read_spreadsheet(path, EMA_SHEET_NAME, infer_types=False)
+    rows = read_spreadsheet(path, EMA_SHEET_NAME, infer_types=False, has_header=False)
+    rows = rows.filter(pl.any_horizontal(pl.all().is_not_null()).cast(pl.Int8).cum_max() == 1)
+    banner = [value if value is not None else f'Unnamed: {i}' for i, value in enumerate(rows.row(0))]
+    sheet = rows.slice(1).rename(dict(zip(rows.columns, banner, strict=True)))
     return sheet.with_columns(
         pl.when(pl.all().str.strip_chars().eq('')).then(pl.lit('')).otherwise(pl.all()).name.keep()
     )
