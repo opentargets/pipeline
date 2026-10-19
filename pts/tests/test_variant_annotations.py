@@ -196,6 +196,18 @@ def test_amino_acid_annotation():
     assert result['variantEffect'].list.len().to_list() == [3, 0]
     assert [item['method'] for item in result['variantEffect'][0]] == ['VEP', 'FoldX', 'AlphaMissense']
 
+    # Predictions for substitutions no variant carries, or with null keys, change nothing.
+    unrelated = pl.DataFrame(
+        {
+            'aminoAcidChange': ['C/G', 'A/T', None],
+            'uniprotAccession': ['P1', 'P9', 'P1'],
+            'variantEffect': [[effect('FoldX')]] * 3,
+        },
+        schema=annotation.schema,
+    )
+    padded = annotate_with_amino_acid_consequences(frame.lazy(), pl.concat([annotation, unrelated]).lazy())
+    assert padded.collect().sort('variantId').equals(result)
+
 
 def test_null_array_and_null_key_annotations():
     """Null join keys never match and missing arrays remain null until initialization."""
