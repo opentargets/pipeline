@@ -77,6 +77,13 @@ def test_recursive_reader_gzip_and_schema_pinning(tmp_path: Path) -> None:
     assert result['transcript_consequences'].null_count() == 2
 
 
+def test_reader_skips_vep_warning_files(tmp_path: Path) -> None:
+    """VEP's `<part>.json_warnings.txt` sits next to the data and is not JSON."""
+    (tmp_path / '0000062a.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
+    (tmp_path / '0000062a.json_warnings.txt').write_text('WARNING: 14 : substr outside of string\n')
+    assert read_vep(str(tmp_path)).collect().height == 1
+
+
 def test_reader_rejects_empty_directory(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='No VEP JSON'):
         read_vep(str(tmp_path))
