@@ -69,7 +69,7 @@ def hash_long_variant_ids(variant_id: pl.Expr, threshold: int = VARIANT_HASH_LEN
 
     chrom = regexp_extract(variant_id, pattern, 1)
     position = regexp_extract(variant_id, pattern, 2)
-    digest = plh.col('variantId').nchash.md5()
+    digest = plh.concat_str(variant_id).nchash.md5()
     return (
         pl
         .when(chrom.is_null() | position.is_null())
