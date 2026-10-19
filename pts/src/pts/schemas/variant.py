@@ -26,8 +26,6 @@ variant_schema = pl.Schema({
             'targetId': pl.String,
             'impact': pl.String,
             'lofteePrediction': pl.String,
-            'siftPrediction': pl.Float32,
-            'polyphenPrediction': pl.Float32,
             'consequenceScore': pl.Float32,
             'transcriptIndex': pl.Int32,
             'approvedSymbol': pl.String,
