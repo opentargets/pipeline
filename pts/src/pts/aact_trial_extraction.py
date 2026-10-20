@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 from loguru import logger
-from openai import APIError
+from openai import APIError, BadRequestError, UnprocessableEntityError
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
@@ -79,7 +79,9 @@ def _error_type_names(cls: type) -> frozenset[str]:
     return frozenset({cls.__name__}).union(*(_error_type_names(sub) for sub in cls.__subclasses__()))
 
 
-SYSTEMIC_ERROR_TYPES = _error_type_names(APIError) | {'ServiceTierExhausted'}
+SYSTEMIC_ERROR_TYPES = (
+    _error_type_names(APIError) - _error_type_names(BadRequestError) - _error_type_names(UnprocessableEntityError)
+) | {'ServiceTierExhausted'}
 """Workflow error types that come from the API or the transport rather than from a trial's content."""
 LLM_WORKFLOW_PATCH_LOCK = Lock()
 """Serialises temporary patches to the LLM workflow's module globals."""

@@ -531,6 +531,19 @@ def test_systemic_errors_abort(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert not (tmp_path / 'v1/extraction').exists()
 
 
+@pytest.mark.parametrize('error_type', ['BadRequestError', 'UnprocessableEntityError'])
+def test_a_retry_round_of_only_rejected_requests_does_not_abort(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error_type: str
+) -> None:
+    bad = [f'nct{i:02d}' for i in range(1, 11)]
+    llm = FakeLlm(monkeypatch, failing=set(bad), error_type=error_type)
+
+    _run(monkeypatch, tmp_path, _report('nct00', *bad))
+
+    assert llm.calls == [['nct00', *bad], bad, bad]
+    assert pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')['id'].to_list() == ['nct00']
+
+
 def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     bad = [f'nct{i:02d}' for i in range(1, 12)]
     llm = FakeLlm(monkeypatch, failing=set(bad))
