@@ -1,0 +1,29 @@
+[
+  {
+    "id": "id",
+    "description": "Term identifier: GO term, Reactome pathway or ChEMBL protein class",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "label",
+    "description": "Term name"
+  },
+  {
+    "id": "source",
+    "description": "Hierarchy the term belongs to: go, reactome or chembl_target_class",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "category",
+    "description": "Gene set category: GO:BP, GO:MF, GO:CC, Reactome or ChEMBL Target Class"
+  },
+  {
+    "id": "parentIds",
+    "description": "Direct parent terms in the same hierarchy"
+  },
+  {
+    "id": "entityIds",
+    "description": "Targets annotated to the term or to any of its descendants",
+    "foreign_key": "target/id"
+  }
+]

@@ -19,6 +19,23 @@ def _non_obsolete_ids(graph) -> set[str]:
     }
 
 
+def _hierarchy(graph) -> nx.DiGraph:
+    """The is_a and part_of edges between terms of the same namespace.
+
+    go.obo has part_of edges from molecular_function to biological_process terms, which would
+    propagate function annotations into process terms.
+    """
+    namespace = dict(graph.nodes(data='namespace'))
+    hierarchy = nx.DiGraph()
+    hierarchy.add_nodes_from(graph)
+    hierarchy.add_edges_from(
+        (u, v)
+        for u, v, key in graph.edges(keys=True)
+        if key in ('is_a', 'part_of') and namespace.get(u) == namespace.get(v)
+    )
+    return hierarchy
+
+
 def _rows_from_obo(graph) -> list[dict]:
     rows: list[dict] = []
     obsolete_count = 0
@@ -100,11 +117,12 @@ def go(
 
     logger.info('computing ancestors and descendants')
     live_ids = _non_obsolete_ids(graph)
+    hierarchy = _hierarchy(graph)
     for row in rows:
         node = row['id']
         # obonet edges go child→parent, so nx.descendants = ontological ancestors
-        row['ancestors'] = sorted(nx.descendants(graph, node) & live_ids)
-        row['descendants'] = sorted(nx.ancestors(graph, node) & live_ids)
+        row['ancestors'] = sorted(nx.descendants(hierarchy, node) & live_ids)
+        row['descendants'] = sorted(nx.ancestors(hierarchy, node) & live_ids)
 
     logger.info('creating dataframe from parsed data')
     df = pl.DataFrame(rows, schema=go_schema)
