@@ -2,10 +2,8 @@
 
 import json
 from enum import StrEnum
-from io import BytesIO
 from typing import Any
 
-import pdfplumber
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
@@ -21,20 +19,16 @@ from pts.transformers.clinical import (
     extract_chembl_clinical_report,
     extract_disease_entities,
     extract_drug_warning_clinical_report,
-    extract_ema_clinical_report,
-    extract_pmda_clinical_report,
-    extract_ttd_clinical_report,
-    extract_ttd_indication,
     filter_df,
     map_entities,
-    parse_pmda_approvals,
     union_dfs,
 )
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
+from pts.transformers.clinical.mining import build_mining_reports
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
-from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 CHEMBL_SCHEMA_NAME = 'public'
 
@@ -86,8 +80,6 @@ AACT_TABLES = {
 }
 
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
-
-EMA_SHEET_NAME = 'Medicine'
 
 OUTPUT_COLUMNS = (
     'id',
@@ -194,9 +186,7 @@ def _clinical_report(
     llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
-    pmda_bytes, _ = StorageHandle(source['pmda']).read()
-    pmda_pdf = pdfplumber.open(BytesIO(pmda_bytes))
-    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), extract_diseases=extract_disease_entities)
+    mining = build_mining_reports(source['ttd'], source['ema'], source['pmda'], extract_disease_entities)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
@@ -238,20 +228,15 @@ def _clinical_report(
         molecule_dictionary=chembl_molecule_dictionary,
         warning_refs=chembl_drug_warning_references,
     )
-    ttd_txt_handler = StorageHandle(source['ttd'])
-    ttd_txt_lines = ttd_txt_handler.open('r').read().split('\n')
-    ttd_indications = extract_ttd_indication(ttd_txt_lines)
-    ttd = extract_ttd_clinical_report(indications=ttd_indications)
-    ema = extract_ema_clinical_report(read_ema_sheet(source['ema']), extract_diseases=extract_disease_entities)
 
     reports = union_dfs([
-        pmda.df,
+        mining['pmda'].df,
         aact.df,
         # Remove ClinicalTrials reports from ChEMBL indications as they are already included in AACT
         chembl_indication_report.pipe(lambda self: ClinicalReport(filter_df(self.df, "source != 'ClinicalTrials'"))).df,
         chembl_drug_warning_report.df,
-        ttd.df,
-        ema.df,
+        mining['ttd'].df,
+        mining['ema'].df,
     ])
     aact_drug_entities = staged_aact_drug_entities(source['aact_drug_entities'], reports)
     logger.info('reports generated. map entities...')
@@ -277,25 +262,6 @@ def _clinical_report(
 
     logger.info(f'destination paths: {destination}')
     write_dataset(order_output_columns(output.df), destination['output'])
-
-
-def read_ema_sheet(path: str) -> pl.DataFrame:
-    """The EMA list of medicines, every cell a string, the sheet's banner row as column names.
-
-    Blank rows are dropped. Blanks and `read_spreadsheet`'s missing-value strings are null;
-    a whitespace-only cell is ''.
-
-    Args:
-        path: the EMA medicines workbook.
-
-    Returns:
-        The `Medicine` sheet, with the real column names in its first row.
-    """
-    sheet = read_spreadsheet(path, EMA_SHEET_NAME, infer_types=False)
-    sheet = sheet.filter(pl.any_horizontal(pl.all().is_not_null()))
-    return sheet.with_columns(
-        pl.when(pl.all().str.strip_chars().eq('')).then(pl.lit('')).otherwise(pl.all()).name.keep()
-    )
 
 
 def require_staged(texts: pl.Series, staged: pl.Series, what: str) -> None:

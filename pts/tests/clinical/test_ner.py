@@ -6,7 +6,7 @@ import pytest
 from loguru import logger
 
 from pts.transformers.clinical import extract_disease_entities, extract_drug_entities, ner
-from pts.transformers.clinical.ner import drug_entities_with_status, drug_ner_revision
+from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status, drug_ner_revision
 
 Entity = dict[str, Any]
 
@@ -247,3 +247,35 @@ def test_drug_ner_revision_changes_with_patterns(monkeypatch: pytest.MonkeyPatch
     assert len(before.rsplit('+', 1)[1]) == 12
     assert before != after
     assert f'{CHEMICAL_MODEL}+{DRUGTEMIST_MODEL}+regex' == ner.DRUG_NER_MODEL
+
+
+def test_disease_status_marks_only_failing_texts(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline({'a': [_ent('DISEASE', 'Gout')], 'b': [_ent('DISEASE', 'Flu')]}, fail_on={'bad'})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+
+    out = disease_entities_with_status(['a', 'bad', '', '  ', 'b'])
+
+    assert out == [(['gout'], None), (None, 'disease ner failed: boom'), ([], None), ([], None), (['flu'], None)]
+    assert fake.calls == ['a', 'bad', 'b']
+
+
+def test_disease_status_matches_extract_disease_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline({'t': [_ent('DISEASE', ' Breast Cancer '), _ent('DISEASE', 'x'), _ent('CHEMICAL', 'aspirin')]})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+
+    status = disease_entities_with_status(['t'])
+    extracted = extract_disease_entities(pl.Series(['t']))
+
+    assert [found for found, _ in status] == extracted.to_list()
+
+
+def test_disease_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def factory(*_: Any, **__: Any) -> FakePipeline:
+        raise OSError('no such model')
+
+    monkeypatch.setattr(ner, '_create_ner_pipeline', factory)
+
+    with pytest.raises(OSError, match='no such model'):
+        disease_entities_with_status(['a'])
+    assert disease_entities_with_status(['', ' ']) == [([], None), ([], None)]
+    assert ner.DISEASE_NER_MODEL == DISEASE_MODEL

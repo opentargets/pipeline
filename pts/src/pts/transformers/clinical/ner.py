@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 DISEASE_MODEL = 'alvaroalon2/biobert_diseases_ner'
+DISEASE_NER_MODEL = DISEASE_MODEL
 CHEMICAL_MODEL = 'alvaroalon2/biobert_chemical_ner'
 DRUGTEMIST_MODEL = 'BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist'
 
@@ -73,6 +74,35 @@ def _create_ner_pipeline(
     return run
 
 
+def _disease_mentions(biobert: Callable[..., Any], text: str) -> list[str]:
+    found: set[str] = set()
+    for ent in biobert(text):
+        label = ent.get('entity_group', '').upper()
+        if any(wanted in label for wanted in DISEASE_LABELS):
+            word = ent['word'].strip()
+            if len(word) > 1 and not word.isdigit():
+                found.add(word.lower())
+    return sorted(found)
+
+
+def disease_entities_with_status(texts: list[str]) -> list[tuple[list[str] | None, str | None]]:
+    """Disease mentions per text as ``extract_disease_entities`` finds them, or ``(None, error)`` where one failed."""
+    if not any(text.strip() for text in texts):
+        return [([], None) for _ in texts]
+    biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
+    results: list[tuple[list[str] | None, str | None]] = []
+    for text in texts:
+        if not text.strip():
+            results.append(([], None))
+            continue
+        try:
+            results.append((_disease_mentions(biobert, text), None))
+        except Exception as e:
+            logger.debug(f'disease ner failed for {text!r}: {e}')
+            results.append((None, f'disease ner failed: {e}'))
+    return results
+
+
 def extract_disease_entities(texts: pl.Series) -> pl.Series:
     """Extract lower-cased, sorted disease mentions from each text; runs the model once per distinct text."""
     distinct = [t for t in texts.drop_nulls().unique().sort().to_list() if t.strip()]
@@ -82,19 +112,12 @@ def extract_disease_entities(texts: pl.Series) -> pl.Series:
         logger.info(f'extracting disease entities from {len(distinct)} distinct texts')
         biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
         for text in distinct:
-            found: set[str] = set()
             try:
-                for ent in biobert(text):
-                    label = ent.get('entity_group', '').upper()
-                    if any(wanted in label for wanted in DISEASE_LABELS):
-                        word = ent['word'].strip()
-                        if len(word) > 1 and not word.isdigit():
-                            found.add(word.lower())
+                results[text] = _disease_mentions(biobert, text)
             except Exception as e:
                 failures += 1
                 logger.debug(f'disease ner failed for {text!r}: {e}')
-                found = set()
-            results[text] = sorted(found)
+                results[text] = []
     if failures:
         logger.warning(f'disease ner failed for {failures} of {len(distinct)} distinct texts; their results are empty')
     return pl.Series(

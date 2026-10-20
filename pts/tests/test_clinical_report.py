@@ -16,6 +16,7 @@ from pts.transformers.clinical import (
     replace_with_llm_indications,
 )
 from pts.transformers.clinical import mapping as mapping_module
+from pts.transformers.clinical.mining import read_ema_sheet
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
@@ -24,7 +25,6 @@ from pts.transformers.clinical_report import (
     flag_indirect_primary_purpose,
     map_report_entities,
     order_output_columns,
-    read_ema_sheet,
     require_staged,
     staged_aact_drug_entities,
     validate_disease,
