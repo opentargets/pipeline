@@ -86,7 +86,7 @@ class Pyspark(Task):
         logger.info('pyspark job completed successfully')
 
         srcs = flatten_paths(self.srcs)
-        dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
+        dsts = flatten_paths(self.dsts)
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
 
         return self
