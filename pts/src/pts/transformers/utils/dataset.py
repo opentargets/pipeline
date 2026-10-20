@@ -142,12 +142,12 @@ def scan_dataset(
 
 
 def scan_datasets(
-    pattern: str,
+    pattern: str | list[str],
     *,
     format: Format = 'parquet',
     **options: Any,
 ) -> pl.LazyFrame:
-    """Lazily read every dataset whose directory name matches a glob, as one frame.
+    """Lazily combine datasets selected by a directory glob or an explicit path list.
 
     `scan_dataset` refuses a glob because it enumerates a single directory itself. This is the
     dataset-level counterpart: the glob selects DIRECTORIES (`output/evidence_*`), and every
@@ -171,7 +171,7 @@ def scan_datasets(
     would silently strip every drug from the disease index instead of failing the step.
 
     Args:
-        pattern: dataset location containing a glob in its LAST segment, already absolute.
+        pattern: Absolute dataset paths, or a location with a glob in its LAST segment.
         format: `'parquet'`, `'ndjson'`, `'csv'` or `'tsv'`.
         **options: forwarded to `scan_dataset` for each matched dataset.
 
@@ -180,25 +180,30 @@ def scan_datasets(
 
     Raises:
         ValueError: for an unrecognised `format`, if `pattern` has no glob, if the glob is not
-            in the last segment, or if it matches no datasets.
+            in the last segment, if it matches no datasets, or if the path list is empty.
     """
     if format not in _GLOBS:
         msg = f'unrecognised format {format!r} for {pattern!r}, expected one of {sorted(_GLOBS)}'
         raise ValueError(msg)
 
-    parent, _, name_glob = pattern.rpartition('/')
-    if not any(char in name_glob for char in '*?['):
-        msg = f'{pattern!r} is not a glob; use scan_dataset for a single dataset'
-        raise ValueError(msg)
-    if any(char in parent for char in '*?['):
-        msg = f'{pattern!r} globs above the dataset name; only the last segment may be a glob'
-        raise ValueError(msg)
+    if isinstance(pattern, list):
+        if not pattern:
+            raise ValueError('At least one dataset path is required')
+        directories = pattern
+    else:
+        parent, _, name_glob = pattern.rpartition('/')
+        if not any(char in name_glob for char in '*?['):
+            msg = f'{pattern!r} is not a glob; use scan_dataset for a single dataset'
+            raise ValueError(msg)
+        if any(char in parent for char in '*?['):
+            msg = f'{pattern!r} globs above the dataset name; only the last segment may be a glob'
+            raise ValueError(msg)
 
-    files = StorageHandle(parent).glob(f'{name_glob}/{_GLOBS[format]}')
-    directories = sorted({file.rsplit('/', 1)[0] for file in files})
-    if not directories:
-        msg = f'{pattern!r} matched no datasets'
-        raise ValueError(msg)
+        files = StorageHandle(parent).glob(f'{name_glob}/{_GLOBS[format]}')
+        directories = sorted({file.rsplit('/', 1)[0] for file in files})
+        if not directories:
+            msg = f'{pattern!r} matched no datasets'
+            raise ValueError(msg)
 
     frames = [scan_dataset(directory, format=format, **options) for directory in directories]
     return pl.concat(frames, how='diagonal_relaxed')
