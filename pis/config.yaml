@@ -176,7 +176,7 @@ steps:
   ##################################################################################################
 
   #: AACT STEP :###################################################################################
-  # The preprocessing DAG downloads this archive; PTS reads it directly.
+  # The staging DAG downloads this archive and the models, and stages the extraction and snapshots.
   aact:
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
@@ -223,33 +223,25 @@ steps:
           destination: input/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
-  #: CLINICAL_REPORT STEP :#########################################################################
-  clinical_report:
-    # Consume the exact archive processed by the AACT preprocessing DAG.
-    - name: copy aact dump
-      source: gs://aact_data/${aact_version}/input/aact.zip
-      destination: input/clinical_report/aact.zip
+  #: CLINICAL_MINING STEP :#######################################################################
+  # Stages the clinical mining inputs and the models that read them. The staging DAG runs
+  # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version}.
+  clinical_mining:
+    - name: copy ttd
+      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ttd.txt
+      destination: input/ttd.txt
 
-    # TODO: move other clinical report files to team bucket
-    - name: explode_glob clinical_report
-      glob: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/*
-      do:
-        - name: copy clinical_report ${match_stem} ${uuid}
-          source: ${uri}
-          destination: input/clinical_report/${match_stem}.${match_ext}
+    - name: copy ema medicines
+      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ema_medicines.xlsx
+      destination: input/ema_medicines.xlsx
 
-    # AACT stop reasons and drug NER, staged by the extraction DAG.
-    - name: copy_many aact stop reasons
-      sources:
-        - gs://aact_data/${aact_version}/stop_reasons/data.parquet
-        - gs://aact_data/${aact_version}/stop_reasons/metadata.json
-      destination: input/clinical_report/aact_stop_reasons
+    - name: copy pmda
+      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/pmda.pdf
+      destination: input/pmda.pdf
 
-    - name: copy_many aact drug entities
-      sources:
-        - gs://aact_data/${aact_version}/drug_entities/data.parquet
-        - gs://aact_data/${aact_version}/drug_entities/metadata.json
-      destination: input/clinical_report/aact_drug_entities
+    - name: copy chembl mapping
+      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/chembl_mapping.parquet
+      destination: input/chembl_mapping.parquet
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
     - name: explode biobert diseases ner model
@@ -262,7 +254,7 @@ steps:
       do:
         - name: copy biobert diseases ner model ${each}
           source: https://huggingface.co/alvaroalon2/biobert_diseases_ner/resolve/${biobert_diseases_ner_revision}/${each}
-          destination: input/clinical_report/models/alvaroalon2/biobert_diseases_ner/${biobert_diseases_ner_revision}/${each}
+          destination: input/models/alvaroalon2/biobert_diseases_ner/${biobert_diseases_ner_revision}/${each}
 
     - name: explode biobert chemical ner model
       foreach:
@@ -274,7 +266,7 @@ steps:
       do:
         - name: copy biobert chemical ner model ${each}
           source: https://huggingface.co/alvaroalon2/biobert_chemical_ner/resolve/${biobert_chemical_ner_revision}/${each}
-          destination: input/clinical_report/models/alvaroalon2/biobert_chemical_ner/${biobert_chemical_ner_revision}/${each}
+          destination: input/models/alvaroalon2/biobert_chemical_ner/${biobert_chemical_ner_revision}/${each}
 
     - name: explode drugtemist ner model
       foreach:
@@ -288,7 +280,62 @@ steps:
       do:
         - name: copy drugtemist ner model ${each}
           source: https://huggingface.co/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/resolve/${drugtemist_ner_revision}/${each}
-          destination: input/clinical_report/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
+          destination: input/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
+  ##################################################################################################
+
+  #: CLINICAL_REPORT STEP :#########################################################################
+  # Everything is copied from gs://clinical_staging, written by the staging DAG. The tags in the
+  # snapshot paths are the ones pts.transformers.clinical.hf_models.revision_tags writes.
+  clinical_report:
+    - name: copy aact dump
+      source: gs://clinical_staging/aact/${aact_version}/input/aact.zip
+      destination: input/clinical_report/aact.zip
+
+    - name: copy_many aact trial extraction
+      sources:
+        - gs://clinical_staging/aact/${aact_version}/extraction/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/extraction/metadata.json
+      destination: input/clinical_report/aact_trial_extraction
+
+    - name: copy ttd
+      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ttd.txt
+      destination: input/clinical_report/ttd.txt
+
+    - name: copy ema medicines
+      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ema_medicines.xlsx
+      destination: input/clinical_report/ema_medicines.xlsx
+
+    - name: copy pmda
+      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/pmda.pdf
+      destination: input/clinical_report/pmda.pdf
+
+    - name: copy chembl mapping
+      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/chembl_mapping.parquet
+      destination: input/clinical_report/chembl_mapping.parquet
+
+    - name: copy_many aact stop reasons
+      sources:
+        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_model_revision}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_model_revision}/metadata.json
+      destination: input/clinical_report/aact_stop_reasons
+
+    - name: copy_many aact drug entities
+      sources:
+        - gs://clinical_staging/aact/${aact_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/metadata.json
+      destination: input/clinical_report/aact_drug_entities
+
+    - name: copy_many mining drug entities
+      sources:
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/data.parquet
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/metadata.json
+      destination: input/clinical_report/mining_drug_entities
+
+    - name: copy_many mining disease entities
+      sources:
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${biobert_diseases_ner_revision}/data.parquet
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${biobert_diseases_ner_revision}/metadata.json
+      destination: input/clinical_report/mining_disease_entities
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -321,10 +368,11 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
 
-    # AACT clinical-trial LLM extraction, produced by the extraction DAG.
+    # AACT clinical-trial LLM extraction, staged by the clinical staging DAG.
     - name: copy_many aact trial extraction
       sources:
-        - gs://aact_data/${aact_version}/extraction/extractions.parquet
+        - gs://clinical_staging/aact/${aact_version}/extraction/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/extraction/metadata.json
       destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
