@@ -115,3 +115,17 @@ def test_resolve_flag_names_maps_names_and_passes_values_through():
         'UNKNOWN',
     ]
     assert resolve_flag_names(Flag, 'INVALID') == 'INVALID'
+
+
+def test_resolve_flag_names_keeps_members_whose_value_names_another_member():
+    """A member passes through even when its value is another member's name."""
+
+    class Clash(StrEnum):
+        FIRST = 'SECOND'
+        SECOND = 'second reason'
+
+    assert resolve_flag_names(Clash, [Clash.FIRST, 'FIRST', 'second reason']) == [
+        Clash.FIRST,
+        Clash.FIRST,
+        'second reason',
+    ]

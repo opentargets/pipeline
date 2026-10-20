@@ -58,7 +58,10 @@ def resolve_flag_names(flags: type[StrEnum], value: Any) -> Any:
     through unchanged, so the field validation still reports unknown flags.
     """
     if isinstance(value, list):
-        return [flags.__members__.get(item, item) if isinstance(item, str) else item for item in value]
+        return [
+            item if isinstance(item, flags) else flags.__members__.get(item, item) if isinstance(item, str) else item
+            for item in value
+        ]
     return value
 
 
