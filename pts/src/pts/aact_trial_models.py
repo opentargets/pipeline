@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from otter.config.model import Config
 
 SEED_RUN_ID = 'seed-ner-cache'
+SEED_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 """Run that holds the records imported from the release NER cache."""
 
 
@@ -68,7 +69,7 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
         output=pl.col('extracted_drugs').fill_null([]),
         status=pl.lit('ok'),
         error=pl.lit(None, dtype=pl.String),
-        computed_at=pl.lit(datetime.now(UTC)),
+        computed_at=pl.lit(SEED_COMPUTED_AT),
         run_id=pl.lit(SEED_RUN_ID),
     )
     write_run(records.cast(RECORD_SCHEMA), drug_store, SEED_RUN_ID, config)

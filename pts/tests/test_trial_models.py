@@ -9,7 +9,7 @@ import pytest
 
 from pts import aact_trial_models
 from pts.aact_trial_models import seed_drug_entities, stage_trial_models, why_stopped_texts
-from pts.record_store import read_records, text_sha256
+from pts.record_store import map_texts, read_records, text_sha256
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL, drug_ner_revision
 from pts.transformers.clinical.providers.aact import llm_drug_labels
@@ -254,3 +254,25 @@ def test_staged_stop_reasons_join_the_release_report(tmp_path: Path, models_uri:
 
     assert attached['trialWhyStopped'].to_list() == [SANITISED]
     assert attached['trialStopReasonCategories'].to_list() == [[f'reason:{SANITISED}']]
+
+
+def test_seed_never_outranks_a_computed_record(tmp_path: Path) -> None:
+    store = str(tmp_path / 'store')
+    revision = drug_ner_revision(REVISIONS)
+    drug_store = f'{store}/drug_entities'
+    map_texts(
+        pl.Series(['a']),
+        lambda texts: [(['computed'], None) for _ in texts],
+        drug_store,
+        DRUG_NER_MODEL,
+        revision,
+        'r1',
+        None,
+    )
+    cache = tmp_path / 'ner_cache.parquet'
+    pl.DataFrame({'query_label': ['a'], 'extracted_drugs': [['seeded']]}).write_parquet(cache)
+
+    seed_drug_entities(str(cache), store, DRUG_NER_MODEL, revision, None)
+
+    result = map_texts(pl.Series(['a']), lambda texts: [], drug_store, DRUG_NER_MODEL, revision, 'r2', None)
+    assert result['output'].to_list() == [['computed']]
