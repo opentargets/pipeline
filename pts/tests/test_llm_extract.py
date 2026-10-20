@@ -4,6 +4,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from time import sleep
@@ -353,6 +354,9 @@ def _report(*titles: str) -> pl.DataFrame:
     })
 
 
+NO_PROMPTS = pl.DataFrame(schema={'id': pl.String, 'prompt_sha256': pl.String, 'cache_key': pl.String})
+
+
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
@@ -417,7 +421,7 @@ def test_prompts_for_keys_on_trial_schema_and_prompt() -> None:
 def test_rekey_cache_rewrites_keys_from_stored_columns(tmp_path: Path) -> None:
     uri = _old_cache(tmp_path, 'digest', ['a', 'b'], ['pa', 'pb'])
 
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 2
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 2
 
     rows = read_cache(uri, cast(Any, None)).sort('id')
     assert rows['cache_key'].to_list() == [cache_key('a', 'digest', _sha('pa')), cache_key('b', 'digest', _sha('pb'))]
@@ -426,10 +430,10 @@ def test_rekey_cache_rewrites_keys_from_stored_columns(tmp_path: Path) -> None:
 
 def test_rekey_cache_is_a_noop_the_second_time(tmp_path: Path) -> None:
     uri = _old_cache(tmp_path, 'digest', ['a'], ['pa'])
-    aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new')
+    aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new')
     pointer = (Path(uri) / 'latest.json').read_text()
 
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'again') == 0
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'again') == 0
 
     assert (Path(uri) / 'latest.json').read_text() == pointer
     assert not (Path(uri) / 'snapshots' / 'again').exists()
@@ -438,7 +442,7 @@ def test_rekey_cache_is_a_noop_the_second_time(tmp_path: Path) -> None:
 def test_rekey_leaves_rows_without_prompt_hash(tmp_path: Path) -> None:
     uri = _old_cache(tmp_path, 'digest', ['a', 'b'], [None, 'pb'])
 
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 1
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 1
 
     rows = read_cache(uri, cast(Any, None)).sort('id')
     assert rows['cache_key'][0] == cache_key('a', 'digest')
@@ -447,29 +451,80 @@ def test_rekey_leaves_rows_without_prompt_hash(tmp_path: Path) -> None:
 def test_rekey_leaves_a_cache_without_a_prompt_hash_column(tmp_path: Path) -> None:
     uri = _old_cache(tmp_path, 'digest', ['a'])
 
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 0
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 0
 
     assert read_cache(uri, cast(Any, None))['cache_key'].to_list() == [cache_key('a', 'digest')]
 
 
-def _computed_after_rekey(tmp_path: Path, old_title: str, new_title: str) -> int:
-    old = aact_trial_extraction.prompts_for(_report(old_title), 'digest')
-    uri = _old_cache(tmp_path, 'digest', ['nct1'], [old['prompt'][0]])
-    aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new')
+def _computed(prompts: pl.DataFrame, uri: str) -> int:
     computed: list[int] = []
 
     def compute(shard: pl.DataFrame) -> pl.DataFrame:
         computed.append(shard.height)
         return shard.select('cache_key', 'id', 'prompt_sha256').with_columns(result=pl.lit('x'))
 
-    prompts = aact_trial_extraction.prompts_for(_report(new_title), 'digest')
     cached_map(prompts, compute, uri, cast(Any, None), 'run', 'ts')
     return sum(computed)
 
 
 def test_unchanged_prompt_is_a_hit_after_rekey(tmp_path: Path) -> None:
-    assert _computed_after_rekey(tmp_path, 'title', 'title') == 0
+    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
+    uri = _old_cache(tmp_path, 'digest', ['nct1'], [prompts['prompt'][0]])
+    aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new')
+
+    assert _computed(prompts, uri) == 0
 
 
-def test_changed_prompt_is_reextracted(tmp_path: Path) -> None:
-    assert _computed_after_rekey(tmp_path, 'title', 'other title') == 1
+def test_pre_migration_rows_adopt_the_current_prompt_hash(tmp_path: Path) -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
+    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['a stale prompt'])
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new') == 1
+
+    row = read_cache(uri, cast(Any, None)).to_dicts()[0]
+    assert row['prompt_sha256'] == prompts['prompt_sha256'][0]
+    assert row['cache_key'] == prompts['cache_key'][0]
+    assert _computed(prompts, uri) == 0
+
+
+def test_rekeyed_rows_are_never_readopted(tmp_path: Path) -> None:
+    old = aact_trial_extraction.prompts_for(_report('title'), 'digest')
+    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['a stale prompt'])
+    aact_trial_extraction.rekey_cache(uri, 'digest', old, cast(Any, None), 'new')
+    new = aact_trial_extraction.prompts_for(_report('other title'), 'digest')
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', new, cast(Any, None), 'again') == 0
+
+    assert _computed(new, uri) == 1
+
+
+def test_pre_migration_row_for_a_trial_no_longer_in_aact_rekeys_from_its_stored_hash(tmp_path: Path) -> None:
+    other = aact_trial_extraction.prompts_for(_report('title'), 'digest').with_columns(id=pl.lit('nct2'))
+    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['pa'])
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', other, cast(Any, None), 'new') == 1
+
+    row = read_cache(uri, cast(Any, None)).to_dicts()[0]
+    assert row['cache_key'] == cache_key('nct1', 'digest', _sha('pa'))
+    assert row['prompt_sha256'] == _sha('pa')
+
+
+def test_rekey_keeps_the_newest_of_rows_that_collide(tmp_path: Path) -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
+    uri = str(tmp_path / 'cache')
+    new_key = prompts['cache_key'][0]
+    rows = pl.DataFrame(
+        {
+            'cache_key': [cache_key('nct1', 'digest'), new_key],
+            'computed_at': [datetime(2026, 9, 4, tzinfo=UTC), datetime(2026, 10, 1, tzinfo=UTC)],
+            'id': ['nct1', 'nct1'],
+            'prompt_sha256': ['stale', prompts['prompt_sha256'][0]],
+            'result': ['old', 'new'],
+        },
+        schema_overrides={'computed_at': METADATA_SCHEMA['computed_at']},
+    )
+    write_cache(rows, uri, cast(Any, None), 'old')
+
+    aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new')
+
+    assert read_cache(uri, cast(Any, None))['result'].to_list() == ['new']

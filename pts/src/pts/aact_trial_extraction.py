@@ -139,33 +139,70 @@ def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
     )
 
 
-def rekey_cache(schema_cache_uri: str, schema_digest: str, config: Config, snapshot: str) -> int:
-    """Recompute cache keys from the stored ``id`` and ``prompt_sha256``.
+def rekey_cache(schema_cache_uri: str, schema_digest: str, prompts: pl.DataFrame, config: Config, snapshot: str) -> int:
+    """Move cached rows onto the ``(id, schema, prompt hash)`` key.
 
-    Rows written before the prompt joined the key carry the old
-    ``(id, schema)`` key. Rows without a prompt hash keep the key they have.
-    A new snapshot is written only when a key changed, so a second call is a no-op.
+    A row is pre-migration when its key is the old ``(id, schema)`` one. Such a
+    row for a trial in ``prompts`` adopts the current prompt hash and key. A
+    pre-migration row for any other trial is rekeyed from its stored
+    ``prompt_sha256``, and keeps its key when it has none. Rows already on the
+    new key are never touched. Of rows that end up with the same key the newest
+    is kept. A new snapshot is written only when a key changed, so a second call
+    is a no-op.
+
+    Args:
+        schema_cache_uri: Cache namespace of the response schema.
+        schema_digest: Digest of the response schema.
+        prompts: Output of :py:func:`prompts_for`: ``id``, ``prompt_sha256``, ``cache_key``.
+        config: The otter config, used to resolve storage.
+        snapshot: Name of the snapshot written when a key changed.
 
     Returns:
         int: The number of rows whose key changed.
     """
     rows = read_cache(schema_cache_uri, config)
-    if 'prompt_sha256' not in rows.columns or 'id' not in rows.columns:
+    if 'id' not in rows.columns:
         return 0
+    if 'prompt_sha256' not in rows.columns:
+        rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
 
-    rekeyed = rows.with_columns(
-        cache_key=pl.struct('id', 'prompt_sha256', 'cache_key').map_elements(
-            lambda row: (
-                cache_key(row['id'], schema_digest, row['prompt_sha256'])
-                if row['id'] is not None and row['prompt_sha256'] is not None
-                else row['cache_key']
-            ),
-            return_dtype=pl.String,
+    current = prompts.select(
+        'id', pl.col('prompt_sha256').alias('current_sha256'), pl.col('cache_key').alias('current_key')
+    ).unique(subset='id')
+    joined = rows.join(current, on='id', how='left').with_columns(
+        pre_migration=pl.struct('id', 'cache_key').map_elements(
+            lambda row: row['id'] is not None and row['cache_key'] == cache_key(row['id'], schema_digest),
+            return_dtype=pl.Boolean,
         )
     )
-    changed = int((rekeyed['cache_key'] != rows['cache_key']).sum())
+    adopt = pl.col('pre_migration') & pl.col('current_key').is_not_null()
+    rekeyed = joined.with_columns(
+        new_key=pl
+        .when(adopt)
+        .then(pl.col('current_key'))
+        .otherwise(
+            pl.struct('id', 'prompt_sha256', 'cache_key', 'pre_migration').map_elements(
+                lambda row: (
+                    cache_key(row['id'], schema_digest, row['prompt_sha256'])
+                    if row['pre_migration'] and row['prompt_sha256'] is not None
+                    else row['cache_key']
+                ),
+                return_dtype=pl.String,
+            )
+        ),
+        prompt_sha256=pl.when(adopt).then(pl.col('current_sha256')).otherwise(pl.col('prompt_sha256')),
+    )
+    changed = int((rekeyed['new_key'] != rekeyed['cache_key']).sum())
     if changed:
-        write_cache(rekeyed, schema_cache_uri, config, snapshot)
+        result = (
+            rekeyed
+            .drop('cache_key', 'current_sha256', 'current_key', 'pre_migration')
+            .rename({'new_key': 'cache_key'})
+            .select(rows.columns)
+            .sort('computed_at', descending=True, nulls_last=True)
+            .unique(subset='cache_key', keep='first', maintain_order=True)
+        )
+        write_cache(result, schema_cache_uri, config, snapshot)
         logger.info(f'rekeyed {changed} cached extractions onto the prompt hash')
     return changed
 

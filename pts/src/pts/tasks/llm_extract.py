@@ -8,6 +8,9 @@ publishes the result as a typed parquet the release can read directly.
 Cache identity is the trial ID, the JSON schema the model is held to and the
 hash of the rendered prompt, so a trial whose text changed is extracted again.
 The model and system instructions do not invalidate an accepted extraction.
+Rows cached under the older ``(trial, schema)`` key are moved onto the new key
+before extraction, adopting the current prompt of their trial, so the first run
+after the change re-extracts nothing; from then on a changed prompt misses.
 
 The extraction work lives in :py:mod:`pts.aact_trial_extraction`.
 """
@@ -146,7 +149,7 @@ class LlmExtract(Task):
         StorageHandle(system_prompt_path, config=self.context.config, force_local=True).write_text(system_prompt)
 
         aact_trial_extraction.rekey_cache(
-            schema_cache_uri, schema_digest, self.context.config, f'{self.spec.snapshot}-rekey'
+            schema_cache_uri, schema_digest, prompts, self.context.config, f'{self.spec.snapshot}-rekey'
         )
 
         extractions = cached_map(
