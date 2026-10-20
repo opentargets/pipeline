@@ -110,6 +110,9 @@ def stop_reasons_revision(model_revision: str) -> str:
 
 def stop_reasons_with_status(texts: list[str], batch_size: int = 32) -> list[tuple[list[str] | None, str | None]]:
     """Stop reason labels per text, or ``(None, error)`` for the texts of a batch that raised."""
+    if not texts:
+        return []
+    _load_model_assets(STOP_REASONS_MODEL)
     results: list[tuple[list[str] | None, str | None]] = []
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]

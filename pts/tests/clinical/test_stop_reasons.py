@@ -22,6 +22,7 @@ def _fake_predict(monkeypatch: pytest.MonkeyPatch, fail_on: set[str] | None = No
         return [[f'label-{t}'] for t in texts]
 
     monkeypatch.setattr(stop_reasons, 'predict_trial_stop_reasons', predict)
+    monkeypatch.setattr(stop_reasons, '_load_model_assets', lambda model_name: None)
     return calls
 
 
@@ -69,6 +70,16 @@ def test_stop_reasons_failed_batch_marks_its_texts(monkeypatch: pytest.MonkeyPat
         (None, 'stop reasons batch failed: boom'),
         (['label-d'], None),
     ]
+
+
+def test_stop_reasons_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_model(model_name: str) -> None:
+        raise OSError('model not staged')
+
+    monkeypatch.setattr(stop_reasons, '_load_model_assets', no_model)
+
+    with pytest.raises(OSError, match='model not staged'):
+        stop_reasons_with_status(['a', 'b'], batch_size=1)
 
 
 def test_stop_reasons_with_status_of_no_texts() -> None:
