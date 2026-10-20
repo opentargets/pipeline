@@ -101,6 +101,6 @@ class Transform(Task):
         )
 
         srcs = flatten_paths(self.srcs)
-        dsts = flatten_paths(self.dsts)
+        dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
         return self

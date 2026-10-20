@@ -1,6 +1,5 @@
 """Source and destination path shapes shared by the transform and pyspark tasks."""
 
-from collections.abc import Mapping
 from typing import cast
 
 from otter.config.model import Config
@@ -27,7 +26,7 @@ def resolve_source_paths(source: SourcePaths, config: Config) -> SourcePaths:
     }
 
 
-def flatten_paths(paths: str | Mapping[str, str | list[str]]) -> str | list[str]:
+def flatten_paths(paths: SourcePaths) -> str | list[str]:
     """All paths as a flat list (or the single path), for recording task artifacts."""
     if isinstance(paths, str):
         return paths
