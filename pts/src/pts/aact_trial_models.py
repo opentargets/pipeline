@@ -13,7 +13,7 @@ from otter.util.errors import NotFoundError
 
 from pts.record_store import RECORD_SCHEMA, map_texts, publish_snapshot, text_sha256, write_run
 from pts.transformers.clinical.helpers import sanitise_text
-from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
+from pts.transformers.clinical.hf_models import offline_hf_models, revision_tags, staged_model_revisions
 from pts.transformers.clinical.ner import DRUG_NER_MODEL, drug_entities_with_status, drug_ner_revision
 from pts.transformers.clinical.providers.aact import llm_drug_labels
 from pts.transformers.clinical.stop_reasons import (
@@ -76,7 +76,7 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
     return records.height
 
 
-def _tracked(compute: Callable[[list[str]], Any], calls: list[int]) -> Callable[[list[str]], Any]:
+def tracked(compute: Callable[[list[str]], Any], calls: list[int]) -> Callable[[list[str]], Any]:
     """Wrap ``compute`` so the caller can tell whether it was asked for anything."""
 
     def wrapped(texts: list[str]) -> Any:
@@ -114,7 +114,7 @@ def stage_trial_models(
     with offline_hf_models(models_uri):
         stop = map_texts(
             stop_texts,
-            _tracked(lambda texts: stop_reasons_with_status(texts, stop_reasons_batch_size), stop_calls),
+            tracked(lambda texts: stop_reasons_with_status(texts, stop_reasons_batch_size), stop_calls),
             f'{store_uri}/stop_reasons',
             STOP_REASONS_MODEL,
             stop_revision,
@@ -124,7 +124,7 @@ def stage_trial_models(
         )
         ner = map_texts(
             drug_texts,
-            _tracked(lambda texts: drug_entities_with_status(texts, ner_batch_size), ner_calls),
+            tracked(lambda texts: drug_entities_with_status(texts, ner_batch_size), ner_calls),
             f'{store_uri}/drug_entities',
             DRUG_NER_MODEL,
             ner_revision,
@@ -133,15 +133,16 @@ def stage_trial_models(
             max_attempts,
         )
 
+    tags = revision_tags(revisions)
     stop_published = publish_snapshot(
         stop.rename({'output': 'categories'}).select('text', 'text_sha256', 'categories'),
-        destination['stop_reasons'],
+        f'{destination["stop_reasons"]}/{tags["stop_reasons"]}',
         {'model': STOP_REASONS_MODEL, 'model_revision': stop_revision, 'model_revisions': revisions},
         config,
     )
     ner_published = publish_snapshot(
         ner.select(label=pl.col('text'), extracted_drugs=pl.col('output')),
-        destination['drug_entities'],
+        f'{destination["drug_entities"]}/{tags["drug_entities"]}',
         {'model': DRUG_NER_MODEL, 'model_revision': ner_revision, 'model_revisions': revisions},
         config,
     )

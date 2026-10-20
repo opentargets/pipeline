@@ -802,7 +802,24 @@ steps:
       destination:
         stop_reasons: stop_reasons
         drug_entities: drug_entities
-      store_uri: gs://aact_data/store
+      store_uri: gs://clinical_staging/store
+      snapshot: '{{snapshot}}'
+  ##################################################################################################
+
+  #: CLINICAL_MINING_MODELS STEP :#################################################################
+  # Not part of a release. Runs with release_uri pointed at
+  # gs://clinical_staging/clinical_mining/${clinical_mining_version}; the record stores sit outside it
+  clinical_mining_models:
+    - name: mining_models clinical mining
+      source:
+        ttd: input/ttd.txt
+        ema: input/ema_medicines.xlsx
+        pmda: input/pmda.pdf
+        models: input/models
+      destination:
+        drug_entities: drug_entities
+        disease_entities: disease_entities
+      store_uri: gs://clinical_staging/store
       snapshot: '{{snapshot}}'
   ##################################################################################################
 
