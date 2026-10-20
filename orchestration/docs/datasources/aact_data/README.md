@@ -1,6 +1,6 @@
 # AACT
 
-This document was updated on 2026-09-24.
+This document was updated on 2026-10-19.
 
 AACT (Aggregate Analysis of ClinicalTrials.gov) is published as dated
 PostgreSQL archives by CTTI, fetched from
@@ -74,7 +74,7 @@ and supportive drugs, each with synonyms and dosages.
 
 Only trials that are not already in the cache are sent to the model. The cache
 key hashes the `trial ID` and the `JSON schema` the response is validated
-against. Changing AACT text, publications, the model or system instructions
+against. Changing AACT text, the model or system instructions
 therefore does not re-extract accepted results; changing the schema does.
 
 Only results are cached. A trial the model failed on has no row, so it is
@@ -122,6 +122,11 @@ missing row means the extraction never succeeded and the trial is excluded
 rather than being combined with partially populated AACT data.
 
 ## Changelog
+
+### 2026-10-19
+
+- The extraction code now lives in `pts.transformers.clinical`; prompts,
+  schema and cache are unchanged. The unused `publications` option is removed.
 
 ### 2026-09-23
 

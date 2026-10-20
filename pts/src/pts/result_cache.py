@@ -10,7 +10,7 @@ caller, so a run only pays for records the caller considers genuinely new.
 
 For LLM extraction, cache identity is deliberately scoped to the record ID and
 output schema. This allows accepted results to survive changes to trial text,
-publications, models and system instructions. Callers may retain input hashes
+models and system instructions. Callers may retain input hashes
 as audit metadata, but those hashes are not necessarily cache identity.
 
 Layout under ``cache_uri``::

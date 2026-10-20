@@ -1,20 +1,33 @@
+import datetime
 import socket
 from pathlib import Path
 
 import huggingface_hub.constants as hf_constants
+import openpyxl
 import polars as pl
 import pytest
 from huggingface_hub import hf_hub_download
-from mira.dataset import ClinicalReport
-from mira.provider.aact.clinical_report import replace_with_llm_indications
-from mira.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
 
-from pts.pyspark.clinical_report import (
+from pts.transformers.clinical import (
+    ClinicalProvider,
+    ClinicalReport,
+    ClinicalReportOrigin,
+    ClinicalReportType,
+    ClinicalSource,
+    extract_ema_clinical_report,
+    replace_with_llm_indications,
+)
+from pts.transformers.clinical import mapping as mapping_module
+from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     flag_indirect_primary_purpose,
+    map_report_entities,
     offline_hf_models,
+    order_output_columns,
+    read_ema_sheet,
     validate_disease,
 )
+from tests.clinical.mapping_fixtures import DISEASE, DRUG
 
 
 def _build_reports(entries) -> ClinicalReport:
@@ -204,7 +217,7 @@ def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
 
 
 def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
-    """`clinical_report` must hand the extraction to Mira unprojected."""
+    """`clinical_report` must hand the extraction to the AACT provider unprojected."""
     studies = pl.DataFrame({
         'nct_id': ['NCT0001'],
         'diseaseFromSource': ['from-aact'],
@@ -250,3 +263,320 @@ def test_offline_hf_models_fails_when_nothing_is_staged(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='no models staged'), offline_hf_models(str(tmp_path / 'models')):
         pass
+
+
+EMA_BANNER = [
+    'Content type:',
+    'Medicine',
+    'Output automatically generated from content on www.ema.europa.eu on:',
+    '27/05/2026 - 06:15',
+]
+EMA_HEADER = [
+    'Category',
+    'Name of medicine',
+    'EMA product number',
+    'Medicine status',
+    'International non-proprietary name (INN) / common name',
+    'Active substance',
+    'Therapeutic area (MeSH)',
+    'Therapeutic indication',
+    'Marketing authorisation date',
+    'Medicine URL',
+    'Revision number',
+]
+EMA_ROWS = [
+    [
+        'Human',
+        'Alpha',
+        'EMEA/H/C/000001',
+        'Authorised',
+        'alphamab',
+        'alphamab',
+        'Asthma',
+        '  treatment of asthma  ',
+        '15/01/2020',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/alpha',
+        3,
+    ],
+    [
+        'Human',
+        'Beta',
+        'EMEA/H/C/000002',
+        'Withdrawn',
+        'N/A',
+        'betanib',
+        None,
+        'treatment of copd',
+        datetime.datetime(2019, 3, 4),
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/beta',
+        2.5,
+    ],
+    [
+        'Human',
+        'Gamma',
+        'EMEA/H/C/000003',
+        'Authorised',
+        'gammastat',
+        'gammastat',
+        None,
+        'nothing to extract',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
+        None,
+    ],
+    [
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '   ',
+        'None',
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        ' \t ',
+    ],
+    [
+        'Veterinary',
+        'Vetix',
+        'EMEA/V/C/000004',
+        'Authorised',
+        None,
+        'vetixin',
+        None,
+        'mastitis',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/veterinary/EPAR/vetix',
+        1,
+    ],
+]
+
+EMA_NER = {
+    'treatment of asthma': ['asthma'],
+    'treatment of copd': ['chronic obstructive pulmonary disease'],
+    'nothing to extract': [],
+}
+
+READ_EXCEL_COLUMNS = [*EMA_BANNER, *(f'__UNNAMED__{i}' for i in range(len(EMA_BANNER), len(EMA_HEADER)))]
+READ_EXCEL_ROWS = [
+    tuple(EMA_HEADER),
+    (
+        'Human',
+        'Alpha',
+        'EMEA/H/C/000001',
+        'Authorised',
+        'alphamab',
+        'alphamab',
+        'Asthma',
+        '  treatment of asthma  ',
+        '15/01/2020',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/alpha',
+        '3',
+    ),
+    (
+        'Human',
+        'Beta',
+        'EMEA/H/C/000002',
+        'Withdrawn',
+        None,
+        'betanib',
+        None,
+        'treatment of copd',
+        '2019-03-04 00:00:00',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/beta',
+        '2.5',
+    ),
+    (
+        'Human',
+        'Gamma',
+        'EMEA/H/C/000003',
+        'Authorised',
+        'gammastat',
+        'gammastat',
+        None,
+        'nothing to extract',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
+        None,
+    ),
+    (
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '',
+        None,
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        '',
+    ),
+    (
+        'Veterinary',
+        'Vetix',
+        'EMEA/V/C/000004',
+        'Authorised',
+        None,
+        'vetixin',
+        None,
+        'mastitis',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/veterinary/EPAR/vetix',
+        '1',
+    ),
+]
+"""`pl.read_excel(<bytes>, sheet_name='Medicine')` of `_ema_workbook`, captured with fastexcel 0.21.0.
+
+Its 'N/A' and 'None' cells are set to null, as `read_ema_sheet` reads them.
+"""
+
+
+def _ema_workbook(path: Path, blank_rows: int = 0) -> str:
+    """The EMA medicines workbook: a banner row, `blank_rows` blank rows, the header, then the medicines."""
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = 'Medicine'
+    for i, row in enumerate([EMA_BANNER, *[[None]] * blank_rows, EMA_HEADER, *EMA_ROWS]):
+        for j, value in enumerate(row):
+            sheet.cell(row=i + 1, column=j + 1, value=value)
+    workbook.save(path)
+    return str(path)
+
+
+def _stub_ner(texts: pl.Series) -> pl.Series:
+    return pl.Series([EMA_NER[text] for text in texts], dtype=pl.List(pl.String))
+
+
+def _sorted_reports(reports: ClinicalReport) -> list[dict]:
+    return reports.df.sort('id').with_columns(pl.col('drugs', 'diseases').list.sort()).to_dicts()
+
+
+def test_ema_sheet_matches_read_excel(tmp_path: Path) -> None:
+    """The sheet is `pl.read_excel`'s, except missing-value strings ('N/A', 'None', ...), null by design."""
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+    read_excel = pl.DataFrame(READ_EXCEL_ROWS, schema=dict.fromkeys(READ_EXCEL_COLUMNS, pl.String), orient='row')
+
+    assert sheet.dtypes == [pl.String] * len(READ_EXCEL_COLUMNS)
+    assert sheet.columns[: len(EMA_BANNER)] == EMA_BANNER
+    assert sheet.rows() == READ_EXCEL_ROWS
+    assert _sorted_reports(extract_ema_clinical_report(sheet, _stub_ner)) == _sorted_reports(
+        extract_ema_clinical_report(read_excel, _stub_ner)
+    )
+
+
+def test_ema_sheet_skips_blank_rows_below_the_banner(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx', blank_rows=7))
+
+    assert sheet.columns == read_ema_sheet(_ema_workbook(tmp_path / 'plain.xlsx')).columns
+    assert sheet.rows() == READ_EXCEL_ROWS
+    assert sorted(extract_ema_clinical_report(sheet, _stub_ner).df['id'].to_list()) == [
+        'emea/h/c/000001',
+        'emea/h/c/000002',
+        'emea/h/c/000005',
+    ]
+
+
+def test_ema_row_without_mesh_or_ner_dropped(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+
+    reports = extract_ema_clinical_report(sheet, _stub_ner).df
+
+    assert sorted(reports['id'].to_list()) == ['emea/h/c/000001', 'emea/h/c/000002', 'emea/h/c/000005']
+
+
+def test_ema_missing_value_inn_falls_back_to_the_active_substance(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+
+    reports = extract_ema_clinical_report(sheet, _stub_ner).df
+
+    drugs = reports.filter(pl.col('id') == 'emea/h/c/000002')['drugs'].to_list()
+    assert drugs == [[{'drugFromSource': 'betanib', 'drugId': None}]]
+
+
+PUBLISHED_COLUMNS = [
+    'id',
+    'clinicalStage',
+    'origin',
+    'type',
+    'source',
+    'provider',
+    'drugs',
+    'countries',
+    'trialDescription',
+    'phaseFromSource',
+    'trialOfficialTitle',
+    'trialSponsor',
+    'diseases',
+    'trialLiterature',
+    'sideEffects',
+    'trialPhase',
+    'trialWhyStopped',
+    'trialStudyType',
+    'qualityControls',
+    'trialPrimaryPurpose',
+    'title',
+    'trialNumberOfArms',
+    'trialOverallStatus',
+    'year',
+    'trialStopReasonCategories',
+    'url',
+    'trialStartDate',
+]
+"""The parquet column order of `gs://open-targets-pipeline-runs/do/platform-2610-2/output/clinical_report`."""
+
+
+def test_output_column_order_matches_published() -> None:
+    reports = pl.DataFrame({column: [None] for column in sorted(PUBLISHED_COLUMNS, reverse=True)})
+
+    assert order_output_columns(reports).columns == PUBLISHED_COLUMNS
+
+
+def test_output_column_order_rejects_unpublished_columns() -> None:
+    reports = pl.DataFrame({column: [None] for column in [*PUBLISHED_COLUMNS, 'drug_intent']})
+
+    with pytest.raises(ValueError, match='drug_intent'):
+        order_output_columns(reports)
+
+
+def test_map_report_entities_maps_each_drug_and_disease_of_a_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_ner(labels: pl.Series, batch_size: int) -> pl.Series:
+        raise AssertionError(f'drug NER run on {labels.to_list()}')
+
+    monkeypatch.setattr(mapping_module, 'extract_drug_entities', no_ner)
+    reports = pl.DataFrame(
+        [
+            {
+                **_report('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value),
+                'drugs': [
+                    {'drugFromSource': 'Aspirin', 'drugId': None},
+                    {'drugFromSource': 'Kalydeco', 'drugId': None},
+                ],
+                'diseases': [{'diseaseFromSource': 'Cystic fibrosis', 'diseaseId': None}],
+            },
+            {
+                **_report('NCT02', ClinicalSource.CLINICAL_TRIALS_GOV.value),
+                'drugs': [{'drugFromSource': 'Ecotrin', 'drugId': None}],
+                'diseases': None,
+            },
+        ],
+        schema_overrides={'diseases': pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))},
+    )
+
+    mapped = map_report_entities(reports, DISEASE, DRUG, chembl_curation=None, ner_batch_size=8, ner_cache_path=None)
+
+    rows = {
+        r['id']: (sorted(r['drugs'], key=str), r['diseases'])
+        for r in mapped.df.select('id', 'drugs', 'diseases').iter_rows(named=True)
+    }
+    assert rows == {
+        'nct01': (
+            [
+                {'drugFromSource': 'Aspirin', 'drugId': 'CHEMBL25'},
+                {'drugFromSource': 'Kalydeco', 'drugId': 'CHEMBL2010601'},
+            ],
+            [{'diseaseFromSource': 'Cystic fibrosis', 'diseaseId': 'MONDO_0009061'}],
+        ),
+        'nct02': ([{'drugFromSource': 'Ecotrin', 'drugId': 'CHEMBL25'}], None),
+    }

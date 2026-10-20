@@ -1,0 +1,257 @@
+"""Domain-specific LLM extraction helpers for AACT clinical trials."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+import polars as pl
+from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
+
+from pts.transformers.clinical.datasets import ClinicalReportExtraction
+from pts.transformers.clinical.helpers import sanitise_nested
+from pts.transformers.clinical.llm_workflow import _extractions_to_df
+from pts.transformers.clinical.schemas import (
+    ClinicalReportExtractionSchema,
+    ExtractedDisease,
+    ExtractedDrug,
+)
+
+if TYPE_CHECKING:
+    from otter.config.model import Config
+
+
+def sample_report(report: pl.DataFrame, sample_size: int | None, seed: int = 42) -> pl.DataFrame:
+    """Sample trials before expensive downstream steps.
+
+    Returns full report when sample_size is None or >= row count.
+    """
+    if sample_size is None or sample_size >= report.height:
+        return report
+    return report.sample(n=sample_size, seed=seed, shuffle=True)
+
+
+def build_prompts(report: pl.DataFrame, trial_fields: dict) -> list[dict]:
+    """Build prompts for each record in the report.
+
+    Returns a list of dicts: [{"id": ..., "prompt": ...}, ...]
+    """
+    records = report.to_dicts()
+    results = []
+    for row in records:
+        prompt = build_prompt(row, trial_fields=trial_fields)
+        results.append({'id': row['id'], 'prompt': prompt})
+    return results
+
+
+def build_prompt(row: dict, trial_fields: dict) -> str:
+    """Build prompt from a single clinical trial record."""
+    lines = [f'Trial ID: {row["id"]}']
+    for field, label in trial_fields.items():
+        value = row.get(field)
+        lines.append(f'{label}: {value if value is not None else "null"}')
+    drugs = [d['drugFromSource'] for d in (row.get('drugs') or []) if d.get('drugFromSource')]
+    if drugs:
+        lines.append(f'Interventions: {"; ".join(drugs)}')
+    return '\n'.join(lines)
+
+
+def _normalise_disease(raw: dict) -> dict:
+    """Fill every ExtractedDisease field, defaulting missing ones to None."""
+    return {
+        'name': raw.get('name'),
+        'severity': raw.get('severity'),
+        'stage': raw.get('stage'),
+        'onset': raw.get('onset'),
+        'etiology': raw.get('etiology'),
+        'evidence_quote': raw.get('evidence_quote'),
+    }
+
+
+def _normalise_drug(raw: dict) -> dict:
+    """Fill every ExtractedDrug field, defaulting missing ones to None."""
+    return {
+        'drug': raw.get('drug'),
+        'route': raw.get('route'),
+        'formulation': raw.get('formulation'),
+        'synonyms': raw.get('synonyms'),  # already list[str] | None
+        'dosages': raw.get('dosages'),  # already list[str] | None
+        'evidence_quote': raw.get('evidence_quote'),
+    }
+
+
+def _normalise_disease_list(items: list | None) -> list[dict]:
+    if not items:
+        return []
+    return [_normalise_disease(x) for x in items if isinstance(x, dict)]
+
+
+def _normalise_drug_list(items: list | None) -> list[dict]:
+    if not items:
+        return []
+    return [_normalise_drug(x) for x in items if isinstance(x, dict)]
+
+
+def _message_texts(outer: dict) -> list[str]:
+    """Collect every text payload carried by a batch envelope.
+
+    The batch API can split one response across several ``output`` items, a
+    truncated fragment followed by a continuation, so ``output[0]`` is not
+    reliably the complete payload. Every ``message`` item is walked, in order,
+    and every text content entry is returned as a candidate.
+    """
+    return [
+        content['text']
+        for item in outer['response']['body']['output']
+        if item.get('type') == 'message'
+        for content in (item.get('content') or [])
+        if 'text' in content
+    ]
+
+
+def _parse_single_record(
+    outer: dict, path: str = '<test>', row_idx: int = 0
+) -> tuple[ClinicalReportExtractionSchema | None, dict | None]:
+    """Parse a single decoded JSONL envelope into a typed extraction object.
+
+    The first candidate payload that decodes to a JSON object wins; a record is
+    only rejected when none of them does.
+
+    Returns (ClinicalReportExtractionSchema, None) on success,
+    (None, bad_record_dict) on failure.
+    """
+    record_id = outer.get('custom_id', '')
+
+    try:
+        texts = _message_texts(outer)
+        if not texts:
+            raise ValueError('no message output with text content')
+    except Exception as e:
+        return None, {
+            'file': path,
+            'row_idx': row_idx,
+            'id': record_id,
+            'error': f'missing_text_path: {e}',
+        }
+
+    payload = None
+    last_error: Exception | None = None
+    for text in texts:
+        try:
+            candidate = sanitise_nested(json.loads(text))
+        except json.JSONDecodeError as e:
+            last_error = e
+            continue
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+        last_error = ValueError(f'expected a JSON object, got {type(candidate).__name__}')
+
+    if payload is None:
+        return None, {
+            'file': path,
+            'row_idx': row_idx,
+            'id': record_id,
+            'error': f'inner_json_error: {last_error}',
+        }
+
+    try:
+        extraction = ClinicalReportExtractionSchema(
+            id=record_id,
+            drug_intent=payload.get('drug_intent'),
+            drug_intent_confidence=payload.get('drug_intent_confidence'),
+            primary_indications=[
+                ExtractedDisease(**d)
+                for d in _normalise_disease_list(payload.get('primary_indications'))
+                if d.get('name')
+            ],
+            background_conditions=[
+                ExtractedDisease(**d)
+                for d in _normalise_disease_list(payload.get('background_conditions'))
+                if d.get('name')
+            ]
+            or None,
+            investigated_drugs=[
+                ExtractedDrug(**d) for d in _normalise_drug_list(payload.get('investigated_drugs')) if d.get('drug')
+            ],
+            comparator_drugs=[
+                ExtractedDrug(**d) for d in _normalise_drug_list(payload.get('comparator_drugs')) if d.get('drug')
+            ]
+            or None,
+            supportive_drugs=[
+                ExtractedDrug(**d) for d in _normalise_drug_list(payload.get('supportive_drugs')) if d.get('drug')
+            ]
+            or None,
+            conclusion=payload.get('conclusion'),
+        )
+    except Exception as e:
+        return None, {
+            'file': path,
+            'row_idx': row_idx,
+            'id': record_id,
+            'error': f'model_validation_error: {e}',
+        }
+
+    return extraction, None
+
+
+def parse_batch_results(uri: str, config: Config) -> ClinicalReportExtraction:
+    """Read LLM extraction output files and return a validated dataset.
+
+    Returns an empty dataset when no valid records are found.
+    """
+    try:
+        output_files = sorted(StorageHandle(uri, config=config).glob('**/*_output.jsonl'))
+    except NotFoundError:
+        output_files = []
+    if not output_files:
+        raise ValueError(f'No *_output.jsonl files found under: {uri}')
+
+    good_records: list[ClinicalReportExtractionSchema] = []
+    bad_records: list[dict] = []
+    total_rows = 0
+
+    for path in output_files:
+        text, _ = StorageHandle(path, config=config).read_text()
+        for row_idx, line in enumerate(text.split('\n')):
+            line = line.strip()
+            if not line:
+                continue
+            total_rows += 1
+
+            try:
+                outer = json.loads(line)
+            except json.JSONDecodeError as e:
+                bad_records.append({
+                    'file': path,
+                    'row_idx': row_idx,
+                    'id': None,
+                    'error': f'outer_json_error: {e}',
+                })
+                continue
+
+            good, bad = _parse_single_record(outer, path=path, row_idx=row_idx)
+            if good:
+                good_records.append(good)
+            if bad:
+                bad_records.append(bad)
+
+    if bad_records:
+        logger.warning(
+            'Dropped {} malformed rows while parsing batch outputs from {}',
+            len(bad_records),
+            uri,
+        )
+        logger.warning('Sample malformed rows: {}', bad_records[:5])
+
+    logger.info(
+        'Parsed {} rows from {} output files (good={}, bad={})',
+        total_rows,
+        len(output_files),
+        len(good_records),
+        len(bad_records),
+    )
+
+    return ClinicalReportExtraction(_extractions_to_df(good_records))

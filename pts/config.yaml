@@ -791,15 +791,12 @@ steps:
       service_tier: auto
       concurrency: 75
       shard_size: 200
-      publications:
-        # see PublicationsSpec — this fetches abstracts for every trial, not
-        # only cache misses, so it needs its own cache before a full run
-        enabled: false
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
   clinical_report:
-    - name: pyspark clinical_report
+    - name: transform clinical_report
+      transformer: clinical_report
       source:
         chembl_molecule: intermediate/chembl_molecule
         disease: output/disease
@@ -816,7 +813,6 @@ steps:
         output: output/clinical_report
       settings:
         ner_batch_size: 256
-      pyspark: clinical_report
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################

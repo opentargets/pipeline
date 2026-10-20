@@ -18,11 +18,6 @@ clusters:
       # Spark 4 turns ANSI mode on by default; keep Spark 3's null-on-error
       # semantics until the pyspark modules are audited. pts' Session sets it too.
       'spark:spark.sql.ansi.enabled': 'false'
-      # Spark NLP fat jar (required by clinical_report). Loaded via spark.jars from
-      # the version-pinned jar orchestration pre-stages in the pipelines bucket,
-      # instead of spark.jars.packages which re-runs Ivy resolution against Maven
-      # Central on every spark-submit. See opentargets/issues#4453.
-      'spark:spark.jars': 'gs://opentargets-pipelines/up/pts/jars/spark-nlp-assembly_2.13-{{spark_nlp_version}}.jar'
     # Uploaded into the run by the DAG from
     # orchestration/src/orchestration/assets/install_dependencies_on_cluster.sh.
     init_actions_uris:
