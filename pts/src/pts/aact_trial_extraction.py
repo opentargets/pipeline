@@ -26,13 +26,8 @@ from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, text_sha256, write_run
-from pts.transformers.clinical import (
-    build_prompts,
-    extract_aact_clinical_report,
-    llm_workflow,
-    run_extraction,
-    sample_report,
-)
+from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, llm_workflow, sample_report
+from pts.transformers.clinical.llm_workflow import run_extraction
 
 if TYPE_CHECKING:
     from otter.config.model import Config

@@ -89,8 +89,8 @@ def process_molecules(
         molecule_hierarchy: Raw ChEMBL molecule_hierarchy table.
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
-        aact_batch: (optional) Parsed AACT batch extractions, as returned by
-            :func:`pts.transformers.clinical.parse_batch_results`.
+        aact_batch: (optional) AACT trial extractions, as published by
+            :py:mod:`pts.tasks.llm_extract`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.

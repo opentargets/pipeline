@@ -29,12 +29,7 @@ from pts.aact_trial_extraction import (
 )
 from pts.record_store import read_records, text_sha256
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class
-from pts.transformers.clinical import (
-    ClinicalReportExtractionSchema,
-    extract_aact_clinical_report,
-    llm_workflow,
-    parse_batch_results,
-)
+from pts.transformers.clinical import ClinicalReportExtractionSchema, extract_aact_clinical_report, llm_workflow
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 
 
@@ -289,31 +284,6 @@ def logged() -> Iterator[list[str]]:
     sink = logger.add(lambda m: messages.append(str(m).strip()), level='INFO', format='{message}')
     yield messages
     logger.remove(sink)
-
-
-def _legacy_line(record_id: str) -> str:
-    return SAMPLE_LINE.replace('nct00031889', record_id)
-
-
-def test_parse_batch_results_reads_nested_output_files(tmp_path: Path, logged: list[str]) -> None:
-    (tmp_path / 'batch_2').mkdir()
-    (tmp_path / 'batch_1_output.jsonl').write_text(_legacy_line('nct1') + '\n')
-    (tmp_path / 'batch_2' / 'batch_2_output.jsonl').write_text(
-        _legacy_line('nct2') + '\n\nnot json\n' + _legacy_line('nct3') + '\n'
-    )
-    (tmp_path / 'batch_1_input.jsonl').write_text(_legacy_line('ignored') + '\n')
-
-    result = parse_batch_results(str(tmp_path), cast(Any, None))
-
-    assert sorted(result.df['id'].to_list()) == ['nct1', 'nct2', 'nct3']
-    assert any(m.startswith('Dropped 1 malformed rows') for m in logged)
-
-
-def test_parse_batch_results_raises_when_no_output_files(tmp_path: Path) -> None:
-    (tmp_path / 'batch_1_input.jsonl').write_text('ignored')
-
-    with pytest.raises(ValueError, match=r'No \*_output\.jsonl files found'):
-        parse_batch_results(str(tmp_path), cast(Any, None))
 
 
 def _report(*ids: str, title: str = 'title') -> pl.DataFrame:

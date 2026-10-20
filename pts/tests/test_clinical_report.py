@@ -212,7 +212,7 @@ def test_flag_indirect_primary_purpose_non_aact_not_flagged() -> None:
 
 
 def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
-    """A minimal frame in `ClinicalReportExtractionSchema` shape, as `parse_batch_results` returns."""
+    """A minimal frame in `ClinicalReportExtractionSchema` shape, as the extraction snapshot holds it."""
     return pl.DataFrame({
         'id': [nct_id],
         'drug_intent': ['therapeutic'],
@@ -753,11 +753,11 @@ drugs = staged_drug_entities([_staged_drug_entities(('mystery pill', ['kalydeco'
 map_report_entities(_drug_reports(('TTD01', 'TTD', 'mystery pill')), DISEASE, DRUG, None, drugs)
 diseases = pl.DataFrame({'text': ['asthma'], 'extracted_diseases': [['asthma']]})
 staged_lookup(diseases, 'text', 'extracted_diseases', 'disease texts')(pl.Series(['asthma']))
-print(sorted({module.split('.')[0] for module in sys.modules} & {'torch', 'transformers'}))
+print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torch', 'transformers'}))
 """
 
 
-def test_release_imports_no_torch() -> None:
+def test_release_imports_no_torch_or_openai() -> None:
     result = subprocess.run(
         [sys.executable, '-c', RELEASE_MAPPING],
         cwd=Path(__file__).parents[1],

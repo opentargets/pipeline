@@ -3,7 +3,6 @@
 Production code outside this package imports from here, not from its submodules.
 """
 
-from pts.transformers.clinical import llm_workflow
 from pts.transformers.clinical.datasets import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
@@ -13,12 +12,11 @@ from pts.transformers.clinical.datasets import (
     ClinicalReportExtraction,
 )
 from pts.transformers.clinical.helpers import filter_df, union_dfs
-from pts.transformers.clinical.llm_workflow import run_extraction
 from pts.transformers.clinical.mapping import map_entities
 from pts.transformers.clinical.ner import extract_disease_entities, extract_drug_entities
 from pts.transformers.clinical.providers.aact import extract_clinical_report as extract_aact_clinical_report
 from pts.transformers.clinical.providers.aact import replace_with_llm_indications
-from pts.transformers.clinical.providers.aact_llm import build_prompts, parse_batch_results, sample_report
+from pts.transformers.clinical.providers.aact_llm import build_prompts, sample_report
 from pts.transformers.clinical.providers.chembl_drug_warnings import (
     extract_clinical_report as extract_drug_warning_clinical_report,
 )
@@ -63,12 +61,9 @@ __all__ = [
     'extract_ttd_clinical_report',
     'extract_ttd_indication',
     'filter_df',
-    'llm_workflow',
     'map_entities',
-    'parse_batch_results',
     'parse_pmda_approvals',
     'replace_with_llm_indications',
-    'run_extraction',
     'sample_report',
     'union_dfs',
 ]

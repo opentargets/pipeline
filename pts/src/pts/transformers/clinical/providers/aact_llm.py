@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 
 import polars as pl
-from loguru import logger
-from otter.storage.synchronous.handle import StorageHandle
-from otter.util.errors import NotFoundError
 
-from pts.transformers.clinical.datasets import ClinicalReportExtraction
 from pts.transformers.clinical.helpers import sanitise_nested
-from pts.transformers.clinical.llm_workflow import _extractions_to_df
 from pts.transformers.clinical.schemas import (
     ClinicalReportExtractionSchema,
     ExtractedDisease,
     ExtractedDrug,
 )
-
-if TYPE_CHECKING:
-    from otter.config.model import Config
 
 
 def sample_report(report: pl.DataFrame, sample_size: int | None, seed: int = 42) -> pl.DataFrame:
@@ -195,63 +186,3 @@ def _parse_single_record(
         }
 
     return extraction, None
-
-
-def parse_batch_results(uri: str, config: Config) -> ClinicalReportExtraction:
-    """Read LLM extraction output files and return a validated dataset.
-
-    Returns an empty dataset when no valid records are found.
-    """
-    try:
-        output_files = sorted(StorageHandle(uri, config=config).glob('**/*_output.jsonl'))
-    except NotFoundError:
-        output_files = []
-    if not output_files:
-        raise ValueError(f'No *_output.jsonl files found under: {uri}')
-
-    good_records: list[ClinicalReportExtractionSchema] = []
-    bad_records: list[dict] = []
-    total_rows = 0
-
-    for path in output_files:
-        text, _ = StorageHandle(path, config=config).read_text()
-        for row_idx, line in enumerate(text.split('\n')):
-            line = line.strip()
-            if not line:
-                continue
-            total_rows += 1
-
-            try:
-                outer = json.loads(line)
-            except json.JSONDecodeError as e:
-                bad_records.append({
-                    'file': path,
-                    'row_idx': row_idx,
-                    'id': None,
-                    'error': f'outer_json_error: {e}',
-                })
-                continue
-
-            good, bad = _parse_single_record(outer, path=path, row_idx=row_idx)
-            if good:
-                good_records.append(good)
-            if bad:
-                bad_records.append(bad)
-
-    if bad_records:
-        logger.warning(
-            'Dropped {} malformed rows while parsing batch outputs from {}',
-            len(bad_records),
-            uri,
-        )
-        logger.warning('Sample malformed rows: {}', bad_records[:5])
-
-    logger.info(
-        'Parsed {} rows from {} output files (good={}, bad={})',
-        total_rows,
-        len(output_files),
-        len(good_records),
-        len(bad_records),
-    )
-
-    return ClinicalReportExtraction(_extractions_to_df(good_records))
