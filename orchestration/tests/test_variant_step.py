@@ -15,6 +15,5 @@ def test_foldx_runs_on_a_vm_before_the_variant_index() -> None:
     config = UnifiedPipelineConfig()
     assert pts_step_from_config('pts_foldx', config).is_gce
     assert config.step_definition('pts_foldx')['depends_on'] == ['pis_variant']
-    assert {'pis_variant', 'pts_foldx', 'gentropy_variant_annotation'} <= set(
-        config.step_definition('pts_variant')['depends_on']
-    )
+    # pis_variant is reached through pts_foldx, so the index does not list it again.
+    assert config.step_definition('pts_variant')['depends_on'] == ['pts_foldx', 'gentropy_variant_annotation']

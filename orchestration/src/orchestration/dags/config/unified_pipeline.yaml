@@ -125,7 +125,6 @@ steps:
       - pis_variant
   pts_variant:
     depends_on:
-      - pis_variant
       - pts_foldx
       - gentropy_variant_annotation
     depends_on_ppp:
@@ -160,7 +159,6 @@ steps:
       - pts_target
   pts_coding_variant:
     depends_on:
-      - pts_variant
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
@@ -469,7 +467,6 @@ steps:
   pts_search:
     depends_on:
       - pts_association
-      - pts_variant
       - pts_drug_molecule
       - pts_target
       - pts_disease
