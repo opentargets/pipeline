@@ -2,14 +2,13 @@
 
 import gzip
 import hashlib
-from dataclasses import FrozenInstanceError
-from typing import Any, cast
+from typing import Any
 
 import polars as pl
 import pytest
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
-from pts.transformers.enhancer_to_gene import E2GConstants, parse_enhancer_to_gene, read_enhancer_to_gene
+from pts.transformers.enhancer_to_gene import parse_enhancer_to_gene, read_enhancer_to_gene
 
 
 def raw_frame(**changes):
@@ -126,19 +125,6 @@ def test_duplicate_lookup_rows_preserve_join_multiplicity():
     """Repeated mapping records must not silently deduplicate evidence."""
     result = parse_enhancer_to_gene(raw_frame(), mapping(duplicate=True), targets(duplicate=True)).collect()
     assert result.height == 4
-
-
-def test_constants_are_frozen():
-    """Shared publication and score names cannot be changed accidentally."""
-    constants = E2GConstants()
-    assert (constants.pmid, constants.datasource_id, constants.dnase_score_name, constants.hic_score_name) == (
-        '38014075',
-        'E2G',
-        'DNase',
-        'HiC_contacts',
-    )
-    with pytest.raises(FrozenInstanceError):
-        cast(Any, constants).pmid = 'other'
 
 
 def test_reader_unifies_mixed_headers_from_gzip_glob(tmp_path):

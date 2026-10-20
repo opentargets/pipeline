@@ -1,6 +1,5 @@
 """Enhancer-to-gene annotation and validation."""
 
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Self
 
@@ -16,19 +15,12 @@ from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 from pts.transformers.utils.target import tss_lut
 
-
-@dataclass(frozen=True)
-class E2GConstants:
-    """Shared metadata and identifier fields for regulatory enhancer-to-gene evidence."""
-
-    pmid: str = '38014075'
-    datasource_id: str = 'E2G'
-    dnase_score_name: str = 'DNase'
-    hic_score_name: str = 'HiC_contacts'
-    identifier_columns: tuple[str, ...] = ('chromosome', 'start', 'end', 'geneId', 'studyId', 'intervalType')
-
-
-E2G = E2GConstants()
+PMID = '38014075'
+DATASOURCE_ID = 'E2G'
+DNASE_SCORE_NAME = 'DNase'
+HIC_SCORE_NAME = 'HiC_contacts'
+#: Columns hashed, in this order, into `intervalId`.
+IDENTIFIER_COLUMNS = ('chromosome', 'start', 'end', 'geneId', 'studyId', 'intervalType')
 
 
 class QualityFlag(StrEnum):
@@ -149,8 +141,6 @@ def parse_enhancer_to_gene(
         pl
         .when((pl.col('intervalType') == 'promoter') | pl.col('tss').is_between(pl.col('start'), pl.col('end')))
         .then(0)
-        .when(pl.col('tss').is_null())
-        .then(None)
         .otherwise(pl.min_horizontal((pl.col('tss') - pl.col('start')).abs(), (pl.col('tss') - pl.col('end')).abs()))
         .cast(pl.Int32, strict=False)
     )
@@ -158,7 +148,7 @@ def parse_enhancer_to_gene(
     # could collide (chromosome '1' + start '12' == chromosome '11' + start '2'). The
     # separator intentionally changes every intervalId relative to Gentropy.
     identifier = plh.concat_str(
-        [pl.col(column).cast(pl.String).fill_null('None') for column in E2G.identifier_columns],
+        [pl.col(column).cast(pl.String).fill_null('None') for column in IDENTIFIER_COLUMNS],
         separator='|',
     ).nchash.md5()
     return base.select(
@@ -170,17 +160,17 @@ def parse_enhancer_to_gene(
         distance.alias('distanceToTss'),
         pl.concat_list(
             pl.struct(
-                pl.lit(E2G.dnase_score_name).alias('name'),
+                pl.lit(DNASE_SCORE_NAME).alias('name'),
                 pl.col('dnase').cast(pl.Float32, strict=False).alias('value'),
             ),
             pl.struct(
-                pl.lit(E2G.hic_score_name).alias('name'),
+                pl.lit(HIC_SCORE_NAME).alias('name'),
                 pl.col('hicContacts').cast(pl.Float32, strict=False).alias('value'),
             ),
         ).alias('resourceScore'),
-        pl.lit(E2G.datasource_id).alias('datasourceId'),
+        pl.lit(DATASOURCE_ID).alias('datasourceId'),
         'intervalType',
-        pl.lit(E2G.pmid).alias('pmid'),
+        pl.lit(PMID).alias('pmid'),
         'biosampleName',
         pl.lit(None, dtype=pl.String).alias('biosampleFromSourceId'),
         'biosampleId',
