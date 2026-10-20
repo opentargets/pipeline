@@ -11,7 +11,7 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
-from pts.record_store import RECORD_SCHEMA, map_texts, publish_snapshot, text_sha256, write_run
+from pts.record_store import RECORD_SCHEMA, map_texts, publish_snapshot, text_sha256, tracked, write_run
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, revision_tags, staged_model_revisions
 from pts.transformers.clinical.ner import DRUG_NER_MODEL, drug_entities_with_status, drug_ner_revision
@@ -23,8 +23,6 @@ from pts.transformers.clinical.stop_reasons import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from otter.config.model import Config
 
 SEED_RUN_ID = 'seed-ner-cache'
@@ -74,16 +72,6 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
     )
     write_run(records.cast(RECORD_SCHEMA), drug_store, SEED_RUN_ID, config)
     return records.height
-
-
-def tracked(compute: Callable[[list[str]], Any], calls: list[int]) -> Callable[[list[str]], Any]:
-    """Wrap ``compute`` so the caller can tell whether it was asked for anything."""
-
-    def wrapped(texts: list[str]) -> Any:
-        calls.append(len(texts))
-        return compute(texts)
-
-    return wrapped
 
 
 def stage_trial_models(

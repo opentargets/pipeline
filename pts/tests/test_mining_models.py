@@ -12,6 +12,7 @@ from pts import mining_models
 from pts.mining_models import stage_mining_models
 from pts.record_store import map_texts
 from pts.transformers.clinical.hf_models import revision_tags
+from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
 from pts.transformers.clinical.ner import (
     CHEMICAL_MODEL,
     DISEASE_MODEL,
@@ -21,6 +22,7 @@ from pts.transformers.clinical.ner import (
     drug_ner_revision,
 )
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
+from tests.clinical.test_mining import inputs  # noqa: F401
 
 REVISIONS = {DISEASE_MODEL: 'rx', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 
@@ -150,3 +152,43 @@ def test_a_label_shared_with_aact_is_not_recomputed(tmp_path: Path, models_uri: 
     assert models.ner_calls == [['ibuprofen', 'x']]
     drugs = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')
     assert drugs.filter(label='aspirin')['extracted_drugs'].to_list() == [['aact']]
+
+
+def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
+    tmp_path: Path,
+    models_uri: str,
+    inputs: dict[str, str],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mining_models, 'disease_entities_with_status', lambda texts: [([f'd:{t}'], None) for t in texts]
+    )
+    monkeypatch.setattr(
+        mining_models, 'drug_entities_with_status', lambda texts, batch_size: [([f'drug:{t}'], None) for t in texts]
+    )
+    ttd, ema, pmda = inputs['ttd'], inputs['ema'], inputs['pmda']
+
+    stage_mining_models(
+        ttd,
+        ema,
+        pmda,
+        models_uri,
+        {
+            'drug_entities': str(tmp_path / 'snap/drug_entities'),
+            'disease_entities': str(tmp_path / 'snap/disease_entities'),
+        },
+        str(tmp_path / 'store'),
+        'r1',
+        None,
+        ner_batch_size=4,
+        max_attempts=3,
+    )
+
+    staged = pl.read_parquet(tmp_path / 'snap/disease_entities/rx/data.parquet')
+    lookup = staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts')
+    expected = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, lookup).values())
+    blind = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, RecordingNer()).values())
+    labels = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')['label']
+    assert labels.to_list() == expected.to_list()
+    assert set(blind.to_list()) < set(expected.to_list())
+    assert {'alphamab', 'gammastat'} <= set(labels.to_list())

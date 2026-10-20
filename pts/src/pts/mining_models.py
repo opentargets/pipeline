@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from pts.aact_trial_models import tracked
-from pts.record_store import map_texts, publish_snapshot
+from pts.record_store import map_texts, publish_snapshot, tracked
 from pts.transformers.clinical.hf_models import offline_hf_models, revision_tags, staged_model_revisions
-from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels
+from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
 from pts.transformers.clinical.ner import (
+    CHEMICAL_MODEL,
     DISEASE_NER_MODEL,
     DRUG_NER_MODEL,
+    DRUGTEMIST_MODEL,
     disease_entities_with_status,
     drug_entities_with_status,
     drug_ner_revision,
@@ -40,11 +41,13 @@ def stage_mining_models(
         dict[str, Any]: Per model, the number of texts and whether it computed or published anything.
     """
     revisions = staged_model_revisions(models_uri)
+    missing = [m for m in (DISEASE_NER_MODEL, CHEMICAL_MODEL, DRUGTEMIST_MODEL) if m not in revisions]
+    if missing:
+        raise ValueError(f'models not staged under {models_uri}: {missing}')
     tags = revision_tags(revisions)
     recorder = RecordingNer()
-    reports = build_mining_reports(ttd, ema, pmda, recorder)
+    build_mining_reports(ttd, ema, pmda, recorder)
     disease_texts = pl.Series('text', sorted(recorder.texts), dtype=pl.String)
-    drug_labels = report_drug_labels(report.df for report in reports.values())
     disease_calls: list[int] = []
     ner_calls: list[int] = []
     ner_revision = drug_ner_revision(revisions)
@@ -60,6 +63,11 @@ def stage_mining_models(
             config,
             max_attempts,
         )
+        staged = disease.select('text', extracted_diseases=pl.col('output'))
+        reports = build_mining_reports(
+            ttd, ema, pmda, staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts')
+        )
+        drug_labels = report_drug_labels(report.df for report in reports.values())
         ner = map_texts(
             drug_labels,
             tracked(lambda texts: drug_entities_with_status(texts, ner_batch_size), ner_calls),
@@ -72,7 +80,7 @@ def stage_mining_models(
         )
 
     disease_published = publish_snapshot(
-        disease.select(text=pl.col('text'), extracted_diseases=pl.col('output')),
+        staged,
         f'{destination["disease_entities"]}/{tags["disease_entities"]}',
         {
             'model': DISEASE_NER_MODEL,

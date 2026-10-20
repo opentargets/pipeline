@@ -254,6 +254,16 @@ def _compute_with_retries(
     return pl.concat(rounds)
 
 
+def tracked(compute: Callable[[list[str]], Any], calls: list[int]) -> Callable[[list[str]], Any]:
+    """Wrap ``compute`` so the caller can tell whether it was asked for anything."""
+
+    def wrapped(texts: list[str]) -> Any:
+        calls.append(len(texts))
+        return compute(texts)
+
+    return wrapped
+
+
 def map_texts(
     texts: pl.Series,
     compute: Callable[[list[str]], list[tuple[Any, str | None]]],
