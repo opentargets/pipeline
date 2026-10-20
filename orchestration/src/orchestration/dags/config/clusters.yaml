@@ -43,6 +43,7 @@ clusters:
     master_machine_type: n1-standard-8
     master_disk_size: 128
     worker_disk_size: 256
+    worker_disk_type: pd-ssd
     idle_delete_ttl: 3600
     internal_ip_only: false
     metadata:

@@ -3,11 +3,9 @@
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
-from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.transformers.utils.dataset import scan_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
 
 
 class VariantPartitionSource(BaseModel):
@@ -96,12 +94,7 @@ def variant_partition(source: dict[str, str], destination: dict[str, str], setti
     sources = VariantPartitionSource.model_validate(source)
     destinations = VariantPartitionDestination.model_validate(destination)
     options = VariantPartitionSettings.model_validate(settings)
-    try:
-        StorageHandle(destinations.output).stat()
-    except NotFoundError:
-        pass
-    else:
-        raise ValueError(f'{destinations.output!r} already exists; remove it before writing VCF parts')
+    check_destinations_absent([destinations.output])
     logger.info('Reading variant evidence for partitioning')
     frames = [
         as_vcf_df(scan_dataset(sources.uniprot_variants, format='ndjson', infer_schema_length=None)),
@@ -112,8 +105,10 @@ def variant_partition(source: dict[str, str], destination: dict[str, str], setti
     variants = (
         pl
         .concat(frames)
+        # Sorting first makes the kept rsID (ID) the same on every run, preferring a real
+        # rsID over the '.' placeholder and then the smallest one.
+        .sort('CHROM', 'POS', 'REF', 'ALT', pl.col('ID') == '.', 'ID')
         .unique(subset=['CHROM', 'POS', 'REF', 'ALT'], keep='first', maintain_order=True)
-        .sort('CHROM', 'POS')
     )
     logger.info('Writing VCF parts to {} (at most {} rows per file)', destinations.output, options.partition_size)
     variants.sink_csv(

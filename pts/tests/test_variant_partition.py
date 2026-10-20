@@ -129,7 +129,23 @@ def test_variant_partition_deduplicates_coordinates_across_source_rsids(tmp_path
     output = tmp_path / 'output'
     variant_partition(source, {'output': str(output)}, {}, Mock())
     result = pl.concat([pl.read_csv(path, separator='\t') for path in output.glob('*.csv')])
-    assert result.filter((pl.col('CHROM') == 1) & (pl.col('POS') == 3)).height == 1
+    assert result.filter((pl.col('CHROM') == 1) & (pl.col('POS') == 3))['ID'].to_list() == ['rs3']
+
+
+def test_variant_partition_keeps_the_same_rsid_whatever_the_input_order(tmp_path):
+    """Conflicting rsIDs for one variant resolve to the smallest, independent of source order."""
+    kept = []
+    for order, rsids in enumerate([['rs9', 'rs2'], ['rs2', 'rs9']]):
+        (tmp_path / str(order)).mkdir()
+        source = _inputs(tmp_path / str(order))
+        pl.DataFrame({'variantId': ['1_3_A_G', '1_3_A_G'], 'variantRsId': rsids}).write_parquet(
+            Path(source['pharmacogenomics']) / 'part.parquet'
+        )
+        output = tmp_path / str(order) / 'output'
+        variant_partition(source, {'output': str(output)}, {}, Mock())
+        result = pl.concat([pl.read_csv(path, separator='\t') for path in output.glob('*.csv')])
+        kept.append(result.filter((pl.col('CHROM') == 1) & (pl.col('POS') == 3))['ID'].to_list())
+    assert kept == [['rs2'], ['rs2']]
 
 
 def test_variant_partition_empty_inputs_write_header(tmp_path):

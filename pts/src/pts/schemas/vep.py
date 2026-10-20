@@ -29,7 +29,8 @@ vep_schema = pl.Schema({
                 'ClinVar': pl.List(pl.String),
                 'LMDD': pl.List(pl.String),
                 'OIVD': pl.List(pl.String),
-                'OMIM': pl.List(pl.Float64),
+                # Text, not numbers: a double drops the trailing zeros of IDs such as 600234.0010.
+                'OMIM': pl.List(pl.String),
                 'PharmGKB': pl.List(pl.String),
                 'PhenCode': pl.List(pl.String),
                 'UniProt': pl.List(pl.String),

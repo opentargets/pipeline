@@ -61,13 +61,17 @@ def colocated_rsids(colocated: Column) -> Column:
 
 
 def omim_xrefs(colocated: Column) -> Column:
-    """OMIM cross-references, written `<entry>#<variant>` as on omim.org."""
+    """OMIM cross-references, written `<entry>#<variant>` as on omim.org.
+
+    VEP writes the IDs as JSON numbers; they are read as text so suffixes keep their trailing
+    zeros (`600234.0010` -> `600234#0010`). Gentropy read them as doubles and wrote `600234#001`.
+    """
     with_omim = f.filter(colocated, lambda variant: variant.getItem('var_synonyms').getItem('OMIM').isNotNull())
     ids = f.transform(
         with_omim,
         lambda variant: f.transform(
             variant.getItem('var_synonyms').getItem('OMIM'),
-            lambda omim: f.regexp_replace(omim.cast(t.StringType()), r'\.', '#'),
+            lambda omim: f.regexp_replace(omim, r'\.', '#'),
         ),
     )
     return generate_dbxrefs(f.flatten(ids), 'omim')

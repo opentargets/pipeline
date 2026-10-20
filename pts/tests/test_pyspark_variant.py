@@ -37,12 +37,6 @@ from pts.tasks.pyspark import PysparkSpec
 SAMPLE = Path(__file__).parent / 'test_data' / 'vep_sample.jsonl'
 
 
-@pytest.fixture(autouse=True)
-def legacy_casts(spark: SparkSession):
-    """The pts Session runs with ANSI off, as Gentropy did; invalid casts give null."""
-    spark.conf.set('spark.sql.ansi.enabled', 'false')
-
-
 def same_types(left: t.StructType, right: t.StructType) -> bool:
     """Compare schemas by name and type; Spark marks computed columns non-nullable."""
     return [(x.name, x.dataType.simpleString()) for x in left.fields] == [
@@ -255,6 +249,27 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations(spark):
     )
 
 
+def test_omim_ids_keep_trailing_zeros(spark, tmp_path):
+    """VEP writes OMIM IDs as JSON numbers; read from file as text they keep their four-digit suffix.
+
+    Read through a file as in production: Spark's in-memory string RDD path rewrites numbers.
+    """
+    record = (
+        json
+        .dumps({
+            'input': '1\t123\t.\tA\tG',
+            'most_severe_consequence': 'intergenic_variant',
+            'colocated_variants': [{'id': 'rs1', 'var_synonyms': {'OMIM': ['ENTRY_A', 'ENTRY_B']}}],
+        })
+        .replace('"ENTRY_A"', '600234.0010')
+        .replace('"ENTRY_B"', '171834.0100')
+    )
+    (tmp_path / '00000001.json').write_text(record + '\n')
+    row = parse_vep(read_vep(spark, str(tmp_path))).first()
+    assert row is not None
+    assert [x['id'] for x in row['dbXrefs'] if x['source'] == 'omim'] == ['600234#0010', '171834#0100']
+
+
 def test_all_predictors_without_sift_or_polyphen(spark):
     result = parsed(
         spark,
@@ -355,14 +370,12 @@ def test_identifier_hashing(spark):
         ('CADD', 10.0, None, 0.0),
         ('CADD', 81.0, None, 1.0),
         ('Pangolin', -1.0, None, 1.0),
-        ('LossOfFunctionCuration', None, 'likely_lof', 0.5),
-        ('LossOfFunctionCuration', None, 'not_lof', -1.0),
         ('SpliceAI', 0.2, None, 0.2),
         ('VEP', 0.4, None, 0.4),
         ('GERP', -5.0, None, 0.0),
         ('GERP', 2.0, None, 0.75),
-        ('FoldX', -2.0, None, 1.0),
-        ('FoldX', 1.0, None, 0.5),
+        ('FoldX', 1.0, None, None),
+        ('LossOfFunctionCuration', None, 'lof', None),
         ('SIFT', 0.0, 'deleterious', None),
         ('PolyPhen', 1.0, 'probably_damaging', None),
         ('unknown', 1.0, None, None),
@@ -512,6 +525,23 @@ def test_variant_job_writes_the_annotated_index(spark, tmp_path):
     assert row['variantId'] == '1_123_A_G'
     assert row['rsIds'] == ['rs1']
     assert {x['method'] for x in row['variantEffect']} == {'VEP', 'FoldX'}
+
+
+@pytest.mark.parametrize('source', ['variant_annotations', 'amino_acid_annotations'])
+def test_variant_job_rejects_an_empty_annotation_source(spark, tmp_path, source):
+    """An empty gnomAD or FoldX input fails the job instead of silently annotating nothing."""
+    vep = tmp_path / 'vep'
+    vep.mkdir()
+    (vep / '00000001.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
+    empty = tmp_path / 'empty'
+    spark.createDataFrame([], 'variantId string').write.parquet(str(empty))
+    with pytest.raises(ValueError, match='No annotations found'):
+        variant(
+            source={'vep': str(vep), source: [str(empty)]},
+            destination={'output': str(tmp_path / 'output')},
+            settings={},
+            properties={},
+        )
 
 
 def test_variant_configuration_matches_models():

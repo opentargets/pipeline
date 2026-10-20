@@ -120,6 +120,7 @@ def normalise_score(score: Column, method: Column, assessment: Column) -> Column
     """Map each predictor's raw score onto a comparable scale, by predictor.
 
     SIFT and PolyPhen are not computed (VEP runs without them), so they are not normalised.
+    FoldX and LoF curation arrive already normalised by their own PTS steps.
     """
     absolute = f.abs(score)
     return (
@@ -146,15 +147,6 @@ def normalise_score(score: Column, method: Column, assessment: Column) -> Column
                 absolute <= 0.14, _rescale(absolute, 0, 0.14, 0.0, 0.5)
             ),
         )
-        .when(
-            method == 'LossOfFunctionCuration',
-            f
-            .when(assessment == 'lof', f.lit(1.0))
-            .when(assessment == 'likely_lof', f.lit(0.5))
-            .when(assessment == 'uncertain', f.lit(0.0))
-            .when(assessment == 'likely_not_lof', f.lit(-0.5))
-            .when(assessment == 'not_lof', f.lit(-1.0)),
-        )
         .when(method.isin('SpliceAI', 'VEP'), score)
         .when(
             method == 'GERP',
@@ -165,7 +157,6 @@ def normalise_score(score: Column, method: Column, assessment: Column) -> Column
             .when(score >= -3, _rescale(score, -3, 0, 0.0, 0.25))
             .when(score < -3, f.lit(0.0)),
         )
-        .when(method == 'FoldX', f.when(absolute >= 2, f.lit(1.0)).otherwise(_rescale(absolute, 0.0, 2.0, 0.0, 1.0)))
         .cast(t.DoubleType())
     )
 

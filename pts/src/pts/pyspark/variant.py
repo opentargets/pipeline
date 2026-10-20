@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
@@ -54,6 +55,13 @@ class VariantSettings(BaseModel):
     """Number of output parts, range-partitioned by genomic position."""
 
 
+def require_rows(frame: DataFrame, path: str) -> DataFrame:
+    """Fail on an empty annotation source, as Gentropy's `from_parquet` did, rather than drop it silently."""
+    if frame.isEmpty():
+        raise ValueError(f'No annotations found in {path}')
+    return frame
+
+
 def variant(
     source: dict[str, Any],
     destination: dict[str, str],
@@ -70,11 +78,11 @@ def variant(
     index = parse_vep(read_vep(spark, sources.vep), options.hash_threshold)
     for path in sources.variant_annotations:
         logger.info('Adding variant annotations from {}', path)
-        annotations = read_variant_annotations(spark, path, options.hash_threshold)
+        annotations = require_rows(read_variant_annotations(spark, path, options.hash_threshold), path)
         index = fill_null_arrays(add_annotation(index, annotations))
     for path in sources.amino_acid_annotations:
         logger.info('Adding amino-acid annotations from {}', path)
-        annotations = spark.read.option('recursiveFileLookup', 'true').parquet(path)
+        annotations = require_rows(spark.read.option('recursiveFileLookup', 'true').parquet(path), path)
         index = annotate_with_amino_acid_consequences(index, annotations)
 
     logger.info('Writing variant index to {}', destinations.output)
