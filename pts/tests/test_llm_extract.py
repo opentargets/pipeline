@@ -22,7 +22,6 @@ from otter.task.model import TaskContext
 from pts import aact_trial_extraction
 from pts.aact_trial_extraction import (
     EXTRACTION_MODEL,
-    IMPORT_RUN_ID,
     _models_to_dataframe,
     _run_extraction_in_thread,
     import_extraction_cache,
@@ -613,12 +612,28 @@ def test_import_runs_once(tmp_path: Path) -> None:
     assert records['model'].to_list() == [EXTRACTION_MODEL] * 2
     assert records['model_revision'].to_list() == ['digest'] * 2
     assert records['status'].to_list() == ['ok'] * 2
-    assert records['run_id'].to_list() == [IMPORT_RUN_ID] * 2
+    assert records['run_id'].to_list() == ['import-extraction-cache-digest'] * 2
     assert records['computed_at'].to_list() == [datetime(2026, 9, 4, tzinfo=UTC), datetime(1970, 1, 1, tzinfo=UTC)]
     outputs = [json.loads(o) for o in records['output']]
     assert [o['id'] for o in outputs] == ['nct1', 'nct2']
     assert not {'cache_key', 'prompt_sha256', 'computed_at'} & set(outputs[0])
     assert ClinicalReportExtractionSchema.model_validate(outputs[0]) == _model('nct1')
+
+
+def test_each_schema_digest_is_imported_once(tmp_path: Path) -> None:
+    digests = ['a' * 64, 'b' * 64]
+    store = str(tmp_path / 'store')
+    for digest in digests:
+        prompts = aact_trial_extraction.prompts_for(_report('nct1'), digest)
+        cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), digest)
+
+        assert import_extraction_cache(cache_uri, prompts, store, digest, cast(Any, None)) == 1
+
+    records = read_records(store, cast(Any, None), output_dtype=pl.String()).sort('model_revision')
+    assert records['run_id'].to_list() == [
+        'import-extraction-cache-aaaaaaaaaaaa',
+        'import-extraction-cache-bbbbbbbbbbbb',
+    ]
 
 
 def test_import_refuses_a_cache_of_another_schema(tmp_path: Path) -> None:

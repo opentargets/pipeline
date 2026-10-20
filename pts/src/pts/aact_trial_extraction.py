@@ -63,9 +63,10 @@ AACT_TABLES = {
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 EXTRACTION_MODEL = 'aact_llm_extraction'
 """Model name of the extraction records; their model revision is the response schema digest."""
-IMPORT_RUN_ID = 'import-extraction-cache'
+IMPORT_RUN_PREFIX = 'import-extraction-cache'
 IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
-"""Run that holds the records imported from the extraction cache, and the time of those cached without one."""
+"""Prefix of the run that holds the records imported from the extraction cache of a schema digest, and the time
+of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
 
@@ -274,7 +275,9 @@ def extractions_from_records(
 def import_extraction_cache(
     cache_uri: str, prompts: pl.DataFrame, store_uri: str, schema_digest: str, config: Config
 ) -> int:
-    """Import an extraction cache of one response schema into the record store, once.
+    """Import an extraction cache of one response schema into the record store, once per schema digest.
+
+    The import is the run ``import-extraction-cache-<digest[:12]>``.
 
     Every cached trial still in ``prompts`` becomes an ``ok`` record whose text is
     that trial's current prompt. Of several rows for one trial, the one cached
@@ -298,12 +301,13 @@ def import_extraction_cache(
         msg = f'{cache_uri} is not the extraction cache namespace of schema {schema_digest}'
         raise ValueError(msg)
 
+    run_id = f'{IMPORT_RUN_PREFIX}-{schema_digest[:12]}'
     try:
-        StorageHandle(f'{store_uri}/runs/{IMPORT_RUN_ID}/manifest.json', config=config).read_text()
+        StorageHandle(f'{store_uri}/runs/{run_id}/manifest.json', config=config).read_text()
     except NotFoundError:
         pass
     else:
-        logger.info(f'{IMPORT_RUN_ID} already imported into {store_uri}')
+        logger.info(f'{run_id} already imported into {store_uri}')
         return 0
 
     pointer, _ = StorageHandle(f'{cache_uri}/latest.json', config=config).read_text()
@@ -332,9 +336,9 @@ def import_extraction_cache(
         status=pl.lit('ok'),
         error=pl.lit(None, dtype=pl.String),
         computed_at=pl.col('computed_at').fill_null(IMPORT_COMPUTED_AT),
-        run_id=pl.lit(IMPORT_RUN_ID),
+        run_id=pl.lit(run_id),
     )
-    write_run(records, store_uri, IMPORT_RUN_ID, config, output_dtype=pl.String())
+    write_run(records, store_uri, run_id, config, output_dtype=pl.String())
     return records.height
 
 
