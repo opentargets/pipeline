@@ -449,7 +449,7 @@ def credible_set(
     target = scan_dataset(sources.target)
     disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
     validated = (
-        scan_datasets(sources.credible_set, schema=credible_set_schema)
+        scan_datasets(sources.credible_set)
         .pipe(qc_mhc_region)
         .pipe(validate_chromosome_label)
         .pipe(validate_study, study)
@@ -461,6 +461,8 @@ def credible_set(
         .pipe(assign_confidence)
         .pipe(flag_trans_qtls, study, target, options.trans_qtl_threshold)
         .select(credible_set_schema.names())
+        # Sources carry different subsets of columns; check the result against the schema.
+        .match_to_schema(credible_set_schema)
         # Duplicate IDs are checked among rows the earlier QC keeps, in the same pass, so
         # the dataset is materialised once rather than again for its valid subset.
         .pipe(validate_unique_study_locus_id, ~has_excluded_flag(options.invalid_qc_reasons))

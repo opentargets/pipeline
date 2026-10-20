@@ -9,7 +9,7 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.study import study_schema
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
+from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
 
@@ -342,10 +342,13 @@ def study(
     heritability = scan_dataset(sources.heritability)
     validated = (
         pl
-        .concat([
-            scan_datasets([path], schema=study_schema).with_columns(pl.lit(rank).alias('_source_rank'))
-            for rank, path in enumerate(sources.study)
-        ])
+        .concat(
+            [
+                scan_dataset(path).with_columns(pl.lit(rank).alias('_source_rank'))
+                for rank, path in enumerate(sources.study)
+            ],
+            how='diagonal_relaxed',
+        )
         .pipe(deconvolute_studies)
         .pipe(validate_study_type)
         .pipe(validate_project_id, options.deprecated_project_ids)
@@ -357,6 +360,9 @@ def study(
         .pipe(collect_heritability, heritability)
         .pipe(sort_study_collections)
         .select(study_schema.names())
+        # Sources carry different subsets of columns; check the result against the schema,
+        # which also restores its struct field order.
+        .match_to_schema(study_schema)
         .collect()
     )
     # Validate once, then write both outputs from the same frame.
