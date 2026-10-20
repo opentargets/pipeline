@@ -77,6 +77,17 @@ def test_parse_output_contract():
 
 
 @pytest.mark.parametrize(
+    ('start', 'score', 'expected_start', 'expected_score'),
+    [(' 100 ', ' 0.75 ', 100, 0.75), ('100.9', '0.75', 100, 0.75), ('abc', 'x', None, None)],
+    ids=['padded', 'fraction', 'invalid'],
+)
+def test_parse_casts_numbers_like_spark(start, score, expected_start, expected_score):
+    """Padding is trimmed and fractions truncated, as Gentropy's Spark casts did; bad text is null."""
+    row = parse_enhancer_to_gene(raw_frame(start=start, score=score), mapping(), targets()).collect().row(0, named=True)
+    assert (row['start'], row['score']) == (expected_start, expected_score)
+
+
+@pytest.mark.parametrize(
     ('tss', 'interval_type', 'distance'),
     [
         (100, 'enhancer', 0),

@@ -9,12 +9,12 @@ from polars.testing import assert_frame_equal
 from pydantic import ValidationError
 
 from pts.schemas.study import study_schema
+from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.study import (
     QualityFlag,
     StudySource,
     collect_heritability,
     deconvolute_studies,
-    disease_lut,
     study,
     validate_analysis_flags,
     validate_biosample,
@@ -26,52 +26,42 @@ from pts.transformers.study import (
 )
 
 
-class TestDiseaseLut:
-    """Canonical and obsolete identifiers retain their lookup semantics."""
-
-    @pytest.mark.parametrize(
-        ('obsolete_terms', 'expected_efo'),
-        [
-            (None, ['EFO_001']),
-            ([], ['EFO_001']),
-            (['OLD_001', 'OLD_002'], ['EFO_001', 'OLD_001', 'OLD_002']),
-            (['OLD_001', 'EFO_001', 'OLD_001'], ['EFO_001', 'OLD_001']),
-            ([None, None, 'OLD_001'], ['EFO_001', 'EFO_001', 'OLD_001']),
-        ],
-        ids=['null-list', 'empty-list', 'obsolete-terms', 'duplicate-terms', 'null-terms'],
+def disease_lookup(tmp_path, rows):
+    """The study step's lookup: evidence's disease LUT, keyed on `efo`."""
+    path = tmp_path / 'disease'
+    path.mkdir()
+    pl.DataFrame(rows, schema={'id': pl.String, 'obsoleteTerms': pl.List(pl.String)}).write_parquet(
+        path / 'part-0.parquet'
     )
-    def test_identifier_mapping(self, obsolete_terms, expected_efo):
-        """Null terms fall back after deduplication, preserving duplicate output rows."""
-        disease = pl.DataFrame(
-            {'id': ['EFO_001'], 'obsoleteTerms': [obsolete_terms], 'name': ['Disease']},
-            schema={'id': pl.String, 'obsoleteTerms': pl.List(pl.String), 'name': pl.String},
-        ).lazy()
+    return build_disease_lut(str(path)).lazy().rename({'diseaseFromSourceMappedId': 'efo'})
 
-        result = disease_lut(disease)
 
-        assert isinstance(result, pl.LazyFrame)
-        expected = pl.DataFrame({'diseaseId': ['EFO_001'] * len(expected_efo), 'efo': expected_efo})
-        assert_frame_equal(result.collect(), expected, check_row_order=False)
+@pytest.mark.parametrize(
+    ('obsolete_terms', 'mapped', 'expected'),
+    [
+        (None, ['EFO_001'], ['EFO_001']),
+        ([], ['EFO_001'], ['EFO_001']),
+        (['OLD_001', 'OLD_002'], ['OLD_002'], ['EFO_001']),
+        (['OLD_001', 'EFO_001', 'OLD_001'], ['EFO_001', 'OLD_001'], ['EFO_001']),
+        ([None, None, 'OLD_001'], ['OLD_001'], ['EFO_001']),
+        (['OLD_001'], ['UNKNOWN'], []),
+    ],
+    ids=['null-list', 'empty-list', 'obsolete-term', 'repeated-own-id', 'null-terms', 'unknown'],
+)
+def test_validate_disease_resolves_current_and_obsolete_ids(tmp_path, obsolete_terms, mapped, expected):
+    """Current and obsolete identifiers resolve to one current disease, without duplicates."""
+    lookup = disease_lookup(tmp_path, {'id': ['EFO_001'], 'obsoleteTerms': [obsolete_terms]})
+    studies = studies_frame([{'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': mapped}])
 
-    def test_shared_obsolete_term_preserves_both_mappings(self):
-        """An obsolete identifier shared by diseases must retain each mapping."""
-        disease = pl.DataFrame({
-            'id': ['EFO_001', 'EFO_002'],
-            'obsoleteTerms': [['OLD_001'], ['OLD_001']],
-        }).lazy()
-        expected = pl.DataFrame({
-            'diseaseId': ['EFO_001', 'EFO_001', 'EFO_002', 'EFO_002'],
-            'efo': ['EFO_001', 'OLD_001', 'EFO_002', 'OLD_001'],
-        })
+    assert validate_disease(studies, lookup).collect()['diseaseIds'].to_list() == [expected]
 
-        assert_frame_equal(disease_lut(disease).collect(), expected, check_row_order=False)
 
-    def test_empty_dataset_preserves_output_schema(self):
-        """No input records produce a typed empty lookup."""
-        disease = pl.LazyFrame(schema={'id': pl.String, 'obsoleteTerms': pl.List(pl.String)})
-        expected = pl.DataFrame(schema={'diseaseId': pl.String, 'efo': pl.String})
+def test_validate_disease_keeps_every_disease_sharing_an_obsolete_id(tmp_path):
+    """An obsolete identifier shared by two diseases maps to both."""
+    lookup = disease_lookup(tmp_path, {'id': ['EFO_001', 'EFO_002'], 'obsoleteTerms': [['OLD_001'], ['OLD_001']]})
+    studies = studies_frame([{'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['OLD_001']}])
 
-        assert_frame_equal(disease_lut(disease).collect(), expected)
+    assert validate_disease(studies, lookup).collect()['diseaseIds'].to_list() == [['EFO_001', 'EFO_002']]
 
 
 def studies_frame(rows):

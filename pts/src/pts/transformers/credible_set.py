@@ -9,7 +9,9 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import credible_set_schema
+from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
+from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
 #: Disease index therapeutic area that marks a term as a measurement rather than a disease.
@@ -132,8 +134,7 @@ def qc_mhc_region(frame: pl.LazyFrame) -> pl.LazyFrame:
 def validate_chromosome_label(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag unsupported chromosome labels, leaving null labels unflagged."""
     logger.info('Validating credible set chromosome labels')
-    chromosomes = [str(value) for value in range(1, 23)] + ['X', 'Y', 'XY', 'MT']
-    return flag_rows(frame, ~pl.col('chromosome').is_in(chromosomes), QualityFlag.INVALID_CHROMOSOME)
+    return flag_rows(frame, ~pl.col('chromosome').is_in([*CANONICAL_CHROMOSOMES, 'XY']), QualityFlag.INVALID_CHROMOSOME)
 
 
 def validate_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
@@ -150,7 +151,7 @@ def validate_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     result = flag_rows(
         result,
         _contains_flag('qualityControls', QualityFlag.TOP_HIT.value)
-        & ~_contains_flag('_study_qc', 'Harmonized summary statistics are not available or empty'),
+        & ~_contains_flag('_study_qc', StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value),
         QualityFlag.TOP_HIT_AND_SUMMARY_STATS,
     )
     return flag_rows(result, pl.col('_study_found').is_null(), QualityFlag.MISSING_STUDY).drop(

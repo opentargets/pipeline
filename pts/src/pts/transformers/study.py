@@ -9,6 +9,7 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.study import study_schema
+from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
@@ -72,22 +73,6 @@ class StudySettings(BaseModel):
     def resolve_qc_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the QC flags."""
         return resolve_flag_names(QualityFlag, value)
-
-
-def disease_lut(disease: pl.LazyFrame) -> pl.LazyFrame:
-    """Map canonical and obsolete disease identifiers to the canonical disease ID."""
-    return (
-        disease
-        .select(
-            pl.col('id').alias('diseaseId'),
-            pl
-            .concat_list(pl.col('id'), pl.col('obsoleteTerms').fill_null([]))
-            .list.unique(maintain_order=True)
-            .alias('efo'),
-        )
-        .explode('efo')
-        .with_columns(pl.coalesce('efo', 'diseaseId').alias('efo'))
-    )
 
 
 def sort_study_collections(studies: pl.LazyFrame) -> pl.LazyFrame:
@@ -338,7 +323,7 @@ def study(
     options = StudySettings.model_validate(settings)
     target = scan_dataset(sources.target)
     biosample = scan_dataset(sources.biosample)
-    disease = disease_lut(scan_dataset(sources.disease))
+    disease = build_disease_lut(sources.disease).lazy().rename({'diseaseFromSourceMappedId': 'efo'})
     heritability = scan_dataset(sources.heritability)
     validated = (
         pl

@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
+from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
+from pts.transformers.utils.spark_casts import cast_double, to_long
 from pts.transformers.utils.target import tss_lut
 
 PMID = '38014075'
@@ -124,9 +126,9 @@ def parse_enhancer_to_gene(
         raw
         .with_columns(
             chromosome.alias('chromosome'),
-            pl.col('start').cast(pl.Int64, strict=False),
-            pl.col('end').cast(pl.Int64, strict=False),
-            pl.col('score').cast(pl.Float64, strict=False),
+            to_long(pl.col('start')).alias('start'),
+            to_long(pl.col('end')).alias('end'),
+            cast_double('score'),
             pl.col('intervalType').str.strip_chars().str.to_lowercase(),
             pl.col('filePath').str.extract(r'([^/]+)\.bed\.gz$', 1).fill_null('').alias('studyId'),
         )
@@ -183,8 +185,7 @@ def parse_enhancer_to_gene(
 def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.LazyFrame:
     """Flag noncanonical chromosomes and bounds outside their canonical contig."""
     logger.info('Validating enhancer-to-gene chromosome bounds')
-    chromosomes = [str(value) for value in range(1, 23)] + ['X', 'Y', 'MT']
-    lookup = contig.filter(pl.col('id').is_in(chromosomes)).select(
+    lookup = contig.filter(pl.col('id').is_in(CANONICAL_CHROMOSOMES)).select(
         pl.col('id').alias('chromosome'),
         pl.col('start').alias('_contig_start'),
         pl.col('end').alias('_contig_end'),
