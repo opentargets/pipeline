@@ -369,6 +369,24 @@ def test_compute_aborted_writes_nothing_for_that_call(store_uri):
     assert read_records(store_uri, None, pl.String)['text'].to_list() == ['t0', 't1']
 
 
+def test_an_abort_in_a_retry_round_keeps_the_finished_rounds(store_uri):
+    def abort_on_retry(batch):
+        if batch == ['bad']:
+            msg = 'no key'
+            raise ComputeAborted(msg)
+        return [(None, 'bad text') if t == 'bad' else (json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='no key'):
+        run(['good', 'bad'], abort_on_retry, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    records = read_records(store_uri, None, pl.String).sort('text')
+    assert records.select('text', 'status', 'run_id').rows() == [('bad', 'failed', 'r1'), ('good', 'ok', 'r1')]
+    rerun = JsonRecorder()
+    result = run(['good', 'bad'], rerun, store_uri, 'r2', output_dtype=pl.String, allow_failures=True)
+    assert rerun.calls == [['bad']]
+    assert result['text'].to_list() == ['bad', 'good']
+
+
 def test_strict_store_is_unchanged(store_uri):
     with pytest.raises(RecordStoreError):
         run(['a', 'bad'], Recorder(fails={'bad'}), store_uri, 'r1')

@@ -80,7 +80,12 @@ class RecordStoreError(Exception):
 
 
 class ComputeAborted(Exception):  # noqa: N818
-    """Raised by a compute to stop the run without recording any text of the call as failed."""
+    """Raised by a compute to stop the run without recording any text of the call as failed.
+
+    ``finished`` holds the records of the rounds that completed before it, if any.
+    """
+
+    finished: pl.DataFrame | None = None
 
 
 class SnapshotConflictError(Exception):
@@ -238,11 +243,20 @@ def _compute_with_retries(
     schema: pl.Schema,
     max_attempts: int,
 ) -> pl.DataFrame:
-    """Compute ``todo``, recomputing failures, one call per round, until each text reaches ``max_attempts``."""
+    """Compute ``todo``, recomputing failures, one call per round, until each text reaches ``max_attempts``.
+
+    Raises:
+        ComputeAborted: If ``compute`` raises it, carrying the records of the finished rounds.
+    """
     rounds = []
     pending = todo
     while pending.height:
-        fresh = _compute_round(pending, compute, model, model_revision, run_id, schema)
+        try:
+            fresh = _compute_round(pending, compute, model, model_revision, run_id, schema)
+        except ComputeAborted as exc:
+            if rounds:
+                exc.finished = pl.concat(rounds)
+            raise
         rounds.append(fresh)
         failed = fresh.filter(pl.col('status') == 'failed').select('text_sha256')
         pending = (
@@ -284,7 +298,7 @@ def map_texts(
     ``compute`` call, with the texts distinct and sorted. If ``compute`` raises,
     every text of the call is recorded as failed with the exception text, unless
     it raises :py:class:`ComputeAborted`, which propagates and records nothing
-    of that call.
+    of that call. An abort in a retry round still writes the rounds before it.
 
     With ``allow_failures`` the texts that fail are recomputed in the same run,
     one ``compute`` call per round, until their failures, earlier runs' included,
@@ -316,7 +330,8 @@ def map_texts(
         ValueError: If ``texts`` contains nulls, or ``shard_size`` is not positive.
         RecordStoreError: If any text still has no ok record once the run is written
             and ``allow_failures`` is False.
-        ComputeAborted: If ``compute`` raises it. Shards written before stay written.
+        ComputeAborted: If ``compute`` raises it. Shards written before stay written, and
+            so do the finished rounds of the shard it aborts.
     """
     if texts.null_count():
         msg = f'texts contains {texts.null_count()} null values'
@@ -362,7 +377,12 @@ def map_texts(
             continue
         shard_run_id = run_id if shard_size is None else f'{run_id}-{n:04d}'
         if allow_failures:
-            fresh = _compute_with_retries(shard, compute, model, model_revision, shard_run_id, schema, max_attempts)
+            try:
+                fresh = _compute_with_retries(shard, compute, model, model_revision, shard_run_id, schema, max_attempts)
+            except ComputeAborted as exc:
+                if exc.finished is not None:
+                    write_run(exc.finished, store_uri, shard_run_id, config, output_dtype)
+                raise
         else:
             fresh = _compute_round(shard, compute, model, model_revision, shard_run_id, schema)
         write_run(fresh, store_uri, shard_run_id, config, output_dtype)
