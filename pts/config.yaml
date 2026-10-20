@@ -65,6 +65,44 @@ steps:
       transformer: disease_phenotype
   ##################################################################################################
 
+  #: STUDY MIGRATION
+  study:
+    - name: transform validate study
+      source:
+        study:
+          - input/gwas/study/gcca
+          - input/gwas/study/gcss_pics
+          - input/gwas/study/gcss_susie
+          - input/gwas/study/finngen
+          - input/molqtl/study/eqtl_catalogue/r7
+          - input/molqtl/study/otar2077/MAGE_OTAR
+          - input/molqtl/study/otar2077/IBDverse
+          - input/molqtl/study/GTEx_v10
+          - input/molqtl/study/ukb_ppp_eur
+        target: output/target
+        disease: output/disease
+        biosample: output/biosample
+        heritability: input/heritability_estimate
+      destination:
+        output: output/study
+        excluded: excluded/study
+      transformer: study
+      settings:
+        invalid_qc_reasons:
+          - UNRESOLVED_TARGET
+          - UNRESOLVED_DISEASE
+          - UNKNOWN_STUDY_TYPE
+          - DUPLICATED_STUDY
+          - UNKNOWN_BIOSAMPLE
+          - FAILED_MEAN_BETA_CHECK
+          - FAILED_PZ_CHECK
+          - FAILED_GC_LAMBDA_CHECK
+          - NO_OT_CURATION
+          - CASE_CASE_STUDY_DESIGN
+          - DEPRECATED_PROJECT
+        deprecated_project_ids:
+          - GTEx
+
   #: GO STEP :######################################################################################
   go:
     - name: transform go
@@ -72,6 +110,47 @@ steps:
       source: input/go/go.obo
       destination: output/go
   ##################################################################################################
+
+  #: CREDIBLE_SET MIGRATION
+  credible_set:
+    - name: transform validate credible set
+      source:
+        credible_set:
+          - input/gwas/credible_set/gcca
+          - input/gwas/credible_set/gcss_pics
+          - input/gwas/credible_set/gcss_susie
+          - input/gwas/credible_set/finngen
+          - input/molqtl/credible_set/eqtl_catalogue/r7
+          - input/molqtl/credible_set/otar2077/MAGE_OTAR
+          - input/molqtl/credible_set/otar2077/IBDverse
+          - input/molqtl/credible_set/GTEx_v10
+          - input/molqtl/credible_set/ukb_ppp_eur
+        study: output/study
+        target: output/target
+        disease: output/disease
+      destination:
+        output: output/credible_set
+        excluded: excluded/credible_set
+      transformer: credible_set
+      settings:
+        trans_qtl_threshold: 5000000
+        invalid_qc_reasons:
+          - DUPLICATED_STUDYLOCUS_ID
+          - AMBIGUOUS_STUDY
+          - MISSING_STUDY
+          - NO_GENOMIC_LOCATION_FLAG
+          - COMPOSITE_FLAG
+          - INCONSISTENCY_FLAG
+          - SUBSIGNIFICANT_FLAG
+          - LD_CLUMPED
+          - IN_MHC
+          - REDUNDANT_PICS_TOP_HIT
+          - EXPLAINED_BY_SUSIE
+          - WINDOW_CLUMPED
+          - NON_MAPPED_VARIANT_FLAG
+          - INVALID_VARIANT_IDENTIFIER
+          - INVALID_CHROMOSOME
+          - TOP_HIT_AND_SUMMARY_STATS
 
   #: OTAR STEP :####################################################################################
   otar:
@@ -747,6 +826,33 @@ steps:
         failed_evidence: excluded/evidence/ot_crispr
         evidence: output/evidence_ot_crispr
   ##################################################################################################
+
+  #: ENHANCER_TO_GENE MIGRATION
+  enhancer_to_gene:
+    - name: transform enhancer to gene
+      transformer: enhancer_to_gene
+      source:
+        enhancer_to_gene: input/encode/rE2G/datasets/*.bed.gz
+        biosample_lut: input/encode/rE2G/biosample_mapping.csv
+        target: output/target
+        biosample: output/biosample
+        chromosome: input/chromosome/chromosome.parquet
+      destination:
+        output: output/enhancer_to_gene
+        excluded: excluded/enhancer_to_gene
+      settings:
+        min_valid_score: 0.6
+        max_valid_score: 1.0
+        invalid_qc_reasons:
+          - UNRESOLVED_TARGET
+          - UNKNOWN_BIOSAMPLE
+          - SCORE_OUTSIDE_BOUNDS
+          - UNKNOWN_INTERVAL_TYPE
+          - AMBIGUOUS_SCORE
+          - INVALID_CHROMOSOME
+          - INVALID_RANGE
+          - AMBIGUOUS_INTERVAL_TYPE
+          - TRANS_CHROMOSOMAL_EFFECT
 
   #: ONTOMA STEPS :##################################################################################
   ontoma:
