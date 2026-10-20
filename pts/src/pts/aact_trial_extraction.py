@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 from loguru import logger
+from openai import APIError
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
@@ -71,7 +72,15 @@ IMPORT_RUN_ID = 'import-extraction-cache'
 IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 """Run that holds the records imported from the extraction cache, and the time of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
-"""Trials in an extraction call at or above which getting none back aborts the run instead of failing them."""
+"""Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
+
+
+def _error_type_names(cls: type) -> frozenset[str]:
+    return frozenset({cls.__name__}).union(*(_error_type_names(sub) for sub in cls.__subclasses__()))
+
+
+SYSTEMIC_ERROR_TYPES = _error_type_names(APIError) | {'ServiceTierExhausted'}
+"""Workflow error types that come from the API or the transport rather than from a trial's content."""
 LLM_WORKFLOW_PATCH_LOCK = Lock()
 """Serialises temporary patches to the LLM workflow's module globals."""
 
@@ -155,7 +164,8 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) 
 
     Raises:
         ComputeAborted: If the OpenAI key cannot be read, or a shard of at least
-            ``SYSTEMIC_FAILURE_MIN_PROMPTS`` trials yields no extraction at all.
+            ``SYSTEMIC_FAILURE_MIN_PROMPTS`` trials yields no extraction at all and
+            each trial's error is in ``SYSTEMIC_ERROR_TYPES`` or was not reported.
     """
     try:
         openai_key = Path(spec.openai_key_path).read_text(encoding='utf-8').strip()
@@ -170,6 +180,7 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) 
         prompts = prompts * 2
 
     errors: dict[str, str] = {}
+    error_types: dict[str, str] = {}
     with TemporaryDirectory(prefix='llm-extraction-errors-') as errors_dir:
         extracted = _run_extraction_in_thread(
             prompts=prompts,
@@ -188,14 +199,16 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) 
                 if line.strip():
                     error = json.loads(line)
                     errors[str(error.get('id'))] = f'{error.get("error_type")}: {error.get("error_message")}'
+                    error_types[str(error.get('id'))] = str(error.get('error_type'))
     if extracted is None or extracted.is_empty():
         extracted = pl.DataFrame(schema={'id': pl.String})
 
     trials = shard.select('id').unique()
     succeeded = extracted.unique(subset='id', keep='first', maintain_order=True).join(trials, on='id', how='semi')
-    if succeeded.is_empty() and trials.height >= SYSTEMIC_FAILURE_MIN_PROMPTS:
+    systemic = all(error_types.get(i) in (None, *SYSTEMIC_ERROR_TYPES) for i in trials['id'])
+    if succeeded.is_empty() and trials.height >= SYSTEMIC_FAILURE_MIN_PROMPTS and systemic:
         examples = '; '.join(list(errors.values())[:3]) or 'no errors reported'
-        msg = f'none of {trials.height} trials returned an extraction, e.g. {examples}'
+        msg = f'none of {trials.height} trials returned an extraction, all for systemic reasons, e.g. {examples}'
         raise ComputeAborted(msg)
 
     missing = shard.height - succeeded.height

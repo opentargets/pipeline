@@ -374,16 +374,25 @@ def _model(trial_id: str) -> ClinicalReportExtractionSchema:
 class FakeLlm:
     """Stands in for the LLM workflow, remembering which trials it was asked about."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, failing: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        failing: set[str] | None = None,
+        error_type: str | None = 'ValidationError',
+    ) -> None:
+        """Trials in ``failing`` fail with ``error_type``, or with no reported error when it is None."""
         self.calls: list[list[str]] = []
         self.failing = failing or set()
+        self.error_type = error_type
         monkeypatch.setattr(aact_trial_extraction, '_run_extraction_in_thread', self.run)
 
     def run(self, **kwargs: Any) -> pl.DataFrame:
         ids = sorted({p['id'] for p in kwargs['prompts']})
         self.calls.append(ids)
         errors = [
-            {'id': i, 'error_type': 'ValidationError', 'error_message': f'bad {i}'} for i in ids if i in self.failing
+            {'id': i, 'error_type': self.error_type, 'error_message': f'bad {i}'}
+            for i in ids
+            if i in self.failing and self.error_type
         ]
         if errors:
             (Path(kwargs['errors_dir']) / 'errors.jsonl').write_text('\n'.join(json.dumps(e) for e in errors) + '\n')
@@ -496,9 +505,9 @@ def test_missing_key_aborts_without_recording_failures(monkeypatch: pytest.Monke
     assert not (tmp_path / 'v1/extraction').exists()
 
 
-def test_a_call_with_no_extractions_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_call_with_no_extractions_and_no_errors_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ids = [f'nct{i:02d}' for i in range(10)]
-    llm = FakeLlm(monkeypatch, failing=set(ids))
+    llm = FakeLlm(monkeypatch, failing=set(ids), error_type=None)
 
     task = _attempt(monkeypatch, tmp_path, _report(*ids))
 
@@ -507,6 +516,39 @@ def test_a_call_with_no_extractions_aborts(monkeypatch: pytest.MonkeyPatch, tmp_
     assert llm.calls == [ids]
     assert not (tmp_path / 'store').exists()
     assert not (tmp_path / 'v1/extraction').exists()
+
+
+def test_systemic_errors_abort(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ids = [f'nct{i:02d}' for i in range(10)]
+    llm = FakeLlm(monkeypatch, failing=set(ids), error_type='APIConnectionError')
+
+    task = _attempt(monkeypatch, tmp_path, _report(*ids))
+
+    assert task.manifest.failure_reason is not None
+    assert 'APIConnectionError: bad nct00' in task.manifest.failure_reason
+    assert llm.calls == [ids]
+    assert not (tmp_path / 'store').exists()
+    assert not (tmp_path / 'v1/extraction').exists()
+
+
+def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    bad = [f'nct{i:02d}' for i in range(1, 12)]
+    llm = FakeLlm(monkeypatch, failing=set(bad))
+    report = _report('nct00', *bad)
+
+    _run(monkeypatch, tmp_path, report)
+
+    assert llm.calls == [['nct00', *bad], bad, bad]
+    records = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String())
+    failed = records.filter(pl.col('status') == 'failed')
+    assert failed.height == 33
+    assert failed.group_by('text').len()['len'].to_list() == [3] * 11
+    assert pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')['id'].to_list() == ['nct00']
+    llm.calls.clear()
+
+    _run(monkeypatch, tmp_path, report, snapshot='v1')
+
+    assert llm.calls == []
 
 
 def test_nothing_extracted_publishes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
