@@ -43,18 +43,30 @@ if TYPE_CHECKING:
 
     from otter.config.model import Config
 
-RECORD_SCHEMA = pl.Schema({
-    'text_sha256': pl.String,
-    'text': pl.String,
-    'model': pl.String,
-    'model_revision': pl.String,
-    'output': pl.List(pl.String),
-    'status': pl.String,
-    'error': pl.String,
-    'computed_at': pl.Datetime(time_unit='us', time_zone='UTC'),
-    'run_id': pl.String,
-})
-"""Columns of every record. ``status`` is ``ok`` or ``failed``; ``output`` is null when failed."""
+
+def record_schema(output_dtype: pl.DataType) -> pl.Schema:
+    """Return the columns of every record of a store whose model output has ``output_dtype``.
+
+    ``status`` is ``ok`` or ``failed``; ``output`` is null when failed.
+    """
+    return pl.Schema({
+        'text_sha256': pl.String,
+        'text': pl.String,
+        'model': pl.String,
+        'model_revision': pl.String,
+        'output': output_dtype,
+        'status': pl.String,
+        'error': pl.String,
+        'computed_at': pl.Datetime(time_unit='us', time_zone='UTC'),
+        'run_id': pl.String,
+    })
+
+
+LIST_OUTPUT = pl.List(pl.String)
+"""Output dtype of the stores that hold a list of labels per text."""
+
+RECORD_SCHEMA = record_schema(LIST_OUTPUT)
+"""Columns of every record of a store that holds a list of strings per text."""
 
 KEY = ['text_sha256', 'model', 'model_revision']
 """Columns that identify a record."""
@@ -101,36 +113,45 @@ def _exists(uri: str, config: Config) -> bool:
     return True
 
 
-def read_records(store_uri: str, config: Config) -> pl.DataFrame:
+def read_records(store_uri: str, config: Config, output_dtype: pl.DataType = LIST_OUTPUT) -> pl.DataFrame:
     """Read every record of every finished run.
 
     Args:
         store_uri: Root of the store, an absolute URI.
         config: The otter config, used to resolve storage.
+        output_dtype: Dtype of the store's ``output`` column.
 
     Returns:
         pl.DataFrame: The records of the runs whose manifest exists, or an empty
-            frame with ``RECORD_SCHEMA`` when there are none.
+            frame with the store's record schema when there are none.
     """
     try:
         manifests = sorted(StorageHandle(f'{store_uri}/runs', config=config).glob('*/manifest.json'))
     except NotFoundError:
         manifests = []
 
+    schema = record_schema(output_dtype)
     frames = [_read_parquet(m.removesuffix('manifest.json') + 'records.parquet', config) for m in manifests]
     if not frames:
-        return pl.DataFrame(schema=RECORD_SCHEMA)
-    return pl.concat(frames).select(RECORD_SCHEMA.names()).cast(RECORD_SCHEMA)
+        return pl.DataFrame(schema=schema)
+    return pl.concat(frames).select(schema.names()).cast(schema)
 
 
-def write_run(records: pl.DataFrame, store_uri: str, run_id: str, config: Config) -> None:
+def write_run(
+    records: pl.DataFrame,
+    store_uri: str,
+    run_id: str,
+    config: Config,
+    output_dtype: pl.DataType = LIST_OUTPUT,
+) -> None:
     """Write one run: its records first, then the manifest that makes it visible.
 
     Args:
-        records: The records of the run, with the columns of ``RECORD_SCHEMA``.
+        records: The records of the run, with the columns of the store's record schema.
         store_uri: Root of the store, an absolute URI.
         run_id: Identifies the run.
         config: The otter config, used to resolve storage.
+        output_dtype: Dtype of the store's ``output`` column.
 
     Raises:
         RecordStoreError: If the run already has a manifest.
@@ -140,7 +161,8 @@ def write_run(records: pl.DataFrame, store_uri: str, run_id: str, config: Config
         msg = f'run {run_id} already exists in {store_uri}'
         raise RecordStoreError(msg)
 
-    records = records.select(RECORD_SCHEMA.names()).cast(RECORD_SCHEMA)
+    schema = record_schema(output_dtype)
+    records = records.select(schema.names()).cast(schema)
     _write_parquet(records, f'{run_uri}/records.parquet', config)
 
     models = records.select('model', 'model_revision').unique().sort('model', 'model_revision')
@@ -166,15 +188,78 @@ def _current(records: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def _compute_round(
+    todo: pl.DataFrame,
+    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+    model: str,
+    model_revision: str,
+    run_id: str,
+    schema: pl.Schema,
+) -> pl.DataFrame:
+    """Compute one round over ``todo`` and return its records."""
+    todo_texts = todo['text'].to_list()
+    try:
+        results = compute(todo_texts)
+    except Exception as exc:
+        logger.error(f'compute failed for {len(todo_texts)} texts: {exc}')
+        results = [(None, str(exc))] * len(todo_texts)
+    if len(results) != len(todo_texts):
+        msg = f'compute returned {len(results)} results for {len(todo_texts)} texts'
+        raise RecordStoreError(msg)
+
+    return pl.DataFrame(
+        {
+            'text_sha256': todo['text_sha256'],
+            'text': todo['text'],
+            'model': model,
+            'model_revision': model_revision,
+            'output': [r[0] for r in results],
+            'status': ['failed' if r[0] is None else 'ok' for r in results],
+            'error': [r[1] for r in results],
+            'computed_at': datetime.now(UTC),
+            'run_id': run_id,
+        },
+        schema=schema,
+    )
+
+
+def _compute_with_retries(
+    todo: pl.DataFrame,
+    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+    model: str,
+    model_revision: str,
+    run_id: str,
+    schema: pl.Schema,
+    max_attempts: int,
+) -> pl.DataFrame:
+    """Compute ``todo``, recomputing failures, one call per round, until each text reaches ``max_attempts``."""
+    rounds = []
+    pending = todo
+    while pending.height:
+        fresh = _compute_round(pending, compute, model, model_revision, run_id, schema)
+        rounds.append(fresh)
+        failed = fresh.filter(pl.col('status') == 'failed').select('text_sha256')
+        pending = (
+            pending
+            .join(failed, on='text_sha256')
+            .with_columns(attempts=pl.col('attempts') + 1)
+            .filter(pl.col('attempts') < max_attempts)
+        )
+    return pl.concat(rounds)
+
+
 def map_texts(
     texts: pl.Series,
-    compute: Callable[[list[str]], list[tuple[list[str] | None, str | None]]],
+    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
     store_uri: str,
     model: str,
     model_revision: str,
     run_id: str,
     config: Config,
     max_attempts: int = 3,
+    output_dtype: pl.DataType = LIST_OUTPUT,
+    allow_failures: bool = False,
+    shard_size: int | None = None,
 ) -> pl.DataFrame:
     """Return the model output for every distinct text, computing only what the store lacks.
 
@@ -182,6 +267,15 @@ def map_texts(
     failed ones numbering fewer than ``max_attempts``. All of them go to one
     ``compute`` call, with the texts distinct and sorted. If ``compute`` raises,
     every text of the call is recorded as failed with the exception text.
+
+    With ``allow_failures`` the texts that fail are recomputed in the same run,
+    one ``compute`` call per round, until their failures, earlier runs' included,
+    reach ``max_attempts``. Those still failing are left out of the result with a
+    warning.
+
+    With ``shard_size`` the texts to compute are split, in sorted order, into
+    shards of that size. Each is computed and written as the run
+    ``<run_id>-<n:04d>`` before the next starts, so a crash keeps the finished ones.
 
     Args:
         texts: The texts to map. Must not contain nulls.
@@ -193,18 +287,26 @@ def map_texts(
         run_id: Identifies the run this call writes, if it computes anything.
         config: The otter config, used to resolve storage.
         max_attempts: Failed records after which a text is no longer retried.
+        output_dtype: Dtype of the store's ``output`` column.
+        allow_failures: Whether texts that keep failing are left out instead of raising.
+        shard_size: Number of texts per run, or None for a single run.
 
     Returns:
         pl.DataFrame: ``text``, ``text_sha256`` and ``output`` per distinct text, sorted by text.
 
     Raises:
-        ValueError: If ``texts`` contains nulls.
-        RecordStoreError: If any text still has no ok record once the run is written.
+        ValueError: If ``texts`` contains nulls, or ``shard_size`` is not positive.
+        RecordStoreError: If any text still has no ok record once the run is written
+            and ``allow_failures`` is False.
     """
     if texts.null_count():
         msg = f'texts contains {texts.null_count()} null values'
         raise ValueError(msg)
+    if shard_size is not None and shard_size < 1:
+        msg = f'shard_size must be positive, got {shard_size}'
+        raise ValueError(msg)
 
+    schema = record_schema(output_dtype)
     wanted = (
         texts
         .cast(pl.String)
@@ -214,7 +316,7 @@ def map_texts(
         .with_columns(text_sha256=pl.col('text').map_elements(text_sha256, return_dtype=pl.String))
     )
 
-    existing = read_records(store_uri, config).filter(
+    existing = read_records(store_uri, config, output_dtype).filter(
         (pl.col('model') == model) & (pl.col('model_revision') == model_revision)
     )
     ok_hashes = existing.filter(pl.col('status') == 'ok').select('text_sha256').unique()
@@ -229,45 +331,33 @@ def map_texts(
         wanted
         .join(ok_hashes, on='text_sha256', how='anti')
         .join(attempts, on='text_sha256', how='left')
-        .filter(pl.col('attempts').fill_null(0) < max_attempts)
+        .with_columns(pl.col('attempts').fill_null(0))
+        .filter(pl.col('attempts') < max_attempts)
     )
     logger.info(f'{wanted.height} distinct texts, {todo.height} to compute')
 
-    fresh = pl.DataFrame(schema=RECORD_SCHEMA)
-    if todo.height:
-        todo_texts = todo['text'].to_list()
-        try:
-            results = compute(todo_texts)
-        except Exception as exc:
-            logger.error(f'compute failed for {len(todo_texts)} texts: {exc}')
-            results = [(None, str(exc))] * len(todo_texts)
-        if len(results) != len(todo_texts):
-            msg = f'compute returned {len(results)} results for {len(todo_texts)} texts'
-            raise RecordStoreError(msg)
+    shards = [todo] if shard_size is None else [todo.slice(i, shard_size) for i in range(0, todo.height, shard_size)]
+    written = [pl.DataFrame(schema=schema)]
+    for n, shard in enumerate(shards):
+        if not shard.height:
+            continue
+        shard_run_id = run_id if shard_size is None else f'{run_id}-{n:04d}'
+        if allow_failures:
+            fresh = _compute_with_retries(shard, compute, model, model_revision, shard_run_id, schema, max_attempts)
+        else:
+            fresh = _compute_round(shard, compute, model, model_revision, shard_run_id, schema)
+        write_run(fresh, store_uri, shard_run_id, config, output_dtype)
+        written.append(fresh)
 
-        fresh = pl.DataFrame(
-            {
-                'text_sha256': todo['text_sha256'],
-                'text': todo['text'],
-                'model': model,
-                'model_revision': model_revision,
-                'output': [r[0] for r in results],
-                'status': ['failed' if r[0] is None else 'ok' for r in results],
-                'error': [r[1] for r in results],
-                'computed_at': datetime.now(UTC),
-                'run_id': run_id,
-            },
-            schema=RECORD_SCHEMA,
-        )
-        write_run(fresh, store_uri, run_id, config)
-
-    current = _current(pl.concat([existing, fresh]))
+    current = _current(pl.concat([existing, *written]))
     done = wanted.join(current.filter(pl.col('status') == 'ok').select('text_sha256', 'output'), on='text_sha256')
     if done.height < wanted.height:
         missing = wanted.join(done.select('text_sha256'), on='text_sha256', how='anti')['text'].to_list()
         examples = ', '.join(repr(t) for t in missing[:MAX_EXAMPLES])
-        msg = f'{len(missing)} texts have no ok record for {model}@{model_revision}, e.g. {examples}'
-        raise RecordStoreError(msg)
+        if not allow_failures:
+            msg = f'{len(missing)} texts have no ok record for {model}@{model_revision}, e.g. {examples}'
+            raise RecordStoreError(msg)
+        logger.warning(f'{len(missing)} texts have no ok record for {model}@{model_revision}, e.g. {examples}')
 
     return done.select('text', 'text_sha256', 'output').sort('text')
 

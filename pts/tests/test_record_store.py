@@ -261,3 +261,98 @@ def test_publish_snapshot_with_a_trailing_slash_writes_single_slash_names(tmp_pa
     assert sorted(p.name for p in (tmp_path / 'snap').iterdir()) == ['data.parquet', 'metadata.json']
     assert publish_snapshot(snapshot(), f'{tmp_path}/snap', {'version': '1'}, None) is False
     assert not [u for u in uris if '//' in u.removeprefix(str(tmp_path))]
+
+
+class Crash(BaseException):
+    """Stands in for a process dying, which `map_texts` must not catch."""
+
+
+class JsonRecorder(Recorder):
+    """A compute function whose outputs are JSON strings, as an LLM extraction's are.
+
+    A text in ``fail_times`` fails that many times before it succeeds.
+    """
+
+    def __init__(self, fails=None, fail_times=None, crash_on=None) -> None:
+        super().__init__(fails)
+        self.fail_times = fail_times or {}
+        self.crash_on = crash_on
+
+    def __call__(self, texts):
+        before = self.computed
+        self.calls.append(list(texts))
+        if self.crash_on in texts:
+            raise Crash
+        return [
+            (None, 'bad text')
+            if t in self.fails or before.count(t) < self.fail_times.get(t, 0)
+            else (json.dumps({'text': t}), None)
+            for t in texts
+        ]
+
+
+def test_list_and_string_outputs_round_trip(store_uri):
+    listed = run(['a', 'b'], Recorder(), store_uri + '/list', 'r1')
+    strings = run(['a', 'b'], JsonRecorder(), store_uri + '/json', 'r1', output_dtype=pl.String)
+
+    assert listed['output'].to_list() == [['A'], ['B']]
+    assert strings['output'].to_list() == ['{"text": "a"}', '{"text": "b"}']
+    assert read_records(store_uri + '/json', None, pl.String).schema == record_store.record_schema(pl.String)
+    again = JsonRecorder()
+    assert run(['a', 'b'], again, store_uri + '/json', 'r2', output_dtype=pl.String).equals(strings)
+    assert again.calls == []
+
+
+def test_tolerated_failures_retry_in_run_then_publish_the_rest(store_uri):
+    compute = JsonRecorder(fails={'bad'})
+
+    result = run(['good', 'bad'], compute, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    assert result['text'].to_list() == ['good']
+    assert compute.calls == [['bad', 'good'], ['bad'], ['bad']]
+    again = JsonRecorder(fails={'bad'})
+    assert run(['good', 'bad'], again, store_uri, 'r2', output_dtype=pl.String, allow_failures=True).equals(result)
+    assert again.calls == []
+
+
+def test_a_later_success_in_the_same_run_counts(store_uri):
+    compute = JsonRecorder(fail_times={'a': 1})
+
+    result = run(['a', 'b'], compute, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    assert result['text'].to_list() == ['a', 'b']
+    assert compute.calls == [['a', 'b'], ['a']]
+    records = read_records(store_uri, None, pl.String)
+    assert records.filter(pl.col('text') == 'a')['status'].sort().to_list() == ['failed', 'ok']
+    assert set(records['run_id']) == {'r1'}
+
+
+def test_earlier_failures_count_toward_the_attempts_of_a_tolerant_run(store_uri):
+    with pytest.raises(RecordStoreError):
+        run(['bad'], JsonRecorder(fails={'bad'}), store_uri, 'r1', output_dtype=pl.String, max_attempts=2)
+    compute = JsonRecorder(fails={'bad'})
+
+    result = run(['bad'], compute, store_uri, 'r2', output_dtype=pl.String, allow_failures=True, max_attempts=3)
+
+    assert result.height == 0
+    assert compute.calls == [['bad'], ['bad']]
+
+
+def test_finished_shards_survive_a_crash(store_uri):
+    texts = [f't{i}' for i in range(6)]
+    with pytest.raises(Crash):
+        run(texts, JsonRecorder(crash_on='t4'), store_uri, 'r1', output_dtype=pl.String, shard_size=2)
+
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000', 'r1-0001']
+    rerun = JsonRecorder()
+    result = run(texts, rerun, store_uri, 'r2', output_dtype=pl.String, shard_size=2)
+
+    assert rerun.computed == ['t4', 't5']
+    assert result['text'].to_list() == texts
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000', 'r1-0001', 'r2-0000']
+
+
+def test_strict_store_is_unchanged(store_uri):
+    with pytest.raises(RecordStoreError):
+        run(['a', 'bad'], Recorder(fails={'bad'}), store_uri, 'r1')
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1']
