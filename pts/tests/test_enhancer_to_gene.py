@@ -197,11 +197,6 @@ def qc_contig():
     ('method', 'changes', 'expected'),
     [
         (
-            'validate_datasource_id',
-            [{'datasourceId': value} for value in ['E2G', 'OTHER', 'unknown', '', None]],
-            [[], ['UNKNOWN_PROJECT_ID'], ['UNKNOWN_PROJECT_ID'], ['UNKNOWN_PROJECT_ID'], []],
-        ),
-        (
             'validate_score',
             [{'score': value} for value in [0.6, 1.0, 0.59, 1.01, None]],
             [[], [], ['SCORE_OUTSIDE_BOUNDS'], ['SCORE_OUTSIDE_BOUNDS'], ['SCORE_OUTSIDE_BOUNDS']],
@@ -265,10 +260,10 @@ def test_qc_flags_and_idempotence(method, changes, expected):
 
 def test_qc_creates_missing_quality_controls():
     """A raw normalized frame may not contain the QC array yet."""
-    from pts.transformers.enhancer_to_gene import QualityFlag, validate_datasource_id
+    from pts.transformers.enhancer_to_gene import QualityFlag, validate_score
 
-    result = validate_datasource_id(evidence_rows({'datasourceId': 'unknown'}).drop('qualityControls')).collect()
-    assert result['qualityControls'].to_list() == [[QualityFlag.UNKNOWN_PROJECT_ID.value]]
+    result = validate_score(evidence_rows({'score': 2.0}).drop('qualityControls'), 0.6, 1.0).collect()
+    assert result['qualityControls'].to_list() == [[QualityFlag.SCORE_OUTSIDE_BOUNDS.value]]
 
 
 def test_interval_type_ambiguity_ignores_null_and_groups_null_keys():
@@ -322,7 +317,6 @@ def test_composed_qc_pipeline_and_valid_rows():
     from pts.transformers.enhancer_to_gene import (
         QualityFlag,
         validate_biosample,
-        validate_datasource_id,
         validate_id_has_unique_score,
         validate_interval_range,
         validate_interval_type,
@@ -333,7 +327,6 @@ def test_composed_qc_pipeline_and_valid_rows():
 
     result = (
         evidence_rows({}, {'score': None, 'start': 201}, {'geneId': 'unknown', 'start': 202})
-        .pipe(validate_datasource_id)
         .pipe(validate_interval_range, qc_contig())
         .pipe(validate_target, qc_target('1'))
         .pipe(validate_biosample, pl.DataFrame({'biosampleId': ['CL_1']}).lazy())

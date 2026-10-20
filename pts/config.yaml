@@ -849,7 +849,6 @@ steps:
           - SCORE_OUTSIDE_BOUNDS
           - UNKNOWN_INTERVAL_TYPE
           - AMBIGUOUS_SCORE
-          - UNKNOWN_PROJECT_ID
           - INVALID_CHROMOSOME
           - INVALID_RANGE
           - AMBIGUOUS_INTERVAL_TYPE

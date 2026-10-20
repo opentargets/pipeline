@@ -39,7 +39,6 @@ class QualityFlag(StrEnum):
     SCORE_OUTSIDE_BOUNDS = 'Score was above or below specified thresholds'
     UNKNOWN_INTERVAL_TYPE = 'Interval type is not supported'
     AMBIGUOUS_SCORE = 'Interval has a duplicate with different score'
-    UNKNOWN_PROJECT_ID = 'Project id could not be resolved to any known dataset'
     INVALID_CHROMOSOME = 'Interval chromosome was not found in contig index'
     INVALID_RANGE = 'Interval range exceeded chromosome bounds'
     AMBIGUOUS_INTERVAL_TYPE = 'Multiple interval types for the same (region, geneId) pair'
@@ -191,12 +190,6 @@ def parse_enhancer_to_gene(
     ).match_to_schema(enhancer_to_gene_schema)
 
 
-def validate_datasource_id(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag data sources other than E2G."""
-    logger.info('Validating enhancer-to-gene data sources')
-    return flag_rows(frame, pl.col('datasourceId') != E2G.datasource_id, QualityFlag.UNKNOWN_PROJECT_ID)
-
-
 def validate_interval_range(frame: pl.LazyFrame, contig: pl.LazyFrame) -> pl.LazyFrame:
     """Flag noncanonical chromosomes and bounds outside their canonical contig."""
     logger.info('Validating enhancer-to-gene chromosome bounds')
@@ -296,7 +289,6 @@ def enhancer_to_gene(
     validated = (
         read_enhancer_to_gene(sources.enhancer_to_gene)
         .pipe(parse_enhancer_to_gene, biosample_mapping, target)
-        .pipe(validate_datasource_id)
         .pipe(validate_interval_range, contig)
         .pipe(validate_target, target)
         .pipe(validate_biosample, biosample)
