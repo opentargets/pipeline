@@ -6,6 +6,7 @@ import pytest
 from loguru import logger
 
 from pts.transformers.clinical import extract_disease_entities, extract_drug_entities, ner
+from pts.transformers.clinical.ner import drug_entities_with_status, drug_ner_revision
 
 Entity = dict[str, Any]
 
@@ -181,3 +182,68 @@ def test_drug_after_biobert_batch_failure_keeps_regex_hits_and_runs_drugtemist(
     assert out.to_list() == [['xmab'], ['rescued']]
     assert pipelines[DRUGTEMIST_MODEL].calls == [['b']]
     assert warnings == ['BioBERT failed for 2 of 2 texts']
+
+
+def test_staging_ner_outputs_equal_extract_drug_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(
+        biobert={
+            'pembrolizumab 100mg': [_ent('CHEMICAL', 'Pembrolizumab')],
+            'aspirin tablet': [_ent('CHEMICAL', 'Aspirin'), _ent('DRUG', '##sodium')],
+        },
+        drugtemist={'brandname': [_ent('FARMACO', 'BrandName')]},
+    )
+    _patch_factory(monkeypatch, pipelines)
+    texts = ['pembrolizumab 100mg', 'aspirin tablet', 'brandname', 'nothing', '', 'osimertinib']
+
+    expected = extract_drug_entities(pl.Series(texts), batch_size=2).to_list()
+    actual = drug_entities_with_status(texts, batch_size=2)
+
+    assert actual == [(drugs, None) for drugs in expected]
+    assert expected[2] == ['brandname']
+
+
+def test_staging_ner_marks_texts_of_a_failed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(
+        biobert={'a': [_ent('CHEMICAL', 'aspirin')], 'c': [_ent('CHEMICAL', 'ibuprofen')]},
+        drugtemist={},
+        fail_on={'b'},
+    )
+    _patch_factory(monkeypatch, pipelines)
+
+    out = drug_entities_with_status(['a', 'b', 'c'], batch_size=1)
+
+    assert out == [(['aspirin'], None), (None, 'ner batch failed: boom'), (['ibuprofen'], None)]
+
+
+def test_staging_ner_marks_regex_hits_of_a_failed_biobert_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(biobert={}, drugtemist={}, fail_on={'xmab'})
+    _patch_factory(monkeypatch, pipelines)
+
+    out = drug_entities_with_status(['xmab', 'ok'], batch_size=1)
+
+    assert out[0] == (None, 'ner batch failed: boom')
+    assert out[1] == ([], None)
+
+
+def test_drugtemist_failure_marks_only_fallback_texts(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(biobert={'hit': [_ent('CHEMICAL', 'aspirin')]}, drugtemist={})
+    pipelines[DRUGTEMIST_MODEL] = FakePipeline({}, fail_on={'miss'})
+    _patch_factory(monkeypatch, pipelines)
+
+    out = drug_entities_with_status(['hit', 'miss', 'other'], batch_size=1)
+
+    assert out == [(['aspirin'], None), (None, 'ner batch failed: boom'), ([], None)]
+    assert pipelines[DRUGTEMIST_MODEL].calls == [['miss'], ['other']]
+
+
+def test_drug_ner_revision_changes_with_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
+    revisions = {CHEMICAL_MODEL: 'c' * 40, DRUGTEMIST_MODEL: 'd' * 40}
+
+    before = drug_ner_revision(revisions)
+    monkeypatch.setattr(ner, 'DRUG_NAME_PATTERNS', [*ner.DRUG_NAME_PATTERNS, r'\w*zumab\b'])
+    after = drug_ner_revision(revisions)
+
+    assert before.startswith(f'{"c" * 40}+{"d" * 40}+')
+    assert len(before.rsplit('+', 1)[1]) == 12
+    assert before != after
+    assert f'{CHEMICAL_MODEL}+{DRUGTEMIST_MODEL}+regex' == ner.DRUG_NER_MODEL

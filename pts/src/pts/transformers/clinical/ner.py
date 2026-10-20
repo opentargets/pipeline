@@ -5,6 +5,7 @@ Ported from OnToma's ``ontoma.ner`` (Open Targets), without Spark.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
 DISEASE_MODEL = 'alvaroalon2/biobert_diseases_ner'
 CHEMICAL_MODEL = 'alvaroalon2/biobert_chemical_ner'
 DRUGTEMIST_MODEL = 'BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist'
+
+DRUG_NER_MODEL = f'{CHEMICAL_MODEL}+{DRUGTEMIST_MODEL}+regex'
 
 DISEASE_LABELS = ['DISEASE']
 BIOBERT_LABELS = ['CHEMICAL', 'DRUG', 'MEDICATION', 'CHEM']
@@ -113,10 +116,10 @@ def _extract_with_regex(text: str, patterns: list[str]) -> set[str]:
 
 def _extract_entities_from_batch(
     texts: list[str], ner_pipeline: Callable[..., Any], label_filters: list[str]
-) -> tuple[list[set[str]], int]:
-    """Entities per text, and the number of texts in a batch that failed."""
+) -> tuple[list[set[str]], str | None]:
+    """Entities per text, and the error if the batch failed (its texts then have no entities)."""
     if not texts:
-        return [], 0
+        return [], None
     try:
         batch_entities = ner_pipeline(texts)
         if not isinstance(batch_entities[0], list):
@@ -135,8 +138,8 @@ def _extract_entities_from_batch(
             results.append(drugs)
     except Exception as e:
         logger.debug(f'ner batch failed: {e}')
-        return [set() for _ in texts], len(texts)
-    return results, 0
+        return [set() for _ in texts], str(e)
+    return results, None
 
 
 def _process_batch_tiered(
@@ -144,8 +147,10 @@ def _process_batch_tiered(
     biobert_pipeline: Callable[..., Any],
     drugtemist_pipeline: Callable[..., Any],
     batch_size: int,
-) -> tuple[list[list[str]], int, int, int]:
+) -> tuple[list[list[str]], list[str | None], int, int, int]:
+    """Drug names per text, the error of each text whose model batch failed (else None), and the failure counts."""
     all_results: list[list[str] | None] = []
+    errors: list[str | None] = [None] * len(texts)
     fallback_texts: list[str] = []
     fallback_indices: list[int] = []
     biobert_failures = 0
@@ -154,8 +159,10 @@ def _process_batch_tiered(
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]
         regex_results = [_extract_with_regex(text, DRUG_NAME_PATTERNS) if text else set() for text in batch]
-        biobert_results, failed = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS)
-        biobert_failures += failed
+        biobert_results, error = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS)
+        if error is not None:
+            biobert_failures += len(batch)
+            errors[start : start + len(batch)] = [error] * len(batch)
         for offset, (regex_drugs, biobert_drugs, text) in enumerate(
             zip(regex_results, biobert_results, batch, strict=True)
         ):
@@ -173,13 +180,35 @@ def _process_batch_tiered(
         for start in range(0, len(fallback_texts), batch_size):
             batch = fallback_texts[start : start + batch_size]
             indices = fallback_indices[start : start + batch_size]
-            drugtemist_results, failed = _extract_entities_from_batch(batch, drugtemist_pipeline, DRUGTEMIST_LABELS)
-            drugtemist_failures += failed
+            drugtemist_results, error = _extract_entities_from_batch(batch, drugtemist_pipeline, DRUGTEMIST_LABELS)
+            if error is not None:
+                drugtemist_failures += len(batch)
+                for index in indices:
+                    errors[index] = errors[index] or error
             for index, drugs in zip(indices, drugtemist_results, strict=True):
                 all_results[index] = sorted(drugs)
 
     results = [r if r is not None else [] for r in all_results]
-    return results, biobert_failures, drugtemist_failures, len(fallback_texts)
+    return results, errors, biobert_failures, drugtemist_failures, len(fallback_texts)
+
+
+def drug_ner_revision(revisions: dict[str, str]) -> str:
+    """Revision of the drug NER output: both model revisions and a digest of the regex patterns."""
+    patterns = hashlib.sha256('\n'.join(DRUG_NAME_PATTERNS).encode()).hexdigest()[:12]
+    return f'{revisions[CHEMICAL_MODEL]}+{revisions[DRUGTEMIST_MODEL]}+{patterns}'
+
+
+def drug_entities_with_status(texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:
+    """Drug names per text as ``extract_drug_entities`` finds them, or ``(None, error)`` where a model batch failed."""
+    if not texts:
+        return []
+    biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
+    drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
+    extracted, errors, *_ = _process_batch_tiered(texts, biobert, drugtemist, batch_size)
+    return [
+        (None, f'ner batch failed: {error}') if error is not None else (drugs, None)
+        for drugs, error in zip(extracted, errors, strict=True)
+    ]
 
 
 def extract_drug_entities(labels: pl.Series, batch_size: int) -> pl.Series:
@@ -190,7 +219,7 @@ def extract_drug_entities(labels: pl.Series, batch_size: int) -> pl.Series:
         logger.info(f'extracting drug entities from {len(distinct)} distinct texts (batch_size={batch_size})')
         biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
         drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
-        extracted, biobert_failed, drugtemist_failed, fallback = _process_batch_tiered(
+        extracted, _, biobert_failed, drugtemist_failed, fallback = _process_batch_tiered(
             distinct, biobert, drugtemist, batch_size
         )
         results = dict(zip(distinct, extracted, strict=True))
