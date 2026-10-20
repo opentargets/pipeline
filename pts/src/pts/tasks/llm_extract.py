@@ -30,7 +30,7 @@ from otter.manifest.model import Artifact
 from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import TaskValidationError
+from otter.util.errors import TaskRunError, TaskValidationError
 from pydantic import BaseModel
 
 from pts.record_store import map_texts, publish_snapshot
@@ -144,6 +144,9 @@ class LlmExtract(Task):
             shard_size=self.spec.shard_size,
         )
         extractions = aact_trial_extraction.extractions_from_records(records, prompts, model_cls)
+        if prompts.height and extractions.is_empty():
+            msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
+            raise TaskRunError(msg)
 
         destination = StorageHandle(self.spec.destination['extraction'], config=config).absolute
         published = publish_snapshot(

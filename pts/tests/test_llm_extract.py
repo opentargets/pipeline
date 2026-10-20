@@ -382,15 +382,22 @@ class FakeLlm:
     def run(self, **kwargs: Any) -> pl.DataFrame:
         ids = sorted({p['id'] for p in kwargs['prompts']})
         self.calls.append(ids)
+        errors = [
+            {'id': i, 'error_type': 'ValidationError', 'error_message': f'bad {i}'} for i in ids if i in self.failing
+        ]
+        if errors:
+            (Path(kwargs['errors_dir']) / 'errors.jsonl').write_text('\n'.join(json.dumps(e) for e in errors) + '\n')
         return _models_to_dataframe([_model(i) for i in ids if i not in self.failing])
 
 
-def _run(
+def _attempt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
 ) -> LlmExtract:
+    """Run the task and validate it if the run succeeded; the failure reason is left on the manifest."""
     monkeypatch.setattr(aact_trial_extraction, 'trial_report', lambda *args: report)
     key = tmp_path / 'openai-key'
     key.write_text('test-key')
+    spec.setdefault('openai_key_path', str(key))
     context = TaskContext(
         config=Config(step='test', steps=['test'], work_path=tmp_path / 'work'), scratchpad=Scratchpad()
     )
@@ -402,13 +409,20 @@ def _run(
             destination={'extraction': str(tmp_path / snapshot / 'extraction')},
             store_uri=str(tmp_path / 'store'),
             snapshot=snapshot,
-            openai_key_path=str(key),
             **spec,
         ),
         context,
     )
     asyncio.run(task.run())
-    asyncio.run(task.validate())
+    if task.manifest.failure_reason is None:
+        asyncio.run(task.validate())
+    return task
+
+
+def _run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
+) -> LlmExtract:
+    task = _attempt(monkeypatch, tmp_path, report, snapshot, **spec)
 
     # the `report` decorator swallows exceptions, so surface the failure reason
     assert task.manifest.failure_reason is None, task.manifest.failure_reason
@@ -448,6 +462,64 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'failed': 0, 'published': True}
 
 
+def _records(prompts: pl.DataFrame, outputs: dict[str, str]) -> pl.DataFrame:
+    return prompts.select(text='prompt', text_sha256='prompt_sha256', output=pl.col('id').replace_strict(outputs))
+
+
+def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    records = _records(prompts, {'nct1': _model('nct1').model_dump_json(), 'nct2': '{"id": "nct2"}'})
+
+    with pytest.raises(ValueError, match='nct2'):
+        aact_trial_extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+
+
+def test_prompt_hash_follows_its_trial_when_a_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')})
+    monkeypatch.setattr(aact_trial_extraction, '_models_to_dataframe', lambda models: _models_to_dataframe(models[1:]))
+
+    extractions = aact_trial_extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+
+    assert extractions.select('id', 'prompt_sha256').rows() == [('nct2', prompts['prompt_sha256'][1])]
+
+
+def test_missing_key_aborts_without_recording_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    llm = FakeLlm(monkeypatch)
+
+    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(tmp_path / 'no-key'))
+
+    assert task.manifest.failure_reason is not None
+    assert 'no-key' in task.manifest.failure_reason
+    assert llm.calls == []
+    assert not (tmp_path / 'store').exists()
+    assert not (tmp_path / 'v1/extraction').exists()
+
+
+def test_a_call_with_no_extractions_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ids = [f'nct{i:02d}' for i in range(10)]
+    llm = FakeLlm(monkeypatch, failing=set(ids))
+
+    task = _attempt(monkeypatch, tmp_path, _report(*ids))
+
+    assert task.manifest.failure_reason is not None
+    assert 'none of 10 trials' in task.manifest.failure_reason
+    assert llm.calls == [ids]
+    assert not (tmp_path / 'store').exists()
+    assert not (tmp_path / 'v1/extraction').exists()
+
+
+def test_nothing_extracted_publishes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    llm = FakeLlm(monkeypatch, failing={'nct1', 'nct2'})
+
+    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'))
+
+    assert task.manifest.failure_reason is not None
+    assert 'no trial' in task.manifest.failure_reason
+    assert llm.calls == [['nct1', 'nct2'], ['nct1', 'nct2'], ['nct1', 'nct2']]
+    assert not (tmp_path / 'v1/extraction').exists()
+
+
 def test_failed_trial_is_left_out_and_not_retried_on_rerun(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, logged: list[str]
 ) -> None:
@@ -461,6 +533,8 @@ def test_failed_trial_is_left_out_and_not_retried_on_rerun(
     assert published['id'].to_list() == ['nct1']
     assert task.stats['failed'] == 1
     assert any(m.startswith('1 of 2 trials (50.0%) have no extraction') for m in logged)
+    failed = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String()).filter(pl.col('status') == 'failed')
+    assert failed['error'].to_list() == ['ValidationError: bad nct2'] * 3
     snapshot = (tmp_path / 'v1/extraction/data.parquet').stat().st_mtime_ns
     llm.calls.clear()
 
@@ -520,6 +594,16 @@ def test_import_runs_once(tmp_path: Path) -> None:
     assert [o['id'] for o in outputs] == ['nct1', 'nct2']
     assert not {'cache_key', 'prompt_sha256', 'computed_at'} & set(outputs[0])
     assert ClinicalReportExtractionSchema.model_validate(outputs[0]) == _model('nct1')
+
+
+def test_import_refuses_a_cache_of_another_schema(tmp_path: Path) -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('nct1'), 'digest')
+    cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), 'other-digest')
+
+    with pytest.raises(ValueError, match='other-digest'):
+        import_extraction_cache(cache_uri, prompts, str(tmp_path / 'store'), 'digest', cast(Any, None))
+
+    assert not (tmp_path / 'store').exists()
 
 
 def test_a_changed_prompt_is_re_extracted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -79,6 +79,10 @@ class RecordStoreError(Exception):
     """A record store operation could not be completed."""
 
 
+class ComputeAborted(Exception):  # noqa: N818
+    """Raised by a compute to stop the run without recording any text of the call as failed."""
+
+
 class SnapshotConflictError(Exception):
     """A snapshot already exists at the location with different content."""
 
@@ -200,6 +204,8 @@ def _compute_round(
     todo_texts = todo['text'].to_list()
     try:
         results = compute(todo_texts)
+    except ComputeAborted:
+        raise
     except Exception as exc:
         logger.error(f'compute failed for {len(todo_texts)} texts: {exc}')
         results = [(None, str(exc))] * len(todo_texts)
@@ -266,7 +272,9 @@ def map_texts(
     A text is computed when it has no record for this model and revision, or only
     failed ones numbering fewer than ``max_attempts``. All of them go to one
     ``compute`` call, with the texts distinct and sorted. If ``compute`` raises,
-    every text of the call is recorded as failed with the exception text.
+    every text of the call is recorded as failed with the exception text, unless
+    it raises :py:class:`ComputeAborted`, which propagates and records nothing
+    of that call.
 
     With ``allow_failures`` the texts that fail are recomputed in the same run,
     one ``compute`` call per round, until their failures, earlier runs' included,
@@ -298,6 +306,7 @@ def map_texts(
         ValueError: If ``texts`` contains nulls, or ``shard_size`` is not positive.
         RecordStoreError: If any text still has no ok record once the run is written
             and ``allow_failures`` is False.
+        ComputeAborted: If ``compute`` raises it. Shards written before stay written.
     """
     if texts.null_count():
         msg = f'texts contains {texts.null_count()} null values'

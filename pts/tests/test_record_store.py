@@ -11,6 +11,7 @@ import pytest
 from pts import record_store
 from pts.record_store import (
     RECORD_SCHEMA,
+    ComputeAborted,
     RecordStoreError,
     SnapshotConflictError,
     map_texts,
@@ -350,6 +351,22 @@ def test_finished_shards_survive_a_crash(store_uri):
     assert rerun.computed == ['t4', 't5']
     assert result['text'].to_list() == texts
     assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000', 'r1-0001', 'r2-0000']
+
+
+def test_compute_aborted_writes_nothing_for_that_call(store_uri):
+    texts = [f't{i}' for i in range(4)]
+
+    def abort_on_t2(batch):
+        if 't2' in batch:
+            msg = 'no key'
+            raise ComputeAborted(msg)
+        return [(json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='no key'):
+        run(texts, abort_on_t2, store_uri, 'r1', output_dtype=pl.String, allow_failures=True, shard_size=2)
+
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000']
+    assert read_records(store_uri, None, pl.String)['text'].to_list() == ['t0', 't1']
 
 
 def test_strict_store_is_unchanged(store_uri):

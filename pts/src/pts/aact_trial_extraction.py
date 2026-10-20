@@ -21,10 +21,10 @@ import polars as pl
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
-from pts.record_store import text_sha256, write_run
+from pts.record_store import ComputeAborted, text_sha256, write_run
 from pts.transformers.clinical import (
     build_prompts,
     extract_aact_clinical_report,
@@ -70,6 +70,8 @@ EXTRACTION_MODEL = 'aact_llm_extraction'
 IMPORT_RUN_ID = 'import-extraction-cache'
 IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 """Run that holds the records imported from the extraction cache, and the time of those cached without one."""
+SYSTEMIC_FAILURE_MIN_PROMPTS = 10
+"""Trials in an extraction call at or above which getting none back aborts the run instead of failing them."""
 LLM_WORKFLOW_PATCH_LOCK = Lock()
 """Serialises temporary patches to the LLM workflow's module globals."""
 
@@ -144,42 +146,63 @@ def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
     )
 
 
-def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) -> pl.DataFrame:
-    """Run the LLM over one shard and return a row per trial it extracted.
+def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
+    """Run the LLM over one shard and return a row per trial it extracted, and the errors of the rest.
 
     ``run_extraction`` returns only what succeeded and logs the rest, so
-    trials the model failed on are simply absent from the result.
+    trials the model failed on are simply absent from the rows. Their errors,
+    ``<error_type>: <error_message>`` by trial id, are those the workflow wrote.
+
+    Raises:
+        ComputeAborted: If the OpenAI key cannot be read, or a shard of at least
+            ``SYSTEMIC_FAILURE_MIN_PROMPTS`` trials yields no extraction at all.
     """
+    try:
+        openai_key = Path(spec.openai_key_path).read_text(encoding='utf-8').strip()
+    except OSError as exc:
+        msg = f'cannot read the OpenAI key at {spec.openai_key_path}: {exc}'
+        raise ComputeAborted(msg) from exc
+
     prompts = shard.select('id', 'prompt').to_dicts()
     if len(prompts) == 1:
         # run_extraction treats a single prompt as interactive inspect mode
         # and returns None, so never hand it exactly one
         prompts = prompts * 2
 
+    errors: dict[str, str] = {}
     with TemporaryDirectory(prefix='llm-extraction-errors-') as errors_dir:
         extracted = _run_extraction_in_thread(
             prompts=prompts,
             model_class=spec.model_class,
             system_prompt_path=system_prompt_path,
             model=spec.model,
-            openai_key=Path(spec.openai_key_path).read_text(encoding='utf-8').strip(),
+            openai_key=openai_key,
             service_tier=spec.service_tier,
             concurrency=spec.concurrency,
             max_retries=spec.max_retries,
             errors_dir=errors_dir,
         )
+        error_path = Path(errors_dir) / 'errors.jsonl'
+        if error_path.exists():
+            for line in error_path.read_text(encoding='utf-8').splitlines():
+                if line.strip():
+                    error = json.loads(line)
+                    errors[str(error.get('id'))] = f'{error.get("error_type")}: {error.get("error_message")}'
     if extracted is None or extracted.is_empty():
         extracted = pl.DataFrame(schema={'id': pl.String})
 
-    succeeded = extracted.unique(subset='id', keep='first', maintain_order=True).join(
-        shard.select('id').unique(), on='id', how='semi'
-    )
+    trials = shard.select('id').unique()
+    succeeded = extracted.unique(subset='id', keep='first', maintain_order=True).join(trials, on='id', how='semi')
+    if succeeded.is_empty() and trials.height >= SYSTEMIC_FAILURE_MIN_PROMPTS:
+        examples = '; '.join(list(errors.values())[:3]) or 'no errors reported'
+        msg = f'none of {trials.height} trials returned an extraction, e.g. {examples}'
+        raise ComputeAborted(msg)
 
     missing = shard.height - succeeded.height
     if missing:
         logger.warning(f'{missing} of {shard.height} trials in this shard returned no extraction')
 
-    return succeeded
+    return succeeded, errors
 
 
 def extraction_compute(
@@ -188,7 +211,7 @@ def extraction_compute(
     """Return the record store compute that extracts the trials of a list of prompts.
 
     Each prompt maps to the JSON of its trial's extraction, or to a failure
-    when the trial returned none.
+    carrying the workflow's error for the trial, ``no extraction`` if it gave none.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
 
@@ -196,8 +219,11 @@ def extraction_compute(
         shard = pl.DataFrame(
             {'id': [ids[t] for t in texts], 'prompt': texts}, schema={'id': pl.String, 'prompt': pl.String}
         )
-        rows = {row['id']: row for row in extract(shard, spec, system_prompt_path).to_dicts()}
-        return [(json.dumps(rows[i]), None) if i in rows else (None, 'no extraction') for i in shard['id']]
+        extracted, errors = extract(shard, spec, system_prompt_path)
+        rows = {row['id']: row for row in extracted.to_dicts()}
+        return [
+            (json.dumps(rows[i]), None) if i in rows else (None, errors.get(i, 'no extraction')) for i in shard['id']
+        ]
 
     return compute
 
@@ -210,16 +236,29 @@ def extractions_from_records(
     Args:
         records: ``text`` and ``output`` per prompt, as :py:func:`pts.record_store.map_texts` returns them.
         prompts: Output of :py:func:`prompts_for`.
-        model_class: The model each output is validated against.
+        model_class: The model each output is validated against. It has an ``id`` field.
 
     Returns:
         pl.DataFrame: One row per extracted trial: the model's fields, then ``prompt_sha256``.
+
+    Raises:
+        ValueError: If a stored output does not validate, naming its trial.
     """
     joined = records.join(
         prompts.select('id', 'prompt', 'prompt_sha256'), left_on='text', right_on='prompt', maintain_order='left'
     )
-    extractions = _models_to_dataframe([model_class.model_validate_json(output) for output in joined['output']])
-    return extractions.with_columns(id=joined['id'], prompt_sha256=joined['prompt_sha256'])
+    models = []
+    for trial_id, output in joined.select('id', 'output').iter_rows():
+        try:
+            models.append(model_class.model_validate_json(output))
+        except ValidationError as exc:
+            msg = f'stored extraction of {trial_id} does not validate against {model_class.__name__}: {exc}'
+            raise ValueError(msg) from exc
+    extractions = _models_to_dataframe(models)
+    if extractions.is_empty():
+        return pl.DataFrame(schema={'id': pl.String, 'prompt_sha256': pl.String})
+    hashes = joined.select('id', 'prompt_sha256').unique(subset='id', keep='first', maintain_order=True)
+    return extractions.join(hashes, on='id', how='left', maintain_order='left')
 
 
 def import_extraction_cache(
@@ -241,7 +280,14 @@ def import_extraction_cache(
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
+
+    Raises:
+        ValueError: If ``cache_uri`` is not the namespace of ``schema_digest``.
     """
+    if not cache_uri.rstrip('/').endswith(f'/{schema_digest}'):
+        msg = f'{cache_uri} is not the extraction cache namespace of schema {schema_digest}'
+        raise ValueError(msg)
+
     try:
         StorageHandle(f'{store_uri}/runs/{IMPORT_RUN_ID}/manifest.json', config=config).read_text()
     except NotFoundError:
