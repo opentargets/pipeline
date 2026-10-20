@@ -73,6 +73,10 @@ jobs:
         with:
           version: '0.12.24'
           prune-cache: true # v9 flipped the default; keep the cache free of pre-built wheels
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Sync dependencies
         working-directory: pts
