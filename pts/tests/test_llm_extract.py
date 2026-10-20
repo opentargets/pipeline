@@ -18,7 +18,12 @@ from pts import aact_trial_extraction
 from pts.aact_trial_extraction import _run_extraction_in_thread
 from pts.result_cache import METADATA_SCHEMA, cache_key, cached_map, read_cache, write_cache
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
-from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow, parse_batch_results
+from pts.transformers.clinical import (
+    ClinicalReportExtractionSchema,
+    extract_aact_clinical_report,
+    llm_workflow,
+    parse_batch_results,
+)
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 
 
@@ -365,6 +370,39 @@ def _old_cache(tmp_path: Path, digest: str, ids: list[str], prompts: list[str | 
     rows = pl.DataFrame(data, schema_overrides={'computed_at': METADATA_SCHEMA['computed_at']})
     write_cache(rows, uri, cast(Any, None), 'old')
     return uri
+
+
+def test_prompts_are_independent_of_row_order() -> None:
+    studies = pl.DataFrame({
+        'nct_id': ['n1', 'n2'],
+        'study_type': ['INTERVENTIONAL'] * 2,
+        'phase': ['PHASE2'] * 2,
+        'official_title': ['t1', 't2'],
+    })
+    drugs = [f'drug{i}' for i in range(12)]
+    interventions = pl.DataFrame({
+        'nct_id': ['n1'] * 12 + ['n2'] * 3,
+        'intervention_type': ['DRUG'] * 15,
+        'name': [*drugs, 'x', 'y', 'z'],
+    })
+    conditions = pl.DataFrame({'nct_id': ['n1', 'n2'] * 2, 'downcase_name': ['a', 'b', 'c', 'd']})
+    summaries = pl.DataFrame({'nct_id': ['n1', 'n2'], 'description': ['s1', 's2']})
+
+    def prompts(seed: int) -> pl.DataFrame:
+        report = extract_aact_clinical_report(
+            studies=studies.sample(fraction=1, shuffle=True, seed=seed),
+            interventions=interventions.sample(fraction=1, shuffle=True, seed=seed),
+            conditions=conditions.sample(fraction=1, shuffle=True, seed=seed),
+            additional_metadata=[summaries.sample(fraction=1, shuffle=True, seed=seed)],
+        )
+        return aact_trial_extraction.prompts_for(report.df, 'digest').sort('id')
+
+    first = prompts(1)
+    for seed in (2, 3, 4):
+        again = prompts(seed)
+        assert again['prompt'].to_list() == first['prompt'].to_list()
+        assert again['prompt_sha256'].to_list() == first['prompt_sha256'].to_list()
+        assert again['cache_key'].to_list() == first['cache_key'].to_list()
 
 
 def test_prompts_for_keys_on_trial_schema_and_prompt() -> None:

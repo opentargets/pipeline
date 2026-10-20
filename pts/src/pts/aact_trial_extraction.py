@@ -117,6 +117,10 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
 
 def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
     """Render one prompt per trial and derive its cache key."""
+    if 'drugs' in report.columns:
+        report = report.with_columns(
+            pl.col('drugs').list.eval(pl.element().sort_by(pl.element().struct.field('drugFromSource')))
+        )
     prompts = build_prompts(report, trial_fields=TRIAL_FIELDS)
 
     return (
