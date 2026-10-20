@@ -37,10 +37,12 @@ gs://aact_data/store/drug_entities/            # record store, shared across AAC
 
 The cache sits outside the version directory on purpose. Each response schema
 has its own cache directory, named by the SHA-256 digest of its JSON schema.
-Within that directory, rows are keyed on the trial ID and schema digest, so an
-accepted extraction is reused across AACT snapshots. The rendered prompt hash
-is retained as audit metadata. The model and system instructions are
-operational choices and are not part of the key.
+Within that directory, rows are keyed on the trial ID, the schema digest and
+the SHA-256 hash of the rendered prompt, so an accepted extraction is reused
+across AACT snapshots for as long as the text the LLM reads is unchanged. The
+model and system instructions are operational choices and are not part of the
+key. Prompts render deterministically, so the same trial text always gives the
+same hash.
 
 ## Preprocessing
 
@@ -48,7 +50,8 @@ operational choices and are not part of the key.
 
 The **aact_trial_extraction.py** dag contains the following steps:
 
-1. `pis_aact` — downloads the monthly archive to `input/aact.zip`.
+1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and stages
+   the three Hugging Face models under `input/models/`.
 2. `pts_aact_trial_extraction` — builds one prompt per trial and sends the ones
    that are not already in the cache to the OpenAI Responses API. It restores
    and reads the required AACT tables inline through the shared PTS PostgreSQL
@@ -79,6 +82,46 @@ texts as the snapshots `gs://aact_data/<aact_version>/{stop_reasons,drug_entitie
 each a `data.parquet` plus a `metadata.json` written last. Snapshots are
 write-once: a rerun that would change a published one is refused.
 
+### Already staged versions
+
+Snapshots are write-once per AACT version. Rerunning the extraction for a
+version whose `stop_reasons/` and `drug_entities/` snapshots already exist, for
+example to fill in trials that failed, produces new drug labels. The snapshot
+would change, so `pts_aact_trial_models` refuses to publish it
+(`SnapshotConflictError`), and a release on that version would fail with
+"N aact drug labels not staged".
+
+To recover, delete both snapshot directories of that version
+(`gs://aact_data/<aact_version>/stop_reasons/` and `.../drug_entities/`), then
+rerun `pts_aact_trial_models`. The store keeps every computed record, so only
+the texts it has not seen are computed.
+
+### Model revision bumps
+
+Bumping `stop_reasons_model_revision`, `biobert_chemical_ner_revision` or
+`drugtemist_ner_revision` in `pis/config.yaml` must go together with a new
+`aact_version`, staged before the release runs. Restaging an already-published
+version with new revisions is refused, and the release's revision check fails
+on a mismatch between the staged snapshot and the release models.
+
+### Rollout checklist
+
+To move the unified pipeline onto the staged models, in order:
+
+1. Cut a pts release whose image contains the `trial_models` task (the image is
+   built with the `nlp` extra, as `pts/Dockerfile` already does) and bump
+   `pts_version`, and `pis_version` since the pis `aact` step changed, in
+   `orchestration/src/orchestration/dags/config/aact_trial_extraction.yaml`.
+2. Copy the release NER cache (`ner_cache.parquet`, currently staged for
+   releases from
+   `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/`)
+   to a GCS path and set `seed_ner_cache` on the `aact_trial_models` step for
+   the first run only. Without it the first run computes drug NER for every
+   label, about 57.5k, which takes about an hour.
+3. Trigger the DAG for the `aact_version` pinned in `pis/config.yaml` and check
+   that both snapshots exist.
+4. Only then move the unified pipeline onto this pts and pis.
+
 The OpenAI key is fetched from Secret Manager onto the VM and mounted into the
 container.
 
@@ -89,9 +132,10 @@ primary indications and background conditions, and the investigated, comparator
 and supportive drugs, each with synonyms and dosages.
 
 Only trials that are not already in the cache are sent to the model. The cache
-key hashes the `trial ID` and the `JSON schema` the response is validated
-against. Changing AACT text, the model or system instructions
-therefore does not re-extract accepted results; changing the schema does.
+key hashes the `trial ID`, the `JSON schema` the response is validated against
+and the rendered prompt. A trial is therefore re-extracted when the text the
+LLM reads changes, or when the schema does. Changing the model or system
+instructions does not re-extract accepted results.
 
 Only results are cached. A trial the model failed on has no row, so it is
 indistinguishable from one never attempted and the next run tries it again.
@@ -110,7 +154,7 @@ Earlier OpenAI Batch API output can be imported once by setting the optional
 `legacy_batch_results` field on `llm_extract` to a directory containing the
 `*_output.jsonl` files. Set `legacy_import_only: true` for the first run. The
 task parses valid responses, matches them to the current prompts, and seeds the
-shared cache using the current trial-and-schema keys without making API calls.
+shared cache using the current trial, schema and prompt keys without making API calls.
 Rate-limited, malformed, and unmatched responses remain cache misses. Inspect
 the migration counts, then remove both migration fields and run the DAG
 normally; only the remaining misses are sent to the configured model.
@@ -144,6 +188,14 @@ rather than being combined with partially populated AACT data.
 
 - Add `pts_aact_trial_models`, the record store and the snapshots. `pis_aact`
   now also stages the models under `input/models/`.
+- The extraction cache key is now the trial ID, the schema digest and the
+  prompt hash, so a trial is re-extracted when the text the LLM reads changes.
+  Model and system-prompt changes still do not invalidate. Prompts render
+  deterministically.
+- A one-off migration rekeys pre-migration cache rows (old two-part key) onto
+  the current prompt's hash and key, so it re-extracts nothing.
+- Document the write-once snapshot recovery, model revision bumps and the
+  rollout checklist.
 
 ### 2026-10-19
 
