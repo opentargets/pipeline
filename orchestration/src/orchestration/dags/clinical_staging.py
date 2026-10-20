@@ -1,33 +1,18 @@
-"""DAG that extracts structured drug and disease evidence from AACT clinical trials.
+"""DAG that stages every clinical_report input that needs a model or an LLM.
 
-This runs outside the release. It downloads the pinned AACT monthly archive and
-asks an LLM to read every trial it has not read before, then runs the stop-reasons
-and drug NER models over the texts of the trials, publishing the results to
-``gs://aact_data/<aact_version>`` for ``unified_pipeline`` to copy in.
+This runs outside the release. For each source — the AACT monthly archive and the
+clinical mining inputs (TTD, EMA, PMDA) — it runs the LLM extraction and the NER
+and stop-reason models, and publishes write-once, revision-tagged snapshots under
+``gs://clinical_staging/<source>/<version>`` for ``unified_pipeline`` to copy in.
 
 The handoff to the release is the same one every ingestion pipeline here uses:
 a version-pinned path that a human names in ``pis/config.yaml``. There is no
-Airflow dependency between the two, deliberately.
+Airflow dependency between the two, deliberately. If a release pins a version
+that was never staged, its copy fails on a missing path.
 
-The two pin their AACT versions independently. This pipeline can run ahead —
-extracting each monthly archive as it lands keeps the cache warm and makes the
-next release cheap — while a release moves onto a new archive only when someone
-bumps it, and several releases can share one. If a release ever pins an archive
-that was never extracted, its copy fails on a missing path, which is a better
-outcome than quietly reading the wrong snapshot.
-
-The cache reuses an accepted extraction for the same trial ID, response schema
-and rendered prompt. A new AACT archive therefore pays only for new trials,
-trials whose text changed and earlier failures. Changes to the model or the
-system prompt do not invalidate accepted results; changing the response schema
-starts a separate cache.
-See :py:mod:`pts.result_cache`.
-
-The model step (``pts_aact_trial_models``) keeps a record store under
-``gs://aact_data/store`` keyed on the text, model and model revision, so a new
-AACT archive only runs the models over texts it has not seen. Each run also
-writes write-once ``stop_reasons`` and ``drug_entities`` snapshots under the
-version directory, which the release copies.
+Record stores under ``gs://clinical_staging/store`` are keyed on the text, model
+and model revision, so a new version only runs the models over texts not seen
+before. See ``orchestration/docs/datasources/clinical_staging/README.md``.
 """
 
 from __future__ import annotations
@@ -40,7 +25,7 @@ from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import DAG, chain, task_group
 from airflow.task.trigger_rule import TriggerRule
 
-from orchestration.dags.config.aact_trial_extraction import AactTrialExtractionConfig
+from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
 from orchestration.operators.gcs import UploadStringOperator
 from orchestration.utils import resource_name, strhash, to_yaml
@@ -51,19 +36,19 @@ if TYPE_CHECKING:
     from typing import Any
 
 with DAG(
-    dag_id='aact_trial_extraction',
-    description='Open Targets — AACT clinical trial LLM extraction',
+    dag_id='clinical_staging',
+    description='Open Targets — clinical staging',
     default_args=shared_dag_args,
     catchup=False,
     schedule=None,
     user_defined_filters={'strhash': strhash},
-    tags=['aact_trial_extraction', 'preprocessing'],
+    tags=['clinical_staging', 'preprocessing'],
 ) as dag:
     logger = logging.getLogger(__name__)
-    config = AactTrialExtractionConfig()
+    config = ClinicalStagingConfig()
     steps: dict[str, dict[str, Any]] = {}  # registry of tasks, used to build dependencies
 
-    logger.info(f'aact version {config.aact_version}, publishing to {config.snapshot_uri}')
+    logger.info(f'aact {config.aact_version}, clinical_mining {config.clinical_mining_version}, bucket {config.bucket}')
 
     # ==============================================================================================
     # Every step follows the same shape, whether it is a PIS or a PTS one:
@@ -83,7 +68,7 @@ with DAG(
     for step_name in config.steps():
 
         @task_group(group_id=step_name)
-        def extraction_step(step_name: str) -> None:
+        def staging_step(step_name: str) -> None:
             stage, step = step_name.split('_', 1)
             step_definition = config.step_definition(step_name)
 
@@ -128,7 +113,7 @@ with DAG(
             chain(t, e)
             steps[step_name] = {'start': u, 'end': e}
 
-        extraction_step(step_name)
+        staging_step(step_name)
 
     # ==============================================================================================
     # After creating all the tasks, we tie them together by creating dependencies.

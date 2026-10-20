@@ -1,4 +1,4 @@
-"""Configuration class for the AACT trial extraction pipeline. Mirror of `unified_pipeline.py`.
+"""Configuration class for the clinical staging pipeline. Mirror of `unified_pipeline.py`.
 
 Required to initialise PIS and PTS steps.
 """
@@ -16,31 +16,32 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-class AactTrialExtractionConfig:
-    """Configuration for the AACT trial extraction pipeline.
+class ClinicalStagingConfig:
+    """Configuration for the clinical staging pipeline.
 
     The pipeline reuses the PIS and PTS applications rather than introducing a
     third one, so this class does what
     :py:class:`~orchestration.dags.config.unified_pipeline.UnifiedPipelineConfig`
     does — load each application's own config and point its ``release_uri`` at
-    the run's destination — for the two steps this pipeline needs.
+    the run's destination — for the steps this pipeline needs.
 
-    The destination is ``gs://aact_data/<aact_version>``. The preprocessing and
-    release DAGs use the same archive version; the release consumes the exact
-    archive and extraction published here.
+    Every step belongs to a source, ``aact`` or ``clinical_mining``, and writes
+    under ``gs://clinical_staging/<source>/<version>``.
     """
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
         config_path = Path(__file__).parent
 
-        conf = AppConfig.from_file(file_path=config_path / 'aact_trial_extraction.yaml')
+        conf = AppConfig.from_file(file_path=config_path / 'clinical_staging.yaml')
         self._steps = conf.get('steps')
 
         self.bucket: str = conf.get('bucket')
-        """Bucket the snapshots and the cache live in."""
+        """Bucket the snapshots and the record stores live in."""
         self.aact_version: str = conf.get('aact_version')
-        """The AACT monthly archive this run extracts."""
+        """The AACT monthly archive this run stages."""
+        self.clinical_mining_version: str = conf.get('clinical_mining_version')
+        """The clinical mining inputs this run stages."""
         self.machine_type: str = conf.get('machine_type')
         """Default machine type. The extraction is IO bound, not CPU bound; a step may override it."""
         self.disk_size: int = conf.get('disk_size')
@@ -48,35 +49,34 @@ class AactTrialExtractionConfig:
         self.boot_disk_size: int = conf.get('boot_disk_size')
         """Boot disk size in GB. Sized for the PIS and PTS container images."""
 
-        self.snapshot_uri = f'{self.bucket}/{self.aact_version}'
-        """Where this run writes.
+        self.versions = {'aact': self.aact_version, 'clinical_mining': self.clinical_mining_version}
+        """The version of each source."""
 
-        Keyed on the AACT archive, not on a platform release. Otter calls this
-        ``release_uri`` because that is what it is in a release, and relative
-        paths in a step config resolve against it — but nothing about this
-        pipeline belongs to a release.
-        """
+        pis_path = config_path.parents[4] / 'pis' / 'config.yaml'
+        pts_path = config_path.parents[4] / 'pts' / 'config.yaml'
 
-        self.pis = AppConfig.from_file(file_path=config_path.parents[4] / 'pis' / 'config.yaml')
-        """The internal configuration for PIS steps."""
+        self.pis: dict[str, AppConfig] = {}
+        """The internal configuration for PIS steps, per source."""
+        self.pts: dict[str, AppConfig] = {}
+        """The internal configuration for PTS steps, per source."""
+        for source, version in self.versions.items():
+            pis = AppConfig.from_file(file_path=pis_path)
+            pis.config['scratchpad'][f'{source}_version'] = version
+            pis.config['release_uri'] = self.source_uri(source)
+            pis.config['work_path'] = '/mnt/disks/work'
+            pis.config['log_level'] = 'INFO'
+            pis.config['pool_size'] = 16
+            self.pis[source] = pis
 
-        # The preprocessing DAG owns the archive version for this run.
-        self.pis.config['scratchpad']['aact_version'] = self.aact_version
-        self.pis.config['release_uri'] = self.snapshot_uri
-        self.pis.config['work_path'] = '/mnt/disks/work'
-        self.pis.config['log_level'] = 'INFO'
-        self.pis.config['pool_size'] = 16
-
-        self.pts = AppConfig.from_file(
-            file_path=config_path.parents[4] / 'pts' / 'config.yaml',
-            template_context={'release_name': self.aact_version, 'snapshot': self.aact_version},
-        )
-        """The internal configuration for PTS steps."""
-
-        self.pts.config['release_uri'] = self.snapshot_uri
-        self.pts.config['work_path'] = '/mnt/disks/work'
-        self.pts.config['log_level'] = 'INFO'
-        self.pts.config['pool_size'] = 32
+            pts = AppConfig.from_file(
+                file_path=pts_path,
+                template_context={'release_name': version, 'snapshot': version},
+            )
+            pts.config['release_uri'] = self.source_uri(source)
+            pts.config['work_path'] = '/mnt/disks/work'
+            pts.config['log_level'] = 'INFO'
+            pts.config['pool_size'] = 32
+            self.pts[source] = pts
 
         registry = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
         self.images = {
@@ -87,6 +87,32 @@ class AactTrialExtractionConfig:
 
         self.project_id = GCP_PROJECT_PLATFORM
         """The GCP project the steps run in."""
+
+    def source_uri(self, source: str) -> str:
+        """Return where a source writes: ``<bucket>/<source>/<version>``.
+
+        Otter calls this ``release_uri`` because that is what it is in a release, and
+        relative paths in a step config resolve against it — but nothing about this
+        pipeline belongs to a release.
+
+        Args:
+            source: ``aact`` or ``clinical_mining``.
+
+        Returns:
+            str: The version directory of the source.
+        """
+        return f'{self.bucket}/{source}/{self.versions[source]}'
+
+    def release_uri(self, step_name: str) -> str:
+        """Return the version directory a step reads and writes.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            str: The URI under which the step's source is staged.
+        """
+        return self.source_uri(self.step_definition(step_name)['source'])
 
     def steps(self) -> list[str]:
         """Return the steps in the pipeline, in the form ``{stage}_{step}``.
@@ -133,7 +159,7 @@ class AactTrialExtractionConfig:
             dict[str, Any]: The application config, with only this step under ``steps``.
         """
         stage, step = step_name.split('_', 1)
-        stage_config: AppConfig = getattr(self, stage)
+        stage_config: AppConfig = getattr(self, stage)[self.step_definition(step_name)['source']]
         return {
             **stage_config.config,
             'steps': {step: stage_config.config.get('steps', {}).get(step, {})},
@@ -177,4 +203,4 @@ class AactTrialExtractionConfig:
         Returns:
             str: The URI of the configuration file for the step.
         """
-        return f'{self.snapshot_uri}/etc/config/{step_name}.yaml'
+        return f'{self.release_uri(step_name)}/etc/config/{step_name}.yaml'

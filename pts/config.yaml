@@ -772,8 +772,8 @@ steps:
   ##################################################################################################
 
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
-  # Not part of a release. The `aact_trial_extraction` DAG runs this step with
-  # release_uri pointed at gs://aact_data/${aact_version}, so every path below
+  # Not part of a release. The `clinical_staging` DAG runs this step with
+  # release_uri pointed at gs://clinical_staging/aact/${aact_version}, so every path below
   # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
     - name: llm_extract aact trials
@@ -791,8 +791,8 @@ steps:
   ##################################################################################################
 
   #: AACT_TRIAL_MODELS STEP :######################################################################
-  # Not part of a release. Runs in the same DAG as `aact_trial_extraction`, with
-  # release_uri pointed at gs://aact_data/${aact_version}; the record stores sit outside it
+  # Not part of a release. Runs in the `clinical_staging` DAG, with
+  # release_uri pointed at gs://clinical_staging/aact/${aact_version}; the record stores sit outside it
   aact_trial_models:
     - name: trial_models aact trials
       source:
