@@ -181,6 +181,46 @@ steps:
     - name: copy aact dump
       source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
       destination: input/aact.zip
+
+    # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
+    - name: explode stop reasons model
+      foreach:
+        - config.json
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy stop reasons model ${each}
+          source: https://huggingface.co/opentargets/clinical_trial_stop_reasons/resolve/${stop_reasons_model_revision}/${each}
+          destination: input/models/opentargets/clinical_trial_stop_reasons/${stop_reasons_model_revision}/${each}
+
+    - name: explode biobert chemical ner model
+      foreach:
+        - config.json
+        - pytorch_model.bin
+        - special_tokens_map.json
+        - tokenizer_config.json
+        - vocab.txt
+      do:
+        - name: copy biobert chemical ner model ${each}
+          source: https://huggingface.co/alvaroalon2/biobert_chemical_ner/resolve/${biobert_chemical_ner_revision}/${each}
+          destination: input/models/alvaroalon2/biobert_chemical_ner/${biobert_chemical_ner_revision}/${each}
+
+    - name: explode drugtemist ner model
+      foreach:
+        - config.json
+        - merges.txt
+        - model.safetensors
+        - special_tokens_map.json
+        - tokenizer.json
+        - tokenizer_config.json
+        - vocab.json
+      do:
+        - name: copy drugtemist ner model ${each}
+          source: https://huggingface.co/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/resolve/${drugtemist_ner_revision}/${each}
+          destination: input/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#########################################################################
