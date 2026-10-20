@@ -37,6 +37,9 @@ ORDER_BY = {
 }
 """Reads collected into published arrays, which must not come back in plan order."""
 
+#: The `proteinIds` sources ChEMBL accessions are resolved through.
+UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
+
 
 def drug_mechanism_of_action(
     source: dict[str, Path],
@@ -49,7 +52,7 @@ def drug_mechanism_of_action(
     Args:
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
-            - target: Path to the target parquet (gene data).
+            - target: Path to the target dataset.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
         config: Config object, for ``work_path``.
@@ -62,7 +65,7 @@ def drug_mechanism_of_action(
     )
 
     logger.info(f'Reading target data from {source["target"]}')
-    gene_df = scan_dataset(str(source['target'])).collect()
+    gene_df = scan_dataset(str(source['target'])).select('id', 'proteinIds').collect()
 
     logger.info('Processing mechanisms of action')
     output_df = process_mechanism_of_action(
@@ -100,7 +103,7 @@ def process_mechanism_of_action(
         target_dictionary: Raw ChEMBL target_dictionary table.
         target_components: Raw ChEMBL target_components table.
         component_sequences: Raw ChEMBL component_sequences table.
-        gene_df: Gene parquet data from the target step.
+        gene_df: The target dataset's `id` and `proteinIds`.
 
     Returns:
         Processed mechanism of action DataFrame, one row per surviving `mec_id`.
@@ -220,7 +223,7 @@ def _chembl_target(
         target_dictionary: Raw ChEMBL target_dictionary table.
         target_components: Raw ChEMBL target_components table.
         component_sequences: Raw ChEMBL component_sequences table.
-        gene_df: Gene parquet data with proteinIds.
+        gene_df: The target dataset's `id` and `proteinIds`.
 
     Returns:
         DataFrame with target_chembl_id, targetName, targetType, and targets.
@@ -236,6 +239,7 @@ def _chembl_target(
             pl.col('target_type').str.to_lowercase().alias('targetType'),
             pl.col('chembl_id').alias('target_chembl_id'),
         )
+        .with_row_index('component_order')
     )
 
     # ChEMBL spells a target as a uniprot accession or an Ensembl gene id, so resolution
@@ -243,21 +247,16 @@ def _chembl_target(
     # surviving the explode, which drops genes with no accession.
     genes_by_uniprot = (
         gene_df
-        .select(
-            pl.col('id').alias('geneId'),
-            pl.concat_list(
-                pl.col('uniprot_trembl').fill_null([]),
-                pl.col('uniprot_swissprot').fill_null([]),
-            ).alias('uniprotIds'),
-        )
-        .explode('uniprotIds', empty_as_null=True)
-        .rename({'uniprotIds': 'uniprot_id'})
-        .drop_nulls('uniprot_id')
+        .select(pl.col('id').alias('geneId'), pl.col('proteinIds').alias('protein'))
+        .explode('protein', empty_as_null=False, keep_nulls=False)
+        .filter(pl.col('protein').struct.field('source').is_in(UNIPROT_SOURCES))
+        .select('geneId', pl.col('protein').struct.field('id').alias('uniprot_id'))
     )
     genes_by_id = gene_df.select(pl.col('id').alias('geneId'), pl.col('id').alias('uniprot_id'))
-    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique(maintain_order=True)
+    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique()
 
-    joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left', maintain_order='left')
+    # genes sharing an accession come in id order
+    joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left').sort('component_order', 'geneId')
 
     return joined.group_by('target_chembl_id', 'targetName', 'targetType', maintain_order=True).agg(
         pl.col('geneId').drop_nulls().unique(maintain_order=True).alias('targets')

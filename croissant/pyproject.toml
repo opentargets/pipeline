@@ -1,6 +1,6 @@
 [project]
 name = "ot_croissant"
-version = "26.12.0rc1"
+version = "26.12.0rc4"
 description = "Open Targets Pipeline Croissant Exporter"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -10,8 +10,8 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "loguru>=0.7.3",
   "mlcroissant>=1.0.17",
+  "pyarrow>=25.0.1",
   "pydantic>=2.0",
-  "pyspark>=3.5.7",
 ]
 
 [dependency-groups]

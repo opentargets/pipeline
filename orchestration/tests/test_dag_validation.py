@@ -58,7 +58,7 @@ def test_each_staged_jar_has_exactly_one_task(dag_bag: DagBag) -> None:
     """
     tasks = _stage_jar_tasks(dag_bag)
     destinations = [str(t.dst_uri) for t in tasks]
-    assert destinations, 'expected the pts clusters to stage their Spark-NLP jar'
+    assert destinations, 'expected the pts cluster to stage its Spark-NLP jar'
     assert len(destinations) == len(set(destinations)), (
         f'a destination is staged by more than one task: {sorted(destinations)}'
     )

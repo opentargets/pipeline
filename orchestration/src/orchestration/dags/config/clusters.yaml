@@ -18,7 +18,7 @@ clusters:
       # Spark 4 turns ANSI mode on by default; keep Spark 3's null-on-error
       # semantics until the pyspark modules are audited. pts' Session sets it too.
       'spark:spark.sql.ansi.enabled': 'false'
-      # Spark NLP fat jar (required by OnToma steps). Loaded via spark.jars from
+      # Spark NLP fat jar (required by clinical_report). Loaded via spark.jars from
       # the version-pinned jar orchestration pre-stages in the pipelines bucket,
       # instead of spark.jars.packages which re-runs Ivy resolution against Maven
       # Central on every spark-submit. See opentargets/issues#4453.
@@ -161,10 +161,6 @@ clusters:
       'spark:spark.shuffle.io.retryWait': '15s'
       'spark:spark.network.timeout': '300s'
       'spark:spark.reducer.maxBlocksInFlightPerAddress': '128'
-      # Spark NLP fat jar, pre-staged by orchestration and loaded via spark.jars
-      # (not spark.jars.packages) to avoid per-job Ivy resolution against Maven
-      # Central. See opentargets/issues#4453.
-      'spark:spark.jars': 'gs://opentargets-pipelines/up/pts/jars/spark-nlp-assembly_2.13-{{spark_nlp_version}}.jar'
       'spark:spark.sql.adaptive.enabled': 'true'
       'spark:spark.serializer': 'org.apache.spark.serializer.KryoSerializer'
     init_actions_uris:

@@ -190,7 +190,8 @@
     "id": "evidence_clinical_precedence",
     "nice_name": "Clinical Precedence evidence",
     "tags": [
-      "Target-Disease"
+      "Target-Disease",
+      "Drug"
     ],
     "description": "Disease-target evidence based on clinical trials, drug indications, and mechanism of action"
   },
@@ -511,7 +512,7 @@
     "tags": [
       "Target"
     ],
-    "description": "Per-transcript index derived from GENCODE, including genomic coordinates, biotype, protein/UniProt identifiers, and curation flags (MANE, APPRIS, GENCODE Primary, Ensembl canonical)"
+    "description": "Per-transcript index derived from the Ensembl core database, including genomic coordinates, biotype, protein/UniProt identifiers, and curation flags (MANE, APPRIS, GENCODE Primary, Ensembl canonical)"
   },
   {
     "id": "target_prioritisation",

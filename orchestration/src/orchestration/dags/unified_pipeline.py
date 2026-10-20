@@ -270,12 +270,12 @@ with DAG(
         # instead of being resolved from Maven Central on every spark-submit.
         # Resolved from the rendered spark.jars value against the `staged_jars`
         # registry, so every such jar on every cluster (currently the Spark-NLP
-        # fat jar on `pts` and `pts_literature`) is covered automatically; a GCS
+        # fat jar on `pts`) is covered automatically; a GCS
         # jar with no registered source fails the DAG at parse time.
         #
         # One task per destination object, not per step and not per cluster: the
         # steps of a cluster share the one object, and so do the clusters —
-        # `pts` and `pts_literature` point spark.jars at the same jar. Staging per
+        # any clusters that point spark.jars at the same jar share it. Staging per
         # step meant ~60 tasks racing to download the same ~629 MB artifact; per
         # cluster still left two, and two unsynchronised writers can replace the
         # object with a new generation while a cluster created by the other one is
@@ -363,9 +363,6 @@ with DAG(
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
-            'gentropy_biosample': {
-                'step.biosample_index_path': gsp('gentropy_biosample', 'step.biosample_index_path'),
-            },
             'gentropy_study': {
                 'step.valid_study_index_path': gsp('gentropy_study', 'step.valid_study_index_path'),
                 'step.invalid_study_index_path': gsp('gentropy_study', 'step.invalid_study_index_path'),
@@ -388,9 +385,6 @@ with DAG(
             },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
-            },
-            'gentropy_l2g_evidence': {
-                'step.evidence_output_path': gsp('gentropy_l2g_evidence', 'step.evidence_output_path'),
             },
             'gentropy_enhancer_to_gene': {
                 'step.valid_output_path': gsp('gentropy_enhancer_to_gene', 'step.valid_output_path'),

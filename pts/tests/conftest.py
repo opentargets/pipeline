@@ -32,6 +32,8 @@ def spark():
         .config('spark.sql.shuffle.partitions', '1')
         # as Session and the pts clusters do: Spark 4 defaults ANSI mode on
         .config('spark.sql.ansi.enabled', 'false')
+        # as the literature_publication_match step does
+        .config('spark.executorEnv.POLARS_MAX_THREADS', '1')
         .getOrCreate()
     )
     spark_session.sparkContext.setLogLevel('ERROR')
@@ -45,14 +47,7 @@ def pts_session():
 
     Scope: session -> start once per test run, stop at the end.
     """
-    # Use small resources in CI if desired:
-    props = {
-        # no test runs OnToma, so skip resolving spark-nlp and its ~600 MB of
-        # dependencies from Maven Central
-        'spark.jars.packages': '',
-    }
-
-    s = Session(app_name='pts-test', properties=props)
+    s = Session(app_name='pts-test')
     try:
         yield s
     finally:

@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from airflow.sdk.log import Logger
 
 CONTAINER_NAME = 'workload_container'
+# The startup-script runner fails on a line over 64 KiB; carriage-return progress bars build one.
+OUTPUT_FILTER = r"""tr '\r' '\n' | awk '!/^ *[0-9]+%\|/'"""
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 LOGGING_RETRY_MAX_WAIT = 600
@@ -532,7 +534,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 {self.build_volume_params()}
                 --log-driver="gcplogs" \\
                 {self.container_image} \\
-                {self.container_command} {arg}
+                {self.container_command} {arg} 2>&1 | {OUTPUT_FILTER}
         """)
 
     def declare_instance(self) -> compute_v1.Instance:

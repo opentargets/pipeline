@@ -1,482 +1,842 @@
-"""Tests for the target_safety_event PySpark module."""
+"""Tests for the target_safety_event transformer."""
 
-import pyspark.sql.functions as f
-from pyspark.sql import Row
-from pyspark.sql.types import (
-    ArrayType,
-    StringType,
-    StructField,
-    StructType,
-)
+from __future__ import annotations
 
-from pts.pyspark.target_safety_event import (
-    _build_ensg_lookup,
-    _build_target_safety_events,
-    _harmonize_safety_evidence,
+import json
+from pathlib import Path
+
+import polars as pl
+
+from pts.schemas.target_safety_event import biosample, effect, study
+from pts.transformers.target_safety_event import (
+    build_target_safety_events,
     clean_phenotype_to_describe_safety_event,
+    harmonize_safety_evidence,
     process_adverse_events,
+    process_aop,
     process_brennan,
+    process_pharmacogenetics,
+    process_safety_risk,
     process_toxcast,
+    target_safety_event,
 )
+from pts.transformers.utils.target import ensg_lookup
 
-# ---------------------------------------------------------------------------
-# Shared schemas and helpers
-# ---------------------------------------------------------------------------
+TOXCAST_URL = 'https://www.epa.gov/chemical-research/exploring-toxcast-data-downloadable-data'
+PREFIX = 'Genetic variation linked to this safety liability: '
 
-SAFETY_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('targetFromSourceId', StringType()),
-    StructField('event', StringType()),
-    StructField('eventId', StringType()),
-    StructField('datasource', StringType()),
-    StructField('effects', ArrayType(StructType([
-        StructField('direction', StringType()),
-        StructField('dosing', StringType()),
-    ]))),
-    StructField('literature', StringType()),
-    StructField('url', StringType()),
-    StructField('biosamples', ArrayType(StructType([
-        StructField('tissueLabel', StringType()),
-        StructField('tissueId', StringType()),
-        StructField('cellLabel', StringType()),
-        StructField('cellFormat', StringType()),
-        StructField('cellId', StringType()),
-    ]))),
-    StructField('studies', ArrayType(StructType([
-        StructField('description', StringType()),
-        StructField('name', StringType()),
-        StructField('type', StringType()),
-    ]))),
-])
-
-TARGET_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('approvedSymbol', StringType()),
-    StructField('proteinIds', ArrayType(StructType([
-        StructField('id', StringType()),
-        StructField('source', StringType()),
-    ]))),
-])
-
-DISEASE_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('obsoleteTerms', ArrayType(StringType())),
-])
-
-ADVERSE_EVENTS_SCHEMA = StructType([
-    StructField('biologicalSystem', StringType()),
-    StructField('effect', StringType()),
-    StructField('efoId', StringType()),
-    StructField('ensemblId', StringType()),
-    StructField('pmid', StringType()),
-    StructField('ref', StringType()),
-    StructField('symptom', StringType()),
-    StructField('target', StringType()),
-    StructField('uberonCode', StringType()),
-    StructField('url', StringType()),
-])
-
-BRENNAN_SCHEMA = StructType([
-    StructField('id', StringType()),
-    StructField('event', StringType()),
-    StructField('eventId', StringType()),
-    StructField('datasource', StringType()),
-    StructField('literature', StringType()),
-    StructField('url', StringType()),
-    StructField('effects', StructType([
-        StructField('direction', StringType()),
-        StructField('dosing', StringType()),
-    ])),
-    StructField('studies', ArrayType(StructType([
-        StructField('description', StringType()),
-        StructField('name', StringType()),
-        StructField('type', StringType()),
-    ]))),
-    StructField('biosamples', ArrayType(StructType([
-        StructField('tissueLabel', StringType()),
-    ]))),
-])
+SAFETY_SCHEMA = {
+    'id': pl.String,
+    'targetFromSourceId': pl.String,
+    'event': pl.String,
+    'eventId': pl.String,
+    'datasource': pl.String,
+    'effects': pl.List(effect),
+    'literature': pl.String,
+    'url': pl.String,
+    'biosamples': pl.List(biosample),
+    'studies': pl.List(study),
+}
+TARGET_SCHEMA = {
+    'id': pl.String,
+    'approvedSymbol': pl.String,
+    'proteinIds': pl.List(pl.Struct({'id': pl.String, 'source': pl.String})),
+}
+DISEASE_SCHEMA = {'id': pl.String, 'obsoleteTerms': pl.List(pl.String)}
+AE_COLUMNS = [
+    'symptom', 'biologicalSystem', 'effect', 'efoId', 'ensemblId', 'pmid', 'ref', 'target', 'uberonCode', 'url',
+]
+SR_COLUMNS = [
+    'biologicalSystem', 'ensemblId', 'event', 'eventId', 'liability', 'pmid', 'ref', 'target', 'uberonId', 'url',
+]
+TC_COLUMNS = [
+    'assay_component_endpoint_name', 'assay_component_desc', 'biological_process_target', 'tissue', 'cell_format',
+    'cell_short_name', 'assay_format_type', 'official_symbol', 'eventId',
+]
+AOP_SCHEMA = {
+    'id': pl.String,
+    'event': pl.String,
+    'eventId': pl.String,
+    'datasource': pl.String,
+    'url': pl.String,
+    'effects': pl.List(effect),
+    'biosamples': pl.List(biosample),
+}
+BRENNAN_SCHEMA = {
+    'id': pl.String,
+    'event': pl.String,
+    'eventId': pl.String,
+    'datasource': pl.String,
+    'literature': pl.String,
+    'effects': effect,
+    'studies': study,
+    'biosamples': biosample,
+}
+PGX_SCHEMA = {
+    'pgxCategory': pl.String,
+    'targetFromSourceId': pl.String,
+    'phenotypeText': pl.String,
+    'genotypeId': pl.String,
+    'haplotypeId': pl.String,
+    'drugs': pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String})),
+}
 
 
-def _brennan_row(*, event_id):
-    return Row(
-        id='ENSG00000082701', event='Mitochondrial toxicity', eventId=event_id,
-        datasource='Brennan et al. (2024)', literature='38773351', url=None,
-        effects=Row(direction='Activation', dosing=None),
-        studies=[Row(description=None, name=None, type='clinical')],
-        biosamples=None,
+def _strings(columns: list[str], rows: list[tuple]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=dict.fromkeys(columns, pl.String), orient='row')
+
+
+def _ae(*rows: tuple) -> pl.DataFrame:
+    return _strings(AE_COLUMNS, list(rows))
+
+
+def _brennan(event_id: str | None, effects: dict | None = None) -> pl.DataFrame:
+    return pl.DataFrame(
+        [{
+            'id': 'ENSG00000082701',
+            'event': 'Mitochondrial toxicity',
+            'eventId': event_id,
+            'datasource': 'Brennan et al. (2024)',
+            'literature': '38773351',
+            'effects': effects if effects is not None else {'direction': 'Activation', 'dosing': None},
+            'studies': {'description': None, 'name': None, 'type': 'clinical'},
+            'biosamples': None,
+        }],
+        schema=BRENNAN_SCHEMA,
     )
 
 
-TOXCAST_SCHEMA = StructType([
-    StructField('assay_component_endpoint_name', StringType()),
-    StructField('assay_component_desc', StringType()),
-    StructField('biological_process_target', StringType()),
-    StructField('tissue', StringType()),
-    StructField('cell_format', StringType()),
-    StructField('cell_short_name', StringType()),
-    StructField('assay_format_type', StringType()),
-    StructField('official_symbol', StringType()),
-    StructField('eventId', StringType()),
-])
-
-
-def _safety_row(*, ensg=None, source_id=None, event='hepatotoxicity', event_id='EFO_0001234',
-                datasource='AstraZeneca', literature=None, url=None):
-    return Row(
-        id=ensg,
-        targetFromSourceId=source_id,
-        event=event,
-        eventId=event_id,
-        datasource=datasource,
-        effects=None,
-        literature=literature,
-        url=url,
-        biosamples=None,
-        studies=None,
+def _pgx(*rows: tuple) -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                'pgxCategory': cat,
+                'targetFromSourceId': target,
+                'phenotypeText': text,
+                'genotypeId': genotype,
+                'haplotypeId': haplotype,
+                'drugs': None if drugs is None else [{'drugFromSource': d, 'drugId': None} for d in drugs],
+            }
+            for cat, target, text, genotype, haplotype, drugs in rows
+        ],
+        schema=PGX_SCHEMA,
     )
+
+
+def _safety(*rows: dict) -> pl.DataFrame:
+    base = dict.fromkeys(SAFETY_SCHEMA)
+    return pl.DataFrame([{**base, 'event': 'hepatotoxicity', 'eventId': 'EFO_0001234', **r} for r in rows],
+                        schema=SAFETY_SCHEMA)
+
+
+def _target(*rows: tuple) -> pl.DataFrame:
+    return pl.DataFrame(
+        [{'id': i, 'approvedSymbol': s, 'proteinIds': None if p is None else [{'id': x, 'source': 'u'} for x in p]}
+         for i, s, p in rows],
+        schema=TARGET_SCHEMA,
+    )
+
+
+def _diseases(*rows: tuple) -> pl.DataFrame:
+    return pl.DataFrame(list(rows), schema=DISEASE_SCHEMA, orient='row')
+
+
+NO_DISEASES = _diseases(('EFO_9999', []))
+
+
+def _clean(*texts: str | None) -> list[str | None]:
+    df = pl.DataFrame({'t': list(texts)}, schema={'t': pl.String})
+    return df.select(clean_phenotype_to_describe_safety_event(pl.col('t'))).to_series().to_list()
 
 
 # ---------------------------------------------------------------------------
-# process_* source harmonizers and _harmonize_safety_evidence
+# process_* source harmonizers
 # ---------------------------------------------------------------------------
 
 
-def test_process_adverse_events_maps_columns(spark):
-    """Raw adverse-events columns are renamed/restructured into the common evidence schema."""
-    row = Row(
-        biologicalSystem='gastrointestinal', effect='activation_general', efoId='EFO_0009836',
-        ensemblId='ENSG00000133019', pmid='23197038', ref='Bowes et al. (2012)',
-        symptom='bronchoconstriction', target='CHRM3', uberonCode='UBERON_0005409', url=None,
+def test_process_adverse_events_maps_columns() -> None:
+    row = ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_0009836', 'ENSG00000133019',
+           '23197038', 'Bowes et al. (2012)', 'CHRM3', 'UBERON_0005409', None)
+    out = process_adverse_events(_ae(row)).row(0, named=True)
+    assert out['id'] == 'ENSG00000133019'
+    assert out['event'] == 'bronchoconstriction'
+    assert out['eventId'] == 'EFO_0009836'
+    assert out['datasource'] == 'Bowes et al. (2012)'
+    assert out['literature'] == '23197038'
+    assert out['effects'] == [{'direction': 'Activation/Increase/Upregulation', 'dosing': 'general'}]
+    assert out['biosample'] == {
+        'tissueLabel': 'gastrointestinal', 'tissueId': 'UBERON_0005409', 'cellLabel': None, 'cellFormat': None,
+        'cellId': None,
+    }
+    assert out['study'] == {'description': 'bronchoconstriction', 'name': 'EFO_0009836', 'type': 'preclinical'}
+
+
+def test_process_adverse_events_groups_effects_and_reads_text_as_spark() -> None:
+    base = ('e', 's', None, 'EFO_1', 'ENSG1', None, 'Urban et al. (2012)', 'T', 'U', None)
+    df = _ae(
+        (*base[:2], 'activation_general', *base[3:5], '0042', *base[6:]),
+        (*base[:2], 'inhibition_acute', *base[3:5], '7', *base[6:]),
+        (*base[:2], 'activation', *base[3:]),
+        (None, 's', 'activation_acute', 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
+        ('f', 's', None, 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
     )
-    result = process_adverse_events(spark.createDataFrame([row], ADVERSE_EVENTS_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.id == 'ENSG00000133019'
-    assert out.event == 'bronchoconstriction'
-    assert out.eventId == 'EFO_0009836'
-    assert out.datasource == 'Bowes et al. (2012)'
-    assert out.effects[0].direction == 'Activation/Increase/Upregulation'
+    out = process_adverse_events(df).sort('literature', 'event', nulls_last=True)
+    rows = out.select('event', 'literature', 'effects', pl.col('study').struct.field('type')).rows()
+    grouped = [
+        {'direction': 'Activation/Increase/Upregulation', 'dosing': None},
+        {'direction': 'Activation/Increase/Upregulation', 'dosing': 'general'},
+        {'direction': 'Inhibition/Decrease/Downregulation', 'dosing': 'acute'},
+    ]
+    assert rows == [
+        ('e', '42', grouped, 'clinical'),
+        ('e', '7', grouped, 'clinical'),
+        ('e', None, grouped, 'clinical'),
+        ('f', None, [{'direction': None, 'dosing': None}], 'Unknown (2000)'),
+        (None, None, None, 'Unknown (2000)'),
+    ]
 
 
-def test_process_toxcast_maps_columns(spark):
-    """ToxCast rows are keyed by targetFromSourceId (symbol), not an ENSG id."""
-    row = Row(
-        assay_component_endpoint_name='ACEA_ER_80hr', assay_component_desc='some assay',
-        biological_process_target='cell proliferation', tissue=None, cell_format='cell line',
-        cell_short_name='T47D', assay_format_type='cell-based', official_symbol=' ESR1 ', eventId=None,
+def test_process_toxcast_maps_columns() -> None:
+    df = _strings(TC_COLUMNS, [
+        ('ACEA_ER_80hr', 'some assay', 'cell proliferation', None, 'cell line', 'T47D', 'cell-based', ' ESR1 ', None),
+        ('A', 'd', 'e', None, None, None, None, '\tESR1 ', None),
+    ])
+    out = process_toxcast(df)
+    assert out['targetFromSourceId'].to_list() == ['ESR1', '\tESR1']
+    first = out.row(0, named=True)
+    assert first['event'] == 'cell proliferation'
+    assert first['datasource'] == 'ToxCast'
+    assert first['url'] == TOXCAST_URL
+    assert first['biosample'] == {
+        'tissueLabel': None, 'tissueId': None, 'cellLabel': 'T47D', 'cellFormat': 'cell line', 'cellId': None,
+    }
+    assert first['study'] == {'description': 'some assay', 'name': 'ACEA_ER_80hr', 'type': 'cell-based'}
+    assert 'id' not in out.columns
+
+
+def test_process_safety_risk_maps_columns() -> None:
+    df = _strings(SR_COLUMNS, [
+        ('cardiovascular', 'ENSG1', 'x', 'y', 'Important', '21283106', 'Force et al. (2011)', 'T', 'UBERON_1', None),
+        ('heart', 'ENSG5', 'x', 'y', 'Arrhythmia', '22', 'Lamore et al. (2017)', 'T', 'UBERON_2', None),
+        ('other', 'ENSG1', 'some event', 'EFO_A', 'lia', '1', 'Someone (2020)', 'T', 'UBERON_3', 'u'),
+        ('other', 'ENSG1', 'some event', 'EFO_A', 'lia', '1', None, 'T', 'UBERON_3', 'u'),
+    ])
+    out = process_safety_risk(df)
+    assert out.select('id', 'event', 'eventId', 'literature', 'datasource', 'study').rows() == [
+        ('ENSG1', 'heart disease', 'EFO_0003777', '21283106', 'Force et al. (2011)',
+         {'description': 'Important', 'name': None, 'type': 'preclinical'}),
+        ('ENSG5', 'cardiac arrhythmia', 'EFO_0004269', '22', 'Lamore et al. (2017)',
+         {'description': 'Arrhythmia', 'name': None, 'type': 'cell-based'}),
+        ('ENSG1', None, None, '1', 'Someone (2020)', {'description': 'lia', 'name': None, 'type': None}),
+        ('ENSG1', None, None, '1', None, {'description': 'lia', 'name': None, 'type': None}),
+    ]
+    assert out['biosample'][0] == {
+        'tissueLabel': 'cardiovascular', 'tissueId': 'UBERON_1', 'cellLabel': None, 'cellFormat': None, 'cellId': None,
+    }
+    assert 'url' not in out.columns
+
+
+def test_process_aop_maps_columns() -> None:
+    liver = {'tissueLabel': 'liver', 'tissueId': 'UBERON:1', 'cellLabel': None, 'cellFormat': None, 'cellId': None}
+    kidney = {'tissueLabel': 'kidney', 'tissueId': 'UBERON:2', 'cellLabel': 'c', 'cellFormat': 'f', 'cellId': 'i'}
+    df = pl.DataFrame(
+        [
+            {'id': 'ENSG1', 'event': 'NAFLD', 'url': 'u1', 'effects': [{'direction': 'Activation', 'dosing': None}]},
+            {'id': 'ENSG5', 'event': 'NA  liver injury ', 'url': 'u2', 'biosamples': [liver, kidney]},
+            {'id': 'ENSG1', 'event': 'x', 'url': 'u3', 'effects': [{'direction': 'Other', 'dosing': 'acute'}],
+             'biosamples': []},
+            {'id': 'ENSG1', 'event': 'y', 'url': 'u4', 'effects': [{'direction': 'Inhibition', 'dosing': None}]},
+        ],
+        schema=AOP_SCHEMA,
     )
-    result = process_toxcast(spark.createDataFrame([row], TOXCAST_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.targetFromSourceId == 'ESR1'
-    assert out.event == 'cell proliferation'
-    assert out.datasource == 'ToxCast'
+    out = process_aop(df)
+    assert out.select('id', 'event', 'url', 'effects', 'biosample').rows() == [
+        ('ENSG1', 'FLD', 'u1', [{'direction': 'Activation/Increase/Upregulation', 'dosing': None}], None),
+        ('ENSG5', 'liver injury', 'u2', None, liver),
+        ('ENSG5', 'liver injury', 'u2', None, kidney),
+        ('ENSG1', 'x', 'u3', [{'direction': None, 'dosing': 'acute'}], None),
+        ('ENSG1', 'y', 'u4', [{'direction': 'Inhibition/Decrease/Downregulation', 'dosing': None}], None),
+    ]
+    assert out['study'].unique().to_list() == [{'description': None, 'name': None, 'type': 'cell-based'}]
 
 
-def test_process_brennan_normalises_empty_string_event_id(spark):
-    """An empty-string eventId (no curated EFO term) becomes a real null.
-
-    Regression test: 5 target_safety_event rows shipped eventId as "" instead of
-    a null, inside a column that every other source already nulls correctly.
-    """
-    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='')], BRENNAN_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.eventId is None
+def test_process_brennan_normalises_empty_string_event_id() -> None:
+    assert process_brennan(_brennan('')).item(0, 'eventId') is None
 
 
-def test_process_brennan_normalises_whitespace_only_event_id(spark):
-    """A whitespace-only eventId is treated the same as an empty string."""
-    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='  ')], BRENNAN_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.eventId is None
+def test_process_brennan_normalises_whitespace_only_event_id() -> None:
+    assert process_brennan(_brennan('  ')).item(0, 'eventId') is None
 
 
-def test_process_brennan_trims_a_real_event_id(spark):
-    """A real eventId with stray leading/trailing whitespace is trimmed, not just checked."""
-    result = process_brennan(spark.createDataFrame([_brennan_row(event_id=' EFO_0009836 ')], BRENNAN_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.eventId == 'EFO_0009836'
+def test_process_brennan_trims_a_real_event_id() -> None:
+    assert process_brennan(_brennan(' EFO_0009836 ')).item(0, 'eventId') == 'EFO_0009836'
 
 
-def test_process_brennan_keeps_real_event_id(spark):
-    """A genuine curated EFO term passes through unchanged."""
-    result = process_brennan(spark.createDataFrame([_brennan_row(event_id='EFO_0009836')], BRENNAN_SCHEMA))
-    out = result.first()
-    assert out is not None
-    assert out.eventId == 'EFO_0009836'
+def test_process_brennan_keeps_real_event_id() -> None:
+    assert process_brennan(_brennan('EFO_0009836')).item(0, 'eventId') == 'EFO_0009836'
 
 
-def test_clean_phenotype_maps_toxicity_to_drug_toxicity(spark):
-    """The phenotype-cleaning column expression normalizes known phrases to a fixed vocabulary."""
-    schema = StructType([StructField('phenotypeText', StringType())])
-    df = spark.createDataFrame([Row(phenotypeText='toxicity')], schema)
-    result = df.withColumn('cleaned', clean_phenotype_to_describe_safety_event(f.col('phenotypeText')))
-    assert result.first().cleaned == 'drug toxicity'
-
-
-def test_harmonize_safety_evidence_dedupes_identical_source_rows(spark):
-    """Two identical raw adverse-event rows collapse into a single harmonized record."""
-    row = Row(
-        biologicalSystem='gastrointestinal', effect='activation_general', efoId='EFO_0009836',
-        ensemblId='ENSG00000133019', pmid='23197038', ref='Bowes et al. (2012)',
-        symptom='bronchoconstriction', target='CHRM3', uberonCode='UBERON_0005409', url=None,
+def test_process_brennan_maps_effects_study_and_biosample() -> None:
+    df = pl.concat(
+        [
+            _brennan('a', {'direction': 'Inhibition', 'dosing': 'acute'}),
+            _brennan('b', {'direction': 'Other', 'dosing': None}),
+            _brennan('c').with_columns(pl.lit(None, dtype=effect).alias('effects'), pl.lit(None, dtype=study).alias(
+                'studies')),
+        ],
+        rechunk=False,
     )
-    processed = process_adverse_events(spark.createDataFrame([row, row], ADVERSE_EVENTS_SCHEMA))
-    # An empty (but fully-columned) second source lets unionByName(allowMissingColumns=True)
-    # fill in columns process_adverse_events doesn't produce (e.g. targetFromSourceId),
-    # mirroring how the real pipeline unions six heterogeneous sources together.
-    empty_toxcast = process_toxcast(spark.createDataFrame([], TOXCAST_SCHEMA))
-    result = _harmonize_safety_evidence([processed, empty_toxcast])
-    assert result.count() == 1
+    out = process_brennan(df)
+    assert out['effects'].to_list() == [
+        [{'direction': 'Inhibition/Decrease/Downregulation', 'dosing': 'acute'}],
+        [{'direction': 'Other', 'dosing': None}],
+        [{'direction': None, 'dosing': None}],
+    ]
+    assert out['study'].to_list()[2] == {'description': None, 'name': None, 'type': None}
+    assert out['biosample'].to_list() == [None, None, None]
+    assert out.schema['biosample'] == biosample
+
+
+def test_process_pharmacogenetics_filters_and_explodes() -> None:
+    df = _pgx(
+        ('toxicity', 'ENSG1', 'increased risk of toxicity', 'g1', 'h1', ['drugA', 'drugB']),
+        ('toxicity', 'ENSG5', 'neutropenia when taking X', None, None, [None, 'drugC']),
+        ('toxicity', 'ENSG5', 'no significant association with rash', 'g', None, ['d']),
+        ('toxicity', 'ENSG5', 'rash not associated with d', 'g', None, ['d']),
+        ('toxicity', 'ENSG5', 'response', 'g', None, ['d']),
+        ('efficacy', 'ENSG5', 'rash', 'g', None, ['d']),
+        ('toxicity', None, 'rash', 'g', None, ['d']),
+        ('toxicity', 'ENSG4', None, 'g', None, ['d']),
+        ('toxicity', 'ENSG1', 'rash', 'g3', 'g3', ['drugD']),
+        ('toxicity', 'ENSG1', 'hepatotoxicity', 'g4', None, None),
+        ('toxicity', 'ENSG1', 'hepatotoxicity', 'g4', None, []),
+    )
+    out = process_pharmacogenetics(df)
+    rows = sorted(
+        out.select('id', 'event', 'eventId', 'datasource', 'url', 'supporting_variation',
+                   pl.col('study').struct.field('name')).rows(),
+        key=repr,
+    )
+    url = 'https://www.clinpgx.org/search?query='
+    assert rows == sorted(
+        [
+            ('ENSG1', 'drug toxicity', None, 'ClinPGx', url + 'ENSG1', 'g1', 'drugA induced effect'),
+            ('ENSG1', 'drug toxicity', None, 'ClinPGx', url + 'ENSG1', 'h1', 'drugA induced effect'),
+            ('ENSG1', 'drug toxicity', None, 'ClinPGx', url + 'ENSG1', 'g1', 'drugB induced effect'),
+            ('ENSG1', 'drug toxicity', None, 'ClinPGx', url + 'ENSG1', 'h1', 'drugB induced effect'),
+            ('ENSG5', 'neutropenia', None, 'ClinPGx', url + 'ENSG5', None, None),
+            ('ENSG5', 'neutropenia', None, 'ClinPGx', url + 'ENSG5', None, 'drugC induced effect'),
+            ('ENSG1', 'rash', None, 'ClinPGx', url + 'ENSG1', 'g3', 'drugD induced effect'),
+        ],
+        key=repr,
+    )
+    assert out['study'].struct.field('description').null_count() == out.height
+    assert set(out['study'].struct.field('type')) == {'clinical'}
 
 
 # ---------------------------------------------------------------------------
-# _build_ensg_lookup
+# clean_phenotype_to_describe_safety_event
 # ---------------------------------------------------------------------------
 
 
-def test_build_ensg_lookup_includes_approved_symbol(spark):
-    """ApprovedSymbol appears in the name array."""
-    rows = [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[Row(id='P12345', source='uniprot')])]
-    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    row = lut.filter('ensgId = "ENSG00000001"').first()
-    assert row is not None
-    assert 'GENE1' in row.name
+def test_clean_phenotype_maps_toxicity_to_drug_toxicity() -> None:
+    assert _clean('toxicity') == ['drug toxicity']
 
 
-def test_build_ensg_lookup_includes_protein_id(spark):
-    """Protein accession IDs appear in the name array."""
-    rows = [Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[Row(id='P12345', source='uniprot')])]
-    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    row = lut.filter('ensgId = "ENSG00000001"').first()
-    assert row is not None
-    assert 'P12345' in row.name
+def test_clean_phenotype_matches_spark() -> None:
+    cases = {
+        'toxicity': 'drug toxicity',
+        'increased risk of toxicity': 'drug toxicity',
+        'neutropenia when taking X': 'neutropenia',
+        '  rash  ': 'rash',
+        'NA': 'NA',
+        'risk': 'drug toxicity',
+        'response': 'drug response',
+        'altered toxicity': 'altered toxicity',
+        'risk and toxicity': 'risk and toxicity',
+        'increased risk and increased severity of nausea': 'nausea',
+        'more likely to develop rash based on dose': 'rash',
+        'rash\nas a result of taking y': '',
+        'rash\u2028x': '',
+        '': '',
+    }
+    assert _clean(*cases, None) == [*cases.values(), None]
 
 
-def test_build_ensg_lookup_handles_empty_protein_ids(spark):
-    """Empty proteinIds array does not cause an error; symbol still in name."""
-    rows = [Row(id='ENSG00000002', approvedSymbol='GENE2', proteinIds=[])]
-    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    row = lut.filter('ensgId = "ENSG00000002"').first()
-    assert row is not None
-    assert 'GENE2' in row.name
-
-
-def test_build_ensg_lookup_handles_null_protein_ids(spark):
-    """Null proteinIds (non-coding genes, e.g. microRNAs) does not wipe out the symbol.
-
-    Regression test: flatten(array(proteinIds.id, [approvedSymbol])) returns NULL for
-    the whole array if proteinIds.id is NULL rather than an empty array, silently
-    dropping approvedSymbol too and breaking symbol-based ENSG resolution for every
-    non-coding gene.
-    """
-    rows = [Row(id='ENSG00000003', approvedSymbol='MIR122', proteinIds=None)]
-    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    row = lut.filter('ensgId = "ENSG00000003"').first()
-    assert row is not None
-    assert row.name == ['MIR122']
-
-
-def test_build_ensg_lookup_output_columns(spark):
-    """Output has exactly ensgId and name columns."""
-    rows = [Row(id='ENSG00000003', approvedSymbol='G3', proteinIds=[])]
-    lut = _build_ensg_lookup(spark.createDataFrame(rows, TARGET_SCHEMA))
-    assert set(lut.columns) == {'ensgId', 'name'}
+def test_phenotype_regex_ascii_whitespace() -> None:
+    assert _clean('severe\u00a0\u00a0rash\t\tx', 'a\x0bb\x0cc', 'r\u3000s') == [
+        'severe\u00a0\u00a0rash x',
+        'a b c',
+        'r\u3000s',
+    ]
 
 
 # ---------------------------------------------------------------------------
-# _build_target_safety_events
+# harmonize_safety_evidence
 # ---------------------------------------------------------------------------
 
 
-def test_build_target_safety_events_output_columns(spark):
-    """Output has one row per liability record with flat columns."""
-    safety = spark.createDataFrame(
-        [_safety_row(ensg='ENSG00000001')], SAFETY_SCHEMA
+def test_harmonize_safety_evidence_dedupes_identical_source_rows() -> None:
+    row = ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_0009836', 'ENSG00000133019',
+           '23197038', 'Bowes et al. (2012)', 'CHRM3', 'UBERON_0005409', None)
+    empty_toxcast = process_toxcast(_strings(TC_COLUMNS, []))
+    result = harmonize_safety_evidence([process_adverse_events(_ae(row, row)), empty_toxcast])
+    assert result.height == 1
+
+
+def test_union_struct_fields_by_name() -> None:
+    ae = ('e', 'gastrointestinal', 'activation_general', 'EFO_1', 'ENSG1', '1', 'Bowes et al. (2012)', 'T', 'U1',
+          None)
+    brennan_biosample = pl.Struct(dict.fromkeys(['cellFormat', 'cellLabel', 'tissueId', 'tissueLabel'], pl.String))
+    brennan = _brennan('EFO_1').with_columns(
+        pl.lit({'cellFormat': None, 'cellLabel': None, 'tissueId': 'U2', 'tissueLabel': 'GI'},
+               dtype=brennan_biosample).alias('biosamples')
     )
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[])], TARGET_SCHEMA
+    aop_fields = ['cellFormat', 'cellId', 'cellLabel', 'tissueId', 'tissueLabel']
+    aop_biosample = pl.Struct(dict.fromkeys(aop_fields, pl.String))
+    aop = pl.DataFrame(
+        [{'id': 'ENSG1', 'event': 'x', 'datasource': 'AOP-Wiki', 'biosamples': [
+            {'cellFormat': 'f', 'cellId': 'i', 'cellLabel': 'c', 'tissueId': 'U3', 'tissueLabel': 'liver'}]}],
+        schema={**AOP_SCHEMA, 'biosamples': pl.List(aop_biosample)},
     )
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
-    )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert set(result.columns) == {
-        'targetId', 'event', 'eventId', 'effects', 'biosamples',
-        'datasource', 'literature', 'url', 'studies',
+    result = harmonize_safety_evidence([process_adverse_events(_ae(ae)), process_brennan(brennan), process_aop(aop)])
+    assert result.schema['biosamples'] == pl.List(biosample)
+    assert result.schema['studies'] == pl.List(study)
+    assert result.schema['effects'] == pl.List(effect)
+    by_source = dict(result.select('datasource', 'biosamples').rows())
+    assert by_source == {
+        'Bowes et al. (2012)': [
+            {'tissueLabel': 'gastrointestinal', 'tissueId': 'U1', 'cellLabel': None, 'cellFormat': None,
+             'cellId': None}],
+        'Brennan et al. (2024)': [
+            {'tissueLabel': 'GI', 'tissueId': 'U2', 'cellLabel': None, 'cellFormat': None, 'cellId': None}],
+        'AOP-Wiki': [{'tissueLabel': 'liver', 'tissueId': 'U3', 'cellLabel': 'c', 'cellFormat': 'f', 'cellId': 'i'}],
     }
 
 
-def test_build_target_safety_events_one_row_per_liability(spark):
-    """Multiple liabilities for the same target produce separate rows."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg='ENSG00000001', event='hepatotoxicity', event_id='EFO_0001'),
-        _safety_row(ensg='ENSG00000001', event='cardiotoxicity', event_id='EFO_0002'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[])], TARGET_SCHEMA
+def test_clinpgx_description_sorted_join() -> None:
+    df = _pgx(
+        ('toxicity', 'ENSG1', 'rash', 'h1', 'g2', ['drugB', 'drugA']),
+        ('toxicity', 'ENSG1', 'rash', 'g1', 'g1', ['drugA']),
+        ('toxicity', 'ENSG5', 'rash', None, None, ['drugC']),
     )
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+    result = harmonize_safety_evidence([process_pharmacogenetics(df)]).sort('id')
+    assert result['studies'].to_list() == [
+        [
+            {'description': PREFIX + 'g1, g2, h1', 'name': 'drugA induced effect', 'type': 'clinical'},
+            {'description': PREFIX + 'g1, g2, h1', 'name': 'drugB induced effect', 'type': 'clinical'},
+        ],
+        [{'description': PREFIX, 'name': 'drugC induced effect', 'type': 'clinical'}],
+    ]
+
+
+def test_target_safety_event_null_and_empty_lists() -> None:
+    aop = pl.DataFrame(
+        [
+            {'id': 'ENSG1', 'event': 'a', 'effects': None, 'biosamples': None},
+            {'id': 'ENSG1', 'event': 'b', 'effects': [], 'biosamples': []},
+        ],
+        schema=AOP_SCHEMA,
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 2
-    assert result.filter('targetId = "ENSG00000001"').count() == 2
-
-
-def test_build_target_safety_events_resolves_symbol_to_ensg(spark):
-    """ToxCast rows with null id but known symbol get their ENSG resolved."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg=None, source_id='GENE1', datasource='ToxCast'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+    pgx = _pgx(
+        ('toxicity', 'ENSG1', 'rash', 'g', None, None),
+        ('toxicity', 'ENSG1', 'rash', 'g', None, []),
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 1
-    row = result.first()
-    assert row is not None
-    assert row.targetId == 'ENSG00000001'
+    diseases = _diseases(('EFO_A', None), ('EFO_B', []))
+    safety = harmonize_safety_evidence([process_aop(aop), process_pharmacogenetics(pgx)])
+    result = build_target_safety_events(safety, _target(('ENSG1', None, None)), diseases).sort('event')
+    assert result.select('event', 'effects', 'biosamples').rows() == [('a', None, None), ('b', [], None)]
 
 
-def test_build_target_safety_events_resolves_protein_id_to_ensg(spark):
-    """Entries keyed by protein accession are resolved via proteinIds lookup."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg=None, source_id='P12345', datasource='AstraZeneca'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000002', approvedSymbol='GENE2', proteinIds=[Row(id='P12345', source='uniprot')]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+# ---------------------------------------------------------------------------
+# ensg_lookup
+# ---------------------------------------------------------------------------
+
+
+def test_ensg_lookup_fans_out_and_tolerates_null_proteins():
+    target = pl.LazyFrame(
+        {
+            'id': ['ENSG1', 'ENSG2', 'ENSG3'],
+            'approvedSymbol': ['A', 'B', None],
+            'proteinIds': [[{'id': 'P1'}, {'id': 'P1'}], None, [{'id': 'A'}]],
+        }
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 1
-    row = result.first()
-    assert row is not None
-    assert row.targetId == 'ENSG00000002'
+    got = ensg_lookup(target).collect().sort('ensgId', 'name').rows()
+    assert got == [('ENSG1', 'A'), ('ENSG1', 'P1'), ('ENSG2', 'B'), ('ENSG3', 'A')]
 
 
-def test_build_target_safety_events_resolves_symbol_for_non_coding_gene(spark):
-    """ToxCast rows for non-coding genes (null proteinIds) still resolve by symbol.
+def test_ensg_lookup_includes_approved_symbol_and_protein_id() -> None:
+    got = ensg_lookup(_target(('ENSG00000001', 'GENE1', ['P12345'])).lazy()).collect()
+    assert sorted(got.rows()) == [('ENSG00000001', 'GENE1'), ('ENSG00000001', 'P12345')]
 
-    Regression test for the MIR122 bug: a non-coding target has proteinIds=None
-    rather than [], which previously wiped out the whole ensg_lookup name array
-    (including approvedSymbol) via flatten(array(...)), dropping this event.
-    """
-    safety = spark.createDataFrame([
-        _safety_row(ensg=None, source_id='MIR122', datasource='ToxCast'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG_MIR122', approvedSymbol='MIR122', proteinIds=None),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+
+def test_ensg_lookup_handles_empty_protein_ids() -> None:
+    got = ensg_lookup(_target(('ENSG00000002', 'GENE2', [])).lazy()).collect()
+    assert got.rows() == [('ENSG00000002', 'GENE2')]
+
+
+def test_ensg_lookup_handles_null_protein_ids() -> None:
+    got = ensg_lookup(_target(('ENSG00000003', 'MIR122', None)).lazy()).collect()
+    assert got.rows() == [('ENSG00000003', 'MIR122')]
+
+
+def test_ensg_lookup_output_columns() -> None:
+    got = ensg_lookup(_target(('ENSG00000003', 'G3', [])).lazy()).collect()
+    assert got.columns == ['ensgId', 'name']
+
+
+# ---------------------------------------------------------------------------
+# build_target_safety_events
+# ---------------------------------------------------------------------------
+
+
+def test_build_target_safety_events_output_columns() -> None:
+    result = build_target_safety_events(
+        _safety({'id': 'ENSG00000001'}), _target(('ENSG00000001', 'G1', [])), NO_DISEASES
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 1
-    row = result.first()
-    assert row is not None
-    assert row.targetId == 'ENSG_MIR122'
+    assert result.columns == [
+        'targetId', 'event', 'eventId', 'effects', 'biosamples', 'datasource', 'literature', 'url', 'studies',
+    ]
 
 
-def test_build_target_safety_events_drops_unresolvable_rows(spark):
-    """Rows with null id that cannot be resolved to an ENSG are dropped."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg=None, source_id='UNKNOWN_SYMBOL', datasource='ToxCast'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000001', approvedSymbol='GENE1', proteinIds=[]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+def test_build_target_safety_events_one_row_per_liability() -> None:
+    safety = _safety(
+        {'id': 'ENSG00000001', 'event': 'hepatotoxicity', 'eventId': 'EFO_0001'},
+        {'id': 'ENSG00000001', 'event': 'cardiotoxicity', 'eventId': 'EFO_0002'},
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 0
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'G1', [])), NO_DISEASES)
+    assert result.height == 2
+    assert result.filter(pl.col('targetId') == 'ENSG00000001').height == 2
 
 
-def test_build_target_safety_events_drops_ids_not_in_target(spark):
-    """Rows whose id doesn't match any target in output/target are dropped, even if non-null."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg='ENSG00000001', event='hepatotoxicity'),
-        _safety_row(ensg='ENSG_STALE_ID', event='cardiotoxicity'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame(
-        [Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[])], TARGET_SCHEMA
+def test_build_target_safety_events_resolves_symbol_to_ensg() -> None:
+    safety = _safety({'targetFromSourceId': 'GENE1', 'datasource': 'ToxCast'})
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'GENE1', [])), NO_DISEASES)
+    assert result['targetId'].to_list() == ['ENSG00000001']
+
+
+def test_build_target_safety_events_resolves_protein_id_to_ensg() -> None:
+    safety = _safety({'targetFromSourceId': 'P12345', 'datasource': 'AstraZeneca'})
+    result = build_target_safety_events(safety, _target(('ENSG00000002', 'GENE2', ['P12345'])), NO_DISEASES)
+    assert result['targetId'].to_list() == ['ENSG00000002']
+
+
+def test_build_target_safety_events_resolves_symbol_for_non_coding_gene() -> None:
+    safety = _safety({'targetFromSourceId': 'MIR122', 'datasource': 'ToxCast'})
+    result = build_target_safety_events(safety, _target(('ENSG_MIR122', 'MIR122', None)), NO_DISEASES)
+    assert result['targetId'].to_list() == ['ENSG_MIR122']
+
+
+def test_build_target_safety_events_drops_unresolvable_rows() -> None:
+    safety = _safety({'targetFromSourceId': 'UNKNOWN_SYMBOL', 'datasource': 'ToxCast'})
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'GENE1', [])), NO_DISEASES)
+    assert result.height == 0
+
+
+def test_unknown_target_dropped_after_symbol_resolution() -> None:
+    safety = _safety(
+        {'targetFromSourceId': 'SHARED', 'datasource': 'ToxCast'},
+        {'targetFromSourceId': 'UNKNOWN', 'datasource': 'ToxCast'},
+        {'targetFromSourceId': ' SHARED', 'datasource': 'ToxCast'},
+        {'id': 'ENSG_STALE', 'datasource': 'AstraZeneca'},
+        {'id': 'ENSG4', 'datasource': 'AstraZeneca'},
     )
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+    target = _target(('ENSG2', 'SHARED', None), ('ENSG3', 'SHARED', ['SHARED']), ('ENSG4', None, None))
+    result = build_target_safety_events(safety, target, NO_DISEASES)
+    assert sorted(result.select('targetId', 'datasource').rows()) == [
+        ('ENSG2', 'ToxCast'),
+        ('ENSG3', 'ToxCast'),
+        ('ENSG4', 'AstraZeneca'),
+    ]
+
+
+def test_build_target_safety_events_drops_ids_not_in_target() -> None:
+    safety = _safety(
+        {'id': 'ENSG00000001', 'event': 'hepatotoxicity'},
+        {'id': 'ENSG_STALE_ID', 'event': 'cardiotoxicity'},
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 1
-    row = result.first()
-    assert row is not None
-    assert row.targetId == 'ENSG00000001'
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'G1', [])), NO_DISEASES)
+    assert result['targetId'].to_list() == ['ENSG00000001']
 
 
-def test_build_target_safety_events_remaps_obsolete_efo(spark):
-    """Obsolete EFO disease IDs in eventId are replaced with current IDs."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg='ENSG00000001', event_id='EFO_OBSOLETE'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame([
-        Row(id='EFO_CURRENT', obsoleteTerms=['EFO_OBSOLETE']),
-    ], DISEASE_SCHEMA)
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    row = result.first()
-    assert row is not None
-    assert row.eventId == 'EFO_CURRENT'
+def test_build_target_safety_events_remaps_obsolete_efo() -> None:
+    safety = _safety({'id': 'ENSG00000001', 'eventId': 'EFO_OBSOLETE'})
+    diseases = _diseases(('EFO_CURRENT', ['EFO_OBSOLETE']))
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'G1', [])), diseases)
+    assert result['eventId'].to_list() == ['EFO_CURRENT']
 
 
-def test_build_target_safety_events_keeps_current_efo_unchanged(spark):
-    """EFO IDs that are not obsolete are left untouched."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg='ENSG00000001', event_id='EFO_CURRENT'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame([
-        Row(id='EFO_OTHER', obsoleteTerms=['EFO_SOMETHINGELSE']),
-    ], DISEASE_SCHEMA)
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    row = result.first()
-    assert row is not None
-    assert row.eventId == 'EFO_CURRENT'
-
-
-def test_build_target_safety_events_multiple_targets(spark):
-    """Liabilities for different targets produce separate rows."""
-    safety = spark.createDataFrame([
-        _safety_row(ensg='ENSG00000001', event='hepatotoxicity'),
-        _safety_row(ensg='ENSG00000002', event='cardiotoxicity'),
-    ], SAFETY_SCHEMA)
-    target = spark.createDataFrame([
-        Row(id='ENSG00000001', approvedSymbol='G1', proteinIds=[]),
-        Row(id='ENSG00000002', approvedSymbol='G2', proteinIds=[]),
-    ], TARGET_SCHEMA)
-    diseases = spark.createDataFrame(
-        [Row(id='EFO_9999', obsoleteTerms=[])], DISEASE_SCHEMA
+def test_obsolete_efo_remapped() -> None:
+    safety = _safety(
+        {'id': 'ENSG1', 'event': 'a', 'eventId': 'EFO_OLD'},
+        {'id': 'ENSG1', 'event': 'b', 'eventId': 'EFO_OLD2'},
+        {'id': 'ENSG1', 'event': 'c', 'eventId': 'EFO_CURRENT'},
+        {'id': 'ENSG1', 'event': 'd', 'eventId': None},
     )
-    ensg_lut = _build_ensg_lookup(target)
-    result = _build_target_safety_events(safety, ensg_lut, diseases)
-    assert result.count() == 2
+    diseases = _diseases(
+        ('EFO_NEW', ['EFO_OLD']), ('EFO_NEW2', ['EFO_OLD', 'EFO_OLD2', None]), ('EFO_A', None), ('EFO_B', []),
+    )
+    result = build_target_safety_events(safety, _target(('ENSG1', 'G1', [])), diseases)
+    assert sorted(result.select('event', 'eventId').rows(), key=repr) == [
+        ('a', 'EFO_NEW'),
+        ('a', 'EFO_NEW2'),
+        ('b', 'EFO_NEW2'),
+        ('c', 'EFO_CURRENT'),
+        ('d', None),
+    ]
+
+
+def test_build_target_safety_events_keeps_current_efo_unchanged() -> None:
+    safety = _safety({'id': 'ENSG00000001', 'eventId': 'EFO_CURRENT'})
+    diseases = _diseases(('EFO_OTHER', ['EFO_SOMETHINGELSE']))
+    result = build_target_safety_events(safety, _target(('ENSG00000001', 'G1', [])), diseases)
+    assert result['eventId'].to_list() == ['EFO_CURRENT']
+
+
+def test_build_target_safety_events_multiple_targets() -> None:
+    safety = _safety(
+        {'id': 'ENSG00000001', 'event': 'hepatotoxicity'},
+        {'id': 'ENSG00000002', 'event': 'cardiotoxicity'},
+    )
+    target = _target(('ENSG00000001', 'G1', []), ('ENSG00000002', 'G2', []))
+    result = build_target_safety_events(safety, target, NO_DISEASES)
+    assert result.height == 2
+
+
+# ---------------------------------------------------------------------------
+# end to end
+# ---------------------------------------------------------------------------
+
+
+AE_ROWS = [
+    ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_OLD', 'ENSG1', '23197038',
+     'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
+    ('bronchoconstriction', 'cardiovascular', 'inhibition_acute', 'EFO_OLD', 'ENSG1', '23197038',
+     'Bowes et al. (2012)', 'G1', 'UBERON_2', ''),
+    ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_OLD', 'ENSG1', '23197038',
+     'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
+    (' nausea ', '', 'activation', 'EFO_X', 'ENSG1', '0042', 'Urban et al. (2012)', 'G1', 'UBERON_3', ''),
+    ('', 'liver', 'inhibition_chronic', 'EFO_X', 'ENSG5', '456', 'Lynch et al. (2017)', 'G5', 'UBERON_4', ''),
+    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Other ref', 'G1', 'UBERON_5',
+     'https://x'),
+    ('orphan', 'liver', 'activation_acute', 'EFO_X', '', '8', 'Bowes et al. (2012)', 'G', 'UBERON_6', ''),
+    ('vomiting', 'gi', 'inhibition_developmental toxicity', 'EFO_X', 'ENSG4', '9', 'Lynch et al. (2017)', 'G4',
+     'UBERON_7', ''),
+]
+SR_ROWS = [
+    ('cardiovascular', 'ENSG1', 'x', 'y', 'Important', '21283106', 'Force et al. (2011)', 'G1', 'UBERON_1', ''),
+    ('heart', 'ENSG5', 'x', 'y', 'Arrhythmia', '22', 'Lamore et al. (2017)', 'G5', 'UBERON_2', ''),
+    ('other', 'ENSG1', 'some event', 'EFO_A', 'lia', '1', 'Someone (2020)', 'G1', 'UBERON_3', ''),
+]
+TC_ROWS = [
+    ('A1', 'desc1', 'cell proliferation', '', 'cell line', 'T47D', 'cell-based', ' GENE1 ', ''),
+    ('A2', 'desc2', 'cytotoxicity', 'liver', 'cell line', 'HEPG2', 'cell-based', 'SHARED', ''),
+    ('A3', 'desc3', 'binding', '', 'cell-free', '', 'biochemical', 'P5', ''),
+    ('A4', 'desc4', 'binding', '', 'cell-free', '', 'biochemical', 'UNKNOWN', ''),
+    ('A5', 'desc5', 'binding', '', 'cell-free', '', 'biochemical', '"\tGENE1"', ''),
+    ('A6', 'desc6', 'apoptosis', '', 'cell line', 'X', 'cell-based', 'GENE1', 'EFO_OLD'),
+]
+AOP = [
+    {'id': 'ENSG1', 'event': 'NAFLD', 'eventId': None, 'datasource': 'AOP-Wiki', 'url': 'u1',
+     'isHumanApplicable': True, 'effects': [{'direction': 'Activation', 'dosing': None}], 'biosamples': None},
+    {'id': 'ENSG5', 'event': 'NA  liver injury ', 'eventId': None, 'datasource': 'AOP-Wiki', 'url': 'u2',
+     'isHumanApplicable': False, 'effects': None, 'biosamples': [
+         {'tissueLabel': 'liver', 'tissueId': 'UBERON:1', 'cellLabel': None, 'cellFormat': None, 'cellId': None},
+         {'tissueLabel': 'kidney', 'tissueId': 'UBERON:2', 'cellLabel': 'c', 'cellFormat': 'f', 'cellId': 'i'},
+     ]},
+    {'id': 'ENSG1', 'event': 'x', 'eventId': None, 'datasource': 'AOP-Wiki', 'url': 'u3',
+     'isHumanApplicable': True, 'effects': [{'direction': 'Other', 'dosing': 'acute'}], 'biosamples': []},
+    {'id': 'ENSG1', 'event': 'y', 'eventId': None, 'datasource': 'AOP-Wiki', 'url': 'u4', 'isHumanApplicable': True,
+     'effects': [{'direction': 'Inhibition', 'dosing': 'chronic'}, {'direction': 'Activation', 'dosing': 'acute'}],
+     'biosamples': None},
+]
+GI = {'cellFormat': None, 'cellLabel': None, 'tissueId': 'UBERON_1', 'tissueLabel': 'GI'}
+BRENNAN = [
+    ('ENSG1', 'GI tox', '', {'direction': 'Activation', 'dosing': None}, GI,
+     {'description': None, 'name': None, 'type': 'preclinical'}),
+    ('ENSG1', 'Hypertension', ' EFO_OLD ', {'direction': 'Inhibition', 'dosing': 'acute'}, None,
+     {'description': 'd', 'name': 'n', 'type': 'clinical'}),
+    ('ENSG5', 'dizziness', '  ', {'direction': 'Other', 'dosing': None}, None, None),
+    ('ENSG5', 'rash', 'EFO_B', None, GI, {'description': None, 'name': None, 'type': 'clinical'}),
+]
+PGX = [
+    ('toxicity', 'ENSG1', 'increased risk of toxicity', 'g1', 'h1', ['drugA', 'drugB']),
+    ('toxicity', 'ENSG1', 'risk of toxicity', 'g2', None, ['drugA']),
+    ('toxicity', 'ENSG5', 'neutropenia when taking X', None, None, [None, 'drugC']),
+    ('toxicity', 'ENSG5', 'no significant association with rash', 'g', None, ['d']),
+    ('toxicity', 'ENSG5', 'response', 'g', None, ['d']),
+    ('efficacy', 'ENSG5', 'rash', 'g', None, ['d']),
+    ('toxicity', None, 'rash', 'g', None, ['d']),
+    ('toxicity', 'ENSG1', 'severe\u00a0\u00a0rash\t\tx', 'g3', 'g3', ['drugD']),
+    ('toxicity', 'ENSG1', 'hepatotoxicity', 'g4', None, None),
+    ('toxicity', 'ENSG1', 'hepatotoxicity2', 'g4', None, []),
+    ('toxicity', 'ENSG_UNKNOWN', 'rash', 'g', None, ['d']),
+    ('toxicity', 'ENSG4', 'rash', 'g5', None, ['drugE']),
+    ('toxicity', 'ENSG4', None, 'g5', None, ['drugE']),
+]
+EXPECTED = [
+    ('ENSG2', 'cytotoxicity', None, None, [('liver', None, 'HEPG2', 'cell line', None)], 'ToxCast', None,
+     TOXCAST_URL, [('desc2', 'A2', 'cell-based')]),
+    ('ENSG3', 'cytotoxicity', None, None, [('liver', None, 'HEPG2', 'cell line', None)], 'ToxCast', None,
+     TOXCAST_URL, [('desc2', 'A2', 'cell-based')]),
+    ('ENSG1', 'cell proliferation', None, None, [(None, None, 'T47D', 'cell line', None)], 'ToxCast', None,
+     TOXCAST_URL, [('desc1', 'A1', 'cell-based')]),
+    ('ENSG1', 'apoptosis', 'EFO_NEW', None, [(None, None, 'X', 'cell line', None)], 'ToxCast', None, TOXCAST_URL,
+     [('desc6', 'A6', 'cell-based')]),
+    ('ENSG1', 'apoptosis', 'EFO_NEW2', None, [(None, None, 'X', 'cell line', None)], 'ToxCast', None, TOXCAST_URL,
+     [('desc6', 'A6', 'cell-based')]),
+    ('ENSG5', 'binding', None, None, [(None, None, None, 'cell-free', None)], 'ToxCast', None, TOXCAST_URL,
+     [('desc3', 'A3', 'biochemical')]),
+    ('ENSG5', 'liver injury', None, None,
+     [('kidney', 'UBERON:2', 'c', 'f', 'i'), ('liver', 'UBERON:1', None, None, None)], 'AOP-Wiki', None, 'u2',
+     [(None, None, 'cell-based')]),
+    ('ENSG1', 'GI tox', None, [('Activation/Increase/Upregulation', None)], [('GI', 'UBERON_1', None, None, None)],
+     'Brennan et al. (2024)', '38773351', None, [(None, None, 'preclinical')]),
+    ('ENSG5', 'rash', 'EFO_B', [(None, None)], [('GI', 'UBERON_1', None, None, None)], 'Brennan et al. (2024)',
+     '38773351', None, [(None, None, 'clinical')]),
+    ('ENSG1', 'heart disease', 'EFO_0003777', None, [('cardiovascular', 'UBERON_1', None, None, None)],
+     'Force et al. (2011)', '21283106', None, [('Important', None, 'preclinical')]),
+    ('ENSG1', 'bronchoconstriction', 'EFO_NEW',
+     [('Activation/Increase/Upregulation', 'general'), ('Inhibition/Decrease/Downregulation', 'acute')],
+     [('gastrointestinal', 'UBERON_1', None, None, None), ('cardiovascular', 'UBERON_2', None, None, None)],
+     'Bowes et al. (2012)', '23197038', None, [('bronchoconstriction', 'EFO_OLD', 'preclinical')]),
+    ('ENSG1', 'bronchoconstriction', 'EFO_NEW2',
+     [('Activation/Increase/Upregulation', 'general'), ('Inhibition/Decrease/Downregulation', 'acute')],
+     [('gastrointestinal', 'UBERON_1', None, None, None), ('cardiovascular', 'UBERON_2', None, None, None)],
+     'Bowes et al. (2012)', '23197038', None, [('bronchoconstriction', 'EFO_OLD', 'preclinical')]),
+    ('ENSG5', 'cardiac arrhythmia', 'EFO_0004269', None, [('heart', 'UBERON_2', None, None, None)],
+     'Lamore et al. (2017)', '22', None, [('Arrhythmia', None, 'cell-based')]),
+    ('ENSG1', None, None, None, [('other', 'UBERON_3', None, None, None)], 'Someone (2020)', '1', None,
+     [('lia', None, None)]),
+    ('ENSG1', ' nausea ', 'EFO_X', [('Activation/Increase/Upregulation', None)],
+     [(None, 'UBERON_3', None, None, None)], 'Urban et al. (2012)', '42', None, [(' nausea ', 'EFO_X', 'clinical')]),
+    ('ENSG5', None, 'EFO_X', None, [('liver', 'UBERON_4', None, None, None)], 'Lynch et al. (2017)', '456', None,
+     [(None, 'EFO_X', 'preclinical')]),
+    ('ENSG1', 'crisis (known as \\cheese reaction\\)', 'EFO_B', [(None, None)],
+     [('cns', 'UBERON_5', None, None, None)], 'Other ref', '7', 'https://x',
+     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'Other ref')]),
+    ('ENSG4', 'vomiting', 'EFO_X', [('Inhibition/Decrease/Downregulation', 'developmental toxicity')],
+     [('gi', 'UBERON_7', None, None, None)], 'Lynch et al. (2017)', '9', None,
+     [('vomiting', 'EFO_X', 'preclinical')]),
+    ('ENSG1', 'FLD', None, [('Activation/Increase/Upregulation', None)], None, 'AOP-Wiki', None, 'u1',
+     [(None, None, 'cell-based')]),
+    ('ENSG1', 'x', None, [(None, 'acute')], None, 'AOP-Wiki', None, 'u3', [(None, None, 'cell-based')]),
+    ('ENSG1', 'y', None,
+     [('Inhibition/Decrease/Downregulation', 'chronic'), ('Activation/Increase/Upregulation', 'acute')], None,
+     'AOP-Wiki', None, 'u4', [(None, None, 'cell-based')]),
+    ('ENSG1', 'Hypertension', 'EFO_NEW', [('Inhibition/Decrease/Downregulation', 'acute')], None,
+     'Brennan et al. (2024)', '38773351', None, [('d', 'n', 'clinical')]),
+    ('ENSG1', 'Hypertension', 'EFO_NEW2', [('Inhibition/Decrease/Downregulation', 'acute')], None,
+     'Brennan et al. (2024)', '38773351', None, [('d', 'n', 'clinical')]),
+    ('ENSG5', 'dizziness', None, [('Other', None)], None, 'Brennan et al. (2024)', '38773351', None,
+     [(None, None, None)]),
+    ('ENSG1', 'drug toxicity', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG1',
+     [('Genetic variation linked to this safety liability: g1, g2, h1', 'drugA induced effect', 'clinical'),
+      ('Genetic variation linked to this safety liability: g1, g2, h1', 'drugB induced effect', 'clinical')]),
+    ('ENSG5', 'neutropenia', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG5',
+     [('Genetic variation linked to this safety liability: ', 'drugC induced effect', 'clinical'),
+      ('Genetic variation linked to this safety liability: ', None, 'clinical')]),
+    ('ENSG4', 'rash', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG4',
+     [('Genetic variation linked to this safety liability: g5', 'drugE induced effect', 'clinical')]),
+    ('ENSG1', 'severe\xa0\xa0rash x', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG1',
+     [('Genetic variation linked to this safety liability: g3', 'drugD induced effect', 'clinical')]),
+]
+
+
+def _tsv(path: Path, columns: list[str], rows: list[tuple]) -> None:
+    path.write_text('\n'.join(['\t'.join(columns), *('\t'.join(r) for r in rows)]) + '\n')
+
+
+def _two_parts(frame: pl.DataFrame, path: Path) -> None:
+    path.mkdir(parents=True)
+    half = frame.height // 2
+    frame.head(half).write_parquet(path / 'part-0.parquet')
+    frame.tail(frame.height - half).write_parquet(path / 'part-1.parquet')
+
+
+def _write_inputs(root: Path) -> dict[str, str]:
+    safety = root / 'safety'
+    safety.mkdir(parents=True)
+    _tsv(safety / 'adverse_effects.tsv', AE_COLUMNS, AE_ROWS)
+    _tsv(safety / 'safety_risks.tsv', SR_COLUMNS, SR_ROWS)
+    _tsv(safety / 'toxcast.tsv', TC_COLUMNS, TC_ROWS)
+    (safety / 'aopwiki.json').write_text(json.dumps(AOP))
+    brennan = [
+        {'Type': 'Clinical', 'biosamples': b, 'datasource': 'Brennan et al. (2024)', 'effects': e, 'event': ev,
+         'eventId': eid, 'id': i, 'literature': '38773351', 'studies': s}
+        for i, ev, eid, e, b, s in BRENNAN
+    ]
+    (safety / 'secondary_pharmacology.json').write_text(''.join(json.dumps(r) + '\n' for r in brennan))
+    _two_parts(_pgx(*PGX), root / 'pharmacogenomics')
+    _two_parts(
+        _target(('ENSG1', 'GENE1', ['P1']), ('ENSG2', 'SHARED', None), ('ENSG3', 'SHARED', []), ('ENSG4', None, None),
+                ('ENSG5', 'GENE5', ['P5', 'P5'])),
+        root / 'target',
+    )
+    _two_parts(
+        _diseases(('EFO_NEW', ['EFO_OLD']), ('EFO_NEW2', ['EFO_OLD', 'EFO_OLD2']), ('EFO_A', None), ('EFO_B', [])),
+        root / 'disease',
+    )
+    return {
+        'adverse_events': str(safety / 'adverse_effects.tsv'),
+        'safety_risks': str(safety / 'safety_risks.tsv'),
+        'brennan': str(safety / 'secondary_pharmacology.json'),
+        'toxcast': str(safety / 'toxcast.tsv'),
+        'aopwiki': str(safety / 'aopwiki.json'),
+        'pharmacogenetics': str(root / 'pharmacogenomics'),
+        'target': str(root / 'target'),
+        'diseases': str(root / 'disease'),
+    }
+
+
+def _canonical(value: object) -> object:
+    if isinstance(value, dict):
+        return tuple(_canonical(v) for v in value.values())
+    if isinstance(value, list):
+        return sorted((_canonical(v) for v in value), key=repr)
+    return value
+
+
+def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
+    source = _write_inputs(tmp_path / 'in')
+    target_safety_event(source, str(tmp_path / 'out1'), {}, None)
+    target_safety_event(source, str(tmp_path / 'out2'), {}, None)
+
+    first = sorted((tmp_path / 'out1').glob('*.parquet'))
+    second = sorted((tmp_path / 'out2').glob('*.parquet'))
+    assert [p.name for p in first] == [p.name for p in second]
+    assert [p.read_bytes() for p in first] == [p.read_bytes() for p in second]
+
+    out = pl.read_parquet(first)
+    assert out.schema == pl.Schema({
+        'targetId': pl.String,
+        'event': pl.String,
+        'eventId': pl.String,
+        'effects': pl.List(effect),
+        'biosamples': pl.List(biosample),
+        'datasource': pl.String,
+        'literature': pl.String,
+        'url': pl.String,
+        'studies': pl.List(study),
+    })
+    got = sorted((_canonical(list(r)) for r in out.rows()), key=repr)
+    assert got == sorted((_canonical(list(r)) for r in EXPECTED), key=repr)
+
+
+def test_target_safety_event_lists_are_sorted(tmp_path: Path) -> None:
+    source = _write_inputs(tmp_path / 'in')
+    target_safety_event(source, str(tmp_path / 'out'), {}, None)
+    out = pl.read_parquet(tmp_path / 'out')
+    for column in ['biosamples', 'studies']:
+        assert out[column].to_list() == out[column].list.sort().to_list()
+    assert out.rows() == out.sort(pl.all()).rows()
+
+
+def test_target_safety_event_keeps_aop_effects_order(tmp_path: Path) -> None:
+    source = _write_inputs(tmp_path / 'in')
+    target_safety_event(source, str(tmp_path / 'out'), {}, None)
+    out = pl.read_parquet(tmp_path / 'out').filter(event='y')
+    assert out['effects'].to_list() == [[
+        {'direction': 'Inhibition/Decrease/Downregulation', 'dosing': 'chronic'},
+        {'direction': 'Activation/Increase/Upregulation', 'dosing': 'acute'},
+    ]]

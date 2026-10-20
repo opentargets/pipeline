@@ -25,10 +25,10 @@ def test_arrow_is_on_without_fallback(dataproc):
     assert conf['spark.sql.execution.arrow.pyspark.fallback.enabled'] == 'false'
 
 
-def test_local_session_loads_the_spark_4_jars():
+def test_local_session_loads_the_gcs_connector_and_no_spark_nlp():
     conf = _config(dataproc=False)
-    assert conf['spark.jars.packages'].startswith('com.johnsnowlabs.nlp:spark-nlp_2.13:')
     assert 'gcs-connector-4.' in conf['spark.jars']
+    assert 'spark.jars.packages' not in conf
 
 
 def test_dataproc_session_leaves_jars_to_the_cluster():

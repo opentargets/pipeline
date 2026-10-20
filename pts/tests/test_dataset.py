@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import datetime
 import gzip
 import json
 from pathlib import Path
+from typing import Any
 
+import numpy as np
+import openpyxl
+import pandas as pd
 import polars as pl
 import pytest
 
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import (
+    check_destinations_absent,
+    read_spreadsheet,
+    scan_dataset,
+    scan_datasets,
+    write_dataset,
+)
 
 
 def _write_parts(directory: Path, *frames: pl.DataFrame) -> str:
@@ -328,3 +339,163 @@ def test_scan_datasets_ignores_success_markers_and_crc_sidecars(tmp_path: Path) 
     frame = scan_datasets(str(tmp_path / 'evidence_*')).collect()
 
     assert frame['targetId'].to_list() == ['t1']
+
+
+def test_read_spreadsheet_gives_strings_like_pandas(tmp_path: Path) -> None:
+    columns = {
+        'd': ['x', None, ' '],
+        'a': [1, 2, 3],
+        'b': [1.5, None, 2.0],
+        'c': [True, False, None],
+        'm': [1.0, '-', 'NaN'],
+        'n': ['NA', 'n/a', ' NA'],
+    }
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    ws.append(list(columns))
+    for row in zip(*columns.values(), strict=True):
+        ws.append(list(row))
+    wb.save(tmp_path / 'cells.xlsx')
+
+    df = read_spreadsheet(str(tmp_path / 'cells.xlsx'), 'S')
+
+    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
+    assert df.rows() == [
+        ('x', '1', '1.5', '1', '1', None),
+        (None, '2', None, '0', '-', None),
+        (' ', '3', '2.0', None, None, ' NA'),
+    ]
+
+
+def test_spreadsheet_strings_match_old_reader(tmp_path: Path) -> None:
+    """Without type inference, the strings of `pd.read_excel(dtype=str)`, as gene burden read them."""
+    columns = {
+        'integral': [5.0, 0.01, 0.0001, -0.0, 1e15],
+        'floats': [1.5e-08, 2e-05, 0.1 + 0.2, 1 / 3, 5e-320],
+        'flag': [True, False, None, True, False],
+        'number_flag': [1.0, 0.0, 1, None, 1.0],
+        'text': ['-', 'na', 'NA', ' a ', 'NaN'],
+        'numeric_text': ['5', '5.0', 'inf', '1e-05', 'singleton'],
+        'blank': [None, 'x', None, None, ''],
+        'when': [datetime.datetime(2020, 1, 2), datetime.date(2021, 3, 4), None, None, None],
+    }
+    rows = [list(columns), *(list(row) for row in zip(*columns.values(), strict=True))]
+    # a blank row between data rows, and blank rows before a formatted but empty trailing cell
+    rows[3:3] = [[None] * len(columns)]
+    path = _write_sheet(tmp_path / 'cells.xlsx', rows)
+    trailing = openpyxl.load_workbook(path)
+    trailing['S'].cell(row=len(rows) + 3, column=1).number_format = '0.00'
+    trailing['S'].cell(row=len(rows) + 3, column=1).value = ''
+    trailing.save(path)
+
+    df = read_spreadsheet(path, 'S', infer_types=False)
+
+    assert df.schema == pl.Schema(dict.fromkeys(columns, pl.String))
+    assert (df.columns, df.rows()) == _old_reader(path)
+    assert df.height == 6
+    assert df.row(2) == (None,) * len(columns)
+    assert df['integral'].to_list() == ['5', '0.01', None, '0.0001', '0', '1000000000000000']
+    assert df['flag'].to_list() == ['True', 'False', None, None, 'True', 'False']
+
+
+def _write_sheet(path: Path, rows: list[list[Any]], *, start: str = 'A1') -> str:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    origin = ws[start]
+    for i, row in enumerate(rows):
+        for j, value in enumerate(row):
+            if value is not None:
+                ws.cell(row=origin.row + i, column=origin.column + j, value=value)
+    wb.save(path)
+    return str(path)
+
+
+def _cell_to_string(value: Any) -> str | None:
+    """A pandas cell as gene burden's old reader passed it to spark: booleans as '1'/'0', blanks as null."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, bool | np.bool_):
+        return '1' if value else '0'
+    return str(value)
+
+
+def _old_reader(path: str) -> tuple[list[str], list[tuple[str | None, ...]]]:
+    """Gene burden's old reader: `pd.read_excel(dtype=str)` then `_cell_to_string`."""
+    old = pd.read_excel(path, sheet_name='S', dtype=str).astype(object).map(_cell_to_string)
+    rows = [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
+    return [str(c) for c in old.columns], rows
+
+
+@pytest.mark.parametrize(
+    ('rows', 'start'),
+    [
+        pytest.param([[None, None], ['a', 'b'], [1, 'x']], 'A1', id='blank_header_row'),
+        pytest.param([['a', 'b'], [None, None], [1, 'x'], [2, 'y']], 'A1', id='blank_row_under_header'),
+        pytest.param([['a', 'b'], [1, 'x'], [None, None], [None, None], ['note', None]], 'A1', id='footnote'),
+        pytest.param([['a', 'b'], [1, 'x'], ['NA', 'nan'], [2, 'y']], 'A1', id='missing_value_row'),
+        pytest.param([['a', 'b'], [1, 'x']], 'C3', id='offset_table'),
+        pytest.param([['a', 'a', None, 'a.1', 'b'], [1, 2, 3, 4, None]], 'A1', id='header_names'),
+        pytest.param([['a', 'b'], [1e20, '#DIV/0!'], [2**53 + 2.0, '#N/A']], 'A1', id='big_numbers_and_errors'),
+        pytest.param([['a', 'b', None], ['x', None, None], ['y', 'z', None]], 'A1', id='short_rows'),
+    ],
+)
+def test_spreadsheet_layout_matches_old_reader(tmp_path: Path, rows: list[list[Any]], start: str) -> None:
+    path = _write_sheet(tmp_path / 'layout.xlsx', rows, start=start)
+
+    df = read_spreadsheet(path, 'S', infer_types=False)
+
+    assert (df.columns, df.rows()) == _old_reader(path)
+
+
+@pytest.mark.parametrize(
+    'rows',
+    [
+        pytest.param([['title'], ['a', None, 'b'], [None, 'x', None], [1, 2.5, 'NA'], ['note']], id='multi_row_header'),
+        pytest.param([[None, None], ['a', 'b'], [None, None], [1e-8, True]], id='blank_rows'),
+        pytest.param([['a', 'a', None], [5.0, '-', 'n/a']], id='repeated_names'),
+    ],
+)
+def test_spreadsheet_without_a_header_matches_old_reader(tmp_path: Path, rows: list[list[Any]]) -> None:
+    """Every row as data, as `pd.read_excel(header=None, dtype=str)` reads it."""
+    path = _write_sheet(tmp_path / 'raw.xlsx', rows)
+
+    df = read_spreadsheet(path, 'S', infer_types=False, has_header=False)
+
+    old = pd.read_excel(path, sheet_name='S', header=None, dtype=str).astype(object).map(_cell_to_string)
+    assert df.columns == [f'column_{i + 1}' for i in range(old.shape[1])]
+    assert df.rows() == [tuple(None if pd.isna(v) else v for v in row) for row in old.itertuples(index=False)]
+
+
+def test_spreadsheet_without_a_header_needs_text_mode(tmp_path: Path) -> None:
+    path = _write_sheet(tmp_path / 'raw.xlsx', [['a'], [1]])
+    with pytest.raises(ValueError, match='infer_types'):
+        read_spreadsheet(path, 'S', has_header=False)
+
+
+@pytest.mark.parametrize('infer_types', [True, False])
+def test_read_spreadsheet_with_a_header_only(tmp_path: Path, infer_types: bool) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'S'
+    ws.append(['a', 'b'])
+    wb.save(tmp_path / 'header.xlsx')
+
+    df = read_spreadsheet(str(tmp_path / 'header.xlsx'), 'S', infer_types=infer_types)
+
+    assert df.schema == pl.Schema({'a': pl.String, 'b': pl.String})
+    assert df.height == 0
+
+
+def test_check_destinations_absent_names_every_existing_path(tmp_path: Path) -> None:
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'c').mkdir()
+    paths = [str(tmp_path / name) for name in 'abc']
+
+    with pytest.raises(ValueError, match='already exists') as error:
+        check_destinations_absent(paths)
+    assert str(tmp_path / 'a') in str(error.value)
+    assert str(tmp_path / 'b') not in str(error.value)
+    assert str(tmp_path / 'c') in str(error.value)
+    check_destinations_absent([str(tmp_path / 'b')])

@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as f
 from loguru import logger
-from ontoma import OnToma
 
-from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import parse_spark_schema
 from pts.pyspark.literature_utils.dataset.dataset import Dataset
 from pts.pyspark.literature_utils.dataset.match_mapped import MatchMapped
+from pts.pyspark.literature_utils.label_mapping import MAPPED_LABELS_DDL, map_label_batches
 
 if TYPE_CHECKING:
     from pyspark.sql.types import StructType
@@ -36,36 +35,51 @@ class Match(Dataset):
 
     def map_labels(
         self: Match,
-        session: Session,
         label_lut_path: str,
         label_col_name: str,
-        type_col_name: str
+        type_col_name: str,
+        label_mapping_partitions: int | None = None,
     ) -> MatchMapped:
         """Maps labels using the provided label lookup table.
 
         If there are multiple mappings, the results are exploded accordingly.
 
         Args:
-            session (Session): Spark Session object.
             label_lut_path (str): Path to the label lookup table.
             label_col_name (str): Name of the column containing the label.
             type_col_name (str): Name of the column containing the label type.
+            label_mapping_partitions (int | None): Partitions, one task each, for the distinct labels sent to
+                the mapping; no repartition when unset.
 
         Returns:
             MatchMapped: Dataset with mapped labels.
         """
-        logger.info(f'load label lookup table from {label_lut_path}')
-        label_lut = OnToma(spark=session.spark, cache_dir=label_lut_path)
-
-        logger.info('map labels')
-        mapped_matches = label_lut.map_entities(
-            df=self.df,
-            result_col_name='entityIds',
-            entity_col_name=label_col_name,
-            entity_kind='label',
-            type_col_name=type_col_name,
-            include_normalised_entities=True,
-            include_entity_source=True
+        logger.info(f'map labels with the lookup table at {label_lut_path}')
+        distinct_labels = (
+            self.df
+            .select(f.col(label_col_name).alias('label'), f.col(type_col_name).alias('type'))
+            .distinct()
+        )
+        if label_mapping_partitions:
+            distinct_labels = distinct_labels.repartition(label_mapping_partitions)
+        mapped_labels = (
+            distinct_labels
+            .mapInArrow(map_label_batches(label_lut_path), MAPPED_LABELS_DDL)
+            .alias('mapped')
+        )
+        mapped_matches = (
+            self.df
+            .distinct()
+            .alias('match')
+            .join(
+                mapped_labels,
+                on=(
+                    f.col(f'match.{label_col_name}').eqNullSafe(f.col('mapped.label'))
+                    & f.col(f'match.{type_col_name}').eqNullSafe(f.col('mapped.type'))
+                ),
+                how='inner',
+            )
+            .select('match.*', 'mapped.entityLabelNormalised', 'mapped.entityIds')
         )
 
         logger.info('explode results')
