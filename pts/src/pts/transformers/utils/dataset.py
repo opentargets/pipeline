@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal, overload
+from typing import Any, Literal
 
 import openpyxl
 import polars as pl
@@ -141,31 +141,10 @@ def scan_dataset(
     return pl.scan_csv(parts, separator=_SEPARATORS[format], schema=schema, **options)
 
 
-@overload
-def scan_datasets(
-    pattern: str,
-    *,
-    format: Format = 'parquet',
-    schema: pl.Schema | None = None,
-    **options: Any,
-) -> pl.LazyFrame: ...
-
-
-@overload
-def scan_datasets(
-    pattern: list[str],
-    *,
-    format: Format = 'parquet',
-    schema: pl.Schema | None = None,
-    **options: Any,
-) -> pl.LazyFrame: ...
-
-
 def scan_datasets(
     pattern: str | list[str],
     *,
     format: Format = 'parquet',
-    schema: pl.Schema | None = None,
     **options: Any,
 ) -> pl.LazyFrame:
     """Lazily combine datasets selected by a directory glob or an explicit path list.
@@ -194,8 +173,6 @@ def scan_datasets(
     Args:
         pattern: Absolute dataset paths, or a location with a glob in its LAST segment.
         format: `'parquet'`, `'ndjson'`, `'csv'` or `'tsv'`.
-        schema: Optional output schema. Missing columns and nested fields become typed
-            nulls; unexpected fields and mismatched types are rejected.
         **options: forwarded to `scan_dataset` for each matched dataset.
 
     Returns:
@@ -228,15 +205,8 @@ def scan_datasets(
             msg = f'{pattern!r} matched no datasets'
             raise ValueError(msg)
 
-    # Text readers must parse with the schema: inference sees only the first rows, so a field
-    # that appears later is dropped before any post-scan schema matching could keep it.
-    text_schema = {'schema': schema} if schema is not None and format != 'parquet' else {}
-    frames = [scan_dataset(directory, format=format, **text_schema, **options) for directory in directories]
-    if schema is not None:
-        frames = [
-            frame.match_to_schema(schema, missing_columns='insert', missing_struct_fields='insert') for frame in frames
-        ]
-    return pl.concat(frames, how='vertical' if schema is not None else 'diagonal_relaxed')
+    frames = [scan_dataset(directory, format=format, **options) for directory in directories]
+    return pl.concat(frames, how='diagonal_relaxed')
 
 
 def _pandas_cell(cell: Any) -> Any:
