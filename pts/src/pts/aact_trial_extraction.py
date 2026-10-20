@@ -1,9 +1,15 @@
-"""Implementation of the :py:mod:`pts.tasks.llm_extract` task."""
+"""Implementation of the :py:mod:`pts.tasks.llm_extract` task.
+
+Each trial's extraction is a record in a :py:mod:`pts.record_store` store: the
+text is the rendered prompt, the model ``aact_llm_extraction``, the revision the
+digest of the response schema, and the output the JSON of the validated model.
+"""
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Sequence
+import io
+import json
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,15 +19,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
 from pydantic import BaseModel
 
 from pts.postgres import read_dump_tables
-from pts.result_cache import METADATA_SCHEMA, cache_key, read_cache, write_cache
+from pts.record_store import text_sha256, write_run
 from pts.transformers.clinical import (
     build_prompts,
     extract_aact_clinical_report,
     llm_workflow,
-    parse_batch_results,
     run_extraction,
     sample_report,
 )
@@ -58,6 +65,11 @@ AACT_TABLES = {
     'detailed_descriptions': ['nct_id', 'description'],
 }
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+EXTRACTION_MODEL = 'aact_llm_extraction'
+"""Model name of the extraction records; their model revision is the response schema digest."""
+IMPORT_RUN_ID = 'import-extraction-cache'
+IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
+"""Run that holds the records imported from the extraction cache, and the time of those cached without one."""
 LLM_WORKFLOW_PATCH_LOCK = Lock()
 """Serialises temporary patches to the LLM workflow's module globals."""
 
@@ -116,105 +128,27 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
 
 
 def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
-    """Render one prompt per trial and derive its cache key."""
+    """Render one prompt per trial, with the hash of the prompt.
+
+    The prompt is the record store's text, so ``schema_digest`` does not enter
+    the result; the store keys it as the model revision instead.
+    """
     if 'drugs' in report.columns:
         report = report.with_columns(
             pl.col('drugs').list.eval(pl.element().sort_by(pl.element().struct.field('drugFromSource')))
         )
     prompts = build_prompts(report, trial_fields=TRIAL_FIELDS)
 
-    return (
-        pl
-        .DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String})
-        .with_columns(
-            prompt_sha256=pl.col('prompt').map_elements(
-                lambda p: hashlib.sha256(p.encode('utf-8')).hexdigest(), return_dtype=pl.String
-            ),
-        )
-        .with_columns(
-            cache_key=pl.struct('id', 'prompt_sha256').map_elements(
-                lambda row: cache_key(row['id'], schema_digest, row['prompt_sha256']), return_dtype=pl.String
-            ),
-        )
+    return pl.DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String}).with_columns(
+        prompt_sha256=pl.col('prompt').map_elements(text_sha256, return_dtype=pl.String),
     )
 
 
-def rekey_cache(schema_cache_uri: str, schema_digest: str, prompts: pl.DataFrame, config: Config, snapshot: str) -> int:
-    """Move cached rows onto the ``(id, schema, prompt hash)`` key.
-
-    A row is pre-migration when its key is the old ``(id, schema)`` one. Such a
-    row for a trial in ``prompts`` adopts the current prompt hash and key. A
-    pre-migration row for any other trial is rekeyed from its stored
-    ``prompt_sha256``, and keeps its key when it has none. Rows already on the
-    new key are never touched. Of rows that end up with the same key the newest
-    is kept. A new snapshot is written only when a key changed, so a second call
-    is a no-op.
-
-    Args:
-        schema_cache_uri: Cache namespace of the response schema.
-        schema_digest: Digest of the response schema.
-        prompts: Output of :py:func:`prompts_for`: ``id``, ``prompt_sha256``, ``cache_key``.
-        config: The otter config, used to resolve storage.
-        snapshot: Name of the snapshot written when a key changed.
-
-    Returns:
-        int: The number of rows whose key changed.
-    """
-    rows = read_cache(schema_cache_uri, config)
-    if 'id' not in rows.columns:
-        return 0
-    if 'prompt_sha256' not in rows.columns:
-        rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
-
-    current = prompts.select(
-        'id', pl.col('prompt_sha256').alias('current_sha256'), pl.col('cache_key').alias('current_key')
-    ).unique(subset='id')
-    joined = rows.join(current, on='id', how='left').with_columns(
-        pre_migration=pl.struct('id', 'cache_key').map_elements(
-            lambda row: row['id'] is not None and row['cache_key'] == cache_key(row['id'], schema_digest),
-            return_dtype=pl.Boolean,
-        )
-    )
-    adopt = pl.col('pre_migration') & pl.col('current_key').is_not_null()
-    rekeyed = joined.with_columns(
-        new_key=pl
-        .when(adopt)
-        .then(pl.col('current_key'))
-        .otherwise(
-            pl.struct('id', 'prompt_sha256', 'cache_key', 'pre_migration').map_elements(
-                lambda row: (
-                    cache_key(row['id'], schema_digest, row['prompt_sha256'])
-                    if row['pre_migration'] and row['prompt_sha256'] is not None
-                    else row['cache_key']
-                ),
-                return_dtype=pl.String,
-            )
-        ),
-        prompt_sha256=pl.when(adopt).then(pl.col('current_sha256')).otherwise(pl.col('prompt_sha256')),
-    )
-    changed = int((rekeyed['new_key'] != rekeyed['cache_key']).sum())
-    if changed:
-        result = (
-            rekeyed
-            .drop('cache_key', 'current_sha256', 'current_key', 'pre_migration')
-            .rename({'new_key': 'cache_key'})
-            .select(rows.columns)
-            .sort('computed_at', descending=True, nulls_last=True)
-            .unique(subset='cache_key', keep='first', maintain_order=True)
-        )
-        write_cache(result, schema_cache_uri, config, snapshot)
-        logger.info(f'rekeyed {changed} cached extractions onto the prompt hash')
-    return changed
-
-
-def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str, errors: list[str]) -> pl.DataFrame:
-    """Run the LLM over one shard and return a cache row per trial it extracted.
+def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) -> pl.DataFrame:
+    """Run the LLM over one shard and return a row per trial it extracted.
 
     ``run_extraction`` returns only what succeeded and logs the rest, so
-    trials the model failed on are simply absent from the result, and
-    therefore absent from the cache. The next run tries them again. Nothing
-    records that they failed — see :py:func:`pts.result_cache.cached_map`.
-    The workflow's diagnostics are appended to ``errors``.
+    trials the model failed on are simply absent from the result.
     """
     prompts = shard.select('id', 'prompt').to_dicts()
     if len(prompts) == 1:
@@ -234,14 +168,12 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str, 
             max_retries=spec.max_retries,
             errors_dir=errors_dir,
         )
-        error_path = Path(errors_dir) / 'errors.jsonl'
-        if error_path.exists():
-            errors.extend(error_path.read_text(encoding='utf-8').splitlines())
     if extracted is None or extracted.is_empty():
         extracted = pl.DataFrame(schema={'id': pl.String})
 
-    keys = shard.select('id', 'cache_key', 'prompt_sha256')
-    succeeded = extracted.unique(subset='id').join(keys, on='id', how='inner')
+    succeeded = extracted.unique(subset='id', keep='first', maintain_order=True).join(
+        shard.select('id').unique(), on='id', how='semi'
+    )
 
     missing = shard.height - succeeded.height
     if missing:
@@ -250,42 +182,104 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str, 
     return succeeded
 
 
-def seed_legacy_cache(
-    prompts: pl.DataFrame,
-    legacy_path: str,
-    schema_cache_uri: str,
-    config: Config,
-    snapshot: str,
-) -> int:
-    """Import legacy Batch API results using the current trial/schema keys.
+def extraction_compute(
+    prompts: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str
+) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
+    """Return the record store compute that extracts the trials of a list of prompts.
 
-    This compatibility path is deliberately opt-in and intended for one
-    migration run. Failed and malformed legacy records remain absent from
-    the cache, so the normal extraction loop retries them.
+    Each prompt maps to the JSON of its trial's extraction, or to a failure
+    when the trial returned none.
     """
-    logger.info(f'importing legacy AACT batch results from {legacy_path}')
-    legacy = parse_batch_results(legacy_path, config).df
-    if legacy.is_empty():
-        logger.warning('legacy batch results contained no valid extractions')
-        return 0
+    ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
 
-    imported = legacy.join(prompts.select('id', 'cache_key', 'prompt_sha256'), on='id', how='inner')
-    if imported.is_empty():
-        logger.warning('no legacy extractions matched the current AACT prompts')
-        return 0
+    def compute(texts: list[str]) -> list[tuple[str | None, str | None]]:
+        shard = pl.DataFrame(
+            {'id': [ids[t] for t in texts], 'prompt': texts}, schema={'id': pl.String, 'prompt': pl.String}
+        )
+        rows = {row['id']: row for row in extract(shard, spec, system_prompt_path).to_dicts()}
+        return [(json.dumps(rows[i]), None) if i in rows else (None, 'no extraction') for i in shard['id']]
 
-    existing = read_cache(schema_cache_uri, config)
-    combined = pl.concat([existing, imported], how='diagonal_relaxed')
-    combined = combined.with_columns(
-        computed_at=pl.coalesce([
-            pl.col('computed_at'),
-            pl.lit(datetime.now(UTC)).cast(METADATA_SCHEMA['computed_at']),
-        ])
+    return compute
+
+
+def extractions_from_records(
+    records: pl.DataFrame, prompts: pl.DataFrame, model_class: type[BaseModel]
+) -> pl.DataFrame:
+    """Build the published extraction from the store's output per prompt.
+
+    Args:
+        records: ``text`` and ``output`` per prompt, as :py:func:`pts.record_store.map_texts` returns them.
+        prompts: Output of :py:func:`prompts_for`.
+        model_class: The model each output is validated against.
+
+    Returns:
+        pl.DataFrame: One row per extracted trial: the model's fields, then ``prompt_sha256``.
+    """
+    joined = records.join(
+        prompts.select('id', 'prompt', 'prompt_sha256'), left_on='text', right_on='prompt', maintain_order='left'
     )
-    combined = combined.sort('computed_at', descending=True).unique(subset='cache_key', keep='first')
-    write_cache(combined, schema_cache_uri, config, snapshot)
-    logger.info(f'seeded {imported.height} legacy extractions into the cache')
-    return imported.height
+    extractions = _models_to_dataframe([model_class.model_validate_json(output) for output in joined['output']])
+    return extractions.with_columns(id=joined['id'], prompt_sha256=joined['prompt_sha256'])
+
+
+def import_extraction_cache(
+    cache_uri: str, prompts: pl.DataFrame, store_uri: str, schema_digest: str, config: Config
+) -> int:
+    """Import an extraction cache of one response schema into the record store, once.
+
+    Every cached trial still in ``prompts`` becomes an ``ok`` record whose text is
+    that trial's current prompt. Of several rows for one trial, the one cached
+    for the current prompt wins, then the newest.
+
+    Args:
+        cache_uri: The cache's namespace for ``schema_digest``: ``latest.json``
+            pointing at ``snapshots/<snapshot>/rows.parquet``.
+        prompts: Output of :py:func:`prompts_for`.
+        store_uri: Root of the store, an absolute URI.
+        schema_digest: Digest of the response schema, the records' model revision.
+        config: The otter config, used to resolve storage.
+
+    Returns:
+        int: The number of records written, 0 if the import run already exists.
+    """
+    try:
+        StorageHandle(f'{store_uri}/runs/{IMPORT_RUN_ID}/manifest.json', config=config).read_text()
+    except NotFoundError:
+        pass
+    else:
+        logger.info(f'{IMPORT_RUN_ID} already imported into {store_uri}')
+        return 0
+
+    pointer, _ = StorageHandle(f'{cache_uri}/latest.json', config=config).read_text()
+    snapshot = json.loads(pointer)['snapshot']
+    data, _ = StorageHandle(f'{cache_uri}/snapshots/{snapshot}/rows.parquet', config=config).read()
+    rows = pl.read_parquet(io.BytesIO(data))
+    if 'prompt_sha256' not in rows.columns:
+        rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
+
+    current = prompts.select('id', 'prompt', current_sha256='prompt_sha256').unique(subset='id')
+    adopted = (
+        rows
+        .join(current, on='id')
+        .with_columns(is_current=(pl.col('prompt_sha256') == pl.col('current_sha256')).fill_null(False))
+        .sort(['is_current', 'computed_at'], descending=True, nulls_last=True)
+        .unique(subset='id', keep='first', maintain_order=True)
+        .sort('id')
+    )
+    outputs = adopted.drop('cache_key', 'prompt_sha256', 'computed_at', 'prompt', 'current_sha256', 'is_current')
+    records = adopted.select(
+        text_sha256=pl.col('current_sha256'),
+        text=pl.col('prompt'),
+        model=pl.lit(EXTRACTION_MODEL),
+        model_revision=pl.lit(schema_digest),
+        output=pl.Series([json.dumps(row) for row in outputs.to_dicts()], dtype=pl.String),
+        status=pl.lit('ok'),
+        error=pl.lit(None, dtype=pl.String),
+        computed_at=pl.col('computed_at').fill_null(IMPORT_COMPUTED_AT),
+        run_id=pl.lit(IMPORT_RUN_ID),
+    )
+    write_run(records, store_uri, IMPORT_RUN_ID, config, output_dtype=pl.String())
+    return records.height
 
 
 def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
@@ -300,7 +294,7 @@ def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
     def run_with_full_schema_inference() -> pl.DataFrame | None:
         # The workflow's default inference samples only the first 100 model
         # responses. Later validated nested values can then disagree with that
-        # inferred schema, losing the whole shard before cached_map can stage it.
+        # inferred schema, losing the whole shard before the record store can write it.
         with LLM_WORKFLOW_PATCH_LOCK:
             original = llm_workflow._extractions_to_df
 

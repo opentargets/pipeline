@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
+import json
 import subprocess
 import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from time import sleep
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,11 +15,20 @@ from typing import Any, cast
 import polars as pl
 import pytest
 from loguru import logger
+from otter.config.model import Config
+from otter.scratchpad.model import Scratchpad
+from otter.task.model import TaskContext
 
 from pts import aact_trial_extraction
-from pts.aact_trial_extraction import _run_extraction_in_thread
-from pts.result_cache import METADATA_SCHEMA, cache_key, cached_map, read_cache, write_cache
-from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
+from pts.aact_trial_extraction import (
+    EXTRACTION_MODEL,
+    IMPORT_RUN_ID,
+    _models_to_dataframe,
+    _run_extraction_in_thread,
+    import_extraction_cache,
+)
+from pts.record_store import read_records, text_sha256
+from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class
 from pts.transformers.clinical import (
     ClinicalReportExtractionSchema,
     extract_aact_clinical_report,
@@ -48,7 +58,7 @@ def test_default_system_prompt_is_packaged() -> None:
             name='llm_extract test',
             source={'aact': 'aact.zip'},
             destination={},
-            cache_uri='cache',
+            store_uri='store',
             snapshot='snapshot',
         ),
         SimpleNamespace(config=None),
@@ -60,7 +70,7 @@ def test_default_system_prompt_is_packaged() -> None:
 
 def test_default_model_class_is_the_extraction_schema() -> None:
     spec = LlmExtractSpec(
-        name='llm_extract test', source={'aact': 'aact.zip'}, destination={}, cache_uri='cache', snapshot='snapshot'
+        name='llm_extract test', source={'aact': 'aact.zip'}, destination={}, store_uri='store', snapshot='snapshot'
     )
 
     assert spec.model_class == 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
@@ -92,7 +102,6 @@ def test_prompts_without_publications_match_mira() -> None:
                 'for headache.\nDetailed Description: null\nInterventions: aspirin; ibuprofen'
             ),
             'prompt_sha256': 'ad34534226e9e4bb74e1da9ef5f65fdd9f08d19c5094131f18ca2da120524e6e',
-            'cache_key': '70fed69e9bb9173a55dde1c3addb9a8c48e02f5f0d9b2701c4c86550687676f2',
         },
         {
             'id': 'nct00000002',
@@ -101,7 +110,6 @@ def test_prompts_without_publications_match_mira() -> None:
                 'Detailed Description: Detailed protocol.'
             ),
             'prompt_sha256': '0f484a99130e21f5ccc612919f6f43c6f02ea56fce20755c5a31397c352af305',
-            'cache_key': '91f6cce5820b6f3083e4150e040f40fcdcd1ed05777cc1b02370d21982a13e80',
         },
         {
             'id': 'nct00000003',
@@ -110,13 +118,8 @@ def test_prompts_without_publications_match_mira() -> None:
                 'Detailed Description: Multi\nline'
             ),
             'prompt_sha256': '7ea74f612091f04407ad77ecd516b3f9bcf2ab17652951b586c8d12dc9fb4533',
-            'cache_key': 'f34dd6200dbf090edc71974f23a51c4315206fc2e262f413180860a06ae6d321',
         },
     ]
-
-
-def test_schema_cache_uri_namespaces_the_cache_by_schema() -> None:
-    assert _schema_cache_uri('gs://bucket/cache/', 'schema-digest') == 'gs://bucket/cache/schema-digest'
 
 
 def test_trial_report_passes_detailed_description_to_the_aact_provider(
@@ -280,29 +283,6 @@ def test_run_extraction_logs_its_counts(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert any(m.startswith('... plus 2 more errors') for m in logged)
 
 
-def test_publish_writes_consolidated_errors(tmp_path: Path) -> None:
-    errors_path = tmp_path / 'errors.jsonl'
-    task = LlmExtract(
-        LlmExtractSpec(
-            name='llm_extract test',
-            source={'aact': str(tmp_path / 'aact.zip')},
-            destination={
-                'prompts': str(tmp_path / 'prompts.parquet'),
-                'extraction': str(tmp_path / 'extractions.parquet'),
-                'errors': str(errors_path),
-            },
-            cache_uri=str(tmp_path / 'cache'),
-            snapshot='snapshot',
-        ),
-        SimpleNamespace(config=None),
-    )
-    task.errors = ['{"id":"nct1"}', '{"id":"nct2"}']
-
-    task._publish(pl.DataFrame({'id': ['nct1']}), pl.DataFrame({'id': ['nct1']}), str(tmp_path / 'cache'))
-
-    assert errors_path.read_text() == '{"id":"nct1"}\n{"id":"nct2"}\n'
-
-
 @pytest.fixture
 def logged() -> Iterator[list[str]]:
     messages: list[str] = []
@@ -336,44 +316,13 @@ def test_parse_batch_results_raises_when_no_output_files(tmp_path: Path) -> None
         parse_batch_results(str(tmp_path), cast(Any, None))
 
 
-def test_seed_legacy_cache_names_the_configured_path_when_nothing_is_staged(tmp_path: Path) -> None:
-    legacy = tmp_path / 'legacy'
-    legacy.mkdir()
-    prompts = pl.DataFrame(schema={'id': pl.String, 'cache_key': pl.String, 'prompt_sha256': pl.String})
-
-    with pytest.raises(ValueError, match=str(legacy)):
-        aact_trial_extraction.seed_legacy_cache(prompts, str(legacy), str(tmp_path / 'cache'), cast(Any, None), 'snap')
-
-
-def _report(*titles: str) -> pl.DataFrame:
+def _report(*ids: str, title: str = 'title') -> pl.DataFrame:
     return pl.DataFrame({
-        'id': ['nct1'] * len(titles),
-        'trialOfficialTitle': list(titles),
-        'trialDescription': ['d'] * len(titles),
-        'trialDetailedDescription': ['dd'] * len(titles),
+        'id': list(ids),
+        'trialOfficialTitle': [f'{title} {i}' for i in ids],
+        'trialDescription': ['d'] * len(ids),
+        'trialDetailedDescription': ['dd'] * len(ids),
     })
-
-
-NO_PROMPTS = pl.DataFrame(schema={'id': pl.String, 'prompt_sha256': pl.String, 'cache_key': pl.String})
-
-
-def _sha(text: str) -> str:
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()
-
-
-def _old_cache(tmp_path: Path, digest: str, ids: list[str], prompts: list[str | None] | None = None) -> str:
-    uri = str(tmp_path / 'cache')
-    data: dict[str, Any] = {
-        'cache_key': [cache_key(i, digest) for i in ids],
-        'computed_at': [None] * len(ids),
-        'id': ids,
-        'result': [f'r-{i}' for i in ids],
-    }
-    if prompts is not None:
-        data['prompt_sha256'] = [None if p is None else _sha(p) for p in prompts]
-    rows = pl.DataFrame(data, schema_overrides={'computed_at': METADATA_SCHEMA['computed_at']})
-    write_cache(rows, uri, cast(Any, None), 'old')
-    return uri
 
 
 def test_prompts_are_independent_of_row_order() -> None:
@@ -406,125 +355,198 @@ def test_prompts_are_independent_of_row_order() -> None:
         again = prompts(seed)
         assert again['prompt'].to_list() == first['prompt'].to_list()
         assert again['prompt_sha256'].to_list() == first['prompt_sha256'].to_list()
-        assert again['cache_key'].to_list() == first['cache_key'].to_list()
 
 
-def test_prompts_for_keys_on_trial_schema_and_prompt() -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('title one', 'title two'), 'digest')
+def test_prompts_for_hashes_each_prompt() -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
 
-    assert prompts['id'].to_list() == ['nct1', 'nct1']
-    assert prompts['cache_key'].n_unique() == 2
-    for row in prompts.to_dicts():
-        assert row['cache_key'] == cache_key('nct1', 'digest', _sha(row['prompt']))
+    assert prompts.columns == ['id', 'prompt', 'prompt_sha256']
+    assert prompts['prompt_sha256'].to_list() == [text_sha256(p) for p in prompts['prompt']]
 
 
-def test_rekey_cache_rewrites_keys_from_stored_columns(tmp_path: Path) -> None:
-    uri = _old_cache(tmp_path, 'digest', ['a', 'b'], ['pa', 'pb'])
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 2
-
-    rows = read_cache(uri, cast(Any, None)).sort('id')
-    assert rows['cache_key'].to_list() == [cache_key('a', 'digest', _sha('pa')), cache_key('b', 'digest', _sha('pb'))]
-    assert rows['result'].to_list() == ['r-a', 'r-b']
+SAMPLE_EXTRACTION = json.loads(SAMPLE_LINE)['response']['body']['output'][0]['content'][0]['text']
 
 
-def test_rekey_cache_is_a_noop_the_second_time(tmp_path: Path) -> None:
-    uri = _old_cache(tmp_path, 'digest', ['a'], ['pa'])
-    aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new')
-    pointer = (Path(uri) / 'latest.json').read_text()
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'again') == 0
-
-    assert (Path(uri) / 'latest.json').read_text() == pointer
-    assert not (Path(uri) / 'snapshots' / 'again').exists()
+def _model(trial_id: str) -> ClinicalReportExtractionSchema:
+    return ClinicalReportExtractionSchema.model_validate_json(SAMPLE_EXTRACTION.replace('nct00031889', trial_id))
 
 
-def test_rekey_leaves_rows_without_prompt_hash(tmp_path: Path) -> None:
-    uri = _old_cache(tmp_path, 'digest', ['a', 'b'], [None, 'pb'])
+class FakeLlm:
+    """Stands in for the LLM workflow, remembering which trials it was asked about."""
 
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 1
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, failing: set[str] | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.failing = failing or set()
+        monkeypatch.setattr(aact_trial_extraction, '_run_extraction_in_thread', self.run)
 
-    rows = read_cache(uri, cast(Any, None)).sort('id')
-    assert rows['cache_key'][0] == cache_key('a', 'digest')
-
-
-def test_rekey_leaves_a_cache_without_a_prompt_hash_column(tmp_path: Path) -> None:
-    uri = _old_cache(tmp_path, 'digest', ['a'])
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', NO_PROMPTS, cast(Any, None), 'new') == 0
-
-    assert read_cache(uri, cast(Any, None))['cache_key'].to_list() == [cache_key('a', 'digest')]
+    def run(self, **kwargs: Any) -> pl.DataFrame:
+        ids = sorted({p['id'] for p in kwargs['prompts']})
+        self.calls.append(ids)
+        return _models_to_dataframe([_model(i) for i in ids if i not in self.failing])
 
 
-def _computed(prompts: pl.DataFrame, uri: str) -> int:
-    computed: list[int] = []
-
-    def compute(shard: pl.DataFrame) -> pl.DataFrame:
-        computed.append(shard.height)
-        return shard.select('cache_key', 'id', 'prompt_sha256').with_columns(result=pl.lit('x'))
-
-    cached_map(prompts, compute, uri, cast(Any, None), 'run', 'ts')
-    return sum(computed)
-
-
-def test_unchanged_prompt_is_a_hit_after_rekey(tmp_path: Path) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
-    uri = _old_cache(tmp_path, 'digest', ['nct1'], [prompts['prompt'][0]])
-    aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new')
-
-    assert _computed(prompts, uri) == 0
-
-
-def test_pre_migration_rows_adopt_the_current_prompt_hash(tmp_path: Path) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
-    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['a stale prompt'])
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new') == 1
-
-    row = read_cache(uri, cast(Any, None)).to_dicts()[0]
-    assert row['prompt_sha256'] == prompts['prompt_sha256'][0]
-    assert row['cache_key'] == prompts['cache_key'][0]
-    assert _computed(prompts, uri) == 0
-
-
-def test_rekeyed_rows_are_never_readopted(tmp_path: Path) -> None:
-    old = aact_trial_extraction.prompts_for(_report('title'), 'digest')
-    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['a stale prompt'])
-    aact_trial_extraction.rekey_cache(uri, 'digest', old, cast(Any, None), 'new')
-    new = aact_trial_extraction.prompts_for(_report('other title'), 'digest')
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', new, cast(Any, None), 'again') == 0
-
-    assert _computed(new, uri) == 1
-
-
-def test_pre_migration_row_for_a_trial_no_longer_in_aact_rekeys_from_its_stored_hash(tmp_path: Path) -> None:
-    other = aact_trial_extraction.prompts_for(_report('title'), 'digest').with_columns(id=pl.lit('nct2'))
-    uri = _old_cache(tmp_path, 'digest', ['nct1'], ['pa'])
-
-    assert aact_trial_extraction.rekey_cache(uri, 'digest', other, cast(Any, None), 'new') == 1
-
-    row = read_cache(uri, cast(Any, None)).to_dicts()[0]
-    assert row['cache_key'] == cache_key('nct1', 'digest', _sha('pa'))
-    assert row['prompt_sha256'] == _sha('pa')
-
-
-def test_rekey_keeps_the_newest_of_rows_that_collide(tmp_path: Path) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('title'), 'digest')
-    uri = str(tmp_path / 'cache')
-    new_key = prompts['cache_key'][0]
-    rows = pl.DataFrame(
-        {
-            'cache_key': [cache_key('nct1', 'digest'), new_key],
-            'computed_at': [datetime(2026, 9, 4, tzinfo=UTC), datetime(2026, 10, 1, tzinfo=UTC)],
-            'id': ['nct1', 'nct1'],
-            'prompt_sha256': ['stale', prompts['prompt_sha256'][0]],
-            'result': ['old', 'new'],
-        },
-        schema_overrides={'computed_at': METADATA_SCHEMA['computed_at']},
+def _run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
+) -> LlmExtract:
+    monkeypatch.setattr(aact_trial_extraction, 'trial_report', lambda *args: report)
+    key = tmp_path / 'openai-key'
+    key.write_text('test-key')
+    context = TaskContext(
+        config=Config(step='test', steps=['test'], work_path=tmp_path / 'work'), scratchpad=Scratchpad()
     )
-    write_cache(rows, uri, cast(Any, None), 'old')
+    context.abort = Event()
+    task = LlmExtract(
+        LlmExtractSpec(
+            name='llm_extract test',
+            source={'aact': str(tmp_path / 'aact.zip')},
+            destination={'extraction': str(tmp_path / snapshot / 'extraction')},
+            store_uri=str(tmp_path / 'store'),
+            snapshot=snapshot,
+            openai_key_path=str(key),
+            **spec,
+        ),
+        context,
+    )
+    asyncio.run(task.run())
+    asyncio.run(task.validate())
 
-    aact_trial_extraction.rekey_cache(uri, 'digest', prompts, cast(Any, None), 'new')
+    # the `report` decorator swallows exceptions, so surface the failure reason
+    assert task.manifest.failure_reason is None, task.manifest.failure_reason
+    return task
 
-    assert read_cache(uri, cast(Any, None))['result'].to_list() == ['new']
+
+def _digest() -> str:
+    schema = ClinicalReportExtractionSchema.model_json_schema(by_alias=True)
+    return hashlib.sha256(json.dumps(schema, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _old_way(ids: list[str], prompts: pl.DataFrame) -> pl.DataFrame:
+    """Rows as the cache-backed task cached them; it published them without ``computed_at``."""
+    extracted = _models_to_dataframe([_model(i) for i in ids])
+    keys = prompts.select('id', cache_key=pl.lit('k'), prompt_sha256='prompt_sha256')
+    return (
+        extracted
+        .unique(subset='id')
+        .join(keys, on='id', how='inner')
+        .with_columns(computed_at=pl.lit(datetime(2026, 9, 4, tzinfo=UTC)).cast(pl.Datetime('us', 'UTC')))
+    )
+
+
+def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    FakeLlm(monkeypatch)
+    report = _report('nct1', 'nct2')
+
+    task = _run(monkeypatch, tmp_path, report)
+
+    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    prompts = aact_trial_extraction.prompts_for(report, _digest())
+    old = _old_way(['nct1', 'nct2'], prompts).drop('cache_key', 'computed_at')
+    assert published.schema == old.schema
+    assert published.sort('id').equals(old.sort('id'))
+    metadata = json.loads((tmp_path / 'v1/extraction/metadata.json').read_text())
+    assert metadata == {'model': EXTRACTION_MODEL, 'model_revision': _digest()}
+    assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'failed': 0, 'published': True}
+
+
+def test_failed_trial_is_left_out_and_not_retried_on_rerun(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, logged: list[str]
+) -> None:
+    llm = FakeLlm(monkeypatch, failing={'nct2'})
+    report = _report('nct1', 'nct2')
+
+    task = _run(monkeypatch, tmp_path, report)
+
+    assert llm.calls == [['nct1', 'nct2'], ['nct2'], ['nct2']]
+    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    assert published['id'].to_list() == ['nct1']
+    assert task.stats['failed'] == 1
+    assert any(m.startswith('1 of 2 trials (50.0%) have no extraction') for m in logged)
+    snapshot = (tmp_path / 'v1/extraction/data.parquet').stat().st_mtime_ns
+    llm.calls.clear()
+
+    again = _run(monkeypatch, tmp_path, report)
+
+    assert llm.calls == []
+    assert again.stats['published'] is False
+    assert (tmp_path / 'v1/extraction/data.parquet').stat().st_mtime_ns == snapshot
+
+
+def _write_old_cache(tmp_path: Path, rows: pl.DataFrame, digest: str) -> str:
+    uri = tmp_path / 'cache' / digest
+    (uri / 'snapshots' / 's1').mkdir(parents=True)
+    rows.write_parquet(uri / 'snapshots' / 's1' / 'rows.parquet')
+    (uri / 'latest.json').write_text(json.dumps({'snapshot': 's1', 'rows': rows.height}))
+    return str(uri)
+
+
+def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    llm = FakeLlm(monkeypatch)
+    report = _report('nct1', 'nct2')
+    prompts = aact_trial_extraction.prompts_for(report, _digest())
+    cached = _old_way(['nct1', 'nct2'], prompts.with_columns(prompt_sha256=pl.lit('stale')))
+    cache_uri = _write_old_cache(tmp_path, cached, _digest())
+
+    _run(monkeypatch, tmp_path, report, import_extraction_cache=cache_uri)
+
+    assert llm.calls == []
+    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    expected = cached.drop('cache_key', 'computed_at').with_columns(
+        prompt_sha256=pl.col('id').replace_strict(prompts['id'], prompts['prompt_sha256'])
+    )
+    assert published.sort('id').equals(expected.sort('id'))
+
+
+def test_import_runs_once(tmp_path: Path) -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    older = aact_trial_extraction.prompts_for(_report('nct1', 'nct2', 'nct3', title='old'), 'digest')
+    cached = _old_way(['nct1', 'nct2', 'nct3'], older).with_columns(
+        computed_at=pl.when(pl.col('id') != 'nct2').then(pl.col('computed_at'))
+    )
+    cache_uri = _write_old_cache(tmp_path, cached, 'digest')
+    store = str(tmp_path / 'store')
+
+    assert import_extraction_cache(cache_uri, prompts, store, 'digest', cast(Any, None)) == 2
+    assert import_extraction_cache(cache_uri, prompts, store, 'digest', cast(Any, None)) == 0
+
+    records = read_records(store, cast(Any, None), output_dtype=pl.String()).sort('text')
+    assert records['text'].to_list() == prompts['prompt'].to_list()
+    assert records['text_sha256'].to_list() == prompts['prompt_sha256'].to_list()
+    assert records['model'].to_list() == [EXTRACTION_MODEL] * 2
+    assert records['model_revision'].to_list() == ['digest'] * 2
+    assert records['status'].to_list() == ['ok'] * 2
+    assert records['run_id'].to_list() == [IMPORT_RUN_ID] * 2
+    assert records['computed_at'].to_list() == [datetime(2026, 9, 4, tzinfo=UTC), datetime(1970, 1, 1, tzinfo=UTC)]
+    outputs = [json.loads(o) for o in records['output']]
+    assert [o['id'] for o in outputs] == ['nct1', 'nct2']
+    assert not {'cache_key', 'prompt_sha256', 'computed_at'} & set(outputs[0])
+    assert ClinicalReportExtractionSchema.model_validate(outputs[0]) == _model('nct1')
+
+
+def test_a_changed_prompt_is_re_extracted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    llm = FakeLlm(monkeypatch)
+    _run(monkeypatch, tmp_path, _report('nct1', 'nct2'), snapshot='v1')
+    llm.calls.clear()
+
+    _run(monkeypatch, tmp_path, _report('nct1', title='new').vstack(_report('nct2')), snapshot='v2')
+
+    assert llm.calls == [['nct1']]
+
+
+def test_model_change_does_not_re_extract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    llm = FakeLlm(monkeypatch)
+    _run(monkeypatch, tmp_path, _report('nct1', 'nct2'), snapshot='v1')
+    llm.calls.clear()
+    system_prompt = tmp_path / 'system_prompt.txt'
+    system_prompt.write_text('a different system prompt')
+
+    _run(
+        monkeypatch,
+        tmp_path,
+        _report('nct1', 'nct2'),
+        snapshot='v2',
+        model='another-model',
+        system_prompt=str(system_prompt),
+    )
+
+    assert llm.calls == []
+    assert pl.read_parquet(tmp_path / 'v2/extraction/data.parquet')['id'].to_list() == ['nct1', 'nct2']

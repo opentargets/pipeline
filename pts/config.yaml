@@ -774,18 +774,15 @@ steps:
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
   # Not part of a release. The `aact_trial_extraction` DAG runs this step with
   # release_uri pointed at gs://aact_data/${aact_version}, so every path below
-  # resolves inside that snapshot, except for the cache
+  # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
     - name: llm_extract aact trials
       source:
         aact: input/aact.zip
       destination:
-        prompts: prompts/prompts.parquet
-        extraction: extraction/extractions.parquet
-        errors: errors/errors.jsonl
-      cache_uri: gs://aact_data/cache/trial_extraction
-      # the AACT version, so a rerun against the same archive resumes from the
-      # shards the last attempt finished instead of paying for them again
+        extraction: extraction
+      store_uri: gs://clinical_staging/store/llm_extraction
+      # the AACT version, prefixing the store runs this step writes
       snapshot: '{{snapshot}}'
       model: gpt-5-nano-2025-08-07
       service_tier: auto
@@ -800,7 +797,7 @@ steps:
     - name: trial_models aact trials
       source:
         aact: input/aact.zip
-        extraction: extraction/extractions.parquet
+        extraction: extraction/data.parquet
         models: input/models
       destination:
         stop_reasons: stop_reasons
