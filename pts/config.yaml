@@ -1267,7 +1267,7 @@ steps:
         targets: output/target
         go: output/go
         reactome: output/reactome
-        protein_classification: intermediate/chembl/protein_classification.parquet
+        chembl: input/chembl/chembl.tar.gz
       destination: output/gene_sets
   ##################################################################################################
 

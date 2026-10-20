@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 import pytest
 from otter.config.model import Config
 
 from pts.schemas.gene_sets import gene_sets_schema
+from pts.transformers import gene_sets as gene_sets_module
 from pts.transformers.gene_sets import gene_sets
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -51,21 +54,40 @@ CLASSES = pl.DataFrame({
 })
 
 
+#: the arguments the step passed to read_dump_tables
+DUMP_CALLS: list[tuple[tuple, dict]] = []
+
+
+def _read_dump_tables(*args: object, **kwargs: object) -> dict[str, pl.DataFrame]:
+    DUMP_CALLS.append((args, kwargs))
+    return {'protein_classification': CLASSES}
+
+
 @pytest.fixture(scope='module')
 def output(tmp_path_factory: pytest.TempPathFactory) -> pl.DataFrame:
     path = tmp_path_factory.mktemp('gene_sets')
-    source = {}
-    for name, df in {'targets': TARGET, 'go': GO, 'reactome': REACTOME, 'protein_classification': CLASSES}.items():
+    source = {'chembl': str(path / 'chembl.tar.gz')}
+    for name, df in {'targets': TARGET, 'go': GO, 'reactome': REACTOME}.items():
         source[name] = str(path / name)
         write_dataset(df, source[name])
     config = Config(step='gene_sets', steps=['gene_sets'], work_path=path)
-    gene_sets(source, str(path / 'output'), {}, config)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gene_sets_module, 'read_dump_tables', _read_dump_tables)
+        gene_sets(source, str(path / 'output'), {}, config)
     return scan_dataset(str(path / 'output')).collect()
 
 
 @pytest.fixture(scope='module')
 def result(output: pl.DataFrame) -> dict[tuple[str, str], dict]:
     return {(row['source'], row['id']): row for row in output.iter_rows(named=True)}
+
+
+def test_protein_classification_is_restored_from_the_chembl_dump(output: pl.DataFrame) -> None:
+    [(args, kwargs)] = DUMP_CALLS
+    assert args[0].endswith('chembl.tar.gz')
+    assert args[1] == {'protein_classification': ['protein_class_id', 'parent_id', 'pref_name', 'class_level']}
+    assert kwargs['schema_name'] == 'public'
+    assert str(kwargs['scratch_root']) == str(Path(args[0]).parent)
 
 
 def test_output_matches_the_schema(output: pl.DataFrame) -> None:

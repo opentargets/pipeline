@@ -13,7 +13,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.postgres import read_dump_tables
 from pts.schemas.gene_sets import gene_sets_schema
+from pts.transformers.target import chembl_class
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.lists import collect_set, explode
 
@@ -120,15 +122,22 @@ def gene_sets(
     """Generate the gene sets dataset.
 
     Args:
-        source: paths keyed by targets, go, reactome and protein_classification.
+        source: paths keyed by targets, go, reactome and chembl (the ChEMBL postgres dump).
         destination: path of the gene sets dataset.
         settings: unused.
-        config: unused.
+        config: for `work_path`, where the ChEMBL restore puts its scratch.
     """
     target = scan_dataset(source['targets']).select('id', 'go', 'pathways', 'targetClass')
     go = scan_dataset(source['go'])
     reactome = scan_dataset(source['reactome'])
-    classes = scan_dataset(source['protein_classification']).collect()
+    logger.info(f'restoring the protein classification table from {source["chembl"]}')
+    # scratch_root: the restore needs gigabytes, and `work_path` is the work disk.
+    classes = read_dump_tables(
+        source['chembl'],
+        {'protein_classification': chembl_class.TABLES['protein_classification']},
+        schema_name=chembl_class.SCHEMA_NAME,
+        scratch_root=config.work_path,
+    )['protein_classification']
 
     logger.info('computing gene sets')
     result = (
