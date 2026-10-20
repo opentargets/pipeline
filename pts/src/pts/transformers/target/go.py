@@ -23,7 +23,9 @@ def read_tsv(path: str, comment_prefix: str | None = None) -> pl.DataFrame:
 
 
 def _annotations(gaf: pl.DataFrame) -> pl.DataFrame:
-    return gaf.select(
+    # A NOT qualifier (e.g. 'NOT|enables') states the gene product is not associated with the term
+    negated = pl.col('_c3').fill_null('').str.split('|').list.contains('NOT')
+    return gaf.filter(~negated).select(
         pl.col('_c1').alias('dbObjectId'),
         pl.col('_c4').alias('goId'),
         pl.col('_c5').alias('source'),
