@@ -1,0 +1,18 @@
+---
+steps:
+  # PPP adds the curated LoF annotations to the variant index.
+  variant:
+    - name: pyspark variant index
+      pyspark: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - input/variant/gnomad
+          - intermediate/variant/lof_curation
+        amino_acid_annotations:
+          - intermediate/variant/foldx
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
+        output_partitions: 25

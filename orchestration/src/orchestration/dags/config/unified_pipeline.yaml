@@ -92,12 +92,15 @@ steps:
   pis_evidence_intogen:
   pis_evidence_ppp:
     ppp_only: true
+  pis_variant:
   pis_gwas:
   pis_gwas_ppp:
     ppp_only: true
   pis_go:
   pis_interaction:
   pis_heritability:
+  pis_variant_ppp:
+    ppp_only: true
   pis_l2g:
   pis_l2g_predefined_test_for_split:
   pis_literature:
@@ -113,6 +116,19 @@ steps:
   pis_target:
   pis_target_prioritisation:
   # PTS STEPS
+  pts_variant_ppp:
+    ppp_only: true
+    depends_on:
+      - pis_variant_ppp
+  pts_foldx:
+    depends_on:
+      - pis_variant
+  pts_variant:
+    depends_on:
+      - pts_foldx
+      - gentropy_variant_annotation
+    depends_on_ppp:
+      - pts_variant_ppp
   pts_reactome:
     depends_on:
       - pis_reactome
@@ -143,7 +159,6 @@ steps:
       - pts_target
   pts_coding_variant:
     depends_on:
-      - gentropy_variant
       - pts_association
       - pts_pharmacogenetics
   pts_openfda_input_preparation:
@@ -452,7 +467,6 @@ steps:
   pts_search:
     depends_on:
       - pts_association
-      - gentropy_variant
       - pts_drug_molecule
       - pts_target
       - pts_disease
@@ -487,7 +501,7 @@ steps:
       - pts_l2g
       - pis_literature
 
-  # GENTROPY STEPS
+  # GENETICS STEPS (PTS and Gentropy)
   gentropy_enhancer_to_gene:
     depends_on:
       - pis_encode
@@ -512,7 +526,7 @@ steps:
     num_partitions: 200
     depends_on:
       - gentropy_credible_set
-  gentropy_variant_partition:
+  pts_variant_partition:
     depends_on:
       - pts_pharmacogenetics
       - gentropy_credible_set
@@ -520,13 +534,10 @@ steps:
       - pis_evidence_eva
   gentropy_variant_annotation:
     depends_on:
-      - gentropy_variant_partition
-  gentropy_variant:
-    depends_on:
-      - gentropy_variant_annotation
+      - pts_variant_partition
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation
-      - gentropy_variant
+      - pts_variant
       - gentropy_enhancer_to_gene
       - pts_interaction

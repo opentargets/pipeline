@@ -95,25 +95,6 @@ steps:
       # OUTPUTS
       step.coloc_path: '{{release_uri}}/output/colocalisation'
 
-  variant_partition:
-    params:
-      step: variant_to_vcf
-      step.partition_size: 2_000 # approximate num of variants per partition!
-      step.session.write_mode: overwrite
-      # INPUTS
-      step.source_paths:
-        - '{{release_uri}}/input/evidence/uniprot_variants.json.gz'
-        - '{{release_uri}}/input/evidence/eva.json.gz'
-        - '{{release_uri}}/output/pharmacogenomics'
-        - '{{release_uri}}/output/credible_set'
-      step.source_formats:
-        - json
-        - json
-        - parquet
-        - parquet
-      # OUTPUTS
-      step.output_path: '{{release_uri}}/intermediate/variant_partition'
-
   variant_annotation:
     cluster: false
     google_batch_index_specs:
@@ -167,20 +148,6 @@ steps:
             machine_type: n1-standard-4
             provisioning_model: STANDARD # Other options: SPOT (but careful with max_retry_count)
         logs: {}
-
-  variant:
-    params:
-      step: variant_index
-      step.session.write_mode: overwrite
-      step.session.output_partitions: 25
-      # INPUTS
-      step.vep_output_json_path: '{{release_uri}}/intermediate/variant_annotation'
-      step.variant_annotations_path:
-        - gs://gnomad_data_2/v4.1/variant_index
-      step.amino_acid_change_annotations:
-        - gs://otar013-ppp/OTAR2081_foldx/foldx_variant_annotation
-      # OUTPUTS
-      step.variant_index_path: '{{release_uri}}/output/variant'
 
   l2g_feature_matrix:
     params:

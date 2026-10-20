@@ -7,6 +7,41 @@ scratchpad:
   string_version: '12.0'
 
 steps:
+  #: VARIANT PPP STEP :############################################################################
+  variant_ppp:
+    - name: transform LoF curation annotations
+      source: input/variant/lof_curation/curation.csv
+      destination: intermediate/variant/lof_curation
+      transformer: lof_curation
+  ##################################################################################################
+
+  #: FOLDX STEP :##################################################################################
+  foldx:
+    - name: transform FoldX annotations
+      source: input/variant/foldx
+      destination: intermediate/variant/foldx
+      transformer: foldx
+      settings:
+        plddt_threshold: 0.7
+  ##################################################################################################
+
+  #: VARIANT STEP :################################################################################
+  variant:
+    - name: pyspark variant index
+      pyspark: variant
+      source:
+        vep: intermediate/variant_annotation
+        variant_annotations:
+          - input/variant/gnomad
+        amino_acid_annotations:
+          - intermediate/variant/foldx
+      destination:
+        output: output/variant
+      settings:
+        hash_threshold: 300
+        output_partitions: 25
+  ##################################################################################################
+
   #: DISEASE STEP :#################################################################################
   disease:
     - name: transform disease_efo
@@ -289,6 +324,21 @@ steps:
         chembl_molecule: intermediate/chembl_molecule
         target: output/target
       destination: output/chemical_probe
+  ##################################################################################################
+
+  #: VARIANT PARTITION STEP :#######################################################################
+  variant_partition:
+    - name: transform variant partitions
+      transformer: variant_partition
+      source:
+        uniprot_variants: input/evidence/uniprot_variants.json.gz
+        eva: input/evidence/eva.json.gz
+        pharmacogenomics: output/pharmacogenomics
+        credible_set: output/credible_set
+      destination:
+        output: intermediate/variant_partition
+      settings:
+        partition_size: 2000
   ##################################################################################################
 
   #: CODING VARIANT STEP :##########################################################################
