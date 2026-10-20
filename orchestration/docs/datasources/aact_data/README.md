@@ -1,6 +1,6 @@
 # AACT
 
-This document was updated on 2026-10-19.
+This document was updated on 2026-10-20.
 
 AACT (Aggregate Analysis of ClinicalTrials.gov) is published as dated
 PostgreSQL archives by CTTI, fetched from
@@ -26,8 +26,13 @@ gs://aact_data/<aact_version>/input/           # the raw CTTI archive
 gs://aact_data/<aact_version>/prompts/         # the prompt sent for each trial
 gs://aact_data/<aact_version>/extraction/      # the LLM extraction
 gs://aact_data/<aact_version>/errors/          # diagnostics for failed LLM calls
+gs://aact_data/<aact_version>/input/models/    # Hugging Face models, <org>/<name>/<revision>/<file>
+gs://aact_data/<aact_version>/stop_reasons/    # write-once snapshot: data.parquet + metadata.json
+gs://aact_data/<aact_version>/drug_entities/   # write-once snapshot: data.parquet + metadata.json
 gs://aact_data/<aact_version>/etc/config/      # the config each step ran with
 gs://aact_data/cache/trial_extraction/<schema-digest>/  # extraction cache, shared across AACT versions
+gs://aact_data/store/stop_reasons/             # record store, shared across AACT versions
+gs://aact_data/store/drug_entities/            # record store, shared across AACT versions
 ```
 
 The cache sits outside the version directory on purpose. Each response schema
@@ -48,6 +53,10 @@ The **aact_trial_extraction.py** dag contains the following steps:
    that are not already in the cache to the OpenAI Responses API. It restores
    and reads the required AACT tables inline through the shared PTS PostgreSQL
    reader.
+3. `pts_aact_trial_models` — runs the stop-reasons model over every distinct
+   `why_stopped` text and the drug NER models over every distinct drug label.
+   It reads the archive, the extraction and the models staged by `pis_aact`,
+   and runs after `pts_aact_trial_extraction` on a larger machine.
 
 As in `unified_pipeline`, a step is named `{stage}_{step}`: the stage is the
 application that runs it, and the step itself is defined in that application's
@@ -62,6 +71,13 @@ the extraction only sends the model the trials that are not in its cache.
 The output dataset is the trial extraction under
 `gs://aact_data/<aact_version>/extraction/`. The raw input archive is retained
 under `gs://aact_data/<aact_version>/input/aact.zip`.
+
+The record stores under `gs://aact_data/store/{stop_reasons,drug_entities}`
+hold one record per text, model and model revision, so a new archive only runs
+the models over texts not yet seen. Each run publishes the records for its
+texts as the snapshots `gs://aact_data/<aact_version>/{stop_reasons,drug_entities}/`,
+each a `data.parquet` plus a `metadata.json` written last. Snapshots are
+write-once: a rerun that would change a published one is refused.
 
 The OpenAI key is fetched from Secret Manager onto the VM and mounted into the
 container.
@@ -101,11 +117,12 @@ normally; only the remaining misses are sent to the configured model.
 
 ## Consumers
 
-`unified_pipeline` copies the raw input and extraction through PIS tasks that
-use the shared version:
+`unified_pipeline` copies the raw input, extraction and model snapshots through
+PIS tasks that use the shared version:
 
 - the `clinical_report` step copies `input/aact.zip`, which
-  `pts.clinical_report` reads inline, and
+  `pts.clinical_report` reads inline,
+- the `stop_reasons/` and `drug_entities/` snapshots are copied the same way, and
 - the `drug` step copies `extraction/`, which `pts.chembl_molecule` mines for
   drug synonyms and `pts.clinical_report` uses for indications and drug intent.
 
@@ -122,6 +139,11 @@ missing row means the extraction never succeeded and the trial is excluded
 rather than being combined with partially populated AACT data.
 
 ## Changelog
+
+### 2026-10-20
+
+- Add `pts_aact_trial_models`, the record store and the snapshots. `pis_aact`
+  now also stages the models under `input/models/`.
 
 ### 2026-10-19
 

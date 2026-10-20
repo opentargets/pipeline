@@ -1,7 +1,8 @@
 """DAG that extracts structured drug and disease evidence from AACT clinical trials.
 
 This runs outside the release. It downloads the pinned AACT monthly archive and
-asks an LLM to read every trial it has not read before, publishing the result to
+asks an LLM to read every trial it has not read before, then runs the stop-reasons
+and drug NER models over the texts of the trials, publishing the results to
 ``gs://aact_data/<aact_version>`` for ``unified_pipeline`` to copy in.
 
 The handoff to the release is the same one every ingestion pipeline here uses:
@@ -21,6 +22,12 @@ trials whose text changed and earlier failures. Changes to the model or the
 system prompt do not invalidate accepted results; changing the response schema
 starts a separate cache.
 See :py:mod:`pts.result_cache`.
+
+The model step (``pts_aact_trial_models``) keeps a record store under
+``gs://aact_data/store`` keyed on the text, model and model revision, so a new
+AACT archive only runs the models over texts it has not seen. Each run also
+writes write-once ``stop_reasons`` and ``drug_entities`` snapshots under the
+version directory, which the release copies.
 """
 
 from __future__ import annotations
@@ -98,7 +105,7 @@ with DAG(
                 container_env=config.step_env_vars(step_name),
                 container_files={config_uri: '/config.yaml'},
                 container_secret_files=step_definition.get('gce_secret_files'),
-                machine_type=config.machine_type,
+                machine_type=config.machine_type_for(step_name),
                 boot_disk_size_gb=config.boot_disk_size,
                 work_disk_size_gb=config.disk_size,
                 deferrable=True,

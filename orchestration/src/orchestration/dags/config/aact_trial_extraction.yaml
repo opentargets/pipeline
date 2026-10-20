@@ -28,3 +28,10 @@ steps:
     # key itself never appears in config or in code.
     gce_secret_files:
       openai-token: /var/run/secrets/openai-api-key
+
+  # Runs the stop-reasons and drug NER models over the AACT texts. CPU inference,
+  # so it takes a larger machine than the IO-bound steps.
+  pts_aact_trial_models:
+    depends_on:
+      - pts_aact_trial_extraction
+    machine_type: 'n2d-standard-16'

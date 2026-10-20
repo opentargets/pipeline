@@ -42,7 +42,7 @@ class AactTrialExtractionConfig:
         self.aact_version: str = conf.get('aact_version')
         """The AACT monthly archive this run extracts."""
         self.machine_type: str = conf.get('machine_type')
-        """Machine type for both steps. The extraction is IO bound, not CPU bound."""
+        """Default machine type. The extraction is IO bound, not CPU bound; a step may override it."""
         self.disk_size: int = conf.get('disk_size')
         """Work disk size in GB. Sized for the AACT archive plus its restore."""
         self.boot_disk_size: int = conf.get('boot_disk_size')
@@ -108,6 +108,17 @@ class AactTrialExtractionConfig:
         # can't put the default in the get, as the content can actually be None
         # and that will not be replaced by the default
         return self._steps.get(step_name) or {}
+
+    def machine_type_for(self, step_name: str) -> str:
+        """Return the machine type a step runs on.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            str: The step's own ``machine_type`` if it declares one, else the global one.
+        """
+        return self.step_definition(step_name).get('machine_type') or self.machine_type
 
     def step_config(self, step_name: str) -> dict[str, Any]:
         """Return the configuration to upload for a step.
