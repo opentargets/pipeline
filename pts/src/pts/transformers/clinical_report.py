@@ -17,15 +17,13 @@ from pts.transformers.clinical import (
     ClinicalStageCategory,
     extract_aact_clinical_report,
     extract_chembl_clinical_report,
-    extract_disease_entities,
     extract_drug_warning_clinical_report,
     filter_df,
     map_entities,
     union_dfs,
 )
-from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
-from pts.transformers.clinical.mining import build_mining_reports
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
+from pts.transformers.clinical.mapping import require_staged
+from pts.transformers.clinical.mining import build_mining_reports, staged_lookup
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -112,6 +110,13 @@ OUTPUT_COLUMNS = (
 )
 """The columns of `output/clinical_report`, in their published order."""
 
+SNAPSHOTS = ('aact_stop_reasons', 'aact_drug_entities', 'mining_drug_entities', 'mining_disease_entities')
+"""The sources holding staged model results, each a snapshot directory with `data.parquet` and `metadata.json`."""
+
+SNAPSHOT_REVISION_KEYS = ('model', 'model_revision', 'model_revisions')
+
+STAGED_DRUG_ENTITIES_SCHEMA = pl.Schema({'label': pl.String, 'extracted_drugs': pl.List(pl.String)})
+
 
 class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
@@ -134,20 +139,19 @@ def clinical_report(
         source: Dictionary containing paths to input data
         destination: Dictionary containing paths to output data:
             - output: Path to write clinical reports (output/clinical_report)
-        settings: Dictionary containing step variables:
-            - ner_batch_size: batch size of the drug NER
+        settings: Dictionary containing step variables, none used
         config: Config object, for the scratch space of the dump restores
     """
-    with offline_hf_models(source['models']):
-        _clinical_report(source, destination, settings, config)
+    _clinical_report(source, destination, settings, config)
 
 
 def _clinical_report(
     source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
 ) -> None:
     logger.info(f'source paths: {source}')
-    staged_metadata, _ = StorageHandle(f'{source["aact_drug_entities"]}/metadata.json').read_text()
-    check_ner_revisions(json.loads(staged_metadata), source['models'])
+    check_snapshot_revisions({
+        name: json.loads(StorageHandle(f'{source[name]}/metadata.json').read_text()[0]) for name in SNAPSHOTS
+    })
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
@@ -186,7 +190,7 @@ def _clinical_report(
     llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
-    mining = build_mining_reports(source['ttd'], source['ema'], source['pmda'], extract_disease_entities)
+    mining = staged_mining_reports(source)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
@@ -238,7 +242,10 @@ def _clinical_report(
         mining['ttd'].df,
         mining['ema'].df,
     ])
-    aact_drug_entities = staged_aact_drug_entities(source['aact_drug_entities'], reports)
+    drug_entities = staged_drug_entities([
+        scan_dataset(source[name]).select(STAGED_DRUG_ENTITIES_SCHEMA.names()).collect()
+        for name in ('aact_drug_entities', 'mining_drug_entities')
+    ])
     logger.info('reports generated. map entities...')
     output = (
         map_report_entities(
@@ -246,9 +253,7 @@ def _clinical_report(
             disease_index=disease_index,
             drug_index=molecule_index,
             chembl_curation=chembl_curation,
-            ner_batch_size=int(settings['ner_batch_size']),
-            ner_cache_path=source['ner_cache_path'],
-            aact_drug_entities=aact_drug_entities,
+            drug_entities=drug_entities,
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
@@ -264,16 +269,19 @@ def _clinical_report(
     write_dataset(order_output_columns(output.df), destination['output'])
 
 
-def require_staged(texts: pl.Series, staged: pl.Series, what: str) -> None:
-    """Check that every non-null text is staged.
+def staged_mining_reports(source: dict[str, str]) -> dict[str, ClinicalReport]:
+    """The TTD, EMA and PMDA reports, with the EMA and PMDA diseases staged in `mining_disease_entities`.
 
     Raises:
-        ValueError: naming `what`, how many distinct texts are not staged and up to 5 of them.
+        ValueError: if an EMA or PMDA indication text is not staged.
     """
-    distinct = texts.drop_nulls().unique()
-    missing = distinct.filter(~distinct.is_in(staged.implode())).sort()
-    if missing.len() > 0:
-        raise ValueError(f'{missing.len()} {what} not staged, e.g. {missing.head(5).to_list()}')
+    staged = scan_dataset(source['mining_disease_entities']).select('text', 'extracted_diseases').collect()
+    return build_mining_reports(
+        source['ttd'],
+        source['ema'],
+        source['pmda'],
+        staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts'),
+    )
 
 
 def attach_stop_reasons(aact: pl.DataFrame, staged: pl.DataFrame) -> pl.DataFrame:
@@ -298,51 +306,72 @@ def attach_stop_reasons(aact: pl.DataFrame, staged: pl.DataFrame) -> pl.DataFram
     )
 
 
-def check_ner_revisions(metadata: dict[str, Any], models_uri: str) -> None:
-    """Check that the drug NER models were staged at the revisions the release serves.
+def check_snapshot_revisions(metadatas: dict[str, dict[str, Any]]) -> None:
+    """Check that the snapshots of one model were staged at the same revisions.
+
+    Two snapshots of a `model` must have the same `model_revision`, and the same revision of each model
+    both their `model_revisions` name.
 
     Args:
-        metadata: the metadata of the staged drug NER snapshot.
-        models_uri: the release's staged Hugging Face models.
+        metadatas: the metadata of each snapshot, keyed by its source name.
 
     Raises:
-        ValueError: naming each drug NER model whose staged and release revisions differ.
+        ValueError: naming the snapshots and the revisions that differ, or a snapshot whose metadata lacks
+            `model`, `model_revision` or `model_revisions`.
     """
-    if 'model_revisions' not in metadata:
-        msg = 'staged aact drug ner metadata lacks model_revisions'
-        raise ValueError(msg)
-    staged = metadata['model_revisions']
-    release = staged_model_revisions(models_uri)
-    mismatches = [
-        f'{model}: staged {staged.get(model)}, release {release.get(model)}'
-        for model in (CHEMICAL_MODEL, DRUGTEMIST_MODEL)
-        if staged.get(model) != release.get(model)
-    ]
+    for name, metadata in sorted(metadatas.items()):
+        missing = [key for key in SNAPSHOT_REVISION_KEYS if key not in metadata]
+        if missing:
+            raise ValueError(f'snapshot {name} metadata lacks {missing}')
+    by_model: dict[str, list[str]] = {}
+    for name in sorted(metadatas):
+        by_model.setdefault(metadatas[name]['model'], []).append(name)
+    mismatches = []
+    for model, names in by_model.items():
+        first = metadatas[names[0]]
+        for name in names[1:]:
+            other = metadatas[name]
+            if first['model_revision'] != other['model_revision']:
+                mismatches.append(
+                    f'{names[0]} and {name} of {model} differ in model_revision: '
+                    f'{first["model_revision"]!r} != {other["model_revision"]!r}'
+                )
+            mismatches.extend(
+                f'{names[0]} and {name} of {model} differ in model_revisions of {hub_model}: '
+                f'{first["model_revisions"][hub_model]!r} != {other["model_revisions"][hub_model]!r}'
+                for hub_model in sorted(first['model_revisions'].keys() & other['model_revisions'].keys())
+                if first['model_revisions'][hub_model] != other['model_revisions'][hub_model]
+            )
     if mismatches:
-        raise ValueError(f'staged aact drug ner revisions differ from the release models: {"; ".join(mismatches)}')
+        raise ValueError(f'snapshots staged at different revisions: {"; ".join(mismatches)}')
 
 
-def staged_aact_drug_entities(path: str, reports: pl.DataFrame) -> pl.DataFrame:
-    """The staged drug NER snapshot at `path`, checked against the AACT drug labels.
+def staged_drug_entities(snapshots: list[pl.DataFrame]) -> pl.DataFrame:
+    """The union of the staged drug NER `snapshots`, one row per label.
 
     Args:
-        path: the snapshot, holding `data.parquet`.
-        reports: the reports of every provider.
+        snapshots: staged drug NER results, with `label` and `extracted_drugs`.
 
     Returns:
-        The staged `label` and `extracted_drugs`.
+        `label` and `extracted_drugs`, the names sorted.
 
     Raises:
-        ValueError: if an AACT drug label is not staged.
+        ValueError: naming how many labels have different names in two snapshots, and up to 5 of them.
     """
-    staged = scan_dataset(path).select('label', 'extracted_drugs').collect()
-    aact_labels = (
-        reports
-        .filter(pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
-        .select(pl.col('drugs').explode().struct.field('drugFromSource'))
-        .to_series()
+    staged = (
+        pl
+        .concat([
+            snapshot.select(STAGED_DRUG_ENTITIES_SCHEMA.names()).cast(STAGED_DRUG_ENTITIES_SCHEMA)
+            for snapshot in snapshots
+        ])
+        .with_columns(pl.col('extracted_drugs').list.sort())
+        .unique()
     )
-    require_staged(aact_labels, staged['label'], 'aact drug labels')
+    conflicts = staged.filter(pl.col('label').is_duplicated())['label'].unique().sort()
+    if conflicts.len() > 0:
+        raise ValueError(
+            f'{conflicts.len()} drug labels staged with different results, e.g. {conflicts.head(5).to_list()}'
+        )
     return staged
 
 
@@ -351,9 +380,7 @@ def map_report_entities(
     disease_index: pl.DataFrame,
     drug_index: pl.DataFrame,
     chembl_curation: pl.DataFrame | None,
-    ner_batch_size: int,
-    ner_cache_path: str | None,
-    aact_drug_entities: pl.DataFrame,
+    drug_entities: pl.DataFrame,
 ) -> ClinicalReport:
     """Map the drugs and diseases of each report to ids.
 
@@ -362,12 +389,13 @@ def map_report_entities(
         disease_index: disease index, with `DISEASE_COLUMNS`.
         drug_index: drug molecules, with `DRUG_COLUMNS`.
         chembl_curation: ChEMBL's clinical trial curation.
-        ner_batch_size: batch size of the drug NER.
-        ner_cache_path: the drug NER cache, read and rewritten for the reports of other sources than AACT.
-        aact_drug_entities: the staged drug NER of the AACT drug labels, used in place of NER for AACT reports.
+        drug_entities: the staged drug NER, used in place of NER.
 
     Returns:
         ClinicalReport with the ids found.
+
+    Raises:
+        ValueError: if a drug label reaching NER is not staged.
     """
     exploded_reports = (
         reports
@@ -375,27 +403,7 @@ def map_report_entities(
         .explode('diseases', empty_as_null=True)
         .unnest(['drugs', 'diseases'])
     )
-    is_aact = pl.col('source').eq(ClinicalSource.CLINICAL_TRIALS_GOV.value).fill_null(value=False)
-
-    mapped_exploded_reports = pl.concat([
-        map_entities(
-            exploded_reports.filter(is_aact),
-            disease_index,
-            drug_index,
-            chembl_curation,
-            ner_cache_path=None,
-            ner_batch_size=ner_batch_size,
-            staged_drug_entities=aact_drug_entities,
-        ),
-        map_entities(
-            exploded_reports.filter(~is_aact),
-            disease_index,
-            drug_index,
-            chembl_curation,
-            ner_cache_path=ner_cache_path,
-            ner_batch_size=ner_batch_size,
-        ),
-    ])
+    mapped_exploded_reports = map_entities(exploded_reports, disease_index, drug_index, chembl_curation, drug_entities)
 
     mapped_reports = (
         mapped_exploded_reports

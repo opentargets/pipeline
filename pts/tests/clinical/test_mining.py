@@ -19,6 +19,7 @@ from pts.transformers.clinical.mining import (
     report_drug_labels,
     staged_lookup,
 )
+from pts.transformers.clinical_report import staged_mining_reports
 from tests.test_clinical_report import EMA_BANNER, EMA_HEADER, EMA_NER, _ema_workbook
 
 TTD_LINES = [
@@ -137,6 +138,41 @@ def test_recorded_disease_texts_are_what_the_providers_pass(tmp_path: Path, inpu
         'for the treatment of asthma',
         'for the treatment of gout',
     }
+
+
+def _stage_diseases(path: Path, texts: list[str]) -> str:
+    path.mkdir()
+    pl.DataFrame(
+        {'text': texts, 'extracted_diseases': [[f'staged {text}'] for text in texts]},
+        schema={'text': pl.String, 'extracted_diseases': pl.List(pl.String)},
+    ).write_parquet(path / 'data.parquet')
+    return str(path)
+
+
+def test_ema_and_pmda_diseases_come_from_staging(tmp_path: Path, inputs: dict[str, str]) -> None:
+    recorder = RecordingNer()
+    build_mining_reports(inputs['ttd'], inputs['ema'], inputs['pmda'], recorder)
+    texts = sorted(recorder.texts)
+    snapshot = _stage_diseases(tmp_path / 'mining_disease_entities', texts)
+
+    reports = staged_mining_reports({**inputs, 'mining_disease_entities': snapshot})
+
+    expected = build_mining_reports(
+        inputs['ttd'],
+        inputs['ema'],
+        inputs['pmda'],
+        lambda texts: pl.Series([[f'staged {text}'] for text in texts], dtype=pl.List(pl.String)),
+    )
+    assert sorted(reports) == ['ema', 'pmda', 'ttd']
+    for name, report in reports.items():
+        assert _comparable(report) == _comparable(expected[name])
+    for name in ('ema', 'pmda'):
+        diseases = reports[name].df.select(pl.col('diseases').explode().struct.field('diseaseFromSource'))
+        assert any(label.startswith('staged ') for label in diseases.to_series().drop_nulls())
+
+    partial = _stage_diseases(tmp_path / 'partial', [t for t in texts if t != 'for the treatment of gout'])
+    with pytest.raises(ValueError, match=r"1 disease texts not staged, e\.g\. \['for the treatment of gout'\]"):
+        staged_mining_reports({**inputs, 'mining_disease_entities': partial})
 
 
 def test_recording_ner_finds_nothing_and_keeps_the_texts() -> None:

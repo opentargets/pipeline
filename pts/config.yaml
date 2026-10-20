@@ -839,12 +839,10 @@ steps:
         trial_extraction: input/clinical_report/aact_trial_extraction
         aact_stop_reasons: input/clinical_report/aact_stop_reasons
         aact_drug_entities: input/clinical_report/aact_drug_entities
-        ner_cache_path: input/clinical_report/ner_cache.parquet
-        models: input/clinical_report/models
+        mining_drug_entities: input/clinical_report/mining_drug_entities
+        mining_disease_entities: input/clinical_report/mining_disease_entities
       destination:
         output: output/clinical_report
-      settings:
-        ner_batch_size: 256
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################

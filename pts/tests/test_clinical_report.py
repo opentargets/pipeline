@@ -1,5 +1,9 @@
 import datetime
+import json
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import openpyxl
 import polars as pl
@@ -15,18 +19,18 @@ from pts.transformers.clinical import (
     extract_ema_clinical_report,
     replace_with_llm_indications,
 )
-from pts.transformers.clinical import mapping as mapping_module
 from pts.transformers.clinical.mining import read_ema_sheet
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
+from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_NER_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
+from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,
-    check_ner_revisions,
+    check_snapshot_revisions,
     flag_indirect_primary_purpose,
     map_report_entities,
     order_output_columns,
     require_staged,
-    staged_aact_drug_entities,
+    staged_drug_entities,
     validate_disease,
 )
 from tests.clinical.mapping_fixtures import DISEASE, DRUG
@@ -511,11 +515,7 @@ def test_output_column_order_rejects_unpublished_columns() -> None:
         order_output_columns(reports)
 
 
-def test_map_report_entities_maps_each_drug_and_disease_of_a_report(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_ner(labels: pl.Series, batch_size: int) -> pl.Series:
-        raise AssertionError(f'drug NER run on {labels.to_list()}')
-
-    monkeypatch.setattr(mapping_module, 'extract_drug_entities', no_ner)
+def test_map_report_entities_maps_each_drug_and_disease_of_a_report() -> None:
     reports = pl.DataFrame(
         [
             {
@@ -540,9 +540,7 @@ def test_map_report_entities_maps_each_drug_and_disease_of_a_report(monkeypatch:
         DISEASE,
         DRUG,
         chembl_curation=None,
-        ner_batch_size=8,
-        ner_cache_path=None,
-        aact_drug_entities=_staged_drug_entities(('Aspirin', []), ('Kalydeco', []), ('Ecotrin', [])),
+        drug_entities=_staged_drug_entities(),
     )
 
     rows = {
@@ -600,14 +598,6 @@ def _drug_ids(mapped: ClinicalReport) -> dict[tuple[str, str], list]:
     }
 
 
-def _stage_models(root: Path, revisions: dict[str, str]) -> str:
-    for model, revision in revisions.items():
-        path = root / model / revision / 'config.json'
-        path.parent.mkdir(parents=True)
-        path.write_text('{}')
-    return str(root)
-
-
 def test_stop_reasons_come_from_staging() -> None:
     aact = pl.DataFrame({
         'id': ['NCT01', 'NCT02', 'NCT03', 'NCT04'],
@@ -641,143 +631,140 @@ def test_require_staged_ignores_nulls_and_repeats() -> None:
     require_staged(pl.Series(['a', None, 'a', '']), pl.Series(['', 'a']), 'labels')
 
 
-def test_missing_staged_drug_label_fails(tmp_path: Path) -> None:
-    snapshot = tmp_path / 'drug_entities'
-    snapshot.mkdir()
-    _staged_drug_entities(('Aspirin', ['aspirin'])).write_parquet(snapshot / 'data.parquet')
-    reports = _drug_reports(
-        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'),
-        ('TTD01', ClinicalSource.TTD.value, 'ttd only'),
-    )
-
-    staged = staged_aact_drug_entities(str(snapshot), reports)
-    assert staged.rows() == [('Aspirin', ['aspirin'])]
-
-    reports = pl.concat([reports, _drug_reports(('NCT02', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'unstaged'))])
-    with pytest.raises(ValueError, match=r"1 aact drug labels.*'unstaged'"):
-        staged_aact_drug_entities(str(snapshot), reports)
-
-
-def test_ner_revision_mismatch_fails(tmp_path: Path) -> None:
-    models = _stage_models(tmp_path, {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1', 'org/other': 'o1'})
-
-    check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1', 'org/other': 'x'}}, models)
-    with pytest.raises(ValueError, match=f'{CHEMICAL_MODEL}.*c0.*c1') as error:
-        check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c0', DRUGTEMIST_MODEL: 'd1'}}, models)
-    assert DRUGTEMIST_MODEL not in str(error.value)
-    with pytest.raises(ValueError, match=DRUGTEMIST_MODEL):
-        check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c1'}}, models)
-
-
-def test_label_shared_with_ttd_uses_staged_names_for_aact_rows_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[list[str]] = []
-
-    def ner(labels: pl.Series, batch_size: int) -> pl.Series:
-        calls.append(labels.to_list())
-        return pl.Series([['ecotrin']] * labels.len(), dtype=pl.List(pl.String))
-
-    monkeypatch.setattr(mapping_module, 'extract_drug_entities', ner)
+def test_staged_names_serve_a_label_of_every_source() -> None:
     reports = _drug_reports(
         ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'),
         ('TTD01', ClinicalSource.TTD.value, 'mystery pill'),
+        ('X01', None, 'unknownium'),
     )
-    cache = tmp_path / 'ner.parquet'
 
     mapped = map_report_entities(
         reports,
         DISEASE,
         DRUG,
         chembl_curation=None,
-        ner_batch_size=8,
-        ner_cache_path=str(cache),
-        aact_drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco'])),
+        drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco']), ('unknownium', [])),
     )
 
     assert _drug_ids(mapped) == {
         (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'): ['CHEMBL2010601'],
-        (ClinicalSource.TTD.value, 'mystery pill'): ['CHEMBL25'],
+        (ClinicalSource.TTD.value, 'mystery pill'): ['CHEMBL2010601'],
+        (None, 'unknownium'): [None],
     }
-    assert calls == [['mystery pill']]
-    assert pl.read_parquet(cache).rows() == [('mystery pill', ['ecotrin'])]
 
 
-def test_aact_labels_never_reach_release_ner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def ner(labels: pl.Series, batch_size: int) -> pl.Series:
-        assert 'aact only' not in labels.to_list()
-        return pl.Series([[]] * labels.len(), dtype=pl.List(pl.String))
-
-    monkeypatch.setattr(mapping_module, 'extract_drug_entities', ner)
-    cache = tmp_path / 'ner.parquet'
+def test_unstaged_label_from_any_source_fails() -> None:
     reports = _drug_reports(
-        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'aact only'),
-        ('TTD01', ClinicalSource.TTD.value, 'ttd only'),
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'),
+        ('TTD01', ClinicalSource.TTD.value, 'ttd unstaged'),
+        ('CHEMBL_IND1', ClinicalSource.DailyMed.value, 'chembl unstaged'),
+        ('CHEMBL_IND2', ClinicalSource.DailyMed.value, 'Aspirin'),
     )
 
-    mapped = map_report_entities(
-        reports,
-        DISEASE,
-        DRUG,
-        chembl_curation=None,
-        ner_batch_size=8,
-        ner_cache_path=str(cache),
-        aact_drug_entities=_staged_drug_entities(('aact only', ['ecotrin'])),
-    )
-
-    assert _drug_ids(mapped) == {
-        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'aact only'): ['CHEMBL25'],
-        (ClinicalSource.TTD.value, 'ttd only'): [None],
-    }
-    assert pl.read_parquet(cache)['query_label'].to_list() == ['ttd only']
+    with pytest.raises(ValueError, match=r"^2 drug labels not staged, e\.g\. \['chembl unstaged', 'ttd unstaged'\]$"):
+        map_report_entities(
+            reports,
+            DISEASE,
+            DRUG,
+            chembl_curation=None,
+            drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco'])),
+        )
 
 
-def test_report_without_source_is_mapped_with_release_ner() -> None:
-    reports = _drug_reports(
-        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'),
-        ('X01', None, 'Ecotrin'),
-    )
+def test_conflicting_staged_results_for_one_label_fail() -> None:
+    aact = _staged_drug_entities(('pill', ['a', 'b']), ('aact only', []))
+    mining = _staged_drug_entities(('pill', ['c']), ('mining only', ['m']))
 
-    mapped = map_report_entities(
-        reports,
-        DISEASE,
-        DRUG,
-        chembl_curation=None,
-        ner_batch_size=8,
-        ner_cache_path=None,
-        aact_drug_entities=_staged_drug_entities(('Aspirin', [])),
-    )
-
-    assert _drug_ids(mapped) == {
-        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'): ['CHEMBL25'],
-        (None, 'Ecotrin'): ['CHEMBL25'],
-    }
+    with pytest.raises(ValueError, match=r"1 drug labels staged with different results, e\.g\. \['pill'\]"):
+        staged_drug_entities([aact, mining])
 
 
-def test_metadata_without_model_revisions_is_a_clear_error(tmp_path: Path) -> None:
-    models = _stage_models(tmp_path, {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
+def test_staged_drug_entities_are_the_deduplicated_union() -> None:
+    aact = _staged_drug_entities(('pill', ['b', 'a']), ('aact only', []))
+    mining = _staged_drug_entities(('pill', ['a', 'b']), ('mining only', ['m']))
 
-    with pytest.raises(ValueError, match='model_revisions'):
-        check_ner_revisions({'model': 'm'}, models)
+    staged = staged_drug_entities([aact, mining])
+
+    assert staged.schema == pl.Schema(STAGED_DRUG_ENTITIES_SCHEMA)
+    assert sorted(staged.rows()) == [('aact only', []), ('mining only', ['m']), ('pill', ['a', 'b'])]
+
+
+def _metadatas(**overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Metadata of the four snapshots, staged at the same revisions, with `overrides` by snapshot."""
+    aact = {STOP_REASONS_MODEL: 's1', CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'}
+    mining = {DISEASE_NER_MODEL: 'x1', CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'}
+    return {
+        'aact_stop_reasons': {'model': STOP_REASONS_MODEL, 'model_revision': 's1', 'model_revisions': aact},
+        'aact_drug_entities': {'model': DRUG_NER_MODEL, 'model_revision': 'c1+d1', 'model_revisions': aact},
+        'mining_drug_entities': {'model': DRUG_NER_MODEL, 'model_revision': 'c1+d1', 'model_revisions': mining},
+        'mining_disease_entities': {'model': DISEASE_NER_MODEL, 'model_revision': 'x1', 'model_revisions': mining},
+    } | overrides
+
+
+def test_snapshots_with_different_revisions_fail() -> None:
+    check_snapshot_revisions(_metadatas())
+
+    drug_ner = _metadatas()['mining_drug_entities']
+    with pytest.raises(ValueError, match=r'aact_drug_entities.*mining_drug_entities.*c1\+d1.*c0\+d1'):
+        check_snapshot_revisions(_metadatas(mining_drug_entities=drug_ner | {'model_revision': 'c0+d1'}))
+
+    revisions = drug_ner['model_revisions'] | {CHEMICAL_MODEL: 'c0'}
+    with pytest.raises(ValueError, match=f"model_revisions.*{CHEMICAL_MODEL}.*'c1'.*'c0'"):
+        check_snapshot_revisions(_metadatas(mining_drug_entities=drug_ner | {'model_revisions': revisions}))
+
+
+@pytest.mark.parametrize('key', ['model', 'model_revision', 'model_revisions'])
+def test_snapshot_metadata_without_revisions_is_a_clear_error(key: str) -> None:
+    metadata = {k: v for k, v in _metadatas()['mining_disease_entities'].items() if k != key}
+
+    with pytest.raises(ValueError, match=f'mining_disease_entities.*{key}'):
+        check_snapshot_revisions(_metadatas(mining_disease_entities=metadata))
 
 
 def test_revision_mismatch_fails_before_any_dump_is_restored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    models = _stage_models(tmp_path / 'models', {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
-    snapshot = tmp_path / 'drug_entities'
-    snapshot.mkdir()
-    (snapshot / 'metadata.json').write_text(
-        f'{{"model_revisions": {{"{CHEMICAL_MODEL}": "c0", "{DRUGTEMIST_MODEL}": "d1"}}}}'
-    )
-    dumps: list[str] = []
+    metadatas = _metadatas()
+    metadatas['mining_drug_entities'] |= {'model_revision': 'c0+d1'}
+    source = {'chembl': 'unused', 'aact': 'unused'}
+    for name, metadata in metadatas.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / 'metadata.json').write_text(json.dumps(metadata))
+        source[name] = str(tmp_path / name)
 
-    def record_dump(*args: object, **kwargs: object) -> None:
-        dumps.append('read')
+    def no_dump(*args: object, **kwargs: object) -> None:
         raise AssertionError('dump restored')
 
-    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', record_dump)
-    source = {'aact_drug_entities': str(snapshot), 'models': models, 'chembl': 'unused'}
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', no_dump)
 
-    with pytest.raises(ValueError, match=f'{CHEMICAL_MODEL}.*c0.*c1'):
+    with pytest.raises(ValueError, match=r'c0\+d1'):
         clinical_report_module._clinical_report(source, {}, {}, None)
 
-    assert dumps == []
+
+RELEASE_MAPPING = """
+import sys
+
+import polars as pl
+
+from pts.transformers.clinical.mining import staged_lookup
+from pts.transformers.clinical_report import map_report_entities, staged_drug_entities
+from tests.clinical.mapping_fixtures import DISEASE, DRUG
+from tests.test_clinical_report import _drug_reports, _staged_drug_entities
+
+drugs = staged_drug_entities([_staged_drug_entities(('mystery pill', ['kalydeco']))])
+map_report_entities(_drug_reports(('TTD01', 'TTD', 'mystery pill')), DISEASE, DRUG, None, drugs)
+diseases = pl.DataFrame({'text': ['asthma'], 'extracted_diseases': [['asthma']]})
+staged_lookup(diseases, 'text', 'extracted_diseases', 'disease texts')(pl.Series(['asthma']))
+print(sorted({module.split('.')[0] for module in sys.modules} & {'torch', 'transformers'}))
+"""
+
+
+def test_release_imports_no_torch() -> None:
+    result = subprocess.run(
+        [sys.executable, '-c', RELEASE_MAPPING],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == '[]'

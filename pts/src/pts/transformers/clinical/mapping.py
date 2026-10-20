@@ -1,4 +1,4 @@
-"""Map clinical report drug and disease labels to ids: ChEMBL curation, Open Targets dictionaries, drug NER.
+"""Map clinical report drug and disease labels to ids: ChEMBL curation, Open Targets dictionaries, staged drug NER.
 
 Ported from mira's `map_entities` (`utils/mapping.py`), with OnToma replaced by the polars lookup tables of
 `pts.transformers.ontoma_lut` and the polars `OnToma.map_entities` of `pts.transformers.utils.disease_mapping`.
@@ -9,7 +9,6 @@ from __future__ import annotations
 import polars as pl
 from loguru import logger
 
-from pts.transformers.clinical.ner import extract_drug_entities
 from pts.transformers.ontoma_lut.build import (
     DISEASE_COLUMNS,
     DRUG_COLUMNS,
@@ -19,8 +18,17 @@ from pts.transformers.ontoma_lut.build import (
 )
 from pts.transformers.utils.disease_mapping.mapping import map_entities as map_lut_entities
 
-#: The NER cache: each drug label NER has seen, with the drug names it extracted.
-NER_CACHE_SCHEMA = pl.Schema({'query_label': pl.String, 'extracted_drugs': pl.List(pl.String)})
+
+def require_staged(texts: pl.Series, staged: pl.Series, what: str) -> None:
+    """Check that every non-null text is staged.
+
+    Raises:
+        ValueError: naming `what`, how many distinct texts are not staged and up to 5 of them.
+    """
+    distinct = texts.drop_nulls().unique()
+    missing = distinct.filter(~distinct.is_in(staged.implode())).sort()
+    if missing.len() > 0:
+        raise ValueError(f'{missing.len()} {what} not staged, e.g. {missing.head(5).to_list()}')
 
 
 def _normalise_label_expr(col_name: str) -> pl.Expr:
@@ -165,51 +173,16 @@ def _queries(df: pl.DataFrame, label_column: str, id_column: str, entity_type: s
     )
 
 
-def _read_ner_cache(path: str | None) -> pl.DataFrame:
-    """The NER cache at `path`; empty when there is no path or it cannot be read."""
-    if path is not None:
-        try:
-            cache = pl.read_parquet(path).select(NER_CACHE_SCHEMA.names()).cast(NER_CACHE_SCHEMA)
-        except Exception:
-            logger.warning(f'no readable ner cache at {path}, will compute all labels')
-        else:
-            logger.info(f'loaded ner cache from {path}')
-            return cache
-    return pl.DataFrame(schema=NER_CACHE_SCHEMA)
-
-
 def _staged_ner_names(labels: pl.Series, staged_drug_entities: pl.DataFrame) -> pl.DataFrame:
-    """The names staged for each label, as `NER_CACHE_SCHEMA` rows; labels not staged have none."""
-    return (
-        staged_drug_entities
-        .select(pl.col('label').alias('query_label'), 'extracted_drugs')
-        .cast(NER_CACHE_SCHEMA)
-        .filter(pl.col('query_label').is_in(labels.implode()))
-    )
+    """The names staged for each label, as `query_label` and `extracted_drugs`.
 
-
-def _ner_names(labels: pl.Series, cache_path: str | None, batch_size: int) -> pl.DataFrame:
-    """The names NER extracts from each label, as `NER_CACHE_SCHEMA` rows, from the cache where it has the label.
-
-    Labels missing from the cache are extracted and added to it.
+    Raises:
+        ValueError: if a label is not staged.
     """
-    cached = _read_ner_cache(cache_path)
-    new_labels = labels.filter(~labels.is_in(cached['query_label'].implode()))
-    if new_labels.len() > 0:
-        logger.info(
-            f'applying ner to {new_labels.len()} new drug labels (using cache for {labels.len() - new_labels.len()})'
-        )
-        new = pl.DataFrame(
-            {'query_label': new_labels, 'extracted_drugs': extract_drug_entities(new_labels, batch_size)},
-            schema=NER_CACHE_SCHEMA,
-        )
-        cached = pl.concat([cached, new])
-        if cache_path is not None:
-            logger.info(f'updating ner cache: {cache_path}')
-            cached.write_parquet(cache_path, mkdir=True)
-    else:
-        logger.info(f'all {labels.len()} labels found in ner cache, skipping ner extraction')
-    return cached.filter(pl.col('query_label').is_in(labels.implode()))
+    require_staged(labels, staged_drug_entities['label'], 'drug labels')
+    return staged_drug_entities.select(pl.col('label').alias('query_label'), 'extracted_drugs').filter(
+        pl.col('query_label').is_in(labels.implode())
+    )
 
 
 def _ner_drug_ids(names: pl.DataFrame, drug_lut: pl.LazyFrame) -> pl.DataFrame:
@@ -237,37 +210,35 @@ def map_entities(
     disease: pl.DataFrame,
     drug: pl.DataFrame,
     chembl_curation: pl.DataFrame | None,
-    ner_cache_path: str | None,
-    ner_batch_size: int,
+    staged_drug_entities: pl.DataFrame,
     drug_column_name: str = 'drugFromSource',
     disease_column_name: str = 'diseaseFromSource',
     drug_id_column_name: str = 'drugId',
     disease_id_column_name: str = 'diseaseId',
-    staged_drug_entities: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Map drug and disease labels to ids, keeping ids already set.
 
     In order of precedence:
     1. ids already in `df`, then ids curated by ChEMBL for the study and label;
     2. the disease and drug label dictionaries, for labels still without an id;
-    3. drug NER, for drug labels still without an id: the extracted names mapped with the drug dictionary.
-       With `staged_drug_entities`, the names are the staged ones, and neither NER nor its cache is used.
+    3. drug NER, for drug labels still without an id: the staged names of the label mapped with the drug dictionary.
 
     Args:
         df: Reports to map.
         disease: Disease index, with the `DISEASE_COLUMNS` of `output/disease`.
         drug: Drug molecules, with the `DRUG_COLUMNS` of `intermediate/chembl_molecule`.
         chembl_curation: ChEMBL's clinical trial curation, by `studyId` and source labels.
-        ner_cache_path: Parquet file of NER results, read and rewritten with the labels it lacked.
-        ner_batch_size: Batch size for drug NER.
+        staged_drug_entities: Drug names staged per drug label, as `label` and `extracted_drugs`.
         drug_column_name: Column of drug labels.
         disease_column_name: Column of disease labels.
         drug_id_column_name: Column of drug ids, added when missing.
         disease_id_column_name: Column of disease ids, added when missing.
-        staged_drug_entities: Drug names staged per drug label, as `label` and `extracted_drugs`.
 
     Returns:
         `df` with the ids found, one row per drug id and disease id of a row.
+
+    Raises:
+        ValueError: if a drug label reaching NER is not staged.
     """
     missing_id_cols = [
         pl.lit(None, dtype=pl.String).alias(column)
@@ -312,11 +283,7 @@ def map_entities(
     )
     if unmapped_drugs.len() > 0:
         logger.info(f'found {unmapped_drugs.len()} unmapped drug labels')
-        names = (
-            _staged_ner_names(unmapped_drugs, staged_drug_entities)
-            if staged_drug_entities is not None
-            else _ner_names(unmapped_drugs, ner_cache_path, ner_batch_size)
-        )
+        names = _staged_ner_names(unmapped_drugs, staged_drug_entities)
         ner = _ner_drug_ids(names, lut.filter(pl.col('entityType') == 'CD'))
         mapping_results = (
             mapping_results

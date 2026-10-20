@@ -110,21 +110,17 @@ CHEMBL_CURATION = pl.DataFrame(
     orient='row',
 )
 
-#: What the stubbed drug NER extracts from each label; any other label extracts nothing.
-NER = {
-    'Ivacaftor 150 mg tablet': ['ivacaftor'],
-    'aspirin + kalydeco': ['Aspirin', 'kalydeco'],
-    'Study Drug X': ['unmapped extraction'],
-}
-
-#: The NER cache before the run: a label in the reports, extracted differently from the stub, and a stale label.
-NER_CACHE = pl.DataFrame(
-    [('aspirin tabs', ['acetylsalicylic acid']), ('stale label', ['ivacaftor']), ('unknownium', [])],
-    schema={'query_label': pl.String, 'extracted_drugs': pl.List(pl.String)},
+#: The drug names staged for each drug label: the NER cache the goldens' capture wrote, and a stale label.
+STAGED_DRUG_ENTITIES = pl.DataFrame(
+    [
+        ('', []),
+        ('Ivacaftor 150 mg tablet', ['ivacaftor']),
+        ('Study Drug X', ['unmapped extraction']),
+        ('aspirin + kalydeco', ['Aspirin', 'kalydeco']),
+        ('aspirin tabs', ['acetylsalicylic acid']),
+        ('stale label', ['ivacaftor']),
+        ('unknownium', []),
+    ],
+    schema={'label': pl.String, 'extracted_drugs': pl.List(pl.String)},
     orient='row',
 )
-
-
-def ner_stub(labels: pl.Series, batch_size: int) -> pl.Series:
-    """`extract_drug_entities` with `NER` in place of the models."""
-    return pl.Series(labels.name, [NER.get(label, []) for label in labels], dtype=pl.List(pl.String))

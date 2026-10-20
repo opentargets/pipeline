@@ -2,10 +2,8 @@
 
 Captured with mira 1.0.5 and OnToma 2.7.1 on a local Spark session, by a one-off script that is not
 kept in the repository. The reports, `CHEMBL_CURATION` and the disease and drug frames were passed
-as they are; mira's call to OnToma's drug NER was replaced by a stub returning `NER` for each
-label, and the NER cache started as `NER_CACHE`. `MAPPED` is mira's output sorted on every column
-(nulls last), `NER_CACHE_WRITTEN` the cache it wrote, sorted, and `NER_EXTRACTED_LABELS` the
-labels the stub was asked for.
+as they are; mira's call to OnToma's drug NER was replaced by a stub, and the NER cache it wrote
+is `STAGED_DRUG_ENTITIES`. `MAPPED` is mira's output sorted on every column (nulls last).
 """
 
 # ruff: noqa: RUF001
@@ -45,21 +43,4 @@ MAPPED = [
     ('NCT14', '', '', None, None),
     ('NCT15', 'Aspirin', 'Kalydeco', 'CHEMBL25', None),
     ('NCT16', 'Kalydeco', 'Cystic fibrosis', 'CHEMBL2010601', 'MONDO_0009061'),
-]
-
-NER_CACHE_WRITTEN = [
-    ('', []),
-    ('Ivacaftor 150 mg tablet', ['ivacaftor']),
-    ('Study Drug X', ['unmapped extraction']),
-    ('aspirin + kalydeco', ['Aspirin', 'kalydeco']),
-    ('aspirin tabs', ['acetylsalicylic acid']),
-    ('stale label', ['ivacaftor']),
-    ('unknownium', []),
-]
-
-NER_EXTRACTED_LABELS = [
-    '',
-    'Ivacaftor 150 mg tablet',
-    'Study Drug X',
-    'aspirin + kalydeco',
 ]
