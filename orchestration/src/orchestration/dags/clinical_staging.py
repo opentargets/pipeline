@@ -62,8 +62,8 @@ with DAG(
     #
     # There is no diffing here. Unlike a release, this pipeline is already
     # incremental where it counts: the extraction only sends the model the
-    # trials that are not in its cache. Rerunning a step that has nothing to do
-    # is cheap by construction.
+    # trials that are not already in its record store. Rerunning a step that
+    # has nothing to do is cheap by construction.
     # ==============================================================================================
     for step_name in config.steps():
 
