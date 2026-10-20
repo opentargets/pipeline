@@ -15,12 +15,17 @@ from pts.transformers.clinical import (
     replace_with_llm_indications,
 )
 from pts.transformers.clinical import mapping as mapping_module
+from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
+    attach_stop_reasons,
+    check_ner_revisions,
     flag_indirect_primary_purpose,
     map_report_entities,
     order_output_columns,
     read_ema_sheet,
+    require_staged,
+    staged_aact_drug_entities,
     validate_disease,
 )
 from tests.clinical.mapping_fixtures import DISEASE, DRUG
@@ -529,7 +534,15 @@ def test_map_report_entities_maps_each_drug_and_disease_of_a_report(monkeypatch:
         schema_overrides={'diseases': pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))},
     )
 
-    mapped = map_report_entities(reports, DISEASE, DRUG, chembl_curation=None, ner_batch_size=8, ner_cache_path=None)
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        ner_batch_size=8,
+        ner_cache_path=None,
+        aact_drug_entities=_staged_drug_entities(('Aspirin', []), ('Kalydeco', []), ('Ecotrin', [])),
+    )
 
     rows = {
         r['id']: (sorted(r['drugs'], key=str), r['diseases'])
@@ -544,4 +557,202 @@ def test_map_report_entities_maps_each_drug_and_disease_of_a_report(monkeypatch:
             [{'diseaseFromSource': 'Cystic fibrosis', 'diseaseId': 'MONDO_0009061'}],
         ),
         'nct02': ([{'drugFromSource': 'Ecotrin', 'drugId': 'CHEMBL25'}], None),
+    }
+
+
+STAGED_DRUG_ENTITIES_SCHEMA = {'label': pl.String, 'extracted_drugs': pl.List(pl.String)}
+
+
+def _staged_drug_entities(*rows: tuple[str, list[str]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=STAGED_DRUG_ENTITIES_SCHEMA, orient='row')
+
+
+def _staged_stop_reasons(*rows: tuple[str, list[str]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        [(text, f'sha-{text}', categories) for text, categories in rows],
+        schema={'text': pl.String, 'text_sha256': pl.String, 'categories': pl.List(pl.String)},
+        orient='row',
+    )
+
+
+def _drug_reports(*rows: tuple[str, str, str]) -> pl.DataFrame:
+    """Reports of (id, source, drug label), each with one unmapped drug and no disease."""
+    return pl.DataFrame(
+        [
+            {
+                **_report(id_, source),
+                'drugs': [{'drugFromSource': label, 'drugId': None}],
+                'diseases': None,
+            }
+            for id_, source, label in rows
+        ],
+        schema_overrides={'diseases': pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))},
+    )
+
+
+def _drug_ids(mapped: ClinicalReport) -> dict[tuple[str, str], list]:
+    """The drug ids of each (source, drug label) of the mapped reports."""
+    drugs = mapped.df.select('source', 'drugs').explode('drugs').unnest('drugs')
+    return {
+        (row['source'], row['drugFromSource']): sorted(row['drugId'], key=str)
+        for row in drugs.group_by('source', 'drugFromSource').agg('drugId').iter_rows(named=True)
+    }
+
+
+def _stage_models(root: Path, revisions: dict[str, str]) -> str:
+    for model, revision in revisions.items():
+        path = root / model / revision / 'config.json'
+        path.parent.mkdir(parents=True)
+        path.write_text('{}')
+    return str(root)
+
+
+def test_stop_reasons_come_from_staging() -> None:
+    aact = pl.DataFrame({
+        'id': ['NCT01', 'NCT02', 'NCT03', 'NCT04'],
+        'trialWhyStopped': ['funding', None, '', 'funding'],
+    })
+    staged = _staged_stop_reasons(('funding', ['Insufficient_Funding']), ('', ['Uncategorised']), ('other', ['Other']))
+
+    attached = attach_stop_reasons(aact, staged)
+
+    assert attached.columns == ['id', 'trialWhyStopped', 'trialStopReasonCategories']
+    assert attached.schema['trialStopReasonCategories'] == pl.List(pl.String)
+    assert sorted(attached.rows()) == [
+        ('NCT01', 'funding', ['Insufficient_Funding']),
+        ('NCT02', None, None),
+        ('NCT03', '', ['Uncategorised']),
+        ('NCT04', 'funding', ['Insufficient_Funding']),
+    ]
+
+
+def test_missing_staged_why_stopped_fails_with_count_and_examples() -> None:
+    missing = [f'reason {i}' for i in range(7)]
+    aact = pl.DataFrame({'id': [f'NCT{i}' for i in range(9)], 'trialWhyStopped': [*missing, 'funding', 'funding']})
+    staged = _staged_stop_reasons(('funding', ['Insufficient_Funding']))
+
+    with pytest.raises(ValueError, match='7 stop reasons') as error:
+        attach_stop_reasons(aact, staged)
+    assert sum(text in str(error.value) for text in missing) == 5
+
+
+def test_require_staged_ignores_nulls_and_repeats() -> None:
+    require_staged(pl.Series(['a', None, 'a', '']), pl.Series(['', 'a']), 'labels')
+
+
+def test_missing_staged_drug_label_fails(tmp_path: Path) -> None:
+    models = _stage_models(tmp_path / 'models', {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
+    snapshot = tmp_path / 'drug_entities'
+    snapshot.mkdir()
+    _staged_drug_entities(('Aspirin', ['aspirin'])).write_parquet(snapshot / 'data.parquet')
+    (snapshot / 'metadata.json').write_text(
+        '{"model": "m", "model_revision": "r", "model_revisions": '
+        f'{{"{CHEMICAL_MODEL}": "c1", "{DRUGTEMIST_MODEL}": "d1"}}}}'
+    )
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'),
+        ('TTD01', ClinicalSource.TTD.value, 'ttd only'),
+    )
+
+    staged = staged_aact_drug_entities(str(snapshot), models, reports)
+    assert staged.rows() == [('Aspirin', ['aspirin'])]
+
+    reports = pl.concat([reports, _drug_reports(('NCT02', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'unstaged'))])
+    with pytest.raises(ValueError, match=r"1 aact drug labels.*'unstaged'"):
+        staged_aact_drug_entities(str(snapshot), models, reports)
+
+
+def test_ner_revision_mismatch_fails(tmp_path: Path) -> None:
+    models = _stage_models(tmp_path, {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1', 'org/other': 'o1'})
+
+    check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1', 'org/other': 'x'}}, models)
+    with pytest.raises(ValueError, match=f'{CHEMICAL_MODEL}.*c0.*c1') as error:
+        check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c0', DRUGTEMIST_MODEL: 'd1'}}, models)
+    assert DRUGTEMIST_MODEL not in str(error.value)
+    with pytest.raises(ValueError, match=DRUGTEMIST_MODEL):
+        check_ner_revisions({'model_revisions': {CHEMICAL_MODEL: 'c1'}}, models)
+
+
+def test_label_shared_with_ttd_uses_staged_names_for_aact_rows_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def ner(labels: pl.Series, batch_size: int) -> pl.Series:
+        calls.append(labels.to_list())
+        return pl.Series([['ecotrin']] * labels.len(), dtype=pl.List(pl.String))
+
+    monkeypatch.setattr(mapping_module, 'extract_drug_entities', ner)
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'),
+        ('TTD01', ClinicalSource.TTD.value, 'mystery pill'),
+    )
+    cache = tmp_path / 'ner.parquet'
+
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        ner_batch_size=8,
+        ner_cache_path=str(cache),
+        aact_drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco'])),
+    )
+
+    assert _drug_ids(mapped) == {
+        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'): ['CHEMBL2010601'],
+        (ClinicalSource.TTD.value, 'mystery pill'): ['CHEMBL25'],
+    }
+    assert calls == [['mystery pill']]
+    assert pl.read_parquet(cache).rows() == [('mystery pill', ['ecotrin'])]
+
+
+def test_aact_labels_never_reach_release_ner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def ner(labels: pl.Series, batch_size: int) -> pl.Series:
+        assert 'aact only' not in labels.to_list()
+        return pl.Series([[]] * labels.len(), dtype=pl.List(pl.String))
+
+    monkeypatch.setattr(mapping_module, 'extract_drug_entities', ner)
+    cache = tmp_path / 'ner.parquet'
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'aact only'),
+        ('TTD01', ClinicalSource.TTD.value, 'ttd only'),
+    )
+
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        ner_batch_size=8,
+        ner_cache_path=str(cache),
+        aact_drug_entities=_staged_drug_entities(('aact only', ['ecotrin'])),
+    )
+
+    assert _drug_ids(mapped) == {
+        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'aact only'): ['CHEMBL25'],
+        (ClinicalSource.TTD.value, 'ttd only'): [None],
+    }
+    assert pl.read_parquet(cache)['query_label'].to_list() == ['ttd only']
+
+
+def test_report_without_source_is_mapped_with_release_ner() -> None:
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'),
+        ('X01', None, 'Ecotrin'),
+    )
+
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        ner_batch_size=8,
+        ner_cache_path=None,
+        aact_drug_entities=_staged_drug_entities(('Aspirin', [])),
+    )
+
+    assert _drug_ids(mapped) == {
+        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'): ['CHEMBL25'],
+        (None, 'Ecotrin'): ['CHEMBL25'],
     }

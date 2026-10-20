@@ -1,5 +1,6 @@
 """Clinical report dataset generation."""
 
+import json
 from enum import StrEnum
 from io import BytesIO
 from typing import Any
@@ -29,8 +30,8 @@ from pts.transformers.clinical import (
     parse_pmda_approvals,
     union_dfs,
 )
-from pts.transformers.clinical.hf_models import offline_hf_models
-from pts.transformers.clinical.stop_reasons import predict_trial_stop_reasons
+from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
+from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
@@ -223,17 +224,8 @@ def _clinical_report(
         },
         llm_extractions=llm_extractions,
     )
-    aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
-    if aact_stop_reasons.height > 0:
-        logger.info(f'categorise stop reasons... input rows: {aact_stop_reasons.height}')
-        predictions = predict_trial_stop_reasons(aact_stop_reasons['trialWhyStopped'].to_list())
-        stop_reason_predictions = aact_stop_reasons.select('id').with_columns(
-            trialStopReasonCategories=pl.Series('trialStopReasonCategories', predictions)
-        )
-        aact = ClinicalReport(df=aact.df.join(stop_reason_predictions, on='id', how='left'))
-        logger.info('categorise stop reasons... complete')
-    else:
-        aact = ClinicalReport(df=aact.df.with_columns(trialStopReasonCategories=pl.lit(None, dtype=pl.List(pl.String))))
+    logger.info(f'attach stop reasons staged at {source["aact_stop_reasons"]}')
+    aact = ClinicalReport(df=attach_stop_reasons(aact.df, scan_dataset(source['aact_stop_reasons']).collect()))
     chembl_indication_report = extract_chembl_clinical_report(
         drug_indication=chembl_indication,
         molecule_dictionary=chembl_molecule_dictionary,
@@ -259,6 +251,7 @@ def _clinical_report(
         ttd.df,
         ema.df,
     ])
+    aact_drug_entities = staged_aact_drug_entities(source['aact_drug_entities'], source['models'], reports)
     logger.info('reports generated. map entities...')
     output = (
         map_report_entities(
@@ -268,6 +261,7 @@ def _clinical_report(
             chembl_curation=chembl_curation,
             ner_batch_size=int(settings['ner_batch_size']),
             ner_cache_path=source['ner_cache_path'],
+            aact_drug_entities=aact_drug_entities,
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
@@ -302,6 +296,87 @@ def read_ema_sheet(path: str) -> pl.DataFrame:
     )
 
 
+def require_staged(texts: pl.Series, staged: pl.Series, what: str) -> None:
+    """Check that every non-null text is staged.
+
+    Raises:
+        ValueError: naming `what`, how many distinct texts are not staged and up to 5 of them.
+    """
+    distinct = texts.drop_nulls().unique()
+    missing = distinct.filter(~distinct.is_in(staged.implode())).sort()
+    if missing.len() > 0:
+        raise ValueError(f'{missing.len()} {what} not staged, e.g. {missing.head(5).to_list()}')
+
+
+def attach_stop_reasons(aact: pl.DataFrame, staged: pl.DataFrame) -> pl.DataFrame:
+    """The AACT reports with `trialStopReasonCategories`, the staged categories of their `trialWhyStopped`.
+
+    Args:
+        aact: AACT reports.
+        staged: the staged stop reasons, with `text` and `categories`.
+
+    Returns:
+        `aact` with `trialStopReasonCategories`, null where `trialWhyStopped` is null.
+
+    Raises:
+        ValueError: if a `trialWhyStopped` is not staged.
+    """
+    require_staged(aact['trialWhyStopped'], staged['text'], 'stop reasons')
+    return aact.join(
+        staged.select(pl.col('text').alias('trialWhyStopped'), pl.col('categories').alias('trialStopReasonCategories')),
+        on='trialWhyStopped',
+        how='left',
+        maintain_order='left',
+    )
+
+
+def check_ner_revisions(metadata: dict[str, Any], models_uri: str) -> None:
+    """Check that the drug NER models were staged at the revisions the release serves.
+
+    Args:
+        metadata: the metadata of the staged drug NER snapshot.
+        models_uri: the release's staged Hugging Face models.
+
+    Raises:
+        ValueError: naming each drug NER model whose staged and release revisions differ.
+    """
+    release = staged_model_revisions(models_uri)
+    mismatches = [
+        f'{model}: staged {metadata["model_revisions"].get(model)}, release {release.get(model)}'
+        for model in (CHEMICAL_MODEL, DRUGTEMIST_MODEL)
+        if metadata['model_revisions'].get(model) != release.get(model)
+    ]
+    if mismatches:
+        raise ValueError(f'staged aact drug ner revisions differ from the release models: {"; ".join(mismatches)}')
+
+
+def staged_aact_drug_entities(path: str, models_uri: str, reports: pl.DataFrame) -> pl.DataFrame:
+    """The staged drug NER snapshot at `path`, checked against the release models and the AACT drug labels.
+
+    Args:
+        path: the snapshot, holding `data.parquet` and `metadata.json`.
+        models_uri: the release's staged Hugging Face models.
+        reports: the reports of every provider.
+
+    Returns:
+        The staged `label` and `extracted_drugs`.
+
+    Raises:
+        ValueError: if the NER revisions differ or an AACT drug label is not staged.
+    """
+    metadata, _ = StorageHandle(f'{path}/metadata.json').read_text()
+    check_ner_revisions(json.loads(metadata), models_uri)
+    staged = scan_dataset(path).select('label', 'extracted_drugs').collect()
+    aact_labels = (
+        reports
+        .filter(pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
+        .select(pl.col('drugs').explode().struct.field('drugFromSource'))
+        .to_series()
+    )
+    require_staged(aact_labels, staged['label'], 'aact drug labels')
+    return staged
+
+
 def map_report_entities(
     reports: pl.DataFrame,
     disease_index: pl.DataFrame,
@@ -309,6 +384,7 @@ def map_report_entities(
     chembl_curation: pl.DataFrame | None,
     ner_batch_size: int,
     ner_cache_path: str | None,
+    aact_drug_entities: pl.DataFrame,
 ) -> ClinicalReport:
     """Map the drugs and diseases of each report to ids.
 
@@ -318,7 +394,8 @@ def map_report_entities(
         drug_index: drug molecules, with `DRUG_COLUMNS`.
         chembl_curation: ChEMBL's clinical trial curation.
         ner_batch_size: batch size of the drug NER.
-        ner_cache_path: the drug NER cache, read and rewritten.
+        ner_cache_path: the drug NER cache, read and rewritten for the reports of other sources than AACT.
+        aact_drug_entities: the staged drug NER of the AACT drug labels, used in place of NER for AACT reports.
 
     Returns:
         ClinicalReport with the ids found.
@@ -329,15 +406,27 @@ def map_report_entities(
         .explode('diseases', empty_as_null=True)
         .unnest(['drugs', 'diseases'])
     )
+    is_aact = pl.col('source').eq(ClinicalSource.CLINICAL_TRIALS_GOV.value).fill_null(value=False)
 
-    mapped_exploded_reports = map_entities(
-        exploded_reports,
-        disease_index,
-        drug_index,
-        chembl_curation,
-        ner_cache_path=ner_cache_path,
-        ner_batch_size=ner_batch_size,
-    )
+    mapped_exploded_reports = pl.concat([
+        map_entities(
+            exploded_reports.filter(is_aact),
+            disease_index,
+            drug_index,
+            chembl_curation,
+            ner_cache_path=None,
+            ner_batch_size=ner_batch_size,
+            staged_drug_entities=aact_drug_entities,
+        ),
+        map_entities(
+            exploded_reports.filter(~is_aact),
+            disease_index,
+            drug_index,
+            chembl_curation,
+            ner_cache_path=ner_cache_path,
+            ner_batch_size=ner_batch_size,
+        ),
+    ])
 
     mapped_reports = (
         mapped_exploded_reports

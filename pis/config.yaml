@@ -198,20 +198,20 @@ steps:
           source: ${uri}
           destination: input/clinical_report/${match_stem}.${match_ext}
 
-    # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
-    - name: explode stop reasons model
-      foreach:
-        - config.json
-        - model.safetensors
-        - special_tokens_map.json
-        - tokenizer.json
-        - tokenizer_config.json
-        - vocab.txt
-      do:
-        - name: copy stop reasons model ${each}
-          source: https://huggingface.co/opentargets/clinical_trial_stop_reasons/resolve/${stop_reasons_model_revision}/${each}
-          destination: input/clinical_report/models/opentargets/clinical_trial_stop_reasons/${stop_reasons_model_revision}/${each}
+    # AACT stop reasons and drug NER, staged by the extraction DAG.
+    - name: copy_many aact stop reasons
+      sources:
+        - gs://aact_data/${aact_version}/stop_reasons/data.parquet
+        - gs://aact_data/${aact_version}/stop_reasons/metadata.json
+      destination: input/clinical_report/aact_stop_reasons
 
+    - name: copy_many aact drug entities
+      sources:
+        - gs://aact_data/${aact_version}/drug_entities/data.parquet
+        - gs://aact_data/${aact_version}/drug_entities/metadata.json
+      destination: input/clinical_report/aact_drug_entities
+
+    # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
     - name: explode biobert diseases ner model
       foreach:
         - config.json

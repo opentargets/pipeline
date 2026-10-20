@@ -187,3 +187,21 @@ def test_all_mapped_skips_lookup(ner_calls: list[list[str]]) -> None:
     assert mapped.rows() == [('CHEMBL_IND1', 'Aspirin', None, 'CHEMBL_PRESET', None)]
     assert mapped.columns == MAPPED_COLUMNS
     assert ner_calls == []
+
+
+def test_staged_drug_entities_replace_ner_and_its_cache(tmp_path: Path, ner_calls: list[list[str]]) -> None:
+    cache = _cache(tmp_path / 'ner.parquet')
+    before = Path(cache).read_bytes()
+    staged = pl.DataFrame(
+        [('Ivacaftor 150 mg tablet', ['ivacaftor']), ('aspirin tabs', ['kalydeco'])],
+        schema={'label': pl.String, 'extracted_drugs': pl.List(pl.String)},
+        orient='row',
+    )
+    reports = _reports(
+        ('NCT07', 'Ivacaftor 150 mg tablet', 'CF', None, None),
+        ('NCT09', 'aspirin tabs', 'Cystic fibrosis', None, None),
+    )
+    mapped = map_entities(reports, DISEASE, DRUG, None, cache, 8, staged_drug_entities=staged)
+    assert _rows(mapped.select('id', 'drugId')) == [('NCT07', 'CHEMBL2010601'), ('NCT09', 'CHEMBL2010601')]
+    assert ner_calls == []
+    assert Path(cache).read_bytes() == before
