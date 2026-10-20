@@ -15,10 +15,11 @@ bumps it, and several releases can share one. If a release ever pins an archive
 that was never extracted, its copy fails on a missing path, which is a better
 outcome than quietly reading the wrong snapshot.
 
-The cache reuses an accepted extraction for the same trial ID and response
-schema. A new AACT archive therefore pays only for new trials and earlier
-failures. Changes to trial text, the model or the system prompt do not invalidate
-accepted results; changing the response schema starts a separate cache.
+The cache reuses an accepted extraction for the same trial ID, response schema
+and rendered prompt. A new AACT archive therefore pays only for new trials,
+trials whose text changed and earlier failures. Changes to the model or the
+system prompt do not invalidate accepted results; changing the response schema
+starts a separate cache.
 See :py:mod:`pts.result_cache`.
 """
 

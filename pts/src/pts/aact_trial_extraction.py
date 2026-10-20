@@ -128,11 +128,42 @@ def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
             ),
         )
         .with_columns(
-            cache_key=pl.col('id').map_elements(
-                lambda trial_id: cache_key(trial_id, schema_digest), return_dtype=pl.String
+            cache_key=pl.struct('id', 'prompt_sha256').map_elements(
+                lambda row: cache_key(row['id'], schema_digest, row['prompt_sha256']), return_dtype=pl.String
             ),
         )
     )
+
+
+def rekey_cache(schema_cache_uri: str, schema_digest: str, config: Config, snapshot: str) -> int:
+    """Recompute cache keys from the stored ``id`` and ``prompt_sha256``.
+
+    Rows written before the prompt joined the key carry the old
+    ``(id, schema)`` key. Rows without a prompt hash keep the key they have.
+    A new snapshot is written only when a key changed, so a second call is a no-op.
+
+    Returns:
+        int: The number of rows whose key changed.
+    """
+    rows = read_cache(schema_cache_uri, config)
+    if 'prompt_sha256' not in rows.columns or 'id' not in rows.columns:
+        return 0
+
+    rekeyed = rows.with_columns(
+        cache_key=pl.struct('id', 'prompt_sha256', 'cache_key').map_elements(
+            lambda row: (
+                cache_key(row['id'], schema_digest, row['prompt_sha256'])
+                if row['id'] is not None and row['prompt_sha256'] is not None
+                else row['cache_key']
+            ),
+            return_dtype=pl.String,
+        )
+    )
+    changed = int((rekeyed['cache_key'] != rows['cache_key']).sum())
+    if changed:
+        write_cache(rekeyed, schema_cache_uri, config, snapshot)
+        logger.info(f'rekeyed {changed} cached extractions onto the prompt hash')
+    return changed
 
 
 def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str, errors: list[str]) -> pl.DataFrame:

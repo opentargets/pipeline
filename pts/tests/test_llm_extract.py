@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -15,6 +16,7 @@ from loguru import logger
 
 from pts import aact_trial_extraction
 from pts.aact_trial_extraction import _run_extraction_in_thread
+from pts.result_cache import METADATA_SCHEMA, cache_key, cached_map, read_cache, write_cache
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class, _schema_cache_uri
 from pts.transformers.clinical import ClinicalReportExtractionSchema, llm_workflow, parse_batch_results
 from tests.clinical.batch_fixtures import SAMPLE_LINE
@@ -84,7 +86,7 @@ def test_prompts_without_publications_match_mira() -> None:
                 'for headache.\nDetailed Description: null\nInterventions: aspirin; ibuprofen'
             ),
             'prompt_sha256': 'ad34534226e9e4bb74e1da9ef5f65fdd9f08d19c5094131f18ca2da120524e6e',
-            'cache_key': '70aa829644d9d4ecc7c0321e741bb39395c02927bba67d48cc2504d1a59f5a63',
+            'cache_key': '70fed69e9bb9173a55dde1c3addb9a8c48e02f5f0d9b2701c4c86550687676f2',
         },
         {
             'id': 'nct00000002',
@@ -93,7 +95,7 @@ def test_prompts_without_publications_match_mira() -> None:
                 'Detailed Description: Detailed protocol.'
             ),
             'prompt_sha256': '0f484a99130e21f5ccc612919f6f43c6f02ea56fce20755c5a31397c352af305',
-            'cache_key': 'fed716ad4c120a80fb03717e3efd1421b2269739e7b0295361bcb30fb883a498',
+            'cache_key': '91f6cce5820b6f3083e4150e040f40fcdcd1ed05777cc1b02370d21982a13e80',
         },
         {
             'id': 'nct00000003',
@@ -102,7 +104,7 @@ def test_prompts_without_publications_match_mira() -> None:
                 'Detailed Description: Multi\nline'
             ),
             'prompt_sha256': '7ea74f612091f04407ad77ecd516b3f9bcf2ab17652951b586c8d12dc9fb4533',
-            'cache_key': '036c247a2c2191d29218239672b8731d579d212b471063002cca004c80a0ad16',
+            'cache_key': 'f34dd6200dbf090edc71974f23a51c4315206fc2e262f413180860a06ae6d321',
         },
     ]
 
@@ -335,3 +337,101 @@ def test_seed_legacy_cache_names_the_configured_path_when_nothing_is_staged(tmp_
 
     with pytest.raises(ValueError, match=str(legacy)):
         aact_trial_extraction.seed_legacy_cache(prompts, str(legacy), str(tmp_path / 'cache'), cast(Any, None), 'snap')
+
+
+def _report(*titles: str) -> pl.DataFrame:
+    return pl.DataFrame({
+        'id': ['nct1'] * len(titles),
+        'trialOfficialTitle': list(titles),
+        'trialDescription': ['d'] * len(titles),
+        'trialDetailedDescription': ['dd'] * len(titles),
+    })
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _old_cache(tmp_path: Path, digest: str, ids: list[str], prompts: list[str | None] | None = None) -> str:
+    uri = str(tmp_path / 'cache')
+    data: dict[str, Any] = {
+        'cache_key': [cache_key(i, digest) for i in ids],
+        'computed_at': [None] * len(ids),
+        'id': ids,
+        'result': [f'r-{i}' for i in ids],
+    }
+    if prompts is not None:
+        data['prompt_sha256'] = [None if p is None else _sha(p) for p in prompts]
+    rows = pl.DataFrame(data, schema_overrides={'computed_at': METADATA_SCHEMA['computed_at']})
+    write_cache(rows, uri, cast(Any, None), 'old')
+    return uri
+
+
+def test_prompts_for_keys_on_trial_schema_and_prompt() -> None:
+    prompts = aact_trial_extraction.prompts_for(_report('title one', 'title two'), 'digest')
+
+    assert prompts['id'].to_list() == ['nct1', 'nct1']
+    assert prompts['cache_key'].n_unique() == 2
+    for row in prompts.to_dicts():
+        assert row['cache_key'] == cache_key('nct1', 'digest', _sha(row['prompt']))
+
+
+def test_rekey_cache_rewrites_keys_from_stored_columns(tmp_path: Path) -> None:
+    uri = _old_cache(tmp_path, 'digest', ['a', 'b'], ['pa', 'pb'])
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 2
+
+    rows = read_cache(uri, cast(Any, None)).sort('id')
+    assert rows['cache_key'].to_list() == [cache_key('a', 'digest', _sha('pa')), cache_key('b', 'digest', _sha('pb'))]
+    assert rows['result'].to_list() == ['r-a', 'r-b']
+
+
+def test_rekey_cache_is_a_noop_the_second_time(tmp_path: Path) -> None:
+    uri = _old_cache(tmp_path, 'digest', ['a'], ['pa'])
+    aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new')
+    pointer = (Path(uri) / 'latest.json').read_text()
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'again') == 0
+
+    assert (Path(uri) / 'latest.json').read_text() == pointer
+    assert not (Path(uri) / 'snapshots' / 'again').exists()
+
+
+def test_rekey_leaves_rows_without_prompt_hash(tmp_path: Path) -> None:
+    uri = _old_cache(tmp_path, 'digest', ['a', 'b'], [None, 'pb'])
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 1
+
+    rows = read_cache(uri, cast(Any, None)).sort('id')
+    assert rows['cache_key'][0] == cache_key('a', 'digest')
+
+
+def test_rekey_leaves_a_cache_without_a_prompt_hash_column(tmp_path: Path) -> None:
+    uri = _old_cache(tmp_path, 'digest', ['a'])
+
+    assert aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new') == 0
+
+    assert read_cache(uri, cast(Any, None))['cache_key'].to_list() == [cache_key('a', 'digest')]
+
+
+def _computed_after_rekey(tmp_path: Path, old_title: str, new_title: str) -> int:
+    old = aact_trial_extraction.prompts_for(_report(old_title), 'digest')
+    uri = _old_cache(tmp_path, 'digest', ['nct1'], [old['prompt'][0]])
+    aact_trial_extraction.rekey_cache(uri, 'digest', cast(Any, None), 'new')
+    computed: list[int] = []
+
+    def compute(shard: pl.DataFrame) -> pl.DataFrame:
+        computed.append(shard.height)
+        return shard.select('cache_key', 'id', 'prompt_sha256').with_columns(result=pl.lit('x'))
+
+    prompts = aact_trial_extraction.prompts_for(_report(new_title), 'digest')
+    cached_map(prompts, compute, uri, cast(Any, None), 'run', 'ts')
+    return sum(computed)
+
+
+def test_unchanged_prompt_is_a_hit_after_rekey(tmp_path: Path) -> None:
+    assert _computed_after_rekey(tmp_path, 'title', 'title') == 0
+
+
+def test_changed_prompt_is_reextracted(tmp_path: Path) -> None:
+    assert _computed_after_rekey(tmp_path, 'title', 'other title') == 1

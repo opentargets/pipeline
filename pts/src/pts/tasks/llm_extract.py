@@ -5,9 +5,9 @@ makes it repeatable — it builds one prompt per trial, asks
 :py:mod:`pts.result_cache` for the ones that have not been extracted yet, and
 publishes the result as a typed parquet the release can read directly.
 
-Cache identity is the trial ID and the JSON schema the model is held to. The
-prompt hash is retained as audit metadata, but prompt text, the
-model and system instructions do not invalidate an accepted extraction.
+Cache identity is the trial ID, the JSON schema the model is held to and the
+hash of the rendered prompt, so a trial whose text changed is extracted again.
+The model and system instructions do not invalidate an accepted extraction.
 
 The extraction work lives in :py:mod:`pts.aact_trial_extraction`.
 """
@@ -50,7 +50,7 @@ class LlmExtractSpec(Spec):
     cache_uri: str
     """Root containing one extraction cache per response schema, an absolute
         URI. Must sit outside the dataset version directory so a trial whose
-        text did not change between two AACT snapshots stays a cache hit."""
+        prompt did not change between two AACT snapshots stays a cache hit."""
     snapshot: str
     """Name for the cache snapshot this run writes, and for its staging area.
         Reuse it to resume a failed run; change it to start clean. The DAG sets
@@ -144,6 +144,10 @@ class LlmExtract(Task):
         system_prompt_path = f'{self.context.config.work_path}/.scratch/system_prompt.txt'
         Path(system_prompt_path).parent.mkdir(parents=True, exist_ok=True)
         StorageHandle(system_prompt_path, config=self.context.config, force_local=True).write_text(system_prompt)
+
+        aact_trial_extraction.rekey_cache(
+            schema_cache_uri, schema_digest, self.context.config, f'{self.spec.snapshot}-rekey'
+        )
 
         extractions = cached_map(
             records=prompts,

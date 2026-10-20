@@ -8,10 +8,9 @@ almost nothing changes.
 This module keeps their results in a cache with an identity chosen by its
 caller, so a run only pays for records the caller considers genuinely new.
 
-For LLM extraction, cache identity is deliberately scoped to the record ID and
-output schema. This allows accepted results to survive changes to trial text,
-models and system instructions. Callers may retain input hashes
-as audit metadata, but those hashes are not necessarily cache identity.
+For LLM extraction, cache identity is the record ID, the output schema and the
+hash of the rendered prompt. Changed trial text is extracted again, while
+accepted results survive changes to the model and system instructions.
 
 Layout under ``cache_uri``::
 
@@ -56,8 +55,8 @@ def cache_key(*parts: str) -> str:
     """Return a stable hash of everything that influenced a result.
 
     Pass the values that define the result's identity, in a fixed order. For
-    LLM extraction this is the trial ID and output schema. The model, system
-    instructions and rendered prompt are intentionally excluded by the caller.
+    LLM extraction this is the trial ID, the output schema and the hash of the
+    rendered prompt. The model and system instructions are excluded by the caller.
 
     Args:
         *parts: The values to hash, in a fixed order.
