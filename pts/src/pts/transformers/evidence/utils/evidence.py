@@ -171,7 +171,9 @@ class Evidence:
             Evidence with `diseaseId` joined in, and `EvidenceFlags.INVALID_DISEASE` set for
             evidence without a match.
         """
-        joined = _join_matching_spark_order(self.lf, disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left')
+        joined = _join_matching_spark_order(
+            self.lf, disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left'
+        )
         return Evidence(
             joined.with_columns(_flag(pl.col('diseaseId').is_null(), EvidenceFlags.INVALID_DISEASE).alias(QC_COLUMN))
         )
@@ -228,8 +230,7 @@ class Evidence:
         # `pl.concat_str([])` raises; spark's `concat_ws` over no columns yields `''`.
         id_input = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
-            self.lf
-            .with_columns(id_input.alias('_id_input'))
+            self.lf.with_columns(id_input.alias('_id_input'))
             .with_columns(plh.col('_id_input').nchash.sha1().alias('id'))
             .drop('_id_input')
         )
@@ -269,8 +270,7 @@ class Evidence:
         # spark's concat_ws separator is U+0001
         content = pl.concat_str(parts, separator='\x01') if parts else pl.lit('')
         return Evidence(
-            self.lf
-            .with_columns(content.alias('_content'))
+            self.lf.with_columns(content.alias('_content'))
             .with_columns(plh.col('_content').chash.sha2_256().alias('_content_hash'))
             .with_columns(pl.int_range(pl.len()).over('id', order_by='_content_hash').alias('_rank'))
             .with_columns(_flag(pl.col('_rank') != 0, EvidenceFlags.DUPLICATED).alias(QC_COLUMN))
@@ -298,8 +298,7 @@ class Evidence:
         if 'literature' not in schema_names:
             return self
         dated = (
-            self.lf
-            .select('id', pl.col('literature').alias('_lit'))
+            self.lf.select('id', pl.col('literature').alias('_lit'))
             .explode('_lit')
             # Spark's `trim` strips the ASCII space only; polars' no-argument `str.strip_chars()`
             # also strips tab/newline/non-breaking-space, which could map two distinct
