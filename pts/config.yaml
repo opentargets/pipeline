@@ -793,6 +793,22 @@ steps:
       shard_size: 200
   ##################################################################################################
 
+  #: AACT_TRIAL_MODELS STEP :######################################################################
+  # Not part of a release. Runs in the same DAG as `aact_trial_extraction`, with
+  # release_uri pointed at gs://aact_data/${aact_version}; the record stores sit outside it
+  aact_trial_models:
+    - name: trial_models aact trials
+      source:
+        aact: input/aact.zip
+        extraction: extraction/extractions.parquet
+        models: input/models
+      destination:
+        stop_reasons: stop_reasons/
+        drug_entities: drug_entities/
+      store_uri: gs://aact_data/store
+      snapshot: '{{snapshot}}'
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#######################################################################
   clinical_report:
     - name: transform clinical_report
