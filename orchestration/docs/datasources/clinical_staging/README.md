@@ -29,7 +29,7 @@ gs://clinical_staging/aact/<aact_version>/input/                   # aact.zip an
 gs://clinical_staging/aact/<aact_version>/extraction/              # data.parquet + metadata.json
 gs://clinical_staging/aact/<aact_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
 gs://clinical_staging/aact/<aact_version>/drug_entities/<tag>/
-gs://clinical_staging/aact/<aact_version>/etc/config/              # the config each step ran with
+gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<clinical_mining_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<clinical_mining_version>/{drug_entities,disease_entities}/<tag>/
 ```
@@ -92,20 +92,30 @@ record, so only texts they have not seen are computed.
 
 ### Model bumps
 
-A new model revision gives a new tag, so a bump needs no deletion: change the
-revision in `pis/config.yaml`, rerun the staging steps of each affected
-version, then move the release. Until the new snapshot exists, the release
-copy fails on the missing tag.
+A new model revision gives a new tag, and its snapshot lands beside the old
+one, so snapshots need no deletion. Change the revision in `pis/config.yaml`,
+then rerun the staging steps of each affected version. A version that was
+already staged is the catch: its pis step adds
+`input/models/<org>/<name>/<new revision>/` next to the old revision, and the
+models step then fails with "staged at 2 revisions". Before rerunning, delete
+`input/models/<org>/<name>/<old revision>/` of every bumped model in that
+version's directory, rerun its pis step, then its models step. Move the release
+last. Until the new snapshot exists, the release copy fails on the missing tag.
 
 ## Rollout
 
 1. Release pts and pis, and bump `pts_version` and `pis_version` in
    `clinical_staging.yaml`, and the pins in `pis/config.yaml`.
-2. First run only: set `import_extraction_cache` on the `aact_trial_extraction`
-   step to `gs://aact_data/cache/trial_extraction/<schema digest>`, and
-   `seed_ner_cache` on `aact_trial_models` to the release NER cache. Remove
-   both afterwards. Without them the first run pays for every trial and every
-   label again.
+2. First run only, in `pts/config.yaml`: set `import_extraction_cache` on the
+   `aact_trial_extraction` step (task `llm_extract`) to
+   `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
+   on the `aact_trial_models` step (task `trial_models`) to
+   `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/ner_cache.parquet`.
+   Remove both afterwards. The seed fills the shared drug-entity store, so run
+   the AACT steps first and `clinical_mining_models` after them to benefit.
+   The mining disease NER (about 3k texts) is computed in full on the first
+   run. Without the import and the seed the first run pays for every trial and
+   every label again.
 3. Trigger the DAG, and check that every snapshot of both sources exists.
 4. Only then move the unified pipeline onto the new pts and pis.
 
