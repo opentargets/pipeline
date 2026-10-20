@@ -5,6 +5,7 @@ import openpyxl
 import polars as pl
 import pytest
 
+from pts.transformers import clinical_report as clinical_report_module
 from pts.transformers.clinical import (
     ClinicalProvider,
     ClinicalReport,
@@ -641,25 +642,20 @@ def test_require_staged_ignores_nulls_and_repeats() -> None:
 
 
 def test_missing_staged_drug_label_fails(tmp_path: Path) -> None:
-    models = _stage_models(tmp_path / 'models', {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
     snapshot = tmp_path / 'drug_entities'
     snapshot.mkdir()
     _staged_drug_entities(('Aspirin', ['aspirin'])).write_parquet(snapshot / 'data.parquet')
-    (snapshot / 'metadata.json').write_text(
-        '{"model": "m", "model_revision": "r", "model_revisions": '
-        f'{{"{CHEMICAL_MODEL}": "c1", "{DRUGTEMIST_MODEL}": "d1"}}}}'
-    )
     reports = _drug_reports(
         ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'),
         ('TTD01', ClinicalSource.TTD.value, 'ttd only'),
     )
 
-    staged = staged_aact_drug_entities(str(snapshot), models, reports)
+    staged = staged_aact_drug_entities(str(snapshot), reports)
     assert staged.rows() == [('Aspirin', ['aspirin'])]
 
     reports = pl.concat([reports, _drug_reports(('NCT02', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'unstaged'))])
     with pytest.raises(ValueError, match=r"1 aact drug labels.*'unstaged'"):
-        staged_aact_drug_entities(str(snapshot), models, reports)
+        staged_aact_drug_entities(str(snapshot), reports)
 
 
 def test_ner_revision_mismatch_fails(tmp_path: Path) -> None:
@@ -756,3 +752,32 @@ def test_report_without_source_is_mapped_with_release_ner() -> None:
         (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'Aspirin'): ['CHEMBL25'],
         (None, 'Ecotrin'): ['CHEMBL25'],
     }
+
+
+def test_metadata_without_model_revisions_is_a_clear_error(tmp_path: Path) -> None:
+    models = _stage_models(tmp_path, {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
+
+    with pytest.raises(ValueError, match='model_revisions'):
+        check_ner_revisions({'model': 'm'}, models)
+
+
+def test_revision_mismatch_fails_before_any_dump_is_restored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    models = _stage_models(tmp_path / 'models', {CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'})
+    snapshot = tmp_path / 'drug_entities'
+    snapshot.mkdir()
+    (snapshot / 'metadata.json').write_text(
+        f'{{"model_revisions": {{"{CHEMICAL_MODEL}": "c0", "{DRUGTEMIST_MODEL}": "d1"}}}}'
+    )
+    dumps: list[str] = []
+
+    def record_dump(*args: object, **kwargs: object) -> None:
+        dumps.append('read')
+        raise AssertionError('dump restored')
+
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', record_dump)
+    source = {'aact_drug_entities': str(snapshot), 'models': models, 'chembl': 'unused'}
+
+    with pytest.raises(ValueError, match=f'{CHEMICAL_MODEL}.*c0.*c1'):
+        clinical_report_module._clinical_report(source, {}, {}, None)
+
+    assert dumps == []

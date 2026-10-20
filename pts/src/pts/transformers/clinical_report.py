@@ -154,6 +154,8 @@ def _clinical_report(
     source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
 ) -> None:
     logger.info(f'source paths: {source}')
+    staged_metadata, _ = StorageHandle(f'{source["aact_drug_entities"]}/metadata.json').read_text()
+    check_ner_revisions(json.loads(staged_metadata), source['models'])
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
@@ -251,7 +253,7 @@ def _clinical_report(
         ttd.df,
         ema.df,
     ])
-    aact_drug_entities = staged_aact_drug_entities(source['aact_drug_entities'], source['models'], reports)
+    aact_drug_entities = staged_aact_drug_entities(source['aact_drug_entities'], reports)
     logger.info('reports generated. map entities...')
     output = (
         map_report_entities(
@@ -340,32 +342,33 @@ def check_ner_revisions(metadata: dict[str, Any], models_uri: str) -> None:
     Raises:
         ValueError: naming each drug NER model whose staged and release revisions differ.
     """
+    if 'model_revisions' not in metadata:
+        msg = 'staged aact drug ner metadata lacks model_revisions'
+        raise ValueError(msg)
+    staged = metadata['model_revisions']
     release = staged_model_revisions(models_uri)
     mismatches = [
-        f'{model}: staged {metadata["model_revisions"].get(model)}, release {release.get(model)}'
+        f'{model}: staged {staged.get(model)}, release {release.get(model)}'
         for model in (CHEMICAL_MODEL, DRUGTEMIST_MODEL)
-        if metadata['model_revisions'].get(model) != release.get(model)
+        if staged.get(model) != release.get(model)
     ]
     if mismatches:
         raise ValueError(f'staged aact drug ner revisions differ from the release models: {"; ".join(mismatches)}')
 
 
-def staged_aact_drug_entities(path: str, models_uri: str, reports: pl.DataFrame) -> pl.DataFrame:
-    """The staged drug NER snapshot at `path`, checked against the release models and the AACT drug labels.
+def staged_aact_drug_entities(path: str, reports: pl.DataFrame) -> pl.DataFrame:
+    """The staged drug NER snapshot at `path`, checked against the AACT drug labels.
 
     Args:
-        path: the snapshot, holding `data.parquet` and `metadata.json`.
-        models_uri: the release's staged Hugging Face models.
+        path: the snapshot, holding `data.parquet`.
         reports: the reports of every provider.
 
     Returns:
         The staged `label` and `extracted_drugs`.
 
     Raises:
-        ValueError: if the NER revisions differ or an AACT drug label is not staged.
+        ValueError: if an AACT drug label is not staged.
     """
-    metadata, _ = StorageHandle(f'{path}/metadata.json').read_text()
-    check_ner_revisions(json.loads(metadata), models_uri)
     staged = scan_dataset(path).select('label', 'extracted_drugs').collect()
     aact_labels = (
         reports
