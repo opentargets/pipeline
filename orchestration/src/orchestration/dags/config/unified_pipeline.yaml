@@ -501,7 +501,7 @@ steps:
       - pts_l2g
       - pis_literature
 
-  # GENTROPY STEPS
+  # GENETICS STEPS (PTS and Gentropy)
   gentropy_enhancer_to_gene:
     depends_on:
       - pis_encode
