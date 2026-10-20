@@ -51,4 +51,5 @@ steps:
     source: clinical_mining
     depends_on:
       - pis_clinical_mining
+      - pts_aact_trial_models
     machine_type: 'n2d-standard-16'

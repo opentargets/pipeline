@@ -54,7 +54,8 @@ and its version. Each step runs on its own short-lived GCE VM.
    and the chemical, drugtemist and disease models.
 5. `pts_clinical_mining_models` (n2d-standard-16) — runs the drug and disease
    NER over the TTD, EMA and PMDA texts and publishes `drug_entities/<tag>` and
-   `disease_entities/<tag>`.
+   `disease_entities/<tag>`. It waits for `pts_aact_trial_models`, because both
+   write the shared drug-entity store.
 
 ChEMBL is not staged. The release fails on any drug label with no id that no
 snapshot covers, whatever its source.
@@ -111,12 +112,12 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
    `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
    on the `aact_trial_models` step (task `trial_models`) to
    `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/ner_cache.parquet`.
-   Remove both afterwards. The seed fills the shared drug-entity store, so run
-   the AACT steps first and `clinical_mining_models` after them to benefit.
-   The mining disease NER (about 3k texts) is computed in full on the first
-   run. Without the import and the seed the first run pays for every trial and
-   every label again.
-3. Trigger the DAG, and check that every snapshot of both sources exists.
+   Remove both afterwards. The mining disease NER (about 3k texts) is computed
+   in full on the first run. Without the import and the seed the first run pays
+   for every trial and every label again.
+3. Trigger the DAG. It runs `clinical_mining_models` after `aact_trial_models`,
+   so the seed covers the mining labels. Check that every snapshot of both
+   sources exists.
 4. Only then move the unified pipeline onto the new pts and pis.
 
 `gs://aact_data` is kept as history and is no longer read or written.

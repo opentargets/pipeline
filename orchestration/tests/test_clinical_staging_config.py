@@ -43,7 +43,10 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
     ]
     assert config.step_definition('pts_aact_trial_extraction')['depends_on'] == ['pis_aact']
     assert config.step_definition('pts_aact_trial_models')['depends_on'] == ['pts_aact_trial_extraction']
-    assert config.step_definition('pts_clinical_mining_models')['depends_on'] == ['pis_clinical_mining']
+    assert config.step_definition('pts_clinical_mining_models')['depends_on'] == [
+        'pis_clinical_mining',
+        'pts_aact_trial_models',
+    ]
     assert not config.step_definition('pis_clinical_mining').get('depends_on')
 
 
