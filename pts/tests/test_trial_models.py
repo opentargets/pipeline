@@ -14,6 +14,7 @@ from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL, drug_ner_revision
 from pts.transformers.clinical.providers.aact import llm_drug_labels
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, stop_reasons_revision
+from pts.transformers.clinical_report import attach_stop_reasons
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 DRUG_STRUCT = pl.Struct({
@@ -222,3 +223,34 @@ def test_empty_and_blank_texts_are_staged_verbatim(tmp_path: Path, models_uri: s
     assert models.ner_calls == [['', ' ', 'a']]
     assert pl.read_parquet(tmp_path / 'snap/stop_reasons/data.parquet')['text'].to_list() == ['', '  ', 'x']
     assert pl.read_parquet(tmp_path / 'snap/drug_entities/data.parquet')['label'].to_list() == ['', ' ', 'a']
+
+
+ESCAPED = r'Principal investigator \[PI\] has left \_the\_ institution.'
+SANITISED = 'Principal investigator [PI] has left _the_ institution.'
+
+
+def test_why_stopped_is_staged_as_the_release_sanitises_it() -> None:
+    studies = _studies([ESCAPED, SANITISED, None, 'a\x0041b'])
+
+    assert why_stopped_texts(studies).to_list() == sorted([SANITISED, 'aAb'])
+
+
+def test_staged_stop_reasons_join_the_release_report(tmp_path: Path, models_uri: str, models: Models) -> None:
+    studies = pl.DataFrame({
+        'nct_id': ['NCT0'],
+        'study_type': ['INTERVENTIONAL'],
+        'phase': ['PHASE2'],
+        'official_title': ['t'],
+        'why_stopped': [ESCAPED],
+    })
+    interventions = pl.DataFrame({'nct_id': ['NCT0'], 'intervention_type': ['DRUG'], 'name': ['Aspirin']})
+    conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
+    extractions = _extractions([['Aspirin']])
+    _stage(tmp_path, models_uri, studies.select('nct_id', 'why_stopped'), extractions, 'r1')
+
+    aact = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
+    staged = pl.read_parquet(tmp_path / 'snap/stop_reasons/data.parquet')
+    attached = attach_stop_reasons(aact, staged)
+
+    assert attached['trialWhyStopped'].to_list() == [SANITISED]
+    assert attached['trialStopReasonCategories'].to_list() == [[f'reason:{SANITISED}']]

@@ -12,6 +12,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
 from pts.record_store import RECORD_SCHEMA, map_texts, publish_snapshot, text_sha256, write_run
+from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import DRUG_NER_MODEL, drug_entities_with_status, drug_ner_revision
 from pts.transformers.clinical.providers.aact import llm_drug_labels
@@ -31,8 +32,9 @@ SEED_RUN_ID = 'seed-ner-cache'
 
 
 def why_stopped_texts(studies: pl.DataFrame) -> pl.Series:
-    """Distinct non-null ``why_stopped`` texts, sorted, exactly as AACT has them."""
-    return studies['why_stopped'].drop_nulls().unique().sort()
+    """Distinct non-null ``why_stopped`` texts, sorted, as the release's ``ClinicalReport`` sanitises them."""
+    sanitised = studies['why_stopped'].map_elements(sanitise_text, return_dtype=pl.String, skip_nulls=True)
+    return sanitised.drop_nulls().unique().sort()
 
 
 def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_revision: str, config: Config) -> int:
