@@ -30,4 +30,5 @@ def test_validation_steps_run_in_pts():
     for step in ('study', 'credible_set', 'enhancer_to_gene'):
         assert f'pts_{step}' in config.steps('pts_')
         assert f'gentropy_{step}' not in config.steps()
-    assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study', 'pts_target', 'pts_disease']
+    # pts_study already depends on pts_target and pts_disease, which credible set validation also reads.
+    assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study']
