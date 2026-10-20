@@ -803,8 +803,8 @@ steps:
         extraction: extraction/extractions.parquet
         models: input/models
       destination:
-        stop_reasons: stop_reasons/
-        drug_entities: drug_entities/
+        stop_reasons: stop_reasons
+        drug_entities: drug_entities
       store_uri: gs://aact_data/store
       snapshot: '{{snapshot}}'
   ##################################################################################################

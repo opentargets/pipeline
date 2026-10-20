@@ -8,6 +8,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts import record_store
 from pts.record_store import (
     RECORD_SCHEMA,
     RecordStoreError,
@@ -248,3 +249,15 @@ def test_publish_refuses_different_metadata(tmp_path):
 
     with pytest.raises(SnapshotConflictError):
         publish_snapshot(snapshot(), uri, {'model_revision': 'rev2'}, None)
+
+
+def test_publish_snapshot_with_a_trailing_slash_writes_single_slash_names(tmp_path, monkeypatch):
+    uris = []
+    handle = record_store.StorageHandle
+    monkeypatch.setattr(record_store, 'StorageHandle', lambda uri, **kw: uris.append(uri) or handle(uri, **kw))
+
+    assert publish_snapshot(snapshot(), f'{tmp_path}/snap/', {'version': '1'}, None) is True
+
+    assert sorted(p.name for p in (tmp_path / 'snap').iterdir()) == ['data.parquet', 'metadata.json']
+    assert publish_snapshot(snapshot(), f'{tmp_path}/snap', {'version': '1'}, None) is False
+    assert not [u for u in uris if '//' in u.removeprefix(str(tmp_path))]

@@ -290,6 +290,7 @@ def publish_snapshot(df: pl.DataFrame, uri: str, metadata: dict[str, Any], confi
     Raises:
         SnapshotConflictError: If a snapshot with different data or metadata is already there.
     """
+    uri = uri.rstrip('/')
     wanted_metadata = json.loads(json.dumps(metadata))
     try:
         text, _ = StorageHandle(f'{uri}/metadata.json', config=config).read_text()
