@@ -43,7 +43,7 @@ and its version. Each step runs on its own short-lived GCE VM.
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
-2. `pts_aact_trial_extraction` — asks the LLM to read every trial the record
+2. `pts_aact_trial_extraction` (n1-highmem-8) — asks the LLM to read every trial the record
    store does not already hold, and publishes the extraction. A trial that
    fails all 3 attempts is published without, with a warning giving the count;
    a rerun of the version computes nothing.

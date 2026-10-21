@@ -80,7 +80,7 @@ def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> Non
     """A step's own machine type wins; the others keep the global one."""
     assert config.machine_type_for('pts_aact_trial_models') == 'n2d-standard-16'
     assert config.machine_type_for('pts_clinical_mining_models') == 'n2d-standard-16'
-    assert config.machine_type_for('pts_aact_trial_extraction') == config.machine_type
+    assert config.machine_type_for('pts_aact_trial_extraction') == 'n1-highmem-8'
     assert config.machine_type_for('pis_aact') == config.machine_type
     assert config.machine_type_for('pis_clinical_mining') == config.machine_type
 

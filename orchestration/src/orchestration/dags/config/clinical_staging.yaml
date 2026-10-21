@@ -29,6 +29,7 @@ steps:
     source: aact
     depends_on:
       - pis_aact
+    machine_type: 'n1-highmem-8'
     # Fetched from Secret Manager onto the VM and mounted into the container at
     # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
     # key itself never appears in config or in code.
