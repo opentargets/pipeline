@@ -387,6 +387,34 @@ def test_an_abort_in_a_retry_round_keeps_the_finished_rounds(store_uri):
     assert result['text'].to_list() == ['bad', 'good']
 
 
+def test_failures_kept_by_aborted_runs_add_up_to_max_attempts(store_uri):
+    class AbortAfterFirstRound:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, batch):
+            self.calls.append(list(batch))
+            if len(self.calls) > 1:
+                msg = 'no key'
+                raise ComputeAborted(msg)
+            return [(None, 'bad text') for _ in batch]
+
+    for run_id in ('r1', 'r2'):
+        with pytest.raises(ComputeAborted, match='no key'):
+            run(['bad'], AbortAfterFirstRound(), store_uri, run_id, output_dtype=pl.String, allow_failures=True)
+
+    assert read_records(store_uri, None, pl.String)['run_id'].sort().to_list() == ['r1', 'r2']
+    last = AbortAfterFirstRound()
+    result = run(['bad'], last, store_uri, 'r3', output_dtype=pl.String, allow_failures=True)
+    assert result.height == 0
+    assert last.calls == [['bad']]
+    assert read_records(store_uri, None, pl.String)['run_id'].sort().to_list() == ['r1', 'r2', 'r3']
+    after = JsonRecorder()
+    assert run(['bad'], after, store_uri, 'r4', output_dtype=pl.String, allow_failures=True).height == 0
+    assert after.calls == []
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1', 'r2', 'r3']
+
+
 def test_strict_store_is_unchanged(store_uri):
     with pytest.raises(RecordStoreError):
         run(['a', 'bad'], Recorder(fails={'bad'}), store_uri, 'r1')
