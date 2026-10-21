@@ -27,8 +27,8 @@ steps:
 
   #: VARIANT STEP :################################################################################
   variant:
-    - name: pyspark variant index
-      pyspark: variant
+    - name: transform variant index
+      transformer: variant
       source:
         vep: intermediate/variant_annotation
         variant_annotations:
@@ -39,7 +39,6 @@ steps:
         output: output/variant
       settings:
         hash_threshold: 300
-        output_partitions: 25
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
