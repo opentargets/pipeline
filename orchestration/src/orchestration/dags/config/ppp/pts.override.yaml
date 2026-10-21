@@ -2,8 +2,8 @@
 steps:
   # PPP adds the curated LoF annotations to the variant index.
   variant:
-    - name: pyspark variant index
-      pyspark: variant
+    - name: transform variant index
+      transformer: variant
       source:
         vep: intermediate/variant_annotation
         variant_annotations:
@@ -15,7 +15,6 @@ steps:
         output: output/variant
       settings:
         hash_threshold: 300
-        output_partitions: 25
 
   # PPP validates its own study and credible-set inputs instead of the platform molQTL sources.
   study:
