@@ -5,7 +5,7 @@ from typing import Annotated, Any, ClassVar, Literal
 
 import polars as pl
 import pytest
-from pydantic import Field, computed_field, create_model, field_validator, model_validator
+from pydantic import ConfigDict, Field, computed_field, create_model, field_validator, model_validator
 from pydantic.fields import FieldInfo
 
 from pts.schemas.dataset import (
@@ -191,6 +191,40 @@ _Recursive.model_rebuild()
 def test_rejects_what_it_cannot_translate(fields: dict[str, Any], message: str) -> None:
     with pytest.raises(SchemaDefinitionError, match=message):
         _spec(**fields)
+
+
+@pytest.mark.parametrize('config', [ConfigDict(allow_inf_nan=False), ConfigDict(str_max_length=2)])
+def test_rejects_a_model_config_override(config: ConfigDict) -> None:
+    class WithConfig(DatasetModel):
+        model_config = config
+        dataset_name: ClassVar[str] = 'with_config'
+        dataset_title: ClassVar[str] = 'with config'
+        dataset_description: ClassVar[str] = 'with config'
+        example: ClassVar[dict] = {}
+
+        x: str
+
+    class Part(StructModel):
+        model_config = config
+
+        y: str
+
+    class WithStructConfig(DatasetModel):
+        dataset_name: ClassVar[str] = 'with_struct_config'
+        dataset_title: ClassVar[str] = 'with struct config'
+        dataset_description: ClassVar[str] = 'with struct config'
+        example: ClassVar[dict] = {}
+
+        part: Part
+
+    for model in (WithConfig, WithStructConfig):
+        with pytest.raises(SchemaDefinitionError, match='overrides model_config'):
+            dataset_spec(model)
+
+
+def test_rejects_a_validated_default() -> None:
+    with pytest.raises(SchemaDefinitionError, match='validate_default not supported'):
+        _spec(x=(int, Field(default=-1, ge=0, validate_default=True)))
 
 
 def test_rejects_validators_serializers_and_computed_fields() -> None:

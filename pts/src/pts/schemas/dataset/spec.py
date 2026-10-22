@@ -18,7 +18,8 @@ Only a strict subset of Pydantic is supported, and anything outside it raises
 * a default on a top-level column, making it optional (the column may be absent).
 
 Everything Pydantic validates in code rather than declaratively -- validators, serializers,
-computed fields -- is rejected, as are aliases and discriminators.
+computed fields -- is rejected, as are aliases, discriminators and any `model_config` other than
+`SchemaModel`'s (options such as `allow_inf_nan` or `str_max_length` change what Pydantic accepts).
 """
 
 import dataclasses
@@ -41,6 +42,7 @@ from pts.schemas.dataset.base import (
     PolarsDtype,
     PrimaryKey,
     Reference,
+    SchemaModel,
     StructModel,
 )
 
@@ -68,7 +70,15 @@ _NUMBER_CONSTRAINTS = frozenset({'ge', 'gt', 'le', 'lt'})
 _LIST_CONSTRAINTS = frozenset({'min_length', 'max_length'})
 
 #: `FieldInfo` attributes that change what a field means in ways the converter cannot follow.
-_REJECTED_FIELD_ATTRIBUTES = ('alias', 'validation_alias', 'serialization_alias', 'discriminator', 'json_schema_extra')
+_REJECTED_FIELD_ATTRIBUTES = (
+    'alias',
+    'validation_alias',
+    'serialization_alias',
+    'discriminator',
+    'json_schema_extra',
+    # a default validated by Pydantic is not by pandera, which accepts an absent optional column as is
+    'validate_default',
+)
 
 #: Pydantic decorator kinds that validate or reshape data in code.
 _REJECTED_DECORATORS = (
@@ -230,6 +240,9 @@ def _walk(node: Node, path: str) -> Iterator[tuple[str, Node]]:
 
 
 def _fields(model: type[BaseModel], *, prefix: str, top_level: bool, seen: tuple[type, ...]) -> tuple[FieldSpec, ...]:
+    if model.model_config != SchemaModel.model_config:
+        msg = f'{model.__name__} overrides model_config, which cannot be translated to column checks'
+        raise SchemaDefinitionError(msg)
     used = [kind for kind in _REJECTED_DECORATORS if getattr(model.__pydantic_decorators__, kind)]
     if used:
         msg = f'{model.__name__} uses {", ".join(used)}, which cannot be translated to column checks'

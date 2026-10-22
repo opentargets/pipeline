@@ -9,7 +9,7 @@ from pts.schemas.dataset import DatasetModel
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import Evidence
 from pts.transformers.evidence.utils.luts import build_luts
-from pts.transformers.utils.dataset import check_destinations_absent, sink_dataset, validate_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, sink_dataset, write_dataset
 
 
 def write_evidence(
@@ -23,25 +23,31 @@ def write_evidence(
 
     `alongside` are further sinks planned and collected with them, so a refused destination stops all writes.
 
-    With a `schema`, the evidence is collected and the valid part validated against it before anything is
-    written, so a violation writes neither output.
+    With a `schema`, valid evidence is validated against it before it is written. Failed evidence and `alongside`
+    are streamed to disk unvalidated in the same pass that collects the valid evidence, so only the valid part is
+    held in memory. A violation therefore leaves `failed_evidence` and `alongside` written but not `evidence`.
 
     Raises:
         pandera.errors.SchemaErrors: if `schema` is given and the valid evidence violates it.
     """
-    valid = evidence.valid()
-    if schema is not None:
-        # checked first, so an occupied destination fails before the evidence is computed
-        check_destinations_absent([destination['evidence'], destination['failed_evidence']])
-        evidence = Evidence(evidence.lf.collect().lazy())
-        valid = validate_dataset(evidence.valid(), schema).lazy()
     logger.info(f'writing valid evidence to {destination["evidence"]}')
     logger.info(f'writing failed evidence to {destination["failed_evidence"]}')
-    pl.collect_all([
-        sink_dataset(valid, destination['evidence']),
+    if schema is None:
+        pl.collect_all([
+            sink_dataset(evidence.valid(), destination['evidence']),
+            sink_dataset(evidence.invalid(), destination['failed_evidence']),
+            *(alongside or []),
+        ])
+        return
+
+    # checked first, so an occupied valid destination fails before anything is computed or written
+    check_destinations_absent([destination['evidence'], destination['failed_evidence']])
+    *_, valid = pl.collect_all([
         sink_dataset(evidence.invalid(), destination['failed_evidence']),
         *(alongside or []),
+        evidence.valid(),
     ])
+    write_dataset(valid, destination['evidence'], schema=schema)
 
 
 def run_evidence(

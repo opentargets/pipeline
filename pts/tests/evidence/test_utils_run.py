@@ -12,7 +12,8 @@ from pts.schemas.outputs.gwas_evidence import GwasCredibleSetEvidence
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import QC_COLUMN, EvidenceFlags
 from pts.transformers.evidence.utils.luts import ValidationLuts
-from pts.transformers.evidence.utils.run import run_evidence
+from pts.transformers.evidence.utils.run import run_evidence, write_evidence
+from pts.transformers.utils.dataset import sink_dataset
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 SPEC = EvidenceDatasource(
@@ -165,7 +166,7 @@ def test_an_existing_failed_destination_stops_both_writes(tmp_path: Path) -> Non
     assert not (tmp_path / 'out' / 'valid').exists()
 
 
-def test_evidence_violating_its_schema_writes_neither_output(tmp_path: Path) -> None:
+def test_evidence_violating_its_schema_is_not_written_but_failed_evidence_is(tmp_path: Path) -> None:
     spec = EvidenceDatasource(
         datasource_id='eva',
         unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId'],
@@ -182,4 +183,31 @@ def test_evidence_violating_its_schema_writes_neither_output(tmp_path: Path) -> 
             target=write_target(tmp_path / 'target', ['ENSG1']),
             destination={'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
         )
-    assert not dst.exists()
+    assert not (dst / 'valid').exists()
+    assert pl.read_parquet(dst / 'failed')['targetFromSourceId'].to_list() == ['NOT_A_TARGET']
+
+
+def test_validated_evidence_and_alongside_sinks_are_computed_in_one_pass(tmp_path: Path) -> None:
+    batches: list[int] = []
+
+    def count(s: pl.Series) -> pl.Series:
+        batches.append(len(s))
+        return s
+
+    counted = raw().with_columns(pl.col('resourceScore').map_batches(count, return_dtype=pl.Float64))
+    luts = ValidationLuts(
+        disease=pl.DataFrame({'diseaseFromSourceMappedId': ['EFO_1'], 'diseaseId': ['EFO_1']}),
+        target=pl.DataFrame({'targetFromSourceId': ['ENSG1'], 'targetId': ['ENSG1'], 'biotype': ['pc']}),
+    )
+    evidence = SPEC.postprocess(counted, luts)
+    dst = tmp_path / 'out'
+    with pytest.raises(pe.SchemaErrors):
+        write_evidence(
+            evidence,
+            {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
+            alongside=[sink_dataset(evidence.lf.select('id'), str(dst / 'ids'))],
+            schema=GwasCredibleSetEvidence,
+        )
+
+    assert sum(batches) == 2
+    assert pl.read_parquet(dst / 'ids').height == 2

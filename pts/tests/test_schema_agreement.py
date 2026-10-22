@@ -1,8 +1,11 @@
 """Agreement between each dataset model and the pandera schema derived from it.
 
 The rule checked: the derived pandera schema (before registered checks, which Pydantic cannot see)
-accepts a one-row frame exactly when Pydantic, in strict mode, accepts that row. NaN is turned into
-None for Pydantic first, since the derived schema treats NaN as null.
+accepts a one-row frame exactly when Pydantic, in strict mode, accepts that row -- with NaN turned
+into None for Pydantic first. That is a deliberate deviation, not a gap in the test: the derived
+schema treats NaN as null, so a non-nullable float rejects NaN and a nullable one accepts it
+whatever its bounds, whereas Pydantic accepts NaN in an unbounded float and rejects it under a
+bound. Without the conversion those cases would disagree by design.
 
 Rows are single-field mutations of the model's `example`, generated from its field tree for every
 value at every depth: null, empty, NaN and infinities, each side of every bound, values outside a
