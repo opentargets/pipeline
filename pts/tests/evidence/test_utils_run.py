@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandera.errors as pe
 import polars as pl
 import pytest
 
+from pts.schemas.outputs.gwas_evidence import GwasCredibleSetEvidence
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import QC_COLUMN, EvidenceFlags
 from pts.transformers.evidence.utils.luts import ValidationLuts
@@ -161,3 +163,23 @@ def test_an_existing_failed_destination_stops_both_writes(tmp_path: Path) -> Non
             destination=dst,
         )
     assert not (tmp_path / 'out' / 'valid').exists()
+
+
+def test_evidence_violating_its_schema_writes_neither_output(tmp_path: Path) -> None:
+    spec = EvidenceDatasource(
+        datasource_id='eva',
+        unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId'],
+        score=pl.col('resourceScore'),
+        # eva evidence lacks the GWAS columns, and its ids are not Ensembl-shaped
+        schema=GwasCredibleSetEvidence,
+    )
+    dst = tmp_path / 'out'
+    with pytest.raises(pe.SchemaErrors):
+        run_evidence(
+            raw(),
+            spec,
+            disease=write_disease(tmp_path / 'disease', ['EFO_1']),
+            target=write_target(tmp_path / 'target', ['ENSG1']),
+            destination={'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
+        )
+    assert not dst.exists()

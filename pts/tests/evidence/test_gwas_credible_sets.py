@@ -114,7 +114,14 @@ class TestBuildRawEvidence:
 def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
     src = tmp_path / 'src'
     for name, frame in [
-        ('l2g', pl.DataFrame({'studyLocusId': ['SL1', 'SL1'], 'geneId': ['ENSG1', 'ENSG9'], 'score': [0.8, 0.6]})),
+        (
+            'l2g',
+            pl.DataFrame({
+                'studyLocusId': ['SL1', 'SL1'],
+                'geneId': ['ENSG00000000001', 'ENSG00000000009'],
+                'score': [0.8, 0.6],
+            }),
+        ),
         ('credible_set', pl.DataFrame(ONE_LOCUS)),
         ('study', pl.DataFrame(one_study(pubmedId=['111'], publicationDate=['2019-05-01']), schema=STUDY_SCHEMA)),
     ]:
@@ -128,7 +135,7 @@ def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
             'credible_set': str(src / 'credible_set'),
             'study_index': str(src / 'study'),
             'disease': write_disease(src / 'disease', ['EFO_1']),
-            'target': write_target(src / 'target', ['ENSG1']),
+            'target': write_target(src / 'target', ['ENSG00000000001']),
             'literature': write_literature(src / 'literature', {'111': '2018-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
@@ -139,6 +146,6 @@ def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
     valid = pl.read_parquet(dst / 'valid')
     failed = pl.read_parquet(dst / 'failed')
     assert valid.select('targetId', 'diseaseId', 'score', 'publicationDate', 'evidenceDate').rows() == [
-        ('ENSG1', 'EFO_1', 0.8, '2018-01-01', '2018-01-01')
+        ('ENSG00000000001', 'EFO_1', 0.8, '2018-01-01', '2018-01-01')
     ]
-    assert failed['targetFromSourceId'].to_list() == ['ENSG9']
+    assert failed['targetFromSourceId'].to_list() == ['ENSG00000000009']
