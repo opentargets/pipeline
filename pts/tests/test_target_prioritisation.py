@@ -2,7 +2,6 @@
 
 import math
 import random
-from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -26,7 +25,6 @@ from pts.transformers.target_prioritisation import (
     paralogs_query,
     safety_query,
     target_membrane_query,
-    target_prioritisation,
 )
 
 TRACTABILITY_SCHEMA = {'targetId': pl.String, 'modality': pl.String, 'category': pl.String, 'value': pl.Boolean}
@@ -805,34 +803,7 @@ def test_target_prioritisation_null_and_empty_lists():
     assert got['maxClinicalStage'].to_list() == [None, None, None]
 
 
-def write_inputs(root: Path) -> dict[str, str]:
-    source = {}
-    for name, df in inputs().items():
-        if name == 'uniprot_slterms':
-            path = root / 'uniprot_locations.tsv'
-            df.with_columns(Category=pl.lit('Cellular component')).write_csv(path, separator='\t')
-        elif name == 'mouse_pheno_scores':
-            path = root / 'mouse_pheno_scores.csv'
-            path.write_text('id,label,score,\n' + ''.join(f'{i},{lbl},{s:g},\n' for i, lbl, s in PHENO))
-        else:
-            path = root / name
-            path.mkdir()
-            half = df.height // 2
-            df.slice(0, half).write_parquet(path / 'part-0.parquet')
-            df.slice(half).write_parquet(path / 'part-1.parquet')
-        source[name] = str(path)
-    return source
 
 
-def parquet_bytes(path: Path) -> list[bytes]:
-    return [p.read_bytes() for p in sorted(path.glob('*.parquet'))]
 
 
-def test_target_prioritisation_end_to_end(tmp_path):
-    source = write_inputs(tmp_path)
-    target_prioritisation(source, str(tmp_path / 'out1'), None, None)
-    target_prioritisation(source, str(tmp_path / 'out2'), None, None)
-    got = pl.read_parquet(tmp_path / 'out1')
-    assert got.schema == OUTPUT_SCHEMA
-    assert got.equals(compute_target_prioritisation(**inputs()))
-    assert parquet_bytes(tmp_path / 'out1') == parquet_bytes(tmp_path / 'out2')

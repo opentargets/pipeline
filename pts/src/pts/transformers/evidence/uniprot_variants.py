@@ -6,6 +6,7 @@ from typing import Any
 
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_uniprot_variants import EvidenceUniprotVariants
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -28,6 +29,7 @@ UNIPROT_VARIANTS = EvidenceDatasource(
         'literature',
     ],
     score=confidence_score(CONFIDENCE_SCORES),
+    schema=EvidenceUniprotVariants,
 )
 
 
@@ -47,4 +49,8 @@ def uniprot_variants(
     """
     raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
-    write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)
+    write_evidence(
+        UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(),
+        destination,
+        schema=UNIPROT_VARIANTS.schema,
+    )

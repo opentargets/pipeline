@@ -14,6 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.otar import otar_schema
+from pts.schemas.outputs.otar import Otar
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
@@ -113,4 +114,4 @@ def otar(
     logger.info(f'Generated otar info for {result.height} diseases')
 
     logger.info(f'Writing otar output to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=Otar)

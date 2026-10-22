@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_europepmc import EvidenceEuropepmc
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -57,6 +58,7 @@ EUROPEPMC = EvidenceDatasource(
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'literature'],
     # min_horizontal skips a null or NaN resourceScore, so it scores 1.0
     score=pl.min_horizontal(divide(pl.col('resourceScore'), 100.0), pl.lit(1.0)),
+    schema=EvidenceEuropepmc,
 )
 
 

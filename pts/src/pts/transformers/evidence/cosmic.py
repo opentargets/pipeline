@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_cancer_gene_census import EvidenceCancerGeneCensus
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -17,6 +18,7 @@ CANCER_GENE_CENSUS = EvidenceDatasource(
     datasource_id='cancer_gene_census',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId'],
     score=pl.col('resourceScore'),
+    schema=EvidenceCancerGeneCensus,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = pl.col('TSorOncogene').replace_strict({'oncogene': 'GoF', 'tsg': 'LoF'}, default=None)
@@ -45,4 +47,4 @@ def cosmic(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=CANCER_GENE_CENSUS.schema)

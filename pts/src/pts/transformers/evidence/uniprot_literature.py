@@ -6,6 +6,7 @@ from typing import Any
 
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_uniprot_literature import EvidenceUniprotLiterature
 from pts.transformers.evidence.uniprot_variants import CONFIDENCE_SCORES
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
@@ -17,6 +18,7 @@ UNIPROT_LITERATURE = EvidenceDatasource(
     # order feeds the id, as in the spark config
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'diseaseFromSource'],
     score=confidence_score(CONFIDENCE_SCORES),
+    schema=EvidenceUniprotLiterature,
 )
 
 

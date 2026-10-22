@@ -1,13 +1,7 @@
-"""The biosample index: the output of the `biosample` step.
+"""Biosample core annotation: the `biosample` output.
 
-Descriptions are copied verbatim from croissant's `biosample.json`, as is `biosampleId`'s
-`isPrimaryKey` (as `PrimaryKey`); croissant tags no references or registries here.
-
-`biosampleId` has no pattern: a real output (35,477 rows) spans dozens of ontology prefixes
-(`UBERON`, `CL`, `EFO`, `GO`, `PR`, plus ~35 rarer ones pulled in as imported terms), so no single
-regex is true of it. All six relationship lists are nullable: gentropy's reference output has null
-`parents`/`children`, which its merge logic does not explain, so nullability is asserted uniformly
-rather than guaranteed per column. Their elements are never null.
+Generated from the 26.09 release output (35,477 rows) and its croissant metadata. Rules are
+strict to that release: dtypes, nullability, value ranges, allowed values and identifier shapes are as observed.
 """
 
 from typing import Annotated, ClassVar
@@ -17,34 +11,42 @@ from pydantic import Field
 from pts.schemas.dataset import DatasetModel, PrimaryKey
 
 
-class BiosampleIndex(DatasetModel):
-    """Biosample index merged from Cell Ontology, Uberon and EFO."""
+class Biosample(DatasetModel):
+    """Biosample core annotation."""
 
     dataset_name: ClassVar[str] = 'biosample'
     dataset_title: ClassVar[str] = 'Biosample core annotation'
     dataset_description: ClassVar[str] = (
-        'Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL '
-        'and EFO ontologies'
+        'Integration of metadata related to tissues, cell types or cell lines '
+        '(biosamples) derived from the UBERON, CL and EFO ontologies'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
     example: ClassVar[dict] = {
-        'biosampleId': 'UBERON_0002107',
-        'biosampleName': 'liver',
-        'description': 'An exocrine gland which secretes bile and functions in metabolism.',
-        'xrefs': ['FMA:7197'],
-        'synonyms': ['iecur'],
-        'parents': ['UBERON_0002423'],
-        'ancestors': ['UBERON_0002423', 'UBERON_0000062'],
-        'children': ['UBERON_0001114'],
-        'descendants': ['UBERON_0001114'],
+        'biosampleId': 'BFO_0000017',
+        'biosampleName': 'realizable entity',
+        'description': 'a core relation that holds between a part and its whole',
+        'xrefs': ['BFO:0000050'],
+        'synonyms': ['anterior to (developmentally)'],
+        'parents': ['BFO_0000020'],
+        'ancestors': ['BFO_0000001'],
+        'children': ['BFO_0000016'],
+        'descendants': ['BFO_0000016'],
     }
 
-    biosampleId: Annotated[str, PrimaryKey()] = Field(description='Unique identifier for the biosample')
-    biosampleName: str = Field(description='Name of the biosample')
-    description: str | None = Field(description='Description of the biosample')
-    xrefs: list[str] | None = Field(description='Cross-reference IDs from other ontologies')
-    synonyms: list[str] | None = Field(description='List of synonymous names for the term')
-    parents: list[str] | None = Field(description='Direct parent biosample IDs in the ontology')
-    ancestors: list[str] | None = Field(description='List of ancestor biosample IDs in the ontology')
-    children: list[str] | None = Field(description='Direct child biosample IDs in the ontology')
-    descendants: list[str] | None = Field(description='List of descendant biosample IDs in the ontology')
+    biosampleId: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the biosample')
+    biosampleName: str = Field(min_length=1, description='Name of the biosample')
+    description: str | None = Field(min_length=1, description='Description of the biosample')
+    xrefs: list[Annotated[str, Field(min_length=1)]] = Field(description='Cross-reference IDs from other ontologies')
+    synonyms: list[Annotated[str, Field(min_length=1)]] = Field(description='List of synonymous names for the term')
+    parents: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        min_length=1, description='Direct parent biosample IDs in the ontology'
+    )
+    ancestors: list[Annotated[str, Field(min_length=1)]] = Field(
+        description='List of ancestor biosample IDs in the ontology'
+    )
+    children: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        min_length=1, description='Direct child biosample IDs in the ontology'
+    )
+    descendants: list[Annotated[str, Field(min_length=1)]] = Field(
+        description='List of descendant biosample IDs in the ontology'
+    )

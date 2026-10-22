@@ -8,7 +8,7 @@ import pandera.errors as pe
 import polars as pl
 import pytest
 
-from pts.schemas.outputs.gwas_evidence import GwasCredibleSetEvidence
+from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import QC_COLUMN, EvidenceFlags
 from pts.transformers.evidence.utils.luts import ValidationLuts
@@ -172,7 +172,7 @@ def test_evidence_violating_its_schema_is_not_written_but_failed_evidence_is(tmp
         unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId'],
         score=pl.col('resourceScore'),
         # eva evidence lacks the GWAS columns, and its ids are not Ensembl-shaped
-        schema=GwasCredibleSetEvidence,
+        schema=EvidenceGwasCredibleSets,
     )
     dst = tmp_path / 'out'
     with pytest.raises(pe.SchemaErrors):
@@ -206,7 +206,7 @@ def test_validated_evidence_and_alongside_sinks_are_computed_in_one_pass(tmp_pat
             evidence,
             {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
             alongside=[sink_dataset(evidence.lf.select('id'), str(dst / 'ids'))],
-            schema=GwasCredibleSetEvidence,
+            schema=EvidenceGwasCredibleSets,
         )
 
     assert sum(batches) == 2

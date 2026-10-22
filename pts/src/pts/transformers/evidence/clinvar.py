@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_eva import EvidenceEva
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -127,6 +128,7 @@ EVA = EvidenceDatasource(
     # order feeds the id, as in the spark config
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'studyId', 'variantId'],
     score=SCORE,
+    schema=EvidenceEva,
 )
 
 
@@ -147,7 +149,7 @@ def run_eva(source: dict[str, str], destination: dict[str, str], datasource: Evi
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=datasource.schema)
 
 
 def clinvar(

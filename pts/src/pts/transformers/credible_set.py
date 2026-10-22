@@ -9,8 +9,9 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import credible_set_schema
+from pts.schemas.outputs.credible_set import CredibleSet
 from pts.transformers.study import QualityFlag as StudyQualityFlag
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, scan_datasets, write_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
@@ -482,7 +483,6 @@ def credible_set(
         destinations.output,
         destinations.excluded,
     )
-    pl.collect_all([
-        sink_dataset(accepted, destinations.output),
-        sink_dataset(excluded, destinations.excluded),
-    ])
+    check_destinations_absent([destinations.output, destinations.excluded])
+    write_dataset(accepted, destinations.output, schema=CredibleSet)
+    write_dataset(excluded, destinations.excluded)

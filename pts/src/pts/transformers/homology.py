@@ -14,6 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.homology import homology_schema, orthologs_schema
+from pts.schemas.outputs.homology import Homology
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.ensembl import CoreDump, gene_names
 from pts.transformers.utils.spark_casts import cast_double
@@ -206,4 +207,4 @@ def homology(
     result = resolve_homology(orthologs, target)
 
     logger.info(f'writing output data to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=Homology)

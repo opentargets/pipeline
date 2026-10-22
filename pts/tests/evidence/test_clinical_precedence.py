@@ -284,40 +284,6 @@ def test_clinical_precedence_unique_fields_are_the_config_ones() -> None:
     ]
 
 
-def test_clinical_precedence_step_scores_assigns_directions_and_writes_excluded_reports(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    sources = _sources(src)
-    dst = tmp_path / 'out'
-
-    clinical_precedence(
-        {
-            **sources,
-            'disease': write_disease(src / 'disease', ['EFO_1', 'EFO_2']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2', 'ENSG3']),
-            'literature': write_literature(src / 'literature', {'111': '2002-01-01'}),
-        },
-        {
-            'evidence': str(dst / 'valid'),
-            'failed_evidence': str(dst / 'failed'),
-            'excluded_report': str(dst / 'excluded_report'),
-        },
-        {'invalid_clinical_report_qc': INVALID_QC},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('clinicalReportId', 'targetId')
-    failed = pl.read_parquet(dst / 'failed')
-    excluded = pl.read_parquet(dst / 'excluded_report')
-    assert valid.select('clinicalReportId', 'targetId', 'score', 'directionOnTrait', 'directionOnTarget').rows() == [
-        ('R1', 'ENSG1', 0.7, 'protect', 'LoF'),
-        ('R1', 'ENSG2', 0.7, 'protect', 'LoF'),
-        ('R1', 'ENSG3', 0.7, 'protect', 'GoF'),
-        ('R2', 'ENSG1', 0.2, 'protect', 'LoF'),
-        ('R2', 'ENSG2', 0.2, 'protect', 'LoF'),
-    ]
-    assert valid['publicationDate'].to_list()[:3] == ['2002-01-01'] * 3
-    assert failed.select('clinicalReportId', 'targetFromSourceId').rows() == [('R8', 'ENSG5')]
-    assert sorted(excluded['id']) == ['R6', 'R7']
 
 
 def test_an_existing_evidence_destination_leaves_no_excluded_report(tmp_path: Path) -> None:

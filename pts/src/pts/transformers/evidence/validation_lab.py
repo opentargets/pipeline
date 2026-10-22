@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_ot_crispr_validation import EvidenceOtCrisprValidation
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -26,6 +27,7 @@ OT_CRISPR_VALIDATION = EvidenceDatasource(
         'primaryProjectId',
     ],
     score=pl.col('resourceScore'),
+    schema=EvidenceOtCrisprValidation,
 )
 
 

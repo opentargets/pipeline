@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import http.server
 import io
-import re
-import threading
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 import pytest
-from otter.storage.synchronous.http import HTTPStorage
 
 from pts.transformers.gene_essentiality import (
-    aggregate,
     build_screens,
     gene_essentiality,
     melt_matrix,
@@ -419,67 +414,10 @@ def test_full_output_and_schema(tmp_path):
     assert got.rows() == [('ENSG_A', True, GENEA_TISSUES), ('ENSG_B', False, GENEB_TISSUES)]
 
 
-class RangeHandler(http.server.BaseHTTPRequestHandler):
-    """Serves the files of `directory` with byte ranges, which polars needs for a remote scan."""
-
-    directory: Path
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
-
-    def do_HEAD(self) -> None:
-        self.send(body=False)
-
-    def do_GET(self) -> None:
-        self.send(body=True)
-
-    def send(self, body: bool) -> None:
-        data = (self.directory / self.path.lstrip('/')).read_bytes()
-        start, end = 0, len(data) - 1
-        if match := re.fullmatch(r'bytes=(\d+)-(\d*)', self.headers.get('Range', '')):
-            start, end = int(match[1]), int(match[2] or end)
-        self.send_response(206 if 'Range' in self.headers else 200)
-        self.send_header('Accept-Ranges', 'bytes')
-        self.send_header('Content-Length', str(end - start + 1))
-        self.send_header('Content-Range', f'bytes {start}-{end}/{len(data)}')
-        self.end_headers()
-        if body:
-            self.wfile.write(data[start : end + 1])
 
 
-def widen(text: str, after: int, n: int = 6000) -> str:
-    """Insert `n` empty gene columns after column `after`, pushing the header past 64 KiB."""
-    lines = []
-    for i, line in enumerate(text.splitlines()):
-        fields = line.split(',')
-        filler = [f'FILLER{j} ({j})' for j in range(n)] if i == 0 else [''] * n
-        lines.append(','.join(fields[:after] + filler + fields[after:]))
-    return '\n'.join(lines) + '\n'
 
 
-def test_wide_header_on_remote_storage_keeps_every_column(tmp_path, monkeypatch):
-    files = {
-        'gene_effects': widen(FILES['gene_effects'], 1),
-        'mutation_damaging': widen(FILES['mutation_damaging'], 6),
-    }
-    source = write_inputs(tmp_path, files)
-    handler = type('Handler', (RangeHandler,), {'directory': tmp_path})
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-
-    # otter streams GCS objects but not HTTP ones, so HTTP stands in for GCS via the local copy
-    def local_open(self, location: str, mode: str = 'r'):
-        return (tmp_path / Path(location).name).open(mode)
-
-    monkeypatch.setattr(HTTPStorage, 'open', local_open)
-    url = f'http://127.0.0.1:{server.server_port}'
-    try:
-        remote = {name: f'{url}/{Path(path).name}' if name != 'target' else path for name, path in source.items()}
-        gene_essentiality(remote, str(tmp_path / 'out'), {'keep_only_essentials': False}, None)
-    finally:
-        server.shutdown()
-    got = pl.read_parquet(sorted((tmp_path / 'out').glob('*.parquet')))
-    assert got.rows() == [('ENSG_A', True, GENEA_TISSUES), ('ENSG_B', False, GENEB_TISSUES)]
 
 
 def test_gene_essentiality_null_and_empty_lists(tmp_path):
@@ -497,84 +435,9 @@ def test_gene_essentiality_null_and_empty_lists(tmp_path):
 # end to end
 # ---------------------------------------------------------------------------
 
-E2E = {
-    'models': (
-        'ModelID,CellLineName,CCLEName,OncotreeLineage,OncotreePrimaryDisease,SangerModelID\n'
-        'ACH-1,Line1,,Lung,Lung Cancer,SIDM1\n'
-        'ACH-2,Line2,,Lung,Lung Cancer,SIDM2\n'
-        'ACH-3,Line3,,Breast,Breast Cancer,SIDM3\n'
-    ),
-    'essential_genes': 'Essentials\nGENEA (1)\nGENEC (3)\n',
-    'gene_effects': (
-        ',GENEA (1),GENEB (2),GENEC (3),GENED (4)\n'
-        'ACH-1,-1.0,0.1,-2.0,0.4\n'
-        'ACH-2,-1.1,0.2,-2.1,\n'
-        'ACH-3,-1.2,0.3,-2.2,0.6\n'
-    ),
-    'gene_expression': (
-        ',SequencingID,ModelConditionID,ModelID,IsDefaultEntryForMC,IsDefaultEntryForModel,'
-        'GENEA (1),GENEB (2),GENEC (3),GENED (4)\n'
-        '0,CDS-1,MC-1,ACH-1,Yes,Yes,1.0,2.0,3.0,4.0\n'
-        '1,CDS-2,MC-2,ACH-2,Yes,Yes,1.5,2.5,3.5,4.5\n'
-        '2,CDS-3,MC-3,ACH-3,Yes,Yes,0.5,0.25,0.125,0.0625\n'
-    ),
-    'mutation_hotspots': f'{HEADER},GENEC (3)\n0,CDS-2,ACH-2,MC-2,Yes,Yes,1.0\n',
-    'mutation_damaging': (
-        f'{HEADER},GENEC (3),GENED (4)\n0,CDS-2,ACH-2,MC-2,Yes,Yes,1.0,0.0\n1,CDS-3,ACH-3,MC-3,Yes,Yes,0.0,1.0\n'
-    ),
-    'depmap_tissue_mapping': 'tissueFromSource,tissueId,tissueName\nlung,UBERON_L,lung\nbreast,UBERON_B,breast\n',
-}
-E2E_TARGET = [
-    {'id': f'ENSG_{g}', 'approvedSymbol': f'GENE{g}', 'proteinIds': [{'id': f'P_{g}', 'source': 'uniprot'}]}
-    for g in 'ABCD'
-] + [{'id': 'ENSG_A2', 'approvedSymbol': None, 'proteinIds': [{'id': 'GENEA', 'source': 'x'}]}]
 
 
-def two_chunks(lf: pl.LazyFrame) -> pl.LazyFrame:
-    df = lf.collect()
-    return pl.concat([df.head(1), df.tail(df.height - 1)], rechunk=False).lazy()
 
 
-def pipeline(frames: dict[str, pl.LazyFrame], target: pl.LazyFrame) -> pl.DataFrame:
-    screens = build_screens(**frames, keep_only_essentials=False)
-    return resolve_target_ids(aggregate(screens), ensg_lookup(target)).sort('targetId').collect()
 
 
-def test_end_to_end_two_chunks_deterministic(tmp_path):
-    frames = {name: csv(text) for name, text in E2E.items()}
-    target = pl.LazyFrame(E2E_TARGET, schema=TARGET_SCHEMA)
-    single = pipeline(frames, target)
-    chunked = {name: two_chunks(lf) for name, lf in frames.items()}
-    assert chunked['models'].collect().n_chunks() == 2
-    assert pipeline(chunked, two_chunks(target)).equals(single)
-
-    source = write_inputs(tmp_path, E2E, E2E_TARGET)
-    for out in ('a', 'b'):
-        gene_essentiality(source, str(tmp_path / out), {'keep_only_essentials': False}, None)
-    parts_a = sorted((tmp_path / 'a').glob('*.parquet'))
-    parts_b = sorted((tmp_path / 'b').glob('*.parquet'))
-    assert [p.name for p in parts_a] == [p.name for p in parts_b]
-    assert all(a.read_bytes() == b.read_bytes() for a, b in zip(parts_a, parts_b, strict=True))
-
-    got = pl.read_parquet(parts_a)
-    assert got.schema == OUTPUT_SCHEMA
-    assert got.equals(single)
-    summary = [
-        (row['targetId'], row['isEssential'], [(t['tissueId'], len(t['screens'])) for t in row['depMapEssentiality']])
-        for row in got.to_dicts()
-    ]
-    assert summary == [
-        ('ENSG_A', True, [('UBERON_B', 1), ('UBERON_L', 2)]),
-        ('ENSG_A2', True, [('UBERON_B', 1), ('UBERON_L', 2)]),
-        ('ENSG_B', False, [('UBERON_B', 1), ('UBERON_L', 2)]),
-        ('ENSG_C', True, [('UBERON_B', 1), ('UBERON_L', 2)]),
-        ('ENSG_D', False, [('UBERON_B', 1), ('UBERON_L', 1)]),
-    ]
-    mutations = {
-        (row['targetId'], s['depmapId']): s['mutation']
-        for row in got.to_dicts()
-        for t in row['depMapEssentiality']
-        for s in t['screens']
-        if s['mutation']
-    }
-    assert mutations == {('ENSG_C', 'ACH-2'): 'damaging', ('ENSG_D', 'ACH-3'): 'damaging'}

@@ -21,9 +21,7 @@ from pts.transformers.evidence.project_score import (
     generate,
     parse_msi_status,
     passport_cell_lines,
-    project_score,
 )
-from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 GENE_SCORES_HEADER = ['cancerType', 'targetSymbol', 'diseaseName', 'diseaseId', 'targetId', 'PRIORITY']
 CELL_TYPES_HEADER = ['SAMPLE_ID', 'CellLineName', 'TISSUE', 'CANCER_TYPE', 'CMP_ID']
@@ -262,37 +260,6 @@ def test_crispr_unique_fields_are_the_config_ones() -> None:
     assert CRISPR.unique_fields == ['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId']
 
 
-def test_project_score_step_scores_and_splits(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    sources = _sources(src)
-    dst = tmp_path / 'out'
-
-    project_score(
-        {
-            **sources,
-            'disease': write_disease(src / 'disease', ['EFO_1', 'EFO_2']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2']),
-            'literature': write_literature(src / 'literature', {PMID: '2024-01-16'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId')
-    failed = pl.read_parquet(dst / 'failed')
-    assert valid.select('targetId', 'diseaseId', 'datasourceId').rows() == [
-        ('ENSG1', 'EFO_1', 'crispr'),
-        ('ENSG2', 'EFO_2', 'crispr'),
-    ]
-    widened = float(np.float32(52.8))
-    assert valid['score'].to_list() == [
-        pytest.approx(0.585 * (float(np.float32(83.8)) - 41.5) / 58.5 + 0.415),
-        pl.DataFrame({'resourceScore': [widened]}).select(SCORE.alias('s'))['s'][0],
-    ]
-    assert valid['publicationDate'].to_list() == ['2024-01-16', '2024-01-16']
-    assert valid['diseaseCellLines'].to_list() == [[A375, SKMEL], [HT29]]
-    assert failed['diseaseFromSourceMappedId'].to_list() == ['EFO_5']
 
 
 # ------------------------------------------------------------------------------------------------

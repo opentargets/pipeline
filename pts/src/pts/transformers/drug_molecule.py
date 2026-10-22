@@ -19,6 +19,7 @@ from mira.dataset.clinical_indication import (
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
+from pts.schemas.outputs.drug_molecule import DrugMolecule
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
@@ -110,7 +111,7 @@ def drug_molecule(
     logger.info(f'Drug index has {output.height} molecules')
 
     logger.info(f'Writing drug index to {destination["output"]}')
-    write_dataset(output, str(destination['output']))
+    write_dataset(output, str(destination['output']), schema=DrugMolecule)
 
 
 def process_drug_index(

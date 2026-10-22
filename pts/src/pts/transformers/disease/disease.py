@@ -8,6 +8,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.schemas.outputs.disease import Disease
 from pts.transformers.disease.coalescing import (
     absorb_obsolete_content,
     annotate_name_duplicates,
@@ -388,5 +389,5 @@ def disease(
     )
 
     # write the result
-    write_dataset(disease_index, destination)
+    write_dataset(disease_index, destination, schema=Disease)
     logger.info('transformation complete')

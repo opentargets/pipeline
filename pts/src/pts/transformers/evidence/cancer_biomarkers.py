@@ -8,6 +8,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_cancer_biomarkers import EvidenceCancerBiomarkers
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -68,6 +69,7 @@ CANCER_BIOMARKERS = EvidenceDatasource(
         'drugResponse',
     ],
     score=pl.lit(1.0),
+    schema=EvidenceCancerBiomarkers,
 )
 
 

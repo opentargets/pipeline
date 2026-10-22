@@ -12,6 +12,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -80,7 +81,7 @@ def drug_mechanism_of_action(
     )
 
     logger.info(f'Writing mechanism of action to {destination}')
-    write_dataset(output_df, str(destination))
+    write_dataset(output_df, str(destination), schema=DrugMechanismOfAction)
 
 
 def process_mechanism_of_action(

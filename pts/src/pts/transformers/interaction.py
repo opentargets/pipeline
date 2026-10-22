@@ -18,6 +18,8 @@ import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.interaction import Interaction
+from pts.schemas.outputs.interaction_evidence import InteractionEvidence
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SWAP = {
@@ -547,8 +549,8 @@ def interaction(
         raise ValueError('interaction_evidence has a null interactionId')
 
     logger.info(f'writing {interactions.height} interactions to {destination["interactions"]}')
-    write_dataset(interactions, destination['interactions'])
+    write_dataset(interactions, destination['interactions'], schema=Interaction)
     logger.info(f'writing {evidences.height} evidences to {destination["interactions_evidence"]}')
-    write_dataset(evidences, destination['interactions_evidence'])
+    write_dataset(evidences, destination['interactions_evidence'], schema=InteractionEvidence)
     logger.info(f'writing {unmatched_ids.height} unmatched interactors to {destination["interactions_unmatched"]}')
     write_dataset(unmatched_ids, destination['interactions_unmatched'])

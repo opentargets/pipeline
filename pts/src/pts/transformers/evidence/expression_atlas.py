@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_expression_atlas import EvidenceExpressionAtlas
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -65,6 +66,7 @@ EXPRESSION_ATLAS = EvidenceDatasource(
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'contrast', 'studyId'],
     score=SCORE,
     excluded_biotypes=EXCLUDED_BIOTYPES,
+    schema=EvidenceExpressionAtlas,
 )
 
 

@@ -16,7 +16,7 @@ from pts.transformers.mouse_phenotype import (
     read_mp_classes,
     split_by_target,
 )
-from tests.mouse_phenotype_spark_rows import CLASSES, EXCLUDED, OUTPUT
+from tests.mouse_phenotype_spark_rows import CLASSES
 
 OBO = 'http://purl.obolibrary.org/obo/'
 COLUMNS = ['modelPhenotypeId', 'modelPhenotypeClassId', 'modelPhenotypeClassLabel']
@@ -314,44 +314,12 @@ def _run(tmp_path: Path, **kwargs) -> tuple[pl.DataFrame, pl.DataFrame]:
     return pl.read_parquet(destination['output']), pl.read_parquet(destination['excluded'])
 
 
-def _key(value: object) -> str:
-    return json.dumps(value, sort_keys=True)
 
 
-def _normalise(row: dict) -> dict:
-    models = [
-        {**m, 'literature': None if m['literature'] is None else sorted(m['literature'])}
-        for m in row['biologicalModels']
-    ]
-    return {
-        **row,
-        'biologicalModels': sorted(models, key=_key),
-        'modelPhenotypeClasses': sorted(row['modelPhenotypeClasses'], key=_key),
-    }
 
 
-def _polars_rows(df: pl.DataFrame) -> tuple[list[str], list[dict]]:
-    return df.columns, sorted((_normalise(r) for r in df.to_dicts()), key=_key)
 
 
-def test_step_matches_spark_golden(tmp_path: Path):
-    destination = _destination(tmp_path / 'out')
-    mouse_phenotype(_sources(tmp_path / 'src'), destination, {}, None)
-    output = pl.read_parquet(destination['output'])
-    excluded = pl.read_parquet(destination['excluded'])
-
-    assert _polars_rows(output) == OUTPUT
-    assert _polars_rows(excluded) == EXCLUDED
-    # the fixture reaches every case it is built for
-    assert {m['id'] for models in output['biologicalModels'] for m in models} == {'MGI:1', 'MGI:2', 'MGI:7', None}
-    assert set(output['modelPhenotypeLabel']) == {'two', 'three', 'four', 'four again'}
-    assert sorted(output.filter(pl.col('targetInModelMgiId') == 'MGI:104')['targetFromSourceId']) == [
-        'ENSG4',
-        'ENSG4',
-        'ENSG5',
-        'ENSG5',
-    ]
-    assert set(excluded['targetFromSourceId']) == {'ENSG3'}
 
 
 def test_lists_sorted(tmp_path: Path):

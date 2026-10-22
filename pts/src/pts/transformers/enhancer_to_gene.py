@@ -11,7 +11,8 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
-from pts.transformers.utils.dataset import scan_dataset, sink_dataset
+from pts.schemas.outputs.enhancer_to_gene import EnhancerToGene
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 from pts.transformers.utils.spark_casts import cast_double, to_long
@@ -296,7 +297,8 @@ def enhancer_to_gene(
         destinations.output,
         destinations.excluded,
     )
-    pl.collect_all([
-        sink_dataset(result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output),
-        sink_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded),
-    ])
+    check_destinations_absent([destinations.output, destinations.excluded])
+    write_dataset(
+        result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output, schema=EnhancerToGene
+    )
+    write_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded)

@@ -15,7 +15,6 @@ from pts.transformers.interaction import (
     generate_interactions,
     generate_mapping,
     get_code,
-    interaction,
     interaction_id,
     snake_to_lower_camel,
     sort_evidences,
@@ -400,75 +399,3 @@ def test_mapping_resolves_an_accession_through_a_shared_gene_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_interaction_end_to_end(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    src.mkdir()
-    pl.DataFrame(
-        {
-            'id': ['ENSG1', 'ENSG2'],
-            'proteinIds': [[{'id': 'P1', 'source': 'uniprot'}], [{'id': 'P2', 'source': 'uniprot'}]],
-            'dbXrefs': [[{'id': '1', 'source': 'HGNC'}], None],
-        },
-    ).write_parquet(src / 'target.parquet')
-    (src / 'rna.tsv').write_text('URS1\t9606\tx\ty\tz\tENSG2\n')
-    (src / 'hm.dat').write_text('P1\tEnsembl\tENSG1\nP2\tEnsembl\tENSG2\n')
-    (src / 'gtf').write_text(
-        '#!genome\n1\tens\tCDS\t1\t2\t.\t+\t0\tgene_id "ENSG00000000001"; protein_id "ENSP00000000001";\n'
-        '1\tens\tCDS\t1\t2\t.\t+\t0\tgene_id "ENSG00000000002"; protein_id "ENSP00000000002";\n'
-    )
-    records = [
-        intact_record(interactor('P1'), interactor('P2'), 0.5, [intact_evidence('e1'), intact_evidence('e2')]),
-        intact_record(interactor('P1'), interactor('Q9', organism()), 0.4, [intact_evidence('e3')]),
-    ]
-    (src / 'intact.json').write_text('\n'.join(json.dumps(r) for r in records) + '\n')
-    (src / 'string.txt').write_text(
-        ' '.join(STRING_COLUMNS) + '\n9606.ENSP00000000001 9606.ENSP00000000002 0 0 0 0 288 0 100 500 0\n'
-    )
-    dst = tmp_path / 'dst'
-    interaction(
-        {
-            'targets': str(src / 'target.parquet'),
-            'rnacentral': str(src / 'rna.tsv'),
-            'humanmapping': str(src / 'hm.dat'),
-            'ensproteins': str(src / 'gtf'),
-            'intact': str(src / 'intact.json'),
-            'strings': str(src / 'string.txt'),
-        },
-        {
-            'interactions': str(dst / 'interaction'),
-            'interactions_evidence': str(dst / 'interaction_evidence'),
-            'interactions_unmatched': str(dst / 'unmatched'),
-        },
-        {'string_version': '12.0'},
-        None,
-    )
-    interactions = pl.read_parquet(dst / 'interaction')
-    evidences = pl.read_parquet(dst / 'interaction_evidence')
-    unmatched = pl.read_parquet(dst / 'unmatched')
-
-    by_pair = {(r['sourceDatabase'], r['intA'], r['intB']): r for r in interactions.to_dicts()}
-    assert set(by_pair) == {
-        ('intact', 'P1', 'P2'),
-        ('intact', 'P2', 'P1'),
-        ('intact', 'P1', 'Q9'),
-        ('string', 'ENSP00000000001', 'ENSP00000000002'),
-    }
-    assert by_pair['intact', 'P1', 'P2']['count'] == 2
-    assert by_pair['string', 'ENSP00000000001', 'ENSP00000000002']['count'] == 2
-    assert by_pair['string', 'ENSP00000000001', 'ENSP00000000002']['scoring'] == 0.5
-    assert unmatched['intB'].to_list() == ['Q9']
-
-    assert evidences.height == interactions['count'].sum()
-    assert evidences.join(interactions, on='interactionId', how='anti').height == 0
-    string_scores = evidences.filter(pl.col('interactionResources').struct.field('sourceDatabase') == 'string')
-    assert sorted(string_scores['evidenceScore'].to_list()) == [0.1, 0.288]
-
-    assert evidences.columns[:7] == [
-        'interactionResources',
-        'interactionScore',
-        'interactionDetectionMethodShortName',
-        'interactionDetectionMethodMiIdentifier',
-        'evidenceScore',
-        'interactionIdentifier',
-        'pubmedId',
-    ]

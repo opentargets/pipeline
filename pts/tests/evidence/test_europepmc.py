@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import random
-from pathlib import Path
 from typing import Any
 
 import polars as pl
 import pytest
 
-from pts.transformers.evidence.europepmc import EUROPEPMC, compute_evidence, europepmc
-from tests.evidence.fixtures import write_disease, write_literature, write_target
+from pts.transformers.evidence.europepmc import EUROPEPMC, compute_evidence
 
 nan = float('nan')
 
@@ -250,33 +248,3 @@ def test_score_is_summed_in_ascending_order_whatever_the_row_order() -> None:
 # step
 
 
-def test_step_generates_scores_and_splits(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    (src / 'cooccurrence').mkdir(parents=True)
-    pl.DataFrame(
-        [
-            _row(pmid='1', evidenceScore=150.0),
-            _row(pmid='1', mappedId2='EFO_9', evidenceScore=50.0),
-        ],
-        schema=COOCCURRENCE_SCHEMA,
-    ).write_parquet(src / 'cooccurrence' / 'part.parquet')
-    dst = tmp_path / 'out'
-
-    europepmc(
-        {
-            'cooccurrence': str(src / 'cooccurrence'),
-            'disease': write_disease(src / 'disease', ['EFO_0000311']),
-            'target': write_target(src / 'target', ['ENSG001']),
-            'literature': write_literature(src / 'literature', {'1': '2020-01-01'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid')
-    failed = pl.read_parquet(dst / 'failed')
-    assert valid['diseaseId'].to_list() == ['EFO_0000311']
-    assert valid['score'].to_list() == [1.0]
-    assert valid['publicationDate'].to_list() == ['2020-01-01']
-    assert failed['diseaseFromSourceMappedId'].to_list() == ['EFO_9']

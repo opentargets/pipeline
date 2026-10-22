@@ -13,6 +13,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene_burden import GENE_BURDEN_UNION
+from pts.schemas.outputs.evidence_gene_burden import EvidenceGeneBurden
 from pts.transformers.evidence.gene_burden.az import parse_az
 from pts.transformers.evidence.gene_burden.brava import parse_brava
 from pts.transformers.evidence.gene_burden.curated import parse_curated
@@ -44,6 +45,7 @@ GENE_BURDEN = EvidenceDatasource(
         'projectId',
     ],
     score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 1e-7, 1e-17),
+    schema=EvidenceGeneBurden,
 )
 # a NaN compares above every number, as in spark
 DIRECTION_ON_TRAIT = (
@@ -164,4 +166,4 @@ def gene_burden(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=GENE_BURDEN.schema)

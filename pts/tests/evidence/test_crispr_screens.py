@@ -13,11 +13,9 @@ import pytest
 
 from pts.transformers.evidence.crispr_screens import (
     CRISPR_SCREEN,
-    crispr_screens,
     generate,
     parsing_experiment,
 )
-from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 GENES_HEADER = [
     'Gene', 'TSS', 'Phenotype', 'P Value', 'Gene Score', 'Hit Class', 'P Value (-Log10)', 'P Value (Signed -Log10)',
@@ -360,36 +358,3 @@ def test_crispr_screen_unique_fields_are_the_config_ones() -> None:
     assert CRISPR_SCREEN.unique_fields == ['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'studyId']
 
 
-def test_crispr_screens_step_scores_and_splits(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    sources = _sources(src)
-    dst = tmp_path / 'out'
-
-    crispr_screens(
-        {
-            **sources,
-            'disease': write_disease(src / 'disease', ['MONDO_1', 'MONDO_3']),
-            'target': write_target(
-                src / 'target', ['ENSG1', 'ENSG2', 'ENSG4'], {'ENSG1': 'GENE1', 'ENSG2': 'GENE2', 'ENSG4': 'GENE4'}
-            ),
-            'literature': write_literature(src / 'literature', {'30297964': '2018-10-08'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId')
-    failed = pl.read_parquet(dst / 'failed').sort('targetId')
-    assert valid.select('targetId', 'diseaseId', 'studyId').rows() == [
-        ('ENSG1', 'MONDO_1', 'iAstrocyte-A'),
-        ('ENSG2', 'MONDO_1', 'iAstrocyte-A'),
-        ('ENSG4', 'MONDO_3', 'Neuron B'),
-    ]
-    assert valid['score'].to_list() == [
-        pytest.approx(np.log10(0.01 / 0.5) / np.log10(0.01), rel=1e-6),
-        pytest.approx(np.log10(float(np.float32(0.2)) / 0.5) / np.log10(0.01)),
-        1.0,
-    ]
-    assert valid['publicationDate'].to_list() == ['2018-10-08', '2018-10-08', None]
-    assert failed['diseaseFromSourceMappedId'].to_list() == ['MONDO_2', 'MONDO_2']

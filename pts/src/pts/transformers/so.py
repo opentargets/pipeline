@@ -6,6 +6,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.schemas.outputs.so import So
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -40,5 +41,5 @@ def so(
     )
 
     # write the result locally
-    write_dataset(output, destination)
+    write_dataset(output, destination, schema=So)
     logger.info('transformation complete')

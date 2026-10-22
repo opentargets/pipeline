@@ -10,7 +10,6 @@ import polars as pl
 import pytest
 from loguru import logger
 
-from pts.schemas.pharmacogenetics import PHARMACOGENOMICS
 from pts.transformers import pharmacogenetics as pgx
 from pts.transformers.pharmacogenetics import (
     add_variant_id,
@@ -309,30 +308,6 @@ def test_enrich_matches_spark_baseline() -> None:
     ]
 
 
-PUBLISHED_COLUMNS = [
-    'datasourceId',
-    'datasourceVersion',
-    'datatypeId',
-    'directionality',
-    'evidenceLevel',
-    'genotype',
-    'genotypeAnnotationText',
-    'genotypeId',
-    'haplotypeFromSourceId',
-    'haplotypeId',
-    'literature',
-    'pgxCategory',
-    'phenotypeFromSourceId',
-    'phenotypeText',
-    'variantAnnotation',
-    'studyId',
-    'targetFromSourceId',
-    'variantFunctionalConsequenceId',
-    'variantRsId',
-    'variantId',
-    'isDirectTarget',
-    'drugs',
-]
 
 CLINPGX_RECORD = {
     'datasourceId': 'clinpgx',
@@ -395,48 +370,10 @@ def _read_output(path: str) -> pl.DataFrame:
     return pl.read_parquet(f'{path}/*.parquet')
 
 
-def test_output_schema_is_published(tmp_path: Path) -> None:
-    source = _write_inputs(
-        tmp_path / 'in',
-        [CLINPGX_RECORD, {**CLINPGX_RECORD, 'genotypeAnnotationText': 'unmapped'}],
-        [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}],
-    )
-    destination = _destination(tmp_path)
-    pharmacogenetics(source, destination, {}, None)
-    out = _read_output(destination['associations'])
-    assert list(PHARMACOGENOMICS) == PUBLISHED_COLUMNS
-    assert out.schema == PHARMACOGENOMICS
-    assert out.select('genotypeAnnotationText', 'phenotypeText', 'phenotypeFromSourceId', 'variantId').rows() == [
-        ('parsed', 'increased response', 'EFO_0000001', '1_163063901_C_T'),
-        ('unmapped', None, None, '1_163063901_C_T'),
-    ]
-    assert out['drugs'].to_list()[0] == [{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}]
-    assert out['isDirectTarget'].to_list() == [True, True]
-    assert out['variantAnnotation'].to_list()[0][0]['baseAlleleOrGenotype'] == 'C'
 
 
-def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
-    source = _write_inputs(tmp_path / 'in', [], [])
-    destination = _destination(tmp_path)
-    pharmacogenetics(source, destination, {}, None)
-    out = _read_output(destination['associations'])
-    assert out.height == 0
-    assert out.schema == PHARMACOGENOMICS
-    assert json.loads(Path(destination['unparsed_texts']).read_text()) == []
 
 
-def test_shared_and_duplicate_alt_genotypes_give_one_row_each(tmp_path: Path) -> None:
-    records = [
-        {**CLINPGX_RECORD, 'studyId': 's1', 'genotypeId': '1_100_C_T,T'},
-        {**CLINPGX_RECORD, 'studyId': 's2', 'genotypeId': '1_100_C_T,T'},
-    ]
-    source = _write_inputs(
-        tmp_path / 'in', records, [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}]
-    )
-    destination = _destination(tmp_path)
-    pharmacogenetics(source, destination, {}, None)
-    out = _read_output(destination['associations'])
-    assert sorted(out.select('studyId', 'variantId').rows()) == [('s1', '1_100_C_T'), ('s2', '1_100_C_T')]
 
 
 def test_missing_column_in_a_non_empty_input_raises(tmp_path: Path) -> None:

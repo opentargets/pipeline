@@ -15,6 +15,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_ot_crispr import EvidenceOtCrispr
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -34,6 +35,7 @@ OT_CRISPR = EvidenceDatasource(
         'statisticalTestTail',
     ],
     score=pl.lit(1.0),
+    schema=EvidenceOtCrispr,
 )
 #: Java's `\s`, which is ASCII-only.
 _LEADING_WHITESPACE = r'^[ \t\n\x0B\f\r]+'

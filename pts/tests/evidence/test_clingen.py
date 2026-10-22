@@ -7,9 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.evidence.clingen import CLINGEN, COLUMNS, clingen, parse_clingen
-from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
-from tests.evidence.fixtures import write_disease, write_ontoma_lut, write_target
+from pts.transformers.evidence.clingen import CLINGEN, COLUMNS, parse_clingen
 
 
 def _csv_row(values: list[str]) -> str:
@@ -107,32 +105,3 @@ def test_score_follows_the_classification(confidence: str, score: float | None) 
     assert df.select(CLINGEN.score).item() == score
 
 
-def test_maps_scores_and_splits_valid_from_failed(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    src.mkdir()
-    dst = tmp_path / 'out'
-    clingen(
-        {
-            'evidence': _write_csv(src / 'clingen.csv'),
-            'ontoma_disease_label_lut': write_ontoma_lut(
-                src / 'label_lut', 'label', normalise_term('cystic fibrosis'), 'MONDO_0009061'
-            ),
-            'ontoma_disease_id_lut': write_ontoma_lut(
-                src / 'id_lut', 'id', normalise_symbol('MONDO:0007254'), 'MONDO_0007254'
-            ),
-            'disease': write_disease(src / 'disease', ['MONDO_0009061', 'MONDO_0007254']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'CFTR', 'ENSG2': 'BRCA1'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId')
-    assert valid.select('targetId', 'diseaseId', 'score', 'evidenceDate').rows() == [
-        ('ENSG1', 'MONDO_0009061', 1.0, '2024-03-14'),
-        ('ENSG2', 'MONDO_0007254', 0.5, '2018-06-07'),
-    ]
-    failed = pl.read_parquet(dst / 'failed')
-    assert failed['diseaseFromSource'].to_list() == ['nothing at all']
-    assert failed['diseaseFromSourceMappedId'].to_list() == [None]

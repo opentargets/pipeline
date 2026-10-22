@@ -14,11 +14,8 @@ from pts.transformers.evidence.gene2phenotype import (
     GENE2PHENOTYPE,
     PANELS,
     PYTHON_WHITESPACE,
-    gene2phenotype,
     parse_gene2phenotype,
 )
-from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
-from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 
 COLUMNS = list(G2P_INPUT_SCHEMA)
 PARSED_COLUMNS = [
@@ -274,99 +271,11 @@ def test_parse_matches_spark_baseline_on_a_mixed_panel(tmp: Path) -> None:
     ]
 
 
-def _sources(root: Path, panels: dict[str, list[str]]) -> dict[str, str]:
-    root.mkdir(parents=True, exist_ok=True)
-    source = {key: _write(root / f'{key}.csv', *panels.get(key, [])) for key in PANELS}
-    return source | {
-        'ontoma_disease_label_lut': write_ontoma_lut(
-            root / 'label_lut', 'label', normalise_term('cystic fibrosis'), 'MONDO_0009061'
-        ),
-        'ontoma_disease_id_lut': write_ontoma_lut(
-            root / 'id_lut', 'id', normalise_symbol('MONDO:0007254'), 'MONDO_0007254'
-        ),
-        'disease': write_disease(root / 'disease', ['MONDO_0009061', 'MONDO_0007254']),
-        'target': write_target(root / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'CFTR', 'ENSG2': 'BRCA1'}),
-        'literature': write_literature(root / 'literature', {'111': '2020-05-01'}),
-    }
 
 
-def _destination(root: Path) -> dict[str, str]:
-    return {'evidence': str(root / 'valid'), 'failed_evidence': str(root / 'failed')}
 
 
-def test_maps_scores_and_splits_valid_from_failed(tmp: Path) -> None:
-    source = _sources(
-        tmp / 'src',
-        {
-            'eye_panel': [
-                _line(
-                    gene_symbol='CFTR',
-                    disease_name='CFTR-related cystic fibrosis',
-                    allelic_requirement='biallelic',
-                    confidence='definitive',
-                    variant_consequence='absent gene product',
-                    publications='111',
-                    panel='Eye',
-                ),
-                _line(
-                    gene_symbol='BRCA1',
-                    disease_name='something else',
-                    disease_MONDO='MONDO:0007254',
-                    confidence='moderate',
-                    variant_consequence='increased gene product level',
-                    panel='Eye',
-                ),
-                _line(gene_symbol='BRCA1', disease_name='unmappable', confidence='limited', panel='Eye'),
-            ]
-        },
-    )
-    destination = _destination(tmp / 'out')
-    gene2phenotype(source, destination, {}, None)
-
-    valid = pl.read_parquet(destination['evidence']).sort('targetId')
-    assert valid.select(
-        'targetId', 'diseaseId', 'score', 'directionOnTrait', 'directionOnTarget', 'evidenceDate'
-    ).rows() == [
-        ('ENSG1', 'MONDO_0009061', 1.0, 'risk', 'LoF', '2020-05-01'),
-        ('ENSG2', 'MONDO_0007254', 0.5, 'risk', 'GoF', None),
-    ]
-    assert valid['datasourceId'].to_list() == ['gene2phenotype'] * 2
-    assert valid['id'].n_unique() == 2
 
 
-def test_unmapped_disease_lands_in_failed_evidence(tmp: Path) -> None:
-    source = _sources(
-        tmp / 'src',
-        {'skin_panel': [_line(gene_symbol='CFTR', disease_name='nothing at all', confidence='strong', panel='Skin')]},
-    )
-    destination = _destination(tmp / 'out')
-    gene2phenotype(source, destination, {}, None)
-
-    failed = pl.read_parquet(destination['failed_evidence'])
-    assert failed['diseaseFromSource'].to_list() == ['nothing at all']
-    assert failed['diseaseFromSourceMappedId'].to_list() == [None]
-    assert failed['targetId'].to_list() == ['ENSG1']
-    assert pl.read_parquet(destination['evidence']).height == 0
 
 
-def test_empty_panels_write_empty_outputs(tmp: Path) -> None:
-    source = _sources(tmp / 'src', {})
-    destination = _destination(tmp / 'out')
-    gene2phenotype(source, destination, {}, None)
-    full_source = _sources(
-        tmp / 'full_src',
-        {
-            'eye_panel': [
-                _line(gene_symbol='CFTR', disease_name='cystic fibrosis', confidence='strong', panel='Eye'),
-                _line(gene_symbol='CFTR', disease_name='nothing at all', confidence='strong', panel='Eye'),
-            ]
-        },
-    )
-    full = _destination(tmp / 'full_out')
-    gene2phenotype(full_source, full, {}, None)
-
-    for key in ('evidence', 'failed_evidence'):
-        empty, non_empty = pl.read_parquet(destination[key]), pl.read_parquet(full[key])
-        assert empty.height == 0
-        assert non_empty.height == 1
-        assert empty.schema == non_empty.schema

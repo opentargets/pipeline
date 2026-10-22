@@ -8,9 +8,10 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pts.schemas.outputs.study import Study
 from pts.schemas.study import study_schema
 from pts.transformers.evidence.utils.luts import build_disease_lut
-from pts.transformers.utils.dataset import scan_dataset, sink_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
 
 
@@ -353,7 +354,6 @@ def study(
     # Validate once, then write both outputs from the same frame.
     result = valid_rows(validated.lazy(), options.invalid_qc_reasons)
     logger.info('Writing accepted studies to {} and excluded studies to {}', destinations.output, destinations.excluded)
-    pl.collect_all([
-        sink_dataset(result.valid, destinations.output),
-        sink_dataset(result.invalid, destinations.excluded),
-    ])
+    check_destinations_absent([destinations.output, destinations.excluded])
+    write_dataset(result.valid, destinations.output, schema=Study)
+    write_dataset(result.invalid, destinations.excluded)

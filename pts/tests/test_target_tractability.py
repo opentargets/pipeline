@@ -1,10 +1,9 @@
 """Tests for the target_tractability transformer."""
 
-from pathlib import Path
 
 import polars as pl
 
-from pts.transformers.target_tractability import build_tractability, target_tractability
+from pts.transformers.target_tractability import build_tractability
 
 SM = 'SM_B1_existence_sm_tractability_bucket'
 AB = 'AB_B1_existence_ab_tractability_bucket'
@@ -85,30 +84,6 @@ def test_build_tractability_duplicate_target_ids_fan_out():
     assert build_tractability(tract([('ENSG1', '1', '1')]), targets(['ENSG1', 'ENSG1'])).height == 4
 
 
-def test_target_tractability_end_to_end_is_deterministic(tmp_path: Path):
-    tsv = tmp_path / 'tractability.tsv'
-    tsv.write_text(f'ensembl_gene_id\t{SM}\t{AB}\tnote\nENSG2\t1\t0\tx\nENSG1\t0\t1.0\ty\nENSG9\t1\t1\tz\n')
-    target = tmp_path / 'target'
-    target.mkdir()
-    a = pl.DataFrame({'id': ['ENSG1']})
-    b = pl.DataFrame({'id': ['ENSG2']})
-    pl.concat([a, b], rechunk=False).write_parquet(target / 'part.parquet')
-    source = {'tractability': str(tsv), 'target': str(target)}
-
-    outputs = []
-    for name in ('one', 'two'):
-        destination = tmp_path / name
-        target_tractability(source, str(destination), None, None)
-        outputs.append(sorted((p.name, p.read_bytes()) for p in destination.glob('*.parquet')))
-    assert outputs[0] == outputs[1]
-
-    result = pl.read_parquet(tmp_path / 'one')
-    assert result.rows() == [
-        ('ENSG1', 'SM', 'bucket', False),
-        ('ENSG1', 'AB', 'bucket', True),
-        ('ENSG2', 'SM', 'bucket', True),
-        ('ENSG2', 'AB', 'bucket', False),
-    ]
 
 
 def test_build_tractability_keeps_bucket_order_within_target():

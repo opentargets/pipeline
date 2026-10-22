@@ -14,6 +14,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_genomics_england import EvidenceGenomicsEngland
 from pts.schemas.panel_app import PANEL_APP_INPUT_SCHEMA, PANELS_SCHEMA
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
@@ -70,6 +71,7 @@ PANEL_APP = EvidenceDatasource(
     # order feeds the id, as in the spark config
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'diseaseFromSource', 'studyId'],
     score=confidence_score({'amber': 0.5, 'green': 1.0}),
+    schema=EvidenceGenomicsEngland,
 )
 
 

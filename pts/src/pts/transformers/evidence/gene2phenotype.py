@@ -14,6 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene2phenotype import G2P_INPUT_SCHEMA
+from pts.schemas.outputs.evidence_gene2phenotype import EvidenceGene2phenotype
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -68,6 +69,7 @@ GENE2PHENOTYPE = EvidenceDatasource(
         'studyId',
     ],
     score=confidence_score(CONFIDENCE_SCORES),
+    schema=EvidenceGene2phenotype,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = (
@@ -158,4 +160,4 @@ def gene2phenotype(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=GENE2PHENOTYPE.schema)

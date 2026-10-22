@@ -7,6 +7,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
+from pts.schemas.outputs.disease_hpo import DiseaseHpo
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -95,4 +96,4 @@ def disease_hpo(
     )
 
     logger.debug('writing processed hpo data')
-    write_dataset(n_complete, str(destination))
+    write_dataset(n_complete, str(destination), schema=DiseaseHpo)

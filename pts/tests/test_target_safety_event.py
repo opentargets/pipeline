@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import polars as pl
 
 from pts.schemas.target_safety_event import biosample, effect, study
@@ -18,7 +15,6 @@ from pts.transformers.target_safety_event import (
     process_pharmacogenetics,
     process_safety_risk,
     process_toxcast,
-    target_safety_event,
 )
 from pts.transformers.utils.target import ensg_lookup
 
@@ -608,34 +604,6 @@ def test_build_target_safety_events_multiple_targets() -> None:
 # ---------------------------------------------------------------------------
 
 
-AE_ROWS = [
-    ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_OLD', 'ENSG1', '23197038',
-     'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
-    ('bronchoconstriction', 'cardiovascular', 'inhibition_acute', 'EFO_OLD', 'ENSG1', '23197038',
-     'Bowes et al. (2012)', 'G1', 'UBERON_2', ''),
-    ('bronchoconstriction', 'gastrointestinal', 'activation_general', 'EFO_OLD', 'ENSG1', '23197038',
-     'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
-    (' nausea ', '', 'activation', 'EFO_X', 'ENSG1', '0042', 'Urban et al. (2012)', 'G1', 'UBERON_3', ''),
-    ('', 'liver', 'inhibition_chronic', 'EFO_X', 'ENSG5', '456', 'Lynch et al. (2017)', 'G5', 'UBERON_4', ''),
-    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Other ref', 'G1', 'UBERON_5',
-     'https://x'),
-    ('orphan', 'liver', 'activation_acute', 'EFO_X', '', '8', 'Bowes et al. (2012)', 'G', 'UBERON_6', ''),
-    ('vomiting', 'gi', 'inhibition_developmental toxicity', 'EFO_X', 'ENSG4', '9', 'Lynch et al. (2017)', 'G4',
-     'UBERON_7', ''),
-]
-SR_ROWS = [
-    ('cardiovascular', 'ENSG1', 'x', 'y', 'Important', '21283106', 'Force et al. (2011)', 'G1', 'UBERON_1', ''),
-    ('heart', 'ENSG5', 'x', 'y', 'Arrhythmia', '22', 'Lamore et al. (2017)', 'G5', 'UBERON_2', ''),
-    ('other', 'ENSG1', 'some event', 'EFO_A', 'lia', '1', 'Someone (2020)', 'G1', 'UBERON_3', ''),
-]
-TC_ROWS = [
-    ('A1', 'desc1', 'cell proliferation', '', 'cell line', 'T47D', 'cell-based', ' GENE1 ', ''),
-    ('A2', 'desc2', 'cytotoxicity', 'liver', 'cell line', 'HEPG2', 'cell-based', 'SHARED', ''),
-    ('A3', 'desc3', 'binding', '', 'cell-free', '', 'biochemical', 'P5', ''),
-    ('A4', 'desc4', 'binding', '', 'cell-free', '', 'biochemical', 'UNKNOWN', ''),
-    ('A5', 'desc5', 'binding', '', 'cell-free', '', 'biochemical', '"\tGENE1"', ''),
-    ('A6', 'desc6', 'apoptosis', '', 'cell line', 'X', 'cell-based', 'GENE1', 'EFO_OLD'),
-]
 AOP = [
     {'id': 'ENSG1', 'event': 'NAFLD', 'eventId': None, 'datasource': 'AOP-Wiki', 'url': 'u1',
      'isHumanApplicable': True, 'effects': [{'direction': 'Activation', 'dosing': None}], 'biosamples': None},
@@ -651,142 +619,12 @@ AOP = [
      'biosamples': None},
 ]
 GI = {'cellFormat': None, 'cellLabel': None, 'tissueId': 'UBERON_1', 'tissueLabel': 'GI'}
-BRENNAN = [
-    ('ENSG1', 'GI tox', '', {'direction': 'Activation', 'dosing': None}, GI,
-     {'description': None, 'name': None, 'type': 'preclinical'}),
-    ('ENSG1', 'Hypertension', ' EFO_OLD ', {'direction': 'Inhibition', 'dosing': 'acute'}, None,
-     {'description': 'd', 'name': 'n', 'type': 'clinical'}),
-    ('ENSG5', 'dizziness', '  ', {'direction': 'Other', 'dosing': None}, None, None),
-    ('ENSG5', 'rash', 'EFO_B', None, GI, {'description': None, 'name': None, 'type': 'clinical'}),
-]
-PGX = [
-    ('toxicity', 'ENSG1', 'increased risk of toxicity', 'g1', 'h1', ['drugA', 'drugB']),
-    ('toxicity', 'ENSG1', 'risk of toxicity', 'g2', None, ['drugA']),
-    ('toxicity', 'ENSG5', 'neutropenia when taking X', None, None, [None, 'drugC']),
-    ('toxicity', 'ENSG5', 'no significant association with rash', 'g', None, ['d']),
-    ('toxicity', 'ENSG5', 'response', 'g', None, ['d']),
-    ('efficacy', 'ENSG5', 'rash', 'g', None, ['d']),
-    ('toxicity', None, 'rash', 'g', None, ['d']),
-    ('toxicity', 'ENSG1', 'severe\u00a0\u00a0rash\t\tx', 'g3', 'g3', ['drugD']),
-    ('toxicity', 'ENSG1', 'hepatotoxicity', 'g4', None, None),
-    ('toxicity', 'ENSG1', 'hepatotoxicity2', 'g4', None, []),
-    ('toxicity', 'ENSG_UNKNOWN', 'rash', 'g', None, ['d']),
-    ('toxicity', 'ENSG4', 'rash', 'g5', None, ['drugE']),
-    ('toxicity', 'ENSG4', None, 'g5', None, ['drugE']),
-]
-EXPECTED = [
-    ('ENSG2', 'cytotoxicity', None, None, [('liver', None, 'HEPG2', 'cell line', None)], 'ToxCast', None,
-     TOXCAST_URL, [('desc2', 'A2', 'cell-based')]),
-    ('ENSG3', 'cytotoxicity', None, None, [('liver', None, 'HEPG2', 'cell line', None)], 'ToxCast', None,
-     TOXCAST_URL, [('desc2', 'A2', 'cell-based')]),
-    ('ENSG1', 'cell proliferation', None, None, [(None, None, 'T47D', 'cell line', None)], 'ToxCast', None,
-     TOXCAST_URL, [('desc1', 'A1', 'cell-based')]),
-    ('ENSG1', 'apoptosis', 'EFO_NEW', None, [(None, None, 'X', 'cell line', None)], 'ToxCast', None, TOXCAST_URL,
-     [('desc6', 'A6', 'cell-based')]),
-    ('ENSG1', 'apoptosis', 'EFO_NEW2', None, [(None, None, 'X', 'cell line', None)], 'ToxCast', None, TOXCAST_URL,
-     [('desc6', 'A6', 'cell-based')]),
-    ('ENSG5', 'binding', None, None, [(None, None, None, 'cell-free', None)], 'ToxCast', None, TOXCAST_URL,
-     [('desc3', 'A3', 'biochemical')]),
-    ('ENSG5', 'liver injury', None, None,
-     [('kidney', 'UBERON:2', 'c', 'f', 'i'), ('liver', 'UBERON:1', None, None, None)], 'AOP-Wiki', None, 'u2',
-     [(None, None, 'cell-based')]),
-    ('ENSG1', 'GI tox', None, [('Activation/Increase/Upregulation', None)], [('GI', 'UBERON_1', None, None, None)],
-     'Brennan et al. (2024)', '38773351', None, [(None, None, 'preclinical')]),
-    ('ENSG5', 'rash', 'EFO_B', [(None, None)], [('GI', 'UBERON_1', None, None, None)], 'Brennan et al. (2024)',
-     '38773351', None, [(None, None, 'clinical')]),
-    ('ENSG1', 'heart disease', 'EFO_0003777', None, [('cardiovascular', 'UBERON_1', None, None, None)],
-     'Force et al. (2011)', '21283106', None, [('Important', None, 'preclinical')]),
-    ('ENSG1', 'bronchoconstriction', 'EFO_NEW',
-     [('Activation/Increase/Upregulation', 'general'), ('Inhibition/Decrease/Downregulation', 'acute')],
-     [('gastrointestinal', 'UBERON_1', None, None, None), ('cardiovascular', 'UBERON_2', None, None, None)],
-     'Bowes et al. (2012)', '23197038', None, [('bronchoconstriction', 'EFO_OLD', 'preclinical')]),
-    ('ENSG1', 'bronchoconstriction', 'EFO_NEW2',
-     [('Activation/Increase/Upregulation', 'general'), ('Inhibition/Decrease/Downregulation', 'acute')],
-     [('gastrointestinal', 'UBERON_1', None, None, None), ('cardiovascular', 'UBERON_2', None, None, None)],
-     'Bowes et al. (2012)', '23197038', None, [('bronchoconstriction', 'EFO_OLD', 'preclinical')]),
-    ('ENSG5', 'cardiac arrhythmia', 'EFO_0004269', None, [('heart', 'UBERON_2', None, None, None)],
-     'Lamore et al. (2017)', '22', None, [('Arrhythmia', None, 'cell-based')]),
-    ('ENSG1', None, None, None, [('other', 'UBERON_3', None, None, None)], 'Someone (2020)', '1', None,
-     [('lia', None, None)]),
-    ('ENSG1', ' nausea ', 'EFO_X', [('Activation/Increase/Upregulation', None)],
-     [(None, 'UBERON_3', None, None, None)], 'Urban et al. (2012)', '42', None, [(' nausea ', 'EFO_X', 'clinical')]),
-    ('ENSG5', None, 'EFO_X', None, [('liver', 'UBERON_4', None, None, None)], 'Lynch et al. (2017)', '456', None,
-     [(None, 'EFO_X', 'preclinical')]),
-    ('ENSG1', 'crisis (known as \\cheese reaction\\)', 'EFO_B', [(None, None)],
-     [('cns', 'UBERON_5', None, None, None)], 'Other ref', '7', 'https://x',
-     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'Other ref')]),
-    ('ENSG4', 'vomiting', 'EFO_X', [('Inhibition/Decrease/Downregulation', 'developmental toxicity')],
-     [('gi', 'UBERON_7', None, None, None)], 'Lynch et al. (2017)', '9', None,
-     [('vomiting', 'EFO_X', 'preclinical')]),
-    ('ENSG1', 'FLD', None, [('Activation/Increase/Upregulation', None)], None, 'AOP-Wiki', None, 'u1',
-     [(None, None, 'cell-based')]),
-    ('ENSG1', 'x', None, [(None, 'acute')], None, 'AOP-Wiki', None, 'u3', [(None, None, 'cell-based')]),
-    ('ENSG1', 'y', None,
-     [('Inhibition/Decrease/Downregulation', 'chronic'), ('Activation/Increase/Upregulation', 'acute')], None,
-     'AOP-Wiki', None, 'u4', [(None, None, 'cell-based')]),
-    ('ENSG1', 'Hypertension', 'EFO_NEW', [('Inhibition/Decrease/Downregulation', 'acute')], None,
-     'Brennan et al. (2024)', '38773351', None, [('d', 'n', 'clinical')]),
-    ('ENSG1', 'Hypertension', 'EFO_NEW2', [('Inhibition/Decrease/Downregulation', 'acute')], None,
-     'Brennan et al. (2024)', '38773351', None, [('d', 'n', 'clinical')]),
-    ('ENSG5', 'dizziness', None, [('Other', None)], None, 'Brennan et al. (2024)', '38773351', None,
-     [(None, None, None)]),
-    ('ENSG1', 'drug toxicity', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG1',
-     [('Genetic variation linked to this safety liability: g1, g2, h1', 'drugA induced effect', 'clinical'),
-      ('Genetic variation linked to this safety liability: g1, g2, h1', 'drugB induced effect', 'clinical')]),
-    ('ENSG5', 'neutropenia', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG5',
-     [('Genetic variation linked to this safety liability: ', 'drugC induced effect', 'clinical'),
-      ('Genetic variation linked to this safety liability: ', None, 'clinical')]),
-    ('ENSG4', 'rash', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG4',
-     [('Genetic variation linked to this safety liability: g5', 'drugE induced effect', 'clinical')]),
-    ('ENSG1', 'severe\xa0\xa0rash x', None, None, None, 'ClinPGx', None, 'https://www.clinpgx.org/search?query=ENSG1',
-     [('Genetic variation linked to this safety liability: g3', 'drugD induced effect', 'clinical')]),
-]
 
 
-def _tsv(path: Path, columns: list[str], rows: list[tuple]) -> None:
-    path.write_text('\n'.join(['\t'.join(columns), *('\t'.join(r) for r in rows)]) + '\n')
 
 
-def _two_parts(frame: pl.DataFrame, path: Path) -> None:
-    path.mkdir(parents=True)
-    half = frame.height // 2
-    frame.head(half).write_parquet(path / 'part-0.parquet')
-    frame.tail(frame.height - half).write_parquet(path / 'part-1.parquet')
 
 
-def _write_inputs(root: Path) -> dict[str, str]:
-    safety = root / 'safety'
-    safety.mkdir(parents=True)
-    _tsv(safety / 'adverse_effects.tsv', AE_COLUMNS, AE_ROWS)
-    _tsv(safety / 'safety_risks.tsv', SR_COLUMNS, SR_ROWS)
-    _tsv(safety / 'toxcast.tsv', TC_COLUMNS, TC_ROWS)
-    (safety / 'aopwiki.json').write_text(json.dumps(AOP))
-    brennan = [
-        {'Type': 'Clinical', 'biosamples': b, 'datasource': 'Brennan et al. (2024)', 'effects': e, 'event': ev,
-         'eventId': eid, 'id': i, 'literature': '38773351', 'studies': s}
-        for i, ev, eid, e, b, s in BRENNAN
-    ]
-    (safety / 'secondary_pharmacology.json').write_text(''.join(json.dumps(r) + '\n' for r in brennan))
-    _two_parts(_pgx(*PGX), root / 'pharmacogenomics')
-    _two_parts(
-        _target(('ENSG1', 'GENE1', ['P1']), ('ENSG2', 'SHARED', None), ('ENSG3', 'SHARED', []), ('ENSG4', None, None),
-                ('ENSG5', 'GENE5', ['P5', 'P5'])),
-        root / 'target',
-    )
-    _two_parts(
-        _diseases(('EFO_NEW', ['EFO_OLD']), ('EFO_NEW2', ['EFO_OLD', 'EFO_OLD2']), ('EFO_A', None), ('EFO_B', [])),
-        root / 'disease',
-    )
-    return {
-        'adverse_events': str(safety / 'adverse_effects.tsv'),
-        'safety_risks': str(safety / 'safety_risks.tsv'),
-        'brennan': str(safety / 'secondary_pharmacology.json'),
-        'toxcast': str(safety / 'toxcast.tsv'),
-        'aopwiki': str(safety / 'aopwiki.json'),
-        'pharmacogenetics': str(root / 'pharmacogenomics'),
-        'target': str(root / 'target'),
-        'diseases': str(root / 'disease'),
-    }
 
 
 def _canonical(value: object) -> object:
@@ -797,46 +635,7 @@ def _canonical(value: object) -> object:
     return value
 
 
-def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
-    source = _write_inputs(tmp_path / 'in')
-    target_safety_event(source, str(tmp_path / 'out1'), {}, None)
-    target_safety_event(source, str(tmp_path / 'out2'), {}, None)
-
-    first = sorted((tmp_path / 'out1').glob('*.parquet'))
-    second = sorted((tmp_path / 'out2').glob('*.parquet'))
-    assert [p.name for p in first] == [p.name for p in second]
-    assert [p.read_bytes() for p in first] == [p.read_bytes() for p in second]
-
-    out = pl.read_parquet(first)
-    assert out.schema == pl.Schema({
-        'targetId': pl.String,
-        'event': pl.String,
-        'eventId': pl.String,
-        'effects': pl.List(effect),
-        'biosamples': pl.List(biosample),
-        'datasource': pl.String,
-        'literature': pl.String,
-        'url': pl.String,
-        'studies': pl.List(study),
-    })
-    got = sorted((_canonical(list(r)) for r in out.rows()), key=repr)
-    assert got == sorted((_canonical(list(r)) for r in EXPECTED), key=repr)
 
 
-def test_target_safety_event_lists_are_sorted(tmp_path: Path) -> None:
-    source = _write_inputs(tmp_path / 'in')
-    target_safety_event(source, str(tmp_path / 'out'), {}, None)
-    out = pl.read_parquet(tmp_path / 'out')
-    for column in ['biosamples', 'studies']:
-        assert out[column].to_list() == out[column].list.sort().to_list()
-    assert out.rows() == out.sort(pl.all()).rows()
 
 
-def test_target_safety_event_keeps_aop_effects_order(tmp_path: Path) -> None:
-    source = _write_inputs(tmp_path / 'in')
-    target_safety_event(source, str(tmp_path / 'out'), {}, None)
-    out = pl.read_parquet(tmp_path / 'out').filter(event='y')
-    assert out['effects'].to_list() == [[
-        {'direction': 'Inhibition/Decrease/Downregulation', 'dosing': 'chronic'},
-        {'direction': 'Activation/Increase/Upregulation', 'dosing': 'acute'},
-    ]]

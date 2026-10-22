@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.chemical_probe import ChemicalProbe
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -100,7 +101,7 @@ def chemical_probes(
         process_drugs_xrefs(source['drugs_csv'], chembl_molecule),
     )
     result = resolve_targets(evidence, lookup)
-    write_dataset(result.sort(result.columns), destination)
+    write_dataset(result.sort(result.columns), destination, schema=ChemicalProbe)
 
 
 def resolve_targets(evidence: pl.DataFrame, lookup: pl.DataFrame) -> pl.DataFrame:

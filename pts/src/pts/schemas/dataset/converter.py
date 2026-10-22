@@ -85,7 +85,9 @@ def node_conditions(node: Node, value: pl.Expr, path: str) -> list[tuple[str, pl
         nested = _nullability(child.node, child_value, child_path) + node_conditions(
             child.node, child_value, child_path
         )
-        conditions += [(rule, pl.when(value.is_null()).then(True).otherwise(passes)) for rule, passes in nested]
+        # `is_null() | passes`, not `when(is_null()).then(True).otherwise(passes)`: identical under Kleene logic,
+        # but the `when` form panics in polars on a multi-chunk frame once `passes` holds a `list.eval`
+        conditions += [(rule, value.is_null() | passes) for rule, passes in nested]
 
     return conditions
 
@@ -123,6 +125,9 @@ def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...]) -> pa.
 def _rules(node: Node, value: pl.Expr) -> list[tuple[str, pl.Expr]]:
     """The node's own constraints, as `(rule, passes)` pairs on a non-missing value."""
     c = node.constraints
+    if node.dtype.is_float():
+        # compared at full precision, as Pydantic compares the stored value: a Float32 0.1 is above 0.1
+        value = value.cast(pl.Float64)
     length = value.list.len() if node.kind == 'list' else value.str.len_chars()
     rules: list[tuple[str, pl.Expr | None]] = [
         (f'>= {c.ge}', value >= c.ge if c.ge is not None else None),

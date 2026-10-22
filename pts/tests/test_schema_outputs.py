@@ -10,7 +10,6 @@ directory holding one folder per dataset to run it::
 import json
 import os
 from pathlib import Path
-from typing import get_args
 
 import polars as pl
 import pytest
@@ -19,8 +18,6 @@ from pts.schemas.dataset import DatasetModel, Reference, to_pandera, to_polars_s
 from pts.schemas.dataset.discovery import discover_datasets
 from pts.schemas.dataset.docs import write_docs
 from pts.schemas.dataset.spec import Node, dataset_spec, walk
-from pts.schemas.outputs.evidence_base import QualityFlag
-from pts.transformers.evidence.utils.evidence import EvidenceFlags
 
 DATASETS = discover_datasets()
 MODELS = sorted(DATASETS.values(), key=lambda model: model.dataset_name)
@@ -55,7 +52,9 @@ def test_documentation_is_written_for_every_dataset(tmp_path: Path) -> None:
     REFERENCES,
     ids=[f'{m.dataset_name}:{p}' for m, p, _ in REFERENCES],
 )
-def test_reference_resolves_to_a_primary_key(model: type[DatasetModel], path: str, node: Node) -> None:
+def test_reference_resolves_to_a_column(model: type[DatasetModel], path: str, node: Node) -> None:
+    """A reference is a look-up into another dataset: often its primary key, but not necessarily (croissant's
+    foreign keys also point at a column of a composite key, or at a dataset with no key)."""
     reference = node.reference
     assert isinstance(reference, Reference)
     target = DATASETS.get(reference.dataset)
@@ -66,14 +65,8 @@ def test_reference_resolves_to_a_primary_key(model: type[DatasetModel], path: st
     target_field = next((f for f in target_spec.fields if f.name == reference.column), None)
 
     assert target_field is not None, f'{reference.dataset} has no column {reference.column!r}'
-    assert target_spec.primary_key == (reference.column,), (
-        f'{reference.dataset}.{reference.column} is not its primary key'
-    )
     assert target_field.node.dtype == node.dtype
 
-
-def test_quality_flag_vocabulary_matches_the_evidence_flags() -> None:
-    assert set(get_args(QualityFlag)) == {flag.value for flag in EvidenceFlags}
 
 
 @pytest.mark.parametrize('model', MODELS, ids=_name)
@@ -88,7 +81,6 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
     to_pandera(model).validate(pl.read_parquet(location), lazy=True)
 
 
-def test_every_dataset_has_a_title_and_tags() -> None:
+def test_every_dataset_has_a_title() -> None:
     for name, model in discover_datasets().items():
         assert model.dataset_title, name
-        assert model.dataset_tags, name

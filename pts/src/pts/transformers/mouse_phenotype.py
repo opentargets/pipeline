@@ -16,6 +16,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
+from pts.schemas.outputs.mouse_phenotype import MousePhenotype
 from pts.transformers.impc_common import (
     MODEL_ID,
     biological_model_id,
@@ -199,5 +200,5 @@ def mouse_phenotype(
     )
     output, excluded = split_by_target(mouse_phenotypes, targets['id'])
     logger.info(f'{output.height} mouse phenotypes, {excluded.height} excluded')
-    write_dataset(output, destination['output'])
+    write_dataset(output, destination['output'], schema=MousePhenotype)
     write_dataset(excluded, destination['excluded'])

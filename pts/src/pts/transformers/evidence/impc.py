@@ -15,6 +15,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
+from pts.schemas.outputs.evidence_impc import EvidenceImpc
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -73,6 +74,7 @@ IMPC = EvidenceDatasource(
         'diseaseFromSource',
     ],
     score=divide(pl.col('resourceScore'), 100),
+    schema=EvidenceImpc,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = direction_when_disease_present('LoF')
@@ -219,4 +221,4 @@ def impc(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=IMPC.schema)

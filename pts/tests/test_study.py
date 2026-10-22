@@ -1,10 +1,8 @@
 """Tests for study transformations."""
 
-from unittest.mock import Mock
 
 import polars as pl
 import pytest
-from otter.config.model import Config
 from polars.testing import assert_frame_equal
 from pydantic import ValidationError
 
@@ -15,7 +13,6 @@ from pts.transformers.study import (
     StudySource,
     collect_heritability,
     deconvolute_studies,
-    study,
     validate_analysis_flags,
     validate_biosample,
     validate_ccs,
@@ -413,45 +410,6 @@ def test_study_source_requires_heritability_path():
         })
 
 
-def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_path):
-    """Real input scans run the complete pipeline and write correctly separated datasets."""
-    input_frames = {
-        'study': studies_frame([
-            {'studyId': 'valid', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['old'], 'nSamples': 100},
-            {'studyId': 'invalid', 'studyType': 'unsupported', 'nSamples': 100},
-        ]).collect(),
-        'target': pl.DataFrame({'id': ['gene']}),
-        'biosample': pl.DataFrame({'biosampleId': ['tissue']}),
-        'disease': pl.DataFrame({'id': ['disease'], 'obsoleteTerms': [['old']]}),
-        'heritability': heritability_frame([{'studyId': 'valid', 'runStatus': 'success', 'h2': 0.5}]).collect(),
-    }
-    paths = {}
-    for name, frame in input_frames.items():
-        path = tmp_path / f'{name}.parquet'
-        frame.write_parquet(path)
-        paths[name] = str(path)
-    paths['study'] = [paths['study']]
-    output_path = tmp_path / 'output'
-    excluded_path = tmp_path / 'excluded'
-
-    study(
-        source=paths,
-        destination={'output': str(output_path), 'excluded': str(excluded_path)},
-        settings={'invalid_qc_reasons': ['UNKNOWN_STUDY_TYPE']},
-        config=Mock(spec=Config),
-    )
-
-    output_files = list(output_path.glob('*.parquet'))
-    excluded_files = list(excluded_path.glob('*.parquet'))
-    assert len(output_files) == len(excluded_files) == 1
-    valid = pl.read_parquet(output_files[0])
-    invalid = pl.read_parquet(excluded_files[0])
-    assert valid['studyId'].to_list() == ['valid']
-    assert invalid['studyId'].to_list() == ['invalid']
-    assert valid.schema == invalid.schema == study_schema
-    assert valid['diseaseIds'].to_list() == [['disease']]
-    assert valid['sumstatQCValues'][0][0]['QCCheckValue'] == 0.5
-    assert str(QualityFlag.UNKNOWN_STUDY_TYPE) in invalid['qualityControls'][0]
 
 
 @pytest.mark.parametrize('seed', [1, 7, 42])

@@ -15,6 +15,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.target_essentiality import TargetEssentiality
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -230,4 +231,4 @@ def gene_essentiality(
     screens = build_screens(**frames, keep_only_essentials=keep_only_essentials)
     result = resolve_target_ids(aggregate(screens), ensg_lookup(target)).sort('targetId')
     logger.info(f'writing gene essentiality to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=TargetEssentiality)

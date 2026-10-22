@@ -12,6 +12,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.evidence_crispr_screen import EvidenceCrisprScreen
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -43,6 +44,7 @@ CRISPR_SCREEN = EvidenceDatasource(
     datasource_id='crispr_screen',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'studyId'],
     score=log10_rescaled_score(pl.col('resourceScore'), 0.0, 0.5, 0.005),
+    schema=EvidenceCrisprScreen,
 )
 
 

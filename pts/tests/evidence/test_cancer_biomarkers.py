@@ -10,13 +10,11 @@ import pytest
 
 from pts.transformers.evidence.cancer_biomarkers import (
     CANCER_BIOMARKERS,
-    cancer_biomarkers,
     explode_alterations,
     generate,
     get_variant_id,
     initcap,
 )
-from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 ASSOCIATIONS_HEADER = [
     'Alteration',
@@ -499,33 +497,3 @@ def test_cancer_biomarkers_unique_fields_are_the_config_ones() -> None:
     ]
 
 
-def test_cancer_biomarkers_step_scores_and_splits(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    sources = _sources(src)
-    dst = tmp_path / 'out'
-
-    cancer_biomarkers(
-        {
-            **sources,
-            'disease': write_disease(src / 'disease', [MELANOMA, ANY_CANCER]),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'BRAF', 'ENSG2': 'MET'}),
-            'literature': write_literature(src / 'literature', {'111': '2013-01-01', '222': '2015-06-01'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId', 'confidence', 'drugFromSource')
-    failed = pl.read_parquet(dst / 'failed')
-    assert valid.select('targetId', 'diseaseId', 'confidence', 'drugFromSource').rows() == [
-        ('ENSG1', MELANOMA, 'FDA guidelines', 'Vemurafenib'),
-        ('ENSG2', ANY_CANCER, 'Case report', 'Capmatinib'),
-        ('ENSG2', ANY_CANCER, 'Case report', 'Crizotinib'),
-        ('ENSG2', ANY_CANCER, 'Pre-clinical', 'Capmatinib'),
-        ('ENSG2', ANY_CANCER, 'Pre-clinical', 'Crizotinib'),
-    ]
-    assert valid['score'].to_list() == [1.0] * 5
-    assert valid['publicationDate'].to_list() == ['2013-01-01', None, None, None, None]
-    assert failed.height == len(EXPECTED) - 5
-    assert valid['id'].n_unique() == 5

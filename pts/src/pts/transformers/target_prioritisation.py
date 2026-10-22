@@ -14,6 +14,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.target_prioritisation import TargetPrioritisation
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 ONCOTSG = ['TSG', 'oncogene', 'Oncogene', 'oncogene,TSG', 'TSG,oncogene', 'fusion,oncogene', 'oncogene,fusion']
@@ -735,4 +736,4 @@ def target_prioritisation(
     result = compute_target_prioritisation(**frames)
 
     logger.info(f'writing {result.height} targets to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=TargetPrioritisation)

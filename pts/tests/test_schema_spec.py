@@ -168,7 +168,7 @@ _Recursive.model_rebuild()
     [
         ({'x': int | str}, 'only `T | None`'),
         ({'x': dict[str, str]}, 'unsupported type'),
-        ({'x': datetime.date}, 'unsupported type'),
+        ({'x': datetime.datetime}, 'unsupported type'),
         ({'x': list}, 'needs its element type'),
         ({'x': Literal['a', 1]}, 'all str or all int'),
         ({'x': (int, Field(multiple_of=2))}, 'unsupported annotation'),

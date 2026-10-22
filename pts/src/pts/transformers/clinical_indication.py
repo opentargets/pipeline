@@ -8,6 +8,7 @@ from loguru import logger
 from mira.dataset import ClinicalIndication
 from otter.config.model import Config
 
+from pts.schemas.outputs.clinical_indication import ClinicalIndication as ClinicalIndicationOutput
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
@@ -53,4 +54,4 @@ def clinical_indication(
     )
 
     logger.info(f'Destination path: {destination["output"]}')
-    write_dataset(indications, str(destination['output']))
+    write_dataset(indications, str(destination['output']), schema=ClinicalIndicationOutput)

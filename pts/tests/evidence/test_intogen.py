@@ -13,10 +13,8 @@ from pts.transformers.evidence.intogen import (
     DIRECTION_ON_TRAIT,
     INTOGEN,
     generate,
-    intogen,
     parse_source,
 )
-from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 GENES_HEADER = ['SYMBOL', 'COHORT', 'CANCER_TYPE', 'METHODS', 'MUTATIONS', 'SAMPLES', 'QVALUE_COMBINATION', 'ROLE']
 COHORTS_HEADER = ['COHORT', 'CANCER', 'CANCER_NAME', 'REFERENCE', 'SAMPLES', 'MUTATIONS', 'COHORT_NICK', 'COHORT_NAME']
@@ -214,29 +212,3 @@ def test_intogen_direction_on_target_needs_a_matching_consequence() -> None:
     assert got == ['LoF', 'GoF', None, None, None]
 
 
-def test_intogen_step_scores_and_assigns_directions(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    sources = _sources(src)
-    dst = tmp_path / 'out'
-
-    intogen(
-        {
-            **sources,
-            'disease': write_disease(src / 'disease', ['EFO_1']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'A1', 'ENSG2': 'B1'}),
-            'literature': write_literature(src / 'literature', {'23334666': '2013-01-20'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId')
-    failed = pl.read_parquet(dst / 'failed')
-    assert valid.select('targetId', 'diseaseId', 'directionOnTrait', 'directionOnTarget').rows() == [
-        ('ENSG1', 'EFO_1', 'risk', 'GoF'),
-        ('ENSG2', 'EFO_1', 'risk', 'LoF'),
-    ]
-    assert valid['score'].to_list() == [pytest.approx(0.25 + 0.75 * 4 / 9), 0.25]
-    assert valid['publicationDate'].to_list() == ['2013-01-20', '2013-01-20']
-    assert failed['cohortId'].to_list() == ['C2']

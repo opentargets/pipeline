@@ -8,6 +8,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -117,6 +118,7 @@ CLINICAL_PRECEDENCE = EvidenceDatasource(
     datasource_id='clinical_precedence',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'drugId', 'clinicalReportId'],
     score=_score(),
+    schema=EvidenceClinicalPrecedence,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('protect')
 DIRECTION_ON_TARGET = _direction_on_target()
@@ -246,4 +248,9 @@ def clinical_precedence(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
     )
     logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
-    write_evidence(evidence, destination, alongside=[sink_dataset(excluded, destination['excluded_report'])])
+    write_evidence(
+        evidence,
+        destination,
+        alongside=[sink_dataset(excluded, destination['excluded_report'])],
+        schema=CLINICAL_PRECEDENCE.schema,
+    )

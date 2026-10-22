@@ -15,6 +15,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.reactome import Reactome
 from pts.schemas.reactome import reactome_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -127,4 +128,4 @@ def reactome(
     result = _build_graph_documents(clean, relations)
 
     logger.info(f'Writing Reactome output to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=Reactome)

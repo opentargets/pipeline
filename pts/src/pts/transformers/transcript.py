@@ -13,6 +13,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.transcript import Transcript
 from pts.schemas.transcript import transcript as transcript_schema
 from pts.transformers.utils import ensembl
 from pts.transformers.utils.dataset import write_dataset
@@ -122,4 +123,4 @@ def transcript(
     result = build_transcripts(ensembl.transcripts(dump), ensembl.translation_xrefs(dump))
 
     logger.info(f'writing {result.height} transcripts from Ensembl {dump.release} to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=Transcript)

@@ -15,6 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.orphanet import ORPHANET_SCHEMA
+from pts.schemas.outputs.evidence_orphanet import EvidenceOrphanet
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -43,6 +44,7 @@ ORPHANET = EvidenceDatasource(
     datasource_id='orphanet',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'diseaseFromSourceId'],
     score=confidence_score({'Assessed': 1.0, 'Not yet assessed': 0.5}),
+    schema=EvidenceOrphanet,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 DIRECTION_ON_TARGET = (
@@ -197,4 +199,4 @@ def orphanet(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=ORPHANET.schema)

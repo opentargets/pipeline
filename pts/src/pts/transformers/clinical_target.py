@@ -14,6 +14,7 @@ from mira.dataset.clinical_indication import (
 )
 from otter.config.model import Config
 
+from pts.schemas.outputs.clinical_target import ClinicalTarget
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
@@ -107,4 +108,4 @@ def clinical_target(
         .join(drug_max_stage, 'drugId')
     )
     logger.info(f'Destination path: {destination["output"]}')
-    write_dataset(clinical_target, str(destination['output']))
+    write_dataset(clinical_target, str(destination['output']), schema=ClinicalTarget)

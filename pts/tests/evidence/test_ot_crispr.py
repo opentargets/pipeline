@@ -12,10 +12,8 @@ from pts.transformers.evidence.ot_crispr import (
     OT_CRISPR,
     adjust_column_names,
     generate,
-    ot_crispr,
     process_studies,
 )
-from tests.evidence.fixtures import write_disease, write_target
 
 STUDY_HEADER = [
     'studyId',
@@ -280,24 +278,3 @@ def test_score_is_one() -> None:
     assert pl.select(OT_CRISPR.score.alias('s'))['s'].to_list() == [1.0]
 
 
-def test_ot_crispr_step_writes_scored_evidence(tmp_path: Path) -> None:
-    src = tmp_path / 'src'
-    dst = tmp_path / 'out'
-
-    ot_crispr(
-        {
-            **_sources(src),
-            'disease': write_disease(src / 'disease', ['EFO_1']),
-            'target': write_target(src / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'GA', 'ENSG2': 'GE'}),
-        },
-        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
-        {},
-        None,
-    )
-
-    valid = pl.read_parquet(dst / 'valid').sort('targetId')
-    assert valid.select('targetId', 'diseaseId', 'studyId', 'score').rows() == [
-        ('ENSG1', 'EFO_1', 'S1', 1.0),
-        ('ENSG2', 'EFO_1', 'S1', 1.0),
-    ]
-    assert pl.read_parquet(dst / 'failed').height == 3

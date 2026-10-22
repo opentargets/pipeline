@@ -7,10 +7,10 @@ further target (a Spark `StructType`, say) only needs another reader of the same
 Only a strict subset of Pydantic is supported, and anything outside it raises
 `SchemaDefinitionError` instead of being silently left unenforced:
 
-* types: `str`, `bool`, `int`, `float` (see `PolarsDtype` to change their Polars precision),
+* types: `str`, `bool`, `int`, `float` (see `PolarsDtype` to change their Polars precision), `datetime.date`,
   `Literal[...]` of all-`str` or all-`int` values, `list[T]`, `StructModel` subclasses, and
   `T | None` for any of those;
-* constraints: `ge`/`gt`/`le`/`lt` on numbers, `pattern`/`min_length`/`max_length` on strings,
+* constraints: `ge`/`gt`/`le`/`lt` on numbers and dates, `pattern`/`min_length`/`max_length` on strings,
   `min_length`/`max_length` on lists -- on a column, a struct field or a list element alike
   (`list[Annotated[str, Field(pattern=...)]]`);
 * markers: `PrimaryKey` and `Note` on a top-level column (`Note` on a struct field too),
@@ -23,6 +23,7 @@ computed fields -- is rejected, as are aliases, discriminators and any `model_co
 """
 
 import dataclasses
+import datetime
 import functools
 import types
 from collections.abc import Iterator
@@ -62,6 +63,7 @@ _PRIMITIVES: dict[type, pl.DataType] = {
     bool: pl.Boolean(),
     int: pl.Int64(),
     float: pl.Float64(),
+    datetime.date: pl.Date(),
 }
 
 #: Constraints each kind of value accepts.
@@ -96,10 +98,10 @@ _REJECTED_DECORATORS = (
 class Constraints:
     """Declarative rules on one value. `None` means unconstrained."""
 
-    ge: float | None = None
-    gt: float | None = None
-    le: float | None = None
-    lt: float | None = None
+    ge: float | datetime.date | None = None
+    gt: float | datetime.date | None = None
+    le: float | datetime.date | None = None
+    lt: float | datetime.date | None = None
     pattern: str | None = None
     min_length: int | None = None
     max_length: int | None = None
@@ -336,7 +338,7 @@ def _node(annotation: Any, metadata: list[Any], *, path: str, seen: tuple[type, 
             _STRING_CONSTRAINTS
             if annotation is str
             else _NUMBER_CONSTRAINTS
-            if annotation in {int, float}
+            if annotation in {int, float, datetime.date}
             else frozenset()
         )
         _accept_only(constraints, accepted, path, annotation.__name__)

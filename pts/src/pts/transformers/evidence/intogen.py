@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_intogen import EvidenceIntogen
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present, log10_rescaled_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -31,6 +32,7 @@ INTOGEN = EvidenceDatasource(
     datasource_id='intogen',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'cohortShortName'],
     score=log10_rescaled_score(pl.col('resourceScore'), 0.25, 0.1, 1e-10),
+    schema=EvidenceIntogen,
 )
 DIRECTION_ON_TRAIT = direction_when_disease_present('risk')
 
@@ -142,4 +144,4 @@ def intogen(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, schema=INTOGEN.schema)

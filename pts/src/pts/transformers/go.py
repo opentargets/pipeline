@@ -10,6 +10,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
+from pts.schemas.outputs.go import Go
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -128,4 +129,4 @@ def go(
     df = pl.DataFrame(rows, schema=go_schema)
 
     logger.info('writing dataframe')
-    write_dataset(df, destination)
+    write_dataset(df, destination, schema=Go)

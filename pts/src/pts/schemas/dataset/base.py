@@ -43,9 +43,8 @@ class DatasetModel(SchemaModel):
 
     A concrete dataset sets `dataset_name`, `dataset_title`, `dataset_description` and `example`
     in its own class body, and `dataset_tags` where it has any. A subclass that does not set
-    `dataset_name` is an abstract base sharing fields between datasets (e.g.
-    `pts.schemas.outputs.evidence_base.EvidenceBase`) -- never discovered, converted or documented
-    on its own.
+    `dataset_name` is an abstract base sharing fields between datasets -- never discovered,
+    converted or documented on its own.
 
     Attributes:
         dataset_name: name of the dataset, matching the output name its step writes.

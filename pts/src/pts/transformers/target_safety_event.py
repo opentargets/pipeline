@@ -18,6 +18,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.target_safety_event import TargetSafetyEvent
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.spark_strings import spark_trim
@@ -408,4 +409,4 @@ def target_safety_event(
     result = _sort_output(build_target_safety_events(safety, target, diseases))
 
     logger.info(f'writing {result.height} target safety events to {destination}')
-    write_dataset(result, destination)
+    write_dataset(result, destination, schema=TargetSafetyEvent)

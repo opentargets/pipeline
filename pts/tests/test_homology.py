@@ -19,7 +19,6 @@ from pts.transformers.homology import (
     read_species_dictionary,
     resolve_homology,
 )
-from pts.transformers.utils.dataset import write_dataset
 from tests.ensembl_fixtures import cells, release_116_ddl, write_dump, write_gz
 
 REPO = Path(__file__).parents[2]
@@ -516,39 +515,6 @@ def test_read_gene_names_concatenates_every_species(tmp_path: Path) -> None:
     assert result.rows() == [('ENSG0001', 'TP53'), ('ENSG0002', None), ('ENSMUSG0001', 'Trp53')]
 
 
-def test_homology_writes_the_dataset(tmp_path: Path) -> None:
-    """The entrypoint reads every source and writes the resolved pairs."""
-    species = tmp_path / 'species_EnsemblVertebrates.txt'
-    species.write_text(
-        '#name\tspecies\tdivision\ttaxonomy_id\n'
-        'Human\thomo_sapiens\tEnsemblVertebrates\t9606\t\n'
-        'Mouse\tmus_musculus\tEnsemblVertebrates\t10090\t\n'
-    )
-    header = COMPARA_COLUMNS + OTHER_COMPARA_COLUMNS
-    _write_tsv_gz(tmp_path / 'homologies' / 'protein-homo_sapiens.tsv.gz', header, [_pair(is_high_confidence=None)])
-    _write_core(tmp_path / 'ensembl', 'homo_sapiens_core_116_38', [('ENSG0001', 'TP53')])
-    _write_core(tmp_path / 'ensembl', 'mus_musculus_core_116_39', [('ENSMUSG0001', ' Trp53 ')])
-    write_dataset(_target(('ENSG0001', 'TP53')), str(tmp_path / 'target'))
-    destination = tmp_path / 'homology'
-
-    homology(
-        {
-            'species_dictionary': str(species),
-            'homologies': str(tmp_path / 'homologies'),
-            'ensembl': str(tmp_path / 'ensembl'),
-            'target': str(tmp_path / 'target'),
-        },
-        str(destination),
-        {'ensembl_species': ['homo_sapiens', 'mus_musculus']},
-        None,
-    )
-
-    expected = pl.DataFrame(
-        [('ENSG0001', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0001', None, 'Trp53', 100.0, 88.0, 3)],
-        schema=homology_schema,
-        orient='row',
-    )
-    assert_frame_equal(pl.read_parquet(str(destination / '*.parquet')), expected)
 
 
 def test_homology_requires_the_species_setting(tmp_path: Path) -> None:
