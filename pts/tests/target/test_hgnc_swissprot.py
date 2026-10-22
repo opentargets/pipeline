@@ -127,3 +127,30 @@ def test_the_promoted_label_wins_over_the_obsolete_one_the_hgnc_path_adds() -> N
     assert filter_and_sort_protein_ids(merged)['proteinIds'].item().to_list() == _ids(
         ('Q96P20', 'uniprot_swissprot'), ('A0A2R8YEG7', 'uniprot_trembl'), ('ENSP00000337383', 'ensembl_PRO')
     )
+
+
+def test_padded_accessions_are_one_accession_in_every_check() -> None:
+    """`filter_and_sort_protein_ids` trims accessions later, so the checks must see them trimmed too."""
+    ensembl = _ensembl(
+        ('G_OWNER', 'protein_coding', _ids((' P00001 ', 'uniprot_swissprot'))),
+        ('G_HELD', 'protein_coding', []),
+        ('G_PADDED', 'protein_coding', []),
+        ('G_SHARED_A', 'protein_coding', []),
+        ('G_SHARED_B', 'protein_coding', []),
+    )
+    hgnc = _hgnc(
+        ('G_HELD', ['P00001']),
+        ('G_PADDED', [' P00002 ']),
+        ('G_SHARED_A', ['P00003']),
+        ('G_SHARED_B', [' P00003']),
+    )
+    entries = _entries((True, ['P00001']), (True, [' P00002']), (True, ['P00003']))
+    result = promote_hgnc_swissprot(ensembl, hgnc, entries)
+    promoted = dict(zip(result['id'].to_list(), result['proteinIds'].to_list(), strict=True))
+
+    # Ensembl gives G_OWNER the accession, however it is padded
+    assert promoted['G_HELD'] == []
+    # padding on either side does not stop a promotion, and the promoted accession is trimmed
+    assert promoted['G_PADDED'] == _ids(('P00002', 'uniprot_swissprot'))
+    # two spellings of one accession still count as one accession mapped to two genes
+    assert promoted['G_SHARED_A'] == promoted['G_SHARED_B'] == []

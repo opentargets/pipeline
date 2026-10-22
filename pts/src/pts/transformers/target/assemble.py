@@ -116,12 +116,15 @@ def promote_hgnc_swissprot(ensembl: pl.DataFrame, hgnc: pl.DataFrame, entries: p
     Returns:
         `ensembl`, with the promoted accessions appended to `proteinIds`.
     """
+    # every accession trimmed as `filter_and_sort_protein_ids` trims it later, so ` P1 ` and `P1` are one accession
+    # in each check here, as they will be in the output
     source = pl.element().struct.field('source')
     swissprot = ensembl.select(
         'id',
         pl
         .col('proteinIds')
-        .list.eval(pl.element().filter(source == 'uniprot_swissprot').struct.field('id'))
+        .list.eval(pl.element().filter(source == 'uniprot_swissprot').struct.field('id').str.strip_chars())
+        .list.eval(pl.element().filter(pl.element() != ''))
         .alias('sp'),
     )
     held = swissprot.explode('sp', empty_as_null=False, keep_nulls=False).select(pl.col('sp').alias('uniprotId'))
@@ -129,12 +132,13 @@ def promote_hgnc_swissprot(ensembl: pl.DataFrame, hgnc: pl.DataFrame, entries: p
         swissprot.filter(pl.col('sp').list.len().fill_null(0) == 0), on='id', how='semi'
     )
     reviewed = entries.filter(pl.col('reviewed')).select(
-        pl.col('accessions').list.first().str.strip_chars(' ').alias('uniprotId')
+        pl.col('accessions').list.first().str.strip_chars().alias('uniprotId')
     )
     candidates = (
         hgnc
         .select(pl.col('ensemblId').alias('id'), pl.col('uniprotIds').alias('uniprotId'))
         .explode('uniprotId', empty_as_null=False, keep_nulls=False)
+        .with_columns(pl.col('uniprotId').str.strip_chars())
         .join(lacking, on='id', how='semi')
         .join(reviewed, on='uniprotId', how='semi')
         .join(held, on='uniprotId', how='anti')
