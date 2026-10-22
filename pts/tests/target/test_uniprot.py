@@ -66,6 +66,11 @@ def test_parse_record_id():
     assert _parse_record(_lines(MINIMAL_ENTRY))['id'] == 'PROT_HUMAN'
 
 
+def test_parse_record_reviewed():
+    assert _parse_record(_lines(MINIMAL_ENTRY))['reviewed'] is True
+    assert _parse_record(_lines(MINIMAL_ENTRY.replace('Reviewed;', 'Unreviewed;')))['reviewed'] is False
+
+
 def test_parse_record_accessions():
     assert _parse_record(_lines(MINIMAL_ENTRY))['accessions'] == ['P12345', 'Q99999']
 
