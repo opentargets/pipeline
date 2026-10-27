@@ -2,7 +2,8 @@
 
 Builds the Open Targets molecule format from the raw ChEMBL tables. Synonyms and trade
 names come from ``molecule_synonyms``, cross-references from DrugBank, and clinical-trial
-synonyms from :mod:`pts.transformers.utils.aact_synonyms`.
+synonyms from :mod:`pts.transformers.utils.aact_synonyms`. Compound properties, structural
+alerts and a molecule class are added for every molecule; ``drug_molecule`` does not read them.
 """
 
 from pathlib import Path
@@ -13,20 +14,36 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.drug_molecule import molecule_properties_schema
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SCHEMA_NAME = 'public'
 
 TABLES = {
-    'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name', 'molecule_type'],
+    'molecule_dictionary': ['molregno', 'chembl_id', 'pref_name', 'molecule_type', 'structure_type', 'natural_product'],
     'compound_structures': ['molregno', 'canonical_smiles', 'standard_inchi_key', 'molfile'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
     'molecule_synonyms': ['molsyn_id', 'molregno', 'synonyms', 'syn_type'],
+    'compound_properties': [
+        'molregno',
+        'mw_freebase',
+        'alogp',
+        'aromatic_rings',
+        'heavy_atoms',
+        'qed_weighted',
+        'num_ro5_violations',
+    ],
+    'compound_structural_alerts': ['molregno', 'alert_id'],
+    'structural_alerts': ['alert_id', 'alert_set_id', 'alert_name'],
+    'structural_alert_sets': ['alert_set_id', 'set_name'],
 }
 """No ``order_by``: every published list sorts at its aggregation site instead."""
 
 CHEMBL_SOURCE = 'ChEMBL'
+
+PEPTIDE_MAX_MW = 1500
+"""The heaviest ``Protein`` (parent free base, Da) labelled a peptide; ChEMBL types peptides as ``Protein``."""
 
 
 def chembl_molecule(
@@ -67,6 +84,16 @@ def chembl_molecule(
         tables['molecule_synonyms'],
         drugbank_lookup,
         aact_batch,
+    )
+
+    logger.info('Adding compound properties')
+    output_df = add_compound_properties(
+        output_df,
+        tables['molecule_dictionary'],
+        tables['compound_properties'],
+        tables['compound_structural_alerts'],
+        tables['structural_alerts'],
+        tables['structural_alert_sets'],
     )
 
     logger.info(f'Writing molecules to {destination}')
@@ -174,6 +201,114 @@ def process_molecules(
             'tradeNames',
             'crossReferences',
         )
+    )
+
+
+def add_compound_properties(
+    molecules: pl.DataFrame,
+    molecule_dictionary: pl.DataFrame,
+    compound_properties: pl.DataFrame,
+    compound_structural_alerts: pl.DataFrame,
+    structural_alerts: pl.DataFrame,
+    structural_alert_sets: pl.DataFrame,
+) -> pl.DataFrame:
+    """Append the compound property columns to the molecules, matched on the ChEMBL id.
+
+    Every molecule is kept. Properties are null where ChEMBL has no ``compound_properties``
+    row, and ``structuralAlerts`` is empty where no alert matches.
+
+    Args:
+        molecules: The output of :func:`process_molecules`.
+        molecule_dictionary: Raw ChEMBL molecule_dictionary table.
+        compound_properties: Raw ChEMBL compound_properties table.
+        compound_structural_alerts: Raw ChEMBL compound_structural_alerts table.
+        structural_alerts: Raw ChEMBL structural_alerts table.
+        structural_alert_sets: Raw ChEMBL structural_alert_sets table.
+
+    Returns:
+        The molecules with the ``molecule_properties_schema`` columns appended.
+    """
+    # postgres `numeric` columns arrive as decimals
+    properties = compound_properties.select(
+        'molregno',
+        pl.col('mw_freebase').alias('mwFreebase'),
+        'alogp',
+        pl.col('aromatic_rings').alias('aromaticRings'),
+        pl.col('heavy_atoms').alias('heavyAtoms'),
+        pl.col('qed_weighted').alias('qedWeighted'),
+        pl.col('num_ro5_violations').alias('numRo5Violations'),
+    )
+    alerts = _process_structural_alerts(compound_structural_alerts, structural_alerts, structural_alert_sets)
+
+    annotations = (
+        molecule_dictionary
+        .select(
+            'molregno',
+            pl.col('chembl_id').alias('id'),
+            'molecule_type',
+            pl.col('structure_type').alias('structureType'),
+            (pl.col('natural_product') == 1).alias('naturalProduct'),
+        )
+        # ChEMBL keys these tables by molregno; fail rather than duplicate molecules
+        .join(properties, on='molregno', how='left', validate='1:1')
+        .join(alerts, on='molregno', how='left', validate='1:1')
+        .with_columns(
+            structuralAlerts=pl.col('structuralAlerts').fill_null([]),
+            moleculeClass=_molecule_class(),
+        )
+        .select('id', *molecule_properties_schema.keys())
+        .cast(molecule_properties_schema)
+    )
+    return molecules.join(annotations, on='id', how='left', validate='1:1', maintain_order='left')
+
+
+def _process_structural_alerts(
+    compound_structural_alerts: pl.DataFrame,
+    structural_alerts: pl.DataFrame,
+    structural_alert_sets: pl.DataFrame,
+) -> pl.DataFrame:
+    """Collect every structural alert of every alert set per molecule.
+
+    Args:
+        compound_structural_alerts: Raw ChEMBL compound_structural_alerts table.
+        structural_alerts: Raw ChEMBL structural_alerts table.
+        structural_alert_sets: Raw ChEMBL structural_alert_sets table.
+
+    Returns:
+        DataFrame with molregno and structuralAlerts, sorted by set name then alert id.
+    """
+    return (
+        compound_structural_alerts
+        .select('molregno', 'alert_id')
+        .unique()
+        .join(structural_alerts, on='alert_id', how='inner')
+        .join(structural_alert_sets, on='alert_set_id', how='inner')
+        .group_by('molregno')
+        .agg(
+            pl
+            .struct(
+                pl.col('alert_id').alias('alertId'),
+                pl.col('alert_name').alias('alertName'),
+                pl.col('set_name').alias('setName'),
+            )
+            .sort_by('set_name', 'alert_id')
+            .alias('structuralAlerts')
+        )
+    )
+
+
+def _molecule_class() -> pl.Expr:
+    """Small molecule, peptide, or else the ChEMBL molecule type.
+
+    A ``Protein`` with no molecular weight keeps the ``Protein`` label, and a missing type
+    reads ``Unknown``, as ``drugType`` does.
+    """
+    molecule_type = pl.col('molecule_type')
+    return (
+        pl
+        .when((molecule_type == 'Protein') & (pl.col('mwFreebase') <= PEPTIDE_MAX_MW))
+        .then(pl.lit('Peptide'))
+        .otherwise(molecule_type.fill_null('Unknown'))
     )
 
 
