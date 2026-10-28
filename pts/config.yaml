@@ -1385,6 +1385,28 @@ steps:
       settings:
         locus_to_gene_threshold: *l2g_threshold
 
+  #: BIOSAMPLE_ENRICHMENT STEP :####################################################################
+  biosample_enrichment:
+    - name: transform biosample_enrichment
+      transformer: biosample_enrichment
+      source:
+        l2g_prediction: output/l2g_prediction
+        credible_set: output/credible_set
+        study: output/study
+        target: output/target
+        baseline_expression: output/baseline_expression
+      destination: output/biosample_enrichment
+      settings:
+        # GTEx tissues are the panel the method was benchmarked on; other panels in
+        # baseline_expression (tabula_sapiens tissue/celltype, DICE celltype) are a line each
+        panels:
+          - datasourceId: gtex
+            biosampleType: tissue
+        pool_by_disease: false
+        standard_errors: region
+        region_window: 1000000
+        density_window: 1000000
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view
