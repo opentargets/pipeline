@@ -682,13 +682,13 @@ steps:
   #: GWAS STEP :######################################################################################
   gwas:
     - name: copy_many GCCA study
-      sources: gs://gwas_catalog_top_hits/study_index/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/study_index/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcca
 
     - name: copy_many GCCA credible sets
-      sources: gs://gwas_catalog_top_hits/credible_sets/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/credible_sets/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcca
