@@ -411,6 +411,8 @@ steps:
     depends_on:
       - pts_association
       - pts_clinical_target
+      # nothing else depends on it, so metrics must wait for it here
+      - pts_biosample_enrichment
 
   pts_otar:
     ppp_only: true
@@ -500,6 +502,15 @@ steps:
     depends_on:
       - pts_l2g
       - pis_literature
+
+  # published, but no other step reads it
+  pts_biosample_enrichment:
+    depends_on:
+      - pts_l2g
+      - pts_credible_set
+      - pts_study
+      - pts_target
+      - pts_baseline_expression
 
   # GENETICS STEPS (PTS and Gentropy)
   pts_enhancer_to_gene:

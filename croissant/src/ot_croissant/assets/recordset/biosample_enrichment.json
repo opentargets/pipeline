@@ -1,0 +1,56 @@
+[
+  {
+    "id": "beta",
+    "description": "Increase in L2G score per unit of expression specificity in the biosample, adjusted for gene length and gene density"
+  },
+  {
+    "id": "biosampleId",
+    "description": "Biosample identifier of the tissue or cell type tested",
+    "foreign_key": "biosample/biosampleId",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "biosampleType",
+    "description": "Resolution of the specificity panel the biosample belongs to (tissue or celltype)",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "datasourceId",
+    "description": "Expression dataset the specificity scores come from",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "nGenesScored",
+    "description": "Number of protein-coding genes with an L2G score in the study, or in its pooled group"
+  },
+  {
+    "id": "nStudiesPooled",
+    "description": "Number of studies with the same diseases whose L2G scores were pooled; 1 when not pooled"
+  },
+  {
+    "id": "pValue",
+    "description": "One-sided p-value for enrichment (positive slope)"
+  },
+  {
+    "id": "pValueBonferroni",
+    "description": "Bonferroni-adjusted p-value across the panel's biosamples within the study"
+  },
+  {
+    "id": "qValue",
+    "description": "Benjamini-Hochberg q-value across the panel's biosamples within the study"
+  },
+  {
+    "id": "standardError",
+    "description": "Standard error of beta, counting genes in the same 1 Mb region as one"
+  },
+  {
+    "id": "studyId",
+    "description": "Identifier of the GWAS study",
+    "foreign_key": "study/studyId",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "zScore",
+    "description": "Beta divided by its standard error"
+  }
+]

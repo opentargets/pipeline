@@ -71,6 +71,15 @@
     "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies"
   },
   {
+    "id": "biosample_enrichment",
+    "nice_name": "Biosample enrichment of GWAS studies",
+    "tags": [
+      "Genetics",
+      "Expression"
+    ],
+    "description": "Enrichment of the genes prioritised by Locus-to-Gene (L2G) in each GWAS study for genes specifically expressed in each tissue or cell type, after accounting for gene length and gene density"
+  },
+  {
     "id": "clinical_indication",
     "nice_name": "Clinical indication",
     "tags": [
