@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from google.cloud import batch_v1
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from orchestration.models.batch.environment import EnvironmentRegistrySpec
 from orchestration.models.batch.task import TaskConfiguration
@@ -11,6 +11,8 @@ from orchestration.models.batch.task import TaskConfiguration
 
 class TaskGroupSpec(BaseModel):
     """Class representing a group of tasks to be executed in a Google Batch job."""
+
+    model_config = ConfigDict(extra='forbid')
 
     parallelism: int
     """Number of tasks to run in parallel."""

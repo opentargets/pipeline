@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from google.cloud import batch_v1
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from orchestration.models.batch.environment import EnvironmentSpec
 from orchestration.models.batch.instance import InstanceResourceSpec
@@ -49,6 +49,8 @@ class TaskConfiguration(BaseModel):
     >>> list(ts.lifecycle_policies[0].action_condition.exit_codes)
     [50001, 50002, 50003, 50004, 50005]
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     # See https://docs.cloud.google.com/batch/docs/troubleshooting#reserved-exit-codes
     DEFAULT_EXIT_CODES: ClassVar[tuple[int, ...]] = (50001, 50002, 50003, 50004, 50005)

@@ -321,6 +321,10 @@ class TestStagingDagConfigModel:
             pytest.param('steps.clumping.definition.kind', 'dataproc', 'Extra inputs', id='kind-in-definition'),
             pytest.param(RUNNABLE, {'inline_commands': ['-c', 'x']}, 'image_uri', id='runnable-without-image'),
             pytest.param(
+                'steps.finemapping.definition.index.max_tasks_count', 99, 'Extra inputs', id='batch-index-typo'
+            ),
+            pytest.param(f'{RUNNABLE}.entrypoints', '/bin/sh', 'Extra inputs', id='batch-runnable-typo'),
+            pytest.param(
                 'steps.finemapping.definition.job.job.labels',
                 {'team': 'x'},
                 'labels of the step',
