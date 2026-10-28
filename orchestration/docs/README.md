@@ -2,6 +2,8 @@
 
 This catalog describes how the orchestration works in the current state
 
+* [Input and data buckets](datasources/README.md): which buckets the staging DAGs read and write, and how runs are laid out.
+
 ## How to generate dag svg files for documentation
 
 ```{bash}
