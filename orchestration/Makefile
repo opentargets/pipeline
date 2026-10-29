@@ -102,9 +102,9 @@ upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_susie/docs
 	@gcloud storage rsync docs/credible_set_qc gs://gwas_catalog_sumstats_susie/docs/credible_set_qc
 
-GWAS_CATALOG_TOP_HITS_RUN ?= prod/20260828T165117
-upload-gwas-catalog-top-hits-readme: ## Upload the gwas_catalog_top_hits readme to the run folder of its bucket
-	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_top_hits gs://gwas_catalog_top_hits/$(GWAS_CATALOG_TOP_HITS_RUN)/docs
+upload-gwas-catalog-top-hits-readme: ## Upload the gwas_catalog_top_hits readme to a run folder: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_top_hits $(BUCKET)/docs
 
 upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 	@gcloud storage rsync docs/datasources/gnomad_data gs://gnomad_data_2/docs
@@ -122,6 +122,5 @@ upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
 									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
-										upload-gwas-catalog-top-hits-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 										upload-finngen-meta-readme upload-decode-bucket-readme
