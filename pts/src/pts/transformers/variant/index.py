@@ -6,8 +6,7 @@ import polars as pl
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import list_parts
-from pts.transformers.utils.spark_math import divide
-from pts.transformers.utils.variant import hash_variant_index_ids
+from pts.transformers.utils.variant import hash_variant_index_ids, min_max_scaler
 
 ANNOTATION_PREFIX = 'annotation_'
 _ARRAYS = [name for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
@@ -16,12 +15,6 @@ _ARRAYS = [name for name, dtype in variant_schema.items() if isinstance(dtype, p
 def fill_null_arrays(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Replace null arrays with empty ones, so array unions never nullify a value."""
     return frame.with_columns(pl.col(name).fill_null([]) for name in _ARRAYS if name in frame.collect_schema())
-
-
-def _rescale(score: pl.Expr, low: float, high: float, minimum: float, maximum: float) -> pl.Expr:
-    # Spark subtracts an integer bound in single precision and a fractional one in double.
-    shifted = score - low if isinstance(low, int) else score.cast(pl.Float64) - low
-    return divide(shifted, high - low) * (maximum - minimum) + minimum
 
 
 def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr:
@@ -38,23 +31,23 @@ def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr
             result = (
                 pl
                 .when(value < 0.06)
-                .then(_rescale(score, 0, 0.06, -1.0, -0.25))
+                .then(min_max_scaler(value, 0, 0.06, -1.0, -0.25))
                 .when(value < 0.77)
-                .then(_rescale(score, 0.06, 0.77, -0.25, 0.25))
+                .then(min_max_scaler(value, 0.06, 0.77, -0.25, 0.25))
                 .when(value >= 0.77)
-                .then(_rescale(score, 0.77, 1, 0.25, 1))
+                .then(min_max_scaler(value, 0.77, 1, 0.25, 1))
             )
         case 'CADD':
             result = (
                 pl
                 .when(value <= 10)
-                .then(_rescale(score, 0, 10, -1.0, 0.0))
+                .then(min_max_scaler(value, 0, 10, -1.0, 0.0))
                 .when(value <= 20)
-                .then(_rescale(score, 10, 20, 0.0, 0.5))
+                .then(min_max_scaler(value, 10, 20, 0.0, 0.5))
                 .when(value <= 30)
-                .then(_rescale(score, 20, 30, 0.5, 0.75))
+                .then(min_max_scaler(value, 20, 30, 0.5, 0.75))
                 .when(value > 30)
-                .then(_rescale(score, 30, 81, 0.75, 1))
+                .then(min_max_scaler(value, 30, 81, 0.75, 1))
             )
         case 'GERP':
             result = (
@@ -62,11 +55,11 @@ def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr
                 .when(value > 6)
                 .then(1.0)
                 .when(value >= 2)
-                .then(_rescale(score, 2, 6, 0.75, 1))
+                .then(min_max_scaler(value, 2, 6, 0.75, 1))
                 .when(value >= 0)
-                .then(_rescale(score, 0, 2, 0.25, 0.75))
+                .then(min_max_scaler(value, 0, 2, 0.25, 0.75))
                 .when(value >= -3)
-                .then(_rescale(score, -3, 0, 0.0, 0.25))
+                .then(min_max_scaler(value, -3, 0, 0.0, 0.25))
                 .when(value < -3)
                 .then(0.0)
             )

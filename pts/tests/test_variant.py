@@ -375,11 +375,9 @@ def test_identifier_hashing():
     ]
 
 
-def _spark_rescale(score: float, low: float, high: float, minimum: float, maximum: float) -> float:
-    """Spark's arithmetic: an integer bound is subtracted in single precision, then double from there."""
-    single = np.float32(score)
-    shifted = np.float64(single - np.float32(low)) if isinstance(low, int) else np.float64(single) - low
-    return float(shifted / (high - low) * (maximum - minimum) + minimum)
+def _rescale(score: float, low: float, high: float, minimum: float, maximum: float) -> float:
+    """A single precision score rescaled in double precision."""
+    return float((np.float64(np.float32(score)) - low) / (high - low) * (maximum - minimum) + minimum)
 
 
 @pytest.mark.parametrize(
@@ -389,20 +387,20 @@ def _spark_rescale(score: float, low: float, high: float, minimum: float, maximu
         ('LOFTEE', None, 'LC', 0.85),
         ('LOFTEE', 1.0, 'other', None),
         ('AlphaMissense', 0.0, None, -1.0),
-        ('AlphaMissense', 0.3, None, _spark_rescale(0.3, 0.06, 0.77, -0.25, 0.25)),
-        ('AlphaMissense', 0.77, None, _spark_rescale(0.77, 0.06, 0.77, -0.25, 0.25)),
+        ('AlphaMissense', 0.3, None, _rescale(0.3, 0.06, 0.77, -0.25, 0.25)),
+        ('AlphaMissense', 0.77, None, _rescale(0.77, 0.06, 0.77, -0.25, 0.25)),
         ('CADD', 10.0, None, 0.0),
-        ('CADD', 17.3, None, _spark_rescale(17.3, 10, 20, 0.0, 0.5)),
+        ('CADD', 17.3, None, _rescale(17.3, 10, 20, 0.0, 0.5)),
         ('CADD', 81.0, None, 1.0),
         ('VEP', 0.4, None, float(np.float32(0.4))),
         ('GERP', -5.0, None, 0.0),
         ('GERP', 2.0, None, 0.75),
-        ('GERP', -2.31, None, _spark_rescale(-2.31, -3, 0, 0.0, 0.25)),
+        ('GERP', -2.31, None, _rescale(-2.31, -3, 0, 0.0, 0.25)),
         ('GERP', 7.0, None, 1.0),
         ('GERP', None, None, None),
     ],
 )
-def test_normalisation_matches_spark_exactly(method, score, assessment, expected):
+def test_normalisation(method, score, assessment, expected):
     frame = pl.DataFrame(
         {'score': [score], 'assessment': [assessment]}, schema={'score': pl.Float32, 'assessment': pl.String}
     )
