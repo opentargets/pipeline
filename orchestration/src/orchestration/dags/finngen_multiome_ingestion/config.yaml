@@ -6,7 +6,7 @@ environments:
   prod:
     input:
       finngen_multiome: gs://finngen-public-data-multiome
-    output: gs://finngen_data/multiome/prod/20261029T123632
+    output: gs://finngen_data/multiome/prod/20261029T125742
     scratchpad:
       gentropy_version: 4.0.0-dev.5
 
@@ -21,10 +21,11 @@ infrastructure:
     otg-finngen-multiome:
       project_id: open-targets-genetics-dev
       # a fixed cluster, with no secondary workers: preempted secondary workers lose
-      # their shuffle data. Same shape as the gwas_catalog_top_hits cluster
+      # their shuffle data. 256 cores: the inputs are about 340 GB of gzipped TSVs, and
+      # with 64 cores 62 executors were left pending; the run 20261029T125742 took 26 min
       master_machine_type: n2d-highmem-8
       master_disk_size: 128
-      num_workers: 4
+      num_workers: 16
       worker_machine_type: n2d-highmem-16
       worker_disk_size: 128
       idle_delete_ttl: 1800
@@ -35,6 +36,9 @@ infrastructure:
         'spark:spark.shuffle.service.enabled': 'true'
         'spark:spark.sql.adaptive.enabled': 'true'
         'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # the hadoop-bam package of the BGZFEnhancedGzipCodec the step reads the inputs with:
+        # gentropy adds it to the session config, which is too late for spark-submit on Dataproc
+        'spark:spark.jars.packages': 'org.seqdoop:hadoop-bam:7.10.0'
       init_actions_uris:
         - '{{output}}/bin/install_dependencies_on_cluster.sh'
 
