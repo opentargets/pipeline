@@ -255,43 +255,9 @@ Produced by the `gwas_catalog_top_hits` DAG into `gs://gwas_catalog_top_hits`, s
 
 ## GWAS Catalog pics summary statistics
 
-Bucket `gs://gwas_catalog_sumstats_pics` contains:
+Produced by the `gwas_catalog_sumstats_pics` DAG into `gs://gwas_catalog_sumstats_pics`, see [GWAS Catalog summary statistics PICS](gwas_catalog_sumstats_pics/README.md).
 
-```sh
-gs://gwas_catalog_sumstats_pics/credible_sets/
-gs://gwas_catalog_sumstats_pics/study_index/
-gs://gwas_catalog_sumstats_pics/study_locus_ld_clumped/
-gs://gwas_catalog_sumstats_pics/study_locus_window_based_clumped/
-```
-
-Data contained in the `pics summary statistics` corresponds to the GWAS Catalog summary statistics harmonised to the Open Targets [SummaryStatistics dataset](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics/).
-
-Data is produced by **gwas_catalog_sumstats_pics DAG**. The dag configuration and topology can be found in `gwas_catalog_sumstats_pics.yaml` file under the config directory.
-
-DAG contains 4 steps:
-
-![gwas_catalog_sumstats_pics](gwas_catalog_sumstats_pics.svg)
-
-1. gwas_catalog_study_index
-2. window_based_clumping
-3. ld_based_clumping
-4. pics
-
-### gwas_catalog_study_index
-
-The step runs on the dataproc cluster that is used to generate the [study_index dataset](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) that is saved under the `gs://gwas_catalog_sumstats_pics/study_index/`
-
-### window_based_clumping
-
-The step that performs the [window_based_clumping](https://opentargets.github.io/gentropy/python_api/methods/clumping/) on harmonised summary statistics. The dataset is saved under `gs://gs://gwas_catalog_sumstats_pics/study_locus_ld_clumped/`.
-
-### ld_based_clumping - sumstats
-
-The step that performs [ld_clumping](https://opentargets.github.io/gentropy/python_api/methods/clumping/) on the results from window based clumping step. The results from this step are saved under `gs://gwas_catalog_top_hits/study_locus_ld_clumped/`.
-
-### pics - sumstats
-
-The step that performs [PICS finemapping](https://opentargets.github.io/gentropy/python_api/methods/pics/) based on the ld clumped study locus dataset to obtain the dataset containing credible sets. This dataset is stored under `gs://gwas_catalog_sumstats_pics/credible_sets/`
+---
 
 ## GWAS Catalog susie summary statistics
 
@@ -456,3 +422,7 @@ To adjust the parameters for google batch infrastructure refer to the `google_ba
 ### 2026-10-26
 
 - chore: move the top hits release (run of 2026-08-28) from the root of `gs://gwas_catalog_top_hits` to `gs://gwas_catalog_top_hits/prod/20260828T165117/` (`config/`, `docs/`, `output/`), and split its docs into [GWAS Catalog top hits](gwas_catalog_top_hits/README.md).
+
+### 2026-10-29
+
+- chore: move the summary statistics PICS release (run of 2026-08-28) from the root of `gs://gwas_catalog_sumstats_pics` to `gs://gwas_catalog_sumstats_pics/prod/20260828T115527/` (`config/`, `docs/`, `output/`), and split its docs into [GWAS Catalog summary statistics PICS](gwas_catalog_sumstats_pics/README.md).
