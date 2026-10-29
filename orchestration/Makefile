@@ -80,6 +80,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_harmonisation \
 		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
 		datasources/finngen_data/finngen_gwas/finngen_ingestion \
+		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
 		credible_set_qc/credible_set_qc \
@@ -96,6 +97,10 @@ upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
 upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/finngen_data/finngen_gwas $(BUCKET)/docs
+
+upload-finngen-multiome-readme: ## Upload the finngen multiome readme to a run folder: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/finngen_data/finngen_multiome $(BUCKET)/docs
 
 upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
