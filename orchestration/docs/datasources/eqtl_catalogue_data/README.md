@@ -3,11 +3,14 @@
 This document was updated on 2026-10-29.
 
 ```sh
-gs://eqtl_catalogue_data/r8/prod/20260822T223458/config/eqtl_catalogue_ingestion.yaml # DAG config of the run
-gs://eqtl_catalogue_data/r8/prod/20260822T223458/docs/
-gs://eqtl_catalogue_data/r8/prod/20260822T223458/output/study_index/
-gs://eqtl_catalogue_data/r8/prod/20260822T223458/output/credible_set/
+gs://eqtl_catalogue_data/r8/prod/20261029T162303/config/eqtl_catalogue_ingestion.yaml # DAG config of the run 20260822T223458
+gs://eqtl_catalogue_data/r8/prod/20261029T162303/config/patch_pubmed_id.py          # patch of pubmedId
+gs://eqtl_catalogue_data/r8/prod/20261029T162303/docs/
+gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/study_index/
+gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/credible_set/
 ```
+
+The release reads `r8/prod/20261029T162303/`. It is the DAG run `r8/prod/20260822T223458/` with `pubmedId` of the study index patched (see [Patch of 2026-10-29](#patch-of-2026-10-29)); its credible sets are the same files. `r8/prod/20260822T223458/` keeps the DAG output unchanged.
 
 Data contained in the run is the [eQTL Catalogue](https://www.ebi.ac.uk/eqtl/) release 8 SuSiE fine-mapping, ingested as a study index and credible sets. Both the public and the PPP release read this run. The eQTL Catalogue r8 already contains GTEx v10, IBDverse and MAGE, so they are not ingested on their own.
 
@@ -55,7 +58,13 @@ The step ([`eqtl_catalogue.py`](https://github.com/opentargets/gentropy/blob/v3.
 - Chromosomes `1` to `22` and `X`.
 - 195,162 credible sets are flagged `Subsignificant p-value`.
 - The posterior probabilities of a credible set sum to 0.95 to 1 for 99% of sets. 2,182 sets sum to less than 0.94, mostly in QTS000055 (1,311) and QTS000044 (736), where members with non-ATGC alleles were removed.
-- Known issues: `pubmedId` is a number written as a float string (`3.2913098E7` for PubMed 32913098), and it is `NaN` for the 100,256 studies of `AFR_LCL`.
+- `pubmedId` is null for the 100,256 studies of `AFR_LCL`, which has no PubMed id in the eQTL Catalogue metadata.
+
+## Patch of 2026-10-29
+
+gentropy `v3.4.0-dev.4` wrote `pubmedId` as a float string (`3.2913098E7` for PubMed 32913098) and as `NaN` where the metadata has `NA`: `Session.load_data` read the metadata URL with pandas, which made the `pmid` column float. `config/patch_pubmed_id.py` rewrites `pubmedId` as the whole number (`32913098`) and `NaN` as null, with pyarrow. Other columns, the column types and the row order are unchanged. The gentropy fix is on the branch `fix/load-data-url-dtypes`.
+
+Run as `python patch_pubmed_id.py <study_index of 20260822T223458>/part-00000-fc3acb61-c698-4359-b9e6-f78391a6927d-c000.snappy.parquet part-00000.snappy.parquet`.
 
 ## Outputs
 
@@ -72,7 +81,7 @@ One row per dataset and molecular trait.
 | `geneId` | `string` | Ensembl gene id of the molecular trait. |
 | `biosampleFromSourceId` | `string` | Tissue or cell type ontology term (UBERON, CL, EFO). |
 | `condition` | `string` | Condition of the samples, e.g. `naive`, `sepsis`, `LPS_24h`. |
-| `pubmedId` | `string` | PubMed id of the study, as a float string (see Known issues). |
+| `pubmedId` | `string` | PubMed id of the study; null for `AFR_LCL`. |
 | `nSamples` | `integer` | Sample size of the dataset. |
 | `summarystatsLocation` | `string` | eQTL Catalogue FTP folder of the summary statistics of the dataset. They are not ingested. |
 | `hasSumstats` | `boolean` | `true`. |
@@ -104,7 +113,8 @@ One row per credible set, in the gentropy v3 [`StudyLocus`](https://github.com/o
 
 ### 2026-10-29
 
-- chore: copy the r8 run of 2026-08-22 from `gs://eqtl_catalogue_data/r8/` to `gs://eqtl_catalogue_data/r8/prod/20260822T223458/` (`config/`, `docs/`, `output/`). The public release now reads r8 from the run folder instead of r7, and no longer reads GTEx v10, IBDverse and MAGE on their own; the PPP release reads the same run. The r7 outputs and the other old folders at the root of the bucket are described in the README of earlier commits.
+- fix: patch `pubmedId` of the r8 study index into `gs://eqtl_catalogue_data/r8/prod/20261029T162303/`, which the releases read.
+- chore: copy the r8 run of 2026-08-22 from `gs://eqtl_catalogue_data/r8/` to `gs://eqtl_catalogue_data/r8/prod/20260822T223458/` (`config/`, `docs/`, `output/`). The public release now reads r8 instead of r7, and no longer reads GTEx v10, IBDverse and MAGE on their own; the PPP release reads the same run. The r7 outputs and the other old folders at the root of the bucket are described in the README of earlier commits.
 
 ### 2025-02-05
 
