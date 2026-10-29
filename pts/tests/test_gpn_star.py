@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from pts.schemas.variant_annotation import variant_effect_dtype
 from pts.transformers.variant.gpn_star import (
+    KEY,
     METHOD,
     GpnStarCutoffs,
     add_gpn_star,
@@ -233,3 +234,24 @@ def test_add_gpn_star_on_multichunk_frame() -> None:
     result = add_gpn_star(chunked, scores)
     assert result.equals(add_gpn_star(pl.concat([first, second]), scores))
     assert [len(effects or []) for effects in result['variantEffect'].to_list()] == [2, 1, 0]
+
+
+@pytest.mark.skipif(pl.thread_pool_size() < 2, reason='a single-threaded join yields one chunk')
+def test_add_gpn_star_on_a_batch_mixing_matched_and_unmatched_rows(tmp_path: Path) -> None:
+    positions = range(1, 5001)
+    file = _write_scores(tmp_path / 'llr_chr1.parquet', [(position, 'A', 'C', -1.0) for position in positions])
+    old = [_effect('VEP')]
+    frame = _index([
+        (position, 'A', 'C' if position % 2 else 'G', [None, [], old][position % 3]) for position in positions
+    ])
+    scores = read_gpn_star(file, frame['position'].unique(), CUTOFFS)
+    assert frame.join(scores, on=KEY, how='left', maintain_order='left')['gpnStarEffect'].n_chunks() > 1
+    result = add_gpn_star(frame, scores)
+    assert result.select(KEY).equals(frame.select(KEY))
+    for position, before, after in zip(
+        positions, frame['variantEffect'].to_list(), result['variantEffect'].to_list(), strict=True
+    ):
+        if position % 2:
+            assert [effect['method'] for effect in after] == [effect['method'] for effect in before or []] + [METHOD]
+        else:
+            assert after == before

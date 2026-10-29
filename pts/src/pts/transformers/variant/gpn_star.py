@@ -143,7 +143,7 @@ def read_gpn_star(file: str, positions: pl.Series, cutoffs: GpnStarCutoffs) -> p
 
 def add_gpn_star(frame: pl.DataFrame, scores: pl.DataFrame) -> pl.DataFrame:
     """Append the matching GPN-Star effect to the variant effects of each row of `frame`."""
-    joined = frame.join(scores, on=KEY, how='left', maintain_order='left')
+    joined = frame.join(scores, on=KEY, how='left', maintain_order='left').rechunk()
     effects = pl.col('variantEffect')
     added = pl.col('gpnStarEffect')
     return joined.select(
