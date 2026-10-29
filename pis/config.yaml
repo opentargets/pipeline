@@ -718,11 +718,11 @@ steps:
       destination: input/gwas/credible_set/gcss_susie
 
     - name: copy_many finngen study
-      sources: gs://finngen_data/r12/study_index/*.parquet
+      sources: gs://finngen_data/gwas/prod/20260526T131014/output/study_index/*.parquet
       destination: input/gwas/study/finngen
 
     - name: copy_many finngen credible sets
-      sources: gs://finngen_data/r12/credible_set_datasets/susie/*.parquet
+      sources: gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/*.parquet
       destination: input/gwas/credible_set/finngen
   ##################################################################################################
 
