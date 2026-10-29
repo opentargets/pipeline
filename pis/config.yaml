@@ -694,13 +694,13 @@ steps:
       destination: input/gwas/credible_set/gcca
 
     - name: copy_many GCSS pics study
-      sources: gs://gwas_catalog_sumstats_pics/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/study_index/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_pics
 
     - name: copy_many GCSS pics credible sets
-      sources: gs://gwas_catalog_sumstats_pics/credible_sets/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/credible_sets/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_pics
