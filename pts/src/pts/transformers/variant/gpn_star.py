@@ -56,15 +56,16 @@ def normalise_gpn_star(llr: pl.Expr, cutoffs: GpnStarCutoffs) -> pl.Expr:
 
 def assess_gpn_star(llr: pl.Expr, cutoffs: GpnStarCutoffs) -> pl.Expr:
     """Label the score by the constraint bin it falls into."""
+    value = llr.cast(pl.Float64)
     return (
         pl
-        .when(llr >= cutoffs.top_10_percent)
+        .when(value >= cutoffs.top_10_percent)
         .then(pl.lit('not constrained'))
-        .when(llr >= cutoffs.top_1_percent)
+        .when(value >= cutoffs.top_1_percent)
         .then(pl.lit('constrained (top 10%)'))
-        .when(llr >= cutoffs.top_0_1_percent)
+        .when(value >= cutoffs.top_0_1_percent)
         .then(pl.lit('constrained (top 1%)'))
-        .when(llr.is_not_null())
+        .when(value.is_not_null())
         .then(pl.lit('constrained (top 0.1%)'))
     )
 
@@ -118,6 +119,7 @@ def read_gpn_star(file: str, positions: pl.Series, cutoffs: GpnStarCutoffs) -> p
         .scan_parquet(file)
         .select('pos', 'ref', 'alt', 'llr_calibrated')
         .filter(pl.col('pos').is_in(positions.cast(pl.Int64).implode()))
+        .filter(llr.is_not_null() & llr.is_not_nan())
         .select(
             pl.col('pos').cast(pl.Int32).alias('position'),
             pl.col('ref').alias('referenceAllele'),

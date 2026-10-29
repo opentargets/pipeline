@@ -255,3 +255,29 @@ def test_add_gpn_star_on_a_batch_mixing_matched_and_unmatched_rows(tmp_path: Pat
             assert [effect['method'] for effect in after] == [effect['method'] for effect in before or []] + [METHOD]
         else:
             assert after == before
+
+
+def test_read_gpn_star_drops_unscored_rows(tmp_path: Path) -> None:
+    file = tmp_path / 'llr_chr1.parquet'
+    pl.DataFrame(
+        {
+            'pos': [100, 100, 100],
+            'ref': ['A'] * 3,
+            'alt': ['C', 'G', 'T'],
+            'llr_calibrated': [-1.0, None, float('nan')],
+        },
+        schema={'pos': pl.Int64, 'ref': pl.String, 'alt': pl.String, 'llr_calibrated': pl.Float32},
+    ).write_parquet(file)
+    result = read_gpn_star(str(file), pl.Series([100], dtype=pl.Int32), CUTOFFS)
+    assert result['alternateAllele'].to_list() == ['C']
+
+
+def test_assess_and_normalise_agree_at_a_float32_cutoff() -> None:
+    cutoffs = GpnStarCutoffs(top_10_percent=-0.1, top_1_percent=-3.3, top_0_1_percent=-6.3, minimum=-13.7)
+    frame = pl.DataFrame({'llr': [-0.1, -3.3, -6.3]}, schema={'llr': pl.Float32})
+    result = frame.select(
+        assess_gpn_star(pl.col('llr'), cutoffs).alias('assessment'),
+        normalise_gpn_star(pl.col('llr'), cutoffs).alias('score'),
+    )
+    for assessment, score in result.iter_rows():
+        assert (assessment == 'not constrained') == (score == 0.0)

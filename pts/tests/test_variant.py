@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,6 +14,7 @@ import numpy as np
 import polars as pl
 import pytest
 import yaml
+from loguru import logger
 from pydantic import ValidationError
 
 from pts.schemas.variant import variant_schema
@@ -675,6 +677,18 @@ def test_variant_step_without_a_gpn_star_file_for_a_chromosome(tmp_path):
     assert not scored.filter(pl.col('chromosome') == '1').equals(plain.filter(pl.col('chromosome') == '1'))
 
 
+def test_variant_step_warns_about_a_missing_standard_chromosome(tmp_path):
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level='WARNING', format='{message}')
+    try:
+        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+    finally:
+        logger.remove(sink_id)
+    assert [m for m in messages if 'GPN-Star' in m and 'chromosome 2' in m]
+    assert not [m for m in messages if 'chromosome 1 ' in m]
+
+
 def test_variant_step_needs_cutoffs_with_a_gpn_star_source(tmp_path):
     with pytest.raises(ValueError, match='cut-offs'):
         variant(
@@ -730,6 +744,24 @@ def test_variant_configuration_matches_models():
     VariantSettings.model_validate(task['settings'])
     assert task['source']['gpn_star'] == 'input/variant/gpn_star'
     GpnStarCutoffs.model_validate(task['settings']['gpn_star'])
+
+
+def test_gpn_star_cutoffs_are_in_step_with_the_revision():
+    root = Path(__file__).parents[2]
+    base_text = (root / 'pts' / 'config.yaml').read_text()
+    override_text = (root / 'orchestration/src/orchestration/dags/config/ppp/pts.override.yaml').read_text()
+    revision = yaml.safe_load((root / 'pis' / 'config.yaml').read_text())['scratchpad']['gpn_star_revision']
+
+    def variant_task(text: str) -> dict:
+        steps = yaml.safe_load(text)['steps']['variant']
+        [task] = [spec for spec in steps if spec.get('transformer') == 'variant']
+        return task
+
+    base, override = variant_task(base_text), variant_task(override_text)
+    assert override['source']['gpn_star'] == base['source']['gpn_star']
+    assert override['settings']['gpn_star'] == base['settings']['gpn_star']
+    for text in (base_text, override_text):
+        assert re.findall(r'gpn-star-scores@([0-9a-f]{40})', text) == [revision]
 
 
 @pytest.mark.parametrize(

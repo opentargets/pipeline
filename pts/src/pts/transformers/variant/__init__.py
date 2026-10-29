@@ -124,6 +124,9 @@ def parse_parts(
     return by_chromosome
 
 
+STANDARD = {*(str(number) for number in range(1, 23)), 'X', 'Y'}
+
+
 def annotate(
     frame: pl.DataFrame,
     variant_annotations: list[pl.DataFrame],
@@ -194,6 +197,8 @@ def variant(
                     else pl.DataFrame(schema=variant_schema)
                     for located in annotation_parts
                 ]
+                if options.gpn_star is not None and chromosome not in gpn_star_by_chromosome and chromosome in STANDARD:
+                    logger.warning('No GPN-Star scores for chromosome {}', chromosome)
                 gpn_star = (
                     read_gpn_star(gpn_star_by_chromosome[chromosome], frame['position'].unique(), options.gpn_star)
                     if chromosome in gpn_star_by_chromosome and options.gpn_star is not None
