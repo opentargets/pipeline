@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from google.cloud import batch_v1
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from orchestration.models.secret import Secrets
 
@@ -15,6 +15,8 @@ class EnvironmentSpec(BaseModel):
         variables (dict[str, str] | None): Optional dictionary of environment variable(s) for the task.
         secrets (Secrets | None): Optional secrets to be added to the environment variables.
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     variables: dict[str, str] | None = None
     """Optional dictionary of environment variable(s) for the task."""
@@ -52,6 +54,8 @@ class EnvironmentRegistrySpec(BaseModel):
             an EnvironmentSpec object representing a single environment (all variable(s) for a single task).
             Size of the list will be equal to the number of tasks running.
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     environments: list[EnvironmentSpec]
     """List of environment variable(s). Each element of the list is
