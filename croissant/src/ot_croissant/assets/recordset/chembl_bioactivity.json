@@ -1,0 +1,124 @@
+[
+  {
+    "id": "actionType",
+    "description": "Effect of the molecule on its target in this measurement (e.g., INHIBITOR)"
+  },
+  {
+    "id": "activityId",
+    "description": "ChEMBL activity identifier, unique to each measurement",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "assayDescription",
+    "description": "ChEMBL description of the assay"
+  },
+  {
+    "id": "assayId",
+    "description": "ChEMBL assay identifier"
+  },
+  {
+    "id": "assayOrganism",
+    "description": "Organism of the protein or system the assay used, where ChEMBL records it (e.g., Rattus norvegicus for a rat homologue)"
+  },
+  {
+    "id": "assayType",
+    "description": "ChEMBL assay type: B (binding) or F (functional)"
+  },
+  {
+    "id": "assayVariantMutation",
+    "description": "Mutation of the target protein used in the assay"
+  },
+  {
+    "id": "complexFlag",
+    "description": "Whether the target has several components and no binding site, so the measurement cannot be assigned to a single one"
+  },
+  {
+    "id": "confidenceScore",
+    "description": "ChEMBL confidence (0-9) that the assay target is correctly assigned: 9, 7 and 5 for the target itself, 8, 6 and 4 for a homologue"
+  },
+  {
+    "id": "docType",
+    "description": "Type of the source document (e.g., PUBLICATION, DATASET)"
+  },
+  {
+    "id": "documentId",
+    "description": "ChEMBL identifier of the source document"
+  },
+  {
+    "id": "doi",
+    "description": "DOI of the source document"
+  },
+  {
+    "id": "le",
+    "description": "Ligand efficiency: binding energy per heavy atom (kcal/mol per heavy atom), from ChEMBL. Empty where ChEMBL computes none"
+  },
+  {
+    "id": "lle",
+    "description": "Lipophilic ligand efficiency: pChEMBL value minus the calculated logP (ALogP), from ChEMBL. Empty where ChEMBL computes none"
+  },
+  {
+    "id": "measurementClass",
+    "description": "What the measurement quantifies: affinity (Ki, Kd), inhibition (IC50) or functional_potency (EC50, AC50, XC50, Potency, ED50)"
+  },
+  {
+    "id": "moleculeId",
+    "description": "ChEMBL identifier of the tested molecule. Most tested molecules are not drugs or clinical candidates, so most are absent from the drug/clinical candidates dataset"
+  },
+  {
+    "id": "pchemblValue",
+    "description": "Negative base-10 logarithm of the molar half-maximal response, concentration or potency, comparable across measurement types"
+  },
+  {
+    "id": "pubmedId",
+    "description": "PubMed identifier of the source document"
+  },
+  {
+    "id": "standardType",
+    "description": "Standardised type of the measurement (e.g., IC50)"
+  },
+  {
+    "id": "standardUnits",
+    "description": "Units of the standardised value (e.g., nM)"
+  },
+  {
+    "id": "standardValue",
+    "description": "Standardised value of the measurement"
+  },
+  {
+    "id": "targetChemblId",
+    "description": "ChEMBL target identifier"
+  },
+  {
+    "id": "targetComponents",
+    "description": "Protein components of the ChEMBL target: one entry per component and Open Targets target it maps to, or one entry with no target identifier when the component does not map"
+  },
+  {
+    "id": "targetComponents/approvedSymbol",
+    "description": "Approved gene symbol of the component"
+  },
+  {
+    "id": "targetComponents/inBindingSite",
+    "description": "Whether ChEMBL records the component in the binding site of the target"
+  },
+  {
+    "id": "targetComponents/targetId",
+    "description": "Open Targets target identifier of the component; empty when the component does not map to an Ensembl gene",
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "targetComponents/uniprotId",
+    "description": "UniProt accession of the component"
+  },
+  {
+    "id": "targetName",
+    "description": "ChEMBL preferred name of the target"
+  },
+  {
+    "id": "targetType",
+    "description": "Classification of the ChEMBL target (e.g., SINGLE PROTEIN, PROTEIN COMPLEX)"
+  },
+  {
+    "id": "year",
+    "description": "Publication year of the source document"
+  }
+]
