@@ -15,19 +15,18 @@ steps:
       transformer: lof_curation
   ##################################################################################################
 
-  #: FOLDX STEP :##################################################################################
-  foldx:
+  #: VARIANT STEP :################################################################################
+  variant:
     - name: transform FoldX annotations
       source: input/variant/foldx
       destination: intermediate/variant/foldx
       transformer: foldx
       settings:
         plddt_threshold: 0.7
-  ##################################################################################################
 
-  #: VARIANT STEP :################################################################################
-  variant:
     - name: transform variant index
+      requires:
+        - transform FoldX annotations
       transformer: variant
       source:
         vep: intermediate/variant_annotation

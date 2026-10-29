@@ -640,9 +640,9 @@ def test_variant_step_rejects_an_empty_annotation_source(tmp_path, source):
 
 def test_variant_configuration_matches_models():
     config = yaml.safe_load((Path(__file__).parents[1] / 'config.yaml').read_text())
-    [task] = config['steps']['variant']
-    TransformSpec.model_validate(task)
-    assert task['transformer'] == 'variant'
+    for spec in config['steps']['variant']:
+        TransformSpec.model_validate(spec)
+    [task] = [spec for spec in config['steps']['variant'] if spec['transformer'] == 'variant']
     VariantSource.model_validate(task['source'])
     VariantDestination.model_validate(task['destination'])
     VariantSettings.model_validate(task['settings'])
