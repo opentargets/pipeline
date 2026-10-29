@@ -130,6 +130,14 @@ def test_llr_histogram_sums_files_and_rounds(tmp_path: Path) -> None:
     assert histogram.to_dict(as_series=False) == {'llr': [-2.0, -1.0], 'count': [1, 3]}
 
 
+def test_llr_histogram_ignores_unscored_rows(tmp_path: Path) -> None:
+    file = tmp_path / 'llr_chr1.parquet'
+    pl.DataFrame({'llr_calibrated': [-1.0, None, float('nan')]}, schema={'llr_calibrated': pl.Float32}).write_parquet(
+        file
+    )
+    assert llr_histogram([str(file)]).to_dict(as_series=False) == {'llr': [-1.0], 'count': [1]}
+
+
 def _three_alts(position: int) -> list[tuple[int, str, str, float]]:
     return [(position, 'A', alt, -float(position) / 100) for alt in 'CGT']
 

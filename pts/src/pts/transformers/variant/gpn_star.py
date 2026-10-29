@@ -80,6 +80,7 @@ def llr_histogram(files: list[str]) -> pl.DataFrame:
         pl
         .scan_parquet(file)
         .select(pl.col('llr_calibrated').cast(pl.Float64).round(3).alias('llr'))
+        .filter(pl.col('llr').is_not_null() & pl.col('llr').is_not_nan())
         .group_by('llr')
         .agg(pl.len().cast(pl.UInt64).alias('count'))
         .collect(engine='streaming')
