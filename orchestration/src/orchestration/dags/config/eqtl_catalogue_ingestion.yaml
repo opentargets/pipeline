@@ -5,8 +5,8 @@ environment_specs:
       metadata_uri: "https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/fd99d45d3e433dcdf3c3d0acb4db0b7d5e8a7bd3/data_tables/dataset_metadata_r8.tsv"
       credible_set_glob: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626/susie/QTS*/QTD*/QTD*.credible_sets.parquet
       lbf_glob: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626/susie/QTS*/QTD*/QTD*.lbf_variable.parquet
-      study_index_output_path: gs://eqtl_catalogue_data/r8/study_index/
-      credible_set_output_path: gs://eqtl_catalogue_data/r8/credible_set
+      study_index_output_path: gs://eqtl_catalogue_data/r8/prod/20260822T223458/output/study_index/
+      credible_set_output_path: gs://eqtl_catalogue_data/r8/prod/20260822T223458/output/credible_set
 env: Prod
 
 dataproc:

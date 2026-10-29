@@ -86,8 +86,9 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 
-upload-eqtl-catalogue-bucket-readme: ## Upload eqtl_catalogue_data readme to the bucket
-	@gcloud storage rsync docs/datasources/eqtl_catalogue_data gs://eqtl_catalogue_data/docs
+upload-eqtl-catalogue-readme: ## Upload the eqtl_catalogue_data readme to a run folder: make upload-eqtl-catalogue-readme BUCKET=gs://eqtl_catalogue_data/r8/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtl-catalogue-readme BUCKET=gs://eqtl_catalogue_data/r8/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/eqtl_catalogue_data $(BUCKET)/docs
 
 upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
 	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data gs://ukb_ppp_eur_data/docs
