@@ -4,7 +4,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \
-				upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
+				upload-eqtl-catalogue-readme upload-ukb-ppp-bucket-readme \
 				upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 				upload-finngen-meta-readme upload-decode-bucket-readme
@@ -124,7 +124,7 @@ upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
 
 update-bucket-docs: ## Upload all datasource readmes to their buckets
-update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
+update-bucket-docs: upload-ukb-ppp-bucket-readme \
 									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 										upload-finngen-meta-readme upload-decode-bucket-readme
