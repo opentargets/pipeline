@@ -11,10 +11,10 @@ from __future__ import annotations
 import re
 
 import polars as pl
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
+from pts.transformers.utils.dataset import list_parts
 from pts.transformers.utils.variant import hash_variant_index_ids
 from pts.transformers.variant_utils.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant_utils.index import fill_null_arrays, normalise_score
@@ -28,10 +28,7 @@ _xref_dtype = variant_schema['dbXrefs']
 
 def list_vep_parts(path: str) -> list[str]:
     """The VEP JSON parts below `path`, or `path` itself when it is a file."""
-    handle = StorageHandle(path)
-    if not handle.stat().is_dir:
-        return [path]
-    parts = sorted(part for part in handle.glob('**/*.json*') if VEP_PART.search(part))
+    parts = [part for part in list_parts(path, '**/*.json*') if VEP_PART.search(part)]
     if not parts:
         raise ValueError(f'No VEP JSON files found in {path}')
     return parts

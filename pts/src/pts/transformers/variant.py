@@ -157,18 +157,19 @@ def variant(
         for path in sources.variant_annotations:
             logger.info('Locating variant annotations in {}', path)
             annotation_parts.append(annotation_parts_by_chromosome(path))
-        keys = amino_acid_keys(index).collect(engine='streaming')
         amino_acid_annotations = []
-        for path in sources.amino_acid_annotations:
-            logger.info('Reading amino-acid annotations from {}', path)
-            dataset = require_rows(scan_dataset(path), path).select(
-                'uniprotAccession', 'aminoAcidChange', 'variantEffect'
-            )
-            amino_acid_annotations.append(
-                dataset.join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi').collect(
-                    engine='streaming'
+        if sources.amino_acid_annotations:
+            keys = amino_acid_keys(index).collect(engine='streaming')
+            for path in sources.amino_acid_annotations:
+                logger.info('Reading amino-acid annotations from {}', path)
+                dataset = require_rows(scan_dataset(path), path).select(
+                    'uniprotAccession', 'aminoAcidChange', 'variantEffect'
                 )
-            )
+                amino_acid_annotations.append(
+                    dataset.join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi').collect(
+                        engine='streaming'
+                    )
+                )
 
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
             for number, chromosome in enumerate(sorted(by_chromosome)):

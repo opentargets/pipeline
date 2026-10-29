@@ -432,7 +432,7 @@ def test_read_variant_annotations_inserts_missing_columns_and_keeps_indexed_loci
 
 
 def test_annotation_parts_require_parquet_parts(tmp_path):
-    with pytest.raises(ValueError, match='No Parquet'):
+    with pytest.raises(ValueError, match=r'no \*\*/\*\.parquet files found'):
         annotation_parts_by_chromosome(str(tmp_path))
 
 

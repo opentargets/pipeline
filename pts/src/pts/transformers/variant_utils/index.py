@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import polars as pl
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.variant import variant_schema
+from pts.transformers.utils.dataset import list_parts
 from pts.transformers.utils.spark_math import divide
 from pts.transformers.utils.variant import hash_variant_index_ids
 
@@ -86,12 +86,8 @@ def require_rows(frame: pl.LazyFrame, path: str) -> pl.LazyFrame:
 
 def annotation_parts_by_chromosome(path: str) -> dict[str, list[str]]:
     """The Parquet parts of an annotation dataset that hold each chromosome."""
-    handle = StorageHandle(path)
-    parts = sorted(handle.glob('**/*.parquet')) if handle.stat().is_dir else [path]
-    if not parts:
-        raise ValueError(f'No Parquet annotation parts found in {path!r}')
     frame = pl.scan_parquet(
-        parts,
+        list_parts(path, '**/*.parquet'),
         schema={'chromosome': pl.String},
         hive_partitioning=False,
         extra_columns='ignore',
