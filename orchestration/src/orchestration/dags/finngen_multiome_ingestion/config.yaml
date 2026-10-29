@@ -1,0 +1,56 @@
+---
+description: Open Targets Genetics — FinnGen multiome single-cell eQTL ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      finngen_multiome: gs://finngen-public-data-multiome
+    output: gs://finngen_data/multiome/prod/20261029T123632
+    scratchpad:
+      gentropy_version: 4.0.0-dev.5
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-finngen-multiome:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers: preempted secondary workers lose
+      # their shuffle data. Same shape as the gwas_catalog_top_hits cluster
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 4
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 128
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  ingestion:
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-multiome
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=finngen_multiome_ingestion \
+          "step.snp_files={{input.finngen_multiome}}/eQTL/finemapping/*.SUSIE.snp.tsv.gz" \
+          "step.cs_summary_files={{input.finngen_multiome}}/eQTL/finemapping/*.SUSIE.cred.tsv.gz" \
+          "step.nominal_files={{input.finngen_multiome}}/eQTL/cis_nominal/*.cis_nominal.tsv.gz" \
+          step.study_index_output_path={{output}}/output/study \
+          step.credible_set_output_path={{output}}/output/credible_set \
+          step.credible_set_variant_output_path={{output}}/output/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.spark_uri=yarn
