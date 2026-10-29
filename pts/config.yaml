@@ -34,10 +34,17 @@ steps:
           - input/variant/gnomad
         amino_acid_annotations:
           - intermediate/variant/foldx
+        gpn_star: input/variant/gpn_star
       destination:
         output: output/variant
       settings:
         hash_threshold: 300
+        # songlab/gpn-star-scores@204d08a92bdf07117f5d869db667c45f9029ed48: genome-wide quantiles 0.1 / 0.01 / 0.001 and minimum
+        gpn_star:
+          top_10_percent: -2.392
+          top_1_percent: -5.448
+          top_0_1_percent: -9.851
+          minimum: -13.698
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

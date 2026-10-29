@@ -21,6 +21,7 @@ from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
+from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,
@@ -727,6 +728,8 @@ def test_variant_configuration_matches_models():
     VariantSource.model_validate(task['source'])
     VariantDestination.model_validate(task['destination'])
     VariantSettings.model_validate(task['settings'])
+    assert task['source']['gpn_star'] == 'input/variant/gpn_star'
+    GpnStarCutoffs.model_validate(task['settings']['gpn_star'])
 
 
 @pytest.mark.parametrize(
