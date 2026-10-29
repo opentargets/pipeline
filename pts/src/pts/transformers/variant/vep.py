@@ -16,8 +16,8 @@ from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
 from pts.transformers.utils.dataset import list_parts
 from pts.transformers.utils.variant import hash_variant_index_ids
-from pts.transformers.variant_utils.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
-from pts.transformers.variant_utils.index import fill_null_arrays, normalise_score
+from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
+from pts.transformers.variant.index import fill_null_arrays, normalise_score
 
 #: VEP data parts, optionally gzipped; excludes VEP's `<part>.json_warnings.txt`.
 VEP_PART = re.compile(r'\.jsonl?(\.gz)?$')

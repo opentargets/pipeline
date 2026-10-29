@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
-from pts.transformers.variant_utils.index import (
+from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,
     annotate_with_amino_acid_consequences,
@@ -38,7 +38,7 @@ from pts.transformers.variant_utils.index import (
     read_variant_annotations,
     require_rows,
 )
-from pts.transformers.variant_utils.vep import list_vep_parts, parse_vep, read_vep
+from pts.transformers.variant.vep import list_vep_parts, parse_vep, read_vep
 
 
 class VariantSource(BaseModel):

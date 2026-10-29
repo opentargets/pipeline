@@ -20,8 +20,8 @@ from pts.schemas.vep import vep_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_variant_index_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
-from pts.transformers.variant_utils.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
-from pts.transformers.variant_utils.index import (
+from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
+from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,
     annotate_with_amino_acid_consequences,
@@ -29,7 +29,7 @@ from pts.transformers.variant_utils.index import (
     normalise_score,
     read_variant_annotations,
 )
-from pts.transformers.variant_utils.vep import (
+from pts.transformers.variant.vep import (
     amino_acid_change,
     generate_dbxrefs,
     list_vep_parts,
