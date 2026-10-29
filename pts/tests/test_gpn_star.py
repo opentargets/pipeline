@@ -56,3 +56,8 @@ def test_assess_gpn_star(llr: float | None, expected: str | None) -> None:
 def test_cutoffs_must_be_ordered() -> None:
     with pytest.raises(ValidationError):
         GpnStarCutoffs(top_10_percent=-4, top_1_percent=-2, top_0_1_percent=-6, minimum=-10)
+
+
+def test_cutoffs_minimum_must_be_below_top_0_1_percent() -> None:
+    with pytest.raises(ValidationError):
+        GpnStarCutoffs(top_10_percent=-2, top_1_percent=-4, top_0_1_percent=-6, minimum=-6)

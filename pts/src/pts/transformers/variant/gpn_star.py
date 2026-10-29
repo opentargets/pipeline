@@ -28,8 +28,8 @@ class GpnStarCutoffs(BaseModel):
 
     @model_validator(mode='after')
     def _check_order(self) -> Self:
-        if not self.minimum <= self.top_0_1_percent < self.top_1_percent < self.top_10_percent:
-            raise ValueError('cut-offs must satisfy minimum <= top_0_1_percent < top_1_percent < top_10_percent')
+        if not self.minimum < self.top_0_1_percent < self.top_1_percent < self.top_10_percent:
+            raise ValueError('cut-offs must satisfy minimum < top_0_1_percent < top_1_percent < top_10_percent')
         return self
 
 
