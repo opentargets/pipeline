@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from pts.transformers.variant.gpn_star import GpnStarCutoffs, assess_gpn_star, normalise_gpn_star
+from pts.schemas.variant_annotation import variant_effect_dtype
+from pts.transformers.variant.gpn_star import (
+    METHOD,
+    GpnStarCutoffs,
+    add_gpn_star,
+    assess_gpn_star,
+    cutoffs_from_histogram,
+    gpn_star_files,
+    llr_histogram,
+    normalise_gpn_star,
+    read_gpn_star,
+)
 
 CUTOFFS = GpnStarCutoffs(top_10_percent=-2.0, top_1_percent=-4.0, top_0_1_percent=-6.0, minimum=-10.0)
 
@@ -61,3 +74,154 @@ def test_cutoffs_must_be_ordered() -> None:
 def test_cutoffs_minimum_must_be_below_top_0_1_percent() -> None:
     with pytest.raises(ValidationError):
         GpnStarCutoffs(top_10_percent=-2, top_1_percent=-4, top_0_1_percent=-6, minimum=-6)
+
+
+def _write_scores(path: Path, rows: list[tuple[int, str, str, float]]) -> str:
+    frame = pl.DataFrame(
+        {
+            'chrom': ['1'] * len(rows),
+            'pos': [row[0] for row in rows],
+            'ref': [row[1] for row in rows],
+            'alt': [row[2] for row in rows],
+            'llr_calibrated': [row[3] for row in rows],
+            'abs_llr_calibrated': [abs(row[3]) for row in rows],
+        },
+        schema={
+            'chrom': pl.String,
+            'pos': pl.Int64,
+            'ref': pl.String,
+            'alt': pl.String,
+            'llr_calibrated': pl.Float32,
+            'abs_llr_calibrated': pl.Float32,
+        },
+    )
+    frame.write_parquet(path)
+    return str(path)
+
+
+def test_gpn_star_files_by_chromosome(tmp_path: Path) -> None:
+    one = _write_scores(tmp_path / 'llr_chr1.parquet', [(1, 'A', 'C', -1.0)])
+    x = _write_scores(tmp_path / 'llr_chrX.parquet', [(1, 'A', 'C', -1.0)])
+    assert gpn_star_files(str(tmp_path)) == {'1': one, 'X': x}
+
+
+def test_gpn_star_files_reject_an_empty_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match='llr_chr'):
+        gpn_star_files(str(tmp_path))
+
+
+def test_cutoffs_from_histogram() -> None:
+    values = [float(v) for v in range(-10000, 0)]
+    histogram = pl.DataFrame(
+        {'llr': values, 'count': [1] * len(values)}, schema={'llr': pl.Float64, 'count': pl.UInt64}
+    )
+    cutoffs = cutoffs_from_histogram(histogram)
+    assert cutoffs.top_0_1_percent == -9991.0
+    assert cutoffs.top_1_percent == -9901.0
+    assert cutoffs.top_10_percent == -9001.0
+    assert cutoffs.minimum == -10000.0
+
+
+def test_llr_histogram_sums_files_and_rounds(tmp_path: Path) -> None:
+    first = _write_scores(tmp_path / 'a.parquet', [(1, 'A', 'C', -1.0004), (2, 'A', 'C', -1.0001)])
+    second = _write_scores(tmp_path / 'b.parquet', [(1, 'A', 'C', -1.0002), (2, 'A', 'C', -2.0)])
+    histogram = llr_histogram([first, second])
+    assert histogram.schema == pl.Schema({'llr': pl.Float64, 'count': pl.UInt64})
+    assert histogram.to_dict(as_series=False) == {'llr': [-2.0, -1.0], 'count': [1, 3]}
+
+
+def _three_alts(position: int) -> list[tuple[int, str, str, float]]:
+    return [(position, 'A', alt, -float(position) / 100) for alt in 'CGT']
+
+
+def test_read_gpn_star_keeps_requested_positions(tmp_path: Path) -> None:
+    file = _write_scores(tmp_path / 'llr_chr1.parquet', _three_alts(100) + _three_alts(200))
+    result = read_gpn_star(file, pl.Series([100], dtype=pl.Int32), CUTOFFS)
+    assert result.height == 3
+    assert result['position'].to_list() == [100] * 3
+    assert result.schema['position'] == pl.Int32
+    assert result.schema['gpnStarEffect'] == variant_effect_dtype.inner
+    effects = result['gpnStarEffect']
+    assert effects.struct.field('method').to_list() == [METHOD] * 3
+    assert effects.struct.field('score').dtype == pl.Float32
+
+
+def test_read_gpn_star_rejects_duplicates(tmp_path: Path) -> None:
+    file = _write_scores(tmp_path / 'llr_chr1.parquet', [(100, 'A', 'C', -1.0), (100, 'A', 'C', -2.0)])
+    with pytest.raises(ValueError, match='duplicate'):
+        read_gpn_star(file, pl.Series([100], dtype=pl.Int32), CUTOFFS)
+
+
+def _effect(method: str) -> dict[str, object]:
+    return {
+        'method': method,
+        'assessment': None,
+        'score': 0.5,
+        'assessmentFlag': None,
+        'targetId': None,
+        'normalisedScore': 0.5,
+    }
+
+
+def _index(rows: list[tuple[int, str, str, list[dict[str, object]] | None]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'position': [row[0] for row in rows],
+            'referenceAllele': [row[1] for row in rows],
+            'alternateAllele': [row[2] for row in rows],
+            'variantEffect': [row[3] for row in rows],
+        },
+        schema={
+            'position': pl.Int32,
+            'referenceAllele': pl.String,
+            'alternateAllele': pl.String,
+            'variantEffect': variant_effect_dtype,
+        },
+    )
+
+
+def _scores(rows: list[tuple[int, str, str]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'position': [row[0] for row in rows],
+            'referenceAllele': [row[1] for row in rows],
+            'alternateAllele': [row[2] for row in rows],
+            'gpnStarEffect': [_effect(METHOD) for _ in rows],
+        },
+        schema={
+            'position': pl.Int32,
+            'referenceAllele': pl.String,
+            'alternateAllele': pl.String,
+            'gpnStarEffect': variant_effect_dtype.inner,
+        },
+    )
+
+
+def test_add_gpn_star_matches_allele_not_just_position() -> None:
+    frame = _index([(100, 'A', 'G', []), (100, 'A', 'C', [])])
+    result = add_gpn_star(frame, _scores([(100, 'A', 'C'), (100, 'A', 'T')]))
+    assert [len(effects) for effects in result['variantEffect'].to_list()] == [0, 1]
+
+
+def test_add_gpn_star_skips_indels_and_keeps_rows() -> None:
+    old = [_effect('VEP')]
+    frame = _index([(100, 'A', 'C', old), (100, 'A', 'AT', old), (300, 'G', 'T', old)])
+    result = add_gpn_star(frame, _scores([(100, 'A', 'C')]))
+    assert result.columns == frame.columns
+    assert result.height == 3
+    assert result['alternateAllele'].to_list() == ['C', 'AT', 'T']
+    effects = result['variantEffect'].to_list()
+    assert effects[1] == old
+    assert effects[2] == old
+    assert [effect['method'] for effect in effects[0]] == ['VEP', METHOD]
+
+
+def test_add_gpn_star_on_multichunk_frame() -> None:
+    first = _index([(100, 'A', 'C', [_effect('VEP')])])
+    second = _index([(200, 'G', 'T', None), (300, 'G', 'T', [])])
+    scores = _scores([(100, 'A', 'C'), (200, 'G', 'T')])
+    chunked = pl.concat([first, second], rechunk=False)
+    assert chunked.n_chunks() > 1
+    result = add_gpn_star(chunked, scores)
+    assert result.equals(add_gpn_star(pl.concat([first, second]), scores))
+    assert [len(effects or []) for effects in result['variantEffect'].to_list()] == [2, 1, 0]
