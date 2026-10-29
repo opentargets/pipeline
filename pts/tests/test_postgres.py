@@ -26,7 +26,7 @@ from pts.postgres import (
     _build_restore_args,
     _build_select_sql,
     _check_archive_version,
-    _check_order_by,
+    _check_projection,
     _resolve_archive_member,
     read_dump_tables,
     restored_dump,
@@ -56,13 +56,38 @@ def test_an_ordered_read_says_so_in_the_sql() -> None:
 def test_ordering_by_a_column_outside_the_projection_is_caught_before_the_restore() -> None:
     """A SELECT DISTINCT can only order by what it selects, and a restore takes minutes."""
     with pytest.raises(PostgresError, match='not in its projection'):
-        _check_order_by({'warning_refs': ['warning_id']}, {'warning_refs': ['warnref_id']})
+        _check_projection({'warning_refs': ['warning_id']}, {'warning_refs': ['warnref_id']}, 'order_by')
 
 
 def test_ordering_a_table_that_is_not_being_read_is_caught() -> None:
     """Almost always a typo, and silently ignoring it would leave the read unordered."""
     with pytest.raises(PostgresError, match='not one of the tables being read'):
-        _check_order_by({'warning_refs': None}, {'warning_ref': ['warnref_id']})
+        _check_projection({'warning_refs': None}, {'warning_ref': ['warnref_id']}, 'order_by')
+
+
+def test_float_columns_are_cast_in_the_select_list() -> None:
+    """An unconstrained numeric is read as a float, under its own name."""
+    assert _build_select_sql(
+        'activities', 'public', ['activity_id', 'pchembl_value'], float_columns=['pchembl_value']
+    ) == (
+        'SELECT DISTINCT "activity_id", "pchembl_value"::double precision AS "pchembl_value" FROM "public"."activities"'
+    )
+
+
+@pytest.mark.parametrize(
+    ('tables', 'float_columns', 'message'),
+    [
+        ({'activities': ['activity_id']}, {'activities': ['pchembl_value']}, 'not in its projection'),
+        ({'activities': None}, {'activities': ['pchembl_value']}, 'columns are not listed'),
+        ({'activities': ['pchembl_value']}, {'ligand_eff': ['le']}, 'not one of the tables being read'),
+    ],
+    ids=['column_not_read', 'table_read_whole', 'table_not_read'],
+)
+def test_float_columns_outside_the_projection_are_caught_before_the_restore(
+    tables: dict, float_columns: dict, message: str
+) -> None:
+    with pytest.raises(PostgresError, match=message):
+        _check_projection(tables, float_columns, 'float_columns', needs_columns=True)
 
 
 def test_restores_only_the_requested_tables_and_skips_the_indexes() -> None:
@@ -143,6 +168,8 @@ class TestRoundTrip:
         try:
             rows = f"SELECT i, 'x' || (i % {DISTINCT_TXT}) FROM generate_series(1, {ROWS}) i"  # noqa: S608 fixture
             server.psql(f'CREATE SCHEMA demo;CREATE TABLE demo.t (id int, txt text);INSERT INTO demo.t {rows};')
+            # an unconstrained numeric whose scale varies by row, as in ChEMBL's activities
+            server.psql('CREATE TABLE demo.n (v numeric);INSERT INTO demo.n VALUES (41), (7.39), (0.001);')
             dump = path / 'demo.dmp'
             subprocess.run([str(server.bin_path / 'pg_dump'), '-Fc', '-f', str(dump), server.get_uri()], check=True)
             yield dump
@@ -170,6 +197,13 @@ class TestRoundTrip:
             scratch_root=tmp_path,
         )['t']
         assert df.get_column('id').to_list() == sorted(df.get_column('id').to_list())
+
+    def test_a_mixed_scale_numeric_reads_as_float(self, dump: Path, tmp_path: Path) -> None:
+        df = read_dump_tables(
+            str(dump), {'n': ['v']}, schema_name='demo', float_columns={'n': ['v']}, scratch_root=tmp_path
+        )['n']
+        assert df.schema['v'] == pl.Float64
+        assert sorted(df['v'].to_list()) == [0.001, 7.39, 41.0]
 
     def test_reads_are_distinct_end_to_end(self, dump: Path, tmp_path: Path) -> None:
         """Projecting to ``txt`` alone collapses the rows, as it does for the real sources."""
