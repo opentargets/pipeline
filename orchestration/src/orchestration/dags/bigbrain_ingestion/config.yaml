@@ -7,7 +7,7 @@ environments:
     input:
       # the platform run of the target index, used to resolve sQTL junctions annotated to several genes
       platform: gs://open-targets-pipeline-runs/do/platform-2610-2
-    output: gs://bigbrain_data/prod/20261029T124825
+    output: gs://bigbrain_data/prod/20261029T125742
     scratchpad:
       gentropy_version: 4.0.0-dev.5
       # Zenodo records of the BigBrain eQTL and sQTL releases
