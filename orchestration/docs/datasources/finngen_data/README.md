@@ -44,6 +44,18 @@ The output datasets are:
 
 The configuration of the dataproc infrastructure and individual step parameters can be found in `finngen_ingestion.yaml` file.
 
+## FinnGen multiome
+
+The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](https://www.nature.com/articles/s41586-026-11078-2) is read from `gs://finngen-public-data-multiome/eQTL/` and ingested by the `finngen_multiome_ingestion` DAG, with the gentropy step [`finngen_multiome_ingestion`](https://github.com/opentargets/gentropy/pull/1307). The DAG config is `dags/finngen_multiome_ingestion/config.yaml`. Each run writes to its own folder:
+
+```sh
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/config/   # DAG config of the run
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/bin/      # gentropy CLI and cluster init script of the run
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/study/
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/credible_set/
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/credible_set_variant/
+```
+
 ## Changelog
 
 ### 2025-02-05
@@ -61,3 +73,7 @@ The configuration of the dataproc infrastructure and individual step parameters 
 ### 2026-05-20
 
 - [feat: rerun study index generation to include latest EFO changes](https://github.com/opentargets/issues/issues/4344)
+
+### 2026-10-29
+
+- feat: add the `finngen_multiome_ingestion` DAG, a StagingDagConfig DAG on gentropy `v4.0.0-dev.5` writing to `gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/`.
