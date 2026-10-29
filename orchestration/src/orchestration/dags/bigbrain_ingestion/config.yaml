@@ -1,0 +1,95 @@
+---
+description: Open Targets Genetics — BigBrain brain eQTL and sQTL fine-mapping ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      # the platform run of the target index, used to resolve sQTL junctions annotated to several genes
+      platform: gs://open-targets-pipeline-runs/do/platform-2610-2
+    output: gs://bigbrain_data/prod/20261029T124825
+    scratchpad:
+      gentropy_version: 4.0.0-dev.5
+      # Zenodo records of the BigBrain eQTL and sQTL releases
+      eqtl_record: '17226890'
+      sqtl_record: '17153730'
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-bigbrain:
+      project_id: open-targets-genetics-dev
+      # the inputs are 10 to 34 MB gzipped files, read by one task each
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 2
+      worker_machine_type: n2d-highmem-8
+      worker_disk_size: 128
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  # the published fine-mapping and the sQTL junction-to-gene mapping, copied from Zenodo
+  # into source/ of the run, as Spark does not read https
+  download:
+    kind: vm
+    definition:
+      image: gcr.io/google.com/cloudsdktool/google-cloud-cli:588.0.0-alpine@sha256:44924be6dcf684d4e76922c5cb015950305e8ded844587f915dbaeefe290f545
+      machine_type: e2-standard-2
+      command: |
+        sh -c 'set -eu; \
+          for file in {{eqtl_record}}/BigBrain_cis_eQTL_finemapping.txt.gz \
+            {{sqtl_record}}/BigBrain_cis_sQTL_finemapping.txt.gz \
+            {{sqtl_record}}/BigBrain_cis_sQTL_EUR_top_assoc.tsv.gz; do \
+            curl -fsSL "https://zenodo.org/records/${file%%/*}/files/${file##*/}?download=1" -o /tmp/source.gz; \
+            gcloud storage cp /tmp/source.gz {{output}}/source/${file##*/}; \
+          done'
+
+  eqtl:
+    depends_on: [download]
+    kind: dataproc
+    definition:
+      cluster: otg-bigbrain
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=bigbrain_finemapping_ingestion \
+          step.qtl_type=eqtl \
+          step.finemapping_path={{output}}/source/BigBrain_cis_eQTL_finemapping.txt.gz \
+          step.study_index_path={{output}}/output/eqtl/study \
+          step.credible_set_path={{output}}/output/eqtl/credible_set \
+          step.credible_set_variant_path={{output}}/output/eqtl/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn
+
+  sqtl:
+    depends_on: [download]
+    kind: dataproc
+    definition:
+      cluster: otg-bigbrain
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=bigbrain_finemapping_ingestion \
+          step.qtl_type=sqtl \
+          step.finemapping_path={{output}}/source/BigBrain_cis_sQTL_finemapping.txt.gz \
+          step.top_assoc_path={{output}}/source/BigBrain_cis_sQTL_EUR_top_assoc.tsv.gz \
+          step.target_index_path={{input.platform}}/output/target \
+          step.study_index_path={{output}}/output/sqtl/study \
+          step.credible_set_path={{output}}/output/sqtl/credible_set \
+          step.credible_set_variant_path={{output}}/output/sqtl/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn
