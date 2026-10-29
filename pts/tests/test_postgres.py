@@ -282,8 +282,13 @@ CALL_SITES = {
         {'chembl': Path('chembl.tar.gz'), 'drugbank': Path('drugbank.csv.gz')},
         Path('out.parquet'),
     ),
+    'chembl_bioactivity': (
+        'pts.transformers.chembl_bioactivity',
+        {'chembl': Path('chembl.tar.gz'), 'target': Path('target')},
+        {'bioactivity': 'bioactivity', 'degradation': 'degradation'},
+    ),
 }
-"""The four transformers that restore a dump, with the arguments they take."""
+"""The transformers that restore a dump, with the arguments they take."""
 
 
 @pytest.mark.parametrize('transformer', list(CALL_SITES), ids=list(CALL_SITES))

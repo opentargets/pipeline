@@ -903,6 +903,17 @@ steps:
       destination: output/drug_mechanism_of_action
   ##################################################################################################
 
+  #: CHEMBL_BIOACTIVITY STEP :######################################################################
+  chembl_bioactivity:
+    - name: transform chembl_bioactivity
+      transformer: chembl_bioactivity
+      source:
+        chembl: input/chembl/chembl.tar.gz
+        target: output/target
+      destination:
+        bioactivity: output/chembl_bioactivity
+  ##################################################################################################
+
   #: CHEMBL_MOLECULE STEP :#########################################################################
   chembl_molecule:
     - name: transform chembl_molecule

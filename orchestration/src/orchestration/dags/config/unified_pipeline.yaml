@@ -336,6 +336,9 @@ steps:
   pts_drug_mechanism_of_action:
     depends_on:
       - pts_target
+  pts_chembl_bioactivity:
+    depends_on:
+      - pts_target
   pts_drug_molecule:
     depends_on:
       - pts_chemical_probes
