@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import polars as pl
 
+#: The `proteinIds` sources ChEMBL accessions are resolved through.
+UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
+
 
 def ensg_lookup(target: pl.LazyFrame) -> pl.LazyFrame:
     """Map each protein accession and approved symbol of a target to its ENSG id.
@@ -40,3 +43,27 @@ def tss_lut(target: pl.LazyFrame) -> pl.LazyFrame:
         pl.col('id').alias('geneId'),
         pl.coalesce(pl.col('tss'), genomic_tss).cast(pl.Int64).alias('tss'),
     )
+
+
+def chembl_accession_lookup(gene_df: pl.DataFrame) -> pl.DataFrame:
+    """Map each accession a ChEMBL target component can carry to its Ensembl gene id.
+
+    ChEMBL spells a target as a uniprot accession or an Ensembl gene id, so resolution
+    needs both lookups. `genes_by_id` covers the whole of `gene_df`, not just the rows
+    surviving the explode, which drops genes with no accession.
+
+    Args:
+        gene_df: The target dataset's `id` and `proteinIds`.
+
+    Returns:
+        Distinct (`geneId`, `uniprot_id`) pairs, in no particular order.
+    """
+    genes_by_uniprot = (
+        gene_df
+        .select(pl.col('id').alias('geneId'), pl.col('proteinIds').alias('protein'))
+        .explode('protein', empty_as_null=False, keep_nulls=False)
+        .filter(pl.col('protein').struct.field('source').is_in(UNIPROT_SOURCES))
+        .select('geneId', pl.col('protein').struct.field('id').alias('uniprot_id'))
+    )
+    genes_by_id = gene_df.select(pl.col('id').alias('geneId'), pl.col('id').alias('uniprot_id'))
+    return pl.concat([genes_by_uniprot, genes_by_id]).unique()
