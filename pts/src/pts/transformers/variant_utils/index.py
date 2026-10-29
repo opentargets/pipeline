@@ -90,8 +90,15 @@ def annotation_parts_by_chromosome(path: str) -> dict[str, list[str]]:
     parts = sorted(handle.glob('**/*.parquet')) if handle.stat().is_dir else [path]
     if not parts:
         raise ValueError(f'No Parquet annotation parts found in {path!r}')
+    frame = pl.scan_parquet(
+        parts,
+        schema={'chromosome': pl.String},
+        hive_partitioning=False,
+        extra_columns='ignore',
+        include_file_paths='_part',
+    )
     located = (
-        require_rows(pl.scan_parquet(parts, hive_partitioning=False, include_file_paths='_part'), path)
+        require_rows(frame, path)
         .select('_part', 'chromosome')
         .drop_nulls('chromosome')
         .unique()

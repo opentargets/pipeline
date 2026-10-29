@@ -449,6 +449,17 @@ def test_annotation_parts_are_grouped_by_the_chromosomes_they_hold(tmp_path):
     }
 
 
+def test_annotation_parts_tolerate_parts_with_different_columns(tmp_path):
+    pl.DataFrame({'chromosome': ['1']}).write_parquet(tmp_path / 'a.parquet')
+    pl.DataFrame({'chromosome': ['2'], 'extra': [1]}).write_parquet(tmp_path / 'b.parquet')
+    pl.DataFrame({'extra': [1], 'chromosome': ['1']}).write_parquet(tmp_path / 'c.parquet')
+    located = annotation_parts_by_chromosome(str(tmp_path))
+    assert {chromosome: [Path(part).name for part in parts] for chromosome, parts in located.items()} == {
+        '1': ['a.parquet', 'c.parquet'],
+        '2': ['b.parquet'],
+    }
+
+
 def test_add_annotation_removes_repeats_only_where_an_annotation_joined():
     """Spark's union removes repeats in the index's array; with nothing joined it keeps them."""
     repeated = [effect('VEP'), effect('VEP')]
