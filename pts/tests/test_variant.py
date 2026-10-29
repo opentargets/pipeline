@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
 from pts.tasks.transform import TransformSpec
-from pts.transformers.utils.variant import hash_variant_index_ids
+from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.index import (
@@ -366,13 +366,18 @@ def test_identifier_hashing():
         {'variantId': ['short', 'abcdefghij', 'missing', None], 'chromosome': ['1', '2', None, None]},
         schema={'variantId': pl.String, 'chromosome': pl.String},
     ).with_columns(position=pl.Series([1, 2, 3, None], dtype=pl.Int32))
-    hashed = frame.select(hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 10))
+    hashed = frame.select(hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 10))
     assert hashed.to_series().to_list() == [
         'short',
         'OTVAR_2_2_' + hashlib.md5(b'abcdefghij').hexdigest(),
         'OTVAR_' + hashlib.md5(b'missing').hexdigest(),
         None,
     ]
+
+
+def test_identifier_hashing_takes_both_coordinates_or_neither():
+    with pytest.raises(ValueError, match='both chromosome and position'):
+        hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'))
 
 
 def _rescale(score: float, low: float, high: float, minimum: float, maximum: float) -> float:

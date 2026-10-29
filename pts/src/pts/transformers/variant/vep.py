@@ -15,7 +15,7 @@ import polars as pl
 from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
 from pts.transformers.utils.dataset import list_parts
-from pts.transformers.utils.variant import hash_variant_index_ids
+from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.index import fill_null_arrays, normalise_score
 
@@ -361,7 +361,7 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
             variant_description(consequence, pl.col('transcriptConsequences')).alias('variantDescription'),
         )
         .with_columns(
-            hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), hash_threshold).alias(
+            hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), hash_threshold).alias(
                 'variantId'
             )
         )

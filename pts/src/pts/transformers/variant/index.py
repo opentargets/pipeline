@@ -6,7 +6,7 @@ import polars as pl
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import list_parts
-from pts.transformers.utils.variant import hash_variant_index_ids, min_max_scaler
+from pts.transformers.utils.variant import hash_long_variant_ids, min_max_scaler
 
 ANNOTATION_PREFIX = 'annotation_'
 _ARRAYS = [name for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
@@ -120,7 +120,7 @@ def read_variant_annotations(parts: list[str], hash_threshold: int, loci: pl.Laz
         .join(loci, on=['chromosome', 'position'], how='semi')
         .pipe(fill_null_arrays)
         .with_columns(
-            hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), hash_threshold).alias(
+            hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), hash_threshold).alias(
                 'variantId'
             )
         )

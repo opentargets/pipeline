@@ -47,60 +47,40 @@ def min_max_scaler(
     return (column - min_value) / (max_value - min_value) * (maximum - minimum) + minimum
 
 
-def hash_long_variant_ids(variant_id: pl.Expr, threshold: int = VARIANT_HASH_LENGTH) -> pl.Expr:
-    """Hash IDs longer than threshold, preserving Spark Evidence's behavior.
-
-    Extract chromosome and position from canonical IDs. Nonmatching non-null
-    IDs use empty coordinate strings, matching Spark's regexp_extract; long
-    nonmatching IDs therefore become OTVAR___<md5>. Null IDs remain null.
-
-    Examples:
-        IDs at the threshold stay unchanged; longer IDs retain their coordinates.
-
-        >>> import hashlib
-        >>> boundary_id = '1_10_A_' + 'T' * 293
-        >>> long_id = boundary_id + 'T'
-        >>> frame = pl.DataFrame({'variantId': ['1_10_A_T', boundary_id, long_id, None]})
-        >>> result = frame.select(hash_long_variant_ids(pl.col('variantId'))).to_series().to_list()
-        >>> result == ['1_10_A_T', boundary_id, 'OTVAR_1_10_' + hashlib.md5(long_id.encode()).hexdigest(), None]
-        True
-    """
-    pattern = r'^([0-9XYMT]{1,2})_([0-9]+)_([ACGTN]+)_([ACGTN]+)$'
-
-    chrom = regexp_extract(variant_id, pattern, 1)
-    position = regexp_extract(variant_id, pattern, 2)
-    digest = plh.concat_str(variant_id).nchash.md5()
-    return (
-        pl
-        .when(chrom.is_null() | position.is_null())
-        .then(pl.lit('OTVAR_') + digest)
-        .when(variant_id.str.len_chars() > threshold)
-        .then(pl.concat_str(pl.lit('OTVAR'), chrom, position, digest, separator='_'))
-        .otherwise(variant_id)
-    )
-
-
-def hash_variant_index_ids(
+def hash_long_variant_ids(
     variant_id: pl.Expr,
-    chromosome: pl.Expr,
-    position: pl.Expr,
+    chromosome: pl.Expr | None = None,
+    position: pl.Expr | None = None,
     threshold: int = VARIANT_HASH_LENGTH,
 ) -> pl.Expr:
     """Hash identifiers following Gentropy's VariantIndex rules.
 
-    Unlike `hash_long_variant_ids`, coordinates come from their own columns and IDs
-    are hashed at the threshold length. Missing coordinates give OTVAR_<md5>; long
-    IDs keep their coordinates as OTVAR_<chromosome>_<position>_<md5>. Null IDs
-    remain null. Thresholds count characters, not UTF-8 bytes.
+    IDs at least `threshold` characters long keep their coordinates as
+    OTVAR_<chromosome>_<position>_<md5>; IDs with a missing coordinate become OTVAR_<md5>.
+    Null IDs remain null. Thresholds count characters, not UTF-8 bytes.
+
+    Without `chromosome` and `position`, coordinates are extracted from canonical IDs.
+    Nonmatching non-null IDs then get empty coordinates, as Spark's regexp_extract
+    gives, so they are hashed only when long, as OTVAR___<md5>.
 
     Examples:
+        IDs at the threshold are hashed; coordinates come from the ID when no columns are given.
+
         >>> import hashlib
+        >>> boundary_id = '1_10_A_' + 'T' * 293
+        >>> frame = pl.DataFrame({'variantId': ['1_10_A_T', boundary_id, None]})
+        >>> result = frame.select(hash_long_variant_ids(pl.col('variantId'))).to_series().to_list()
+        >>> result == ['1_10_A_T', 'OTVAR_1_10_' + hashlib.md5(boundary_id.encode()).hexdigest(), None]
+        True
+
+        Coordinates from their own columns; a missing one gives OTVAR_<md5> at any length.
+
         >>> frame = pl.DataFrame({
         ...     'variantId': ['short', 'abcdefghij', 'missing', None],
         ...     'chromosome': ['1', '2', None, None],
         ...     'position': [1, 2, 3, None],
         ... })
-        >>> ids = hash_variant_index_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 10)
+        >>> ids = hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position'), 10)
         >>> frame.select(ids).to_series().to_list() == [
         ...     'short',
         ...     'OTVAR_2_2_' + hashlib.md5(b'abcdefghij').hexdigest(),
@@ -109,6 +89,12 @@ def hash_variant_index_ids(
         ... ]
         True
     """
+    if (chromosome is None) != (position is None):
+        raise ValueError('pass both chromosome and position, or neither')
+    if chromosome is None or position is None:
+        pattern = r'^([0-9XYMT]{1,2})_([0-9]+)_([ACGTN]+)_([ACGTN]+)$'
+        chromosome = regexp_extract(variant_id, pattern, 1)
+        position = regexp_extract(variant_id, pattern, 2)
     digest = plh.concat_str(variant_id).nchash.md5()
     return (
         pl
