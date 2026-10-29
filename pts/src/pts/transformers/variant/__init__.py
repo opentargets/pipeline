@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
+from pts.transformers.variant.gpn_star import GpnStarCutoffs, add_gpn_star, gpn_star_files, read_gpn_star
 from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,
@@ -49,6 +50,7 @@ class VariantSource(BaseModel):
     vep: str
     variant_annotations: list[str] = Field(default_factory=list)
     amino_acid_annotations: list[str] = Field(default_factory=list)
+    gpn_star: str | None = None
 
 
 class VariantDestination(BaseModel):
@@ -72,6 +74,8 @@ class VariantSettings(BaseModel):
     """Polars threads in each parsing process."""
     batch_size: int = Field(default=5_000, gt=0)
     """Variants per batch when annotating a chromosome."""
+    gpn_star: GpnStarCutoffs | None = None
+    """Cut-offs normalising GPN-Star scores; required with a GPN-Star source."""
 
 
 @contextmanager
@@ -124,8 +128,11 @@ def annotate(
     frame: pl.DataFrame,
     variant_annotations: list[pl.DataFrame],
     amino_acid_annotations: list[pl.DataFrame],
+    gpn_star: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
-    """Merge variant annotations, then amino-acid annotations, into index rows."""
+    """Merge GPN-Star scores, then variant annotations, then amino-acid annotations, into index rows."""
+    if gpn_star is not None:
+        frame = add_gpn_star(frame, gpn_star)
     for dataset in variant_annotations:
         frame = add_annotation(frame, dataset)
     for dataset in amino_acid_annotations:
@@ -144,6 +151,9 @@ def variant(
     destinations = VariantDestination.model_validate(destination)
     options = VariantSettings.model_validate(settings)
     check_destinations_absent([destinations.output])
+    if sources.gpn_star is not None and options.gpn_star is None:
+        raise ValueError('a gpn_star source needs gpn_star cut-offs in the settings')
+    gpn_star_by_chromosome = gpn_star_files(sources.gpn_star) if sources.gpn_star is not None else {}
 
     with TemporaryDirectory(dir=config.work_path) as scratch:
         parts = list_vep_parts(sources.vep)
@@ -184,9 +194,16 @@ def variant(
                     else pl.DataFrame(schema=variant_schema)
                     for located in annotation_parts
                 ]
+                gpn_star = (
+                    read_gpn_star(gpn_star_by_chromosome[chromosome], frame['position'].unique(), options.gpn_star)
+                    if chromosome in gpn_star_by_chromosome and options.gpn_star is not None
+                    else None
+                )
                 logger.info('Annotating {} variants on chromosome {}', frame.height, chromosome)
                 batches = pool.map(
-                    lambda batch, merged=variant_annotations: annotate(batch, merged, amino_acid_annotations),
+                    lambda batch, merged=variant_annotations, scores=gpn_star: annotate(
+                        batch, merged, amino_acid_annotations, scores
+                    ),
                     frame.iter_slices(options.batch_size),
                 )
                 pl.concat(batches).sort('position', maintain_order=True).select(variant_schema.names()).write_parquet(

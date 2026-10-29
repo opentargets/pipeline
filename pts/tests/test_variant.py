@@ -614,6 +614,82 @@ def test_variant_step_writes_the_annotated_index(tmp_path):
     assert sorted(path.name for path in tmp_path.iterdir()) == ['foldx', 'gnomad', 'output', 'vep']
 
 
+GPN_STAR_CUTOFFS = {'top_10_percent': -2.0, 'top_1_percent': -4.0, 'top_0_1_percent': -6.0, 'minimum': -10.0}
+
+
+def _write_gpn_star(directory: Path, chromosome: str, rows: list[tuple[int, str, str, float]]) -> None:
+    directory.mkdir(exist_ok=True)
+    pl.DataFrame(
+        {
+            'chrom': [chromosome] * len(rows),
+            'pos': [row[0] for row in rows],
+            'ref': [row[1] for row in rows],
+            'alt': [row[2] for row in rows],
+            'llr_calibrated': [row[3] for row in rows],
+            'abs_llr_calibrated': [abs(row[3]) for row in rows],
+        },
+        schema={
+            'chrom': pl.String,
+            'pos': pl.Int64,
+            'ref': pl.String,
+            'alt': pl.String,
+            'llr_calibrated': pl.Float32,
+            'abs_llr_calibrated': pl.Float32,
+        },
+    ).write_parquet(directory / f'llr_chr{chromosome}.parquet')
+
+
+def _run_two_chromosome_step(tmp_path: Path, name: str, gpn_star: bool) -> pl.DataFrame:
+    vep = tmp_path / 'vep'
+    vep.mkdir(exist_ok=True)
+    (vep / '00000001.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
+    (vep / '00000002.json').write_text(json.dumps({'input': '2\t5\t.\tC\tT'}) + '\n')
+    source = {'vep': str(vep)}
+    if gpn_star:
+        source['gpn_star'] = str(tmp_path / 'gpn_star')
+    variant(
+        source=source,
+        destination={'output': str(tmp_path / name)},
+        settings={'parse_processes': 2, 'gpn_star': GPN_STAR_CUTOFFS} if gpn_star else {'parse_processes': 2},
+        config=Mock(work_path=tmp_path),
+    )
+    return pl.read_parquet(tmp_path / name / '*.parquet')
+
+
+def test_variant_step_adds_gpn_star(tmp_path):
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0), (124, 'A', 'G', -9.0)])
+    result = _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+    entries = {
+        row['variantId']: [x for x in row['variantEffect'] if x['method'] == 'GPN-Star'] for row in result.to_dicts()
+    }
+    assert [x['normalisedScore'] for x in entries['1_123_A_G']] == [0.25]
+    assert entries['2_5_C_T'] == []
+
+
+def test_variant_step_without_a_gpn_star_file_for_a_chromosome(tmp_path):
+    plain = _run_two_chromosome_step(tmp_path, 'plain', gpn_star=False)
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    scored = _run_two_chromosome_step(tmp_path, 'scored', gpn_star=True)
+    assert scored.filter(pl.col('chromosome') == '2').equals(plain.filter(pl.col('chromosome') == '2'))
+    assert not scored.filter(pl.col('chromosome') == '1').equals(plain.filter(pl.col('chromosome') == '1'))
+
+
+def test_variant_step_needs_cutoffs_with_a_gpn_star_source(tmp_path):
+    with pytest.raises(ValueError, match='cut-offs'):
+        variant(
+            source={'vep': str(tmp_path / 'missing'), 'gpn_star': str(tmp_path / 'gpn_star')},
+            destination={'output': str(tmp_path / 'output')},
+            settings={},
+            config=Mock(work_path=tmp_path),
+        )
+
+
+def test_variant_step_rejects_an_empty_gpn_star_source(tmp_path):
+    (tmp_path / 'gpn_star').mkdir()
+    with pytest.raises(ValueError, match='llr_chr'):
+        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+
+
 def test_variant_step_refuses_an_existing_destination(tmp_path):
     (tmp_path / 'output').mkdir()
     with pytest.raises(ValueError, match='already exists'):
