@@ -158,13 +158,25 @@ def test_error_names_the_count_and_at_most_five_examples(store_uri):
     assert 't5' not in message
 
 
-def test_compute_raising_fails_every_text_of_the_call(store_uri):
-    with pytest.raises(RecordStoreError, match=r'2 texts'):
+def test_compute_raising_aborts_the_call_and_writes_no_records(store_uri):
+    with pytest.raises(ComputeAborted, match=r'2 texts.*model exploded') as exc:
         run(['a', 'b'], Recorder(raises=True), store_uri, 'run1')
 
-    records = read_records(store_uri, None)
-    assert records['status'].to_list() == ['failed', 'failed']
-    assert records['error'].to_list() == ['model exploded', 'model exploded']
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert not Path(store_uri, 'runs').exists()
+    assert read_records(store_uri, None).height == 0
+
+
+def test_a_rerun_after_a_raising_compute_computes_the_texts_again(store_uri):
+    for i in range(4):
+        with pytest.raises(ComputeAborted):
+            run(['a', 'b'], Recorder(raises=True), store_uri, f'run{i}')
+
+    compute = Recorder()
+    out = run(['a', 'b'], compute, store_uri, 'run4')
+
+    assert compute.computed == ['a', 'b']
+    assert out['output'].to_list() == [['A'], ['B']]
 
 
 def test_run_without_manifest_is_ignored(store_uri):
@@ -381,6 +393,24 @@ def test_an_abort_in_a_retry_round_keeps_the_finished_rounds(store_uri):
 
     records = read_records(store_uri, None, pl.String).sort('text')
     assert records.select('text', 'status', 'run_id').rows() == [('bad', 'failed', 'r1'), ('good', 'ok', 'r1')]
+    rerun = JsonRecorder()
+    result = run(['good', 'bad'], rerun, store_uri, 'r2', output_dtype=pl.String, allow_failures=True)
+    assert rerun.calls == [['bad']]
+    assert result['text'].to_list() == ['bad', 'good']
+
+
+def test_a_raise_in_a_retry_round_keeps_the_finished_rounds_and_nothing_else(store_uri):
+    def raise_on_retry(batch):
+        if batch == ['bad']:
+            msg = 'client closed'
+            raise RuntimeError(msg)
+        return [(None, 'bad text') if t == 'bad' else (json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='client closed'):
+        run(['good', 'bad'], raise_on_retry, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    records = read_records(store_uri, None, pl.String).sort('text')
+    assert records.select('text', 'status', 'error').rows() == [('bad', 'failed', 'bad text'), ('good', 'ok', None)]
     rerun = JsonRecorder()
     result = run(['good', 'bad'], rerun, store_uri, 'r2', output_dtype=pl.String, allow_failures=True)
     assert rerun.calls == [['bad']]

@@ -213,7 +213,8 @@ def _compute_round(
         raise
     except Exception as exc:
         logger.error(f'compute failed for {len(todo_texts)} texts: {exc}')
-        results = [(None, str(exc))] * len(todo_texts)
+        msg = f'compute raised for a call of {len(todo_texts)} texts: {exc}'
+        raise ComputeAborted(msg) from exc
     if len(results) != len(todo_texts):
         msg = f'compute returned {len(results)} results for {len(todo_texts)} texts'
         raise RecordStoreError(msg)
@@ -295,10 +296,11 @@ def map_texts(
 
     A text is computed when it has no record for this model and revision, or only
     failed ones numbering fewer than ``max_attempts``. All of them go to one
-    ``compute`` call, with the texts distinct and sorted. If ``compute`` raises,
-    every text of the call is recorded as failed with the exception text, unless
-    it raises :py:class:`ComputeAborted`, which propagates and records nothing
-    of that call. An abort in a retry round still writes the rounds before it.
+    ``compute`` call, with the texts distinct and sorted. An exception from
+    ``compute`` aborts the call, as :py:class:`ComputeAborted` chained to it: the
+    call records nothing, so no text uses up an attempt. A text that fails alone
+    is returned as ``(None, error)``. An abort in a retry round still writes the
+    rounds before it.
 
     With ``allow_failures`` the texts that fail are recomputed in the same run,
     one ``compute`` call per round, until their failures, earlier runs' included,
@@ -330,7 +332,7 @@ def map_texts(
         ValueError: If ``texts`` contains nulls, or ``shard_size`` is not positive.
         RecordStoreError: If any text still has no ok record once the run is written
             and ``allow_failures`` is False.
-        ComputeAborted: If ``compute`` raises it. Shards written before stay written, and
+        ComputeAborted: If ``compute`` raises. Shards written before stay written, and
             so do the finished rounds of the shard it aborts.
     """
     if texts.null_count():
