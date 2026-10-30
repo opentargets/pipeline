@@ -38,6 +38,7 @@ scratchpad:
   stop_reasons_tag: 5594f9e5cb210524efe8053c25788e5e2bc3bb14-p8ae94e84
   drug_entities_tag: b57181cea10a3943c35cf31bb375ff9217886730+8cd97116de5fdc911817166df8cb41a022874b10-pbd6d0afb
   disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
+  extraction_tag: 82af315af627-pfd3cdab9
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
@@ -297,8 +298,8 @@ steps:
 
     - name: copy_many aact trial extraction
       sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/metadata.json
+        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/metadata.json
       destination: input/clinical_report/aact_trial_extraction
 
     - name: copy ttd
@@ -325,8 +326,8 @@ steps:
 
     - name: copy_many aact drug entities
       sources:
-        - gs://clinical_staging/aact/${aact_version}/drug_entities/${drug_entities_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/drug_entities/${drug_entities_tag}/metadata.json
+        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/aact_drug_entities
 
     - name: copy_many mining drug entities
