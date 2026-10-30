@@ -721,14 +721,6 @@ steps:
     - name: copy loftee human ancestor
       source: https://personal.broadinstitute.org/konradk/loftee_data/GRCh38/human_ancestor.fa.gz
       destination: input/variant/loftee/human_ancestor.fa.gz
-
-    - name: copy loftee human ancestor fai
-      source: https://personal.broadinstitute.org/konradk/loftee_data/GRCh38/human_ancestor.fa.gz.fai
-      destination: input/variant/loftee/human_ancestor.fa.gz.fai
-
-    - name: copy loftee human ancestor gzi
-      source: https://personal.broadinstitute.org/konradk/loftee_data/GRCh38/human_ancestor.fa.gz.gzi
-      destination: input/variant/loftee/human_ancestor.fa.gz.gzi
   ##################################################################################################
 
   #: ENCODE STEP :##################################################################################

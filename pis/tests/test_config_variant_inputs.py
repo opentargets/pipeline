@@ -36,8 +36,6 @@ EXPECTED_SOURCES = {
     ),
     'input/variant/alphamissense/AlphaMissense_hg38.tsv.gz': 'gs://dm_alphamissense/AlphaMissense_hg38.tsv.gz',
     'input/variant/loftee/human_ancestor.fa.gz': LOFTEE,
-    'input/variant/loftee/human_ancestor.fa.gz.fai': f'{LOFTEE}.fai',
-    'input/variant/loftee/human_ancestor.fa.gz.gzi': f'{LOFTEE}.gzi',
 }
 
 
@@ -50,3 +48,10 @@ def test_variant_inputs_are_mirrored_from_their_sources() -> None:
     mirrored = {task['destination']: task['source'] for task in copies}
     assert {d: s for d, s in mirrored.items() if d in EXPECTED_SOURCES} == EXPECTED_SOURCES
     assert len([task for task in copies if task['destination'] in EXPECTED_SOURCES]) == len(EXPECTED_SOURCES)
+
+
+def test_the_ancestor_is_mirrored_without_its_indexes() -> None:
+    copies = _copies(parse_yaml(CONFIG_PATH)['steps']['variant'])
+    assert [task['destination'] for task in copies if task['destination'].startswith('input/variant/loftee/')] == [
+        'input/variant/loftee/human_ancestor.fa.gz'
+    ]
