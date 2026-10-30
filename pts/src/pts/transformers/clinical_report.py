@@ -7,8 +7,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
 from pts.postgres import read_dump_tables
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical import (
     ClinicalReport,
     ClinicalReportType,

@@ -11,8 +11,8 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
+from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
 from pts.record_store import RECORD_SCHEMA, text_sha256, write_run
-from pts.staged_outputs import DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import drug_entities_with_status

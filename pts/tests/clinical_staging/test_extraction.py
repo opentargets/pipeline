@@ -20,8 +20,8 @@ from otter.scratchpad.model import Scratchpad
 from otter.task.model import TaskContext
 from pydantic import BaseModel, ValidationError
 
-from pts import aact_trial_extraction
-from pts.aact_trial_extraction import (
+from pts.clinical_staging import extraction
+from pts.clinical_staging.extraction import (
     EXTRACTION_MODEL,
     _models_to_dataframe,
     import_extraction_cache,
@@ -88,7 +88,7 @@ def test_prompts_without_publications_match_mira() -> None:
         ],
     })
 
-    prompts = aact_trial_extraction.prompts_for(report, 'schema-digest')
+    prompts = extraction.prompts_for(report, 'schema-digest')
 
     # mira 1.0.5 build_prompts with publications disabled, via prompts_for
     assert prompts.to_dicts() == [
@@ -141,11 +141,11 @@ def test_trial_report_passes_detailed_description_to_the_aact_provider(
         captured.update(kwargs)
         return SimpleNamespace(df=pl.DataFrame({'id': ['nct1']}))
 
-    monkeypatch.setattr(aact_trial_extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
-    monkeypatch.setattr(aact_trial_extraction, 'extract_aact_clinical_report', fake_extract_clinical_report)
-    monkeypatch.setattr(aact_trial_extraction, 'sample_report', lambda report, sample_size: report)
+    monkeypatch.setattr(extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
+    monkeypatch.setattr(extraction, 'extract_aact_clinical_report', fake_extract_clinical_report)
+    monkeypatch.setattr(extraction, 'sample_report', lambda report, sample_size: report)
 
-    aact_trial_extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
+    extraction.trial_report(str(tmp_path / 'aact.zip'), str(tmp_path), None)
 
     detailed = cast(list[pl.DataFrame], captured['additional_metadata'])[2]
     assert detailed.columns == ['nct_id', 'detailed_description']
@@ -192,7 +192,7 @@ def test_prompts_are_independent_of_row_order() -> None:
             conditions=conditions.sample(fraction=1, shuffle=True, seed=seed),
             additional_metadata=[summaries.sample(fraction=1, shuffle=True, seed=seed)],
         )
-        return aact_trial_extraction.prompts_for(report.df, 'digest').sort('id')
+        return extraction.prompts_for(report.df, 'digest').sort('id')
 
     first = prompts(1)
     for seed in (2, 3, 4):
@@ -202,7 +202,7 @@ def test_prompts_are_independent_of_row_order() -> None:
 
 
 def test_prompts_for_hashes_each_prompt() -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
 
     assert prompts.columns == ['id', 'prompt', 'prompt_sha256']
     assert prompts['prompt_sha256'].to_list() == [text_sha256(p) for p in prompts['prompt']]
@@ -245,7 +245,7 @@ class FakeLlm:
         self.error = error
         self.clients: list[FakeClient] = []
         self.keys: list[str] = []
-        monkeypatch.setattr(aact_trial_extraction, '_open_client', self.open)
+        monkeypatch.setattr(extraction, '_open_client', self.open)
 
     def open(self, spec: LlmExtractSpec, openai_key: str) -> FakeClient:
         client = FakeClient(default=self.answer)
@@ -269,7 +269,7 @@ def _attempt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
 ) -> LlmExtract:
     """Run the task and validate it if the run succeeded; the failure reason is left on the manifest."""
-    monkeypatch.setattr(aact_trial_extraction, 'trial_report', lambda *args: report)
+    monkeypatch.setattr(extraction, 'trial_report', lambda *args: report)
     key = tmp_path / 'openai-key'
     key.write_text('test-key')
     spec.setdefault('openai_key_path', str(key))
@@ -328,7 +328,7 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     task = _run(monkeypatch, tmp_path, report)
 
     published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
-    prompts = aact_trial_extraction.prompts_for(report, _digest())
+    prompts = extraction.prompts_for(report, _digest())
     old = _old_way(['nct1', 'nct2'], prompts).drop('cache_key', 'computed_at')
     assert published.schema == old.schema
     assert published.sort('id').equals(old.sort('id'))
@@ -344,19 +344,19 @@ def _records(prompts: pl.DataFrame, outputs: dict[str, str]) -> pl.DataFrame:
 
 
 def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
     records = _records(prompts, {'nct1': _model('nct1').model_dump_json(), 'nct2': '{"id": "nct2"}'})
 
     with pytest.raises(ValueError, match='nct2'):
-        aact_trial_extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+        extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
 
 def test_prompt_hash_follows_its_trial_when_a_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
     records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')})
-    monkeypatch.setattr(aact_trial_extraction, '_models_to_dataframe', lambda models: _models_to_dataframe(models[1:]))
+    monkeypatch.setattr(extraction, '_models_to_dataframe', lambda models: _models_to_dataframe(models[1:]))
 
-    extractions = aact_trial_extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+    extractions = extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
     assert extractions.select('id', 'prompt_sha256').rows() == [('nct2', prompts['prompt_sha256'][1])]
 
@@ -384,7 +384,7 @@ def test_a_call_with_no_extractions_and_no_errors_aborts(monkeypatch: pytest.Mon
         asked.append(sorted(i for i, _ in prompts))
         return {}
 
-    monkeypatch.setattr(aact_trial_extraction, 'extract_prompts', report_nothing)
+    monkeypatch.setattr(extraction, 'extract_prompts', report_nothing)
 
     task = _attempt(monkeypatch, tmp_path, _report(*ids))
 
@@ -491,7 +491,7 @@ def _write_old_cache(tmp_path: Path, rows: pl.DataFrame, digest: str) -> str:
 def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch)
     report = _report('nct1', 'nct2')
-    prompts = aact_trial_extraction.prompts_for(report, _digest())
+    prompts = extraction.prompts_for(report, _digest())
     cached = _old_way(['nct1', 'nct2'], prompts.with_columns(prompt_sha256=pl.lit('stale')))
     cache_uri = _write_old_cache(tmp_path, cached, _digest())
 
@@ -506,8 +506,8 @@ def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch
 
 
 def test_import_runs_once(tmp_path: Path) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
-    older = aact_trial_extraction.prompts_for(_report('nct1', 'nct2', 'nct3', title='old'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    older = extraction.prompts_for(_report('nct1', 'nct2', 'nct3', title='old'), 'digest')
     cached = _old_way(['nct1', 'nct2', 'nct3'], older).with_columns(
         computed_at=pl.when(pl.col('id') != 'nct2').then(pl.col('computed_at'))
     )
@@ -535,7 +535,7 @@ def test_each_schema_digest_is_imported_once(tmp_path: Path) -> None:
     digests = ['a' * 64, 'b' * 64]
     store = str(tmp_path / 'store')
     for digest in digests:
-        prompts = aact_trial_extraction.prompts_for(_report('nct1'), digest)
+        prompts = extraction.prompts_for(_report('nct1'), digest)
         cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), digest)
 
         assert import_extraction_cache(cache_uri, prompts, store, digest, cast(Any, None)) == 1
@@ -548,7 +548,7 @@ def test_each_schema_digest_is_imported_once(tmp_path: Path) -> None:
 
 
 def test_import_refuses_a_cache_of_another_schema(tmp_path: Path) -> None:
-    prompts = aact_trial_extraction.prompts_for(_report('nct1'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1'), 'digest')
     cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), 'other-digest')
 
     with pytest.raises(ValueError, match='other-digest'):
@@ -613,14 +613,14 @@ def _spec(tmp_path: Path, **spec: Any) -> LlmExtractSpec:
 
 
 def _shard(*ids: str) -> pl.DataFrame:
-    return aact_trial_extraction.prompts_for(_report(*ids), 'digest').select('id', 'prompt')
+    return extraction.prompts_for(_report(*ids), 'digest').select('id', 'prompt')
 
 
 def _extract_in_loop(shard: pl.DataFrame, spec: LlmExtractSpec) -> tuple[dict[str, BaseModel], dict[str, str]]:
     """Call ``extract`` from a running event loop, as Otter does."""
 
     async def call() -> tuple[dict[str, BaseModel], dict[str, str]]:
-        return aact_trial_extraction.extract(shard, spec, 'system prompt', ClinicalReportExtractionSchema)
+        return extraction.extract(shard, spec, 'system prompt', ClinicalReportExtractionSchema)
 
     return asyncio.run(call())
 
@@ -709,7 +709,7 @@ def test_client_is_closed_on_its_loop_when_extraction_raises(monkeypatch: pytest
     async def fail(*args: object, **kwargs: object) -> dict[str, Extracted | Failed]:
         raise RuntimeError('extraction failed')
 
-    monkeypatch.setattr(aact_trial_extraction, 'extract_prompts', fail)
+    monkeypatch.setattr(extraction, 'extract_prompts', fail)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         _extract_in_loop(_shard('nct1'), _spec(tmp_path))
@@ -757,7 +757,7 @@ def test_two_extractions_run_at_once(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 def test_open_client_sets_the_timeout_and_retries(tmp_path: Path) -> None:
     for service_tier, timeout in (('flex', 900), ('auto', 600)):
-        client = aact_trial_extraction._open_client(_spec(tmp_path, service_tier=service_tier, max_retries=5), 'k')
+        client = extraction._open_client(_spec(tmp_path, service_tier=service_tier, max_retries=5), 'k')
 
         assert isinstance(client, AsyncOpenAI)
         assert client.api_key == 'k'
@@ -776,14 +776,14 @@ def test_open_client_sets_the_timeout_and_retries(tmp_path: Path) -> None:
 )
 def test_stored_json_publishes_as_imported_cache_rows(models: list[ClinicalReportExtractionSchema]) -> None:
     ids = [model.id for model in models]
-    prompts = aact_trial_extraction.prompts_for(_report(*ids), 'digest')
+    prompts = extraction.prompts_for(_report(*ids), 'digest')
     stored = {model.id: model.model_dump_json() for model in models}
     imported = {row['id']: json.dumps(row) for row in _models_to_dataframe(models).to_dicts()}
     mixed = {trial_id: (stored if n % 2 else imported)[trial_id] for n, trial_id in enumerate(ids)}
 
     def publish(outputs: dict[str, str]) -> pl.DataFrame:
         records = _records(prompts, outputs)
-        return aact_trial_extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+        return extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
     expected = publish(imported)
     assert expected.height == len(models)

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
 from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status

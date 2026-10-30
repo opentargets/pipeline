@@ -8,10 +8,10 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts import aact_trial_models
-from pts.aact_trial_models import seed_drug_entities, stage_trial_models, why_stopped_texts
+from pts.clinical_staging import trial_models
+from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
+from pts.clinical_staging.trial_models import seed_drug_entities, stage_trial_models, why_stopped_texts
 from pts.record_store import map_texts, read_records, text_sha256
-from pts.staged_outputs import DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.hf_models import staged_model_revisions
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
@@ -89,8 +89,8 @@ class Models:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.stop_calls: list[list[str]] = []
         self.ner_calls: list[list[str]] = []
-        monkeypatch.setattr(aact_trial_models, 'stop_reasons_with_status', self.stop_reasons)
-        monkeypatch.setattr(aact_trial_models, 'drug_entities_with_status', self.drug_entities)
+        monkeypatch.setattr(trial_models, 'stop_reasons_with_status', self.stop_reasons)
+        monkeypatch.setattr(trial_models, 'drug_entities_with_status', self.drug_entities)
 
     def stop_reasons(self, texts: list[str], batch_size: int = 32) -> list[tuple[list[str] | None, str | None]]:
         self.stop_calls.append(list(texts))

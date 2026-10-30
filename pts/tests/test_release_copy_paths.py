@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 

@@ -9,8 +9,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.record_store import publish_snapshot, read_records
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.transformers.clinical.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,

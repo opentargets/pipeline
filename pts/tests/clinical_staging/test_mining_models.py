@@ -9,10 +9,10 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts import mining_models
-from pts.mining_models import stage_mining_models
+from pts.clinical_staging import mining_models
+from pts.clinical_staging.mining_models import stage_mining_models
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.record_store import map_texts
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
 from pts.transformers.clinical.ner import (
     CHEMICAL_MODEL,

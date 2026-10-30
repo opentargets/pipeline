@@ -4,7 +4,7 @@ The models run through the record store of :py:mod:`pts.record_store`, so a text
 that already has an answer for the model revision is not computed again, and the
 result is published as a write-once snapshot next to the AACT version.
 
-The work lives in :py:mod:`pts.aact_trial_models`.
+The work lives in :py:mod:`pts.clinical_staging.trial_models`.
 """
 
 from __future__ import annotations
@@ -57,9 +57,9 @@ class TrialModels(Task):
 
         import polars as pl
 
-        from pts import aact_trial_models
+        from pts.clinical_staging import trial_models
+        from pts.clinical_staging.staged_outputs import DRUG_ENTITIES
         from pts.postgres import read_dump_tables
-        from pts.staged_outputs import DRUG_ENTITIES
         from pts.transformers.clinical.hf_models import staged_model_revisions
         from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
@@ -69,7 +69,7 @@ class TrialModels(Task):
 
         if self.spec.seed_ner_cache:
             revision = DRUG_ENTITIES.tag(staged_model_revisions(models_uri))
-            seeded = aact_trial_models.seed_drug_entities(
+            seeded = trial_models.seed_drug_entities(
                 StorageHandle(self.spec.seed_ner_cache, config=config).absolute,
                 store_uri,
                 DRUG_ENTITIES.model,
@@ -91,7 +91,7 @@ class TrialModels(Task):
 
         run_id = f'{self.spec.snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}'
         destination = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.destination.items()}
-        self.stats = aact_trial_models.stage_trial_models(
+        self.stats = trial_models.stage_trial_models(
             studies,
             extractions,
             models_uri,

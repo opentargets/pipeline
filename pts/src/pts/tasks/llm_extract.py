@@ -12,7 +12,7 @@ identity, so changing them re-extracts nothing. A trial that fails every attempt
 of a run is left out of the snapshot, and a rerun of the same AACT version does
 not try it again.
 
-The extraction work lives in :py:mod:`pts.aact_trial_extraction`.
+The extraction work lives in :py:mod:`pts.clinical_staging.extraction`.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class LlmExtract(Task):
 
     @report
     def run(self) -> Self:
-        from pts import aact_trial_extraction
+        from pts.clinical_staging import extraction
 
         system_prompt = self._system_prompt()
         model_cls = import_class(self.spec.model_class)
@@ -114,21 +114,21 @@ class LlmExtract(Task):
         store_uri = self.spec.store_uri.rstrip('/')
 
         archive = StorageHandle(str(self.spec.source['aact']), config=config).absolute
-        report = aact_trial_extraction.trial_report(archive, config.work_path, self.spec.sample_size)
-        prompts = aact_trial_extraction.prompts_for(report, schema_digest)
+        report = extraction.trial_report(archive, config.work_path, self.spec.sample_size)
+        prompts = extraction.prompts_for(report, schema_digest)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
         if self.spec.import_extraction_cache:
-            imported = aact_trial_extraction.import_extraction_cache(
+            imported = extraction.import_extraction_cache(
                 self.spec.import_extraction_cache, prompts, store_uri, schema_digest, config
             )
             logger.info(f'imported {imported} cached extractions into {store_uri}')
 
         records = map_texts(
             prompts['prompt'],
-            aact_trial_extraction.extraction_compute(prompts, self.spec, system_prompt),
+            extraction.extraction_compute(prompts, self.spec, system_prompt),
             store_uri,
-            aact_trial_extraction.EXTRACTION_MODEL,
+            extraction.EXTRACTION_MODEL,
             schema_digest,
             f'{self.spec.snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}',
             config,
@@ -137,7 +137,7 @@ class LlmExtract(Task):
             allow_failures=True,
             shard_size=self.spec.shard_size,
         )
-        extractions = aact_trial_extraction.extractions_from_records(records, prompts, model_cls)
+        extractions = extraction.extractions_from_records(records, prompts, model_cls)
         if prompts.height and extractions.is_empty():
             msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
             raise TaskRunError(msg)
@@ -146,7 +146,7 @@ class LlmExtract(Task):
         published = publish_snapshot(
             extractions,
             destination,
-            {'model': aact_trial_extraction.EXTRACTION_MODEL, 'model_revision': schema_digest},
+            {'model': extraction.EXTRACTION_MODEL, 'model_revision': schema_digest},
             config,
         )
         self.artifacts = [Artifact(source=store_uri, destination=destination)]

@@ -4,7 +4,7 @@ The models run through the record store of :py:mod:`pts.record_store`, so a text
 that already has an answer for the model revision is not computed again, and the
 result is published as a write-once snapshot under the model revision tag.
 
-The work lives in :py:mod:`pts.mining_models`.
+The work lives in :py:mod:`pts.clinical_staging.mining_models`.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class MiningModels(Task):
 
     @report
     def run(self) -> Self:
-        from pts import mining_models
+        from pts.clinical_staging import mining_models
 
         config = self.context.config
         source = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.source.items()}

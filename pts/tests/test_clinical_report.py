@@ -8,8 +8,8 @@ import openpyxl
 import polars as pl
 import pytest
 
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.record_store import publish_snapshot
-from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.transformers import clinical_report as clinical_report_module
 from pts.transformers.clinical import (
     ClinicalProvider,
@@ -712,7 +712,7 @@ import sys
 import polars as pl
 
 from pts.transformers.clinical.mining import staged_lookup
-import pts.staged_outputs
+import pts.clinical_staging.staged_outputs
 from pts.transformers.clinical_report import map_report_entities
 from tests.clinical.mapping_fixtures import DISEASE, DRUG
 from tests.test_clinical_report import _drug_reports, _staged_drug_entities
@@ -728,7 +728,7 @@ print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torc
 TRIAL_MODELS_STEP = """
 import sys
 
-import pts.aact_trial_models
+import pts.clinical_staging.trial_models
 import pts.postgres
 import pts.tasks.trial_models
 import pts.transformers.clinical.hf_models

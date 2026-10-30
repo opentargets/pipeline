@@ -79,7 +79,7 @@ the records for its texts as a snapshot: a `data.parquet` plus a
 
 The hub revisions come in the order of the kind's models. The digest is the
 first 8 hex digits of the sha256 of the kind's parameters and its
-`logic_version`, both in `pts/src/pts/staged_outputs.py`. The tag is the store's
+`logic_version`, both in `pts/src/pts/clinical_staging/staged_outputs.py`. The tag is the store's
 revision and the snapshot directory name, so one tag means one output.
 
 | Snapshot | Hub revisions in the tag |
