@@ -8,7 +8,7 @@ environments:
       finngen: gs://finngen-public-data-r12
     output: gs://finngen_data/gwas/prod/20261029T152531
     scratchpad:
-      gentropy_version: 4.0.0-dev.6
+      gentropy_version: 4.0.0-dev.10
       curation_tag: 26.09.2
 
 setup:
@@ -78,5 +78,7 @@ steps:
           step.finngen_finemapping_lead_pvalue_threshold=1e-5 \
           step.finngen_finemapping_out={{output}}/output/credible_set \
           step.finngen_finemapping_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.use_enhanced_bgzip_codec=true \
           step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
           step.session.spark_uri=yarn
