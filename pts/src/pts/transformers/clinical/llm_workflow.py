@@ -3,8 +3,8 @@
 Accepts a list of pre-built prompts and any Pydantic model for response validation.
 ``extract_prompts`` returns the outcome per prompt on a client the caller owns.
 
-Flex processing (service_tier="flex") is enabled by default for ~50% cost
-reduction; requests automatically fall back to "auto" on capacity shortage.
+Flex processing (``service_tier="flex"``) costs about half; a request falls
+back to ``auto`` on capacity shortage.
 """
 
 from __future__ import annotations
