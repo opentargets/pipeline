@@ -1,6 +1,7 @@
 """Tests for the trial_models staging task."""
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -10,13 +11,17 @@ import pytest
 from pts import aact_trial_models
 from pts.aact_trial_models import seed_drug_entities, stage_trial_models, why_stopped_texts
 from pts.record_store import map_texts, read_records, text_sha256
+from pts.staged_outputs import DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical import extract_aact_clinical_report
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL, drug_ner_revision
+from pts.transformers.clinical.hf_models import staged_model_revisions
+from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical.providers.aact import llm_drug_labels
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, stop_reasons_revision
+from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_report import attach_stop_reasons
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
+STOP_TAG = STOP_REASONS.tag(REVISIONS)
+DRUG_TAG = DRUG_ENTITIES.tag(REVISIONS)
 DRUG_STRUCT = pl.Struct({
     'drug': pl.String,
     'route': pl.String,
@@ -141,8 +146,8 @@ def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, 
     studies = _studies(['no funds', None, 'no funds', 'slow'])
     stats = _stage(tmp_path, models_uri, studies, _extractions([['a', 'b']]), 'r1')
 
-    stop = pl.read_parquet(tmp_path / 'snap/stop_reasons/rs/data.parquet')
-    ner = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')
+    stop = pl.read_parquet(tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet')
+    ner = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')
     assert stop.columns == ['text', 'text_sha256', 'categories']
     assert stop['text'].to_list() == ['no funds', 'slow']
     assert stop['categories'].to_list() == [['reason:no funds'], ['reason:slow']]
@@ -152,37 +157,39 @@ def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, 
         {'label': 'a', 'extracted_drugs': ['drug:a']},
         {'label': 'b', 'extracted_drugs': ['drug:b']},
     ]
-    revisions = {'stop_reasons': stop_reasons_revision('rs'), 'drug_entities': drug_ner_revision(REVISIONS)}
-    tags = {'stop_reasons': 'rs', 'drug_entities': 'rc+rd'}
-    for name, model in (('stop_reasons', STOP_REASONS_MODEL), ('drug_entities', DRUG_NER_MODEL)):
-        metadata = json.loads((tmp_path / f'snap/{name}/{tags[name]}/metadata.json').read_text())
-        assert metadata == {'model': model, 'model_revision': revisions[name], 'model_revisions': REVISIONS}
-    assert stats['stop_reasons'] == {'texts': 2, 'computed': True, 'published': True}
-    assert stats['drug_entities'] == {'texts': 2, 'computed': True, 'published': True}
+    kinds = (
+        (STOP_REASONS, STOP_TAG, STOP_REASONS_MODEL, {STOP_REASONS_MODEL: 'rs'}),
+        (DRUG_ENTITIES, DRUG_TAG, DRUG_NER_MODEL, {CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}),
+    )
+    for kind, tag, model, hub in kinds:
+        metadata = json.loads((tmp_path / f'snap/{kind.name}/{tag}/metadata.json').read_text())
+        assert metadata == {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
+    assert stats['stop_reasons'] == {'texts': 2, 'computed': True, 'published': True, 'tag': STOP_TAG}
+    assert stats['drug_entities'] == {'texts': 2, 'computed': True, 'published': True, 'tag': DRUG_TAG}
 
 
 def test_trial_models_publish_under_their_tags(tmp_path: Path, models_uri: str, models: Models) -> None:
     _stage(tmp_path, models_uri, _studies(['slow']), _extractions([['a']]), 'r1')
 
     assert sorted(p.relative_to(tmp_path).as_posix() for p in (tmp_path / 'snap').rglob('data.parquet')) == [
-        'snap/drug_entities/rc+rd/data.parquet',
-        'snap/stop_reasons/rs/data.parquet',
+        f'snap/drug_entities/{DRUG_TAG}/data.parquet',
+        f'snap/stop_reasons/{STOP_TAG}/data.parquet',
     ]
 
 
 def test_rerun_computes_nothing_and_rewrites_nothing(tmp_path: Path, models_uri: str, models: Models) -> None:
     studies, extractions = _studies(['no funds', 'slow']), _extractions([['a']])
     _stage(tmp_path, models_uri, studies, extractions, 'r1')
-    snapshot = (tmp_path / 'snap/stop_reasons/rs/data.parquet').stat().st_mtime_ns
+    snapshot = (tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet').stat().st_mtime_ns
     models.stop_calls.clear()
     models.ner_calls.clear()
 
     stats = _stage(tmp_path, models_uri, studies, extractions, 'r2')
 
     assert models.stop_calls == models.ner_calls == []
-    assert stats['stop_reasons'] == {'texts': 2, 'computed': False, 'published': False}
-    assert stats['drug_entities'] == {'texts': 1, 'computed': False, 'published': False}
-    assert (tmp_path / 'snap/stop_reasons/rs/data.parquet').stat().st_mtime_ns == snapshot
+    assert stats['stop_reasons'] == {'texts': 2, 'computed': False, 'published': False, 'tag': STOP_TAG}
+    assert stats['drug_entities'] == {'texts': 1, 'computed': False, 'published': False, 'tag': DRUG_TAG}
+    assert (tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet').stat().st_mtime_ns == snapshot
     assert not (tmp_path / 'store/stop_reasons/runs/r2').exists()
 
 
@@ -194,8 +201,8 @@ def test_seed_imports_the_ner_cache_once(tmp_path: Path) -> None:
     }).write_parquet(cache)
     store = str(tmp_path / 'store')
 
-    assert seed_drug_entities(str(cache), store, DRUG_NER_MODEL, 'rev', None) == 2
-    assert seed_drug_entities(str(cache), store, DRUG_NER_MODEL, 'rev', None) == 0
+    assert seed_drug_entities(str(cache), store, DRUG_NER_MODEL, DRUG_TAG, None) == 2
+    assert seed_drug_entities(str(cache), store, DRUG_NER_MODEL, DRUG_TAG, None) == 0
 
     records = read_records(f'{store}/drug_entities', None).sort('text')
     assert records['text'].to_list() == ['aspirin', 'x']
@@ -203,19 +210,19 @@ def test_seed_imports_the_ner_cache_once(tmp_path: Path) -> None:
     assert records['status'].to_list() == ['ok', 'ok']
     assert records['run_id'].to_list() == ['seed-ner-cache'] * 2
     assert records['model'].to_list() == [DRUG_NER_MODEL] * 2
-    assert records['model_revision'].to_list() == ['rev'] * 2
+    assert records['model_revision'].to_list() == [DRUG_TAG] * 2
     assert records['text_sha256'].to_list() == [text_sha256('aspirin'), text_sha256('x')]
 
 
 def test_seeded_labels_are_not_recomputed(tmp_path: Path, models_uri: str, models: Models) -> None:
     cache = tmp_path / 'ner_cache.parquet'
     pl.DataFrame({'query_label': ['a'], 'extracted_drugs': [['seeded']]}).write_parquet(cache)
-    seed_drug_entities(str(cache), str(tmp_path / 'store'), DRUG_NER_MODEL, drug_ner_revision(REVISIONS), None)
+    seed_drug_entities(str(cache), str(tmp_path / 'store'), DRUG_NER_MODEL, DRUG_TAG, None)
 
     _stage(tmp_path, models_uri, _studies([]), _extractions([['a', 'b']]), 'r1')
 
     assert models.ner_calls == [['b']]
-    ner = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')
+    ner = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')
     assert ner.to_dicts() == [
         {'label': 'a', 'extracted_drugs': ['seeded']},
         {'label': 'b', 'extracted_drugs': ['drug:b']},
@@ -231,8 +238,12 @@ def test_empty_and_blank_texts_are_staged_verbatim(tmp_path: Path, models_uri: s
 
     assert models.stop_calls == [['', '  ', 'x']]
     assert models.ner_calls == [['', ' ', 'a']]
-    assert pl.read_parquet(tmp_path / 'snap/stop_reasons/rs/data.parquet')['text'].to_list() == ['', '  ', 'x']
-    assert pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')['label'].to_list() == ['', ' ', 'a']
+    assert pl.read_parquet(tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet')['text'].to_list() == ['', '  ', 'x']
+    assert pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')['label'].to_list() == [
+        '',
+        ' ',
+        'a',
+    ]
 
 
 ESCAPED = r'Principal investigator \[PI\] has left \_the\_ institution.'
@@ -259,16 +270,38 @@ def test_staged_stop_reasons_join_the_release_report(tmp_path: Path, models_uri:
     _stage(tmp_path, models_uri, studies.select('nct_id', 'why_stopped'), extractions, 'r1')
 
     aact = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
-    staged = pl.read_parquet(tmp_path / 'snap/stop_reasons/rs/data.parquet')
+    staged = pl.read_parquet(tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet')
     attached = attach_stop_reasons(aact, staged)
 
     assert attached['trialWhyStopped'].to_list() == [SANITISED]
     assert attached['trialStopReasonCategories'].to_list() == [[f'reason:{SANITISED}']]
 
 
+def test_stage_trial_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:
+    shutil.rmtree(Path(models_uri) / DRUGTEMIST_MODEL)
+
+    with pytest.raises(ValueError, match=DRUGTEMIST_MODEL):
+        _stage(tmp_path, models_uri, _studies(['slow']), _extractions([['a']]), 'r1')
+
+    assert not (tmp_path / 'snap').exists()
+
+
+def test_seed_records_use_the_drug_entities_tag(tmp_path: Path, models_uri: str, models: Models) -> None:
+    cache = tmp_path / 'ner_cache.parquet'
+    pl.DataFrame({'query_label': ['a'], 'extracted_drugs': [['seeded']]}).write_parquet(cache)
+    store = str(tmp_path / 'store')
+    seed_drug_entities(str(cache), store, DRUG_NER_MODEL, DRUG_ENTITIES.tag(staged_model_revisions(models_uri)), None)
+
+    _stage(tmp_path, models_uri, _studies([]), _extractions([['a', 'b']]), 'r1')
+
+    records = read_records(f'{store}/drug_entities', None)
+    assert sorted(records['run_id'].unique().to_list()) == ['r1', 'seed-ner-cache']
+    assert records['model_revision'].unique().to_list() == [DRUG_TAG]
+
+
 def test_seed_never_outranks_a_computed_record(tmp_path: Path) -> None:
     store = str(tmp_path / 'store')
-    revision = drug_ner_revision(REVISIONS)
+    revision = DRUG_TAG
     drug_store = f'{store}/drug_entities'
     map_texts(
         pl.Series(['a']),

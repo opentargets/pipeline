@@ -7,7 +7,6 @@ from pts.transformers.clinical import stop_reasons
 from pts.transformers.clinical.stop_reasons import (
     STOP_REASONS_MODEL,
     predict_trial_stop_reasons,
-    stop_reasons_revision,
     stop_reasons_with_status,
 )
 
@@ -86,8 +85,7 @@ def test_stop_reasons_with_status_of_no_texts() -> None:
     assert stop_reasons_with_status([]) == []
 
 
-def test_stop_reasons_revision_includes_the_threshold() -> None:
-    assert stop_reasons_revision('abc') == 'abc+threshold=0.3'
+def test_stop_reasons_model_name() -> None:
     assert STOP_REASONS_MODEL == 'opentargets/clinical_trial_stop_reasons'
 
 

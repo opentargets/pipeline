@@ -103,11 +103,6 @@ def predict_trial_stop_reasons(
     return results
 
 
-def stop_reasons_revision(model_revision: str) -> str:
-    """Revision of the stop reasons output: the model revision and the label threshold."""
-    return f'{model_revision}+threshold={STOP_REASONS_THRESHOLD}'
-
-
 def stop_reasons_with_status(texts: list[str], batch_size: int = 32) -> list[tuple[list[str] | None, str | None]]:
     """Stop reason labels per text, or ``(None, error)`` for the texts of a batch that raised."""
     if not texts:

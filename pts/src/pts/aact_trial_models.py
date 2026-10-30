@@ -11,16 +11,13 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
-from pts.record_store import RECORD_SCHEMA, map_texts, publish_snapshot, text_sha256, tracked, write_run
+from pts.record_store import RECORD_SCHEMA, text_sha256, write_run
+from pts.staged_outputs import DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical.helpers import sanitise_text
-from pts.transformers.clinical.hf_models import offline_hf_models, revision_tags, staged_model_revisions
-from pts.transformers.clinical.ner import DRUG_NER_MODEL, drug_entities_with_status, drug_ner_revision
+from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
+from pts.transformers.clinical.ner import drug_entities_with_status
 from pts.transformers.clinical.providers.aact import llm_drug_labels
-from pts.transformers.clinical.stop_reasons import (
-    STOP_REASONS_MODEL,
-    stop_reasons_revision,
-    stop_reasons_with_status,
-)
+from pts.transformers.clinical.stop_reasons import stop_reasons_with_status
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -92,49 +89,39 @@ def stage_trial_models(
         dict[str, Any]: Per model, the number of texts and whether it computed or published anything.
     """
     revisions = staged_model_revisions(models_uri)
+    STOP_REASONS.require(revisions)
+    DRUG_ENTITIES.require(revisions)
     stop_texts = why_stopped_texts(studies)
     drug_texts = llm_drug_labels(extractions)
-    stop_calls: list[int] = []
-    ner_calls: list[int] = []
-    stop_revision = stop_reasons_revision(revisions[STOP_REASONS_MODEL])
-    ner_revision = drug_ner_revision(revisions)
 
     with offline_hf_models(models_uri):
-        stop = map_texts(
+        stop = STOP_REASONS.stage(
             stop_texts,
-            tracked(lambda texts: stop_reasons_with_status(texts, stop_reasons_batch_size), stop_calls),
-            f'{store_uri}/stop_reasons',
-            STOP_REASONS_MODEL,
-            stop_revision,
+            lambda texts: stop_reasons_with_status(texts, stop_reasons_batch_size),
+            revisions,
+            store_uri,
+            destination['stop_reasons'],
             run_id,
             config,
             max_attempts,
         )
-        ner = map_texts(
+        ner = DRUG_ENTITIES.stage(
             drug_texts,
-            tracked(lambda texts: drug_entities_with_status(texts, ner_batch_size), ner_calls),
-            f'{store_uri}/drug_entities',
-            DRUG_NER_MODEL,
-            ner_revision,
+            lambda texts: drug_entities_with_status(texts, ner_batch_size),
+            revisions,
+            store_uri,
+            destination['drug_entities'],
             run_id,
             config,
             max_attempts,
         )
 
-    tags = revision_tags(revisions)
-    stop_published = publish_snapshot(
-        stop.rename({'output': 'categories'}).select('text', 'text_sha256', 'categories'),
-        f'{destination["stop_reasons"]}/{tags["stop_reasons"]}',
-        {'model': STOP_REASONS_MODEL, 'model_revision': stop_revision, 'model_revisions': revisions},
-        config,
-    )
-    ner_published = publish_snapshot(
-        ner.select(label=pl.col('text'), extracted_drugs=pl.col('output')),
-        f'{destination["drug_entities"]}/{tags["drug_entities"]}',
-        {'model': DRUG_NER_MODEL, 'model_revision': ner_revision, 'model_revisions': revisions},
-        config,
-    )
     return {
-        'stop_reasons': {'texts': stop.height, 'computed': bool(stop_calls), 'published': stop_published},
-        'drug_entities': {'texts': ner.height, 'computed': bool(ner_calls), 'published': ner_published},
+        name: {
+            'texts': result.frame.height,
+            'computed': result.computed,
+            'published': result.published,
+            'tag': result.tag,
+        }
+        for name, result in (('stop_reasons', stop), ('drug_entities', ner))
     }

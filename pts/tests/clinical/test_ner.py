@@ -6,7 +6,7 @@ import pytest
 from loguru import logger
 
 from pts.transformers.clinical import extract_disease_entities, extract_drug_entities, ner
-from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status, drug_ner_revision
+from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
 
 Entity = dict[str, Any]
 
@@ -236,16 +236,7 @@ def test_drugtemist_failure_marks_only_fallback_texts(monkeypatch: pytest.Monkey
     assert pipelines[DRUGTEMIST_MODEL].calls == [['miss'], ['other']]
 
 
-def test_drug_ner_revision_changes_with_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
-    revisions = {CHEMICAL_MODEL: 'c' * 40, DRUGTEMIST_MODEL: 'd' * 40}
-
-    before = drug_ner_revision(revisions)
-    monkeypatch.setattr(ner, 'DRUG_NAME_PATTERNS', [*ner.DRUG_NAME_PATTERNS, r'\w*zumab\b'])
-    after = drug_ner_revision(revisions)
-
-    assert before.startswith(f'{"c" * 40}+{"d" * 40}+')
-    assert len(before.rsplit('+', 1)[1]) == 12
-    assert before != after
+def test_drug_ner_model_name() -> None:
     assert f'{CHEMICAL_MODEL}+{DRUGTEMIST_MODEL}+regex' == ner.DRUG_NER_MODEL
 
 

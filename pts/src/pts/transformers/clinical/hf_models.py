@@ -11,9 +11,6 @@ import huggingface_hub.constants as hf_constants
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
-
 if TYPE_CHECKING:
     from collections.abc import Generator
 
@@ -40,27 +37,6 @@ def staged_model_revisions(models_uri: str) -> dict[str, str]:
         if len(found) > 1:
             raise ValueError(f'{model} is staged at {len(found)} revisions under {models_uri}: {sorted(found)}')
     return {model: next(iter(found)) for model, found in revisions.items()}
-
-
-def revision_tags(revisions: dict[str, str]) -> dict[str, str]:
-    """The tag of each snapshot whose models are all in ``revisions``, keyed by snapshot name.
-
-    Args:
-        revisions: the revision of each staged model, keyed ``org/name``.
-
-    Returns:
-        ``stop_reasons``, ``drug_entities`` and ``disease_entities`` tags, for those whose models are staged.
-    """
-    models = {
-        'stop_reasons': (STOP_REASONS_MODEL,),
-        'drug_entities': (CHEMICAL_MODEL, DRUGTEMIST_MODEL),
-        'disease_entities': (DISEASE_MODEL,),
-    }
-    return {
-        name: '+'.join(revisions[model] for model in needed)
-        for name, needed in models.items()
-        if all(model in revisions for model in needed)
-    }
 
 
 @contextmanager

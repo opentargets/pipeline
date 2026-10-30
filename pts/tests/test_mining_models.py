@@ -11,7 +11,7 @@ import pytest
 from pts import mining_models
 from pts.mining_models import stage_mining_models
 from pts.record_store import map_texts
-from pts.transformers.clinical.hf_models import revision_tags
+from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
 from pts.transformers.clinical.ner import (
     CHEMICAL_MODEL,
@@ -19,12 +19,12 @@ from pts.transformers.clinical.ner import (
     DISEASE_NER_MODEL,
     DRUG_NER_MODEL,
     DRUGTEMIST_MODEL,
-    drug_ner_revision,
 )
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from tests.clinical.test_mining import inputs  # noqa: F401
 
 REVISIONS = {DISEASE_MODEL: 'rx', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
+DISEASE_TAG = DISEASE_ENTITIES.tag(REVISIONS)
+DRUG_TAG = DRUG_ENTITIES.tag(REVISIONS)
 
 
 def _report(labels: list[str]) -> Any:
@@ -89,23 +89,11 @@ def _stage(tmp_path: Path, models_uri: str, run_id: str) -> dict[str, Any]:
     )
 
 
-def test_revision_tags_from_staged_revisions() -> None:
-    aact = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
-
-    assert revision_tags({**aact, DISEASE_MODEL: 'rx'}) == {
-        'stop_reasons': 'rs',
-        'drug_entities': 'rc+rd',
-        'disease_entities': 'rx',
-    }
-    assert revision_tags(aact) == {'stop_reasons': 'rs', 'drug_entities': 'rc+rd'}
-    assert revision_tags(REVISIONS) == {'drug_entities': 'rc+rd', 'disease_entities': 'rx'}
-
-
 def test_mining_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, models: Models) -> None:
     stats = _stage(tmp_path, models_uri, 'r1')
 
-    disease = pl.read_parquet(tmp_path / 'snap/disease_entities/rx/data.parquet')
-    drugs = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')
+    disease = pl.read_parquet(tmp_path / f'snap/disease_entities/{DISEASE_TAG}/data.parquet')
+    drugs = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')
     assert disease.columns == ['text', 'extracted_diseases']
     assert disease.to_dicts() == [
         {'text': 'fever', 'extracted_diseases': ['disease:fever']},
@@ -114,14 +102,15 @@ def test_mining_models_publishes_both_snapshots(tmp_path: Path, models_uri: str,
     assert drugs.columns == ['label', 'extracted_drugs']
     assert drugs['label'].to_list() == ['aspirin', 'ibuprofen', 'x']
     assert models.ner_calls == [['aspirin', 'ibuprofen', 'x']]
-    for path, model, revision in (
-        ('disease_entities/rx', DISEASE_NER_MODEL, 'rx'),
-        ('drug_entities/rc+rd', DRUG_NER_MODEL, drug_ner_revision(REVISIONS)),
-    ):
-        metadata = json.loads((tmp_path / f'snap/{path}/metadata.json').read_text())
-        assert metadata == {'model': model, 'model_revision': revision, 'model_revisions': REVISIONS}
-    assert stats['disease_entities'] == {'texts': 2, 'computed': True, 'published': True}
-    assert stats['drug_entities'] == {'texts': 3, 'computed': True, 'published': True}
+    kinds = (
+        (DISEASE_ENTITIES, DISEASE_TAG, DISEASE_NER_MODEL, {DISEASE_MODEL: 'rx'}),
+        (DRUG_ENTITIES, DRUG_TAG, DRUG_NER_MODEL, {CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}),
+    )
+    for kind, tag, model, hub in kinds:
+        metadata = json.loads((tmp_path / f'snap/{kind.name}/{tag}/metadata.json').read_text())
+        assert metadata == {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
+    assert stats['disease_entities'] == {'texts': 2, 'computed': True, 'published': True, 'tag': DISEASE_TAG}
+    assert stats['drug_entities'] == {'texts': 3, 'computed': True, 'published': True, 'tag': DRUG_TAG}
 
 
 def test_mining_rerun_computes_nothing(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -132,8 +121,8 @@ def test_mining_rerun_computes_nothing(tmp_path: Path, models_uri: str, models: 
     stats = _stage(tmp_path, models_uri, 'r2')
 
     assert models.disease_calls == models.ner_calls == []
-    assert stats['disease_entities'] == {'texts': 2, 'computed': False, 'published': False}
-    assert stats['drug_entities'] == {'texts': 3, 'computed': False, 'published': False}
+    assert stats['disease_entities'] == {'texts': 2, 'computed': False, 'published': False, 'tag': DISEASE_TAG}
+    assert stats['drug_entities'] == {'texts': 3, 'computed': False, 'published': False, 'tag': DRUG_TAG}
 
 
 def test_a_label_shared_with_aact_is_not_recomputed(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -142,7 +131,7 @@ def test_a_label_shared_with_aact_is_not_recomputed(tmp_path: Path, models_uri: 
         lambda texts: [(['aact'], None) for _ in texts],
         str(tmp_path / 'store/drug_entities'),
         DRUG_NER_MODEL,
-        drug_ner_revision(REVISIONS),
+        DRUG_TAG,
         'aact-run',
         None,
     )
@@ -150,7 +139,7 @@ def test_a_label_shared_with_aact_is_not_recomputed(tmp_path: Path, models_uri: 
     _stage(tmp_path, models_uri, 'r1')
 
     assert models.ner_calls == [['ibuprofen', 'x']]
-    drugs = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')
+    drugs = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')
     assert drugs.filter(label='aspirin')['extracted_drugs'].to_list() == [['aact']]
 
 
@@ -184,11 +173,11 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
         max_attempts=3,
     )
 
-    staged = pl.read_parquet(tmp_path / 'snap/disease_entities/rx/data.parquet')
+    staged = pl.read_parquet(tmp_path / f'snap/disease_entities/{DISEASE_TAG}/data.parquet')
     lookup = staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts')
     expected = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, lookup).values())
     blind = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, RecordingNer()).values())
-    labels = pl.read_parquet(tmp_path / 'snap/drug_entities/rc+rd/data.parquet')['label']
+    labels = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')['label']
     assert labels.to_list() == expected.to_list()
     assert set(blind.to_list()) < set(expected.to_list())
     assert {'alphamab', 'gammastat'} <= set(labels.to_list())

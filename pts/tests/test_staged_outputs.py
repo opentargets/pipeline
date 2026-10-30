@@ -10,8 +10,14 @@ import pytest
 
 from pts.record_store import publish_snapshot, read_records
 from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
+from pts.transformers.clinical.ner import (
+    CHEMICAL_MODEL,
+    DISEASE_MODEL,
+    DRUG_NAME_PATTERNS,
+    DRUG_NER_MODEL,
+    DRUGTEMIST_MODEL,
+)
+from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
 
@@ -63,6 +69,11 @@ def test_tag_changes_with_params_and_logic_version() -> None:
 
     assert dataclasses.replace(STOP_REASONS, params={'threshold': 0.5}).tag(REVISIONS) != tag
     assert dataclasses.replace(STOP_REASONS, logic_version=2).tag(REVISIONS) != tag
+
+
+def test_params_hold_the_threshold_and_patterns_the_code_runs() -> None:
+    assert STOP_REASONS.params == {'threshold': STOP_REASONS_THRESHOLD}
+    assert DRUG_ENTITIES.params['patterns'] == DRUG_NAME_PATTERNS
 
 
 def test_require_names_the_missing_models() -> None:

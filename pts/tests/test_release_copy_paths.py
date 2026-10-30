@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from pts.transformers.clinical.hf_models import revision_tags
+from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 
@@ -40,8 +40,9 @@ def _copy_sources() -> dict[str, list[str]]:
 
 
 def test_release_copy_paths_use_the_staging_tags() -> None:
-    """Each snapshot directory the release copies ends with the tag ``revision_tags`` gives staging."""
-    tags = revision_tags(FAKE_REVISIONS)
+    """Each snapshot directory the release copies starts with the hub revisions of the tag staging gives."""
+    kinds = {kind.name: kind for kind in (STOP_REASONS, DRUG_ENTITIES, DISEASE_ENTITIES)}
+    tags = {name: kind.tag(FAKE_REVISIONS).rpartition('-p')[0] for name, kind in kinds.items()}
     sources = _copy_sources()
     expected = {
         'input/clinical_report/aact_stop_reasons': ('gs://clinical_staging/aact/A/stop_reasons', 'stop_reasons'),

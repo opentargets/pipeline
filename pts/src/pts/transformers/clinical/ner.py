@@ -5,7 +5,6 @@ Ported from OnToma's ``ontoma.ner`` (Open Targets), without Spark.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -213,12 +212,6 @@ def _process_batch_tiered(
 
     results = [r if r is not None else [] for r in all_results]
     return results, errors, biobert_failures, drugtemist_failures, len(fallback_texts)
-
-
-def drug_ner_revision(revisions: dict[str, str]) -> str:
-    """Revision of the drug NER output: both model revisions and a digest of the regex patterns."""
-    patterns = hashlib.sha256('\n'.join(DRUG_NAME_PATTERNS).encode()).hexdigest()[:12]
-    return f'{revisions[CHEMICAL_MODEL]}+{revisions[DRUGTEMIST_MODEL]}+{patterns}'
 
 
 def drug_entities_with_status(texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:

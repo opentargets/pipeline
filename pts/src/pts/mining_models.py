@@ -6,18 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from pts.record_store import map_texts, publish_snapshot, tracked
-from pts.transformers.clinical.hf_models import offline_hf_models, revision_tags, staged_model_revisions
+from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
+from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
-from pts.transformers.clinical.ner import (
-    CHEMICAL_MODEL,
-    DISEASE_NER_MODEL,
-    DRUG_NER_MODEL,
-    DRUGTEMIST_MODEL,
-    disease_entities_with_status,
-    drug_entities_with_status,
-    drug_ner_revision,
-)
+from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -41,61 +33,44 @@ def stage_mining_models(
         dict[str, Any]: Per model, the number of texts and whether it computed or published anything.
     """
     revisions = staged_model_revisions(models_uri)
-    missing = [m for m in (DISEASE_NER_MODEL, CHEMICAL_MODEL, DRUGTEMIST_MODEL) if m not in revisions]
-    if missing:
-        raise ValueError(f'models not staged under {models_uri}: {missing}')
-    tags = revision_tags(revisions)
+    DISEASE_ENTITIES.require(revisions)
+    DRUG_ENTITIES.require(revisions)
     recorder = RecordingNer()
     build_mining_reports(ttd, ema, pmda, recorder)
     disease_texts = pl.Series('text', sorted(recorder.texts), dtype=pl.String)
-    disease_calls: list[int] = []
-    ner_calls: list[int] = []
-    ner_revision = drug_ner_revision(revisions)
 
     with offline_hf_models(models_uri):
-        disease = map_texts(
+        disease = DISEASE_ENTITIES.stage(
             disease_texts,
-            tracked(disease_entities_with_status, disease_calls),
-            f'{store_uri}/disease_entities',
-            DISEASE_NER_MODEL,
-            revisions[DISEASE_NER_MODEL],
+            disease_entities_with_status,
+            revisions,
+            store_uri,
+            destination['disease_entities'],
             run_id,
             config,
             max_attempts,
         )
-        staged = disease.select('text', extracted_diseases=pl.col('output'))
         reports = build_mining_reports(
-            ttd, ema, pmda, staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts')
+            ttd, ema, pmda, staged_lookup(disease.frame, 'text', 'extracted_diseases', 'disease texts')
         )
         drug_labels = report_drug_labels(report.df for report in reports.values())
-        ner = map_texts(
+        ner = DRUG_ENTITIES.stage(
             drug_labels,
-            tracked(lambda texts: drug_entities_with_status(texts, ner_batch_size), ner_calls),
-            f'{store_uri}/drug_entities',
-            DRUG_NER_MODEL,
-            ner_revision,
+            lambda texts: drug_entities_with_status(texts, ner_batch_size),
+            revisions,
+            store_uri,
+            destination['drug_entities'],
             run_id,
             config,
             max_attempts,
         )
 
-    disease_published = publish_snapshot(
-        staged,
-        f'{destination["disease_entities"]}/{tags["disease_entities"]}',
-        {
-            'model': DISEASE_NER_MODEL,
-            'model_revision': revisions[DISEASE_NER_MODEL],
-            'model_revisions': revisions,
-        },
-        config,
-    )
-    ner_published = publish_snapshot(
-        ner.select(label=pl.col('text'), extracted_drugs=pl.col('output')),
-        f'{destination["drug_entities"]}/{tags["drug_entities"]}',
-        {'model': DRUG_NER_MODEL, 'model_revision': ner_revision, 'model_revisions': revisions},
-        config,
-    )
     return {
-        'disease_entities': {'texts': disease.height, 'computed': bool(disease_calls), 'published': disease_published},
-        'drug_entities': {'texts': ner.height, 'computed': bool(ner_calls), 'published': ner_published},
+        name: {
+            'texts': result.frame.height,
+            'computed': result.computed,
+            'published': result.published,
+            'tag': result.tag,
+        }
+        for name, result in (('disease_entities', disease), ('drug_entities', ner))
     }
