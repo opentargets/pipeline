@@ -105,6 +105,14 @@ they give a new tag. To recover from a refused extraction, delete the
 extraction directory and rerun the step. The stores keep every computed record,
 so only texts they have not seen are computed.
 
+Recovering an extraction for an AACT version that was already staged for trial
+models changes that version's drug labels. The rerun of `pts_aact_trial_models`
+then publishes different data under the same `drug_entities/<tag>/`, because
+the tag does not depend on the extraction, and is refused. Delete that
+version's `drug_entities/<tag>/` directory as well before rerunning. Releases
+that copied that version's extraction or drug snapshot no longer reproduce from
+the bucket. The stop reasons and the mining snapshots are unaffected.
+
 ### Model bumps
 
 A new model revision gives a new tag, and its snapshot lands beside the old
@@ -127,13 +135,21 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
 A change to the parameters of a kind, or to the code that computes its output,
 also gives a new tag.
 
-1. Change the parameters in `staged_outputs.py`. When the compute code changes
-   without a parameter, bump the kind's `logic_version` by one.
+1. Change the constants that the kind's `params` reference: `STOP_REASONS_THRESHOLD`
+   in `stop_reasons.py`, or `DRUG_NAME_PATTERNS`, `BIOBERT_LABELS`,
+   `DRUGTEMIST_LABELS`, `DISEASE_LABELS`, `DISEASE_MIN_LENGTH` and
+   `DISEASE_DROP_DIGITS` in `ner.py`. `params` only records them; editing it
+   does not change what is computed. When the compute code changes without a
+   constant, bump the kind's `logic_version` by one.
 2. Update the matching `*_tag` pin in `pis/config.yaml`, with the tag the pin
    test prints.
-3. Restage the affected versions. The new snapshot lands beside the old one,
+3. Release pts and bump `pts_version` in `clinical_staging.yaml`. Staging
+   computes the tag from the code in the pts image, so restaging with the old
+   image reproduces the old tag. Do the same for the release image when moving
+   the release.
+4. Restage the affected versions. The new snapshot lands beside the old one,
    which stays: snapshots remain write-once.
-4. Move the release last.
+5. Move the release last.
 
 ## Rollout
 
