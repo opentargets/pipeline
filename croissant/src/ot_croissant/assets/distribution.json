@@ -130,6 +130,14 @@
     "description": "Human Phenotype Ontology subset of information included in the Platform"
   },
   {
+    "id": "disease_location",
+    "nice_name": "Disease/Location - anatomical locations of diseases",
+    "tags": [
+      "Disease"
+    ],
+    "description": "Most specific anatomical locations (tissues, organs and cell types) of each disease, from MONDO's disease-has-location axioms inherited down the disease hierarchy"
+  },
+  {
     "id": "disease_phenotype",
     "nice_name": "Disease/Phenotype - clinical signs and symptoms",
     "tags": [
