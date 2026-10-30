@@ -1,60 +1,21 @@
 # Finngen
 
-This document was updated on 2025-07-22.
+This document was updated on 2026-10-29.
 
-This datasource is currently fixed under [Finngen Data Freeze 12 - November 4 2024](https://r12.finngen.fi/)
+Bucket `gs://finngen_data` holds the FinnGen datasets ingested by Open Targets. Each DAG run writes to its own folder, `prod/<YYYYMMDDTHHMMSS>/`, with the DAG config of the run under `config/` and its outputs under `output/`. The docs of a run are under `docs/` of its run folder; the bucket has no top-level `docs/`.
 
-Data source comes from the bucket `gs://finngen-public-data-r12/` hosted by Finngen.
-
-Data is stored under `gs://finngen_data/r12` comes with following structure
-
-```{bash}
-gs://finngen_data/r12/credible_set_datasets/susie
-gs://finngen_data/r12/study_index/
+```sh
+gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/       # FinnGen GWAS, finngen_ingestion DAG
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/   # FinnGen multiome, finngen_multiome_ingestion DAG
 ```
 
-## Preprocessing
+## FinnGen GWAS
 
-Raw data is fetched by the gentropy steps directly from the data source. No preprocessing steps are required.
-
-The fetching paths are:
-
-- snp files from `gs://finngen-public-data-r12/finemap/full/susie/*.snp.bgz`
-- credible_set files from `gs://finngen-public-data-r12/finemap/summary/*SUSIE.cred.summary.tsv`
-
-## Processing description
-
-### finngen_ingestion dag
-
-The **finngen_ingestion.py** dag contains following steps:
-
-![finngen_ingestion](finngen_ingestion.svg)
-
-The dag consists of 2 steps:
-
-1. finngen_studies - Step that creates the StudyIndex dataset
-2. finngen_finemapping_ingestion - Step that ingests the SuSiE finemapping results from Finngen datasource to CredibleSet dataset.
-
-Steps run in parallel in the dataproc cluster.
-
-The output datasets are:
-
-- [x] [`StudyIndex`](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) stored under `gs://finngen_data/r12/study_index/`
-- [x] [`CredibleSets`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) stored under `gs://finngen_data/r12/credible_set_datasets/susie/`
-
-The configuration of the dataproc infrastructure and individual step parameters can be found in `finngen_ingestion.yaml` file.
+The SuSiE fine-mapping of [FinnGen Data Freeze 12](https://r12.finngen.fi/) is read from `gs://finngen-public-data-r12/` and ingested by the `finngen_ingestion` DAG into a study index and credible sets. The DAG config is `dags/config/finngen_ingestion.yaml`. The current release is `gs://finngen_data/gwas/prod/20260526T131014/`, see [FinnGen GWAS](finngen_gwas/README.md).
 
 ## FinnGen multiome
 
-The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](https://www.nature.com/articles/s41586-026-11078-2) is read from `gs://finngen-public-data-multiome/eQTL/` and ingested by the `finngen_multiome_ingestion` DAG, with the gentropy step [`finngen_multiome_ingestion`](https://github.com/opentargets/gentropy/pull/1307). The DAG config is `dags/finngen_multiome_ingestion/config.yaml`. Each run writes to its own folder:
-
-```sh
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/config/   # DAG config of the run
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/bin/      # gentropy CLI and cluster init script of the run
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/study/
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/credible_set/
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/credible_set_variant/
-```
+The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](https://www.nature.com/articles/s41586-026-11078-2) is read from `gs://finngen-public-data-multiome/eQTL/` and ingested by the `finngen_multiome_ingestion` DAG into a study index, credible sets and credible set variants. The DAG config is `dags/finngen_multiome_ingestion/config.yaml`. The current release is `gs://finngen_data/multiome/prod/20261029T125742/`, see [FinnGen multiome](finngen_multiome/README.md).
 
 ## Changelog
 
@@ -77,3 +38,7 @@ gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/output/credible_set_variant/
 ### 2026-10-29
 
 - feat: add the `finngen_multiome_ingestion` DAG, a StagingDagConfig DAG on gentropy `v4.0.0-dev.5` writing to `gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/`.
+- chore: move the FinnGen GWAS release (run of 2026-05-26) from `gs://finngen_data/r12/` to `gs://finngen_data/gwas/prod/20260526T131014/` (`config/`, `docs/`, `output/`), and split its docs into [FinnGen GWAS](finngen_gwas/README.md).
+- docs: add [FinnGen multiome](finngen_multiome/README.md), uploaded to `docs/` of the run folder `gs://finngen_data/multiome/prod/20261029T125742/`.
+- chore: remove the top-level `gs://finngen_data/docs/`; the docs of each run are under `docs/` of its run folder.
+- chore: remove `gs://finngen_data/100_3mb_carma/`, CARMA fine-mapping outputs that no DAG produces or reads.
