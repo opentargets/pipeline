@@ -25,7 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, text_sha256, write_run
-from pts.tasks.llm_extract import _import_class
+from pts.tasks.llm_extract import import_class
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
     SYSTEMIC_ERROR_TYPES,
@@ -135,7 +135,7 @@ def extract(
     The client is opened, used and closed on a worker thread's own event loop.
 
     Raises:
-        ComputeAborted: If the OpenAI key cannot be read, or a shard of at least
+        ComputeAborted: If the OpenAI key cannot be read or is empty, or a shard of at least
             ``SYSTEMIC_FAILURE_MIN_PROMPTS`` trials yields no extraction at all and
             each trial's error is in ``SYSTEMIC_ERROR_TYPES`` or was not reported.
     """
@@ -145,7 +145,8 @@ def extract(
         msg = f'cannot read the OpenAI key at {spec.openai_key_path}: {exc}'
         raise ComputeAborted(msg) from exc
     if not openai_key:
-        raise ValueError('openai_key must be a non-empty string.')
+        msg = f'the OpenAI key at {spec.openai_key_path} is empty'
+        raise ComputeAborted(msg)
 
     prompts = list(shard.select('id', 'prompt').iter_rows())
 
@@ -191,7 +192,7 @@ def extraction_compute(
     carrying the error for the trial, ``no extraction`` if it gave none.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
-    model_cls = _import_class(spec.model_class)
+    model_cls = import_class(spec.model_class)
 
     def compute(texts: list[str]) -> list[tuple[str | None, str | None]]:
         shard = pl.DataFrame(

@@ -27,7 +27,7 @@ from pts.aact_trial_extraction import (
     import_extraction_cache,
 )
 from pts.record_store import ComputeAborted, read_records, text_sha256
-from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class
+from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, import_class
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.llm_workflow import Extracted, Failed
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
@@ -71,7 +71,7 @@ def test_default_model_class_is_the_extraction_schema() -> None:
     )
 
     assert spec.model_class == 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
-    assert _import_class(spec.model_class) is ClinicalReportExtractionSchema
+    assert import_class(spec.model_class) is ClinicalReportExtractionSchema
 
 
 def test_prompts_without_publications_match_mira() -> None:
@@ -720,15 +720,18 @@ def test_client_is_closed_on_its_loop_when_extraction_raises(monkeypatch: pytest
     assert client.closed_loop is client.entered_loop
 
 
-def test_an_empty_key_fails_as_the_workflow_did(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_an_empty_key_aborts_without_recording_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch)
-    spec = _spec(tmp_path)
-    Path(spec.openai_key_path).write_text('\n')
+    key = tmp_path / 'empty-key'
+    key.write_text(' \n')
 
-    with pytest.raises(ValueError, match='openai_key must be a non-empty string'):
-        _extract_in_loop(_shard('nct1'), spec)
+    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(key))
 
+    assert task.manifest.failure_reason is not None
+    assert f'the OpenAI key at {key} is empty' in task.manifest.failure_reason
     assert llm.clients == []
+    assert not (tmp_path / 'store').exists()
+    assert not (tmp_path / 'v1/extraction').exists()
 
 
 def test_two_extractions_run_at_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

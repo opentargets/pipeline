@@ -106,7 +106,7 @@ class LlmExtract(Task):
         from pts import aact_trial_extraction
 
         system_prompt = self._system_prompt()
-        model_cls = _import_class(self.spec.model_class)
+        model_cls = import_class(self.spec.model_class)
         schema_digest = hashlib.sha256(
             json.dumps(model_cls.model_json_schema(by_alias=True), sort_keys=True).encode('utf-8')
         ).hexdigest()
@@ -184,7 +184,7 @@ class LlmExtract(Task):
         return self
 
 
-def _import_class(dotted_path: str) -> type[BaseModel]:
+def import_class(dotted_path: str) -> type[BaseModel]:
     """Import a pydantic model class from a dotted module path."""
     module_path, class_name = dotted_path.rsplit('.', 1)
     return getattr(import_module(module_path), class_name)
