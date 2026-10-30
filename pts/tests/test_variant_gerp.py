@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
@@ -94,3 +95,43 @@ def test_kent_summary_max_matches_exact_for_short_spans(bigwig: str):
         assert reader.summary_max('22', 10, 13) == pytest.approx(-0.466, abs=1e-6)
         assert reader.summary_max('X', 10, 13) is None
         assert reader.summary_mean('22', 20, 22) == pytest.approx((7.0e-05 + 1.97) / 2, abs=1e-6)
+
+
+def _gerp_max_per_span(bigwig: str, chromosome: str, frame: pl.DataFrame) -> pl.Series:
+    """The previous implementation: one `intervals` read per distinct span."""
+    found: dict[tuple[int, int], float | None] = {}
+    keys = list(zip(frame['vepStart'], frame['vepEnd'], strict=True))
+    with pyBigWig.open(bigwig) as handle:
+        length = (handle.chroms() or {}).get(chromosome)
+        if length is not None:
+            for start, end in dict.fromkeys(keys):
+                low, high = (start - 2, end + 1) if start - 1 == end else (start - 1, end)
+                low, high = max(low, 0), min(high, length)
+                intervals = handle.intervals(chromosome, low, high) if low < high else None
+                found[start, end] = max(value for _, _, value in intervals) if intervals else None
+    return pl.Series('gerp', [found.get(key) for key in keys], dtype=pl.Float64)
+
+
+@pytest.mark.parametrize('seed', range(5))
+def test_windowed_reads_equal_one_read_per_span(tmp_path, seed: int):
+    """Random sparse scores and spans (insertions, repeats, overlaps, both contig ends), small windows."""
+    rng = np.random.default_rng(seed)
+    length = 5_000
+    path = str(tmp_path / 'random.bw')
+    handle = pyBigWig.open(path, 'w')
+    handle.addHeader([('1', length), ('2', 10)])
+    covered = np.sort(rng.choice(length, size=3_000, replace=False))
+    handle.addEntries(
+        ['1'] * covered.size,
+        covered.tolist(),
+        ends=(covered + 1).tolist(),
+        values=np.round(rng.normal(0, 3, covered.size), 3).tolist(),
+    )
+    handle.close()
+    starts = rng.integers(-2, length + 5, 2_000)
+    lengths = rng.choice([0, 1, 1, 1, 2, 7, 40], starts.size)
+    frame = pl.DataFrame({'vepStart': starts, 'vepEnd': starts + lengths - 1}).sample(fraction=1.0, seed=seed)
+    expected = _gerp_max_per_span(path, '1', frame)
+    for gap, longest in ((0, 1), (16, 64), (4096, 1 << 22)):
+        assert gerp_max(path, '1', frame, gap=gap, longest=longest).equals(expected)
+    assert gerp_max(path, 'missing', frame).null_count() == frame.height
