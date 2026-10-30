@@ -22,6 +22,11 @@ SCHEMA = pl.Schema({
 })
 
 
+def _contig(chromosome: str) -> str:
+    """The file's `#CHROM` for an index chromosome: `chr` and the name, `chrM` for MT."""
+    return 'chrM' if chromosome == 'MT' else f'chr{chromosome}'
+
+
 def _scan(path: str) -> pl.LazyFrame:
     """The AlphaMissense file, or one chromosome of it written by `partition_alphamissense`."""
     if path.endswith('.parquet'):
@@ -38,7 +43,7 @@ def partition_alphamissense(path: str, directory: Path, chromosomes: Iterable[st
         Chromosome to the path of its file, which `alphamissense` reads in place of the source.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    names = {chromosome: f'chr{chromosome}' for chromosome in chromosomes}
+    names = {chromosome: _contig(chromosome) for chromosome in chromosomes}
     frame = (
         _scan(path)
         .filter(pl.col('chromosome').is_in(list(names.values())))
@@ -56,7 +61,7 @@ def _predictions(path: str, chromosome: str) -> pl.DataFrame:
     """The AlphaMissense rows of one chromosome, with the transcript id stripped of its version."""
     return (
         _scan(path)
-        .filter(pl.col('chromosome') == f'chr{chromosome}')
+        .filter(pl.col('chromosome') == _contig(chromosome))
         .with_columns(pl.col('transcript_id').str.replace(r'\.\d+$', ''))
         .unique(KEY, keep='first', maintain_order=True)
         .select(*KEY, 'am_class', 'am_pathogenicity')
@@ -69,7 +74,7 @@ def alphamissense(path: str, chromosome: str, rows: pl.DataFrame) -> pl.DataFram
 
     Predictions are matched on position, reference allele, alternate allele and the transcript
     id without its version, as the VEP plugin ran with `transcript_match=1`. The file's
-    `#CHROM` carries a `chr` prefix, and its rows are single-base substitutions.
+    `#CHROM` carries a `chr` prefix (`chrM` for MT), and its rows are single-base substitutions.
 
     Args:
         path: The `AlphaMissense_hg38.tsv.gz` file, local or remote, or its `partition_alphamissense` part.

@@ -87,3 +87,12 @@ def test_partition_reads_the_same_predictions(tsv: str, tmp_path: Path):
     assert alphamissense(parts['1'], '1', keys).equals(alphamissense(tsv, '1', keys))
     assert pl.read_parquet(parts['X']).is_empty()
     assert alphamissense(parts['X'], 'X', keys)['am_class'].to_list() == [None, None]
+
+
+def test_alphamissense_reads_mt_as_chrm(tsv: str, tmp_path: Path):
+    """The file names the mitochondrion `chrM`; MT_12706_T_C is a real prediction."""
+    keys = rows((12706, 'T', 'C', 'ENST00000361567'))
+    assert alphamissense(tsv, 'MT', keys).select('am_class', 'am_pathogenicity').row(0) == ('likely_pathogenic', 0.9989)
+    parts = partition_alphamissense(tsv, tmp_path, ['MT'])
+    assert pl.read_parquet(parts['MT']).height == 1
+    assert alphamissense(parts['MT'], 'MT', keys).equals(alphamissense(tsv, 'MT', keys))
