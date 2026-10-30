@@ -366,9 +366,6 @@ with DAG(
             'gentropy_colocalisation': {
                 'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
             },
-            'gentropy_variant_annotation': {
-                'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
-            },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
             },
@@ -379,14 +376,7 @@ with DAG(
             SparkJobDiffer(outputs=gentropy_step_outputs.get(step_name)),
         ]
 
-        gentropy_step_differs: dict[str, list[Differ]] = {
-            'gentropy_variant_annotation': [
-                ConfigDiffer(),
-                # TODO: What else can we check in here?
-            ],
-        }
-
-        return gentropy_step_differs.get(step_name, default_differs)
+        return default_differs
 
     # ==============================================================================================
     # GENTROPY stage of the DAG — two paths

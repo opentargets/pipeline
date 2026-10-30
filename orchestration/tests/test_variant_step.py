@@ -12,7 +12,7 @@ def test_variant_runs_on_a_vm() -> None:
 def test_foldx_runs_inside_the_variant_step() -> None:
     config = UnifiedPipelineConfig()
     assert 'pts_foldx' not in config.steps('pts_')
-    assert config.step_definition('pts_variant')['depends_on'] == ['pis_variant', 'gentropy_variant_annotation']
+    assert 'gentropy_variant_annotation' not in config.step_definition('pts_variant')['depends_on']
     foldx, index = config.pts.config['steps']['variant']
     assert foldx['transformer'] == 'foldx'
     assert index['requires'] == [foldx['name']]

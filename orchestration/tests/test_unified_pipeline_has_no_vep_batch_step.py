@@ -1,0 +1,52 @@
+"""The unified pipeline annotates variants inside the pts variant step, without Google Batch."""
+
+import importlib
+from pathlib import Path
+
+import pytest
+import yaml
+
+from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
+from orchestration.models.pts_step import pts_step_from_config
+
+REMOVED_STEPS = ('gentropy_variant_annotation', 'pts_variant_partition')
+
+STANDALONE_BATCH_DAGS = (
+    'orchestration.dags.gwas_catalog_harmonisation',
+    'orchestration.dags.gwas_catalog_heritability_estimate',
+    'orchestration.dags.gwas_catalog_sumstats_susie_finemapping',
+    'orchestration.dags.ukb_ppp_eur_finemapping',
+)
+
+
+def test_unified_pipeline_has_no_vep_batch_step() -> None:
+    config = UnifiedPipelineConfig()
+    all_steps = config.steps('pis_') + config.steps('pts_') + config.steps('gentropy_')
+    for removed in REMOVED_STEPS:
+        assert removed not in all_steps
+    config_file = Path(__file__).parents[1] / 'src/orchestration/dags/config/unified_pipeline.yaml'
+    raw = yaml.safe_load(config_file.read_text())
+    assert 'vep_version' not in raw
+
+
+def test_variant_depends_on_the_step_sources_only() -> None:
+    config = UnifiedPipelineConfig()
+    assert config.step_definition('pts_variant')['depends_on'] == [
+        'pis_variant',
+        'pis_target',
+        'pis_evidence_uniprot_variants',
+        'pis_evidence_eva',
+        'pts_pharmacogenetics',
+        'pts_credible_set',
+    ]
+
+
+def test_variant_runs_on_a_highmem_vm() -> None:
+    step = pts_step_from_config('pts_variant', UnifiedPipelineConfig())
+    assert step.is_gce
+    assert step.machine_type == 'n2d-highmem-32'
+
+
+@pytest.mark.parametrize('module', STANDALONE_BATCH_DAGS)
+def test_standalone_dags_still_import_batch(module: str) -> None:
+    importlib.import_module(module)

@@ -8,13 +8,11 @@ from orchestration.models.batch import BatchIndexOperatorSpec, BatchIndexRow
 from orchestration.operators.batch.manifest_generators import (
     FinemappingManifestGenerator,
     HarmonisationManifestGenerator,
-    VepManifestGenerator,
 )
 from orchestration.operators.batch.manifest_generators.heritability_estimate import HeritabilityManifestGenerator
 from orchestration.operators.batch.manifest_generators.proto import ProtoManifestGenerator
 
 MANIFEST_GENERATOR_MAP = {
-    'vep': VepManifestGenerator,
     'finemapping': FinemappingManifestGenerator,
     'harmonisation': HarmonisationManifestGenerator,
     'heritability_estimate': HeritabilityManifestGenerator,
