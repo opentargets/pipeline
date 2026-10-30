@@ -134,15 +134,18 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
 
 ### Parameter and code changes
 
-A change to the parameters of a kind, or to the code that computes its output,
-also gives a new tag.
+A change to the `params` of a kind, or a `logic_version` bump for any other
+change to the code that computes its output, also gives a new tag.
 
 1. Change the constants that the kind's `params` reference: `STOP_REASONS_THRESHOLD`
    in `stop_reasons.py`, or `DRUG_NAME_PATTERNS`, `BIOBERT_LABELS`,
    `DRUGTEMIST_LABELS`, `DISEASE_LABELS`, `DISEASE_MIN_LENGTH` and
    `DISEASE_DROP_DIGITS` in `ner.py`. `params` only records them; editing it
-   does not change what is computed. When the compute code changes without a
-   constant, bump the kind's `logic_version` by one.
+   does not change what is computed. `params` hold the tuned constants, not
+   everything the compute reads: the drug NER's regex hit length and leading
+   digit check, its word length and digit filter, and
+   `aggregation_strategy='max'` are literals in `ner.py`. For any change to the
+   compute other than a `params` constant, bump the kind's `logic_version` by one.
 2. Update the matching `*_tag` pin in `pis/config.yaml`, with the tag the pin
    test prints.
 3. Release pts and bump `pts_version` in `clinical_staging.yaml`. Staging
@@ -197,8 +200,8 @@ Only AACT trials with an extraction row are included in the clinical report.
 ### 2026-10-30
 
 - Snapshot tags end in a digest of the kind's parameters and `logic_version`,
-  and pis pins the full tags. A code change gives a new tag, so it no longer
-  needs a delete and restage.
+  and pis pins the full tags. A code change gives a new tag through a `params`
+  change or a `logic_version` bump, so it no longer needs a delete and restage.
 
 ### 2026-10-20
 

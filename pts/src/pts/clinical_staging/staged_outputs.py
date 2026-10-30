@@ -1,7 +1,9 @@
 """The kinds of model output that staging computes and the release reads.
 
-Each kind names the Hugging Face models it runs, the parameters of the code around
-them, and the columns of its snapshot. Its tag identifies one output revision::
+Each kind names the Hugging Face models it runs, the tuned constants of the code
+around them (``params``), and the columns of its snapshot. Any other change to a
+kind's compute needs a ``logic_version`` bump. Its tag identifies one output
+revision::
 
     <hub revision>+<hub revision>-p<digest>
 

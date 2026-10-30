@@ -86,7 +86,7 @@ def test_params_hold_the_threshold_and_patterns_the_code_runs() -> None:
     assert DRUG_ENTITIES.params['patterns'] == DRUG_NAME_PATTERNS
 
 
-def test_params_hold_the_values_each_compute_reads() -> None:
+def test_params_hold_the_tuned_constants_each_compute_reads() -> None:
     default = inspect.signature(predict_trial_stop_reasons).parameters['threshold'].default
     assert STOP_REASONS.params == {'threshold': default}
     assert DRUG_ENTITIES.params == {
