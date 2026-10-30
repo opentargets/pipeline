@@ -9,7 +9,6 @@ from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.schemas import (
     ClinicalIndicationSchema,
     ClinicalProvider,
-    ClinicalReportExtractionSchema,
     ClinicalReportSchema,
     ClinicalStageCategory,
     snake_to_camel,
@@ -311,15 +310,3 @@ class ClinicalIndication:
     def filter_by_report_id(self, report_id: str) -> 'ClinicalIndication':
         """Get associations supported by a given report ID."""
         return ClinicalIndication(df=self.df.filter(pl.col('clinicalReportIds').list.contains(report_id)))
-
-
-class ClinicalReportExtraction:
-    """A validated collection of LLM-extracted clinical trial data.
-
-    The wrapped DataFrame conforms to the ``ClinicalReportExtractionSchema``.
-    """
-
-    def __init__(self, df: pl.DataFrame):
-        if not df.is_empty():
-            df = validate_schema(df, ClinicalReportExtractionSchema)
-        self.df = df

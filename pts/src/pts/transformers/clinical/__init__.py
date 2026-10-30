@@ -1,7 +1,4 @@
-"""Clinical report datasets, providers and the AACT LLM extraction.
-
-Production code outside this package imports from here, not from its submodules.
-"""
+"""Clinical report datasets, schemas, helpers and provider extractors re-exported from their submodules."""
 
 from pts.transformers.clinical.datasets import (
     CATEGORY_RANKS,
