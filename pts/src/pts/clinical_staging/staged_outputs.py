@@ -8,8 +8,8 @@ revision::
     <hub revision>+<hub revision>-p<digest>
 
 The hub revisions come in the kind's model order; the digest is the first 8 hex of
-the sha256 of the parameters and ``logic_version``. The tag is both the record
-store's ``model_revision`` and the directory a snapshot is published under.
+the sha256 of the parameters and ``logic_version``. For these kinds the tag is both
+the record store's ``model_revision`` and the directory a snapshot is published under.
 """
 
 from __future__ import annotations
@@ -197,8 +197,8 @@ class StagedOutput:
 
         Raises:
             ValueError: if a snapshot's metadata lacks a key or differs from ``expect``, is of
-                another kind or was staged by code with other parameters, if the snapshots have different tags, or if a
-                key has different results in two snapshots.
+                another kind or was staged by code with other parameters, if the snapshots
+                have different tags, or if a key has different results in two snapshots.
         """
         tags = {}
         for source, uri in sorted(snapshots.items()):
@@ -238,7 +238,8 @@ class ExtractionOutput:
 
     Unlike a ``StagedOutput`` it runs no Hugging Face model. Its tag is the first 12 hex of the
     response schema digest, then ``-p`` and the first 8 hex of the sha256 of ``logic_version``,
-    ``params['trial_fields']`` and ``sample_size``.
+    ``params['trial_fields']`` and ``sample_size``. Its store revision is the full schema
+    digest, not its tag.
     """
 
     name: str
@@ -246,8 +247,8 @@ class ExtractionOutput:
     params: dict[str, Any]
     logic_version: int
 
-    def tag(self, schema_digest: str, sample_size: int | None) -> str:
-        """The output revision of an extraction against ``schema_digest`` of ``sample_size`` trials, or all if None."""
+    def tag(self, digest: str, sample_size: int | None) -> str:
+        """The output revision of an extraction against schema ``digest`` of ``sample_size`` trials, or all if None."""
         document = json.dumps(
             {
                 'logic_version': self.logic_version,
@@ -256,19 +257,19 @@ class ExtractionOutput:
             },
             sort_keys=True,
         )
-        return f'{schema_digest[:12]}-p{hashlib.sha256(document.encode("utf-8")).hexdigest()[:8]}'
+        return f'{digest[:12]}-p{hashlib.sha256(document.encode("utf-8")).hexdigest()[:8]}'
 
     def release_tag(self) -> str:
         """The tag of a full extraction by this code's response schema, the only one a release reads."""
         return self.tag(schema_digest(ClinicalReportExtractionSchema), None)
 
-    def metadata(self, schema_digest: str, sample_size: int | None) -> dict[str, Any]:
-        """The snapshot metadata of an extraction against ``schema_digest`` of ``sample_size`` trials."""
+    def metadata(self, digest: str, sample_size: int | None) -> dict[str, Any]:
+        """The snapshot metadata of an extraction against schema ``digest`` of ``sample_size`` trials."""
         return {
             'kind': self.name,
             'model': self.model,
-            'tag': self.tag(schema_digest, sample_size),
-            'model_revisions': {self.model: schema_digest},
+            'tag': self.tag(digest, sample_size),
+            'model_revisions': {self.model: digest},
         }
 
     def read(self, uri: str) -> pl.DataFrame:

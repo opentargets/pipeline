@@ -1,6 +1,7 @@
 """Tests for the trial_models staging task."""
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -356,5 +357,5 @@ def test_read_extraction_names_the_path_it_expected(tmp_path: Path) -> None:
     other.mkdir(parents=True)
     _extractions([['b']]).write_parquet(other / 'data.parquet')
 
-    with pytest.raises(FileNotFoundError, match='extraction/' + EXTRACTION.release_tag() + '/data.parquet'):
+    with pytest.raises(FileNotFoundError, match=re.escape(f'extraction/{EXTRACTION.release_tag()}/data.parquet')):
         read_extraction(str(tmp_path / 'extraction'), None)
