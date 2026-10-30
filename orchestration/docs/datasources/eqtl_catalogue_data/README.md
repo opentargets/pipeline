@@ -34,11 +34,11 @@ The DAG has 1 step, run on one Dataproc cluster:
 
 ![eqtl_catalogue_ingestion](eqtl_catalogue_ingestion.svg)
 
-1. eqtl_catalogue
+1. ingestion
 
-## eqtl_catalogue
+## ingestion
 
-The step ([`eqtl_catalogue.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/eqtl_catalogue.py)) joins the SuSiE credible sets, their log Bayes factors, the full SuSiE posterior and the dataset metadata ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/datasource/eqtl_catalogue/finemapping.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/datasource/eqtl_catalogue/study_index.py)):
+The step, gentropy `eqtl_catalogue` ([`eqtl_catalogue.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/eqtl_catalogue.py)) joins the SuSiE credible sets, their log Bayes factors, the full SuSiE posterior and the dataset metadata ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/datasource/eqtl_catalogue/finemapping.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/1ef3310751443ffcc1bfa52a9f2a07b3b72dd849/src/gentropy/datasource/eqtl_catalogue/study_index.py)):
 
 - One study per dataset and molecular trait. `studyType` comes from the quantification method (gene expression, exon, transcript and microarray give `eqtl`; Leafcutter and MAJIQ give `sqtl`; txrevise gives `tuqtl`; aptamer gives `pqtl`), with an `sc` prefix for single-cell datasets.
 - One credible set per SuSiE component (1 to 10) of a molecular trait in a region. The lead is the member with the top posterior probability, ties broken by variant id.
