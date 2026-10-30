@@ -409,7 +409,7 @@ def test_normalisation(method, score, assessment, expected):
     assert frame.select(normalise_score(method, pl.col('score'), pl.col('assessment'))).item() == expected
 
 
-@pytest.mark.parametrize('method', ['FoldX', 'SIFT', 'unknown'])
+@pytest.mark.parametrize('method', ['FoldX', 'PolyPhen', 'unknown'])
 def test_normalisation_rejects_methods_vep_does_not_produce(method):
     with pytest.raises(ValueError, match='No normalisation'):
         normalise_score(method, pl.col('score'), pl.col('assessment'))

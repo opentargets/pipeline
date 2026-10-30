@@ -51,6 +51,19 @@ def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr
                 .when(value < -3)
                 .then(0.0)
             )
+        case 'SIFT':
+            tolerance, rounded = 1 - value, 1 - value.round(2)
+            result = (
+                pl
+                .when((assessment == 'deleterious') & (rounded >= 0.95))
+                .then(min_max_scaler(tolerance, 0.95, 1, 0.5, 1))
+                .when((assessment == 'deleterious_low_confidence') & (rounded >= 0.95))
+                .then(min_max_scaler(tolerance, 0.95, 1, 0.0, 0.5))
+                .when((assessment == 'tolerated_low_confidence') & (rounded <= 0.95))
+                .then(min_max_scaler(tolerance, 0, 0.95, -0.5, 0.0))
+                .when((assessment == 'tolerated') & (rounded <= 0.95))
+                .then(min_max_scaler(tolerance, 0, 0.95, -1.0, -0.5))
+            )
         case 'VEP':
             result = value
         case _:

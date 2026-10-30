@@ -1,9 +1,9 @@
 """Parse Ensembl VEP JSON output into the variant index, ported from Gentropy's VEP parser.
 
 Differences from Gentropy: consequence terms use the corrected Sequence Ontology spelling
-(see `consequences.py`), SIFT and PolyPhen are not extracted (VEP runs without them), OMIM
-variant suffixes keep their four digits, and only VEP JSON parts are read, never VEP's
-`<part>.json_warnings.txt` files.
+(see `consequences.py`), SIFT comes from the canonical transcript with the lowest score rather
+than the highest, PolyPhen is not extracted (VEP runs without it), OMIM variant suffixes keep
+their four digits, and only VEP JSON parts are read, never VEP's `<part>.json_warnings.txt` files.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pts.transformers.utils.dataset import list_parts
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.index import fill_null_arrays, normalise_score
+from pts.transformers.variant.sift import SEVERITY
 
 #: VEP data parts, optionally gzipped; excludes VEP's `<part>.json_warnings.txt`.
 VEP_PART = re.compile(r'\.jsonl?(\.gz)?$')
@@ -108,6 +109,38 @@ def variant_effect(
     return pl.when(transcript.is_not_null()).then(
         _effect(
             method, field(assessment), transcript.struct.field(score), field(flag), transcript.struct.field('gene_id')
+        )
+    )
+
+
+def sift_effect(transcripts: pl.Expr) -> pl.Expr:
+    """SIFT from the transcript with the lowest score, then the more severe prediction, then the lowest id."""
+
+    def field(name: str) -> pl.Expr:
+        return pl.element().struct.field(name)
+
+    severity = {prediction: rank for rank, prediction in enumerate(SEVERITY)}
+    transcript = (
+        transcripts.list
+        .eval(pl.element().filter(field('sift_score').is_not_null()))
+        # Stable sorts, last key first: a multi-key `sort_by` inside `list.eval` fails on empty lists.
+        .list.eval(pl.element().sort_by(field('transcript_id'), maintain_order=True))
+        .list.eval(
+            pl.element().sort_by(
+                field('sift_prediction').replace_strict(severity, default=len(severity), return_dtype=pl.Int32),
+                maintain_order=True,
+            )
+        )
+        .list.eval(pl.element().sort_by(field('sift_score'), maintain_order=True))
+        .list.first()
+    )
+    return pl.when(transcript.is_not_null()).then(
+        _effect(
+            'SIFT',
+            transcript.struct.field('sift_prediction'),
+            transcript.struct.field('sift_score'),
+            pl.lit(None, dtype=pl.String),
+            transcript.struct.field('gene_id'),
         )
     )
 
@@ -308,6 +341,7 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
     consequence = pl.col('most_severe_consequence')
     rsids = colocated.list.eval(pl.element().struct.field('id'))
     effects = pl.concat_list(
+        sift_effect(transcripts),
         variant_effect(transcripts, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
         variant_effect(transcripts, 'GERP', 'conservation'),
         alpha_missense_effect(transcripts),

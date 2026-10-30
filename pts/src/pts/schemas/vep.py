@@ -36,6 +36,8 @@ vep_schema = pl.Schema({
             'lof': pl.String,
             'lof_filter': pl.String,
             'protein_end': pl.Int64,
+            'sift_prediction': pl.String,
+            'sift_score': pl.Float64,
             'swissprot': pl.List(pl.String),
             'transcript_id': pl.String,
             'trembl': pl.List(pl.String),
