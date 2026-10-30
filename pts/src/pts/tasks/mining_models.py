@@ -32,7 +32,9 @@ class MiningModelsSpec(Spec):
     snapshot: str
     """The clinical_mining version, which names the records this run writes."""
     ner_batch_size: int = 256
-    """Labels per drug NER batch."""
+    """Texts per disease and drug NER batch."""
+    ner_model_batch_size: int = 1
+    """Texts per disease and drug NER forward pass, within a batch."""
     max_attempts: int = 3
     """Failed records after which a text is no longer retried."""
 
@@ -65,6 +67,7 @@ class MiningModels(Task):
             run_id,
             config,
             ner_batch_size=self.spec.ner_batch_size,
+            ner_model_batch_size=self.spec.ner_model_batch_size,
             max_attempts=self.spec.max_attempts,
         )
         logger.info(f'mining models staged: {self.stats}')

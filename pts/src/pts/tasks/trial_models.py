@@ -35,6 +35,8 @@ class TrialModelsSpec(Spec):
     """The AACT version, which names the records this run writes."""
     ner_batch_size: int = 256
     """Labels per drug NER batch."""
+    ner_model_batch_size: int = 1
+    """Labels per drug NER forward pass, within a batch."""
     stop_reasons_batch_size: int = 32
     """Texts per stop reasons batch."""
     max_attempts: int = 3
@@ -101,6 +103,7 @@ class TrialModels(Task):
             run_id,
             config,
             ner_batch_size=self.spec.ner_batch_size,
+            ner_model_batch_size=self.spec.ner_model_batch_size,
             stop_reasons_batch_size=self.spec.stop_reasons_batch_size,
             max_attempts=self.spec.max_attempts,
             extraction_tag=extraction_tag,

@@ -25,6 +25,7 @@ def stage_mining_models(
     run_id: str,
     config: Config,
     ner_batch_size: int,
+    ner_model_batch_size: int,
     max_attempts: int,
 ) -> dict[str, Any]:
     """Run disease NER over the EMA and PMDA indication texts and drug NER over the unresolved drug labels.
@@ -42,7 +43,7 @@ def stage_mining_models(
     with offline_hf_models(models_uri):
         disease = DISEASE_ENTITIES.stage(
             disease_texts,
-            disease_entities_with_status,
+            lambda texts: disease_entities_with_status(texts, ner_batch_size, ner_model_batch_size),
             revisions,
             store_uri,
             destination['disease_entities'],
@@ -56,7 +57,7 @@ def stage_mining_models(
         drug_labels = report_drug_labels(report.df for report in reports.values())
         ner = DRUG_ENTITIES.stage(
             drug_labels,
-            lambda texts: drug_entities_with_status(texts, ner_batch_size),
+            lambda texts: drug_entities_with_status(texts, ner_batch_size, ner_model_batch_size),
             revisions,
             store_uri,
             destination['drug_entities'],

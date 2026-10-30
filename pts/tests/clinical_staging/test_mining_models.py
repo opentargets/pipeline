@@ -48,6 +48,7 @@ class Models:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.disease_calls: list[list[str]] = []
         self.ner_calls: list[list[str]] = []
+        self.batch_sizes: dict[str, list[tuple[int, int]]] = {'disease': [], 'drug': []}
         self.labels = {'ttd': ['aspirin'], 'ema': ['ibuprofen'], 'pmda': ['aspirin', 'x']}
         self.texts = ['pain', 'fever']
         monkeypatch.setattr(mining_models, 'build_mining_reports', self.reports)
@@ -58,12 +59,18 @@ class Models:
         extract_diseases(pl.Series('text', self.texts))
         return {key: _report(labels) for key, labels in self.labels.items()}
 
-    def diseases(self, texts: list[str]) -> list[tuple[list[str] | None, str | None]]:
+    def diseases(
+        self, texts: list[str], batch_size: int, model_batch_size: int
+    ) -> list[tuple[list[str] | None, str | None]]:
         self.disease_calls.append(list(texts))
+        self.batch_sizes['disease'].append((batch_size, model_batch_size))
         return [([f'disease:{t}'], None) for t in texts]
 
-    def drug_entities(self, texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:
+    def drug_entities(
+        self, texts: list[str], batch_size: int, model_batch_size: int
+    ) -> list[tuple[list[str] | None, str | None]]:
         self.ner_calls.append(list(texts))
+        self.batch_sizes['drug'].append((batch_size, model_batch_size))
         return [([f'drug:{t}'], None) for t in texts]
 
 
@@ -86,8 +93,15 @@ def _stage(tmp_path: Path, models_uri: str, run_id: str) -> dict[str, Any]:
         run_id,
         None,
         ner_batch_size=4,
+        ner_model_batch_size=3,
         max_attempts=3,
     )
+
+
+def test_mining_models_pass_both_batch_sizes_to_both_models(tmp_path: Path, models_uri: str, models: Models) -> None:
+    _stage(tmp_path, models_uri, 'r1')
+
+    assert models.batch_sizes == {'disease': [(4, 3)], 'drug': [(4, 3)]}
 
 
 def test_stage_mining_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -160,10 +174,10 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        mining_models, 'disease_entities_with_status', lambda texts: [([f'd:{t}'], None) for t in texts]
+        mining_models, 'disease_entities_with_status', lambda texts, *_: [([f'd:{t}'], None) for t in texts]
     )
     monkeypatch.setattr(
-        mining_models, 'drug_entities_with_status', lambda texts, batch_size: [([f'drug:{t}'], None) for t in texts]
+        mining_models, 'drug_entities_with_status', lambda texts, *_: [([f'drug:{t}'], None) for t in texts]
     )
     ttd, ema, pmda = inputs['ttd'], inputs['ema'], inputs['pmda']
 
@@ -180,6 +194,7 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
         'r1',
         None,
         ner_batch_size=4,
+        ner_model_batch_size=1,
         max_attempts=3,
     )
 

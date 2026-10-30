@@ -86,6 +86,7 @@ def stage_trial_models(
     run_id: str,
     config: Config,
     ner_batch_size: int,
+    ner_model_batch_size: int,
     stop_reasons_batch_size: int,
     max_attempts: int,
     extraction_tag: str,
@@ -114,7 +115,7 @@ def stage_trial_models(
         )
         ner = DRUG_ENTITIES.stage(
             drug_texts,
-            lambda texts: drug_entities_with_status(texts, ner_batch_size),
+            lambda texts: drug_entities_with_status(texts, ner_batch_size, ner_model_batch_size),
             revisions,
             store_uri,
             destination['drug_entities'],

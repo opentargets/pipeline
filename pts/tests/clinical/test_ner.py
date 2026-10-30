@@ -23,9 +23,11 @@ class FakePipeline:
         self.by_text = by_text
         self.fail_on = fail_on or set()
         self.calls: list[Any] = []
+        self.batch_sizes: list[int] = []
 
-    def __call__(self, texts: str | list[str]) -> list[Entity] | list[list[Entity]]:
+    def __call__(self, texts: str | list[str], batch_size: int = 1) -> list[Entity] | list[list[Entity]]:
         self.calls.append(texts)
+        self.batch_sizes.append(batch_size)
         batch = [texts] if isinstance(texts, str) else texts
         if self.fail_on & set(batch):
             raise RuntimeError('boom')
@@ -187,7 +189,7 @@ def test_disease_status_marks_only_failing_texts(monkeypatch: pytest.MonkeyPatch
     out = disease_entities_with_status(['a', 'bad', '', '  ', 'b'])
 
     assert out == [(['gout'], None), (None, 'disease ner failed: boom'), ([], None), ([], None), (['flu'], None)]
-    assert fake.calls == ['a', 'bad', 'b']
+    assert fake.calls == [['a', 'bad', 'b'], 'a', 'bad', 'b']
 
 
 def test_disease_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -200,3 +202,136 @@ def test_disease_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> N
         disease_entities_with_status(['a'])
     assert disease_entities_with_status(['', ' ']) == [([], None), ([], None)]
     assert ner.DISEASE_NER_MODEL == DISEASE_MODEL
+
+
+def test_drug_chunk_calls_pass_the_model_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(biobert={'a': [_ent('CHEMICAL', 'aspirin')]}, drugtemist={})
+    _patch_factory(monkeypatch, pipelines)
+
+    drug_entities_with_status(['a', 'b', 'c'], batch_size=2, model_batch_size=7)
+
+    assert pipelines[CHEMICAL_MODEL].calls == [['a', 'b'], ['c']]
+    assert pipelines[CHEMICAL_MODEL].batch_sizes == [7, 7]
+    assert pipelines[DRUGTEMIST_MODEL].calls == [['b', 'c']]
+    assert pipelines[DRUGTEMIST_MODEL].batch_sizes == [7]
+
+
+def test_drug_default_model_batch_size_is_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipelines = _drug_pipelines(biobert={}, drugtemist={})
+    _patch_factory(monkeypatch, pipelines)
+
+    drug_entities_with_status(['a', 'b', 'c'], batch_size=2)
+
+    assert pipelines[CHEMICAL_MODEL].batch_sizes == [1, 1]
+    assert pipelines[DRUGTEMIST_MODEL].batch_sizes == [1, 1]
+
+
+def test_disease_calls_the_model_once_per_chunk_without_blanks(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline({'a': [_ent('DISEASE', 'Gout')], 'c': [_ent('DISEASE', 'Flu')]})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+
+    out = disease_entities_with_status(['a', '', 'b', '  ', 'c', 'd', 'e'], batch_size=2, model_batch_size=3)
+
+    assert out == [(['gout'], None), ([], None), ([], None), ([], None), (['flu'], None), ([], None), ([], None)]
+    assert fake.calls == [['a', 'b'], ['c', 'd'], ['e']]
+    assert fake.batch_sizes == [3, 3, 3]
+
+
+def test_disease_retries_a_failing_chunk_one_text_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline(
+        {'a': [_ent('DISEASE', 'Gout')], 'b': [_ent('DISEASE', 'Flu')], 'c': [_ent('DISEASE', 'Mumps')]},
+        fail_on={'bad'},
+    )
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+
+    out = disease_entities_with_status(['a', 'bad', 'b', 'c'], batch_size=3, model_batch_size=2)
+
+    assert out == [(['gout'], None), (None, 'disease ner failed: boom'), (['flu'], None), (['mumps'], None)]
+    assert fake.calls == [['a', 'bad', 'b'], 'a', 'bad', 'b', ['c']]
+
+
+def test_disease_retries_a_chunk_whose_result_count_is_wrong(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Short(FakePipeline):
+        def __call__(self, texts: str | list[str], batch_size: int = 1) -> Any:
+            out = super().__call__(texts, batch_size)
+            return out[:-1] if isinstance(texts, list) else out
+
+    fake = Short({'a': [_ent('DISEASE', 'Gout')], 'b': [_ent('DISEASE', 'Flu')]})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+
+    out = disease_entities_with_status(['a', 'b'], batch_size=4, model_batch_size=2)
+
+    assert out == [(['gout'], None), (['flu'], None)]
+    assert fake.calls == [['a', 'b'], 'a', 'b']
+
+
+def test_disease_defaults_chunk_256_texts_with_model_batch_size_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline({})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+    texts = [f't{i}' for i in range(300)]
+
+    disease_entities_with_status(texts)
+
+    assert [len(call) for call in fake.calls] == [256, 44]
+    assert fake.batch_sizes == [1, 1]
+
+
+DISEASE_TEXTS = ['a', '', 'bad', 'b', ' ', 'c', 'd', 'e', 'f', 'g']
+DISEASE_BY_TEXT = {
+    'a': [_ent('DISEASE', 'Gout')],
+    'b': [_ent('DISEASE', 'Flu'), _ent('CHEMICAL', 'aspirin')],
+    'c': [_ent('DISEASE', 'Mumps'), _ent('DISEASE', 'mumps')],
+    'e': [_ent('DISEASE', '12')],
+    'g': [_ent('B-DISEASE', 'Anaemia')],
+}
+DISEASE_TODAY = [
+    (['gout'], None),
+    ([], None),
+    (None, 'disease ner failed: boom'),
+    (['flu'], None),
+    ([], None),
+    (['mumps'], None),
+    ([], None),
+    ([], None),
+    ([], None),
+    (['anaemia'], None),
+]
+DRUG_TEXTS = ['pembrolizumab 100mg', 'aspirin tablet', 'brandname', 'nothing', '', 'osimertinib', 'fail', 'x']
+DRUG_BIOBERT = {
+    'pembrolizumab 100mg': [_ent('CHEMICAL', 'Pembrolizumab')],
+    'aspirin tablet': [_ent('CHEMICAL', 'Aspirin'), _ent('DRUG', '##sodium')],
+}
+DRUG_DRUGTEMIST = {'brandname': [_ent('FARMACO', 'BrandName')], 'x': [_ent('FARMACO', 'Xeno')]}
+DRUG_TODAY = [
+    (['pembrolizumab'], None),
+    (['aspirin', 'sodium'], None),
+    (['brandname'], None),
+    ([], None),
+    ([], None),
+    (['osimertinib'], None),
+    (None, 'ner batch failed: boom'),
+    (None, 'ner batch failed: boom'),
+]
+
+
+@pytest.mark.parametrize('model_batch_size', [1, 2, 7])
+def test_disease_output_does_not_depend_on_the_model_batch_size(
+    monkeypatch: pytest.MonkeyPatch, model_batch_size: int
+) -> None:
+    _patch_factory(monkeypatch, {DISEASE_MODEL: FakePipeline(DISEASE_BY_TEXT, fail_on={'bad'})})
+
+    out = disease_entities_with_status(DISEASE_TEXTS, batch_size=3, model_batch_size=model_batch_size)
+
+    assert out == DISEASE_TODAY
+
+
+@pytest.mark.parametrize('model_batch_size', [1, 2, 7])
+def test_drug_output_does_not_depend_on_the_model_batch_size(
+    monkeypatch: pytest.MonkeyPatch, model_batch_size: int
+) -> None:
+    pipelines = _drug_pipelines(DRUG_BIOBERT, DRUG_DRUGTEMIST, fail_on={'fail'})
+    _patch_factory(monkeypatch, pipelines)
+
+    out = drug_entities_with_status(DRUG_TEXTS, batch_size=3, model_batch_size=model_batch_size)
+
+    assert out == DRUG_TODAY

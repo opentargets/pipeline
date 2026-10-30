@@ -67,16 +67,16 @@ def _create_ner_pipeline(
         ignore_labels=[],
     )
 
-    def run(texts: Any) -> Any:
+    def run(texts: Any, batch_size: int = 1) -> Any:
         with torch.no_grad():
-            return ner(texts)
+            return ner(texts, batch_size=batch_size)
 
     return run
 
 
-def _disease_mentions(biobert: Callable[..., Any], text: str) -> list[str]:
+def _disease_mentions(entities: list[dict[str, Any]]) -> list[str]:
     found: set[str] = set()
-    for ent in biobert(text):
+    for ent in entities:
         label = ent.get('entity_group', '').upper()
         if any(wanted in label for wanted in DISEASE_LABELS):
             word = ent['word'].strip()
@@ -85,21 +85,44 @@ def _disease_mentions(biobert: Callable[..., Any], text: str) -> list[str]:
     return sorted(found)
 
 
-def disease_entities_with_status(texts: list[str]) -> list[tuple[list[str] | None, str | None]]:
-    """Lower-cased, sorted disease mentions per text, or ``(None, error)`` where one failed; blank texts get ``[]``."""
-    if not any(text.strip() for text in texts):
-        return [([], None) for _ in texts]
-    biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
+def _disease_chunk(
+    biobert: Callable[..., Any], texts: list[str], model_batch_size: int
+) -> list[tuple[list[str] | None, str | None]]:
+    """Disease mentions per text of one chunk; if the chunk call fails, each text is retried on its own."""
+    try:
+        batch_entities = biobert(texts, batch_size=model_batch_size)
+        if len(batch_entities) != len(texts):
+            raise ValueError(f'expected {len(texts)} results, got {len(batch_entities)}')
+        return [(_disease_mentions(entities), None) for entities in batch_entities]
+    except Exception as e:
+        logger.debug(f'disease ner chunk of {len(texts)} failed, retrying per text: {e}')
     results: list[tuple[list[str] | None, str | None]] = []
     for text in texts:
-        if not text.strip():
-            results.append(([], None))
-            continue
         try:
-            results.append((_disease_mentions(biobert, text), None))
+            results.append((_disease_mentions(biobert(text)), None))
         except Exception as e:
             logger.debug(f'disease ner failed for {text!r}: {e}')
             results.append((None, f'disease ner failed: {e}'))
+    return results
+
+
+def disease_entities_with_status(
+    texts: list[str], batch_size: int = 256, model_batch_size: int = 1
+) -> list[tuple[list[str] | None, str | None]]:
+    """Lower-cased, sorted disease mentions per text, or ``(None, error)`` where one failed; blank texts get ``[]``.
+
+    Non-blank texts go to the model ``batch_size`` at a time, ``model_batch_size`` per forward pass.
+    """
+    results: list[tuple[list[str] | None, str | None]] = [([], None) for _ in texts]
+    indices = [index for index, text in enumerate(texts) if text.strip()]
+    if not indices:
+        return results
+    biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
+    for start in range(0, len(indices), batch_size):
+        chunk = indices[start : start + batch_size]
+        chunk_results = _disease_chunk(biobert, [texts[index] for index in chunk], model_batch_size)
+        for index, result in zip(chunk, chunk_results, strict=True):
+            results[index] = result
     return results
 
 
@@ -114,13 +137,13 @@ def _extract_with_regex(text: str, patterns: list[str]) -> set[str]:
 
 
 def _extract_entities_from_batch(
-    texts: list[str], ner_pipeline: Callable[..., Any], label_filters: list[str]
+    texts: list[str], ner_pipeline: Callable[..., Any], label_filters: list[str], model_batch_size: int
 ) -> tuple[list[set[str]], str | None]:
     """Entities per text, and the error if the batch failed (its texts then have no entities)."""
     if not texts:
         return [], None
     try:
-        batch_entities = ner_pipeline(texts)
+        batch_entities = ner_pipeline(texts, batch_size=model_batch_size)
         if not isinstance(batch_entities[0], list):
             batch_entities = [batch_entities]
         if len(batch_entities) != len(texts):
@@ -146,6 +169,7 @@ def _process_batch_tiered(
     biobert_pipeline: Callable[..., Any],
     drugtemist_pipeline: Callable[..., Any],
     batch_size: int,
+    model_batch_size: int,
 ) -> tuple[list[list[str]], list[str | None]]:
     """Drug names per text, and the error of each text whose model batch failed (else None)."""
     all_results: list[list[str] | None] = []
@@ -156,7 +180,7 @@ def _process_batch_tiered(
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]
         regex_results = [_extract_with_regex(text, DRUG_NAME_PATTERNS) if text else set() for text in batch]
-        biobert_results, error = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS)
+        biobert_results, error = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS, model_batch_size)
         if error is not None:
             errors[start : start + len(batch)] = [error] * len(batch)
         for offset, (regex_drugs, biobert_drugs, text) in enumerate(
@@ -176,7 +200,9 @@ def _process_batch_tiered(
         for start in range(0, len(fallback_texts), batch_size):
             batch = fallback_texts[start : start + batch_size]
             indices = fallback_indices[start : start + batch_size]
-            drugtemist_results, error = _extract_entities_from_batch(batch, drugtemist_pipeline, DRUGTEMIST_LABELS)
+            drugtemist_results, error = _extract_entities_from_batch(
+                batch, drugtemist_pipeline, DRUGTEMIST_LABELS, model_batch_size
+            )
             if error is not None:
                 for index in indices:
                     errors[index] = errors[index] or error
@@ -187,16 +213,19 @@ def _process_batch_tiered(
     return results, errors
 
 
-def drug_entities_with_status(texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:
+def drug_entities_with_status(
+    texts: list[str], batch_size: int, model_batch_size: int = 1
+) -> list[tuple[list[str] | None, str | None]]:
     """Sorted drug names per text, or ``(None, error)`` where a model batch failed.
 
     Regex and BioBERT hits are unioned; DrugTEMIST runs only on texts where both found nothing.
+    Texts go to each model ``batch_size`` at a time, ``model_batch_size`` per forward pass.
     """
     if not texts:
         return []
     biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
     drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
-    extracted, errors = _process_batch_tiered(texts, biobert, drugtemist, batch_size)
+    extracted, errors = _process_batch_tiered(texts, biobert, drugtemist, batch_size, model_batch_size)
     return [
         (None, f'ner batch failed: {error}') if error is not None else (drugs, None)
         for drugs, error in zip(extracted, errors, strict=True)

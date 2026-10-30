@@ -95,6 +95,7 @@ class Models:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.stop_calls: list[list[str]] = []
         self.ner_calls: list[list[str]] = []
+        self.ner_batch_sizes: list[tuple[int, int]] = []
         monkeypatch.setattr(trial_models, 'stop_reasons_with_status', self.stop_reasons)
         monkeypatch.setattr(trial_models, 'drug_entities_with_status', self.drug_entities)
 
@@ -102,8 +103,11 @@ class Models:
         self.stop_calls.append(list(texts))
         return [([f'reason:{t}'], None) for t in texts]
 
-    def drug_entities(self, texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:
+    def drug_entities(
+        self, texts: list[str], batch_size: int, model_batch_size: int
+    ) -> list[tuple[list[str] | None, str | None]]:
         self.ner_calls.append(list(texts))
+        self.ner_batch_sizes.append((batch_size, model_batch_size))
         return [([f'drug:{t}'], None) for t in texts]
 
 
@@ -124,6 +128,7 @@ def _stage(
         run_id,
         None,
         ner_batch_size=4,
+        ner_model_batch_size=3,
         stop_reasons_batch_size=2,
         max_attempts=3,
         extraction_tag=EXTRACTION.release_tag(),
@@ -184,6 +189,12 @@ def test_trial_models_publish_under_their_tags(tmp_path: Path, models_uri: str, 
         f'snap/drug_entities/{DRUG_TAG}/data.parquet',
         f'snap/stop_reasons/{STOP_TAG}/data.parquet',
     ]
+
+
+def test_trial_models_pass_both_batch_sizes_to_drug_ner(tmp_path: Path, models_uri: str, models: Models) -> None:
+    _stage(tmp_path, models_uri, _studies(['slow']), _extractions([['a']]), 'r1')
+
+    assert models.ner_batch_sizes == [(4, 3)]
 
 
 def test_rerun_computes_nothing_and_rewrites_nothing(tmp_path: Path, models_uri: str, models: Models) -> None:
