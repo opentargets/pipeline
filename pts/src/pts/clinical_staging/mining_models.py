@@ -65,12 +65,4 @@ def stage_mining_models(
             max_attempts,
         )
 
-    return {
-        name: {
-            'texts': result.frame.height,
-            'computed': result.computed,
-            'published': result.published,
-            'tag': result.tag,
-        }
-        for name, result in (('disease_entities', disease), ('drug_entities', ner))
-    }
+    return {'disease_entities': disease.stats(), 'drug_entities': ner.stats()}

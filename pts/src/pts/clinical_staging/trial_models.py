@@ -107,12 +107,4 @@ def stage_trial_models(
             max_attempts,
         )
 
-    return {
-        name: {
-            'texts': result.frame.height,
-            'computed': result.computed,
-            'published': result.published,
-            'tag': result.tag,
-        }
-        for name, result in (('stop_reasons', stop), ('drug_entities', ner))
-    }
+    return {'stop_reasons': stop.stats(), 'drug_entities': ner.stats()}

@@ -62,6 +62,10 @@ class StagedResult:
     published: bool
     tag: str
 
+    def stats(self) -> dict[str, Any]:
+        """Return the number of texts, whether anything was computed or published, and the tag."""
+        return {'texts': self.frame.height, 'computed': self.computed, 'published': self.published, 'tag': self.tag}
+
 
 @dataclass(frozen=True)
 class StagedOutput:
