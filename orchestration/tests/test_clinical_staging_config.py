@@ -10,6 +10,7 @@ from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
 PIS_CONFIG = Path(__file__).parents[2] / 'pis' / 'config.yaml'
 
 FAKE_TAGS = {
+    'extraction_tag': 'eeee5555-p44444444',
     'stop_reasons_tag': 'aaaa1111-p11111111',
     'drug_entities_tag': 'bbbb2222+cccc3333-p22222222',
     'disease_entities_tag': 'dddd4444-p33333333',
@@ -93,9 +94,11 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     stop = FAKE_TAGS['stop_reasons_tag']
     drug = FAKE_TAGS['drug_entities_tag']
     disease = FAKE_TAGS['disease_entities_tag']
+    extraction = FAKE_TAGS['extraction_tag']
     for base in (
         f'gs://clinical_staging/aact/A/stop_reasons/{stop}',
-        f'gs://clinical_staging/aact/A/drug_entities/{drug}',
+        f'gs://clinical_staging/aact/A/extraction/{extraction}',
+        f'gs://clinical_staging/aact/A/extraction/{extraction}/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/M/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/M/disease_entities/{disease}',
     ):
