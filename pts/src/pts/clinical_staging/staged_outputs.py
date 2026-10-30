@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
+from pydantic import BaseModel
 
 from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot, tracked
 from pts.transformers.clinical.ner import (
@@ -36,6 +37,8 @@ from pts.transformers.clinical.ner import (
     DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -49,6 +52,26 @@ METADATA_KEYS = ('kind', 'model', 'tag', 'model_revisions')
 
 MAX_EXAMPLES = 5
 """Keys quoted in the error raised for conflicting snapshots."""
+
+
+def schema_digest(model_cls: type[BaseModel]) -> str:
+    """The full sha256 hex of the sorted JSON schema, by alias, of ``model_cls``."""
+    return hashlib.sha256(
+        json.dumps(model_cls.model_json_schema(by_alias=True), sort_keys=True).encode('utf-8')
+    ).hexdigest()
+
+
+def read_metadata(source: str, uri: str) -> dict[str, Any]:
+    """The metadata of the snapshot ``uri``, named ``source`` in errors.
+
+    Raises:
+        ValueError: if the metadata lacks a key of ``METADATA_KEYS``.
+    """
+    metadata = json.loads(StorageHandle(f'{uri}/metadata.json').read_text()[0])
+    missing = [key for key in METADATA_KEYS if key not in metadata]
+    if missing:
+        raise ValueError(f'snapshot {source} metadata lacks {missing}')
+    return metadata
 
 
 @dataclass
@@ -117,6 +140,7 @@ class StagedOutput:
         run_id: str,
         config: Config,
         max_attempts: int,
+        extra_metadata: dict[str, str] | None = None,
     ) -> StagedResult:
         """Map ``texts`` through the store ``{store_root}/{name}`` and publish the snapshot ``{destination}/{tag}``.
 
@@ -129,6 +153,7 @@ class StagedOutput:
             run_id: Identifies the store run, if anything is computed.
             config: The otter config, used to resolve storage.
             max_attempts: Failed records after which a text is no longer retried.
+            extra_metadata: Further keys for the snapshot's metadata.
 
         Returns:
             StagedResult: The snapshot contents, its tag, and whether anything was computed or published.
@@ -151,11 +176,12 @@ class StagedOutput:
             'model': self.model,
             'tag': tag,
             'model_revisions': {m: revisions[m] for m in self.hub_models},
+            **(extra_metadata or {}),
         }
         published = publish_snapshot(frame, f'{destination}/{tag}', metadata, config)
         return StagedResult(frame=frame, computed=bool(calls), published=published, tag=tag)
 
-    def read(self, snapshots: dict[str, str]) -> pl.DataFrame:
+    def read(self, snapshots: dict[str, str], expect: dict[str, dict[str, str]] | None = None) -> pl.DataFrame:
         """The snapshot columns of ``snapshots``, merged into one row per ``key``.
 
         A single snapshot is returned as staged. Two or more are concatenated, their list
@@ -163,21 +189,23 @@ class StagedOutput:
 
         Args:
             snapshots: Each snapshot directory, keyed by its source name.
+            expect: Metadata values, by source name, that the source's snapshot must hold. A source
+                without an entry is not checked.
 
         Returns:
             The snapshot columns.
 
         Raises:
-            ValueError: if a snapshot's metadata lacks a key, is of another kind or was staged
-                by code with other parameters, if the snapshots have different tags, or if a
+            ValueError: if a snapshot's metadata lacks a key or differs from ``expect``, is of
+                another kind or was staged by code with other parameters, if the snapshots have different tags, or if a
                 key has different results in two snapshots.
         """
         tags = {}
         for source, uri in sorted(snapshots.items()):
-            metadata = json.loads(StorageHandle(f'{uri}/metadata.json').read_text()[0])
-            missing = [key for key in METADATA_KEYS if key not in metadata]
-            if missing:
-                raise ValueError(f'snapshot {source} metadata lacks {missing}')
+            metadata = read_metadata(source, uri)
+            for key, value in (expect or {}).get(source, {}).items():
+                if metadata.get(key) != value:
+                    raise ValueError(f'snapshot {source} {key} expected {value!r}, found {metadata.get(key)!r}')
             if metadata['kind'] != self.name:
                 raise ValueError(f'snapshot {source} is of kind {metadata["kind"]!r}, not {self.name!r}')
             digest = metadata['tag'].rpartition('-p')[2]
@@ -202,6 +230,61 @@ class StagedOutput:
                 f'e.g. {conflicts.head(MAX_EXAMPLES).to_list()}'
             )
         return merged.sort(self.key)
+
+
+@dataclass(frozen=True)
+class ExtractionOutput:
+    """The LLM extraction of the AACT trials, tagged by its response schema and the code around it.
+
+    Unlike a ``StagedOutput`` it runs no Hugging Face model. Its tag is the first 12 hex of the
+    response schema digest, then ``-p`` and the first 8 hex of the sha256 of ``logic_version``,
+    ``params['trial_fields']`` and ``sample_size``.
+    """
+
+    name: str
+    model: str
+    params: dict[str, Any]
+    logic_version: int
+
+    def tag(self, schema_digest: str, sample_size: int | None) -> str:
+        """The output revision of an extraction against ``schema_digest`` of ``sample_size`` trials, or all if None."""
+        document = json.dumps(
+            {
+                'logic_version': self.logic_version,
+                'trial_fields': self.params['trial_fields'],
+                'sample_size': sample_size,
+            },
+            sort_keys=True,
+        )
+        return f'{schema_digest[:12]}-p{hashlib.sha256(document.encode("utf-8")).hexdigest()[:8]}'
+
+    def release_tag(self) -> str:
+        """The tag of a full extraction by this code's response schema, the only one a release reads."""
+        return self.tag(schema_digest(ClinicalReportExtractionSchema), None)
+
+    def metadata(self, schema_digest: str, sample_size: int | None) -> dict[str, Any]:
+        """The snapshot metadata of an extraction against ``schema_digest`` of ``sample_size`` trials."""
+        return {
+            'kind': self.name,
+            'model': self.model,
+            'tag': self.tag(schema_digest, sample_size),
+            'model_revisions': {self.model: schema_digest},
+        }
+
+    def read(self, uri: str) -> pl.DataFrame:
+        """The extraction snapshot ``uri``.
+
+        Raises:
+            ValueError: if its metadata lacks a key, is of another kind, or its tag is not ``release_tag()``.
+        """
+        metadata = read_metadata(self.name, uri)
+        if metadata['kind'] != self.name:
+            raise ValueError(f'snapshot {self.name} is of kind {metadata["kind"]!r}, not {self.name!r}')
+        if metadata['tag'] != self.release_tag():
+            raise ValueError(
+                f'snapshot {self.name} has tag {metadata["tag"]!r}, this code expects {self.release_tag()!r}'
+            )
+        return scan_dataset(uri).collect()
 
 
 STOP_REASONS = StagedOutput(
@@ -236,4 +319,11 @@ DISEASE_ENTITIES = StagedOutput(
     logic_version=1,
     columns={'text': 'text', 'output': 'extracted_diseases'},
     key='text',
+)
+
+EXTRACTION = ExtractionOutput(
+    name='extraction',
+    model='aact_llm_extraction',
+    params={'trial_fields': TRIAL_FIELDS},
+    logic_version=1,
 )

@@ -17,8 +17,6 @@ The extraction work lives in :py:mod:`pts.clinical_staging.extraction`.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from importlib import import_module, resources
 from typing import Any, Self
 
@@ -31,6 +29,7 @@ from otter.task.task_reporter import report
 from otter.util.errors import TaskRunError, TaskValidationError
 from pydantic import BaseModel
 
+from pts.clinical_staging.staged_outputs import schema_digest
 from pts.record_store import map_texts, new_run_id, publish_snapshot
 
 DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
@@ -106,9 +105,7 @@ class LlmExtract(Task):
 
         system_prompt = self._system_prompt()
         model_cls = import_class(self.spec.model_class)
-        schema_digest = hashlib.sha256(
-            json.dumps(model_cls.model_json_schema(by_alias=True), sort_keys=True).encode('utf-8')
-        ).hexdigest()
+        digest = schema_digest(model_cls)
         config = self.context.config
         store_uri = self.spec.store_uri.rstrip('/')
 
@@ -119,7 +116,7 @@ class LlmExtract(Task):
 
         if self.spec.import_extraction_cache:
             imported = extraction.import_extraction_cache(
-                self.spec.import_extraction_cache, prompts, store_uri, schema_digest, config
+                self.spec.import_extraction_cache, prompts, store_uri, digest, config
             )
             logger.info(f'imported {imported} cached extractions into {store_uri}')
 
@@ -128,7 +125,7 @@ class LlmExtract(Task):
             extraction.extraction_compute(prompts, self.spec, system_prompt),
             store_uri,
             extraction.EXTRACTION_MODEL,
-            schema_digest,
+            digest,
             new_run_id(self.spec.snapshot),
             config,
             max_attempts=self.spec.max_attempts,
@@ -145,7 +142,7 @@ class LlmExtract(Task):
         published = publish_snapshot(
             extractions,
             destination,
-            {'model': extraction.EXTRACTION_MODEL, 'model_revision': schema_digest},
+            {'model': extraction.EXTRACTION_MODEL, 'model_revision': digest},
             config,
         )
         self.artifacts = [Artifact(source=store_uri, destination=destination)]

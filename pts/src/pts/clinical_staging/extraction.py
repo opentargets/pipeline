@@ -33,18 +33,12 @@ from pts.transformers.clinical.llm_workflow import (
     extract_prompts,
 )
 from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
+from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
 
 if TYPE_CHECKING:
     from otter.config.model import Config
 
     from pts.tasks.llm_extract import LlmExtractSpec
-
-TRIAL_FIELDS = {
-    'trialOfficialTitle': 'Official Title',
-    'trialDescription': 'Description',
-    'trialDetailedDescription': 'Detailed Description',
-}
-"""Report columns rendered into each prompt, and the labels they get."""
 
 AACT_TABLES = {
     'studies': [

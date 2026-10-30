@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import polars as pl
 
+TRIAL_FIELDS = {
+    'trialOfficialTitle': 'Official Title',
+    'trialDescription': 'Description',
+    'trialDetailedDescription': 'Detailed Description',
+}
+"""Report columns rendered into each prompt, and the labels they get."""
+
 
 def sample_report(report: pl.DataFrame, sample_size: int | None, seed: int = 42) -> pl.DataFrame:
     """Sample trials before expensive downstream steps.

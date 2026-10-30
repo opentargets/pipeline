@@ -1,15 +1,25 @@
 """Tests for the description of each kind of staged model output."""
 
 import dataclasses
+import hashlib
 import inspect
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
+from pts.clinical_staging.staged_outputs import (
+    DISEASE_ENTITIES,
+    DRUG_ENTITIES,
+    EXTRACTION,
+    STOP_REASONS,
+    StagedOutput,
+    schema_digest,
+)
 from pts.record_store import publish_snapshot, read_records
 from pts.transformers.clinical.ner import (
     BIOBERT_LABELS,
@@ -23,6 +33,8 @@ from pts.transformers.clinical.ner import (
     DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical.stop_reasons import (
     STOP_REASONS_MODEL,
     STOP_REASONS_THRESHOLD,
@@ -220,3 +232,152 @@ def test_read_fails_on_metadata_without_a_tag(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"mining_disease_entities metadata lacks \['kind', 'tag'\]"):
         DISEASE_ENTITIES.read({'mining_disease_entities': uri})
+
+
+def extraction_snapshot(tmp_path: Path, name: str, **overrides: object) -> str:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+    metadata = {**EXTRACTION.metadata(digest, None), **overrides}
+    df = pl.DataFrame({'id': ['NCT1']})
+    return snapshot(tmp_path, name, df, {k: v for k, v in metadata.items() if v is not None})
+
+
+def test_schema_digest_is_the_hash_of_the_sorted_alias_schema() -> None:
+    document = json.dumps(ClinicalReportExtractionSchema.model_json_schema(by_alias=True), sort_keys=True)
+
+    assert schema_digest(ClinicalReportExtractionSchema) == hashlib.sha256(document.encode('utf-8')).hexdigest()
+
+
+def test_extraction_describes_the_llm_extraction() -> None:
+    assert EXTRACTION.name == 'extraction'
+    assert EXTRACTION.model == 'aact_llm_extraction'
+    assert EXTRACTION.logic_version == 1
+    assert EXTRACTION.params == {'trial_fields': TRIAL_FIELDS}
+
+
+def test_extraction_tag_is_the_schema_prefix_and_a_param_digest() -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+    document = json.dumps({'logic_version': 1, 'trial_fields': TRIAL_FIELDS, 'sample_size': None}, sort_keys=True)
+    expected = hashlib.sha256(document.encode('utf-8')).hexdigest()[:8]
+
+    assert EXTRACTION.tag(digest, None) == f'{digest[:12]}-p{expected}'
+    assert re.fullmatch(r'[0-9a-f]{12}-p[0-9a-f]{8}', EXTRACTION.tag(digest, None))
+
+
+def test_extraction_tag_differs_between_a_full_run_and_a_sample() -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+
+    assert EXTRACTION.tag(digest, None) != EXTRACTION.tag(digest, 5)
+    assert EXTRACTION.tag(digest, 5) != EXTRACTION.tag(digest, 6)
+
+
+def test_extraction_tag_changes_with_trial_fields_logic_version_and_schema() -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+    tag = EXTRACTION.tag(digest, None)
+
+    assert dataclasses.replace(EXTRACTION, params={'trial_fields': {'a': 'A'}}).tag(digest, None) != tag
+    assert dataclasses.replace(EXTRACTION, logic_version=2).tag(digest, None) != tag
+    assert EXTRACTION.tag('f' * 64, None) != tag
+
+
+def test_extraction_release_tag_is_the_full_run_of_the_current_schema() -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+
+    assert EXTRACTION.release_tag() == EXTRACTION.tag(digest, None)
+
+
+def test_extraction_metadata_holds_the_full_schema_digest() -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+
+    assert EXTRACTION.metadata(digest, 5) == {
+        'kind': 'extraction',
+        'model': 'aact_llm_extraction',
+        'tag': EXTRACTION.tag(digest, 5),
+        'model_revisions': {'aact_llm_extraction': digest},
+    }
+
+
+def test_extraction_read_accepts_its_own_metadata(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'extraction')
+
+    assert EXTRACTION.read(uri).to_dict(as_series=False) == {'id': ['NCT1']}
+
+
+def test_extraction_read_rejects_a_missing_key(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'extraction', model_revisions=None)
+
+    with pytest.raises(ValueError, match='model_revisions'):
+        EXTRACTION.read(uri)
+
+
+def test_extraction_read_rejects_another_kind(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'extraction', kind='stop_reasons')
+
+    with pytest.raises(ValueError, match="'stop_reasons'"):
+        EXTRACTION.read(uri)
+
+
+def test_extraction_read_rejects_another_tag_naming_both(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'extraction', tag='abcdef012345-p00000000')
+
+    with pytest.raises(ValueError, match='abcdef012345-p00000000') as error:
+        EXTRACTION.read(uri)
+    assert EXTRACTION.release_tag() in str(error.value)
+
+
+def test_extraction_read_rejects_a_sampled_extraction(tmp_path: Path) -> None:
+    digest = schema_digest(ClinicalReportExtractionSchema)
+    uri = extraction_snapshot(tmp_path, 'extraction', tag=EXTRACTION.tag(digest, 5))
+
+    with pytest.raises(ValueError, match='tag'):
+        EXTRACTION.read(uri)
+
+
+def test_stage_writes_the_extra_metadata(tmp_path: Path) -> None:
+    result = STOP_REASONS.stage(
+        pl.Series('text', ['a'], dtype=pl.String),
+        upper,
+        REVISIONS,
+        str(tmp_path / 'store'),
+        str(tmp_path / 'snap'),
+        'run-1',
+        None,
+        max_attempts=3,
+        extra_metadata={'extraction_tag': 'x-p1'},
+    )
+
+    metadata = json.loads((tmp_path / 'snap' / result.tag / 'metadata.json').read_text())
+    assert metadata['extraction_tag'] == 'x-p1'
+    assert metadata['kind'] == 'stop_reasons'
+
+
+def test_read_checks_the_expected_metadata_of_the_named_sources(tmp_path: Path) -> None:
+    tag = DRUG_ENTITIES.tag(REVISIONS)
+    a = snapshot(
+        tmp_path,
+        'a',
+        pl.DataFrame({'label': ['x'], 'extracted_drugs': [['X']]}),
+        {
+            'kind': 'drug_entities',
+            'model': DRUG_NER_MODEL,
+            'tag': tag,
+            'model_revisions': {},
+            'extraction_tag': 'right',
+        },
+    )
+    b = drug_snapshot(tmp_path, 'b', ['y'], [['Y']])
+
+    assert DRUG_ENTITIES.read({'a': a, 'b': b}, expect={'a': {'extraction_tag': 'right'}}).height == 2
+    with pytest.raises(ValueError, match=r"a.*extraction_tag.*'wrong'.*'right'"):
+        DRUG_ENTITIES.read({'a': a, 'b': b}, expect={'a': {'extraction_tag': 'wrong'}})
+    with pytest.raises(ValueError, match=r"b.*extraction_tag.*'wrong'.*None"):
+        DRUG_ENTITIES.read({'a': a, 'b': b}, expect={'b': {'extraction_tag': 'wrong'}})
+
+
+def test_staged_outputs_loads_no_heavy_library() -> None:
+    code = (
+        'import sys; import pts.clinical_staging.staged_outputs; '
+        "bad = [m for m in ('openai', 'torch', 'transformers') if m in sys.modules]; "
+        'sys.exit(repr(bad) if bad else 0)'
+    )
+
+    assert subprocess.run([sys.executable, '-c', code], check=False, capture_output=True).returncode == 0
