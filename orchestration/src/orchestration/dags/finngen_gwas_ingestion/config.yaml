@@ -65,6 +65,9 @@ steps:
           step.session.spark_uri=yarn
 
   finemapping:
+    # after study_index: spark-submit resolves the hadoop-bam package into the ivy cache of the
+    # master, and two jobs resolving it at the same time break each other's downloads
+    depends_on: [study_index]
     kind: dataproc
     definition:
       cluster: otg-finngen-gwas
