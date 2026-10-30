@@ -9,10 +9,9 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
-from otter.util.errors import NotFoundError
 
 from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
-from pts.record_store import RECORD_SCHEMA, text_sha256, write_run
+from pts.record_store import RECORD_SCHEMA, run_exists, text_sha256, write_run
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import drug_entities_with_status
@@ -40,11 +39,7 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
         int: The number of records written, 0 if the seed run already exists.
     """
     drug_store = f'{store_uri}/drug_entities'
-    try:
-        StorageHandle(f'{drug_store}/runs/{SEED_RUN_ID}/manifest.json', config=config).read_text()
-    except NotFoundError:
-        pass
-    else:
+    if run_exists(drug_store, SEED_RUN_ID, config):
         logger.info(f'{SEED_RUN_ID} already imported into {drug_store}')
         return 0
 

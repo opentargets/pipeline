@@ -17,6 +17,7 @@ from pts.record_store import (
     map_texts,
     publish_snapshot,
     read_records,
+    run_exists,
     text_sha256,
     write_run,
 )
@@ -210,6 +211,17 @@ def test_write_run_refuses_an_existing_run(store_uri):
 
     with pytest.raises(RecordStoreError, match='run1'):
         write_run(records, store_uri, 'run1', None)
+
+
+def test_run_exists_once_its_manifest_is_written(store_uri):
+    assert not run_exists(store_uri, 'run1', None)
+
+    write_run(record('run1', 'A', datetime(2026, 1, 1, tzinfo=UTC)), store_uri, 'run1', None)
+    assert run_exists(store_uri, 'run1', None)
+
+    Path(store_uri, 'runs', 'run1', 'manifest.json').unlink()
+    assert Path(store_uri, 'runs', 'run1').is_dir()
+    assert not run_exists(store_uri, 'run1', None)
 
 
 def test_newest_ok_wins_over_older_ok(store_uri):

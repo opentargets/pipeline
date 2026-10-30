@@ -122,6 +122,11 @@ def _exists(uri: str, config: Config) -> bool:
     return True
 
 
+def run_exists(store_uri: str, run_id: str, config: Config) -> bool:
+    """Return whether the store has a finished run ``run_id``, that is, one whose manifest exists."""
+    return _exists(f'{store_uri}/runs/{run_id}/manifest.json', config)
+
+
 def read_records(store_uri: str, config: Config, output_dtype: pl.DataType = LIST_OUTPUT) -> pl.DataFrame:
     """Read every record of every finished run.
 
@@ -166,7 +171,7 @@ def write_run(
         RecordStoreError: If the run already has a manifest.
     """
     run_uri = f'{store_uri}/runs/{run_id}'
-    if _exists(f'{run_uri}/manifest.json', config):
+    if run_exists(store_uri, run_id, config):
         msg = f'run {run_id} already exists in {store_uri}'
         raise RecordStoreError(msg)
 

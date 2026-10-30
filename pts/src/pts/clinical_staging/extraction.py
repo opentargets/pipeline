@@ -20,11 +20,10 @@ import polars as pl
 from loguru import logger
 from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
-from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
-from pts.record_store import ComputeAborted, text_sha256, write_run
+from pts.record_store import ComputeAborted, run_exists, text_sha256, write_run
 from pts.tasks.llm_extract import import_class
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
@@ -270,11 +269,7 @@ def import_extraction_cache(
         raise ValueError(msg)
 
     run_id = f'{IMPORT_RUN_PREFIX}-{schema_digest[:12]}'
-    try:
-        StorageHandle(f'{store_uri}/runs/{run_id}/manifest.json', config=config).read_text()
-    except NotFoundError:
-        pass
-    else:
+    if run_exists(store_uri, run_id, config):
         logger.info(f'{run_id} already imported into {store_uri}')
         return 0
 
