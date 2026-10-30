@@ -1,6 +1,15 @@
 """Build the disease location dataset from MONDO's disease-has-location axioms."""
 
+from typing import Any
+
 import polars as pl
+from loguru import logger
+from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
+
+from pts.schemas import ontology
+from pts.schemas.disease_location import disease_location_schema
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 LOCATED_IN = 'http://purl.obolibrary.org/obo/RO_0004026'
 
@@ -83,3 +92,35 @@ def most_specific_locations(pairs: pl.DataFrame, biosample: pl.DataFrame) -> pl.
         .unique()
     )
     return known.join(broader, on=['diseaseId', 'biosampleId'], how='anti')
+
+
+def disease_location(
+    source: dict[str, str],
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Build the disease location dataset.
+
+    Args:
+        source: ``mondo`` (OBO-Graph JSON), ``disease`` and ``biosample`` dataset paths.
+        destination: output dataset path.
+        settings: unused.
+        config: unused.
+    """
+    logger.debug('loading mondo')
+    f = StorageHandle(source['mondo']).open()
+    graph = pl.read_json(f, schema=ontology.schema)['graphs'][0][0]  # ty:ignore[invalid-argument-type]
+    edges = pl.DataFrame(graph['edges'], schema=ontology.edge)
+    axioms = pl.DataFrame(graph['logicalDefinitionAxioms'])
+
+    disease = scan_dataset(source['disease']).select('id', 'ancestors').collect()
+    biosample = scan_dataset(source['biosample']).select('biosampleId', 'ancestors').collect()
+
+    locations = (
+        most_specific_locations(inherit_locations(stated_locations(edges, axioms), disease), biosample)
+        .sort('diseaseId', 'biosampleId')
+        .select(disease_location_schema.names())
+    )
+    logger.info(f'{locations.height} locations on {locations["diseaseId"].n_unique()} diseases')
+    write_dataset(locations, destination)

@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 import polars as pl
 
 from pts.schemas import ontology
-from pts.transformers.disease_location import inherit_locations, most_specific_locations, stated_locations
+from pts.schemas.disease_location import disease_location_schema
+from pts.transformers.disease_location import (
+    disease_location,
+    inherit_locations,
+    most_specific_locations,
+    stated_locations,
+)
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 OBO = 'http://purl.obolibrary.org/obo/'
 LOCATED_IN = f'{OBO}RO_0004026'
@@ -197,3 +205,67 @@ class TestMostSpecificLocations:
     def test_uc_shape(self) -> None:
         pairs = _locations_on('UC', COLON, LARGE_INTESTINE, INTESTINE, IMMUNE)
         assert _pairs(most_specific_locations(pairs, _biosample())) == [('UC', COLON), ('UC', IMMUNE)]
+
+
+def _write_mondo(path: Path) -> None:
+    doc = {
+        'graphs': [
+            {
+                'id': 'mondo',
+                'meta': None,
+                'nodes': [],
+                'edges': [{'sub': f'{OBO}MONDO_A', 'pred': LOCATED_IN, 'obj': f'{OBO}{COLON}', 'meta': None}],
+                'logicalDefinitionAxioms': [
+                    {
+                        'definedClassId': f'{OBO}MONDO_B',
+                        'genusIds': [],
+                        'restrictions': [
+                            {'propertyId': LOCATED_IN, 'fillerId': f'{OBO}{IMMUNE}'},
+                            {'propertyId': LOCATED_IN, 'fillerId': f'{OBO}GO_0000781'},
+                        ],
+                    },
+                ],
+                'domainRangeAxioms': [],
+            },
+        ],
+    }
+    path.write_text(json.dumps(doc))
+
+
+def test_disease_location_end_to_end(tmp_path: Path) -> None:
+    _write_mondo(tmp_path / 'mondo.json')
+    write_dataset(
+        _diseases(
+            ('MONDO_A', []),
+            ('MONDO_B', []),
+            ('MONDO_C', ['MONDO_A', 'MONDO_B']),
+            ('ORPHA_1', ['MONDO_C', 'MONDO_A', 'MONDO_B']),
+            ('MONDO_Z', []),
+        ),
+        str(tmp_path / 'disease'),
+    )
+    write_dataset(_biosample().filter(pl.col('biosampleId') != LARGE_INTESTINE), str(tmp_path / 'biosample'))
+    (tmp_path / 'biosample' / '_SUCCESS').touch()
+
+    disease_location(
+        {
+            'mondo': str(tmp_path / 'mondo.json'),
+            'disease': str(tmp_path / 'disease'),
+            'biosample': str(tmp_path / 'biosample'),
+        },
+        str(tmp_path / 'out'),
+        {},
+        None,
+    )
+
+    out = scan_dataset(str(tmp_path / 'out')).collect()
+    assert out.schema == disease_location_schema
+    assert out.rows() == sorted(out.rows())
+    assert out.rows() == [
+        ('MONDO_A', COLON),
+        ('MONDO_B', IMMUNE),
+        ('MONDO_C', COLON),
+        ('MONDO_C', IMMUNE),
+        ('ORPHA_1', COLON),
+        ('ORPHA_1', IMMUNE),
+    ]
