@@ -1,6 +1,7 @@
 """Tests for the mining_models staging task."""
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -87,6 +88,15 @@ def _stage(tmp_path: Path, models_uri: str, run_id: str) -> dict[str, Any]:
         ner_batch_size=4,
         max_attempts=3,
     )
+
+
+def test_stage_mining_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:
+    shutil.rmtree(Path(models_uri) / DRUGTEMIST_MODEL)
+
+    with pytest.raises(ValueError, match=DRUGTEMIST_MODEL):
+        _stage(tmp_path, models_uri, 'r1')
+
+    assert not (tmp_path / 'snap').exists()
 
 
 def test_mining_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, models: Models) -> None:

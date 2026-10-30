@@ -24,7 +24,9 @@ from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot, tracked
 from pts.transformers.clinical.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
+    DISEASE_DROP_DIGITS,
     DISEASE_LABELS,
+    DISEASE_MIN_LENGTH,
     DISEASE_MODEL,
     DISEASE_NER_MODEL,
     DRUG_NAME_PATTERNS,
@@ -174,9 +176,7 @@ class StagedOutput:
                 raise ValueError(f'snapshot {source} is of kind {metadata["kind"]!r}, not {self.name!r}')
             digest = metadata['tag'].rpartition('-p')[2]
             if digest != self.digest:
-                raise ValueError(
-                    f'snapshot {source} was staged with parameter digest {digest!r}, this code has {self.digest!r}'
-                )
+                raise ValueError(f'snapshot {source} was staged with digest {digest!r}, this code has {self.digest!r}')
             tags[source] = metadata['tag']
         if len(set(tags.values())) > 1:
             raise ValueError(f'{self.name} snapshots have different tags: {tags}')
@@ -226,7 +226,7 @@ DISEASE_ENTITIES = StagedOutput(
     name='disease_entities',
     model=DISEASE_NER_MODEL,
     hub_models=(DISEASE_MODEL,),
-    params={'labels': DISEASE_LABELS, 'min_length': 2, 'drop_digits': True},
+    params={'labels': DISEASE_LABELS, 'min_length': DISEASE_MIN_LENGTH, 'drop_digits': DISEASE_DROP_DIGITS},
     logic_version=1,
     columns={'text': 'text', 'output': 'extracted_diseases'},
     key='text',

@@ -22,6 +22,8 @@ DRUGTEMIST_MODEL = 'BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist'
 DRUG_NER_MODEL = f'{CHEMICAL_MODEL}+{DRUGTEMIST_MODEL}+regex'
 
 DISEASE_LABELS = ['DISEASE']
+DISEASE_MIN_LENGTH = 2
+DISEASE_DROP_DIGITS = True
 BIOBERT_LABELS = ['CHEMICAL', 'DRUG', 'MEDICATION', 'CHEM']
 DRUGTEMIST_LABELS = ['CHEMICAL', 'DRUG', 'MEDICATION', 'CHEM', 'FARMACO', 'NORMALIZABLES']
 
@@ -79,7 +81,7 @@ def _disease_mentions(biobert: Callable[..., Any], text: str) -> list[str]:
         label = ent.get('entity_group', '').upper()
         if any(wanted in label for wanted in DISEASE_LABELS):
             word = ent['word'].strip()
-            if len(word) > 1 and not word.isdigit():
+            if len(word) >= DISEASE_MIN_LENGTH and not (DISEASE_DROP_DIGITS and word.isdigit()):
                 found.add(word.lower())
     return sorted(found)
 

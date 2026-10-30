@@ -61,7 +61,6 @@ class TrialModels(Task):
         from pts.postgres import read_dump_tables
         from pts.staged_outputs import DRUG_ENTITIES
         from pts.transformers.clinical.hf_models import staged_model_revisions
-        from pts.transformers.clinical.ner import DRUG_NER_MODEL
         from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
         config = self.context.config
@@ -73,7 +72,7 @@ class TrialModels(Task):
             seeded = aact_trial_models.seed_drug_entities(
                 StorageHandle(self.spec.seed_ner_cache, config=config).absolute,
                 store_uri,
-                DRUG_NER_MODEL,
+                DRUG_ENTITIES.model,
                 revision,
                 config,
             )

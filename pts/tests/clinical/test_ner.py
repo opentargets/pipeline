@@ -77,6 +77,17 @@ def test_disease_filters_and_normalises(monkeypatch: pytest.MonkeyPatch) -> None
     assert created == [{'model': DISEASE_MODEL, 'tokenizer': DISEASE_MODEL, 'aggregation_strategy': 'max'}]
 
 
+def test_disease_filter_reads_its_constants(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePipeline({'text': [_ent('DISEASE', 'ab'), _ent('DISEASE', 'abc'), _ent('DISEASE', '2024')]})
+    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
+    monkeypatch.setattr(ner, 'DISEASE_MIN_LENGTH', 3)
+    monkeypatch.setattr(ner, 'DISEASE_DROP_DIGITS', False)
+
+    out = extract_disease_entities(pl.Series(['text']))
+
+    assert out.to_list() == [['2024', 'abc']]
+
+
 def test_disease_empty_and_blank_text_yield_empty_without_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePipeline({'a': [_ent('DISEASE', 'gout')]})
     _patch_factory(monkeypatch, {DISEASE_MODEL: fake})

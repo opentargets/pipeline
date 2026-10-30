@@ -1,6 +1,7 @@
 """Tests for the description of each kind of staged model output."""
 
 import dataclasses
+import inspect
 import json
 import re
 from pathlib import Path
@@ -11,13 +12,22 @@ import pytest
 from pts.record_store import publish_snapshot, read_records
 from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.transformers.clinical.ner import (
+    BIOBERT_LABELS,
     CHEMICAL_MODEL,
+    DISEASE_DROP_DIGITS,
+    DISEASE_LABELS,
+    DISEASE_MIN_LENGTH,
     DISEASE_MODEL,
     DRUG_NAME_PATTERNS,
     DRUG_NER_MODEL,
+    DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
+from pts.transformers.clinical.stop_reasons import (
+    STOP_REASONS_MODEL,
+    STOP_REASONS_THRESHOLD,
+    predict_trial_stop_reasons,
+)
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
 
@@ -74,6 +84,21 @@ def test_tag_changes_with_params_and_logic_version() -> None:
 def test_params_hold_the_threshold_and_patterns_the_code_runs() -> None:
     assert STOP_REASONS.params == {'threshold': STOP_REASONS_THRESHOLD}
     assert DRUG_ENTITIES.params['patterns'] == DRUG_NAME_PATTERNS
+
+
+def test_params_hold_the_values_each_compute_reads() -> None:
+    default = inspect.signature(predict_trial_stop_reasons).parameters['threshold'].default
+    assert STOP_REASONS.params == {'threshold': default}
+    assert DRUG_ENTITIES.params == {
+        'patterns': DRUG_NAME_PATTERNS,
+        'biobert_labels': BIOBERT_LABELS,
+        'drugtemist_labels': DRUGTEMIST_LABELS,
+    }
+    assert DISEASE_ENTITIES.params == {
+        'labels': DISEASE_LABELS,
+        'min_length': DISEASE_MIN_LENGTH,
+        'drop_digits': DISEASE_DROP_DIGITS,
+    }
 
 
 def test_require_names_the_missing_models() -> None:
