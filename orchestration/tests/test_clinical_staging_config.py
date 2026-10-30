@@ -88,7 +88,7 @@ def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> Non
 def test_release_copy_paths_use_the_staging_tags() -> None:
     """The snapshot paths the release copies end with the tags staging writes.
 
-    orchestration does not depend on pts, so the tag formats are the literal ones of ``revision_tags``.
+    orchestration does not depend on pts, so the tag formats are the literal ones of ``StagedOutput.tag``.
     """
     text = _release_step_text({'aact_version': 'A', 'clinical_mining_version': 'M', **FAKE_REVISIONS})
     stop = FAKE_REVISIONS['stop_reasons_model_revision']

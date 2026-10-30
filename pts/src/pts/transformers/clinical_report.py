@@ -1,15 +1,14 @@
 """Clinical report dataset generation."""
 
-import json
 from enum import StrEnum
 from typing import Any
 
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.postgres import read_dump_tables
+from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
 from pts.transformers.clinical import (
     ClinicalReport,
     ClinicalReportType,
@@ -107,13 +106,6 @@ OUTPUT_COLUMNS = (
 )
 """The columns of `output/clinical_report`, in their published order."""
 
-SNAPSHOTS = ('aact_stop_reasons', 'aact_drug_entities', 'mining_drug_entities', 'mining_disease_entities')
-"""The sources holding staged model results, each a snapshot directory with `data.parquet` and `metadata.json`."""
-
-SNAPSHOT_REVISION_KEYS = ('model', 'model_revision', 'model_revisions')
-
-STAGED_DRUG_ENTITIES_SCHEMA = pl.Schema({'label': pl.String, 'extracted_drugs': pl.List(pl.String)})
-
 
 class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
@@ -146,9 +138,12 @@ def _clinical_report(
     source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
 ) -> None:
     logger.info(f'source paths: {source}')
-    check_snapshot_revisions({
-        name: json.loads(StorageHandle(f'{source[name]}/metadata.json').read_text()[0]) for name in SNAPSHOTS
+    stop_reasons = STOP_REASONS.read({'aact_stop_reasons': source['aact_stop_reasons']})
+    drug_entities = DRUG_ENTITIES.read({
+        'aact_drug_entities': source['aact_drug_entities'],
+        'mining_drug_entities': source['mining_drug_entities'],
     })
+    disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
@@ -187,7 +182,7 @@ def _clinical_report(
     llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
-    mining = staged_mining_reports(source)
+    mining = staged_mining_reports(source, disease_entities)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
@@ -218,7 +213,7 @@ def _clinical_report(
         llm_extractions=llm_extractions,
     )
     logger.info(f'attach stop reasons staged at {source["aact_stop_reasons"]}')
-    aact = ClinicalReport(df=attach_stop_reasons(aact.df, scan_dataset(source['aact_stop_reasons']).collect()))
+    aact = ClinicalReport(df=attach_stop_reasons(aact.df, stop_reasons))
     chembl_indication_report = extract_chembl_clinical_report(
         drug_indication=chembl_indication,
         molecule_dictionary=chembl_molecule_dictionary,
@@ -238,10 +233,6 @@ def _clinical_report(
         chembl_drug_warning_report.df,
         mining['ttd'].df,
         mining['ema'].df,
-    ])
-    drug_entities = staged_drug_entities([
-        scan_dataset(source[name]).select(STAGED_DRUG_ENTITIES_SCHEMA.names()).collect()
-        for name in ('aact_drug_entities', 'mining_drug_entities')
     ])
     logger.info('reports generated. map entities...')
     output = (
@@ -266,13 +257,16 @@ def _clinical_report(
     write_dataset(order_output_columns(output.df), destination['output'])
 
 
-def staged_mining_reports(source: dict[str, str]) -> dict[str, ClinicalReport]:
-    """The TTD, EMA and PMDA reports, with the EMA and PMDA diseases staged in `mining_disease_entities`.
+def staged_mining_reports(source: dict[str, str], staged: pl.DataFrame) -> dict[str, ClinicalReport]:
+    """The TTD, EMA and PMDA reports, with the EMA and PMDA diseases staged in `staged`.
+
+    Args:
+        source: the paths of the TTD, EMA and PMDA inputs.
+        staged: the staged disease entities, with `text` and `extracted_diseases`.
 
     Raises:
         ValueError: if an EMA or PMDA indication text is not staged.
     """
-    staged = scan_dataset(source['mining_disease_entities']).select('text', 'extracted_diseases').collect()
     return build_mining_reports(
         source['ttd'],
         source['ema'],
@@ -301,75 +295,6 @@ def attach_stop_reasons(aact: pl.DataFrame, staged: pl.DataFrame) -> pl.DataFram
         how='left',
         maintain_order='left',
     )
-
-
-def check_snapshot_revisions(metadatas: dict[str, dict[str, Any]]) -> None:
-    """Check that the snapshots of one model were staged at the same revisions.
-
-    Two snapshots of a `model` must have the same `model_revision`, and the same revision of each model
-    both their `model_revisions` name.
-
-    Args:
-        metadatas: the metadata of each snapshot, keyed by its source name.
-
-    Raises:
-        ValueError: naming the snapshots and the revisions that differ, or a snapshot whose metadata lacks
-            `model`, `model_revision` or `model_revisions`.
-    """
-    for name, metadata in sorted(metadatas.items()):
-        missing = [key for key in SNAPSHOT_REVISION_KEYS if key not in metadata]
-        if missing:
-            raise ValueError(f'snapshot {name} metadata lacks {missing}')
-    by_model: dict[str, list[str]] = {}
-    for name in sorted(metadatas):
-        by_model.setdefault(metadatas[name]['model'], []).append(name)
-    mismatches = []
-    for model, names in by_model.items():
-        first = metadatas[names[0]]
-        for name in names[1:]:
-            other = metadatas[name]
-            if first['model_revision'] != other['model_revision']:
-                mismatches.append(
-                    f'{names[0]} and {name} of {model} differ in model_revision: '
-                    f'{first["model_revision"]!r} != {other["model_revision"]!r}'
-                )
-            mismatches.extend(
-                f'{names[0]} and {name} of {model} differ in model_revisions of {hub_model}: '
-                f'{first["model_revisions"][hub_model]!r} != {other["model_revisions"][hub_model]!r}'
-                for hub_model in sorted(first['model_revisions'].keys() & other['model_revisions'].keys())
-                if first['model_revisions'][hub_model] != other['model_revisions'][hub_model]
-            )
-    if mismatches:
-        raise ValueError(f'snapshots staged at different revisions: {"; ".join(mismatches)}')
-
-
-def staged_drug_entities(snapshots: list[pl.DataFrame]) -> pl.DataFrame:
-    """The union of the staged drug NER `snapshots`, one row per label.
-
-    Args:
-        snapshots: staged drug NER results, with `label` and `extracted_drugs`.
-
-    Returns:
-        `label` and `extracted_drugs`, the names sorted.
-
-    Raises:
-        ValueError: naming how many labels have different names in two snapshots, and up to 5 of them.
-    """
-    staged = (
-        pl
-        .concat([
-            snapshot.select(STAGED_DRUG_ENTITIES_SCHEMA.names()).cast(STAGED_DRUG_ENTITIES_SCHEMA)
-            for snapshot in snapshots
-        ])
-        .with_columns(pl.col('extracted_drugs').list.sort())
-        .unique()
-    )
-    conflicts = staged.filter(pl.col('label').is_duplicated())['label'].unique().sort()
-    if conflicts.len() > 0:
-        raise ValueError(
-            f'{conflicts.len()} drug labels staged with different results, e.g. {conflicts.head(5).to_list()}'
-        )
-    return staged
 
 
 def map_report_entities(

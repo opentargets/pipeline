@@ -1,5 +1,4 @@
 import datetime
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +8,8 @@ import openpyxl
 import polars as pl
 import pytest
 
+from pts.record_store import publish_snapshot
+from pts.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
 from pts.transformers import clinical_report as clinical_report_module
 from pts.transformers.clinical import (
     ClinicalProvider,
@@ -20,17 +21,13 @@ from pts.transformers.clinical import (
     replace_with_llm_indications,
 )
 from pts.transformers.clinical.mining import read_ema_sheet
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_NER_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,
-    check_snapshot_revisions,
     flag_indirect_primary_purpose,
     map_report_entities,
     order_output_columns,
     require_staged,
-    staged_drug_entities,
     validate_disease,
 )
 from tests.clinical.mapping_fixtures import DISEASE, DRUG
@@ -671,71 +668,41 @@ def test_unstaged_label_from_any_source_fails() -> None:
         )
 
 
-def test_conflicting_staged_results_for_one_label_fail() -> None:
-    aact = _staged_drug_entities(('pill', ['a', 'b']), ('aact only', []))
-    mining = _staged_drug_entities(('pill', ['c']), ('mining only', ['m']))
-
-    with pytest.raises(ValueError, match=r"1 drug labels staged with different results, e\.g\. \['pill'\]"):
-        staged_drug_entities([aact, mining])
-
-
-def test_staged_drug_entities_are_the_deduplicated_union() -> None:
-    aact = _staged_drug_entities(('pill', ['b', 'a']), ('aact only', []))
-    mining = _staged_drug_entities(('pill', ['a', 'b']), ('mining only', ['m']))
-
-    staged = staged_drug_entities([aact, mining])
-
-    assert staged.schema == pl.Schema(STAGED_DRUG_ENTITIES_SCHEMA)
-    assert sorted(staged.rows()) == [('aact only', []), ('mining only', ['m']), ('pill', ['a', 'b'])]
-
-
-def _metadatas(**overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Metadata of the four snapshots, staged at the same revisions, with `overrides` by snapshot."""
-    aact = {STOP_REASONS_MODEL: 's1', CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'}
-    mining = {DISEASE_NER_MODEL: 'x1', CHEMICAL_MODEL: 'c1', DRUGTEMIST_MODEL: 'd1'}
+def _snapshot_metadata(kind: StagedOutput, tag: str | None = None) -> dict[str, Any]:
     return {
-        'aact_stop_reasons': {'model': STOP_REASONS_MODEL, 'model_revision': 's1', 'model_revisions': aact},
-        'aact_drug_entities': {'model': DRUG_NER_MODEL, 'model_revision': 'c1+d1', 'model_revisions': aact},
-        'mining_drug_entities': {'model': DRUG_NER_MODEL, 'model_revision': 'c1+d1', 'model_revisions': mining},
-        'mining_disease_entities': {'model': DISEASE_NER_MODEL, 'model_revision': 'x1', 'model_revisions': mining},
-    } | overrides
+        'kind': kind.name,
+        'model': kind.model,
+        'tag': tag or kind.tag(dict.fromkeys(kind.hub_models, 'r1')),
+        'model_revisions': dict.fromkeys(kind.hub_models, 'r1'),
+    }
 
 
-def test_snapshots_with_different_revisions_fail() -> None:
-    check_snapshot_revisions(_metadatas())
-
-    drug_ner = _metadatas()['mining_drug_entities']
-    with pytest.raises(ValueError, match=r'aact_drug_entities.*mining_drug_entities.*c1\+d1.*c0\+d1'):
-        check_snapshot_revisions(_metadatas(mining_drug_entities=drug_ner | {'model_revision': 'c0+d1'}))
-
-    revisions = drug_ner['model_revisions'] | {CHEMICAL_MODEL: 'c0'}
-    with pytest.raises(ValueError, match=f"model_revisions.*{CHEMICAL_MODEL}.*'c1'.*'c0'"):
-        check_snapshot_revisions(_metadatas(mining_drug_entities=drug_ner | {'model_revisions': revisions}))
-
-
-@pytest.mark.parametrize('key', ['model', 'model_revision', 'model_revisions'])
-def test_snapshot_metadata_without_revisions_is_a_clear_error(key: str) -> None:
-    metadata = {k: v for k, v in _metadatas()['mining_disease_entities'].items() if k != key}
-
-    with pytest.raises(ValueError, match=f'mining_disease_entities.*{key}'):
-        check_snapshot_revisions(_metadatas(mining_disease_entities=metadata))
-
-
-def test_revision_mismatch_fails_before_any_dump_is_restored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    metadatas = _metadatas()
-    metadatas['mining_drug_entities'] |= {'model_revision': 'c0+d1'}
+def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metadatas = {
+        'aact_stop_reasons': _snapshot_metadata(STOP_REASONS),
+        'aact_drug_entities': _snapshot_metadata(DRUG_ENTITIES),
+        'mining_drug_entities': _snapshot_metadata(DRUG_ENTITIES),
+        'mining_disease_entities': _snapshot_metadata(DISEASE_ENTITIES, 'r1-pdeadbeef'),
+    }
+    kinds = {
+        'aact_stop_reasons': STOP_REASONS,
+        'aact_drug_entities': DRUG_ENTITIES,
+        'mining_drug_entities': DRUG_ENTITIES,
+        'mining_disease_entities': DISEASE_ENTITIES,
+    }
     source = {'chembl': 'unused', 'aact': 'unused'}
     for name, metadata in metadatas.items():
-        (tmp_path / name).mkdir()
-        (tmp_path / name / 'metadata.json').write_text(json.dumps(metadata))
+        empty = pl.DataFrame(schema=dict.fromkeys(kinds[name].columns.values(), pl.String))
+        publish_snapshot(empty, str(tmp_path / name), metadata, None)
         source[name] = str(tmp_path / name)
 
     def no_dump(*args: object, **kwargs: object) -> None:
         raise AssertionError('dump restored')
 
     monkeypatch.setattr(clinical_report_module, 'read_dump_tables', no_dump)
-
-    with pytest.raises(ValueError, match=r'c0\+d1'):
+    with pytest.raises(ValueError, match=r"mining_disease_entities.*'deadbeef'"):
         clinical_report_module._clinical_report(source, {}, {}, None)
 
 
@@ -745,15 +712,16 @@ import sys
 import polars as pl
 
 from pts.transformers.clinical.mining import staged_lookup
-from pts.transformers.clinical_report import map_report_entities, staged_drug_entities
+import pts.staged_outputs
+from pts.transformers.clinical_report import map_report_entities
 from tests.clinical.mapping_fixtures import DISEASE, DRUG
 from tests.test_clinical_report import _drug_reports, _staged_drug_entities
 
-drugs = staged_drug_entities([_staged_drug_entities(('mystery pill', ['kalydeco']))])
+drugs = _staged_drug_entities(('mystery pill', ['kalydeco']))
 map_report_entities(_drug_reports(('TTD01', 'TTD', 'mystery pill')), DISEASE, DRUG, None, drugs)
 diseases = pl.DataFrame({'text': ['asthma'], 'extracted_diseases': [['asthma']]})
 staged_lookup(diseases, 'text', 'extracted_diseases', 'disease texts')(pl.Series(['asthma']))
-print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torch', 'transformers'}))
+print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torch', 'transformers', 'huggingface_hub'}))
 """
 
 

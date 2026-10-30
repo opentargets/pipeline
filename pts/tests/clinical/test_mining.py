@@ -140,22 +140,20 @@ def test_recorded_disease_texts_are_what_the_providers_pass(tmp_path: Path, inpu
     }
 
 
-def _stage_diseases(path: Path, texts: list[str]) -> str:
-    path.mkdir()
-    pl.DataFrame(
+def _stage_diseases(texts: list[str]) -> pl.DataFrame:
+    return pl.DataFrame(
         {'text': texts, 'extracted_diseases': [[f'staged {text}'] for text in texts]},
         schema={'text': pl.String, 'extracted_diseases': pl.List(pl.String)},
-    ).write_parquet(path / 'data.parquet')
-    return str(path)
+    )
 
 
-def test_ema_and_pmda_diseases_come_from_staging(tmp_path: Path, inputs: dict[str, str]) -> None:
+def test_ema_and_pmda_diseases_come_from_staging(inputs: dict[str, str]) -> None:
     recorder = RecordingNer()
     build_mining_reports(inputs['ttd'], inputs['ema'], inputs['pmda'], recorder)
     texts = sorted(recorder.texts)
-    snapshot = _stage_diseases(tmp_path / 'mining_disease_entities', texts)
+    staged = _stage_diseases(texts)
 
-    reports = staged_mining_reports({**inputs, 'mining_disease_entities': snapshot})
+    reports = staged_mining_reports(inputs, staged)
 
     expected = build_mining_reports(
         inputs['ttd'],
@@ -170,9 +168,9 @@ def test_ema_and_pmda_diseases_come_from_staging(tmp_path: Path, inputs: dict[st
         diseases = reports[name].df.select(pl.col('diseases').explode().struct.field('diseaseFromSource'))
         assert any(label.startswith('staged ') for label in diseases.to_series().drop_nulls())
 
-    partial = _stage_diseases(tmp_path / 'partial', [t for t in texts if t != 'for the treatment of gout'])
+    partial = _stage_diseases([t for t in texts if t != 'for the treatment of gout'])
     with pytest.raises(ValueError, match=r"1 disease texts not staged, e\.g\. \['for the treatment of gout'\]"):
-        staged_mining_reports({**inputs, 'mining_disease_entities': partial})
+        staged_mining_reports(inputs, partial)
 
 
 def test_recording_ner_finds_nothing_and_keeps_the_texts() -> None:
