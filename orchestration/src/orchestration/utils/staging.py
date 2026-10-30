@@ -57,8 +57,10 @@ def build_staging_dag(config: StagingDagConfig) -> dict[str, TaskGroup]:
 
     The first tasks of a run upload the rendered config into the `config/` folder of the run,
     and the `setup` files, if any, into the `bin/` folder of the run. Each cluster is
-    created before its first step and deleted after its last step, as `<cluster>-<hash>`, a
-    name distinct for each DAG run (`run_resource_name`). A step without a cluster and
+    created before its first steps, once the steps they depend on have ended, and deleted
+    after its last step, as `<cluster>-<hash>`, a name distinct for each DAG run
+    (`run_resource_name`). A cluster whose first step depends on a step of another cluster
+    is therefore created when that step ends. A step without a cluster and
     without dependencies follows the uploads. The order of the steps follows `depends_on`,
     and the tasks of each step are the task group of `definition.build()`. Every resource has
     the labels of `staging_labels`: the labels of a step on the resources of the step, and the
@@ -121,6 +123,8 @@ def build_staging_dag(config: StagingDagConfig) -> dict[str, TaskGroup]:
         for name in on_cluster:
             if not set(steps[name].depends_on) & on_cluster:
                 create >> tasks[name]
+                for upstream in steps[name].depends_on:
+                    tasks[upstream] >> create
             if not any(name in steps[other].depends_on for other in on_cluster):
                 tasks[name] >> delete
     return tasks
