@@ -1,6 +1,6 @@
 # Clinical staging
 
-This document was updated on 2026-10-20.
+This document was updated on 2026-10-30.
 
 The `clinical_report` step needs data that comes from an LLM or from models:
 the trial extraction, the stop reasons, and the drug and disease entities in
@@ -19,7 +19,8 @@ hand under `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/`.
 | --- | --- |
 | `aact_version`, `clinical_mining_version` in `clinical_staging.yaml` | the versions the DAG stages |
 | the same names in `pis/config.yaml` | the versions the release copies |
-| `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models, and so the snapshot tags |
+| `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
+| `*_tag` in `pis/config.yaml` | the snapshots the release copies |
 
 ## Layout
 
@@ -67,41 +68,72 @@ Secret Manager onto the VM and mounted into the container.
 
 ## Record stores, snapshots and revision tags
 
-A record store holds one record per text, model and model revision, so a new
+A record store holds one record per text, model and output revision, so a new
 version only runs the models over texts it has not seen. Each run publishes
 the records for its texts as a snapshot: a `data.parquet` plus a
-`metadata.json` written last. The snapshot directory is named by a tag built
-from the revisions of the models behind it:
+`metadata.json` written last. The snapshot directory is named by a tag:
 
-| Snapshot | Tag |
+```
+<hub revision>+<hub revision>-p<digest>
+```
+
+The hub revisions come in the order of the kind's models. The digest is the
+first 8 hex digits of the sha256 of the kind's parameters and its
+`logic_version`, both in `pts/src/pts/staged_outputs.py`. The tag is the store's
+revision and the snapshot directory name, so one tag means one output.
+
+| Snapshot | Hub revisions in the tag |
 | --- | --- |
-| `stop_reasons` | `<stop_reasons_model_revision>` |
-| `drug_entities` | `<biobert_chemical_ner_revision>+<drugtemist_ner_revision>` |
-| `disease_entities` | `<biobert_diseases_ner_revision>` |
+| `stop_reasons` | `stop_reasons_model_revision` |
+| `drug_entities` | `biobert_chemical_ner_revision`, `drugtemist_ner_revision` |
+| `disease_entities` | `biobert_diseases_ner_revision` |
 
-`pis/config.yaml` builds the same paths from the same revisions, so the
-release can only read a snapshot made with the models it pins. Snapshots are
-write-once per (version, tag), and the extraction is write-once per AACT
-version.
+`pis/config.yaml` pins the full tags as `stop_reasons_tag`, `drug_entities_tag`
+and `disease_entities_tag`, and the release copies those paths. A pts test
+computes each tag from the pinned hub revisions and fails, printing the new
+tag, when a pin is stale. Reading a snapshot staged by code with other
+parameters fails before any work, naming both digests.
+
+Snapshots are write-once per (version, tag), and the extraction is write-once
+per AACT version.
 
 ### Recovery when a publish is refused
 
 A rerun that would change a published snapshot is refused
-(`SnapshotConflictError`). To recover, delete that snapshot directory (or the
-extraction directory) and rerun the step. The stores keep every computed
-record, so only texts they have not seen are computed.
+(`SnapshotConflictError`). Parameter and code changes do not cause it, because
+they give a new tag. To recover from a refused extraction, delete the
+extraction directory and rerun the step. The stores keep every computed record,
+so only texts they have not seen are computed.
 
 ### Model bumps
 
 A new model revision gives a new tag, and its snapshot lands beside the old
-one, so snapshots need no deletion. Change the revision in `pis/config.yaml`,
-then rerun the staging steps of each affected version. A version that was
-already staged is the catch: its pis step adds
+one, so snapshots need no deletion.
+
+1. Update the hub revision in `pis/config.yaml`.
+2. Run the pts test `test_pinned_tags_equal_the_code`. It prints the new tag;
+   update the matching `*_tag` pin.
+3. Rerun the staging steps of each affected version.
+
+A version that was already staged is the catch: its pis step adds
 `input/models/<org>/<name>/<new revision>/` next to the old revision, and the
 models step then fails with "staged at 2 revisions". Before rerunning, delete
 `input/models/<org>/<name>/<old revision>/` of every bumped model in that
 version's directory, rerun its pis step, then its models step. Move the release
 last. Until the new snapshot exists, the release copy fails on the missing tag.
+
+### Parameter and code changes
+
+A change to the parameters of a kind, or to the code that computes its output,
+also gives a new tag.
+
+1. Change the parameters in `staged_outputs.py`. When the compute code changes
+   without a parameter, bump the kind's `logic_version` by one.
+2. Update the matching `*_tag` pin in `pis/config.yaml`, with the tag the pin
+   test prints.
+3. Restage the affected versions. The new snapshot lands beside the old one,
+   which stays: snapshots remain write-once.
+4. Move the release last.
 
 ## Rollout
 
@@ -143,6 +175,12 @@ mining version. The `drug` step copies the extraction, which
 Only AACT trials with an extraction row are included in the clinical report.
 
 ## Changelog
+
+### 2026-10-30
+
+- Snapshot tags end in a digest of the kind's parameters and `logic_version`,
+  and pis pins the full tags. A code change gives a new tag, so it no longer
+  needs a delete and restage.
 
 ### 2026-10-20
 
