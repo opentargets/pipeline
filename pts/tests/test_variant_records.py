@@ -11,7 +11,7 @@ from polars.testing import assert_frame_equal
 
 from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import read_chromosome
-from pts.transformers.variant.records import fastvep_records, read_records
+from pts.transformers.variant.records import fastvep_records, read_records, unannotated_records
 from pts.transformers.variant.vep import parse_vep
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
@@ -217,3 +217,16 @@ def test_canonical_from_the_core(tmp_path: Path) -> None:
     found = fastvep_records(path, ONE_ROW, core, b'NNNNANNNNN', '22').collect()
     kept = found['transcript_consequences'][0]
     assert [(tc['transcript_id'], tc['canonical']) for tc in kept] == [('ENST00', 1)]
+
+
+def test_unannotated_records_are_intergenic() -> None:
+    found = unannotated_records(ONE_ROW, 'Y').collect()
+    assert found.schema == vep_schema
+    assert found.row(0, named=True) | {'input': None} == {
+        'input': None,
+        'most_severe_consequence': 'intergenic_variant',
+        'intergenic_consequences': [{'hgvsg': None}],
+        'colocated_variants': [],
+        'transcript_consequences': [],
+    }
+    assert parse_vep(found.lazy()).collect()['hgvsId'].to_list() == [None]

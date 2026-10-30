@@ -25,7 +25,7 @@ from pts.transformers.variant.fastvep import run_fastvep, write_vcf
 from pts.transformers.variant.gerp import KentBigWig
 from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.records import fastvep_records
+from pts.transformers.variant.records import fastvep_records, unannotated_records
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
 from pts.transformers.variant.vep import parse_vep
@@ -75,8 +75,24 @@ def _sequence(fasta: str, chromosome: str) -> bytes:
     try:
         return read_chromosome(fasta, chromosome)
     except ValueError:
-        logger.warning('No reference sequence for chromosome {}', chromosome)
         return b''
+
+
+def _fastvep_records(frame: pl.DataFrame, sequence: bytes, chromosome: str, shared: Shared) -> pl.DataFrame:
+    """The VEP records of the chromosome's rows, from fastVEP."""
+    directory = shared.directory / chromosome
+    vcf = directory / 'rows.vcf'
+    write_vcf(frame, vcf, sequence)
+    logger.info('Running fastVEP on {} variants of chromosome {}', frame.height, chromosome)
+    output = run_fastvep(
+        vcf, shared.gff3, shared.plain_fasta, directory / 'fastvep.json', shared.threads, shared.binary
+    )
+    vcf.unlink()
+    try:
+        transcripts = transcript_fields(shared.core, chromosome)
+        return fastvep_records(output, frame, transcripts, sequence, chromosome).collect()
+    finally:
+        output.unlink()
 
 
 def with_colocated(records: pl.DataFrame, rows: pl.DataFrame, all_vars: Path | None) -> pl.DataFrame:
@@ -115,6 +131,9 @@ def annotate_chromosome(chromosome: str, rows: Path, all_vars: Path | None, alph
     Returns:
         The path of the chromosome's index, in its directory under `shared.directory`.
 
+    A chromosome the reference FASTA lacks is not run through fastVEP: its rows are intergenic,
+    without HGVS.
+
     Raises:
         RuntimeError: if fastVEP fails or its output is truncated; no index is written.
     """
@@ -122,18 +141,15 @@ def annotate_chromosome(chromosome: str, rows: Path, all_vars: Path | None, alph
     sequence = _sequence(shared.fasta, chromosome)
     directory = shared.directory / chromosome
     directory.mkdir(parents=True)
-    vcf = directory / 'rows.vcf'
-    write_vcf(frame, vcf, sequence)
-    logger.info('Running fastVEP on {} variants of chromosome {}', frame.height, chromosome)
-    output = run_fastvep(
-        vcf, shared.gff3, shared.plain_fasta, directory / 'fastvep.json', shared.threads, shared.binary
-    )
-    vcf.unlink()
-    try:
-        transcripts = transcript_fields(shared.core, chromosome)
-        records = fastvep_records(output, frame, transcripts, sequence, chromosome).collect()
-    finally:
-        output.unlink()
+    if sequence:
+        records = _fastvep_records(frame, sequence, chromosome, shared)
+    else:
+        logger.warning(
+            'No reference sequence for chromosome {}: {} variants left without transcript consequences',
+            chromosome,
+            frame.height,
+        )
+        records = unannotated_records(frame, chromosome).collect()
     records = with_colocated(records, frame, all_vars)
     filled = add_gerp_and_alphamissense(records.lazy(), shared.gerp, alphamissense, chromosome)
     with KentBigWig(shared.gerp) as gerp:

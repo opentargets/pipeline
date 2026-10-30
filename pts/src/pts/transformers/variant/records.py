@@ -275,3 +275,24 @@ def fastvep_records(
         )
         .lazy()
     )
+
+
+def unannotated_records(rows: pl.DataFrame, chromosome: str) -> pl.LazyFrame:
+    """The VEP records of rows on a chromosome without reference sequence.
+
+    Each record is intergenic, with a null `hgvsg` and no transcript or colocated variants.
+    """
+    return (
+        _variants(rows, b'', chromosome)
+        .select(
+            'input',
+            pl.lit('intergenic_variant').alias('most_severe_consequence'),
+            pl
+            .concat_list(pl.struct('hgvsg'))
+            .cast(vep_schema['intergenic_consequences'])
+            .alias('intergenic_consequences'),
+            pl.lit([], dtype=vep_schema['colocated_variants']).alias('colocated_variants'),
+            pl.lit([], dtype=vep_schema['transcript_consequences']).alias('transcript_consequences'),
+        )
+        .lazy()
+    )

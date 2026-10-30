@@ -817,6 +817,20 @@ def test_failed_chromosome_writes_nothing(tmp_path, step_inputs):
     assert not list(tmp_path.glob('output/part-*.parquet'))
 
 
+def test_chromosome_without_reference_is_intergenic(tmp_path, step_inputs):
+    """Y is not in the reference FASTA: fastVEP, which fails on Y here, is not run on it."""
+    output = _run_step(tmp_path, step_inputs, [('1_123_A_G', None), ('Y_100_A_G', None)], fail='Y')
+    result = pl.read_parquet(output / '*.parquet')
+    assert result.schema == variant_schema
+    found = result.filter(pl.col('chromosome') == 'Y').to_dicts()
+    assert len(found) == 1
+    assert found[0]['variantId'] == 'Y_100_A_G'
+    assert found[0]['hgvsId'] is None
+    assert found[0]['transcriptConsequences'] == []
+    assert found[0]['mostSevereConsequenceId'] == SEQUENCE_ONTOLOGY['intergenic_variant']
+    assert result.filter(pl.col('chromosome') == '1')['transcriptConsequences'].list.len().to_list() == [1]
+
+
 def test_variant_step_writes_the_annotated_index(tmp_path, step_inputs):
     (tmp_path / 'gnomad').mkdir()
     pl.DataFrame(
