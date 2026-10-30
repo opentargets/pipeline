@@ -371,13 +371,6 @@ steps:
     - name: copy drugbank annotation
       source: https://ftp.ebi.ac.uk/pub/databases/chembl/UniChem/data/wholeSourceMapping/src_id1/src1src2.txt.gz
       destination: input/drug/drugbank.csv.gz
-
-    # AACT clinical-trial LLM extraction, staged by the clinical staging DAG.
-    - name: copy_many aact trial extraction
-      sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/metadata.json
-      destination: input/clinical_report/aact_trial_extraction
   ##################################################################################################
 
   #: IMPC STEP :####################################################################################

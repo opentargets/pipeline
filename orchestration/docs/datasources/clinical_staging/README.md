@@ -185,8 +185,8 @@ from the one-off import.
 `unified_pipeline` copies, through the `clinical_report` step, the archive, the
 extraction, the stop-reasons and drug snapshots of the AACT version, the
 clinical mining inputs, and the drug and disease snapshots of the clinical
-mining version. The `drug` step copies the extraction, which
-`pts.chembl_molecule` mines for drug synonyms.
+mining version. `pts.chembl_molecule` mines the extraction for drug synonyms
+and reads the copy the `clinical_report` step makes.
 
 Only AACT trials with an extraction row are included in the clinical report.
 
