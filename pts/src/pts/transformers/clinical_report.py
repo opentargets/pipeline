@@ -131,12 +131,6 @@ def clinical_report(
         settings: Dictionary containing step variables, none used
         config: Config object, for the scratch space of the dump restores
     """
-    _clinical_report(source, destination, settings, config)
-
-
-def _clinical_report(
-    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
-) -> None:
     logger.info(f'source paths: {source}')
     stop_reasons = STOP_REASONS.read({'aact_stop_reasons': source['aact_stop_reasons']})
     drug_entities = DRUG_ENTITIES.read({

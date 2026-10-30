@@ -703,7 +703,7 @@ def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(
 
     monkeypatch.setattr(clinical_report_module, 'read_dump_tables', no_dump)
     with pytest.raises(ValueError, match=r"mining_disease_entities.*'deadbeef'"):
-        clinical_report_module._clinical_report(source, {}, {}, None)
+        clinical_report_module.clinical_report(source, {}, {}, None)
 
 
 RELEASE_MAPPING = """
