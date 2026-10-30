@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,6 +14,7 @@ import numpy as np
 import polars as pl
 import pytest
 import yaml
+from loguru import logger
 from pydantic import ValidationError
 
 from pts.schemas.variant import variant_schema
@@ -21,6 +23,7 @@ from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
+from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,
@@ -614,6 +617,94 @@ def test_variant_step_writes_the_annotated_index(tmp_path):
     assert sorted(path.name for path in tmp_path.iterdir()) == ['foldx', 'gnomad', 'output', 'vep']
 
 
+GPN_STAR_CUTOFFS = {'top_10_percent': -2.0, 'top_1_percent': -4.0, 'top_0_1_percent': -6.0, 'minimum': -10.0}
+
+
+def _write_gpn_star(directory: Path, chromosome: str, rows: list[tuple[int, str, str, float]]) -> None:
+    directory.mkdir(exist_ok=True)
+    pl.DataFrame(
+        {
+            'chrom': [chromosome] * len(rows),
+            'pos': [row[0] for row in rows],
+            'ref': [row[1] for row in rows],
+            'alt': [row[2] for row in rows],
+            'llr_calibrated': [row[3] for row in rows],
+            'abs_llr_calibrated': [abs(row[3]) for row in rows],
+        },
+        schema={
+            'chrom': pl.String,
+            'pos': pl.Int64,
+            'ref': pl.String,
+            'alt': pl.String,
+            'llr_calibrated': pl.Float32,
+            'abs_llr_calibrated': pl.Float32,
+        },
+    ).write_parquet(directory / f'llr_chr{chromosome}.parquet')
+
+
+def _run_two_chromosome_step(tmp_path: Path, name: str, gpn_star: bool) -> pl.DataFrame:
+    vep = tmp_path / 'vep'
+    vep.mkdir(exist_ok=True)
+    (vep / '00000001.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
+    (vep / '00000002.json').write_text(json.dumps({'input': '2\t5\t.\tC\tT'}) + '\n')
+    source = {'vep': str(vep)}
+    if gpn_star:
+        source['gpn_star'] = str(tmp_path / 'gpn_star')
+    variant(
+        source=source,
+        destination={'output': str(tmp_path / name)},
+        settings={'parse_processes': 2, 'gpn_star': GPN_STAR_CUTOFFS} if gpn_star else {'parse_processes': 2},
+        config=Mock(work_path=tmp_path),
+    )
+    return pl.read_parquet(tmp_path / name / '*.parquet')
+
+
+def test_variant_step_adds_gpn_star(tmp_path):
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0), (124, 'A', 'G', -9.0)])
+    result = _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+    entries = {
+        row['variantId']: [x for x in row['variantEffect'] if x['method'] == 'GPN-Star'] for row in result.to_dicts()
+    }
+    assert [x['normalisedScore'] for x in entries['1_123_A_G']] == [0.25]
+    assert entries['2_5_C_T'] == []
+
+
+def test_variant_step_without_a_gpn_star_file_for_a_chromosome(tmp_path):
+    plain = _run_two_chromosome_step(tmp_path, 'plain', gpn_star=False)
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    scored = _run_two_chromosome_step(tmp_path, 'scored', gpn_star=True)
+    assert scored.filter(pl.col('chromosome') == '2').equals(plain.filter(pl.col('chromosome') == '2'))
+    assert not scored.filter(pl.col('chromosome') == '1').equals(plain.filter(pl.col('chromosome') == '1'))
+
+
+def test_variant_step_warns_about_a_missing_standard_chromosome(tmp_path):
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level='WARNING', format='{message}')
+    try:
+        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+    finally:
+        logger.remove(sink_id)
+    assert [m for m in messages if 'GPN-Star' in m and 'chromosome 2' in m]
+    assert not [m for m in messages if 'chromosome 1 ' in m]
+
+
+def test_variant_step_needs_cutoffs_with_a_gpn_star_source(tmp_path):
+    with pytest.raises(ValueError, match='cut-offs'):
+        variant(
+            source={'vep': str(tmp_path / 'missing'), 'gpn_star': str(tmp_path / 'gpn_star')},
+            destination={'output': str(tmp_path / 'output')},
+            settings={},
+            config=Mock(work_path=tmp_path),
+        )
+
+
+def test_variant_step_rejects_an_empty_gpn_star_source(tmp_path):
+    (tmp_path / 'gpn_star').mkdir()
+    with pytest.raises(ValueError, match='llr_chr'):
+        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+
+
 def test_variant_step_refuses_an_existing_destination(tmp_path):
     (tmp_path / 'output').mkdir()
     with pytest.raises(ValueError, match='already exists'):
@@ -651,6 +742,26 @@ def test_variant_configuration_matches_models():
     VariantSource.model_validate(task['source'])
     VariantDestination.model_validate(task['destination'])
     VariantSettings.model_validate(task['settings'])
+    assert task['source']['gpn_star'] == 'input/variant/gpn_star'
+    GpnStarCutoffs.model_validate(task['settings']['gpn_star'])
+
+
+def test_gpn_star_cutoffs_are_in_step_with_the_revision():
+    root = Path(__file__).parents[2]
+    base_text = (root / 'pts' / 'config.yaml').read_text()
+    override_text = (root / 'orchestration/src/orchestration/dags/config/ppp/pts.override.yaml').read_text()
+    revision = yaml.safe_load((root / 'pis' / 'config.yaml').read_text())['scratchpad']['gpn_star_revision']
+
+    def variant_task(text: str) -> dict:
+        steps = yaml.safe_load(text)['steps']['variant']
+        [task] = [spec for spec in steps if spec.get('transformer') == 'variant']
+        return task
+
+    base, override = variant_task(base_text), variant_task(override_text)
+    assert override['source']['gpn_star'] == base['source']['gpn_star']
+    assert override['settings']['gpn_star'] == base['settings']['gpn_star']
+    for text in (base_text, override_text):
+        assert re.findall(r'gpn-star-scores@([0-9a-f]{40})', text) == [revision]
 
 
 @pytest.mark.parametrize(
