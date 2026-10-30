@@ -1,7 +1,8 @@
 """Generic LLM extraction engine.
 
 Accepts a list of pre-built prompts and any Pydantic model for response validation.
-Returns a Polars DataFrame of extractions (for parquet output) or None (inspect mode).
+``extract_prompts`` returns the outcome per prompt on a client the caller owns;
+``run_extraction`` returns a Polars DataFrame of extractions (for parquet output) or None (inspect mode).
 
 Flex processing (service_tier="flex") is enabled by default for ~50% cost
 reduction; requests automatically fall back to "auto" on capacity shortage.
@@ -13,19 +14,86 @@ import asyncio
 import copy
 import json
 import logging
-import traceback
 from collections.abc import Sequence
+from dataclasses import dataclass
 from importlib import import_module
 from importlib.resources import files
 from pathlib import Path
 
 import polars as pl
 from loguru import logger
-from openai import APIStatusError, AsyncOpenAI
+from openai import APIError, APIStatusError, AsyncOpenAI, BadRequestError, UnprocessableEntityError
 from pydantic import BaseModel
 
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
+
+
+def _error_type_names(cls: type) -> frozenset[str]:
+    return frozenset({cls.__name__}).union(*(_error_type_names(sub) for sub in cls.__subclasses__()))
+
+
+SYSTEMIC_ERROR_TYPES = (
+    _error_type_names(APIError) - _error_type_names(BadRequestError) - _error_type_names(UnprocessableEntityError)
+) | {'ServiceTierExhausted'}
+"""Workflow error types that come from the API or the transport rather than from a trial's content."""
+
+
+@dataclass(frozen=True)
+class Extracted:
+    """A prompt's validated response, its ``id`` set to the prompt's."""
+
+    model: BaseModel
+
+
+@dataclass(frozen=True)
+class Failed:
+    """Why a prompt gave no extraction."""
+
+    error_type: str
+    message: str
+
+
+def client_timeout(service_tier: str) -> int:
+    """Request timeout in seconds: 15 minutes for flex, 10 otherwise, as OpenAI recommends."""
+    return 900 if service_tier == 'flex' else 600
+
+
+async def extract_prompts(
+    client: AsyncOpenAI,
+    model_cls: type[BaseModel],
+    system_prompt: str,
+    prompts: Sequence[tuple[str, str]],
+    *,
+    model: str,
+    service_tier: str,
+    concurrency: int,
+) -> dict[str, Extracted | Failed]:
+    """Extract each prompt with the Responses API, validating against ``model_cls``.
+
+    The caller owns ``client`` and closes it.
+
+    Args:
+        client: OpenAI client.
+        model_cls: Pydantic model the responses are validated against.
+        system_prompt: Instructions sent with every prompt.
+        prompts: ``(id, prompt)`` pairs.
+        model: OpenAI model identifier.
+        service_tier: OpenAI service tier; ``flex`` falls back to ``auto`` on capacity shortage.
+        concurrency: Maximum number of API calls in flight.
+
+    Returns:
+        The outcome per prompt id, in prompt order.
+    """
+    logger.info(f'Running extraction: model={model}  concurrency={concurrency}  service_tier={service_tier}')
+    outcomes = await _extract_all(client, model_cls, system_prompt, prompts, model, service_tier, concurrency)
+    failures = [(prompt_id, o) for (prompt_id, _), o in zip(prompts, outcomes, strict=True) if isinstance(o, Failed)]
+    logger.info(f'Extraction complete: {len(outcomes) - len(failures)} succeeded, {len(failures)} failed.')
+    for prompt_id, failure in failures[:5]:
+        logger.error(f'Failed  id={prompt_id!s:<30}  type={failure.error_type}  message={failure.message}')
+    if len(failures) > 5:
+        logger.error(f'... plus {len(failures) - 5} more errors')
+    return {prompt_id: outcome for (prompt_id, _), outcome in zip(prompts, outcomes, strict=True)}
 
 
 def _read_text(path: str | Path) -> str:
@@ -88,10 +156,7 @@ def run_extraction(
     model_cls = _import_class(model_class)
     system_prompt = _read_text(system_prompt_path)
 
-    timeout = (
-        900 if service_tier == 'flex' else 600
-    )  # 15 minutes for flex, 10 minutes for auto as per OpenAI recommendations
-    client = AsyncOpenAI(api_key=openai_key, timeout=timeout, max_retries=max_retries)
+    client = AsyncOpenAI(api_key=openai_key, timeout=client_timeout(service_tier), max_retries=max_retries)
 
     # ── Inspect mode: single prompt ───────────────────────────────────────────
     if len(prompts) == 1:
@@ -188,39 +253,48 @@ async def _run_async(
     concurrency: int,
     service_tier: str,
 ) -> tuple[list[BaseModel], list[dict]]:
+    pairs = [(entry['id'], entry['prompt']) for entry in prompts]
+    outcomes = await _extract_all(client, model_cls, system_prompt, pairs, model, service_tier, concurrency)
+
+    extractions = [o.model for o in outcomes if isinstance(o, Extracted)]
+    errors = [
+        {'id': prompt_id, 'error': o.message, 'error_type': o.error_type, 'error_message': o.message}
+        for (prompt_id, _), o in zip(pairs, outcomes, strict=True)
+        if isinstance(o, Failed)
+    ]
+    return extractions, errors
+
+
+async def _extract_all(
+    client: AsyncOpenAI,
+    model_cls: type[BaseModel],
+    system_prompt: str,
+    prompts: Sequence[tuple[str, str]],
+    model: str,
+    service_tier: str,
+    concurrency: int,
+) -> list[Extracted | Failed]:
     semaphore = asyncio.Semaphore(concurrency)
     schema = _patch_schema(model_cls.model_json_schema(by_alias=True))
-
-    tasks = [
-        _extract_record(
-            semaphore,
-            client,
-            entry,
-            model_cls,
-            system_prompt,
-            model,
-            schema,
-            service_tier,
+    return await asyncio.gather(
+        *(
+            _extract_record(semaphore, client, prompt_id, prompt, model_cls, system_prompt, model, schema, service_tier)
+            for prompt_id, prompt in prompts
         )
-        for entry in prompts
-    ]
-    results = await asyncio.gather(*tasks)
-
-    extractions = [r for r, _ in results if r is not None]
-    errors = [e for _, e in results if e is not None]
-    return extractions, errors
+    )
 
 
 async def _extract_record(
     semaphore: asyncio.Semaphore,
     client: AsyncOpenAI,
-    entry: dict,
+    prompt_id: str,
+    prompt: str,
     model_cls: type[BaseModel],
     system_prompt: str,
     model: str,
     schema: dict,
     service_tier: str,
-) -> tuple[BaseModel | None, dict | None]:
+) -> Extracted | Failed:
     """Call the Responses API for a single record.
 
     Transient errors (408 timeout, rate-limit 429, 5xx) are retried
@@ -240,7 +314,7 @@ async def _extract_record(
                 response = await client.responses.create(
                     model=model,
                     instructions=system_prompt,
-                    input=entry['prompt'],
+                    input=prompt,
                     text={
                         'format': {
                             'type': 'json_schema',
@@ -255,8 +329,8 @@ async def _extract_record(
 
             extraction = model_cls.model_validate_json(response.output_text)
             if hasattr(extraction, 'id'):
-                extraction.id = entry['id']  # ty: ignore[invalid-assignment]
-            return extraction, None
+                extraction.id = prompt_id  # ty: ignore[invalid-assignment]
+            return Extracted(extraction)
 
         except APIStatusError as e:
             # Distinguish flex capacity shortage from ordinary rate-limit 429s.
@@ -266,33 +340,16 @@ async def _extract_record(
                 'error', {}
             ).get('code', '')
             if is_flex_unavailable and tier != tiers_to_try[-1]:
-                logger.warning(f'Flex capacity unavailable for id={entry["id"]} — retrying with standard processing.')
+                logger.warning(f'Flex capacity unavailable for id={prompt_id} — retrying with standard processing.')
                 continue  # move to "auto"
 
-            return None, {
-                'id': entry['id'],
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'error_message': str(e),
-                'status_code': e.status_code,
-            }
+            return Failed(type(e).__name__, str(e))
 
         except Exception as e:
-            return None, {
-                'id': entry['id'],
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'error_message': str(e) or repr(e),
-                'error_traceback': traceback.format_exc(),
-            }
+            return Failed(type(e).__name__, str(e) or repr(e))
 
     # Unreachable in normal flow; guards against future loop changes.
-    return None, {
-        'id': entry['id'],
-        'error': 'all service tiers exhausted without a result',
-        'error_type': 'ServiceTierExhausted',
-        'error_message': 'Request failed on both flex and auto tiers.',
-    }
+    return Failed('ServiceTierExhausted', 'Request failed on both flex and auto tiers.')
 
 
 def _extractions_to_df(extractions: Sequence[BaseModel]) -> pl.DataFrame:

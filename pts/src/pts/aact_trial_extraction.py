@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 from loguru import logger
-from openai import APIError, BadRequestError, UnprocessableEntityError
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
@@ -27,7 +26,7 @@ from pydantic import BaseModel, ValidationError
 from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, text_sha256, write_run
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, llm_workflow, sample_report
-from pts.transformers.clinical.llm_workflow import run_extraction
+from pts.transformers.clinical.llm_workflow import SYSTEMIC_ERROR_TYPES, run_extraction
 from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
 if TYPE_CHECKING:
@@ -68,16 +67,6 @@ IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
-
-
-def _error_type_names(cls: type) -> frozenset[str]:
-    return frozenset({cls.__name__}).union(*(_error_type_names(sub) for sub in cls.__subclasses__()))
-
-
-SYSTEMIC_ERROR_TYPES = (
-    _error_type_names(APIError) - _error_type_names(BadRequestError) - _error_type_names(UnprocessableEntityError)
-) | {'ServiceTierExhausted'}
-"""Workflow error types that come from the API or the transport rather than from a trial's content."""
 LLM_WORKFLOW_PATCH_LOCK = Lock()
 """Serialises temporary patches to the LLM workflow's module globals."""
 
