@@ -41,6 +41,7 @@ with DAG(
     default_args=shared_dag_args,
     catchup=False,
     schedule=None,
+    max_active_runs=1,
     user_defined_filters={'strhash': strhash},
     tags=['clinical_staging', 'preprocessing'],
 ) as dag:
