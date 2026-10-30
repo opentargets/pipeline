@@ -21,13 +21,6 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 OBO = 'http://purl.obolibrary.org/obo/'
 LOCATED_IN = f'{OBO}RO_0004026'
 
-_AXIOM_SCHEMA = pl.Schema({
-    'definedClassId': pl.String(),
-    'genusIds': pl.List(pl.String()),
-    'restrictions': pl.List(pl.Struct({'propertyId': pl.String(), 'fillerId': pl.String()})),
-})
-
-
 def _edge(sub: str, pred: str, obj: str) -> dict:
     return {'sub': f'{OBO}{sub}', 'pred': pred, 'obj': f'{OBO}{obj}', 'meta': None}
 
@@ -47,7 +40,7 @@ def _axiom(defined: str, restrictions: list[tuple[str, str]] | None) -> dict:
 
 
 def _axioms(*axioms: dict) -> pl.DataFrame:
-    return pl.from_dicts(list(axioms), schema=_AXIOM_SCHEMA)
+    return pl.from_dicts(list(axioms), schema=ontology.axiom)
 
 
 def _pairs(df: pl.DataFrame) -> list[tuple[str, str]]:
@@ -87,6 +80,10 @@ class TestStatedLocations:
     def test_non_obo_iri_is_shortened(self) -> None:
         axioms = _axioms(_axiom('MONDO_3', [(LOCATED_IN, 'http://www.ebi.ac.uk/efo/EFO_0000001')]))
         assert _pairs(stated_locations(_edges(), axioms)) == [('MONDO_3', 'EFO_0000001')]
+
+    def test_curie_ids_are_normalised(self) -> None:
+        edges = _edges({'sub': 'MONDO:0000005', 'pred': LOCATED_IN, 'obj': 'UBERON:0000005', 'meta': None})
+        assert _pairs(stated_locations(edges, _axioms())) == [('MONDO_0000005', 'UBERON_0000005')]
 
     def test_ontology_schema_keeps_restrictions(self) -> None:
         doc = {
@@ -269,3 +266,37 @@ def test_disease_location_end_to_end(tmp_path: Path) -> None:
         ('ORPHA_1', COLON),
         ('ORPHA_1', IMMUNE),
     ]
+
+
+def _write_graph(path: Path, axioms: list[dict] | None) -> None:
+    graph = {'id': 'mondo', 'meta': None, 'nodes': [], 'edges': [], 'domainRangeAxioms': []}
+    if axioms is not None:
+        graph['logicalDefinitionAxioms'] = axioms
+    path.write_text(json.dumps({'graphs': [graph]}))
+
+
+def _run_on_graph(tmp_path: Path, axioms: list[dict] | None) -> pl.DataFrame:
+    _write_graph(tmp_path / 'mondo.json', axioms)
+    write_dataset(_diseases(('MONDO_B', [])), str(tmp_path / 'disease'))
+    write_dataset(_biosample(), str(tmp_path / 'biosample'))
+    disease_location(
+        {
+            'mondo': str(tmp_path / 'mondo.json'),
+            'disease': str(tmp_path / 'disease'),
+            'biosample': str(tmp_path / 'biosample'),
+        },
+        str(tmp_path / 'out'),
+        {},
+        None,
+    )
+    return scan_dataset(str(tmp_path / 'out')).collect()
+
+
+def test_many_axioms_without_restrictions_before_a_located_one(tmp_path: Path) -> None:
+    genus_only = [_axiom(f'MONDO_{i}', None) for i in range(150)]
+    located = _axiom('MONDO_B', [(LOCATED_IN, f'{OBO}{IMMUNE}')])
+    assert _run_on_graph(tmp_path, [*genus_only, located]).rows() == [('MONDO_B', IMMUNE)]
+
+
+def test_graph_without_logical_definitions(tmp_path: Path) -> None:
+    assert _run_on_graph(tmp_path, None).is_empty()

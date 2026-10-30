@@ -15,7 +15,7 @@ LOCATED_IN = 'http://purl.obolibrary.org/obo/RO_0004026'
 
 
 def _short_id(expr: pl.Expr) -> pl.Expr:
-    return expr.str.split('/').list.last()
+    return expr.str.split('/').list.last().str.replace(':', '_')
 
 
 def stated_locations(edges: pl.DataFrame, axioms: pl.DataFrame) -> pl.DataFrame:
@@ -112,7 +112,7 @@ def disease_location(
     f = StorageHandle(source['mondo']).open()
     graph = pl.read_json(f, schema=ontology.schema)['graphs'][0][0]  # ty:ignore[invalid-argument-type]
     edges = pl.DataFrame(graph['edges'], schema=ontology.edge)
-    axioms = pl.DataFrame(graph['logicalDefinitionAxioms'])
+    axioms = pl.DataFrame(graph['logicalDefinitionAxioms'] or [], schema=ontology.axiom)
 
     disease = scan_dataset(source['disease']).select('id', 'ancestors').collect()
     biosample = scan_dataset(source['biosample']).select('biosampleId', 'ancestors').collect()

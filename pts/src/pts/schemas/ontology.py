@@ -75,6 +75,19 @@ edge_dict = {
 }
 edge = pl.Schema(edge_dict)
 
+axiom_dict = {
+    'definedClassId': pl.String(),
+    'genusIds': pl.List(pl.String()),
+    'restrictions': pl.List(
+        pl.Struct({
+            'propertyId': pl.String,
+            'fillerId': pl.String,
+        }),
+    ),
+}
+
+axiom = pl.Schema(axiom_dict)
+
 
 schema = pl.Schema({
     'graphs': pl.List(
@@ -91,18 +104,7 @@ schema = pl.Schema({
             }),
             'nodes': pl.List(pl.Struct(node_dict)),
             'edges': pl.List(pl.Struct(edge_dict)),
-            'logicalDefinitionAxioms': pl.List(
-                pl.Struct({
-                    'definedClassId': pl.String(),
-                    'genusIds': pl.List(pl.String()),
-                    'restrictions': pl.List(
-                        pl.Struct({
-                            'propertyId': pl.String,
-                            'fillerId': pl.String,
-                        }),
-                    ),
-                }),
-            ),
+            'logicalDefinitionAxioms': pl.List(pl.Struct(axiom_dict)),
             'domainRangeAxioms': pl.List(
                 pl.Struct({
                     'predicateId': pl.String(),
