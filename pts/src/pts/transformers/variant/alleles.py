@@ -31,7 +31,7 @@ def read_chromosome(fasta: str, chromosome: str) -> bytes:
     return b''.join(lines).upper()
 
 
-def _shared_prefix_length(left: pl.Expr, right: pl.Expr) -> pl.Expr:
+def shared_prefix_length(left: pl.Expr, right: pl.Expr) -> pl.Expr:
     """The number of leading characters two strings have in common."""
     length = pl.min_horizontal(left.str.len_chars(), right.str.len_chars())
     half = pl.len() // 2
@@ -59,12 +59,12 @@ def vep_allele_form(frame: pl.LazyFrame) -> pl.LazyFrame:
     ref_rest, alt_rest = ref.str.slice(pl.col('_prefix')), alt.str.slice(pl.col('_prefix'))
     return (
         frame
-        .with_columns(pl.when(untrimmed).then(0).otherwise(_shared_prefix_length(ref, alt)).alias('_prefix'))
+        .with_columns(pl.when(untrimmed).then(0).otherwise(shared_prefix_length(ref, alt)).alias('_prefix'))
         .with_columns(
             pl
             .when(untrimmed)
             .then(0)
-            .otherwise(_shared_prefix_length(ref_rest.str.reverse(), alt_rest.str.reverse()))
+            .otherwise(shared_prefix_length(ref_rest.str.reverse(), alt_rest.str.reverse()))
             .alias('_suffix'),
         )
         .with_columns(

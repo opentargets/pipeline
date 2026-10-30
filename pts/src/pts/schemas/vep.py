@@ -9,6 +9,9 @@ vep_schema = pl.Schema({
     'colocated_variants': pl.List(
         pl.Struct({
             'id': pl.String,
+            'allele_string': pl.String,
+            'start': pl.Int64,
+            'end': pl.Int64,
             'var_synonyms': pl.Struct({'ClinVar': pl.List(pl.String), 'OMIM': pl.List(pl.String)}),
         })
     ),

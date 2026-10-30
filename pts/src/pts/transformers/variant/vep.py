@@ -63,10 +63,11 @@ def omim_ids(colocated: pl.Expr) -> pl.Expr:
 
 
 def clinvar_ids(colocated: pl.Expr) -> pl.Expr:
-    """ClinVar variation (VCV) identifiers."""
-    return colocated.list.eval(
+    """ClinVar variation (VCV) identifiers, each once, in first-occurrence order."""
+    clinvar = colocated.list.eval(
         pl.element().struct.field('var_synonyms').struct.field('ClinVar').drop_nulls().explode()
-    ).list.eval(pl.element().filter(pl.element().str.starts_with('VCV')))
+    )
+    return clinvar.list.eval(pl.element().filter(pl.element().str.starts_with('VCV'))).list.unique(maintain_order=True)
 
 
 def _highest(transcripts: pl.Expr, field: str) -> pl.Expr:
