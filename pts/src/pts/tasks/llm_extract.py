@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from importlib import import_module, resources
 from typing import Any, Self
 
@@ -32,7 +31,7 @@ from otter.task.task_reporter import report
 from otter.util.errors import TaskRunError, TaskValidationError
 from pydantic import BaseModel
 
-from pts.record_store import map_texts, publish_snapshot
+from pts.record_store import map_texts, new_run_id, publish_snapshot
 
 DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
 """Packaged system prompt."""
@@ -130,7 +129,7 @@ class LlmExtract(Task):
             store_uri,
             extraction.EXTRACTION_MODEL,
             schema_digest,
-            f'{self.spec.snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}',
+            new_run_id(self.spec.snapshot),
             config,
             max_attempts=self.spec.max_attempts,
             output_dtype=pl.String(),

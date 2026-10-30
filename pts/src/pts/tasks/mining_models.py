@@ -9,7 +9,6 @@ The work lives in :py:mod:`pts.clinical_staging.mining_models`.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Self
 
 from loguru import logger
@@ -49,11 +48,12 @@ class MiningModels(Task):
     @report
     def run(self) -> Self:
         from pts.clinical_staging import mining_models
+        from pts.record_store import new_run_id
 
         config = self.context.config
         source = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.source.items()}
         store_uri = self.spec.store_uri.rstrip('/')
-        run_id = f'{self.spec.snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}'
+        run_id = new_run_id(self.spec.snapshot)
         destination = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.destination.items()}
         self.stats = mining_models.stage_mining_models(
             source['ttd'],

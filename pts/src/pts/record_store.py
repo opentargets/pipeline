@@ -97,6 +97,11 @@ def text_sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
+def new_run_id(snapshot: str) -> str:
+    """Return the id of a run computing for ``snapshot`` now: ``<snapshot>-<UTC time as %Y%m%dT%H%M%SZ>``."""
+    return f'{snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}'
+
+
 def read_parquet(uri: str, config: Config) -> pl.DataFrame:
     """Read a parquet file through otter storage, so it works on GCS and locally alike."""
     data, _ = StorageHandle(uri, config=config).read()

@@ -9,7 +9,6 @@ The work lives in :py:mod:`pts.clinical_staging.trial_models`.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Self
 
 from loguru import logger
@@ -56,7 +55,7 @@ class TrialModels(Task):
         from pts.clinical_staging import trial_models
         from pts.clinical_staging.staged_outputs import DRUG_ENTITIES
         from pts.postgres import read_dump_tables
-        from pts.record_store import read_parquet
+        from pts.record_store import new_run_id, read_parquet
         from pts.transformers.clinical.hf_models import staged_model_revisions
         from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
@@ -85,7 +84,7 @@ class TrialModels(Task):
         )['studies']
         extractions = read_parquet(self.spec.source['extraction'], config)
 
-        run_id = f'{self.spec.snapshot}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}'
+        run_id = new_run_id(self.spec.snapshot)
         destination = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.destination.items()}
         self.stats = trial_models.stage_trial_models(
             studies,

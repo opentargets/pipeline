@@ -16,6 +16,7 @@ from pts.record_store import (
     RecordStoreError,
     SnapshotConflictError,
     map_texts,
+    new_run_id,
     publish_snapshot,
     read_parquet,
     read_records,
@@ -233,6 +234,17 @@ def test_read_parquet_reads_a_file_through_storage(tmp_path):
     assert read_parquet(str(tmp_path / 'one.parquet'), None).equals(frame)
     with pytest.raises(NotFoundError):
         read_parquet(str(tmp_path / 'missing.parquet'), None)
+
+
+def test_new_run_id_is_the_snapshot_and_the_utc_time(monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 30, 7, 5, 3, 123456, tzinfo=tz)
+
+    monkeypatch.setattr(record_store, 'datetime', Clock)
+
+    assert new_run_id('20261001') == '20261001-20261030T070503Z'
 
 
 def test_newest_ok_wins_over_older_ok(store_uri):
