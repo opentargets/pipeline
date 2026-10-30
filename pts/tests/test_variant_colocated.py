@@ -145,6 +145,14 @@ def test_cached_alleles_also_trimmed_from_the_end(tmp_path: Path) -> None:
     assert ids(colocated_variants(cache, rows('1_100_ACG_A'))) == {'1_100_ACG_A': ['rs1']}
 
 
+def test_trailing_empty_cached_allele_dropped(tmp_path: Path) -> None:
+    """`A/G/` at 101 is `A/G`, as Perl's `split` drops trailing empty fields: no deletion of the `A`."""
+    cache = all_vars(
+        tmp_path / 'all_vars.gz', cache_line('rs_trailing', 101, 101, 'A/G/'), cache_line('rs1', 101, 101, 'A/-')
+    )
+    assert ids(colocated_variants(cache, rows('1_100_CA_C'))) == {'1_100_CA_C': ['rs1']}
+
+
 def test_reverse_strand_cached_variant(tmp_path: Path) -> None:
     cache = all_vars(
         tmp_path / 'all_vars.gz',

@@ -191,7 +191,7 @@ def colocated_variants(all_vars: Path, rows: pl.DataFrame) -> pl.DataFrame:
         pl.when(reverse).then(_reverse_complement(pl.col('vepAlternate'))).otherwise('vepAlternate').alias('alt'),
         pl.col('vepStart').alias('pos'),
     )
-    alleles = pl.col('allele_string').str.split('/')
+    alleles = pl.col('allele_string').str.strip_chars_end('/').str.split('/')
     cached = pairs.select(
         'pair', alleles.list.first().alias('ref'), alleles.list.slice(1).alias('alt'), pl.col('start').alias('pos')
     ).explode('alt')
