@@ -2,7 +2,7 @@
 
 Each kind names the Hugging Face models it runs, the tuned constants of the code
 around them (``params``), and the columns of its snapshot. Any other change to a
-kind's compute needs a ``logic_version`` bump. Its tag identifies one output
+kind's compute needs a ``logic_version`` bump. A kind's tag identifies one output
 revision::
 
     <hub revision>+<hub revision>-p<digest>

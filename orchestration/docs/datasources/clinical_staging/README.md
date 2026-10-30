@@ -142,9 +142,9 @@ change to the code that computes its output, also gives a new tag.
    `DRUGTEMIST_LABELS`, `DISEASE_LABELS`, `DISEASE_MIN_LENGTH` and
    `DISEASE_DROP_DIGITS` in `ner.py`. `params` only records them; editing it
    does not change what is computed. `params` hold the tuned constants, not
-   everything the compute reads: the drug NER's regex hit length and leading
-   digit check, its word length and digit filter, and
-   `aggregation_strategy='max'` are literals in `ner.py`. For any change to the
+   everything the compute reads: `ner.py` also hard-codes, for example, the drug
+   NER's regex hit length and leading digit check, its word length, digit and
+   subword (`##`) filters, and both models' `aggregation_strategy='max'`. For any change to the
    compute other than a `params` constant, bump the kind's `logic_version` by one.
 2. Update the matching `*_tag` pin in `pis/config.yaml`, with the tag the pin
    test prints.
