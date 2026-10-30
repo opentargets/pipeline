@@ -165,10 +165,8 @@ class LlmExtract(Task):
         """Check the published extraction covers the trials it was asked about.
 
         A trial the model answered negatively still has a row, so a missing row
-        means the trial was never successfully attempted. That is a real gap,
-        but it is not a reason to stop a release: some trials fail permanently,
-        and the release is better off with a slightly thinner extraction than
-        with no release. Hence a warning rather than an error.
+        means the trial was never successfully attempted. Missing rows are
+        logged as a warning.
         """
         if not self.stats:
             raise TaskValidationError('run produced no statistics')

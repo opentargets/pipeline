@@ -178,7 +178,7 @@ async def _extract_record(
                         }
                     },
                     service_tier=tier,  # ty: ignore[invalid-argument-type]
-                    store=False,  # extractions are stateless; no persistence needed
+                    store=False,
                 )
 
             extraction = model_cls.model_validate_json(response.output_text)
@@ -187,9 +187,6 @@ async def _extract_record(
             return Extracted(extraction)
 
         except APIStatusError as e:
-            # Distinguish flex capacity shortage from ordinary rate-limit 429s.
-            # Only the former warrants a tier fallback; the latter is already
-            # retried by the SDK.
             is_flex_unavailable = e.status_code == 429 and 'resource_unavailable' in (e.code or '')
             if is_flex_unavailable and tier != tiers_to_try[-1]:
                 logger.warning(f'Flex capacity unavailable for id={prompt_id} — retrying with standard processing.')
@@ -200,5 +197,4 @@ async def _extract_record(
         except Exception as e:
             return Failed(type(e).__name__, str(e) or repr(e))
 
-    # Unreachable in normal flow; guards against future loop changes.
     return Failed('ServiceTierExhausted', 'Request failed on both flex and auto tiers.')

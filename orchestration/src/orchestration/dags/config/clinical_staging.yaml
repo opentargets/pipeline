@@ -36,8 +36,7 @@ steps:
     gce_secret_files:
       openai-token: /var/run/secrets/openai-api-key
 
-  # Runs the stop-reasons and drug NER models over the AACT texts. CPU inference,
-  # so it takes a larger machine than the IO-bound steps.
+  # Runs the stop-reasons and drug NER models over the AACT texts.
   pts_aact_trial_models:
     source: aact
     depends_on:

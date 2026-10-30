@@ -316,11 +316,10 @@ def _open_client(spec: LlmExtractSpec, openai_key: str) -> AsyncOpenAI:
 
 
 def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:
-    """Convert validated model results without losing a whole shard on one row.
+    """Convert validated model results to one dataframe, inferring the schema from every row.
 
-    Full inference handles nullable fields that only become populated late in a
-    shard. The row-wise fallback protects the checkpoint boundary if a model
-    response still exposes a value Polars cannot combine with its neighbours.
+    If the rows cannot be combined at once, each row is converted on its own and
+    the rows that still fail are dropped with an error logged.
     """
     if not extractions:
         return pl.DataFrame()

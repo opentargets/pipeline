@@ -91,10 +91,6 @@ class ClinicalStagingConfig:
     def source_uri(self, source: str) -> str:
         """Return where a source writes: ``<bucket>/<source>/<version>``.
 
-        Otter calls this ``release_uri`` because that is what it is in a release, and
-        relative paths in a step config resolve against it — but nothing about this
-        pipeline belongs to a release.
-
         Args:
             source: ``aact`` or ``clinical_mining``.
 

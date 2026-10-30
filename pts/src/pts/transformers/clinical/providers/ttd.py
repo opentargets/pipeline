@@ -22,7 +22,6 @@ def extract_indication(ttd_input: str | list[str]) -> pl.DataFrame:
             lines = file.readlines()
     else:
         # If input has already been read, use it as is
-        # This is necessary to run on Google Cloud
         lines = ttd_input
 
     # Initialize variables
