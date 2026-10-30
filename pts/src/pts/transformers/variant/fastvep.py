@@ -78,49 +78,49 @@ def prepare_gff3(gff3: str, directory: Path) -> Path:
     return target
 
 
-def write_vcf(rows: pl.DataFrame, path: Path, sequence: bytes | None = None) -> None:
-    """Write rows as a VCF 4.2, sorted by chromosome, position and alleles, `ID` from `rsId`.
+def write_vcf(rows: pl.DataFrame, path: Path, sequence: bytes) -> None:
+    """Write rows as a VCF 4.2 in VEP's input allele form, sorted by chromosome, position and alleles.
 
-    With the chromosome `sequence` (byte i being position i + 1), each row is first put in VEP's
-    input allele form, and an allele left empty is padded with the reference base before it.
+    `ID` is the row's 0-based ordinal in `rows`. An allele left empty by the trim is padded with
+    the reference base before it, from the chromosome `sequence` (byte i being position i + 1).
     """
-    frame = rows.select('chromosome', 'position', 'rsId', 'referenceAllele', 'alternateAllele')
-    if sequence is not None:
-        frame = vep_allele_form(frame.lazy()).collect()
-        indel = (pl.col('vepReference') == '-') | (pl.col('vepAlternate') == '-')
-        padded = indel & (pl.col('vepStart') > 1)
-        bases = np.frombuffer(sequence, dtype=np.uint8)
-        pad_index = frame.select(pl.when(padded).then(pl.col('vepStart') - 2).otherwise(0)).to_series().to_numpy()
-        pads = pl.Series('_pad', list(bases[pad_index].tobytes().decode('ascii')), dtype=pl.String)
-        frame = frame.with_columns(pads).with_columns(
-            pl
-            .when(padded)
-            .then(pl.col('vepStart') - 1)
-            .when(~indel)
-            .then(pl.col('vepStart'))
-            .otherwise(pl.col('position'))
-            .cast(pl.Int32)
-            .alias('position'),
-            pl
-            .when(padded)
-            .then(pl.col('_pad') + pl.col('vepReference').str.replace('-', '', literal=True))
-            .when(~indel)
-            .then(pl.col('vepReference'))
-            .otherwise(pl.col('referenceAllele'))
-            .alias('referenceAllele'),
-            pl
-            .when(padded)
-            .then(pl.col('_pad') + pl.col('vepAlternate').str.replace('-', '', literal=True))
-            .when(~indel)
-            .then(pl.col('vepAlternate'))
-            .otherwise(pl.col('alternateAllele'))
-            .alias('alternateAllele'),
-        )
+    frame = vep_allele_form(
+        rows.lazy().select('chromosome', 'position', 'referenceAllele', 'alternateAllele').with_row_index('id')
+    ).collect()
+    indel = (pl.col('vepReference') == '-') | (pl.col('vepAlternate') == '-')
+    padded = indel & (pl.col('vepStart') > 1)
+    bases = np.frombuffer(sequence, dtype=np.uint8)
+    pad_index = frame.select(pl.when(padded).then(pl.col('vepStart') - 2).otherwise(0)).to_series().to_numpy()
+    pads = pl.Series('_pad', list(bases[pad_index].tobytes().decode('ascii')), dtype=pl.String)
+    frame = frame.with_columns(pads).with_columns(
+        pl
+        .when(padded)
+        .then(pl.col('vepStart') - 1)
+        .when(~indel)
+        .then(pl.col('vepStart'))
+        .otherwise(pl.col('position'))
+        .cast(pl.Int32)
+        .alias('position'),
+        pl
+        .when(padded)
+        .then(pl.col('_pad') + pl.col('vepReference').str.replace('-', '', literal=True))
+        .when(~indel)
+        .then(pl.col('vepReference'))
+        .otherwise(pl.col('referenceAllele'))
+        .alias('referenceAllele'),
+        pl
+        .when(padded)
+        .then(pl.col('_pad') + pl.col('vepAlternate').str.replace('-', '', literal=True))
+        .when(~indel)
+        .then(pl.col('vepAlternate'))
+        .otherwise(pl.col('alternateAllele'))
+        .alias('alternateAllele'),
+    )
     lines = frame.sort('chromosome', 'position', 'referenceAllele', 'alternateAllele').select(
         pl.concat_str(
             'chromosome',
             'position',
-            pl.col('rsId').fill_null('.'),
+            'id',
             'referenceAllele',
             'alternateAllele',
             pl.lit('.\t.\t.'),

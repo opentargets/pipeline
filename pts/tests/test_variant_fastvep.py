@@ -83,56 +83,35 @@ def test_prepare_gff3_reads_plain_text(tmp_path: Path) -> None:
 
 
 def test_write_vcf(tmp_path: Path) -> None:
+    #                1234567890123
+    sequence = b'ACGTTTATCTGCA'
     rows = pl.DataFrame(
         {
-            'chromosome': ['22', '22', '22'],
-            'position': [300, 100, 100],
-            'rsId': ['.', 'rs2', 'rs1'],
-            'referenceAllele': ['G', 'C', 'C'],
-            'alternateAllele': ['GA', 'T', 'A'],
+            'chromosome': ['1'] * 7,
+            'position': [4, 7, 10, 2, 11, 9, 2],
+            'rsId': ['rs1', '.', '.', '.', '.', '.', '.'],
+            'referenceAllele': ['TTT', 'AT', 'T', 'C', 'GCA', 'CTG', 'C'],
+            'alternateAllele': ['TT', 'T', 'TAT', 'G', 'GA', 'CGT', 'A'],
         },
         schema_overrides={'position': pl.Int32},
     )
     path = tmp_path / 'rows.vcf'
 
-    write_vcf(rows, path)
+    write_vcf(rows, path, sequence)
 
     assert path.read_text().splitlines() == [
         '##fileformat=VCFv4.2',
         '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO',
-        '22\t100\trs1\tC\tA\t.\t.\t.',
-        '22\t100\trs2\tC\tT\t.\t.\t.',
-        '22\t300\t.\tG\tGA\t.\t.\t.',
-    ]
-
-
-def test_write_vcf_in_vep_allele_form(tmp_path: Path) -> None:
-    #                1234567890123
-    sequence = b'ACGTTTAGCTGCA'
-    rows = pl.DataFrame(
-        {
-            'chromosome': ['1'] * 6,
-            'position': [4, 7, 10, 2, 11, 9],
-            'rsId': ['.'] * 6,
-            'referenceAllele': ['TTT', 'AG', 'T', 'C', 'GCA', 'CTG'],
-            'alternateAllele': ['TT', 'G', 'TAT', 'G', 'GA', 'CGT'],
-        },
-        schema_overrides={'position': pl.Int32},
-    )
-    path = tmp_path / 'rows.vcf'
-
-    write_vcf(rows, path, sequence=sequence)
-
-    assert [line.split('\t')[1:5] for line in path.read_text().splitlines()[2:]] == [
-        ['2', '.', 'C', 'G'],
+        '1\t2\t6\tC\tA\t.\t.\t.',
+        '1\t2\t3\tC\tG\t.\t.\t.',
         # The shared prefix TT is trimmed and the deletion re-padded with the base before it.
-        ['5', '.', 'TT', 'T'],
-        # Only a shared suffix: the padding base is position 6, from the sequence.
-        ['6', '.', 'TA', 'T'],
-        ['9', '.', 'CTG', 'CGT'],
-        ['10', '.', 'T', 'TAT'],
+        '1\t5\t0\tTT\tT\t.\t.\t.',
+        # AT>T shares only a suffix: the padding base is T at position 6, from the sequence.
+        '1\t6\t1\tTA\tT\t.\t.\t.',
+        '1\t9\t5\tCTG\tCGT\t.\t.\t.',
+        '1\t10\t2\tT\tTAT\t.\t.\t.',
         # GCA>GA trims G, then A: C at 12 is deleted, padded with G at 11.
-        ['11', '.', 'GC', 'G'],
+        '1\t11\t4\tGC\tG\t.\t.\t.',
     ]
 
 
@@ -234,4 +213,5 @@ def test_run_fastvep_chr22_slice(tmp_path: Path) -> None:
     records = json.loads(output.read_text())
     rows = [line for line in vcf.read_text().splitlines() if not line.startswith('#')]
     assert len(records) == len(rows) == 50
+    assert [record['id'] for record in records] == [line.split('\t')[2] for line in rows]
     assert records == json.loads(SAMPLE.read_text())

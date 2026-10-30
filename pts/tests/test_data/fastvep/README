@@ -3,7 +3,10 @@ fastVEP fixtures: a 50-variant slice of chromosome 22 (GRCh38, Ensembl 116).
 Variants: rows of the platform-2610-2 variant index
 (gs://open-targets-pipeline-runs/do/platform-2610-2/output/variant), chromosome 22,
 positions 19,700,000-20,100,000, plus 22_18521430_A_G, which is intergenic only here
-because the GFF3 is cut. chr22_slice.vcf is pts write_vcf(rows, path, sequence) of them.
+because the GFF3 is cut. chr22_slice_rows.parquet holds them (chromosome, position, rsId,
+referenceAllele, alternateAllele), sorted by position and alleles; chr22_slice.vcf is pts
+write_vcf(rows, path, sequence) of them, whose ID is the row's 0-based ordinal. fastVEP
+echoes it as each JSON record's top-level "id".
 
 chr22_slice.gff3.gz: Homo_sapiens.GRCh38.116.chromosome.22.gff3.gz from the Ensembl FTP,
 cut to the 88 genes overlapping 19,200,000-20,600,000 and their descendants, then put
