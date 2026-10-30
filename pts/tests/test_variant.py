@@ -1042,3 +1042,55 @@ def test_gpn_star_cutoffs_are_in_step_with_the_revision():
 def test_variant_settings_are_validated(settings):
     with pytest.raises(ValidationError):
         VariantSettings.model_validate(settings)
+
+
+def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
+    """Chunks of a few rows, annotated in parallel, give the same index, row for row, as one chunk per chromosome."""
+    variants = [('1_123_A_G', 'rs1'), ('2_5_C_T', None), *_slice_variants(), ('MT_123_G_A', None)]
+    chr22 = [variant for variant, _ in variants if variant.startswith('22_')]
+    (tmp_path / 'gnomad').mkdir()
+    pl.DataFrame(
+        {
+            'variantId': ['1_123_A_G', chr22[3], chr22[20]],
+            'chromosome': ['1', '22', '22'],
+            'position': [int(variant.split('_')[1]) for variant in ['1_123_A_G', chr22[3], chr22[20]]],
+            'rsIds': [['rs1'], ['rs9'], ['rs8']],
+        },
+        schema_overrides={'position': pl.Int32},
+    ).write_parquet(tmp_path / 'gnomad' / 'part.parquet')
+    (tmp_path / 'foldx').mkdir()
+    pl.DataFrame(
+        {'uniprotAccession': ['P1'], 'aminoAcidChange': ['A1T'], 'variantEffect': [[effect('FoldX', 1.0)]]},
+        schema={'uniprotAccession': pl.String, 'aminoAcidChange': pl.String, 'variantEffect': EFFECTS},
+    ).write_parquet(tmp_path / 'foldx' / 'part.parquet')
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    _write_gpn_star(
+        tmp_path / 'gpn_star',
+        '22',
+        [(int(variant.split('_')[1]), *variant.split('_')[2:], -5.0) for variant in chr22[::5]],
+    )
+    source = {
+        'variant_annotations': [str(tmp_path / 'gnomad')],
+        'amino_acid_annotations': [str(tmp_path / 'foldx')],
+        'gpn_star': str(tmp_path / 'gpn_star'),
+    }
+
+    def run(name: str, **settings: object) -> tuple[pl.DataFrame, list[str]]:
+        output = _run_step(
+            tmp_path,
+            step_inputs,
+            variants,
+            name=name,
+            source=source,
+            settings={'gpn_star': GPN_STAR_CUTOFFS, **settings},
+        )
+        parts = sorted(path.name for path in output.glob('*.parquet'))
+        return pl.read_parquet([output / part for part in parts]), parts
+
+    whole, whole_parts = run('whole', chunk_rows=1_000_000)
+    chunked, chunked_parts = run('chunked', chunk_rows=7, parallel_chunks=3, batch_size=3)
+
+    assert len(whole_parts) == 4
+    assert len(chunked_parts) == 2 + 1 + -(-len(chr22) // 7)
+    assert {x['method'] for row in whole['variantEffect'] for x in row} >= {'GPN-Star', 'FoldX', 'GERP'}
+    assert whole.equals(chunked)

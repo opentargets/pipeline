@@ -1,12 +1,13 @@
 """VEP allele form and genomic HGVS tests."""
 
+import gzip
 from functools import cache
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from pts.transformers.variant.alleles import hgvs_genomic, read_chromosome, vep_allele_form
+from pts.transformers.variant.alleles import contig_spans, hgvs_genomic, read_chromosome, read_contig, vep_allele_form
 
 #: Ensembl 116 GRCh38 bases around each test variant, one contig per chromosome. Each contig
 #: holds only a window, whose first position is in its header and in `WINDOW_START`.
@@ -116,3 +117,19 @@ def test_vep_allele_form_keeps_rows_and_columns():
 def test_hgvs_genomic(variant_id, expected):
     chromosome, position, ref, alt = variant_id.split('_')
     assert hgvs_genomic(reference(chromosome), chromosome, int(position), ref, alt) == expected
+
+
+def test_contigs_of_the_uncompressed_fasta_match_read_chromosome(tmp_path: Path):
+    plain = tmp_path / 'reference.fa'
+    plain.write_bytes(gzip.decompress(Path(FASTA).read_bytes()))
+    spans = contig_spans(plain)
+    assert sorted(spans) == sorted(WINDOW_START)
+    for chromosome, span in spans.items():
+        assert read_contig(plain, span) == read_chromosome(FASTA, chromosome)
+
+
+def test_contig_spans_keep_the_first_contig_of_a_name_and_a_last_line_without_newline(tmp_path: Path):
+    plain = tmp_path / 'reference.fa'
+    plain.write_bytes(b'>1 dna:chromosome\nacgt\nAC\n>2\nGG\n>1\nTTTT\n>3\nCA')
+    spans = contig_spans(plain)
+    assert {name: read_contig(plain, span) for name, span in spans.items()} == {'1': b'ACGTAC', '2': b'GG', '3': b'CA'}

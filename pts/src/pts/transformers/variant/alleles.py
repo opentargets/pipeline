@@ -1,6 +1,8 @@
 """Reference sequence, VEP's input allele form and genomic HGVS."""
 
 import gzip
+import mmap
+from pathlib import Path
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
@@ -29,6 +31,33 @@ def read_chromosome(fasta: str, chromosome: str) -> bytes:
     if lines is None:
         raise ValueError(f'contig {chromosome} not found in {fasta}')
     return b''.join(lines).upper()
+
+
+def contig_spans(fasta: Path) -> dict[str, tuple[int, int]]:
+    """The byte span of each contig's sequence lines in an uncompressed FASTA, the first contig of a name kept."""
+    spans: dict[str, tuple[int, int]] = {}
+    if fasta.stat().st_size == 0:
+        return spans
+    with fasta.open('rb') as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+        start = 0 if buffer[:1] == b'>' else buffer.find(b'\n>') + 1
+        while 0 <= start < len(buffer) and buffer[start : start + 1] == b'>':
+            header_end = buffer.find(b'\n', start)
+            header_end = len(buffer) if header_end == -1 else header_end
+            following = buffer.find(b'\n>', header_end)
+            end = len(buffer) if following == -1 else following + 1
+            name = buffer[start + 1 : header_end].split(maxsplit=1)
+            if name:
+                spans.setdefault(name[0].decode(), (min(header_end + 1, end), end))
+            start = end
+    return spans
+
+
+def read_contig(fasta: Path, span: tuple[int, int]) -> bytes:
+    """The sequence of one `contig_spans` span of an uncompressed FASTA, in upper case."""
+    start, end = span
+    with fasta.open('rb') as handle:
+        handle.seek(start)
+        return handle.read(end - start).translate(None, b' \t\r\n').upper()
 
 
 def shared_prefix_length(left: pl.Expr, right: pl.Expr) -> pl.Expr:

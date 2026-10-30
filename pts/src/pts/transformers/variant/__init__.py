@@ -1,49 +1,37 @@
 """Variant index generation with fastVEP and supplementary annotations.
 
-The variant rows are collected from the evidence and credible sets, then annotated one chromosome
-at a time by `chromosome.annotate_chromosomes`: fastVEP, then joins on the mirrored Ensembl data
-(transcript fields, colocated variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the VEP
-records that `parse_vep` turns into index rows. The inputs these joins share are prepared once,
-before the chromosomes run.
-
-The index is then annotated one chromosome at a time, reading only that chromosome's
-annotations, in batches of variants annotated in parallel: GPN-Star scores, supplementary
-variant annotations (gnomAD, LoF curation) merged by variant, and amino-acid level predictions
-(FoldX) through each variant's first transcript with an amino-acid change. Each chromosome is
-written as one part of the output.
+The variant rows are collected from the evidence and credible sets, then annotated by
+`chromosome.annotate_chromosomes`: fastVEP on each chromosome, then, on chunks of each
+chromosome's rows in parallel, joins on the mirrored Ensembl data (transcript fields, colocated
+variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the VEP records that `parse_vep` turns into
+index rows. GPN-Star scores, supplementary variant annotations (gnomAD, LoF curation) merged by
+variant, and amino-acid level predictions (FoldX) through each variant's first transcript with an
+amino-acid change are merged into each chunk. The inputs these share are prepared once, before the
+chromosomes run, and each chunk is written as one part of the output once every chunk has succeeded.
 """
 
 from __future__ import annotations
 
 import gzip
-import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-import polars as pl
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
+from pts.transformers.variant.alleles import contig_spans
 from pts.transformers.variant.alphamissense import partition_alphamissense
 from pts.transformers.variant.chromosome import Shared, annotate_chromosomes
 from pts.transformers.variant.colocated import extract_all_vars
 from pts.transformers.variant.fastvep import build_cache, prepare_gff3
-from pts.transformers.variant.gpn_star import GpnStarCutoffs, add_gpn_star, gpn_star_files, read_gpn_star
-from pts.transformers.variant.index import (
-    add_annotation,
-    amino_acid_keys,
-    annotate_with_amino_acid_consequences,
-    annotation_parts_by_chromosome,
-    read_variant_annotations,
-    require_rows,
-)
+from pts.transformers.variant.gpn_star import GpnStarCutoffs, gpn_star_files
+from pts.transformers.variant.index import annotation_parts_by_chromosome, require_rows
 from pts.transformers.variant.rows import collect_variants
 from pts.transformers.variant.sift import sift_matrices
 from pts.transformers.variant.transcripts import canonical_transcript_ids
@@ -100,11 +88,17 @@ class VariantSettings(BaseModel):
     """Identifiers at least this long are hashed."""
     fastvep_binary: str = 'fastvep'
     fastvep_threads: int = Field(default=8, gt=0)
-    """Threads of each fastVEP run, and polars threads of each chromosome's process."""
+    """Threads of each fastVEP run."""
     parallel_chromosomes: int = Field(default=4, gt=0)
-    """Chromosomes annotated at the same time."""
+    """Chromosomes run through fastVEP at the same time."""
+    chunk_rows: int = Field(default=50_000, gt=0)
+    """Rows of each chunk a chromosome is annotated in after fastVEP."""
+    parallel_chunks: int = Field(default=16, gt=0)
+    """Chromosome preparations and chunks annotated at the same time."""
+    chunk_threads: int = Field(default=2, gt=0)
+    """Polars threads of each process."""
     batch_size: int = Field(default=5_000, gt=0)
-    """Variants per batch when annotating a chromosome."""
+    """Variants per batch when merging the annotations into a chunk."""
     gpn_star: GpnStarCutoffs | None = None
     """Cut-offs normalising GPN-Star scores; required with a GPN-Star source."""
 
@@ -120,16 +114,18 @@ def _local(path: str, directory: Path) -> str:
     return str(target)
 
 
-def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[str, Path, Path]:
-    """The local gzip FASTA, the FASTA uncompressed, and the prepared GFF3 with its fastVEP cache."""
+def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[Path, Path]:
+    """The FASTA uncompressed, and the prepared GFF3 with its fastVEP cache."""
     directory.mkdir(parents=True)
     fasta = _local(sources.fasta, directory)
     plain = directory / Path(fasta).name.removesuffix('.gz')
     with gzip.open(fasta, 'rb') as source, plain.open('wb') as out:
         shutil.copyfileobj(source, out, COPY_BYTES)
+    if fasta != sources.fasta:
+        Path(fasta).unlink()
     gff3 = prepare_gff3(sources.gff3, directory)
     build_cache(gff3, plain, binary)
-    return fasta, plain, gff3
+    return plain, gff3
 
 
 def _sift(sources: VariantSource, path: Path) -> Path:
@@ -146,7 +142,7 @@ def _sift(sources: VariantSource, path: Path) -> Path:
 
 
 def _rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dict[str, int]]:
-    """Each chromosome's rows written to `directory/<chromosome>.parquet`, and their number."""
+    """Each chromosome's rows, sorted by position, written to `directory/<chromosome>.parquet`, and their number."""
     rows = collect_variants(
         sources.uniprot_variants, sources.eva, sources.pharmacogenomics, sources.credible_set
     ).collect(engine='streaming')
@@ -157,14 +153,24 @@ def _rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dic
     for (chromosome,), frame in rows.partition_by('chromosome', as_dict=True, maintain_order=True).items():
         paths[str(chromosome)] = directory / f'{chromosome}.parquet'
         sizes[str(chromosome)] = frame.height
-        frame.write_parquet(paths[str(chromosome)])
+        frame.sort('position', maintain_order=True).write_parquet(paths[str(chromosome)])
     logger.info('Collected {} variant rows on {} chromosomes', rows.height, len(paths))
     return paths, sizes
 
 
-def _index_by_chromosome(sources: VariantSource, options: VariantSettings, scratch: Path) -> dict[str, Path]:
-    """The parsed index of every chromosome, from its rows, fastVEP and the joins on reference data."""
+def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> list[Path]:
+    """The annotated index of every chromosome, in parts, from its rows, fastVEP and the joins on reference data."""
+    gpn_star = gpn_star_files(sources.gpn_star) if sources.gpn_star is not None else {}
+    located = []
+    for path in sources.variant_annotations:
+        logger.info('Locating variant annotations in {}', path)
+        located.append(annotation_parts_by_chromosome(path))
+    for path in sources.amino_acid_annotations:
+        require_rows(scan_dataset(path), path)
     rows, sizes = _rows(sources, scratch / 'rows')
+    for chromosome in sorted(rows):
+        if options.gpn_star is not None and chromosome not in gpn_star and chromosome in STANDARD:
+            logger.warning('No GPN-Star scores for chromosome {}', chromosome)
     with ThreadPoolExecutor() as pool:
         reference = pool.submit(_reference, sources, options.fastvep_binary, scratch / 'reference')
         all_vars = pool.submit(extract_all_vars, sources.vep_cache, scratch / 'all_vars')
@@ -172,10 +178,10 @@ def _index_by_chromosome(sources: VariantSource, options: VariantSettings, scrat
         sift = pool.submit(_sift, sources, scratch / 'sift.parquet')
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
         ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
-        fasta, plain_fasta, gff3 = reference.result()
+        plain_fasta, gff3 = reference.result()
         shared = Shared(
-            fasta=fasta,
             plain_fasta=plain_fasta,
+            contigs=contig_spans(plain_fasta),
             gff3=gff3,
             gerp=gerp.result(),
             ancestor=ancestor.result(),
@@ -185,30 +191,41 @@ def _index_by_chromosome(sources: VariantSource, options: VariantSettings, scrat
             threads=options.fastvep_threads,
             hash_threshold=options.hash_threshold,
             directory=scratch / 'chromosomes',
+            chunk_rows=options.chunk_rows,
+            batch_size=options.batch_size,
+            variant_annotations=tuple(located),
+            amino_acid_annotations=tuple(sources.amino_acid_annotations),
+            gpn_star=gpn_star if options.gpn_star is not None else {},
+            gpn_star_cutoffs=options.gpn_star,
         )
         extracted, partitions = all_vars.result(), alphamissense.result()
     for chromosome in sorted(set(rows) - set(extracted)):
         logger.warning('No colocated variants for chromosome {}: the VEP cache has no all_vars', chromosome)
-    return annotate_chromosomes(rows, sizes, extracted, partitions, shared, options.parallel_chromosomes)
+    return annotate_chromosomes(
+        rows,
+        sizes,
+        extracted,
+        partitions,
+        shared,
+        options.parallel_chromosomes,
+        options.parallel_chunks,
+        options.chunk_threads,
+    )
 
 
 STANDARD = {*(str(number) for number in range(1, 23)), 'X', 'Y'}
 
 
-def annotate(
-    frame: pl.DataFrame,
-    variant_annotations: list[pl.DataFrame],
-    amino_acid_annotations: list[pl.DataFrame],
-    gpn_star: pl.DataFrame | None = None,
-) -> pl.DataFrame:
-    """Merge GPN-Star scores, then variant annotations, then amino-acid annotations, into index rows."""
-    if gpn_star is not None:
-        frame = add_gpn_star(frame, gpn_star)
-    for dataset in variant_annotations:
-        frame = add_annotation(frame, dataset)
-    for dataset in amino_acid_annotations:
-        frame = annotate_with_amino_acid_consequences(frame, dataset)
-    return frame
+def _publish(part: Path, destination: str) -> None:
+    """Move a part into the output, a local directory or an object store prefix."""
+    target = f'{destination}/{part.name}'
+    if '://' not in destination:
+        Path(destination).mkdir(parents=True, exist_ok=True)
+        shutil.move(part, target)
+        return
+    with part.open('rb') as source, StorageHandle(target).open('wb') as out:
+        shutil.copyfileobj(source, out, COPY_BYTES)
+    part.unlink()
 
 
 def variant(
@@ -224,58 +241,8 @@ def variant(
     check_destinations_absent([destinations.output])
     if sources.gpn_star is not None and options.gpn_star is None:
         raise ValueError('a gpn_star source needs gpn_star cut-offs in the settings')
-    gpn_star_by_chromosome = gpn_star_files(sources.gpn_star) if sources.gpn_star is not None else {}
-
     with TemporaryDirectory(dir=config.work_path) as scratch:
-        by_chromosome = _index_by_chromosome(sources, options, Path(scratch))
-        index = pl.scan_parquet([by_chromosome[chromosome] for chromosome in sorted(by_chromosome)])
-
-        annotation_parts = []
-        for path in sources.variant_annotations:
-            logger.info('Locating variant annotations in {}', path)
-            annotation_parts.append(annotation_parts_by_chromosome(path))
-        amino_acid_annotations = []
-        if sources.amino_acid_annotations:
-            keys = amino_acid_keys(index).collect(engine='streaming')
-            for path in sources.amino_acid_annotations:
-                logger.info('Reading amino-acid annotations from {}', path)
-                dataset = require_rows(scan_dataset(path), path).select(
-                    'uniprotAccession', 'aminoAcidChange', 'variantEffect'
-                )
-                amino_acid_annotations.append(
-                    dataset.join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi').collect(
-                        engine='streaming'
-                    )
-                )
-
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
-            for number, chromosome in enumerate(sorted(by_chromosome)):
-                on_chromosome = pl.col('chromosome') == chromosome
-                frame = pl.read_parquet(by_chromosome[chromosome])
-                loci = frame.select('chromosome', 'position').unique().lazy()
-                variant_annotations = [
-                    read_variant_annotations(located[chromosome], options.hash_threshold, loci)
-                    .filter(on_chromosome)
-                    .collect(engine='streaming')
-                    if chromosome in located
-                    else pl.DataFrame(schema=variant_schema)
-                    for located in annotation_parts
-                ]
-                if options.gpn_star is not None and chromosome not in gpn_star_by_chromosome and chromosome in STANDARD:
-                    logger.warning('No GPN-Star scores for chromosome {}', chromosome)
-                gpn_star = (
-                    read_gpn_star(gpn_star_by_chromosome[chromosome], frame['position'].unique(), options.gpn_star)
-                    if chromosome in gpn_star_by_chromosome and options.gpn_star is not None
-                    else None
-                )
-                logger.info('Annotating {} variants on chromosome {}', frame.height, chromosome)
-                batches = pool.map(
-                    lambda batch, merged=variant_annotations, scores=gpn_star: annotate(
-                        batch, merged, amino_acid_annotations, scores
-                    ),
-                    frame.iter_slices(options.batch_size),
-                )
-                pl.concat(batches).sort('position', maintain_order=True).select(variant_schema.names()).write_parquet(
-                    f'{destinations.output}/part-{number:05d}.parquet', compression='zstd', mkdir=True
-                )
+        parts = _parts(sources, options, Path(scratch))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda part: _publish(part, destinations.output), parts))
     logger.info('Wrote variant index to {}', destinations.output)

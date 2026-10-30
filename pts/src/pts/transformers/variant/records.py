@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import mmap
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -44,25 +45,31 @@ _TRANSCRIPT = cast(pl.Struct, cast(pl.List, vep_schema['transcript_consequences'
 _BASES = r'^[ACGTN]+$'
 
 
-def read_records(path: Path, chunk_bytes: int = CHUNK_BYTES) -> pl.DataFrame:
+def iter_records(path: Path, chunk_bytes: int = CHUNK_BYTES) -> Iterator[pl.DataFrame]:
     """The fastVEP JSON array, parsed in slices of about `chunk_bytes` cut at record boundaries.
 
-    Returns:
-        One row per record: `row`, the row ordinal fastVEP echoes as the record's `id`,
-        `most_severe_consequence` and every `transcript_consequences` entry.
+    Yields:
+        One frame per slice, one row per record: `row`, the row ordinal fastVEP echoes as the
+        record's `id`, `most_severe_consequence` and every `transcript_consequences` entry.
     """
-    frames = [pl.DataFrame(schema=FASTVEP_SCHEMA)]
     with path.open('rb') as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
         start = buffer.find(_RECORD) + 1
         while 0 < start < len(buffer):
             cut = buffer.find(_RECORD, start + chunk_bytes)
             end = len(buffer) if cut == -1 else cut + 1
             piece = buffer[start:end].rstrip().rstrip(b']').rstrip().rstrip(b',')
-            frames.append(pl.read_json(io.BytesIO(b'[' + piece + b']'), schema=FASTVEP_SCHEMA))
+            yield pl.read_json(io.BytesIO(b'[' + piece + b']'), schema=FASTVEP_SCHEMA).select(
+                pl.col('id').cast(pl.Int64).alias('row'), 'most_severe_consequence', 'transcript_consequences'
+            )
             start = end
-    return pl.concat(frames).select(
+
+
+def read_records(path: Path, chunk_bytes: int = CHUNK_BYTES) -> pl.DataFrame:
+    """The fastVEP JSON array in one frame; see `iter_records`."""
+    empty = pl.DataFrame(schema=FASTVEP_SCHEMA).select(
         pl.col('id').cast(pl.Int64).alias('row'), 'most_severe_consequence', 'transcript_consequences'
     )
+    return pl.concat([empty, *iter_records(path, chunk_bytes)])
 
 
 def _hgvsg(rows: pl.DataFrame, sequence: bytes, chromosome: str) -> pl.Series:
@@ -221,15 +228,7 @@ def _transcript() -> pl.Expr:
 def fastvep_records(
     output: Path, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
 ) -> pl.LazyFrame:
-    """The fastVEP output of one chromosome as the VEP records `parse_vep` reads.
-
-    Records join `rows` on the ordinal fastVEP echoes as their `id`. `input` is rebuilt from
-    the original row and `hgvsg` from the reference. Transcript fields come from `transcripts`
-    (`transcript_fields`), with APPRIS written as VEP does (`P1`, `A2`). VEP's
-    `transcript_ablation` and `mature_miRNA_variant` are applied, and the most severe
-    consequence is ranked over every transcript fastVEP reported, by VEP's ranks. Only
-    transcripts canonical in `transcripts` are kept. A row without a transcript gets `intergenic_consequences`.
-    `colocated_variants` is empty; `conservation`, `alphamissense`, `lof` and `lof_filter` are null.
+    """The fastVEP output of one chromosome as the VEP records `parse_vep` reads; see `records_from_fastvep`.
 
     Raises:
         ValueError: if the record ids are not the row ordinals of `rows`.
@@ -239,6 +238,22 @@ def fastvep_records(
         raise ValueError(f'{output}: {records.height} fastVEP records for {rows.height} rows')
     if records['row'].sort().to_list() != list(range(rows.height)):
         raise ValueError(f'{output}: fastVEP record ids are not the ordinals 0..{rows.height - 1} of the rows')
+    return records_from_fastvep(records, rows, transcripts, sequence, chromosome)
+
+
+def records_from_fastvep(
+    records: pl.DataFrame, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
+) -> pl.LazyFrame:
+    """The records `read_records` reads for rows of one chromosome, as the VEP records `parse_vep` reads.
+
+    Records join `rows` on the ordinal fastVEP echoes as their `id`, the row's ordinal in `rows`.
+    `input` is rebuilt from the original row and `hgvsg` from the reference. Transcript fields
+    come from `transcripts` (`transcript_fields`), with APPRIS written as VEP does (`P1`, `A2`).
+    VEP's `transcript_ablation` and `mature_miRNA_variant` are applied, and the most severe
+    consequence is ranked over every transcript fastVEP reported, by VEP's ranks. Only
+    transcripts canonical in `transcripts` are kept. A row without a transcript gets `intergenic_consequences`.
+    `colocated_variants` is empty; `conservation`, `alphamissense`, `lof` and `lof_filter` are null.
+    """
     variants = _variants(rows, sequence, chromosome)
     consequences = _consequences(records, variants, transcripts)
     rank = pl.col('consequence_terms').list.eval(
