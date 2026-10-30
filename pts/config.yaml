@@ -959,11 +959,10 @@ steps:
     - name: trial_models aact trials
       source:
         aact: input/aact.zip
-        extraction: extraction/data.parquet
+        extraction: extraction
         models: input/models
       destination:
         stop_reasons: stop_reasons
-        drug_entities: drug_entities
       store_uri: gs://clinical_staging/store
       snapshot: '{{snapshot}}'
   ##################################################################################################

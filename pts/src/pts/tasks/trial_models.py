@@ -23,10 +23,11 @@ class TrialModelsSpec(Spec):
     """Configuration fields for the trial_models task."""
 
     source: dict[str, str]
-    """Inputs. Keys: ``aact`` (the dump archive), ``extraction`` (the extraction
-        parquet), ``models`` (the staged Hugging Face models)."""
+    """Inputs. Keys: ``aact`` (the dump archive), ``extraction`` (the directory of
+        tagged extractions), ``models`` (the staged Hugging Face models)."""
     destination: dict[str, str]
-    """Where to publish the snapshots. Keys: ``stop_reasons``, ``drug_entities``."""
+    """Where to publish the snapshots. Key: ``stop_reasons``. The drug entities go
+        under the extraction they were staged from."""
     store_uri: str
     """Root of the record stores, an absolute URI. Sits outside the AACT version
         directory so a text seen in an earlier version is not computed again."""
@@ -53,9 +54,9 @@ class TrialModels(Task):
     @report
     def run(self) -> Self:
         from pts.clinical_staging import trial_models
-        from pts.clinical_staging.staged_outputs import DRUG_ENTITIES
+        from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION
         from pts.postgres import read_dump_tables
-        from pts.record_store import new_run_id, read_parquet
+        from pts.record_store import new_run_id
         from pts.transformers.clinical.hf_models import staged_model_revisions
         from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
@@ -82,10 +83,15 @@ class TrialModels(Task):
             archive_member=AACT_ARCHIVE_MEMBER,
             scratch_root=config.work_path,
         )['studies']
-        extractions = read_parquet(self.spec.source['extraction'], config)
+        extraction_dir = StorageHandle(self.spec.source['extraction'], config=config).absolute.rstrip('/')
+        extractions = trial_models.read_extraction(extraction_dir, config)
 
         run_id = new_run_id(self.spec.snapshot)
-        destination = {key: StorageHandle(uri, config=config).absolute for key, uri in self.spec.destination.items()}
+        extraction_tag = EXTRACTION.release_tag()
+        destination = {
+            'stop_reasons': StorageHandle(self.spec.destination['stop_reasons'], config=config).absolute,
+            'drug_entities': f'{extraction_dir}/{extraction_tag}/drug_entities',
+        }
         self.stats = trial_models.stage_trial_models(
             studies,
             extractions,
@@ -97,6 +103,7 @@ class TrialModels(Task):
             ner_batch_size=self.spec.ner_batch_size,
             stop_reasons_batch_size=self.spec.stop_reasons_batch_size,
             max_attempts=self.spec.max_attempts,
+            extraction_tag=extraction_tag,
         )
         logger.info(f'trial models staged: {self.stats}')
 

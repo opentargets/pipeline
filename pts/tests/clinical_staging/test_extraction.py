@@ -26,6 +26,7 @@ from pts.clinical_staging.extraction import (
     _models_to_dataframe,
     import_extraction_cache,
 )
+from pts.clinical_staging.staged_outputs import EXTRACTION
 from pts.record_store import ComputeAborted, read_records, text_sha256
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, import_class
 from pts.transformers.clinical import extract_aact_clinical_report
@@ -33,6 +34,8 @@ from pts.transformers.clinical.llm_workflow import Extracted, Failed
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 from tests.fake_openai import FakeClient, Outcome, bad_request, connection_error, unprocessable
+
+TAG = EXTRACTION.release_tag()
 
 
 def test_registering_tasks_does_not_import_heavy_deps() -> None:
@@ -327,16 +330,55 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
 
     task = _run(monkeypatch, tmp_path, report)
 
-    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    published = pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')
     prompts = extraction.prompts_for(report)
     old = _old_way(['nct1', 'nct2'], prompts).drop('cache_key', 'computed_at')
     assert published.schema == old.schema
     assert published.sort('id').equals(old.sort('id'))
-    metadata = json.loads((tmp_path / 'v1/extraction/metadata.json').read_text())
-    assert metadata == {'model': EXTRACTION_MODEL, 'model_revision': _digest()}
+    metadata = json.loads((tmp_path / f'v1/extraction/{TAG}/metadata.json').read_text())
+    assert metadata == EXTRACTION.metadata(_digest(), None)
+    assert metadata['model_revisions'] == {EXTRACTION_MODEL: _digest()}
     assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'failed': 0, 'published': True}
     assert llm.keys == ['test-key']
     assert all(client.closed for client in llm.clients)
+
+
+def test_a_rerun_publishes_nothing_and_a_new_digest_publishes_beside_the_old(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    FakeLlm(monkeypatch)
+    report = _report('nct1', 'nct2')
+    first = _run(monkeypatch, tmp_path, report)
+    data = tmp_path / f'v1/extraction/{TAG}/data.parquet'
+    written = data.stat().st_mtime_ns
+
+    again = _run(monkeypatch, tmp_path, report)
+
+    assert first.stats['published'] is True
+    assert again.stats['published'] is False
+    assert data.stat().st_mtime_ns == written
+
+    monkeypatch.setattr('pts.clinical_staging.staged_outputs.schema_digest', lambda model_cls: 'f' * 64)
+    monkeypatch.setattr('pts.tasks.llm_extract.new_run_id', lambda snapshot: f'{snapshot}-other-digest')
+    other = EXTRACTION.tag('f' * 64, None)
+    _run(monkeypatch, tmp_path, report)
+
+    assert other != TAG
+    assert sorted(p.name for p in (tmp_path / 'v1/extraction').iterdir()) == sorted([TAG, other])
+    assert data.stat().st_mtime_ns == written
+    metadata = json.loads((tmp_path / f'v1/extraction/{other}/metadata.json').read_text())
+    assert metadata == EXTRACTION.metadata('f' * 64, None)
+
+
+def test_a_sampled_extraction_publishes_under_its_own_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    FakeLlm(monkeypatch)
+
+    _run(monkeypatch, tmp_path, _report('nct1', 'nct2'), sample_size=5)
+
+    sampled = EXTRACTION.tag(_digest(), 5)
+    assert sampled != TAG
+    assert (tmp_path / f'v1/extraction/{sampled}/data.parquet').exists()
+    assert not (tmp_path / f'v1/extraction/{TAG}').exists()
 
 
 def _records(prompts: pl.DataFrame, outputs: dict[str, str]) -> pl.DataFrame:
@@ -421,7 +463,7 @@ def test_a_retry_round_of_only_rejected_requests_does_not_abort(
     _run(monkeypatch, tmp_path, _report('nct00', *bad))
 
     assert llm.calls == [['nct00', *bad], bad, bad]
-    assert pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')['id'].to_list() == ['nct00']
+    assert pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')['id'].to_list() == ['nct00']
 
 
 def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -436,7 +478,7 @@ def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.M
     failed = records.filter(pl.col('status') == 'failed')
     assert failed.height == 33
     assert failed.group_by('text').len()['len'].to_list() == [3] * 11
-    assert pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')['id'].to_list() == ['nct00']
+    assert pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')['id'].to_list() == ['nct00']
     llm.clients.clear()
 
     _run(monkeypatch, tmp_path, report, snapshot='v1')
@@ -464,20 +506,20 @@ def test_failed_trial_is_left_out_and_not_retried_on_rerun(
     task = _run(monkeypatch, tmp_path, report)
 
     assert llm.calls == [['nct1', 'nct2'], ['nct2'], ['nct2']]
-    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    published = pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')
     assert published['id'].to_list() == ['nct1']
     assert task.stats['failed'] == 1
     assert any(m.startswith('1 of 2 trials (50.0%) have no extraction') for m in logged)
     failed = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String()).filter(pl.col('status') == 'failed')
     assert failed['error'].to_list() == [_validation_error('nct2')] * 3
-    snapshot = (tmp_path / 'v1/extraction/data.parquet').stat().st_mtime_ns
+    snapshot = (tmp_path / f'v1/extraction/{TAG}/data.parquet').stat().st_mtime_ns
     llm.clients.clear()
 
     again = _run(monkeypatch, tmp_path, report)
 
     assert llm.calls == []
     assert again.stats['published'] is False
-    assert (tmp_path / 'v1/extraction/data.parquet').stat().st_mtime_ns == snapshot
+    assert (tmp_path / f'v1/extraction/{TAG}/data.parquet').stat().st_mtime_ns == snapshot
 
 
 def _write_old_cache(tmp_path: Path, rows: pl.DataFrame, digest: str) -> str:
@@ -498,7 +540,7 @@ def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch
     _run(monkeypatch, tmp_path, report, import_extraction_cache=cache_uri)
 
     assert llm.calls == []
-    published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
+    published = pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')
     expected = cached.drop('cache_key', 'computed_at').with_columns(
         prompt_sha256=pl.col('id').replace_strict(prompts['id'], prompts['prompt_sha256'])
     )
@@ -584,7 +626,7 @@ def test_model_change_does_not_re_extract(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
 
     assert llm.calls == []
-    assert pl.read_parquet(tmp_path / 'v2/extraction/data.parquet')['id'].to_list() == ['nct1', 'nct2']
+    assert pl.read_parquet(tmp_path / f'v2/extraction/{TAG}/data.parquet')['id'].to_list() == ['nct1', 'nct2']
 
 
 def _late_populated(trial_id: str) -> ClinicalReportExtractionSchema:
@@ -666,7 +708,7 @@ def test_a_one_trial_shard_makes_one_call(monkeypatch: pytest.MonkeyPatch, tmp_p
     records = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String())
     assert records['status'].to_list() == ['ok']
     assert ClinicalReportExtractionSchema.model_validate_json(records['output'][0]) == _model('nct1')
-    assert pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')['id'].to_list() == ['nct1']
+    assert pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')['id'].to_list() == ['nct1']
 
 
 def test_extract_returns_models_and_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

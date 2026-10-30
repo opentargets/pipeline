@@ -9,8 +9,13 @@ import polars as pl
 import pytest
 
 from pts.clinical_staging import trial_models
-from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
-from pts.clinical_staging.trial_models import seed_drug_entities, stage_trial_models, why_stopped_texts
+from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.clinical_staging.trial_models import (
+    read_extraction,
+    seed_drug_entities,
+    stage_trial_models,
+    why_stopped_texts,
+)
 from pts.record_store import map_texts, read_records, text_sha256
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.hf_models import staged_model_revisions
@@ -120,6 +125,7 @@ def _stage(
         ner_batch_size=4,
         stop_reasons_batch_size=2,
         max_attempts=3,
+        extraction_tag=EXTRACTION.release_tag(),
     )
 
 
@@ -162,7 +168,10 @@ def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, 
     )
     for kind, tag, model, hub in kinds:
         metadata = json.loads((tmp_path / f'snap/{kind.name}/{tag}/metadata.json').read_text())
-        assert metadata == {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
+        expected = {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
+        if kind is DRUG_ENTITIES:
+            expected['extraction_tag'] = EXTRACTION.release_tag()
+        assert metadata == expected
     assert stats['stop_reasons'] == {'texts': 2, 'computed': True, 'published': True, 'tag': STOP_TAG}
     assert stats['drug_entities'] == {'texts': 2, 'computed': True, 'published': True, 'tag': DRUG_TAG}
 
@@ -318,3 +327,34 @@ def test_seed_never_outranks_a_computed_record(tmp_path: Path) -> None:
 
     result = map_texts(pl.Series(['a']), lambda texts: [], drug_store, DRUG_NER_MODEL, revision, 'r2', None)
     assert result['output'].to_list() == [['computed']]
+
+
+def test_the_drug_snapshot_records_the_extraction_it_was_staged_from(
+    tmp_path: Path, models_uri: str, models: Models
+) -> None:
+    _stage(tmp_path, models_uri, _studies([]), _extractions([['a']]), 'r1')
+
+    metadata = json.loads((tmp_path / f'snap/drug_entities/{DRUG_TAG}/metadata.json').read_text())
+    stop = json.loads((tmp_path / f'snap/stop_reasons/{STOP_TAG}/metadata.json').read_text())
+    assert metadata['extraction_tag'] == EXTRACTION.release_tag()
+    assert 'extraction_tag' not in stop
+
+
+def test_read_extraction_reads_the_release_tag(tmp_path: Path) -> None:
+    directory = tmp_path / 'extraction' / EXTRACTION.release_tag()
+    directory.mkdir(parents=True)
+    _extractions([['a']]).write_parquet(directory / 'data.parquet')
+    other = tmp_path / 'extraction' / 'other-tag'
+    other.mkdir()
+    _extractions([['b'], ['c']]).write_parquet(other / 'data.parquet')
+
+    assert read_extraction(str(tmp_path / 'extraction'), None).height == 1
+
+
+def test_read_extraction_names_the_path_it_expected(tmp_path: Path) -> None:
+    other = tmp_path / 'extraction' / 'other-tag'
+    other.mkdir(parents=True)
+    _extractions([['b']]).write_parquet(other / 'data.parquet')
+
+    with pytest.raises(FileNotFoundError, match='extraction/' + EXTRACTION.release_tag() + '/data.parquet'):
+        read_extraction(str(tmp_path / 'extraction'), None)

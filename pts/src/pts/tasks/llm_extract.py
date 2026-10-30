@@ -29,7 +29,6 @@ from otter.task.task_reporter import report
 from otter.util.errors import TaskRunError, TaskValidationError
 from pydantic import BaseModel
 
-from pts.clinical_staging.staged_outputs import schema_digest
 from pts.record_store import map_texts, new_run_id, publish_snapshot
 
 DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
@@ -42,7 +41,7 @@ class LlmExtractSpec(Spec):
     source: dict[str, str]
     """AACT dump archive. The task restores the required tables inline."""
     destination: dict[str, str]
-    """Where to publish. Key: ``extraction``, the snapshot directory."""
+    """Where to publish. Key: ``extraction``, the directory holding one snapshot per tag."""
     store_uri: str
     """Root of the record store of extractions, an absolute URI. Must sit outside
         the dataset version directory so a trial whose prompt did not change
@@ -102,6 +101,7 @@ class LlmExtract(Task):
     @report
     def run(self) -> Self:
         from pts.clinical_staging import extraction
+        from pts.clinical_staging.staged_outputs import EXTRACTION, schema_digest
 
         system_prompt = self._system_prompt()
         model_cls = import_class(self.spec.model_class)
@@ -139,13 +139,14 @@ class LlmExtract(Task):
             raise TaskRunError(msg)
 
         destination = StorageHandle(self.spec.destination['extraction'], config=config).absolute
+        tag = EXTRACTION.tag(digest, self.spec.sample_size)
         published = publish_snapshot(
             extractions,
-            destination,
-            {'model': extraction.EXTRACTION_MODEL, 'model_revision': digest},
+            f'{destination}/{tag}',
+            EXTRACTION.metadata(digest, self.spec.sample_size),
             config,
         )
-        self.artifacts = [Artifact(source=store_uri, destination=destination)]
+        self.artifacts = [Artifact(source=store_uri, destination=f'{destination}/{tag}')]
         self.stats = {
             'trials': report.height,
             'prompts': prompts.height,

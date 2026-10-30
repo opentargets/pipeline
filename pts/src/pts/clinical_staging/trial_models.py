@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from loguru import logger
+from otter.util.errors import NotFoundError
 
-from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
+from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.record_store import RECORD_SCHEMA, read_parquet, run_exists, text_sha256, write_run
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
@@ -62,6 +63,20 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
     return records.height
 
 
+def read_extraction(extraction_uri: str, config: Config) -> pl.DataFrame:
+    """Read the extraction of this code's response schema, published under ``extraction_uri``.
+
+    Raises:
+        FileNotFoundError: if there is none under the current tag, naming the path it looked for.
+    """
+    uri = f'{extraction_uri.rstrip("/")}/{EXTRACTION.release_tag()}/data.parquet'
+    try:
+        return read_parquet(uri, config)
+    except NotFoundError as e:
+        msg = f'no extraction under the current tag, expected {uri}; run aact_trial_extraction first'
+        raise FileNotFoundError(msg) from e
+
+
 def stage_trial_models(
     studies: pl.DataFrame,
     extractions: pl.DataFrame,
@@ -73,6 +88,7 @@ def stage_trial_models(
     ner_batch_size: int,
     stop_reasons_batch_size: int,
     max_attempts: int,
+    extraction_tag: str,
 ) -> dict[str, Any]:
     """Run the stop reason classifier and drug NER over the AACT texts, and publish both snapshots.
 
@@ -105,6 +121,7 @@ def stage_trial_models(
             run_id,
             config,
             max_attempts,
+            extra_metadata={'extraction_tag': extraction_tag},
         )
 
     return {'stop_reasons': stop.stats(), 'drug_entities': ner.stats()}
