@@ -105,14 +105,16 @@ The extraction is tagged too:
 ```
 
 The schema digest is that of `ClinicalReportExtractionSchema`. A schema change,
-a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or a
-`sample_size` other than the full set gives a new tag. The OpenAI model and the
+a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or any
+`sample_size` gives a new tag. The OpenAI model and the
 system prompt are not in it, because they do not change what is published.
 The extraction store keeps the full schema digest as its revision. The AACT
 drug snapshot is published under the extraction it was computed from and
-records its `extraction_tag` in its metadata. `clinical_report` and
-`chembl_molecule` check the extraction and that snapshot against the pin before
-any dump restore, and a sampled extraction never passes.
+records its `extraction_tag` in its metadata. `clinical_report` checks the
+extraction and the drug snapshot's `extraction_tag`, and `chembl_molecule` the
+extraction only, before any dump restore. Both check against the tag the code
+computes, not against the pin; the pin test ties the pin to that tag. A sampled
+extraction never passes.
 
 Snapshots and extractions are write-once per (version, tag).
 
