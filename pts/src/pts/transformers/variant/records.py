@@ -24,6 +24,7 @@ FASTVEP_SCHEMA = pl.Schema({
             'gene_symbol': pl.String,
             'biotype': pl.String,
             'canonical': pl.Int64,
+            'cds_end': pl.Int64,
             'consequence_terms': pl.List(pl.String),
             'distance': pl.Int64,
             'impact': pl.String,
@@ -200,6 +201,7 @@ def _transcript() -> pl.Expr:
         .then(pl.col('tss') - pl.col('vepEnd'))
         .otherwise(pl.col('vepStart') - pl.col('tss')),
         'canonical': pl.col('core_canonical'),
+        'cds_end': pl.col('cds_end'),
         'codons': pl.col('codons'),
         'consequence_terms': pl.col('consequence_terms'),
         'distance': pl.col('distance'),

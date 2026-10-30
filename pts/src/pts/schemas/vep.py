@@ -27,6 +27,7 @@ vep_schema = pl.Schema({
             'mane_select': pl.String,
             'tssdistance': pl.Int64,
             'canonical': pl.Int64,
+            'cds_end': pl.Int64,
             'codons': pl.String,
             'consequence_terms': pl.List(pl.String),
             'distance': pl.Int64,

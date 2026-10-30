@@ -132,6 +132,11 @@ def test_synonymous_amino_acids_are_single(records: pl.DataFrame) -> None:
     assert '/' in transcript(record(records, 19723939), 'ENST00000366425')['amino_acids']
 
 
+def test_cds_end_from_fastvep(records: pl.DataFrame) -> None:
+    assert transcript(record(records, 19723939), 'ENST00000366425')['cds_end'] == 96
+    assert transcript(record(records, 19723858), 'ENST00000366425')['cds_end'] is not None
+
+
 def test_intergenic_placeholder_transcript_dropped(records: pl.DataFrame, index: pl.DataFrame) -> None:
     found = record(records, 18521430)
     assert found['transcript_consequences'] == []
