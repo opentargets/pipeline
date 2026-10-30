@@ -336,9 +336,7 @@ async def _extract_record(
             # Distinguish flex capacity shortage from ordinary rate-limit 429s.
             # Only the former warrants a tier fallback; the latter is already
             # retried by the SDK.
-            is_flex_unavailable = e.status_code == 429 and 'resource_unavailable' in (e.body or {}).get(  # ty: ignore[unresolved-attribute]
-                'error', {}
-            ).get('code', '')
+            is_flex_unavailable = e.status_code == 429 and 'resource_unavailable' in (e.code or '')
             if is_flex_unavailable and tier != tiers_to_try[-1]:
                 logger.warning(f'Flex capacity unavailable for id={prompt_id} — retrying with standard processing.')
                 continue  # move to "auto"

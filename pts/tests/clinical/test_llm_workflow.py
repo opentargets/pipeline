@@ -142,6 +142,16 @@ def test_error_without_text_fails_with_its_repr() -> None:
     assert result == {'nct1': Failed('KeyError', repr(error))}
 
 
+def test_flex_unavailable_falls_back_to_auto_once(logged: list[str]) -> None:
+    client = FakeClient({'prompt 1': [flex_unavailable(), _answer()]})
+
+    result = _extract(client, [('nct1', 'prompt 1')], service_tier='flex')
+
+    assert result == {'nct1': Extracted(Trial(id='nct1', drug='aspirin'))}
+    assert [call['service_tier'] for call in client.calls] == ['flex', 'auto']
+    assert 'Flex capacity unavailable for id=nct1 — retrying with standard processing.' in logged
+
+
 def test_flex_unavailable_on_auto_fails() -> None:
     error = flex_unavailable()
     client = FakeClient({'prompt 1': error})
@@ -150,6 +160,16 @@ def test_flex_unavailable_on_auto_fails() -> None:
 
     assert result == {'nct1': Failed('RateLimitError', str(error))}
     assert len(client.calls) == 1
+
+
+def test_flex_unavailable_twice_fails_after_auto() -> None:
+    error = flex_unavailable()
+    client = FakeClient({'prompt 1': error})
+
+    result = _extract(client, [('nct1', 'prompt 1')], service_tier='flex')
+
+    assert result == {'nct1': Failed('RateLimitError', str(error))}
+    assert [call['service_tier'] for call in client.calls] == ['flex', 'auto']
 
 
 def test_plain_rate_limit_on_flex_does_not_fall_back() -> None:
@@ -169,6 +189,17 @@ def test_calls_stay_within_concurrency() -> None:
     _extract(client, prompts, concurrency=3)
 
     assert len(client.calls) == 12
+    assert client.peak_in_flight == 3
+
+
+def test_fallbacks_stay_within_concurrency() -> None:
+    prompts = [(f'nct{i}', f'prompt {i}') for i in range(12)]
+    client = FakeClient({text: [flex_unavailable(), _answer()] for _, text in prompts})
+
+    result = _extract(client, prompts, service_tier='flex', concurrency=3)
+
+    assert all(isinstance(outcome, Extracted) for outcome in result.values())
+    assert len(client.calls) == 24
     assert client.peak_in_flight == 3
 
 
