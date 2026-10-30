@@ -159,7 +159,7 @@ def uniprot_accessions(swissprot: pl.Expr, trembl: pl.Expr) -> pl.Expr:
 
 
 def transcript_consequences(transcripts: pl.Expr) -> pl.Expr:
-    """Transcript consequences ranked by severity, then distance; unscored transcripts are dropped."""
+    """Transcript consequences ranked by severity, then distance, then id; unscored transcripts are dropped."""
 
     def field(name: str) -> pl.Expr:
         return pl.element().struct.field(name)
@@ -195,7 +195,8 @@ def transcript_consequences(transcripts: pl.Expr) -> pl.Expr:
     return (
         consequences.list
         .eval(pl.element().filter(pl.element().struct.field('consequenceScore').is_not_null()))
-        # Two stable sorts: a multi-key `sort_by` inside `list.eval` fails on empty lists.
+        # Stable sorts, last key first: a multi-key `sort_by` inside `list.eval` fails on empty lists.
+        .list.eval(pl.element().sort_by(pl.element().struct.field('transcriptId'), maintain_order=True))
         .list.eval(pl.element().sort_by(pl.element().struct.field('distanceFromFootprint'), maintain_order=True))
         .list.eval(
             pl.element().sort_by(pl.element().struct.field('consequenceScore'), descending=True, maintain_order=True)

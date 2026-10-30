@@ -89,3 +89,6 @@ CONSEQUENCE_SCORES = {
     'intergenic_variant': 0.02,
     'sequence_variant': 0.0,
 }
+
+#: Ensembl VEP's consequence ranks, most severe first: the order of both tables above.
+RANKS = list(SEQUENCE_ONTOLOGY)
