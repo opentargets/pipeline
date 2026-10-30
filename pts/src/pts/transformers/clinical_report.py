@@ -24,6 +24,7 @@ from pts.transformers.clinical import (
 )
 from pts.transformers.clinical.mapping import require_staged
 from pts.transformers.clinical.mining import build_mining_reports, staged_lookup
+from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -53,10 +54,6 @@ CHEMBL_ORDER_BY = {
     'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
 }
 """Reads collected into published arrays, ordered by their whole projection."""
-
-AACT_SCHEMA_NAME = 'ctgov'
-
-AACT_ARCHIVE_MEMBER = 'postgres.dmp'
 
 AACT_TABLES = {
     'studies': [

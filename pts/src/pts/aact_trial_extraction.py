@@ -28,6 +28,7 @@ from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, text_sha256, write_run
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, llm_workflow, sample_report
 from pts.transformers.clinical.llm_workflow import run_extraction
+from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -41,8 +42,6 @@ TRIAL_FIELDS = {
 }
 """Report columns rendered into each prompt, and the labels they get."""
 
-AACT_SCHEMA_NAME = 'ctgov'
-AACT_ARCHIVE_MEMBER = 'postgres.dmp'
 AACT_TABLES = {
     'studies': [
         'nct_id',

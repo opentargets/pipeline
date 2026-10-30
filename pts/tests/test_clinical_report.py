@@ -757,6 +757,33 @@ print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torc
 """
 
 
+TRIAL_MODELS_STEP = """
+import sys
+
+import pts.aact_trial_models
+import pts.postgres
+import pts.tasks.trial_models
+import pts.transformers.clinical.hf_models
+import pts.transformers.clinical.ner
+import pts.transformers.clinical.providers.aact
+
+print(sorted({module.split('.')[0] for module in sys.modules} & {'openai'}))
+"""
+
+
+def test_trial_models_step_imports_no_openai() -> None:
+    result = subprocess.run(
+        [sys.executable, '-c', TRIAL_MODELS_STEP],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == '[]'
+
+
 def test_release_imports_no_torch_or_openai() -> None:
     result = subprocess.run(
         [sys.executable, '-c', RELEASE_MAPPING],

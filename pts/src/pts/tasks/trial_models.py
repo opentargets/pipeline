@@ -57,10 +57,11 @@ class TrialModels(Task):
 
         import polars as pl
 
-        from pts import aact_trial_extraction, aact_trial_models
+        from pts import aact_trial_models
         from pts.postgres import read_dump_tables
         from pts.transformers.clinical.hf_models import staged_model_revisions
         from pts.transformers.clinical.ner import DRUG_NER_MODEL, drug_ner_revision
+        from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
         config = self.context.config
         models_uri = StorageHandle(self.spec.source['models'], config=config).absolute
@@ -81,8 +82,8 @@ class TrialModels(Task):
         studies = read_dump_tables(
             archive,
             {'studies': ['nct_id', 'why_stopped']},
-            schema_name=aact_trial_extraction.AACT_SCHEMA_NAME,
-            archive_member=aact_trial_extraction.AACT_ARCHIVE_MEMBER,
+            schema_name=AACT_SCHEMA_NAME,
+            archive_member=AACT_ARCHIVE_MEMBER,
             scratch_root=config.work_path,
         )['studies']
         data, _ = StorageHandle(self.spec.source['extraction'], config=config).read()

@@ -12,6 +12,9 @@ from pts.transformers.clinical.schemas import (
     ClinicalSource,
 )
 
+AACT_SCHEMA_NAME = 'ctgov'
+AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+
 
 def process_interventions(interventions: pl.DataFrame) -> pl.DataFrame:
     """Extract relevant MeSH terms for interventional studies."""
