@@ -3,8 +3,15 @@
 import random
 
 import polars as pl
+import pytest
 
-from pts.transformers.chembl_molecule import _molecule_preprocess, process_molecules
+from pts.schemas.drug_molecule import molecule_properties_schema
+from pts.transformers.chembl_molecule import (
+    PEPTIDE_MAX_MW,
+    _molecule_preprocess,
+    add_compound_properties,
+    process_molecules,
+)
 
 # A short but structurally valid MDL molblock (single carbon atom), with no
 # terminator newline of its own -- the raw variants below add zero, one, or two
@@ -397,8 +404,12 @@ class TestOrderIsDeterministic:
         return {
             'molecule_dictionary': molecule_dictionary,
             'compound_structures': pl.DataFrame(
-                schema={'molregno': pl.Int64, 'canonical_smiles': pl.Utf8,
-                        'standard_inchi_key': pl.Utf8, 'molfile': pl.Utf8}
+                schema={
+                    'molregno': pl.Int64,
+                    'canonical_smiles': pl.Utf8,
+                    'standard_inchi_key': pl.Utf8,
+                    'molfile': pl.Utf8,
+                }
             ),
             'molecule_hierarchy': pl.DataFrame(
                 [(1, 1), *[(child, 1) for child in order]],
@@ -424,10 +435,7 @@ class TestOrderIsDeterministic:
 
     def test_child_order_does_not_depend_on_row_order(self):
         """Element order inside the published `childChemblIds` array."""
-        results = [
-            rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds']
-            for p in self._permutations()
-        ]
+        results = [rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds'] for p in self._permutations()]
         assert results[0] == sorted(results[0])
         assert all(r == results[0] for r in results), 'childChemblIds varied with input row order'
 
@@ -443,3 +451,141 @@ class TestOrderIsDeterministic:
         t = self._tables(list(range(2, self.CHILDREN + 2)))
         runs = [_process(t) for _ in range(3)]
         assert all(r.equals(runs[0]) for r in runs), 'repeated runs on one input differed'
+
+
+# --- Tests for add_compound_properties ---
+
+DECIMAL = pl.Decimal(38, 10)
+
+
+def property_tables() -> dict[str, pl.DataFrame]:
+    """Raw ChEMBL property and alert tables, typed as `read_dump_tables` returns them."""
+    molecule_dictionary = pl.DataFrame(
+        [
+            (1, 'CHEMBL1', 'Small molecule', 'MOL', 1),
+            (2, 'CHEMBL2', 'Protein', 'MOL', 0),
+            (3, 'CHEMBL3', 'Protein', 'MOL', 0),
+            (4, 'CHEMBL4', 'Protein', 'SEQ', 0),
+            (5, 'CHEMBL5', None, 'MOL', None),
+            (6, 'CHEMBL6', 'Antibody', 'SEQ', 0),
+        ],
+        schema={
+            'molregno': pl.Int64,
+            'chembl_id': pl.String,
+            'molecule_type': pl.String,
+            'structure_type': pl.String,
+            'natural_product': pl.Int16,
+        },
+        orient='row',
+    )
+    compound_properties = pl.DataFrame(
+        [
+            (1, '493.62', '4.59', 4, 37, '0.39', 0),
+            # the peptide rule's edge: exactly PEPTIDE_MAX_MW, and just above it
+            (2, f'{PEPTIDE_MAX_MW}', None, None, 100, None, 2),
+            (3, f'{PEPTIDE_MAX_MW}.01', None, None, 101, None, 2),
+            # molregno 4 (a Protein) has no properties row, so no molecular weight
+            (5, '120.10', '-0.50', 0, 9, '0.45', 0),
+        ],
+        schema=[
+            'molregno',
+            'mw_freebase',
+            'alogp',
+            'aromatic_rings',
+            'heavy_atoms',
+            'qed_weighted',
+            'num_ro5_violations',
+        ],
+        orient='row',
+    ).with_columns(
+        pl.col('mw_freebase', 'alogp', 'qed_weighted').cast(DECIMAL),
+        pl.col('aromatic_rings', 'heavy_atoms').cast(pl.Int32),
+        pl.col('num_ro5_violations').cast(pl.Int16),
+    )
+    compound_structural_alerts = pl.DataFrame(
+        {'molregno': [1, 1, 1, 1, 5], 'alert_id': [40, 7, 12, 7, 12]},
+    )
+    structural_alerts = pl.DataFrame({
+        'alert_id': [7, 12, 40],
+        'alert_set_id': [4, 1, 1],
+        'alert_name': ['quinone_A(370)', 'Michael acceptor', 'thiol'],
+    })
+    structural_alert_sets = pl.DataFrame({'alert_set_id': [1, 4], 'set_name': ['Glaxo', 'PAINS']})
+    return {
+        'molecule_dictionary': molecule_dictionary,
+        'compound_properties': compound_properties,
+        'compound_structural_alerts': compound_structural_alerts,
+        'structural_alerts': structural_alerts,
+        'structural_alert_sets': structural_alert_sets,
+    }
+
+
+def _with_properties(**overrides: pl.DataFrame) -> pl.DataFrame:
+    t = property_tables() | overrides
+    molecules = pl.DataFrame({'id': [f'CHEMBL{i}' for i in range(1, 7)], 'name': [f'drug {i}' for i in range(1, 7)]})
+    return add_compound_properties(
+        molecules,
+        t['molecule_dictionary'],
+        t['compound_properties'],
+        t['compound_structural_alerts'],
+        t['structural_alerts'],
+        t['structural_alert_sets'],
+    )
+
+
+class TestAddCompoundProperties:
+    def test_appends_the_property_columns_with_their_types(self):
+        result = _with_properties()
+        assert result.columns == ['id', 'name', *molecule_properties_schema.keys()]
+        assert result.select(molecule_properties_schema.keys()).schema == molecule_properties_schema
+
+    def test_keeps_every_molecule_in_order(self):
+        assert _with_properties()['id'].to_list() == [f'CHEMBL{i}' for i in range(1, 7)]
+
+    def test_decimal_properties_become_floats(self):
+        row = rows_by_id(_with_properties())['CHEMBL1']
+        assert (row['mwFreebase'], row['alogp'], row['qedWeighted']) == (493.62, 4.59, 0.39)
+        assert (row['aromaticRings'], row['heavyAtoms'], row['numRo5Violations']) == (4, 37, 0)
+
+    def test_molecule_without_properties_row_has_null_properties(self):
+        row = rows_by_id(_with_properties())['CHEMBL4']
+        assert row['mwFreebase'] is None
+        assert row['alogp'] is None
+        assert row['heavyAtoms'] is None
+
+    def test_alerts_from_every_set_sorted_by_set_then_id(self):
+        alerts = rows_by_id(_with_properties())['CHEMBL1']['structuralAlerts']
+        assert alerts == [
+            {'alertId': 12, 'alertName': 'Michael acceptor', 'setName': 'Glaxo'},
+            {'alertId': 40, 'alertName': 'thiol', 'setName': 'Glaxo'},
+            {'alertId': 7, 'alertName': 'quinone_A(370)', 'setName': 'PAINS'},
+        ]
+
+    def test_molecule_without_alerts_has_an_empty_list(self):
+        assert rows_by_id(_with_properties())['CHEMBL2']['structuralAlerts'] == []
+
+    def test_peptide_rule_edge(self):
+        rows = rows_by_id(_with_properties())
+        assert rows['CHEMBL2']['moleculeClass'] == 'Peptide'
+        assert rows['CHEMBL3']['moleculeClass'] == 'Protein'
+
+    def test_protein_without_molecular_weight_stays_protein(self):
+        assert rows_by_id(_with_properties())['CHEMBL4']['moleculeClass'] == 'Protein'
+
+    def test_other_types_keep_their_chembl_type_and_null_reads_unknown(self):
+        rows = rows_by_id(_with_properties())
+        assert rows['CHEMBL1']['moleculeClass'] == 'Small molecule'
+        assert rows['CHEMBL6']['moleculeClass'] == 'Antibody'
+        assert rows['CHEMBL5']['moleculeClass'] == 'Unknown'
+
+    def test_structure_type_and_natural_product(self):
+        rows = rows_by_id(_with_properties())
+        assert (rows['CHEMBL1']['structureType'], rows['CHEMBL1']['naturalProduct']) == ('MOL', True)
+        assert (rows['CHEMBL4']['structureType'], rows['CHEMBL4']['naturalProduct']) == ('SEQ', False)
+        assert rows['CHEMBL5']['naturalProduct'] is None
+
+    @pytest.mark.parametrize('table', ['molecule_dictionary', 'compound_properties'])
+    def test_duplicate_molregno_fails_instead_of_duplicating_molecules(self, table):
+        duplicated = pl.concat([property_tables()[table], property_tables()[table].head(1)])
+        with pytest.raises(pl.exceptions.ComputeError):
+            _with_properties(**{table: duplicated})
