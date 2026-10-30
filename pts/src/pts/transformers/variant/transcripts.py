@@ -118,3 +118,9 @@ def transcript_fields(core: str, chromosome: str) -> pl.DataFrame:
         )
         .sort('transcript_id')
     )
+
+
+def canonical_transcript_ids(core: str) -> set[str]:
+    """The stable ids of the Ensembl canonical transcripts on every chromosome, from the core tables."""
+    frame = transcripts(CoreDump(core))
+    return set(frame.filter(_attribute('is_canonical').list.contains('1'))['transcriptId'].to_list())

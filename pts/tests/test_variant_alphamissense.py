@@ -8,7 +8,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.alphamissense import alphamissense
+from pts.transformers.variant.alphamissense import alphamissense, partition_alphamissense
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
 
@@ -78,3 +78,12 @@ def test_alphamissense_chromosome_without_rows_is_null(tsv: str):
     found = alphamissense(tsv, 'X', rows((945518, 'C', 'A', 'ENST00000327044')))
     assert found.select('am_class', 'am_pathogenicity').rows() == [(None, None)]
     assert found.height == 1
+
+
+def test_partition_reads_the_same_predictions(tsv: str, tmp_path: Path):
+    parts = partition_alphamissense(tsv, tmp_path, ['1', 'X'])
+    assert parts == {'1': str(tmp_path / '1.parquet'), 'X': str(tmp_path / 'X.parquet')}
+    keys = rows((945518, 'C', 'A', 'ENST00000327044'), (3426142, 'G', 'C', 'ENST00000270722'))
+    assert alphamissense(parts['1'], '1', keys).equals(alphamissense(tsv, '1', keys))
+    assert pl.read_parquet(parts['X']).is_empty()
+    assert alphamissense(parts['X'], 'X', keys)['am_class'].to_list() == [None, None]

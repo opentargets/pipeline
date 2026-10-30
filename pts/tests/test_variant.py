@@ -7,11 +7,15 @@ import hashlib
 import io
 import json
 import re
+import stat
+import sys
+import tarfile
 from pathlib import Path
 from unittest.mock import Mock
 
 import numpy as np
 import polars as pl
+import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 import yaml
 from loguru import logger
@@ -32,14 +36,11 @@ from pts.transformers.variant.index import (
     normalise_score,
     read_variant_annotations,
 )
-from pts.transformers.variant.vep import (
-    amino_acid_change,
-    generate_dbxrefs,
-    list_vep_parts,
-    parse_vep,
-    read_vep,
-    uniprot_accessions,
-)
+from pts.transformers.variant.rows import collect_variants
+from pts.transformers.variant.vep import amino_acid_change, generate_dbxrefs, parse_vep, uniprot_accessions
+from tests.ensembl_fixtures import cells, ddl, write_dump
+from tests.test_variant_colocated import cache_line
+from tests.test_variant_loftee import write_bgzip_fasta
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'vep_sample.jsonl'
 EFFECTS = variant_schema['variantEffect']
@@ -93,7 +94,7 @@ def index_rows(rows: list[dict]) -> pl.DataFrame:
 
 
 def test_sample_preserves_count_and_full_schema():
-    result = parse_vep(read_vep(str(SAMPLE))).collect()
+    result = parse_vep(pl.scan_ndjson(SAMPLE, schema=vep_schema)).collect()
     assert result.schema == variant_schema
     assert result.height == 4
     for row in result.to_dicts():
@@ -102,34 +103,6 @@ def test_sample_preserves_count_and_full_schema():
         assert len({x['targetId'] for x in transcripts}) == len(transcripts)
         assert all(x['isEnsemblCanonical'] for x in transcripts)
         assert all(row[name] is not None for name, dtype in variant_schema.items() if isinstance(dtype, pl.List))
-
-
-def test_parts_are_found_recursively_including_gzip_and_jsonl(tmp_path):
-    nested = tmp_path / 'chunk' / 'nested'
-    nested.mkdir(parents=True)
-    record = {'input': '1\t123\t.\tA\tG', 'extra': 'discarded'}
-    (tmp_path / 'part.jsonl').write_text(json.dumps(record) + '\n')
-    with gzip.open(nested / 'part.json.gz', 'wt') as stream:
-        stream.write(json.dumps(record) + '\n')
-    (tmp_path / '_SUCCESS').touch()
-    parts = list_vep_parts(str(tmp_path))
-    assert [Path(part).name for part in parts] == ['part.json.gz', 'part.jsonl']
-    frames = [read_vep(part).collect() for part in parts]
-    assert [frame.height for frame in frames] == [1, 1]
-    assert all(frame.schema == vep_schema for frame in frames)
-
-
-def test_parts_skip_vep_warning_files(tmp_path):
-    """VEP's `<part>.json_warnings.txt` sits next to the data and is not JSON."""
-    (tmp_path / '0000062a.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
-    (tmp_path / '0000062a.json_warnings.txt').write_text('WARNING: 14 : substr outside of string\n')
-    assert [Path(part).name for part in list_vep_parts(str(tmp_path))] == ['0000062a.json']
-
-
-def test_parts_reject_a_directory_without_vep_files(tmp_path):
-    (tmp_path / 'part.json_warnings.txt').write_text('WARNING: only warnings\n')
-    with pytest.raises(ValueError, match='No VEP JSON files'):
-        list_vep_parts(str(tmp_path))
 
 
 # --- column helpers -----------------------------------------------------------------------------
@@ -247,7 +220,7 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations():
     )
 
 
-def test_omim_ids_keep_their_four_digit_suffix(tmp_path):
+def test_omim_ids_keep_their_four_digit_suffix():
     """VEP writes OMIM IDs as JSON numbers, sometimes without the suffix's trailing zero."""
     record = (
         json
@@ -260,8 +233,7 @@ def test_omim_ids_keep_their_four_digit_suffix(tmp_path):
         .replace('"ENTRY_B"', '171834.0100')
         .replace('"ENTRY_C"', '159530.001')
     )
-    (tmp_path / '00000001.json').write_text(record + '\n')
-    [row] = parse_vep(read_vep(str(tmp_path / '00000001.json'))).collect().to_dicts()
+    [row] = parse_vep(pl.read_ndjson(io.BytesIO(record.encode()), schema=vep_schema).lazy()).collect().to_dicts()
     assert [x['id'] for x in row['dbXrefs'] if x['source'] == 'omim'] == ['600234#0010', '171834#0100', '159530#0010']
 
 
@@ -567,21 +539,285 @@ def test_amino_acid_keys_cover_every_transcript_change():
 
 # --- step and configuration ---------------------------------------------------------------------
 
+FASTVEP_FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
+FASTVEP_SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'
+SIFT_FIXTURES = Path(__file__).parent / 'test_data' / 'sift'
+CONTIG_LENGTH = 1000
 
-def test_variant_step_writes_the_annotated_index(tmp_path):
-    vep = tmp_path / 'vep'
-    vep.mkdir()
-    records = [
-        {
-            'input': '1\t123\t.\tA\tG',
-            'most_severe_consequence': 'missense_variant',
-            'transcript_consequences': [transcript(amino_acids='A/T', protein_end=1, swissprot=['P1.1'])],
+#: A stand-in for fastVEP. It replays `fastvep_sample.json` for a VCF of chromosome 22, exits with
+#: an error for a VCF holding chromosome FAIL, and otherwise reports one canonical missense
+#: consequence on `ENST_<chromosome>` per VCF line.
+FAKE_FASTVEP = r"""#!PYTHON
+import json, shutil, sys
+
+args = sys.argv[1:]
+out = args[args.index('-o') + 1]
+if args[0] == 'cache':
+    open(out, 'w').close()
+    sys.exit(0)
+lines = [line.split('\t') for line in open(args[args.index('--input') + 1]) if not line.startswith('#')]
+chromosomes = {line[0] for line in lines}
+if FAIL in chromosomes:
+    sys.exit('fastVEP failed')
+if chromosomes == {'22'}:
+    shutil.copyfile(SAMPLE, out)
+    sys.exit(0)
+records = [
+    {
+        'id': line[2],
+        'most_severe_consequence': 'missense_variant',
+        'transcript_consequences': [
+            {
+                'transcript_id': f'ENST_{line[0]}',
+                'gene_id': f'ENSG_{line[0]}',
+                'biotype': 'protein_coding',
+                'canonical': 1,
+                'consequence_terms': ['missense_variant'],
+                'impact': 'MODERATE',
+                'amino_acids': 'A/T',
+                'codons': 'Gcc/Acc',
+                'protein_end': 1,
+            }
+        ],
+    }
+    for line in lines
+]
+with open(out, 'w') as handle:
+    handle.write('[\n' + ',\n'.join(json.dumps(record, indent=2) for record in records) + '\n]\n')
+"""
+
+#: Ensembl core tables: one canonical protein coding transcript on each of chromosomes 1 and MT.
+CORE_TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
+    'coord_system': (['coord_system_id', 'species_id', 'name'], [(1, 1, 'chromosome')]),
+    'seq_region': (
+        ['seq_region_id', 'name', 'coord_system_id', 'length'],
+        [(10, '1', 1, CONTIG_LENGTH), (20, 'MT', 1, CONTIG_LENGTH)],
+    ),
+    'gene': (
+        [
+            'gene_id', 'biotype', 'seq_region_id', 'seq_region_start', 'seq_region_end', 'seq_region_strand',
+            'display_xref_id', 'description', 'canonical_transcript_id', 'stable_id',
+        ],
+        [
+            (1, 'protein_coding', 10, 100, 900, 1, 501, None, 100, 'ENSG_1'),
+            (2, 'protein_coding', 20, 100, 900, 1, 502, None, 200, 'ENSG_MT'),
+        ],
+    ),
+    'transcript': (
+        [
+            'transcript_id', 'gene_id', 'seq_region_id', 'seq_region_start', 'seq_region_end',
+            'seq_region_strand', 'biotype', 'canonical_translation_id', 'stable_id',
+        ],
+        [
+            (100, 1, 10, 100, 900, 1, 'protein_coding', 1000, 'ENST_1'),
+            (200, 2, 20, 100, 900, 1, 'protein_coding', 2000, 'ENST_MT'),
+        ],
+    ),
+    'translation': (
+        ['translation_id', 'transcript_id', 'seq_start', 'start_exon_id', 'seq_end', 'end_exon_id', 'stable_id'],
+        [(1000, 100, 1, 1, 801, 1, 'ENSP_1'), (2000, 200, 1, 2, 801, 2, 'ENSP_MT')],
+    ),
+    'exon': (
+        ['exon_id', 'seq_region_id', 'seq_region_start', 'seq_region_end', 'seq_region_strand', 'stable_id'],
+        [(1, 10, 100, 900, 1, 'ENSE_1'), (2, 20, 100, 900, 1, 'ENSE_MT')],
+    ),
+    'exon_transcript': (['exon_id', 'transcript_id', 'rank'], [(1, 100, 1), (2, 200, 1)]),
+    'attrib_type': (['attrib_type_id', 'code', 'name'], [(554, 'is_canonical', 'Ensembl Canonical')]),
+    'transcript_attrib': (['transcript_id', 'attrib_type_id', 'value'], [(100, 554, '1'), (200, 554, '1')]),
+    'external_db': (['external_db_id', 'db_name'], [(2200, 'Uniprot/SWISSPROT'), (1100, 'HGNC')]),
+    'xref': (
+        ['xref_id', 'external_db_id', 'dbprimary_acc', 'display_label'],
+        [(501, 1100, 'HGNC:1', 'GENE1'), (502, 1100, 'HGNC:2', 'GENEMT'), (601, 2200, 'P1', 'P1')],
+    ),
+    'object_xref': (
+        ['object_xref_id', 'ensembl_id', 'ensembl_object_type', 'xref_id'],
+        [(1, 1000, 'Translation', 601)],
+    ),
+    'analysis': (['analysis_id', 'created', 'logic_name'], [(30, None, 'signalp')]),
+    'protein_feature': (['protein_feature_id', 'translation_id', 'hit_name', 'analysis_id'], [(1, 1000, 'x', 30)]),
+}  # fmt: skip
+
+
+def _write_fasta(path: Path) -> None:
+    """Contigs 1, 2 and MT of CONTIG_LENGTH bases around the chromosome 22 slice, as gzip members."""
+
+    def contig(name: str, base: str) -> bytes:
+        lines = [base * 60] * (CONTIG_LENGTH // 60) + [base * (CONTIG_LENGTH % 60)]
+        return gzip.compress(f'>{name}\n'.encode() + '\n'.join(lines).encode() + b'\n')
+
+    slice_ = (FASTVEP_FIXTURES / 'chr22_slice.fa.gz').read_bytes()
+    path.write_bytes(contig('1', 'A') + contig('2', 'C') + slice_ + contig('MT', 'G'))
+
+
+def _write_vep_cache(path: Path, directory: Path) -> None:
+    """An indexed VEP cache with `all_vars.gz` for chromosomes 1 and 22, none for MT."""
+    lines = {
+        '1': cache_line('rs123', 123, 123, 'A/G'),
+        '22': cache_line('rs2542835', 18521430, 18521430, 'A/G', chr='22'),
+    }
+    with tarfile.open(path, 'w:gz') as archive:
+        for chromosome, line in lines.items():
+            member = directory / f'{chromosome}.all_vars.gz'
+            member.write_bytes(gzip.compress(f'{line}\n'.encode()))
+            archive.add(member, arcname=f'homo_sapiens/116_GRCh38/{chromosome}/all_vars.gz')
+
+
+@pytest.fixture(scope='module')
+def step_inputs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+    """The sources every run of the step shares: reference, GERP, cache, SIFT, AlphaMissense, ancestor, core."""
+    directory = tmp_path_factory.mktemp('step_inputs')
+    _write_fasta(directory / 'reference.fa.gz')
+    gerp = pyBigWig.open(str(directory / 'gerp.bw'), 'w')
+    gerp.addHeader([('1', CONTIG_LENGTH), ('2', CONTIG_LENGTH), ('22', 50_818_468)])
+    gerp.addEntries(['1', '22'], [122, 18521429], ends=[123, 18521430], values=[2.5, 1.5])
+    gerp.close()
+    _write_vep_cache(directory / 'vep_cache.tar.gz', directory)
+    (directory / 'alphamissense.tsv').write_text(
+        '# AlphaMissense\n'
+        '#CHROM\tPOS\tREF\tALT\tgenome\tuniprot_id\ttranscript_id\tprotein_variant\tam_pathogenicity\tam_class\n'
+        'chr1\t123\tA\tG\thg38\tP1\tENST_1.1\tA1T\t0.9\tlikely_pathogenic\n'
+    )
+    ancestor = write_bgzip_fasta(directory / 'human_ancestor.fa.gz', {'1': (CONTIG_LENGTH, 1, 'a' * CONTIG_LENGTH)})
+    core = directory / 'core'
+    core.mkdir()
+    write_dump(
+        core,
+        {name: [cells(*row) for row in rows] for name, (_, rows) in CORE_TABLES.items()},
+        ddl({name: columns for name, (columns, _) in CORE_TABLES.items()}),
+    )
+    return {
+        'fasta': str(directory / 'reference.fa.gz'),
+        'gff3': str(FASTVEP_FIXTURES / 'chr22_slice.gff3.gz'),
+        'gerp': str(directory / 'gerp.bw'),
+        'vep_cache': str(directory / 'vep_cache.tar.gz'),
+        'sift_predictions': str(SIFT_FIXTURES / 'protein_function_predictions.txt.gz'),
+        'sift_translation_md5': str(SIFT_FIXTURES / 'translation_md5.txt.gz'),
+        'sift_attrib': str(SIFT_FIXTURES / 'attrib.txt.gz'),
+        'peptides': str(SIFT_FIXTURES / 'Homo_sapiens.GRCh38.pep.all.fa.gz'),
+        'alphamissense': str(directory / 'alphamissense.tsv'),
+        'ancestor': ancestor,
+        'core': str(core),
+    }
+
+
+def _row_sources(directory: Path, variants: list[tuple[str, str | None]]) -> dict[str, str]:
+    """The four row sources: every (variant id, rsID) in the credible sets, the first also in the others."""
+    directory.mkdir(parents=True, exist_ok=True)
+    first = json.dumps({'variantId': variants[0][0], 'variantRsId': variants[0][1]}) + '\n'
+    sources = {}
+    for name in ('uniprot_variants', 'eva'):
+        sources[name] = str(directory / f'{name}.json.gz')
+        with gzip.open(sources[name], 'wt') as stream:
+            stream.write(first)
+    sources['pharmacogenomics'] = str(directory / 'pharmacogenomics')
+    sources['credible_set'] = str(directory / 'credible_set')
+    for name, frame in [('pharmacogenomics', variants[:1]), ('credible_set', variants)]:
+        Path(sources[name]).mkdir()
+        pl.DataFrame(frame, schema={'variantId': pl.String, 'variantRsId': pl.String}, orient='row').write_parquet(
+            Path(sources[name]) / 'part.parquet'
+        )
+    return sources
+
+
+def _fake_fastvep(directory: Path, fail: str | None = None) -> str:
+    script = directory / 'fastvep'
+    script.write_text(
+        FAKE_FASTVEP
+        .replace('PYTHON', sys.executable)
+        .replace('FAIL', repr(fail))
+        .replace('SAMPLE', repr(str(FASTVEP_SAMPLE)))
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return str(script)
+
+
+def _run_step(
+    tmp_path: Path,
+    inputs: dict[str, str],
+    variants: list[tuple[str, str | None]],
+    name: str = 'output',
+    fail: str | None = None,
+    source: dict[str, object] | None = None,
+    settings: dict[str, object] | None = None,
+) -> Path:
+    """Run the step on `variants` with a fake fastVEP, returning its output directory."""
+    work = tmp_path / f'{name}_work'
+    work.mkdir()
+    output = tmp_path / name
+    variant(
+        source={**inputs, **_row_sources(tmp_path / f'{name}_rows', variants), **(source or {})},
+        destination={'output': str(output)},
+        settings={
+            'fastvep_binary': _fake_fastvep(work, fail),
+            'parallel_chromosomes': 2,
+            'fastvep_threads': 1,
+            **(settings or {}),
         },
-        {'input': '2\t5\t.\tC\tT', 'most_severe_consequence': 'intergenic_variant'},
+        config=Mock(work_path=work),
+    )
+    return output
+
+
+def _slice_variants() -> list[tuple[str, str | None]]:
+    """The variants of the chromosome 22 fixture, in its order, with their rsIDs."""
+    rows = pl.read_parquet(FASTVEP_FIXTURES / 'chr22_slice_rows.parquet')
+    return [
+        (f'{chromosome}_{position}_{reference}_{alternate}', None if rs_id == '.' else rs_id)
+        for chromosome, position, rs_id, reference, alternate in rows.iter_rows()
     ]
-    (vep / '00000001.json').write_text(json.dumps(records[0]) + '\n')
-    (vep / '00000002.json').write_text(json.dumps(records[1]) + '\n')
-    (vep / '00000001.json_warnings.txt').write_text('WARNING: ignored\n')
+
+
+@pytest.fixture(scope='module')
+def end_to_end(tmp_path_factory: pytest.TempPathFactory, step_inputs: dict[str, str]) -> tuple[pl.DataFrame, Path]:
+    """The index of chromosomes 1, 22 and MT, and the step's row sources."""
+    tmp_path = tmp_path_factory.mktemp('end_to_end')
+    variants = [('1_123_A_G', 'rs1'), *_slice_variants(), ('MT_123_G_A', None)]
+    output = _run_step(tmp_path, step_inputs, variants)
+    assert list((tmp_path / 'output_work').iterdir()) == [tmp_path / 'output_work' / 'fastvep']
+    return pl.read_parquet(output / '*.parquet'), tmp_path / 'output_rows'
+
+
+def test_variant_end_to_end_with_fake_fastvep(end_to_end):
+    index, rows = end_to_end
+    key = ['chromosome', 'position', 'referenceAllele', 'alternateAllele']
+    collected = collect_variants(
+        str(rows / 'uniprot_variants.json.gz'),
+        str(rows / 'eva.json.gz'),
+        str(rows / 'pharmacogenomics'),
+        str(rows / 'credible_set'),
+    ).collect()
+    assert index.schema == variant_schema
+    assert index.height == collected.height == 52
+    assert index.select(key).sort(key).equals(collected.select(key).sort(key))
+    by_id = {row['variantId']: row for row in index.to_dicts()}
+    assert (
+        by_id['22_19709333_G_A']['mostSevereConsequenceId'] == SEQUENCE_ONTOLOGY['non_coding_transcript_exon_variant']
+    )
+    assert by_id['22_18521430_A_G']['rsIds'] == ['rs2542835']
+    assert sorted(index['chromosome'].unique()) == ['1', '22', 'MT']
+
+
+def test_missing_source_data_is_null(end_to_end):
+    """MT has no `all_vars`, GERP contig or AlphaMissense rows; chromosome 1 has all three."""
+    index, _ = end_to_end
+    by_id = {row['variantId']: row for row in index.to_dicts()}
+    present, missing = by_id['1_123_A_G'], by_id['MT_123_G_A']
+    assert present['rsIds'] == ['rs123']
+    assert {x['method'] for x in present['variantEffect']} >= {'GERP', 'AlphaMissense'}
+    assert missing['rsIds'] == []
+    assert not {x['method'] for x in missing['variantEffect']} & {'GERP', 'AlphaMissense'}
+    assert [x['transcriptId'] for x in missing['transcriptConsequences']] == ['ENST_MT']
+    assert missing['hgvsId'] == 'MT:m.123G>A'
+
+
+def test_failed_chromosome_writes_nothing(tmp_path, step_inputs):
+    variants = [('1_123_A_G', None), *_slice_variants(), ('MT_123_G_A', None)]
+    with pytest.raises(RuntimeError, match='fastVEP failed'):
+        _run_step(tmp_path, step_inputs, variants, fail='22')
+    assert not list(tmp_path.glob('output/part-*.parquet'))
+
+
+def test_variant_step_writes_the_annotated_index(tmp_path, step_inputs):
     (tmp_path / 'gnomad').mkdir()
     pl.DataFrame(
         {'variantId': ['1_123_A_G'], 'chromosome': ['1'], 'rsIds': [['rs1']]},
@@ -591,24 +827,18 @@ def test_variant_step_writes_the_annotated_index(tmp_path):
         {'uniprotAccession': ['P1'], 'aminoAcidChange': ['A1T'], 'variantEffect': [[effect('FoldX', 1.0)]]},
         schema={'uniprotAccession': pl.String, 'aminoAcidChange': pl.String, 'variantEffect': EFFECTS},
     ).write_parquet(tmp_path / 'foldx' / 'part.parquet')
-    output = tmp_path / 'output'
-    variant(
-        source={
-            'vep': str(vep),
-            'variant_annotations': [str(tmp_path / 'gnomad')],
-            'amino_acid_annotations': [str(tmp_path / 'foldx')],
-        },
-        destination={'output': str(output)},
-        settings={'parse_processes': 2},
-        config=Mock(work_path=tmp_path),
+    output = _run_step(
+        tmp_path,
+        step_inputs,
+        [('1_123_A_G', None), ('2_5_C_T', None)],
+        source={'variant_annotations': [str(tmp_path / 'gnomad')], 'amino_acid_annotations': [str(tmp_path / 'foldx')]},
     )
     result = pl.read_parquet(output / '*.parquet')
     assert result.schema == variant_schema
     assert result['variantId'].to_list() == ['1_123_A_G', '2_5_C_T']
     first = result.row(0, named=True)
-    assert first['rsIds'] == ['rs1']
-    assert [x['method'] for x in first['variantEffect']] == ['VEP', 'FoldX']
-    assert sorted(path.name for path in tmp_path.iterdir()) == ['foldx', 'gnomad', 'output', 'vep']
+    assert sorted(first['rsIds']) == ['rs1', 'rs123']
+    assert 'FoldX' in [x['method'] for x in first['variantEffect']]
 
 
 GPN_STAR_CUTOFFS = {'top_10_percent': -2.0, 'top_1_percent': -4.0, 'top_0_1_percent': -6.0, 'minimum': -10.0}
@@ -636,26 +866,23 @@ def _write_gpn_star(directory: Path, chromosome: str, rows: list[tuple[int, str,
     ).write_parquet(directory / f'llr_chr{chromosome}.parquet')
 
 
-def _run_two_chromosome_step(tmp_path: Path, name: str, gpn_star: bool) -> pl.DataFrame:
-    vep = tmp_path / 'vep'
-    vep.mkdir(exist_ok=True)
-    (vep / '00000001.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
-    (vep / '00000002.json').write_text(json.dumps({'input': '2\t5\t.\tC\tT'}) + '\n')
-    source = {'vep': str(vep)}
-    if gpn_star:
-        source['gpn_star'] = str(tmp_path / 'gpn_star')
-    variant(
-        source=source,
-        destination={'output': str(tmp_path / name)},
-        settings={'parse_processes': 2, 'gpn_star': GPN_STAR_CUTOFFS} if gpn_star else {'parse_processes': 2},
-        config=Mock(work_path=tmp_path),
+def _run_two_chromosome_step(
+    tmp_path: Path, inputs: dict[str, str], name: str, gpn_star: bool, **source: object
+) -> pl.DataFrame:
+    output = _run_step(
+        tmp_path,
+        inputs,
+        [('1_123_A_G', None), ('2_5_C_T', None)],
+        name=name,
+        source={'gpn_star': str(tmp_path / 'gpn_star'), **source} if gpn_star else source,
+        settings={'gpn_star': GPN_STAR_CUTOFFS} if gpn_star else None,
     )
-    return pl.read_parquet(tmp_path / name / '*.parquet')
+    return pl.read_parquet(output / '*.parquet')
 
 
-def test_variant_step_adds_gpn_star(tmp_path):
+def test_variant_step_adds_gpn_star(tmp_path, step_inputs):
     _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0), (124, 'A', 'G', -9.0)])
-    result = _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+    result = _run_two_chromosome_step(tmp_path, step_inputs, 'output', gpn_star=True)
     entries = {
         row['variantId']: [x for x in row['variantEffect'] if x['method'] == 'GPN-Star'] for row in result.to_dicts()
     }
@@ -663,69 +890,56 @@ def test_variant_step_adds_gpn_star(tmp_path):
     assert entries['2_5_C_T'] == []
 
 
-def test_variant_step_without_a_gpn_star_file_for_a_chromosome(tmp_path):
-    plain = _run_two_chromosome_step(tmp_path, 'plain', gpn_star=False)
+def test_variant_step_without_a_gpn_star_file_for_a_chromosome(tmp_path, step_inputs):
+    plain = _run_two_chromosome_step(tmp_path, step_inputs, 'plain', gpn_star=False)
     _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
-    scored = _run_two_chromosome_step(tmp_path, 'scored', gpn_star=True)
+    scored = _run_two_chromosome_step(tmp_path, step_inputs, 'scored', gpn_star=True)
     assert scored.filter(pl.col('chromosome') == '2').equals(plain.filter(pl.col('chromosome') == '2'))
     assert not scored.filter(pl.col('chromosome') == '1').equals(plain.filter(pl.col('chromosome') == '1'))
 
 
-def test_variant_step_warns_about_a_missing_standard_chromosome(tmp_path):
+def test_variant_step_warns_about_a_missing_standard_chromosome(tmp_path, step_inputs):
     _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
     messages: list[str] = []
     sink_id = logger.add(messages.append, level='WARNING', format='{message}')
     try:
-        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+        _run_two_chromosome_step(tmp_path, step_inputs, 'output', gpn_star=True)
     finally:
         logger.remove(sink_id)
     assert [m for m in messages if 'GPN-Star' in m and 'chromosome 2' in m]
     assert not [m for m in messages if 'chromosome 1 ' in m]
 
 
-def test_variant_step_needs_cutoffs_with_a_gpn_star_source(tmp_path):
+def test_variant_step_needs_cutoffs_with_a_gpn_star_source(tmp_path, step_inputs):
     with pytest.raises(ValueError, match='cut-offs'):
         variant(
-            source={'vep': str(tmp_path / 'missing'), 'gpn_star': str(tmp_path / 'gpn_star')},
+            source={**step_inputs, **_row_sources(tmp_path / 'rows', [('1_123_A_G', None)]), 'gpn_star': 'gpn_star'},
             destination={'output': str(tmp_path / 'output')},
             settings={},
             config=Mock(work_path=tmp_path),
         )
 
 
-def test_variant_step_rejects_an_empty_gpn_star_source(tmp_path):
+def test_variant_step_rejects_an_empty_gpn_star_source(tmp_path, step_inputs):
     (tmp_path / 'gpn_star').mkdir()
     with pytest.raises(ValueError, match='llr_chr'):
-        _run_two_chromosome_step(tmp_path, 'output', gpn_star=True)
+        _run_two_chromosome_step(tmp_path, step_inputs, 'output', gpn_star=True)
 
 
-def test_variant_step_refuses_an_existing_destination(tmp_path):
+def test_variant_step_refuses_an_existing_destination(tmp_path, step_inputs):
     (tmp_path / 'output').mkdir()
     with pytest.raises(ValueError, match='already exists'):
-        variant(
-            source={'vep': str(tmp_path / 'vep')},
-            destination={'output': str(tmp_path / 'output')},
-            settings={},
-            config=Mock(work_path=tmp_path),
-        )
+        _run_step(tmp_path, step_inputs, [('1_123_A_G', None)])
 
 
 @pytest.mark.parametrize('source', ['variant_annotations', 'amino_acid_annotations'])
-def test_variant_step_rejects_an_empty_annotation_source(tmp_path, source):
+def test_variant_step_rejects_an_empty_annotation_source(tmp_path, step_inputs, source):
     """An empty gnomAD or FoldX input fails the step instead of silently annotating nothing."""
-    vep = tmp_path / 'vep'
-    vep.mkdir()
-    (vep / '00000001.json').write_text(json.dumps({'input': '1\t123\t.\tA\tG'}) + '\n')
     empty = tmp_path / 'empty'
     empty.mkdir()
     pl.DataFrame(schema={'variantId': pl.String}).write_parquet(empty / 'part.parquet')
     with pytest.raises(ValueError, match='No annotations found'):
-        variant(
-            source={'vep': str(vep), source: [str(empty)]},
-            destination={'output': str(tmp_path / 'output')},
-            settings={'parse_processes': 1},
-            config=Mock(work_path=tmp_path),
-        )
+        _run_step(tmp_path, step_inputs, [('1_123_A_G', None)], source={source: [str(empty)]})
 
 
 def test_variant_configuration_matches_models():
@@ -737,7 +951,18 @@ def test_variant_configuration_matches_models():
     VariantDestination.model_validate(task['destination'])
     VariantSettings.model_validate(task['settings'])
     assert task['source']['gpn_star'] == 'input/variant/gpn_star'
+    assert 'vep' not in task['source']
     GpnStarCutoffs.model_validate(task['settings']['gpn_star'])
+
+
+def test_ppp_variant_step_differs_only_by_the_lof_curation():
+    root = Path(__file__).parents[2]
+    base = yaml.safe_load((root / 'pts' / 'config.yaml').read_text())['steps']['variant']
+    override_path = root / 'orchestration/src/orchestration/dags/config/ppp/pts.override.yaml'
+    override = yaml.safe_load(override_path.read_text())['steps']['variant']
+    [task] = [spec for spec in override if spec.get('transformer') == 'variant']
+    task['source']['variant_annotations'].remove('intermediate/variant/lof_curation')
+    assert override == base
 
 
 def test_gpn_star_cutoffs_are_in_step_with_the_revision():
@@ -759,7 +984,14 @@ def test_gpn_star_cutoffs_are_in_step_with_the_revision():
 
 
 @pytest.mark.parametrize(
-    'settings', [{'hash_threshold': 0}, {'parse_processes': 0}, {'parse_threads': 0}, {'unknown': 1}]
+    'settings',
+    [
+        {'hash_threshold': 0},
+        {'fastvep_threads': 0},
+        {'parallel_chromosomes': 0},
+        {'parse_processes': 2},
+        {'unknown': 1},
+    ],
 )
 def test_variant_settings_are_validated(settings):
     with pytest.raises(ValidationError):

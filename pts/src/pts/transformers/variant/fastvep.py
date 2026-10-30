@@ -82,14 +82,15 @@ def write_vcf(rows: pl.DataFrame, path: Path, sequence: bytes) -> None:
     """Write rows as a VCF 4.2 in VEP's input allele form, sorted by chromosome, position and alleles.
 
     `ID` is the row's 0-based ordinal in `rows`. An allele left empty by the trim is padded with
-    the reference base before it, from the chromosome `sequence` (byte i being position i + 1).
+    the reference base before it, from the chromosome `sequence` (byte i being position i + 1);
+    without that base, as for a contig the FASTA lacks, the row is written as given.
     """
     frame = vep_allele_form(
         rows.lazy().select('chromosome', 'position', 'referenceAllele', 'alternateAllele').with_row_index('id')
     ).collect()
     indel = (pl.col('vepReference') == '-') | (pl.col('vepAlternate') == '-')
-    padded = indel & (pl.col('vepStart') > 1)
-    bases = np.frombuffer(sequence, dtype=np.uint8)
+    padded = indel & (pl.col('vepStart') > 1) & (pl.col('vepStart') - 1 <= len(sequence))
+    bases = np.frombuffer(sequence or b'N', dtype=np.uint8)
     pad_index = frame.select(pl.when(padded).then(pl.col('vepStart') - 2).otherwise(0)).to_series().to_numpy()
     pads = pl.Series('_pad', list(bases[pad_index].tobytes().decode('ascii')), dtype=pl.String)
     frame = frame.with_columns(pads).with_columns(

@@ -1,24 +1,24 @@
-"""Variant index generation from VEP output and supplementary annotations.
+"""Variant index generation with fastVEP and supplementary annotations.
 
-Ported from Gentropy's `variant_index` step. VEP output is parsed into the variant index,
-supplementary variant annotations (gnomAD, LoF curation) are merged by variant, and
-amino-acid level predictions (FoldX) are added through each variant's first transcript with
-an amino-acid change.
+The variant rows are collected from the evidence and credible sets, then annotated one chromosome
+at a time by `chromosome.annotate_chromosomes`: fastVEP, then joins on the mirrored Ensembl data
+(transcript fields, colocated variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the VEP
+records that `parse_vep` turns into index rows. The inputs these joins share are prepared once,
+before the chromosomes run.
 
-VEP parts are parsed into local Parquet by a pool of processes, each with few polars threads.
 The index is then annotated one chromosome at a time, reading only that chromosome's
-annotations, in batches of variants annotated in parallel; each chromosome is written as one
-part of the output.
+annotations, in batches of variants annotated in parallel: GPN-Star scores, supplementary
+variant annotations (gnomAD, LoF curation) merged by variant, and amino-acid level predictions
+(FoldX) through each variant's first transcript with an amino-acid change. Each chromosome is
+written as one part of the output.
 """
 
 from __future__ import annotations
 
-import multiprocessing
+import gzip
 import os
-from collections import defaultdict
-from collections.abc import Generator
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from contextlib import contextmanager
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -26,10 +26,15 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
+from pts.transformers.variant.alphamissense import partition_alphamissense
+from pts.transformers.variant.chromosome import Shared, annotate_chromosomes
+from pts.transformers.variant.colocated import extract_all_vars
+from pts.transformers.variant.fastvep import build_cache, prepare_gff3
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, add_gpn_star, gpn_star_files, read_gpn_star
 from pts.transformers.variant.index import (
     add_annotation,
@@ -39,15 +44,40 @@ from pts.transformers.variant.index import (
     read_variant_annotations,
     require_rows,
 )
-from pts.transformers.variant.vep import list_vep_parts, parse_vep, read_vep
+from pts.transformers.variant.rows import collect_variants
+from pts.transformers.variant.sift import sift_matrices
+from pts.transformers.variant.transcripts import canonical_transcript_ids
+
+COPY_BYTES = 64 << 20
 
 
 class VariantSource(BaseModel):
-    """VEP output and supplementary annotation paths."""
+    """Variant rows, the reference data fastVEP and its joins read, and supplementary annotation paths."""
 
     model_config = ConfigDict(extra='forbid')
 
-    vep: str
+    uniprot_variants: str
+    eva: str
+    pharmacogenomics: str
+    credible_set: str
+    fasta: str
+    """The gzip GRCh38 primary assembly FASTA."""
+    gff3: str
+    gerp: str
+    """The GERP conservation bigWig."""
+    vep_cache: str
+    """The indexed VEP cache tarball, read for its `all_vars.gz`."""
+    sift_predictions: str
+    """The variation dump's `protein_function_predictions.txt.gz`."""
+    sift_translation_md5: str
+    sift_attrib: str
+    peptides: str
+    """The `pep.all.fa.gz` FASTA, whose md5s key the SIFT matrices."""
+    alphamissense: str
+    ancestor: str
+    """The bgzip LOFTEE human ancestor FASTA, with its `.fai` and `.gzi` next to it."""
+    core: str
+    """Directory of the Ensembl core database dump."""
     variant_annotations: list[str] = Field(default_factory=list)
     amino_acid_annotations: list[str] = Field(default_factory=list)
     gpn_star: str | None = None
@@ -62,66 +92,111 @@ class VariantDestination(BaseModel):
 
 
 class VariantSettings(BaseModel):
-    """Identifier hashing and parallelism."""
+    """Identifier hashing, fastVEP and parallelism."""
 
     model_config = ConfigDict(extra='forbid')
 
     hash_threshold: int = Field(default=300, gt=0)
     """Identifiers at least this long are hashed."""
-    parse_processes: int | None = Field(default=None, gt=0)
-    """Processes parsing VEP parts at the same time; one per CPU by default."""
-    parse_threads: int = Field(default=1, gt=0)
-    """Polars threads in each parsing process."""
+    fastvep_binary: str = 'fastvep'
+    fastvep_threads: int = Field(default=8, gt=0)
+    """Threads of each fastVEP run, and polars threads of each chromosome's process."""
+    parallel_chromosomes: int = Field(default=4, gt=0)
+    """Chromosomes annotated at the same time."""
     batch_size: int = Field(default=5_000, gt=0)
     """Variants per batch when annotating a chromosome."""
     gpn_star: GpnStarCutoffs | None = None
     """Cut-offs normalising GPN-Star scores; required with a GPN-Star source."""
 
 
-@contextmanager
-def _environment(name: str, value: str) -> Generator[None]:
-    previous = os.environ.get(name)
-    os.environ[name] = value
-    try:
-        yield
-    finally:
-        if previous is None:
-            del os.environ[name]
-        else:
-            os.environ[name] = previous
+def _local(path: str, directory: Path) -> str:
+    """`path` itself when it is local, else a copy of it in `directory`."""
+    if '://' not in path:
+        return path
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / path.rsplit('/', 1)[-1]
+    with StorageHandle(path).open('rb') as source, target.open('wb') as out:
+        shutil.copyfileobj(source, out, COPY_BYTES)
+    return str(target)
 
 
-def parse_part(part: str, path: Path, hash_threshold: int) -> list[str]:
-    """Parse one VEP part into a Parquet file, returning the chromosomes it holds."""
-    frame = parse_vep(read_vep(part), hash_threshold).collect(engine='streaming')
-    frame.write_parquet(path)
-    return frame['chromosome'].unique().to_list()
-
-
-def parse_parts(
-    parts: list[str],
-    directory: Path,
-    hash_threshold: int,
-    processes: int | None = None,
-    threads: int = 1,
-) -> dict[str, list[Path]]:
-    """Parse each VEP part into its own Parquet file, grouped by the chromosomes it holds."""
+def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[str, Path, Path]:
+    """The local gzip FASTA, the FASTA uncompressed, and the prepared GFF3 with its fastVEP cache."""
     directory.mkdir(parents=True)
-    paths = [directory / f'{number:08d}.parquet' for number in range(len(parts))]
-    by_chromosome: dict[str, list[Path]] = defaultdict(list)
-    with (
-        _environment('POLARS_MAX_THREADS', str(threads)),
-        ProcessPoolExecutor(processes, mp_context=multiprocessing.get_context('spawn')) as pool,
-    ):
-        parsed = pool.map(parse_part, parts, paths, [hash_threshold] * len(parts))
-        for number, (path, chromosomes) in enumerate(zip(paths, parsed, strict=True)):
-            if number % 500 == 0:
-                logger.info('Parsed VEP part {} of {}', number + 1, len(parts))
-            for chromosome in chromosomes:
-                by_chromosome[chromosome].append(path)
-    if not by_chromosome:
-        raise ValueError('No VEP records found')
-    return by_chromosome
+    fasta = _local(sources.fasta, directory)
+    plain = directory / Path(fasta).name.removesuffix('.gz')
+    with gzip.open(fasta, 'rb') as source, plain.open('wb') as out:
+        shutil.copyfileobj(source, out, COPY_BYTES)
+    gff3 = prepare_gff3(sources.gff3, directory)
+    build_cache(gff3, plain, binary)
+    return fasta, plain, gff3
+
+
+def _sift(sources: VariantSource, path: Path) -> Path:
+    """The SIFT matrices of the canonical transcripts, written to `path`."""
+    matrices = sift_matrices(
+        sources.sift_predictions,
+        sources.sift_translation_md5,
+        sources.sift_attrib,
+        sources.peptides,
+        canonical_transcript_ids(sources.core),
+    )
+    matrices.write_parquet(path)
+    return path
+
+
+def _ancestor(path: str, directory: Path) -> str:
+    """The human ancestor FASTA and its indexes, local."""
+    for index in (f'{path}.fai', f'{path}.gzi'):
+        _local(index, directory)
+    return _local(path, directory)
+
+
+def _rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dict[str, int]]:
+    """Each chromosome's rows written to `directory/<chromosome>.parquet`, and their number."""
+    rows = collect_variants(
+        sources.uniprot_variants, sources.eva, sources.pharmacogenomics, sources.credible_set
+    ).collect(engine='streaming')
+    if rows.is_empty():
+        raise ValueError('No variant rows found')
+    directory.mkdir(parents=True)
+    paths, sizes = {}, {}
+    for (chromosome,), frame in rows.partition_by('chromosome', as_dict=True, maintain_order=True).items():
+        paths[str(chromosome)] = directory / f'{chromosome}.parquet'
+        sizes[str(chromosome)] = frame.height
+        frame.write_parquet(paths[str(chromosome)])
+    logger.info('Collected {} variant rows on {} chromosomes', rows.height, len(paths))
+    return paths, sizes
+
+
+def _index_by_chromosome(sources: VariantSource, options: VariantSettings, scratch: Path) -> dict[str, Path]:
+    """The parsed index of every chromosome, from its rows, fastVEP and the joins on reference data."""
+    rows, sizes = _rows(sources, scratch / 'rows')
+    with ThreadPoolExecutor() as pool:
+        reference = pool.submit(_reference, sources, options.fastvep_binary, scratch / 'reference')
+        all_vars = pool.submit(extract_all_vars, sources.vep_cache, scratch / 'all_vars')
+        alphamissense = pool.submit(partition_alphamissense, sources.alphamissense, scratch / 'alphamissense', rows)
+        sift = pool.submit(_sift, sources, scratch / 'sift.parquet')
+        gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
+        ancestor = pool.submit(_ancestor, sources.ancestor, scratch / 'ancestor')
+        fasta, plain_fasta, gff3 = reference.result()
+        shared = Shared(
+            fasta=fasta,
+            plain_fasta=plain_fasta,
+            gff3=gff3,
+            gerp=gerp.result(),
+            ancestor=ancestor.result(),
+            core=sources.core,
+            sift=sift.result(),
+            binary=options.fastvep_binary,
+            threads=options.fastvep_threads,
+            hash_threshold=options.hash_threshold,
+            directory=scratch / 'chromosomes',
+        )
+        extracted, partitions = all_vars.result(), alphamissense.result()
+    for chromosome in sorted(set(rows) - set(extracted)):
+        logger.warning('No colocated variants for chromosome {}: the VEP cache has no all_vars', chromosome)
+    return annotate_chromosomes(rows, sizes, extracted, partitions, shared, options.parallel_chromosomes)
 
 
 STANDARD = {*(str(number) for number in range(1, 23)), 'X', 'Y'}
@@ -159,12 +234,8 @@ def variant(
     gpn_star_by_chromosome = gpn_star_files(sources.gpn_star) if sources.gpn_star is not None else {}
 
     with TemporaryDirectory(dir=config.work_path) as scratch:
-        parts = list_vep_parts(sources.vep)
-        logger.info('Parsing {} VEP parts from {}', len(parts), sources.vep)
-        by_chromosome = parse_parts(
-            parts, Path(scratch) / 'vep', options.hash_threshold, options.parse_processes, options.parse_threads
-        )
-        index = pl.scan_parquet(sorted({path for paths in by_chromosome.values() for path in paths}))
+        by_chromosome = _index_by_chromosome(sources, options, Path(scratch))
+        index = pl.scan_parquet([by_chromosome[chromosome] for chromosome in sorted(by_chromosome)])
 
         annotation_parts = []
         for path in sources.variant_annotations:
@@ -187,7 +258,7 @@ def variant(
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
             for number, chromosome in enumerate(sorted(by_chromosome)):
                 on_chromosome = pl.col('chromosome') == chromosome
-                frame = pl.scan_parquet(by_chromosome[chromosome]).filter(on_chromosome).collect()
+                frame = pl.read_parquet(by_chromosome[chromosome])
                 loci = frame.select('chromosome', 'position').unique().lazy()
                 variant_annotations = [
                     read_variant_annotations(located[chromosome], options.hash_threshold, loci)

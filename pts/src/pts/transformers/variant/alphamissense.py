@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from pathlib import Path
+
 import polars as pl
 
 KEY = ['position', 'referenceAllele', 'alternateAllele', 'transcript_id']
@@ -19,11 +22,40 @@ SCHEMA = pl.Schema({
 })
 
 
+def _scan(path: str) -> pl.LazyFrame:
+    """The AlphaMissense file, or one chromosome of it written by `partition_alphamissense`."""
+    if path.endswith('.parquet'):
+        return pl.scan_parquet(path)
+    return pl.scan_csv(path, separator='\t', comment_prefix='#', has_header=False, schema=SCHEMA)
+
+
+def partition_alphamissense(path: str, directory: Path, chromosomes: Iterable[str]) -> dict[str, str]:
+    """The AlphaMissense rows of each chromosome, read in one pass, as `directory/<chromosome>.parquet`.
+
+    Every chromosome gets a file, without rows when the source has none for it.
+
+    Returns:
+        Chromosome to the path of its file, which `alphamissense` reads in place of the source.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    names = {chromosome: f'chr{chromosome}' for chromosome in chromosomes}
+    frame = (
+        _scan(path)
+        .filter(pl.col('chromosome').is_in(list(names.values())))
+        .select('chromosome', *KEY, 'am_pathogenicity', 'am_class')
+        .collect(engine='streaming')
+    )
+    parts = {}
+    for chromosome, name in names.items():
+        parts[chromosome] = str(directory / f'{chromosome}.parquet')
+        frame.filter(pl.col('chromosome') == name).write_parquet(parts[chromosome])
+    return parts
+
+
 def _predictions(path: str, chromosome: str) -> pl.DataFrame:
     """The AlphaMissense rows of one chromosome, with the transcript id stripped of its version."""
     return (
-        pl
-        .scan_csv(path, separator='\t', comment_prefix='#', has_header=False, schema=SCHEMA)
+        _scan(path)
         .filter(pl.col('chromosome') == f'chr{chromosome}')
         .with_columns(pl.col('transcript_id').str.replace(r'\.\d+$', ''))
         .unique(KEY, keep='first', maintain_order=True)
@@ -40,7 +72,7 @@ def alphamissense(path: str, chromosome: str, rows: pl.DataFrame) -> pl.DataFram
     `#CHROM` carries a `chr` prefix, and its rows are single-base substitutions.
 
     Args:
-        path: The `AlphaMissense_hg38.tsv.gz` file, local or remote.
+        path: The `AlphaMissense_hg38.tsv.gz` file, local or remote, or its `partition_alphamissense` part.
         chromosome: The chromosome of `rows`, without the `chr` prefix.
         rows: One row per transcript consequence, with `position`, `referenceAllele`,
             `alternateAllele` and the unversioned `transcript_id`.

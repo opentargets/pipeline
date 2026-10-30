@@ -42,10 +42,7 @@ def fake_binary(directory: Path, body: str) -> str:
     """A shell script standing in for fastVEP; `$out` is the value of its `-o` argument."""
     script = directory / 'fastvep'
     script.write_text(
-        '#!/bin/sh\n'
-        'out=""; prev=""\n'
-        'for arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\n'
-        f'{body}\n'
+        f'#!/bin/sh\nout=""; prev=""\nfor arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\n{body}\n'
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return str(script)
@@ -113,6 +110,25 @@ def test_write_vcf(tmp_path: Path) -> None:
         # GCA>GA trims G, then A: C at 12 is deleted, padded with G at 11.
         '1\t11\t4\tGC\tG\t.\t.\t.',
     ]
+
+
+def test_write_vcf_without_a_sequence(tmp_path: Path) -> None:
+    """A contig the FASTA lacks writes indels as given, without a padding base."""
+    rows = pl.DataFrame(
+        {
+            'chromosome': ['1', '1'],
+            'position': [4, 7],
+            'rsId': ['.', '.'],
+            'referenceAllele': ['C', 'AT'],
+            'alternateAllele': ['G', 'T'],
+        },
+        schema_overrides={'position': pl.Int32},
+    )
+    path = tmp_path / 'rows.vcf'
+
+    write_vcf(rows, path, b'')
+
+    assert path.read_text().splitlines()[2:] == ['1\t4\t0\tC\tG\t.\t.\t.', '1\t7\t1\tAT\tT\t.\t.\t.']
 
 
 def test_build_cache_next_to_the_gff3(tmp_path: Path) -> None:

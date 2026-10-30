@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.transcripts import transcript_fields
+from pts.transformers.variant.transcripts import canonical_transcript_ids, transcript_fields
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
 #: Table name to (columns in DDL order, rows). Transcripts 301752 and 304535 are the human miRNAs
@@ -220,3 +220,7 @@ def test_readthrough_transcripts_absent(core: str) -> None:
 
 def test_only_the_requested_chromosome(core: str) -> None:
     assert transcript_fields(core, '1')['transcript_id'].to_list() == ['ENST_CHR1']
+
+
+def test_canonical_transcript_ids(core: str) -> None:
+    assert canonical_transcript_ids(core) == {'ENST_CODING'}

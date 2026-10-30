@@ -1,43 +1,24 @@
-"""Parse Ensembl VEP JSON output into the variant index, ported from Gentropy's VEP parser.
+"""Parse VEP records (`pts.schemas.vep`) into the variant index, ported from Gentropy's VEP parser.
 
 Differences from Gentropy: consequence terms use the corrected Sequence Ontology spelling
 (see `consequences.py`), SIFT comes from the canonical transcript with the lowest score rather
-than the highest, PolyPhen is not extracted (VEP runs without it), OMIM variant suffixes keep
-their four digits, and only VEP JSON parts are read, never VEP's `<part>.json_warnings.txt` files.
+than the highest, PolyPhen is not extracted (VEP runs without it), and OMIM variant suffixes keep
+their four digits.
 """
 
 from __future__ import annotations
 
-import re
-
 import polars as pl
 
 from pts.schemas.variant import variant_schema
-from pts.schemas.vep import vep_schema
-from pts.transformers.utils.dataset import list_parts
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.index import fill_null_arrays, normalise_score
 from pts.transformers.variant.sift import SEVERITY
 
-#: VEP data parts, optionally gzipped; excludes VEP's `<part>.json_warnings.txt`.
-VEP_PART = re.compile(r'\.jsonl?(\.gz)?$')
 MISSENSE = 'SO_0001583'
 
 _xref_dtype = variant_schema['dbXrefs']
-
-
-def list_vep_parts(path: str) -> list[str]:
-    """The VEP JSON parts below `path`, or `path` itself when it is a file."""
-    parts = [part for part in list_parts(path, '**/*.json*') if VEP_PART.search(part)]
-    if not parts:
-        raise ValueError(f'No VEP JSON files found in {path}')
-    return parts
-
-
-def read_vep(path: str) -> pl.LazyFrame:
-    """Scan one VEP JSON part with the fields the index reads."""
-    return pl.scan_ndjson(path, schema=vep_schema)
 
 
 def generate_dbxrefs(ids: pl.Expr, source: str) -> pl.Expr:
