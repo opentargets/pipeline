@@ -269,7 +269,6 @@ def test_all_predictors_without_sift_or_polyphen():
     result = parsed(
         transcript_consequences=[
             transcript(
-                cadd_phred=10,
                 lof='HC',
                 lof_filter='flag',
                 conservation=3,
@@ -277,7 +276,6 @@ def test_all_predictors_without_sift_or_polyphen():
             ),
             transcript(
                 gene_id='g2',
-                cadd_phred=20,
                 lof='LC',
                 conservation=5,
                 alphamissense={'am_class': 'benign', 'am_pathogenicity': 0.9},
@@ -285,8 +283,7 @@ def test_all_predictors_without_sift_or_polyphen():
         ],
     )
     effects = {x['method']: x for x in result['variantEffect']}
-    assert list(effects) == ['CADD', 'LOFTEE', 'GERP', 'AlphaMissense', 'VEP']
-    assert effects['CADD']['score'] == 20
+    assert list(effects) == ['LOFTEE', 'GERP', 'AlphaMissense', 'VEP']
     assert effects['LOFTEE']['assessment'] == 'LC'
     assert effects['GERP']['score'] == 5
     assert effects['AlphaMissense']['targetId'] == 'ENSG1'
@@ -298,14 +295,14 @@ def test_predictor_comes_from_the_first_transcript_with_the_highest_score():
     result = parsed(
         transcript_consequences=[
             transcript(gene_id='none'),
-            transcript(gene_id='first', cadd_phred=5),
-            transcript(gene_id='second', cadd_phred=5),
-            transcript(gene_id='lower', cadd_phred=1),
+            transcript(gene_id='first', conservation=5),
+            transcript(gene_id='second', conservation=5),
+            transcript(gene_id='lower', conservation=1),
         ]
     )
     effects = {x['method']: x for x in result['variantEffect']}
-    assert effects['CADD']['targetId'] == 'first'
-    assert 'GERP' not in effects
+    assert effects['GERP']['targetId'] == 'first'
+    assert 'LOFTEE' not in effects
 
 
 def test_loftee_ties_keep_the_first_transcript():
@@ -397,9 +394,6 @@ def _rescale(score: float, low: float, high: float, minimum: float, maximum: flo
         ('AlphaMissense', 0.0, None, -1.0),
         ('AlphaMissense', 0.3, None, _rescale(0.3, 0.06, 0.77, -0.25, 0.25)),
         ('AlphaMissense', 0.77, None, _rescale(0.77, 0.06, 0.77, -0.25, 0.25)),
-        ('CADD', 10.0, None, 0.0),
-        ('CADD', 17.3, None, _rescale(17.3, 10, 20, 0.0, 0.5)),
-        ('CADD', 81.0, None, 1.0),
         ('VEP', 0.4, None, float(np.float32(0.4))),
         ('GERP', -5.0, None, 0.0),
         ('GERP', 2.0, None, 0.75),

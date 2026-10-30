@@ -23,7 +23,6 @@ vep_schema = pl.Schema({
             'appris': pl.String,
             'mane_select': pl.String,
             'tssdistance': pl.Int64,
-            'cadd_phred': pl.Float64,
             'canonical': pl.Int64,
             'codons': pl.String,
             'consequence_terms': pl.List(pl.String),

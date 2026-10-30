@@ -306,7 +306,6 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
     consequence = pl.col('most_severe_consequence')
     rsids = colocated.list.eval(pl.element().struct.field('id'))
     effects = pl.concat_list(
-        variant_effect(transcripts, 'CADD', 'cadd_phred'),
         variant_effect(transcripts, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
         variant_effect(transcripts, 'GERP', 'conservation'),
         alpha_missense_effect(transcripts),

@@ -37,18 +37,6 @@ def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr
                 .when(value >= 0.77)
                 .then(min_max_scaler(value, 0.77, 1, 0.25, 1))
             )
-        case 'CADD':
-            result = (
-                pl
-                .when(value <= 10)
-                .then(min_max_scaler(value, 0, 10, -1.0, 0.0))
-                .when(value <= 20)
-                .then(min_max_scaler(value, 10, 20, 0.0, 0.5))
-                .when(value <= 30)
-                .then(min_max_scaler(value, 20, 30, 0.5, 0.75))
-                .when(value > 30)
-                .then(min_max_scaler(value, 30, 81, 0.75, 1))
-            )
         case 'GERP':
             result = (
                 pl
