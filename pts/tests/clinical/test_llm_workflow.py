@@ -20,6 +20,8 @@ from tests.fake_openai import (
     connection_error,
     flex_unavailable,
     rate_limited,
+    status_error,
+    text_status_error,
     unprocessable,
 )
 
@@ -172,8 +174,12 @@ def test_flex_unavailable_twice_fails_after_auto() -> None:
     assert [call['service_tier'] for call in client.calls] == ['flex', 'auto']
 
 
-def test_plain_rate_limit_on_flex_does_not_fall_back() -> None:
-    error = rate_limited()
+@pytest.mark.parametrize(
+    'error',
+    [rate_limited(), status_error(429, None, 'Rate limit reached'), text_status_error(429, 'Too Many Requests')],
+    ids=['other code', 'no code', 'non-dict body'],
+)
+def test_plain_rate_limit_on_flex_does_not_fall_back(error: Exception) -> None:
     client = FakeClient({'prompt 1': error})
 
     result = _extract(client, [('nct1', 'prompt 1')], service_tier='flex')

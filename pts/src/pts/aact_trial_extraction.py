@@ -7,26 +7,33 @@ digest of the response schema, and the output the JSON of the validated model.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import polars as pl
 from loguru import logger
+from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, text_sha256, write_run
-from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, llm_workflow, sample_report
-from pts.transformers.clinical.llm_workflow import SYSTEMIC_ERROR_TYPES, run_extraction
+from pts.tasks.llm_extract import _import_class
+from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
+from pts.transformers.clinical.llm_workflow import (
+    SYSTEMIC_ERROR_TYPES,
+    Extracted,
+    Failed,
+    client_timeout,
+    extract_prompts,
+)
 from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
 
 if TYPE_CHECKING:
@@ -67,29 +74,6 @@ IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
-LLM_WORKFLOW_PATCH_LOCK = Lock()
-"""Serialises temporary patches to the LLM workflow's module globals."""
-
-
-class _AsyncioWithClientCleanup:
-    """Delegate asyncio within the LLM workflow while closing clients on the same event loop."""
-
-    def __init__(self, module: Any, clients: list[Any]) -> None:
-        self._module = module
-        self._clients = clients
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._module, name)
-
-    def run(self, coroutine: Any, **kwargs: Any) -> Any:
-        async def run_with_cleanup() -> Any:
-            try:
-                return await coroutine
-            finally:
-                for client in self._clients:
-                    await client.close()
-
-        return self._module.run(run_with_cleanup(), **kwargs)
 
 
 def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None) -> pl.DataFrame:
@@ -141,12 +125,14 @@ def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
     )
 
 
-def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
-    """Run the LLM over one shard and return a row per trial it extracted, and the errors of the rest.
+def extract(
+    shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt: str, model_cls: type[BaseModel]
+) -> tuple[dict[str, BaseModel], dict[str, str]]:
+    """Run the LLM over one shard and return the extraction of each trial it extracted, and the errors of the rest.
 
-    ``run_extraction`` returns only what succeeded and logs the rest, so
-    trials the model failed on are simply absent from the rows. Their errors,
-    ``<error_type>: <error_message>`` by trial id, are those the workflow wrote.
+    Errors are ``<error_type>: <error_message>`` by trial id.
+
+    The client is opened, used and closed on a worker thread's own event loop.
 
     Raises:
         ComputeAborted: If the OpenAI key cannot be read, or a shard of at least
@@ -158,70 +144,63 @@ def extract(shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str) 
     except OSError as exc:
         msg = f'cannot read the OpenAI key at {spec.openai_key_path}: {exc}'
         raise ComputeAborted(msg) from exc
+    if not openai_key:
+        raise ValueError('openai_key must be a non-empty string.')
 
-    prompts = shard.select('id', 'prompt').to_dicts()
-    if len(prompts) == 1:
-        # run_extraction treats a single prompt as interactive inspect mode
-        # and returns None, so never hand it exactly one
-        prompts = prompts * 2
+    prompts = list(shard.select('id', 'prompt').iter_rows())
 
-    errors: dict[str, str] = {}
-    error_types: dict[str, str] = {}
-    with TemporaryDirectory(prefix='llm-extraction-errors-') as errors_dir:
-        extracted = _run_extraction_in_thread(
-            prompts=prompts,
-            model_class=spec.model_class,
-            system_prompt_path=system_prompt_path,
-            model=spec.model,
-            openai_key=openai_key,
-            service_tier=spec.service_tier,
-            concurrency=spec.concurrency,
-            max_retries=spec.max_retries,
-            errors_dir=errors_dir,
-        )
-        error_path = Path(errors_dir) / 'errors.jsonl'
-        if error_path.exists():
-            for line in error_path.read_text(encoding='utf-8').splitlines():
-                if line.strip():
-                    error = json.loads(line)
-                    errors[str(error.get('id'))] = f'{error.get("error_type")}: {error.get("error_message")}'
-                    error_types[str(error.get('id'))] = str(error.get('error_type'))
-    if extracted is None or extracted.is_empty():
-        extracted = pl.DataFrame(schema={'id': pl.String})
+    async def extract_shard() -> dict[str, Extracted | Failed]:
+        async with _open_client(spec, openai_key) as client:
+            return await extract_prompts(
+                client,
+                model_cls,
+                system_prompt,
+                prompts,
+                model=spec.model,
+                service_tier=spec.service_tier,
+                concurrency=spec.concurrency,
+            )
 
-    trials = shard.select('id').unique()
-    succeeded = extracted.unique(subset='id', keep='first', maintain_order=True).join(trials, on='id', how='semi')
-    systemic = all(error_types.get(i) in (None, *SYSTEMIC_ERROR_TYPES) for i in trials['id'])
-    if succeeded.is_empty() and trials.height >= SYSTEMIC_FAILURE_MIN_PROMPTS and systemic:
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
+        outcomes = executor.submit(lambda: asyncio.run(extract_shard())).result()
+
+    extractions = {i: o.model for i, o in outcomes.items() if isinstance(o, Extracted)}
+    failures = {i: o for i, o in outcomes.items() if isinstance(o, Failed)}
+    errors = {i: f'{f.error_type}: {f.message}' for i, f in failures.items()}
+
+    trials = shard['id'].unique()
+    systemic = all((failures[i].error_type if i in failures else None) in (None, *SYSTEMIC_ERROR_TYPES) for i in trials)
+    if not extractions and trials.len() >= SYSTEMIC_FAILURE_MIN_PROMPTS and systemic:
         examples = '; '.join(list(errors.values())[:3]) or 'no errors reported'
-        msg = f'none of {trials.height} trials returned an extraction, all for systemic reasons, e.g. {examples}'
+        msg = f'none of {trials.len()} trials returned an extraction, all for systemic reasons, e.g. {examples}'
         raise ComputeAborted(msg)
 
-    missing = shard.height - succeeded.height
+    missing = shard.height - len(extractions)
     if missing:
         logger.warning(f'{missing} of {shard.height} trials in this shard returned no extraction')
 
-    return succeeded, errors
+    return extractions, errors
 
 
 def extraction_compute(
-    prompts: pl.DataFrame, spec: LlmExtractSpec, system_prompt_path: str
+    prompts: pl.DataFrame, spec: LlmExtractSpec, system_prompt: str
 ) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
     """Return the record store compute that extracts the trials of a list of prompts.
 
     Each prompt maps to the JSON of its trial's extraction, or to a failure
-    carrying the workflow's error for the trial, ``no extraction`` if it gave none.
+    carrying the error for the trial, ``no extraction`` if it gave none.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
+    model_cls = _import_class(spec.model_class)
 
     def compute(texts: list[str]) -> list[tuple[str | None, str | None]]:
         shard = pl.DataFrame(
             {'id': [ids[t] for t in texts], 'prompt': texts}, schema={'id': pl.String, 'prompt': pl.String}
         )
-        extracted, errors = extract(shard, spec, system_prompt_path)
-        rows = {row['id']: row for row in extracted.to_dicts()}
+        extractions, errors = extract(shard, spec, system_prompt, model_cls)
         return [
-            (json.dumps(rows[i]), None) if i in rows else (None, errors.get(i, 'no extraction')) for i in shard['id']
+            (extractions[i].model_dump_json(), None) if i in extractions else (None, errors.get(i, 'no extraction'))
+            for i in shard['id']
         ]
 
     return compute
@@ -330,47 +309,9 @@ def import_extraction_cache(
     return records.height
 
 
-def _run_extraction_in_thread(**kwargs: Any) -> pl.DataFrame | None:
-    """Call the LLM workflow outside Otter's already-running event loop.
-
-    Otter invokes task methods from an asyncio loop, while the synchronous
-    workflow's entry point owns its loop via ``asyncio.run``. Running it in
-    a short-lived worker thread gives it a thread-local loop without changing
-    Otter's or the workflow's API.
-    """
-
-    def run_with_full_schema_inference() -> pl.DataFrame | None:
-        # The workflow's default inference samples only the first 100 model
-        # responses. Later validated nested values can then disagree with that
-        # inferred schema, losing the whole shard before the record store can write it.
-        with LLM_WORKFLOW_PATCH_LOCK:
-            original = llm_workflow._extractions_to_df
-
-            def to_df(extractions: Sequence[BaseModel]) -> pl.DataFrame:
-                return _models_to_dataframe(extractions)
-
-            workflow = cast(Any, llm_workflow)
-            original_client_factory = workflow.AsyncOpenAI
-            original_asyncio = workflow.asyncio
-            clients: list[Any] = []
-
-            def create_client(*args: Any, **client_kwargs: Any) -> Any:
-                client = original_client_factory(*args, **client_kwargs)
-                clients.append(client)
-                return client
-
-            workflow._extractions_to_df = to_df
-            workflow.AsyncOpenAI = create_client
-            workflow.asyncio = _AsyncioWithClientCleanup(original_asyncio, clients)
-            try:
-                return run_extraction(**kwargs)
-            finally:
-                workflow._extractions_to_df = original
-                workflow.AsyncOpenAI = original_client_factory
-                workflow.asyncio = original_asyncio
-
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
-        return executor.submit(run_with_full_schema_inference).result()
+def _open_client(spec: LlmExtractSpec, openai_key: str) -> AsyncOpenAI:
+    """Return a client for one extraction call, which the caller closes."""
+    return AsyncOpenAI(api_key=openai_key, timeout=client_timeout(spec.service_tier), max_retries=spec.max_retries)
 
 
 def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:

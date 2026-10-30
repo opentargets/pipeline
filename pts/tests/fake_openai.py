@@ -2,8 +2,9 @@
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
+from functools import cache
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import httpx2
 from openai import (
@@ -40,6 +41,8 @@ class FakeClient:
         self.in_flight = 0
         self.peak_in_flight = 0
         self.closed = False
+        self.entered_loop: asyncio.AbstractEventLoop | None = None
+        self.closed_loop: asyncio.AbstractEventLoop | None = None
         self.responses = SimpleNamespace(create=self._create)
 
     async def _create(self, **kwargs: Any) -> SimpleNamespace:
@@ -74,9 +77,19 @@ class FakeClient:
 
     async def close(self) -> None:
         self.closed = True
+        self.closed_loop = asyncio.get_running_loop()
+
+    async def __aenter__(self) -> Self:
+        self.entered_loop = asyncio.get_running_loop()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.close()
 
 
-_SDK = AsyncOpenAI(api_key='not-a-key')
+@cache
+def _sdk() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key='not-a-key')
 
 
 def _request() -> httpx2.Request:
@@ -87,7 +100,13 @@ def status_error(status: int, code: str | None, message: str) -> APIStatusError:
     """The error the SDK raises for a response of ``status`` with this error object."""
     error = {'message': message, 'type': 'invalid_request_error', 'param': None, 'code': code}
     response = httpx2.Response(status, json={'error': error}, request=_request())
-    return _SDK._make_status_error_from_response(response)
+    return _sdk()._make_status_error_from_response(response)
+
+
+def text_status_error(status: int, text: str) -> APIStatusError:
+    """The error the SDK raises for a response of ``status`` whose body is not JSON."""
+    response = httpx2.Response(status, text=text, request=_request())
+    return _sdk()._make_status_error_from_response(response)
 
 
 def connection_error() -> APIConnectionError:

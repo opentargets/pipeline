@@ -21,7 +21,6 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from importlib import import_module, resources
-from pathlib import Path
 from typing import Any, Self
 
 import polars as pl
@@ -125,14 +124,9 @@ class LlmExtract(Task):
             )
             logger.info(f'imported {imported} cached extractions into {store_uri}')
 
-        # run_extraction reads the system prompt off disk, so give it a local copy
-        system_prompt_path = f'{config.work_path}/.scratch/system_prompt.txt'
-        Path(system_prompt_path).parent.mkdir(parents=True, exist_ok=True)
-        StorageHandle(system_prompt_path, config=config, force_local=True).write_text(system_prompt)
-
         records = map_texts(
             prompts['prompt'],
-            aact_trial_extraction.extraction_compute(prompts, self.spec, system_prompt_path),
+            aact_trial_extraction.extraction_compute(prompts, self.spec, system_prompt),
             store_uri,
             aact_trial_extraction.EXTRACTION_MODEL,
             schema_digest,
