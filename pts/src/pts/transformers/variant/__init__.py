@@ -75,7 +75,7 @@ class VariantSource(BaseModel):
     """The `pep.all.fa.gz` FASTA, whose md5s key the SIFT matrices."""
     alphamissense: str
     ancestor: str
-    """The bgzip LOFTEE human ancestor FASTA, with its `.fai` and `.gzi` next to it."""
+    """The gzip LOFTEE human ancestor FASTA."""
     core: str
     """Directory of the Ensembl core database dump."""
     variant_annotations: list[str] = Field(default_factory=list)
@@ -145,13 +145,6 @@ def _sift(sources: VariantSource, path: Path) -> Path:
     return path
 
 
-def _ancestor(path: str, directory: Path) -> str:
-    """The human ancestor FASTA and its indexes, local."""
-    for index in (f'{path}.fai', f'{path}.gzi'):
-        _local(index, directory)
-    return _local(path, directory)
-
-
 def _rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dict[str, int]]:
     """Each chromosome's rows written to `directory/<chromosome>.parquet`, and their number."""
     rows = collect_variants(
@@ -178,7 +171,7 @@ def _index_by_chromosome(sources: VariantSource, options: VariantSettings, scrat
         alphamissense = pool.submit(partition_alphamissense, sources.alphamissense, scratch / 'alphamissense', rows)
         sift = pool.submit(_sift, sources, scratch / 'sift.parquet')
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
-        ancestor = pool.submit(_ancestor, sources.ancestor, scratch / 'ancestor')
+        ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
         fasta, plain_fasta, gff3 = reference.result()
         shared = Shared(
             fasta=fasta,

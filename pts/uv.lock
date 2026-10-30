@@ -2125,7 +2125,6 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pybigwig" },
     { name = "pydantic" },
-    { name = "pyfaidx" },
     { name = "pyspark" },
     { name = "setuptools" },
     { name = "spark-nlp" },
@@ -2184,7 +2183,6 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=22.0.0" },
     { name = "pybigwig", specifier = ">=0.3.24" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pyfaidx", specifier = ">=0.8.1" },
     { name = "pyspark", specifier = ">=4.1,<4.2" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
     { name = "scikit-learn", marker = "extra == 'l2g'", specifier = ">=1.7.0" },
@@ -2353,18 +2351,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/68/ca/31c57507b13119d7d3cfa1576dad2911a4861e3be07b579395f4e9d393f9/pydantic_settings-2.15.0.tar.gz", hash = "sha256:694b793e84f766ba76a90ebdefc01d0a9a045dab0382bee70393da93712ad117", size = 261253, upload-time = "2026-08-07T09:24:57.419Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/a4/2bffa9f8e804325a09867f0e9d30795c80ea9f8d62560bd1b6ad6220eb2f/pydantic_settings-2.15.0-py3-none-any.whl", hash = "sha256:0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42", size = 69413, upload-time = "2026-08-07T09:24:55.839Z" },
-]
-
-[[package]]
-name = "pyfaidx"
-version = "0.9.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "packaging" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/78/79/bf282d0e06196e9db2dfab832d06695eba46aeef831ad0aa0a5aa76188da/pyfaidx-0.9.2.2.tar.gz", hash = "sha256:6ad50a5ac00b396dc117b7322adcbbac945aa60ac05a345a7628422d7852f038", size = 75338, upload-time = "2026-10-29T15:12:53.657Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/1d/629275c099b5e97ed4b8a4adb38605e53ccfe68220d33467657ffb63e122/pyfaidx-0.9.2.2-py3-none-any.whl", hash = "sha256:98f265500ec0141a82f1b6adfc5d3a67240eb1ccec5ffe44feb3ccce60089df5", size = 30085, upload-time = "2026-10-29T15:12:52.358Z" },
 ]
 
 [[package]]

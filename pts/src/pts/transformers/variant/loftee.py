@@ -7,10 +7,8 @@ every option at its default, so splice predictions, `INCOMPLETE_CDS` and the Phy
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
 import polars as pl
-from pyfaidx import Fasta
 
 from pts.schemas.ensembl_core import EXON, TRANSCRIPT
 from pts.transformers.utils.ensembl import CoreDump, transcripts
@@ -230,25 +228,16 @@ def _filters(
     return filters
 
 
-def _ancestral_bases(ancestor: str, chromosome: str, positions: set[int]) -> dict[int, str]:
-    """The ancestral base at each position, upper case; none for a contig the FASTA lacks."""
-    if not positions:
-        return {}
-    fasta = Fasta(ancestor, as_raw=True, sequence_always_upper=True, rebuild=False, build_index=False)
-    try:
-        if chromosome not in fasta:
-            return {}
-        record = fasta[chromosome]
-        return {position: cast(str, record[position - 1 : position]) for position in sorted(positions)}
-    finally:
-        fasta.close()
+def _ancestral_bases(ancestor: bytes, positions: set[int]) -> dict[int, str]:
+    """The ancestral base at each position of the contig; none beyond its end."""
+    return {position: chr(ancestor[position - 1]) for position in positions if 1 <= position <= len(ancestor)}
 
 
 def loftee(
     records: pl.DataFrame,
     models: dict[str, TranscriptModel],
     sequence: bytes,
-    ancestor: str,
+    ancestor: bytes,
     gerp: KentBigWig,
     chromosome: str,
 ) -> pl.DataFrame:
@@ -264,7 +253,8 @@ def loftee(
             `vepReference` and `vepAlternate`, and `transcript_id`, `consequence_terms` and `cds_end`.
         models: `loftee_models` of the chromosome.
         sequence: The chromosome's reference, byte i being position i + 1.
-        ancestor: The bgzip GRCh38 human ancestor FASTA, with its `.fai` and `.gzi`.
+        ancestor: The chromosome's GRCh38 human ancestor in upper case, byte i being position
+            i + 1; empty for a chromosome the ancestor lacks.
         gerp: The GERP bigWig.
         chromosome: The chromosome of the records.
 
@@ -296,7 +286,7 @@ def loftee(
         called[row] = _filters(model, terms, start, end, (reference, alternate), cds_end, sequence, gerp, chromosome)
         if '-' not in (reference, alternate) and len(reference) == len(alternate) == 1:
             substitutions[row] = (start, alternate.upper())
-    ancestral = _ancestral_bases(ancestor, chromosome, {start for start, _ in substitutions.values()})
+    ancestral = _ancestral_bases(ancestor, {start for start, _ in substitutions.values()})
     lof: list[str | None] = [None] * records.height
     lof_filter: list[str | None] = [None] * records.height
     for row, filters in called.items():
@@ -313,7 +303,7 @@ def add_loftee(
     records: pl.LazyFrame,
     models: dict[str, TranscriptModel],
     sequence: bytes,
-    ancestor: str,
+    ancestor: bytes,
     gerp: KentBigWig,
     chromosome: str,
 ) -> pl.LazyFrame:
@@ -326,7 +316,8 @@ def add_loftee(
         records: The VEP-shaped records of one chromosome, with VCF-form `input` lines.
         models: `loftee_models` of the chromosome.
         sequence: The chromosome's reference, byte i being position i + 1.
-        ancestor: The bgzip GRCh38 human ancestor FASTA, with its `.fai` and `.gzi`.
+        ancestor: The chromosome's GRCh38 human ancestor in upper case, byte i being position
+            i + 1; empty for a chromosome the ancestor lacks.
         gerp: The GERP bigWig.
         chromosome: The chromosome of the records.
 

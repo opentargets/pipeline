@@ -44,7 +44,7 @@ class Shared:
     gerp: str
     """The local GERP bigWig."""
     ancestor: str
-    """The local bgzip human ancestor FASTA, with its `.fai` and `.gzi`."""
+    """The local gzip human ancestor FASTA."""
     core: str
     """Directory of the Ensembl core database dump."""
     sift: Path
@@ -71,7 +71,7 @@ def _environment(name: str, value: str) -> Generator[None]:
 
 
 def _sequence(fasta: str, chromosome: str) -> bytes:
-    """The chromosome's reference, empty for a contig the FASTA lacks."""
+    """The chromosome's contig of a gzip FASTA, empty for a contig the FASTA lacks."""
     try:
         return read_chromosome(fasta, chromosome)
     except ValueError:
@@ -154,7 +154,8 @@ def annotate_chromosome(chromosome: str, rows: Path, all_vars: Path | None, alph
     filled = add_gerp_and_alphamissense(records.lazy(), shared.gerp, alphamissense, chromosome)
     with KentBigWig(shared.gerp) as gerp:
         models = loftee_models(shared.core, chromosome)
-        filled = add_loftee(filled, models, sequence, shared.ancestor, gerp, chromosome)
+        ancestor = _sequence(shared.ancestor, chromosome)
+        filled = add_loftee(filled, models, sequence, ancestor, gerp, chromosome)
     filled = add_sift(filled, pl.read_parquet(shared.sift))
     index = directory / 'index.parquet'
     parse_vep(filled, shared.hash_threshold).collect().write_parquet(index)

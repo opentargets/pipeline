@@ -13,6 +13,8 @@ import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stub
 import pytest
 
 from pts.schemas.vep import vep_schema
+from pts.transformers.variant.alleles import read_chromosome
+from pts.transformers.variant.chromosome import _sequence
 from pts.transformers.variant.gerp import KentBigWig
 from pts.transformers.variant.loftee import (
     GERP_END_TRUNC_CUTOFF,
@@ -88,43 +90,31 @@ def _chunks(length: int, start: int, window: str) -> Iterator[tuple[bool, bytes]
 
 
 def write_bgzip_fasta(path: Path, contigs: dict[str, tuple[int, int, str]]) -> str:
-    """A bgzip FASTA with samtools' .fai and htslib's .gzi, from contig name to (length, start, window)."""
-    full = b''.join(b'N' * FASTA_WIDTH + b'\n' for _ in range(BLOCK_BASES // FASTA_WIDTH))
-    repeated = bgzf_block(full)
-    blocks: list[tuple[int, int]] = []
-    fai = []
-    compressed = uncompressed = 0
+    """A bgzip FASTA, from contig name to (length, start, window)."""
+    repeated = bgzf_block(b''.join(b'N' * FASTA_WIDTH + b'\n' for _ in range(BLOCK_BASES // FASTA_WIDTH)))
     with path.open('wb') as out:
-
-        def emit(block: bytes, size: int) -> None:
-            nonlocal compressed, uncompressed
-            blocks.append((compressed, uncompressed))
-            out.write(block)
-            compressed += len(block)
-            uncompressed += size
-
         for name, (length, start, window) in contigs.items():
-            header = f'>{name}\n'.encode()
-            emit(bgzf_block(header), len(header))
-            fai.append(f'{name}\t{length}\t{uncompressed}\t{FASTA_WIDTH}\t{FASTA_WIDTH + 1}\n')
+            out.write(bgzf_block(f'>{name}\n'.encode()))
             for is_full, data in _chunks(length, start, window):
-                emit(repeated, len(full)) if is_full else emit(bgzf_block(data), len(data))
+                out.write(repeated if is_full else bgzf_block(data))
         out.write(bgzf_block(b''))
-    Path(f'{path}.fai').write_text(''.join(fai))
-    gzi = [struct.pack('<Q', len(blocks) - 1)] + [struct.pack('<QQ', c, u) for c, u in blocks[1:]]
-    Path(f'{path}.gzi').write_bytes(b''.join(gzi))
     return str(path)
 
 
 @pytest.fixture(scope='module')
-def ancestor(tmp_path_factory: pytest.TempPathFactory) -> str:
-    """The reference with the ANCESTRAL bases, on contig 1 only."""
+def ancestor_fasta(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """The reference with the ANCESTRAL bases, lower case, on contig 1 only."""
     bases = bytearray(genome())
     for position, base in ANCESTRAL.items():
         bases[position - 1] = ord(base)
     sequence = bases.decode().lower()
     path = tmp_path_factory.mktemp('ancestor') / 'human_ancestor.fa.gz'
     return write_bgzip_fasta(path, {'1': (LENGTH, 1, sequence)})
+
+
+@pytest.fixture(scope='module')
+def ancestor(ancestor_fasta: str) -> bytes:
+    return read_chromosome(ancestor_fasta, '1')
 
 
 @pytest.fixture(scope='module')
@@ -172,7 +162,7 @@ CONSEQUENCES = pl.Schema({
 
 
 def calls(
-    ancestor: str,
+    ancestor: bytes,
     gerp: KentBigWig,
     *rows: dict,
     chromosome: str = '1',
@@ -197,55 +187,55 @@ def test_defaults():
     assert GERP_END_TRUNC_CUTOFF == -58
 
 
-def test_stop_gained_far_from_the_end_is_high_confidence(ancestor: str, gerp: KentBigWig):
+def test_stop_gained_far_from_the_end_is_high_confidence(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 170, 'A', 'T')) == [('HC', None)]
 
 
-def test_end_trunc(ancestor: str, gerp: KentBigWig):
+def test_end_trunc(ancestor: bytes, gerp: KentBigWig):
     # 40 bases from the stop in the last exon, where GERP is -2 a base: -82 <= -58
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 610, 'A', 'T')) == [('LC', 'END_TRUNC')]
 
 
-def test_end_trunc_needs_low_gerp(ancestor: str, gerp: KentBigWig):
+def test_end_trunc_needs_low_gerp(ancestor: bytes, gerp: KentBigWig):
     # the same position on TQ, where GERP is +2 a base
     assert calls(ancestor, gerp, consequence('TQ', ['stop_gained'], 1610, 'A', 'T')) == [('HC', None)]
 
 
-def test_end_trunc_needs_a_cds_end(ancestor: str, gerp: KentBigWig):
+def test_end_trunc_needs_a_cds_end(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 610, 'A', 'T', cds_end=None)) == [('HC', None)]
 
 
-def test_end_trunc_on_an_insertion_inside_the_last_exon(ancestor: str, gerp: KentBigWig):
+def test_end_trunc_on_an_insertion_inside_the_last_exon(ancestor: bytes, gerp: KentBigWig):
     # an insertion between 620 and 621 ends before it starts; 30 bases at -2 give -60
     row = consequence('TP', ['frameshift_variant'], 621, '-', 'T', end=620)
     assert calls(ancestor, gerp, row) == [('LC', 'END_TRUNC')]
 
 
-def test_end_trunc_on_a_deletion(ancestor: str, gerp: KentBigWig):
+def test_end_trunc_on_a_deletion(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['frameshift_variant'], 611, 'A', '-')) == [('LC', 'END_TRUNC')]
 
 
-def test_incomplete_cds_is_not_checked(ancestor: str, gerp: KentBigWig):
+def test_incomplete_cds_is_not_checked(ancestor: bytes, gerp: KentBigWig):
     # TI's CDS is 103 bases, not whole codons; check_complete_cds is off in production
     assert calls(ancestor, gerp, consequence('TI', ['stop_gained'], 3160, 'A', 'T')) == [('HC', None)]
 
 
-def test_exon_intron_undef_never_fires(ancestor: str, gerp: KentBigWig):
+def test_exon_intron_undef_never_fires(ancestor: bytes, gerp: KentBigWig):
     # a stop_gained on no exon of TP: LOFTEE only tests for a missing exon number when it has one
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 250, 'A', 'T')) == [('HC', None)]
 
 
-def test_small_intron(ancestor: str, gerp: KentBigWig):
+def test_small_intron(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TS', ['splice_donor_variant'], 2751, 'G', 'A')) == [
         ('LC', 'SMALL_INTRON')
     ]
 
 
-def test_non_canonical_splice_is_only_a_flag(ancestor: str, gerp: KentBigWig):
+def test_non_canonical_splice_is_only_a_flag(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TQ', ['splice_donor_variant'], 1201, 'A', 'G')) == [('HC', None)]
 
 
-def test_gc_to_gt_donor(ancestor: str, gerp: KentBigWig):
+def test_gc_to_gt_donor(ancestor: bytes, gerp: KentBigWig):
     assert calls(
         ancestor,
         gerp,
@@ -256,7 +246,7 @@ def test_gc_to_gt_donor(ancestor: str, gerp: KentBigWig):
     ) == [('LC', 'GC_TO_GT_DONOR'), ('HC', None), ('LC', 'GC_TO_GT_DONOR')]
 
 
-def test_utr_splice(ancestor: str, gerp: KentBigWig):
+def test_utr_splice(ancestor: bytes, gerp: KentBigWig):
     assert calls(
         ancestor,
         gerp,
@@ -265,15 +255,15 @@ def test_utr_splice(ancestor: str, gerp: KentBigWig):
     ) == [('LC', '5UTR_SPLICE'), ('LC', '3UTR_SPLICE')]
 
 
-def test_anc_allele(ancestor: str, gerp: KentBigWig):
+def test_anc_allele(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 160, 'A', 'T')) == [('LC', 'ANC_ALLELE')]
 
 
-def test_filters_in_plugin_order(ancestor: str, gerp: KentBigWig):
+def test_filters_in_plugin_order(ancestor: bytes, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 600, 'A', 'T')) == [('LC', 'END_TRUNC,ANC_ALLELE')]
 
 
-def test_anc_allele_only_for_single_base_substitutions(ancestor: str, gerp: KentBigWig):
+def test_anc_allele_only_for_single_base_substitutions(ancestor: bytes, gerp: KentBigWig):
     # the ancestor has T at 160, but an insertion or an untrimmed pair is never checked
     assert calls(
         ancestor,
@@ -283,7 +273,7 @@ def test_anc_allele_only_for_single_base_substitutions(ancestor: str, gerp: Kent
     ) == [('HC', None), ('HC', None)]
 
 
-def test_no_call(ancestor: str, gerp: KentBigWig):
+def test_no_call(ancestor: bytes, gerp: KentBigWig):
     assert (
         calls(
             ancestor,
@@ -296,10 +286,10 @@ def test_no_call(ancestor: str, gerp: KentBigWig):
     )
 
 
-def test_chromosome_missing_from_ancestor_and_gerp(ancestor: str, gerp: KentBigWig):
+def test_chromosome_missing_from_ancestor_and_gerp(gerp: KentBigWig):
     # MT is in neither file: no GERP and no ancestral allele, so neither END_TRUNC nor ANC_ALLELE
     assert calls(
-        ancestor,
+        b'',
         gerp,
         consequence('TP', ['stop_gained'], 600, 'A', 'T'),
         consequence('TP', ['splice_donor_variant'], 402, 'C', 'T'),
@@ -308,7 +298,17 @@ def test_chromosome_missing_from_ancestor_and_gerp(ancestor: str, gerp: KentBigW
     ) == [('HC', None), ('HC', None)]
 
 
-def test_order_and_empty_input(ancestor: str, gerp: KentBigWig):
+def test_contig_missing_from_the_ancestor_has_no_ancestral_allele(ancestor_fasta: str, gerp: KentBigWig):
+    """The ancestor has contig 1 only: read for MT it is empty, and the ANC_ALLELE call at 160 does not fire."""
+    assert calls(read_chromosome(ancestor_fasta, '1'), gerp, consequence('TP', ['stop_gained'], 160, 'A', 'T')) == [
+        ('LC', 'ANC_ALLELE')
+    ]
+    missing = _sequence(ancestor_fasta, 'MT')
+    assert missing == b''
+    assert calls(missing, gerp, consequence('TP', ['stop_gained'], 160, 'A', 'T')) == [('HC', None)]
+
+
+def test_order_and_empty_input(ancestor: bytes, gerp: KentBigWig):
     assert calls(
         ancestor,
         gerp,
@@ -328,7 +328,9 @@ def test_ancestor_is_grch38(tmp_path: Path):
     position = 108_289_761
     assert ATM['reference'][position - start] == 'C'
     assert ATM['ancestor'][position - start].upper() == 'C'
-    ancestor = write_bgzip_fasta(tmp_path / 'human_ancestor.fa.gz', {'11': (135_086_622, start, ATM['ancestor'])})
+    ancestor = read_chromosome(
+        write_bgzip_fasta(tmp_path / 'human_ancestor.fa.gz', {'11': (135_086_622, start, ATM['ancestor'])}), '11'
+    )
     sequence = bytearray(b'N' * (start + len(ATM['reference'])))
     sequence[start - 1 :] = ATM['reference'].encode()
     bigwig = str(tmp_path / 'gerp.bw')
@@ -350,7 +352,9 @@ def test_ancestor_is_grch38(tmp_path: Path):
         )
         # the same call against an ancestor that has the alternate allele there
         derived = ATM['ancestor'][: position - start] + 'T' + ATM['ancestor'][position - start + 1 :]
-        other = write_bgzip_fasta(tmp_path / 'derived.fa.gz', {'11': (135_086_622, start, derived)})
+        other = read_chromosome(
+            write_bgzip_fasta(tmp_path / 'derived.fa.gz', {'11': (135_086_622, start, derived)}), '11'
+        )
         flipped = calls(
             other, gerp, row, chromosome='11', sequence=bytes(sequence), models={ATM['transcript_id']: model}
         )
@@ -362,7 +366,7 @@ def line(position: int, ref: str, alt: str) -> str:
     return '\t'.join(['1', str(position), '.', ref, alt, '.', '.', '.'])
 
 
-def test_add_loftee_fills_canonical_consequences_for_parse_vep(ancestor: str, gerp: KentBigWig):
+def test_add_loftee_fills_canonical_consequences_for_parse_vep(ancestor: bytes, gerp: KentBigWig):
     lof = {'canonical': 1, 'gene_id': 'G1', 'biotype': 'protein_coding', 'cds_end': 10}
     records = pl.DataFrame(
         [

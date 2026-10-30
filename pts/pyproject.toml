@@ -25,7 +25,6 @@ dependencies = [
   "opentargets-mira>=1.0.5",
   "networkx>=3.6.1",
   "pybigwig>=0.3.24",
-  "pyfaidx>=0.8.1",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
 ]
