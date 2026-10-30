@@ -21,15 +21,16 @@ hand under `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/`.
 | the same names in `pis/config.yaml` | the versions the release copies |
 | `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
 | `*_tag` in `pis/config.yaml` | the snapshots the release copies |
+| `extraction_tag` in `pis/config.yaml` | the extraction the release copies, and the AACT drug snapshot under it |
 
 ## Layout
 
 ```{bash}
 gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,llm_extraction}/  # record stores, shared across versions
 gs://clinical_staging/aact/<aact_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
-gs://clinical_staging/aact/<aact_version>/extraction/              # data.parquet + metadata.json
+gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
+gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/drug_entities/<tag>/
 gs://clinical_staging/aact/<aact_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
-gs://clinical_staging/aact/<aact_version>/drug_entities/<tag>/
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<clinical_mining_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<clinical_mining_version>/{drug_entities,disease_entities}/<tag>/
@@ -50,7 +51,10 @@ and its version. Each step runs on its own short-lived GCE VM.
    a rerun of the version computes nothing.
 3. `pts_aact_trial_models` (n2d-standard-16) — runs the stop-reasons model over
    the distinct `why_stopped` texts and the drug NER over the distinct drug
-   labels, and publishes `stop_reasons/<tag>` and `drug_entities/<tag>`.
+   labels, and publishes `stop_reasons/<tag>` and
+   `extraction/<extraction_tag>/drug_entities/<tag>`. It reads the extraction
+   of the tag its own code computes, and fails naming the expected path if
+   there is none.
 4. `pis_clinical_mining` — copies the TTD, EMA, PMDA and ChEMBL mapping inputs
    and the chemical, drugtemist and disease models.
 5. `pts_clinical_mining_models` (n2d-standard-16) — runs the drug and disease
@@ -94,26 +98,30 @@ computes each tag from the pinned hub revisions and fails, printing the new
 tag, when a pin is stale. Reading a snapshot staged by code with other
 parameters fails before any work, naming both digests.
 
-Snapshots are write-once per (version, tag), and the extraction is write-once
-per AACT version. The extraction is the one staged artifact without a tag, so a
-response-schema change or a recovery (below) rewrites it in place, and with it
-the version's drug snapshot under an unchanged tag.
+The extraction is tagged too:
+
+```
+<schema digest, 12 hex>-p<8 hex of sha256({logic_version, trial_fields, sample_size})>
+```
+
+The schema digest is that of `ClinicalReportExtractionSchema`. A schema change,
+a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or a
+`sample_size` other than the full set gives a new tag. The OpenAI model and the
+system prompt are not in it, because they do not change what is published.
+The extraction store keeps the full schema digest as its revision. The AACT
+drug snapshot is published under the extraction it was computed from and
+records its `extraction_tag` in its metadata. `clinical_report` and
+`chembl_molecule` check the extraction and that snapshot against the pin before
+any dump restore, and a sampled extraction never passes.
+
+Snapshots and extractions are write-once per (version, tag).
 
 ### Recovery when a publish is refused
 
 A rerun that would change a published snapshot is refused
-(`SnapshotConflictError`). Parameter and code changes do not cause it, because
-they give a new tag. To recover from a refused extraction, delete the
-extraction directory and rerun the step. The stores keep every computed record,
-so only texts they have not seen are computed.
-
-Recovering an extraction for an AACT version that was already staged for trial
-models changes that version's drug labels. The rerun of `pts_aact_trial_models`
-then publishes different data under the same `drug_entities/<tag>/`, because
-the tag does not depend on the extraction, and is refused. Delete that
-version's `drug_entities/<tag>/` directory as well before rerunning. Releases
-that copied that version's extraction or drug snapshot no longer reproduce from
-the bucket. The stop reasons and the mining snapshots are unaffected.
+(`SnapshotConflictError`). Schema, parameter and code changes do not cause it,
+because they give a new tag. A refusal under an unchanged tag is a bug to
+investigate, not to clear by deleting.
 
 ### Model bumps
 
@@ -135,7 +143,10 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
 ### Parameter and code changes
 
 A change to the `params` of a kind, or a `logic_version` bump for any other
-change to the code that computes its output, also gives a new tag.
+change to the code that computes its output, also gives a new tag. The
+extraction follows the same rule with `EXTRACTION` in `staged_outputs.py`: its
+params are `TRIAL_FIELDS`, and a change to the code that builds the prompt or
+reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
 
 1. Change the constants that the kind's `params` reference: `STOP_REASONS_THRESHOLD`
    in `stop_reasons.py`, or `DRUG_NAME_PATTERNS`, `BIOBERT_LABELS`,
@@ -147,13 +158,14 @@ change to the code that computes its output, also gives a new tag.
    subword (`##`) filters, and both models' `aggregation_strategy='max'`. For any change to the
    compute other than a `params` constant, bump the kind's `logic_version` by one.
 2. Update the matching `*_tag` pin in `pis/config.yaml`, with the tag the pin
-   test prints.
+   test prints. For the extraction this is `extraction_tag`.
 3. Release pts and bump `pts_version` in `clinical_staging.yaml`. Staging
    computes the tag from the code in the pts image, so restaging with the old
    image reproduces the old tag. Do the same for the release image when moving
    the release.
 4. Restage the affected versions. The new snapshot lands beside the old one,
-   which stays: snapshots remain write-once.
+   which stays: snapshots remain write-once. A new extraction tag restages the
+   extraction and the AACT drug snapshot under it.
 5. Move the release last.
 
 ## Rollout
@@ -165,11 +177,11 @@ change to the code that computes its output, also gives a new tag.
    `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
    on the `aact_trial_models` step (task `trial_models`) to
    `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/ner_cache.parquet`.
-   The schema digest is the sha256 of the response schema, as the step
-   computes it; from `pts/`:
+   The schema digest is the full 64 hex digest of the response schema, as the
+   step computes it; from `pts/`:
 
    ```bash
-   uv run python -c "import hashlib, json; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(hashlib.sha256(json.dumps(M.model_json_schema(by_alias=True), sort_keys=True).encode()).hexdigest())"
+   uv run python -c "from pts.clinical_staging.staged_outputs import schema_digest; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
    ```
 
    Remove both afterwards: once the schema changes, an `import_extraction_cache`
@@ -199,6 +211,10 @@ Only AACT trials with an extraction row are included in the clinical report.
 
 ### 2026-10-30
 
+- The extraction is published at `extraction/<extraction_tag>/`, and the AACT
+  drug snapshot under it. pis pins `extraction_tag`. A schema or
+  extraction-code change gives a new tag, so it no longer needs a delete and
+  restage.
 - Snapshot tags end in a digest of the kind's parameters and `logic_version`,
   and pis pins the full tags. A code change gives a new tag through a `params`
   change or a `logic_version` bump, so it no longer needs a delete and restage.
