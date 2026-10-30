@@ -95,7 +95,9 @@ tag, when a pin is stale. Reading a snapshot staged by code with other
 parameters fails before any work, naming both digests.
 
 Snapshots are write-once per (version, tag), and the extraction is write-once
-per AACT version.
+per AACT version. The extraction is the one staged artifact without a tag, so a
+response-schema change or a recovery (below) rewrites it in place, and with it
+the version's drug snapshot under an unchanged tag.
 
 ### Recovery when a publish is refused
 
