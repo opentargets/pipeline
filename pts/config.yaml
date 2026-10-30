@@ -15,31 +15,37 @@ steps:
       transformer: lof_curation
   ##################################################################################################
 
-  #: FOLDX STEP :##################################################################################
-  foldx:
+  #: VARIANT STEP :################################################################################
+  variant:
     - name: transform FoldX annotations
       source: input/variant/foldx
       destination: intermediate/variant/foldx
       transformer: foldx
       settings:
         plddt_threshold: 0.7
-  ##################################################################################################
 
-  #: VARIANT STEP :################################################################################
-  variant:
-    - name: pyspark variant index
-      pyspark: variant
+    - name: transform variant index
+      requires:
+        - transform FoldX annotations
+      transformer: variant
       source:
         vep: intermediate/variant_annotation
         variant_annotations:
           - input/variant/gnomad
         amino_acid_annotations:
           - intermediate/variant/foldx
+        gpn_star: input/variant/gpn_star
       destination:
         output: output/variant
       settings:
         hash_threshold: 300
-        output_partitions: 25
+        # songlab/gpn-star-scores@204d08a92bdf07117f5d869db667c45f9029ed48: genome-wide quantiles 0.1 / 0.01 / 0.001 and minimum
+        # measured with cutoffs_from_histogram(llr_histogram(sorted(gpn_star_files(<mirror>).values())))
+        gpn_star:
+          top_10_percent: -2.392
+          top_1_percent: -5.448
+          top_0_1_percent: -9.851
+          minimum: -13.698
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

@@ -120,12 +120,9 @@ steps:
     ppp_only: true
     depends_on:
       - pis_variant_ppp
-  pts_foldx:
-    depends_on:
-      - pis_variant
   pts_variant:
     depends_on:
-      - pts_foldx
+      - pis_variant
       - gentropy_variant_annotation
     depends_on_ppp:
       - pts_variant_ppp
