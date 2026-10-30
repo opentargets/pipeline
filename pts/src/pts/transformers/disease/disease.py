@@ -20,14 +20,14 @@ from pts.transformers.disease.coalescing import (
 from pts.transformers.utils.dataset import write_dataset
 
 
-def direct_location_ids(n: pl.DataFrame) -> pl.DataFrame:
+def direct_location_from_source_ids(n: pl.DataFrame) -> pl.DataFrame:
     """Collect each term's OTAR_0000021 anatomical locations.
 
     Args:
         n: Node DataFrame.
 
     Returns:
-        DataFrame of ``id`` and a sorted, distinct ``directLocationIds`` list.
+        DataFrame of ``id`` and a sorted, distinct ``directLocationFromSourceIds`` list.
     """
     return (
         n
@@ -36,11 +36,11 @@ def direct_location_ids(n: pl.DataFrame) -> pl.DataFrame:
         .filter(pl.col('bpv').struct['pred'] == LOCATED_IN)
         .select(
             id=pl.col('id').str.split('/').list.last(),
-            directLocationIds=pl.col('bpv').struct['val'].str.split('/').list.last(),
+            directLocationFromSourceIds=pl.col('bpv').struct['val'].str.split('/').list.last(),
         )
         .drop_nulls()
         .group_by('id')
-        .agg(pl.col('directLocationIds').unique().sort())
+        .agg(pl.col('directLocationFromSourceIds').unique().sort())
     )
 
 
@@ -132,8 +132,10 @@ def disease(
         parents=pl.col('parents').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
     )
 
-    n_location_ids = n_parents.join(direct_location_ids(n), on='id', how='left').with_columns(
-        directLocationIds=pl.col('directLocationIds').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
+    n_location_ids = n_parents.join(direct_location_from_source_ids(n), on='id', how='left').with_columns(
+        directLocationFromSourceIds=pl.col('directLocationFromSourceIds').fill_null(
+            pl.Series([[]], dtype=pl.List(pl.String))
+        )
     )
 
     # get synonyms by:

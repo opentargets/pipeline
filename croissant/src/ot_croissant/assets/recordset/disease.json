@@ -28,8 +28,8 @@
     "description": "Description of the disease"
   },
   {
-    "id": "directLocationIds",
-    "description": "Anatomical locations the disease is directly annotated to"
+    "id": "directLocationFromSourceIds",
+    "description": "Anatomical locations the disease is directly annotated to, as identified by the source ontology; not validated against the biosample index"
   },
   {
     "id": "exactSynonyms",

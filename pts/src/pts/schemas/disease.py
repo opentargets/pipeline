@@ -16,7 +16,7 @@ schema = pl.Schema({
     'description': pl.String(),
     'dbXRefs': pl.List(pl.String()),
     'parents': pl.List(pl.String()),
-    'directLocationIds': pl.List(pl.String()),
+    'directLocationFromSourceIds': pl.List(pl.String()),
     'exactSynonyms': pl.List(pl.String()),
     'relatedSynonyms': pl.List(pl.String()),
     'narrowSynonyms': pl.List(pl.String()),

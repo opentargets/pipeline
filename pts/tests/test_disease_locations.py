@@ -1,4 +1,4 @@
-"""Tests for absorb_obsolete_locations and direct_location_ids."""
+"""Tests for absorb_obsolete_locations and direct_location_from_source_ids."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import polars as pl
 
 from pts.schemas.ontology import node
 from pts.transformers.disease.coalescing import _IAO_REPLACED_BY, LOCATED_IN, absorb_obsolete_locations
-from pts.transformers.disease.disease import direct_location_ids
+from pts.transformers.disease.disease import direct_location_from_source_ids
 
 OBO = 'http://purl.obolibrary.org/obo/'
 
@@ -52,8 +52,8 @@ def _make_df(*nodes: dict) -> pl.DataFrame:
 
 
 def _locations_of(df: pl.DataFrame, short_id: str) -> list[str]:
-    row = direct_location_ids(df).filter(pl.col('id') == short_id)
-    return row['directLocationIds'][0].to_list() if row.height else []
+    row = direct_location_from_source_ids(df).filter(pl.col('id') == short_id)
+    return row['directLocationFromSourceIds'][0].to_list() if row.height else []
 
 
 class TestDirectLocationIds:
@@ -69,7 +69,7 @@ class TestDirectLocationIds:
 
     def test_other_properties_are_not_locations(self) -> None:
         df = _make_df(_make_node('A', deprecated=True, replaced_by=['B']), _make_node('B'))
-        assert direct_location_ids(df).is_empty()
+        assert direct_location_from_source_ids(df).is_empty()
 
     def test_null_property_list_is_tolerated(self) -> None:
         df = _make_df(_make_node('A', null_bpv=True), _make_node('B', locations=['UBERON_1']))
