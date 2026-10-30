@@ -138,7 +138,9 @@ def _run(command: list[str], output: Path, env: dict[str, str] | None = None) ->
     """Run fastVEP writing to a partial file next to `output`, removed if it exits with an error."""
     partial = _partial(output)
     partial.unlink(missing_ok=True)
-    result = subprocess.run([*command, '-o', str(partial)], check=False, capture_output=True, text=True, env=env)
+    result = subprocess.run(
+        [*command, '-o', str(partial)], check=False, capture_output=True, text=True, errors='replace', env=env
+    )
     if result.returncode != 0:
         partial.unlink(missing_ok=True)
         raise RuntimeError(f'{command[0]} {command[1]} exited with {result.returncode}: {result.stderr[-2000:]}')

@@ -202,6 +202,14 @@ def test_run_fastvep_fails_on_nonzero_exit(tmp_path: Path) -> None:
     assert [path.name for path in tmp_path.iterdir() if path.name.startswith('out')] == []
 
 
+def test_run_fastvep_reports_stderr_that_is_not_utf8(tmp_path: Path) -> None:
+    vcf, gff3, fasta = inputs(tmp_path)
+    binary = fake_binary(tmp_path, "printf 'bad \\377 byte\\n' >&2; exit 1")
+
+    with pytest.raises(RuntimeError, match='bad \ufffd byte'):
+        run_fastvep(vcf, gff3, fasta, tmp_path / 'out.json', threads=1, binary=binary)
+
+
 def test_run_fastvep_needs_the_cache(tmp_path: Path) -> None:
     vcf, gff3, fasta = inputs(tmp_path)
     cache_path(gff3).unlink()

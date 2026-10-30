@@ -104,7 +104,7 @@ def sift_effect(transcripts: pl.Expr) -> pl.Expr:
     transcript = (
         transcripts.list
         .eval(pl.element().filter(field('sift_score').is_not_null()))
-        # Stable sorts, last key first: a multi-key `sort_by` inside `list.eval` fails on empty lists.
+        # Stable sorts, last key first.
         .list.eval(pl.element().sort_by(field('transcript_id'), maintain_order=True))
         .list.eval(
             pl.element().sort_by(
@@ -210,7 +210,7 @@ def transcript_consequences(transcripts: pl.Expr) -> pl.Expr:
     return (
         consequences.list
         .eval(pl.element().filter(pl.element().struct.field('consequenceScore').is_not_null()))
-        # Stable sorts, last key first: a multi-key `sort_by` inside `list.eval` fails on empty lists.
+        # Stable sorts, last key first.
         .list.eval(pl.element().sort_by(pl.element().struct.field('transcriptId'), maintain_order=True))
         .list.eval(pl.element().sort_by(pl.element().struct.field('distanceFromFootprint'), maintain_order=True))
         .list.eval(

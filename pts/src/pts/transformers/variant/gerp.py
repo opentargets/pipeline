@@ -12,13 +12,7 @@ import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stub
 
 
 class KentBigWig:
-    """A bigWig read the way kent's `bigWigSummaryArrayExtended` (v335) reads it.
-
-    Bio::DB::BigWig `features(-type=>'summary')` and `binMean`, as LOFTEE calls them, take a
-    summary over one bin. kent picks a zoom level whose reduction level is at most half the span
-    (the closest, difference of zero or more) and averages its records weighted by overlap;
-    otherwise it averages the full-resolution intervals exactly.
-    """
+    """A bigWig read the way kent's `bigWigSummaryArrayExtended` (v335) reads it."""
 
     def __init__(self, path: str):
         self.path = path
@@ -105,7 +99,7 @@ class KentBigWig:
         ])
         parts = []
         for doff, dsize in sorted(blocks):
-            # The file's last zoom-0 block (chrY end) has a corrupt size; the block ends where the index starts.
+            # Clipped to the start of the index.
             raw = self._read(doff, min(dsize, index_off - doff))
             if self.buf_size:
                 raw = zlib.decompress(raw)
