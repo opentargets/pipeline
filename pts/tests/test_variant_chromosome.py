@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import polars as pl
 import pyarrow.parquet as pq
 import pytest
 
-from pts.transformers.variant.chromosome import Shared, _by_position, _submit, in_range, split_records
+from pts.transformers.variant.chromosome import Shared, _by_position, _submit, in_range, lower_priority, split_records
 
 
 def shared(directory: Path, chunk_rows: int = 2, row_group_rows: int = 10) -> Shared:
@@ -107,3 +108,21 @@ def test_each_pool_runs_polars_with_its_own_threads() -> None:
         wide = [_submit(eight, 8, _polars_threads) for _ in range(2)]
         narrow = [_submit(two, 2, _polars_threads) for _ in range(3)]
         assert [future.result() for future in wide + narrow] == [8, 8, 2, 2, 2]
+
+
+def _niceness() -> int:
+    return os.nice(0)
+
+
+def test_each_pool_runs_at_its_own_niceness() -> None:
+    """Like the step's pools: fastVEP without an initializer, preparations and chunks lowered."""
+    context = multiprocessing.get_context('spawn')
+    step = os.nice(0)
+    with (
+        ProcessPoolExecutor(1, mp_context=context) as fastvep,
+        ProcessPoolExecutor(1, mp_context=context, initializer=lower_priority, initargs=(5,)) as preparations,
+        ProcessPoolExecutor(2, mp_context=context, initializer=lower_priority, initargs=(15,)) as chunks,
+    ):
+        found = [pool.submit(_niceness).result() for pool in (fastvep, preparations, chunks, chunks)]
+    assert found == [step, max(step, 5), max(step, 15), max(step, 15)]
+    assert os.nice(0) == step

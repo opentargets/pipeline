@@ -378,7 +378,10 @@ def annotate_chunk(
 
 @dataclass(frozen=True)
 class Pools:
-    """The processes of each pool, and the polars threads of each process."""
+    """The processes of each pool, and the polars threads and niceness of each process.
+
+    The fastVEP pool, and the fastVEP runs it starts, keep the niceness of the step.
+    """
 
     fastvep: int
     """Chromosomes run through fastVEP at a time."""
@@ -390,6 +393,15 @@ class Pools:
     """Polars threads of each fastVEP and preparation process."""
     chunk_threads: int
     """Polars threads of each chunk process."""
+    preparation_niceness: int = 0
+    """Niceness of each preparation process."""
+    chunk_niceness: int = 0
+    """Niceness of each chunk process."""
+
+
+def lower_priority(niceness: int) -> None:
+    """Raise the process's niceness to `niceness`; a process already nicer is left as it is."""
+    os.nice(max(0, niceness - os.nice(0)))
 
 
 def annotate_chromosomes(
@@ -418,8 +430,15 @@ def annotate_chromosomes(
     parts: list[Path] = []
     with (
         ProcessPoolExecutor(pools.fastvep, mp_context=context) as fastvep_pool,
-        ProcessPoolExecutor(pools.preparations, mp_context=context) as preparation_pool,
-        ProcessPoolExecutor(pools.chunks, mp_context=context) as chunk_pool,
+        ProcessPoolExecutor(
+            pools.preparations,
+            mp_context=context,
+            initializer=lower_priority,
+            initargs=(pools.preparation_niceness,),
+        ) as preparation_pool,
+        ProcessPoolExecutor(
+            pools.chunks, mp_context=context, initializer=lower_priority, initargs=(pools.chunk_niceness,)
+        ) as chunk_pool,
     ):
         units: dict[Future, tuple[str, str]] = {}
         for chromosome in order:

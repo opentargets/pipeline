@@ -101,6 +101,10 @@ class VariantSettings(BaseModel):
     """Chunks annotated at the same time."""
     chunk_threads: int = Field(default=2, gt=0)
     """Polars threads of each chunk process."""
+    preparation_niceness: int = Field(default=5, ge=0, le=19)
+    """Niceness of each preparation process; fastVEP keeps the step's own."""
+    chunk_niceness: int = Field(default=15, ge=0, le=19)
+    """Niceness of each chunk process."""
     batch_size: int = Field(default=5_000, gt=0)
     """Variants per batch when merging the annotations into a chunk."""
     gpn_star: GpnStarCutoffs | None = None
@@ -217,6 +221,8 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
             chunks=options.parallel_chunks,
             chromosome_threads=options.chromosome_threads,
             chunk_threads=options.chunk_threads,
+            preparation_niceness=options.preparation_niceness,
+            chunk_niceness=options.chunk_niceness,
         ),
     )
 
