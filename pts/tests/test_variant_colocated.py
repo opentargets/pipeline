@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import random
 import tarfile
 from pathlib import Path
 
@@ -12,7 +13,8 @@ import polars as pl
 import pytest
 
 from pts.schemas.vep import vep_schema
-from pts.transformers.variant.colocated import colocated_variants, extract_all_vars
+from pts.transformers.variant.alleles import shared_prefix_length
+from pts.transformers.variant.colocated import _keys, colocated_variants, extract_all_vars
 from pts.transformers.variant.vep import parse_vep
 
 CACHE_COLUMNS = (
@@ -251,3 +253,56 @@ def test_extract_all_vars_refuses_a_cache_without_variation(tmp_path: Path) -> N
     packed = tarball(tmp_path / 'cache.tar.gz', {'homo_sapiens/116_GRCh38/info.txt': b''})
     with pytest.raises(ValueError, match=r'no all_vars\.gz'):
         extract_all_vars(str(packed), tmp_path / 'variation')
+
+
+def _keys_per_row(alleles: pl.DataFrame) -> pl.DataFrame:
+    """The previous `_keys`: every row trimmed on its own."""
+
+    def trimmed(frame: pl.DataFrame, end_first: bool) -> pl.DataFrame:
+        ref, alt = pl.col('_ref'), pl.col('_alt')
+        frame = frame.with_columns(pl.col('ref').alias('_ref'), pl.col('alt').alias('_alt'), pl.lit(0).alias('_prefix'))
+        for step in ('suffix', 'prefix') if end_first else ('prefix', 'suffix'):
+            if step == 'prefix':
+                frame = frame.with_columns(shared_prefix_length(ref, alt).alias('_prefix')).with_columns(
+                    ref.str.slice(pl.col('_prefix')), alt.str.slice(pl.col('_prefix'))
+                )
+            else:
+                frame = frame.with_columns(
+                    shared_prefix_length(ref.str.reverse(), alt.str.reverse()).alias('_suffix')
+                ).with_columns(
+                    ref.str.head(ref.str.len_chars() - pl.col('_suffix')),
+                    alt.str.head(alt.str.len_chars() - pl.col('_suffix')),
+                )
+        return frame.select(
+            'pair',
+            pl.concat_str(
+                pl.when(ref == '').then(pl.lit('-')).otherwise(ref),
+                pl.when(alt == '').then(pl.lit('-')).otherwise(alt),
+                (pl.col('pos') + pl.col('_prefix')).cast(pl.String),
+                separator='_',
+            ).alias('key'),
+        )
+
+    longer = alleles.filter((pl.col('ref').str.len_chars() > 1) | (pl.col('alt').str.len_chars() > 1))
+    return pl.concat([trimmed(alleles, end_first=False), trimmed(longer, end_first=True)]).unique()
+
+
+@pytest.mark.parametrize('seed', range(5))
+def test_keys_trimmed_once_per_allele_pair_equal_keys_trimmed_per_row(seed: int):
+    rng = random.Random(seed)
+
+    def allele() -> str:
+        return rng.choice(['-', 'A', 'C', 'G', 'T', 'AC', 'CA', 'ACA', 'ATTA', 'GGGG', 'AAAAAAAAAT', 'TACGTACGTA'])
+
+    size = 3_000
+    alleles = pl.DataFrame(
+        {
+            'pair': range(size),
+            'ref': [allele() for _ in range(size)],
+            'alt': [allele() for _ in range(size)],
+            'pos': [rng.randint(1, 50) for _ in range(size)],
+        },
+        schema_overrides={'pair': pl.UInt32, 'pos': pl.Int64},
+    )
+    found, expected = _keys(alleles), _keys_per_row(alleles)
+    assert found.sort('pair', 'key').equals(expected.sort('pair', 'key'))

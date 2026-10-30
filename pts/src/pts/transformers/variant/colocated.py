@@ -92,14 +92,14 @@ def _cache(all_vars: Path, positions: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _trimmed(frame: pl.DataFrame, end_first: bool) -> pl.DataFrame:
-    """`trim_sequences` of each (`ref`, `alt`, `pos`) as a `key`, empty alleles written `-`.
+def _trimmed(alleles: pl.DataFrame, end_first: bool) -> pl.DataFrame:
+    """`trim_sequences` of each (`ref`, `alt`): `_alleles`, the trimmed pair, and `_prefix`, how far `pos` advances.
 
-    Left-first trims the shared prefix, advancing `pos`, then the shared suffix; end-first
-    trims the suffix, then the prefix.
+    Left-first trims the shared prefix, then the shared suffix; end-first trims the suffix,
+    then the prefix. Empty alleles are written `-`, and `_alleles` joins the two with `_`.
     """
     ref, alt = pl.col('_ref'), pl.col('_alt')
-    frame = frame.with_columns(pl.col('ref').alias('_ref'), pl.col('alt').alias('_alt'), pl.lit(0).alias('_prefix'))
+    frame = alleles.with_columns(pl.col('ref').alias('_ref'), pl.col('alt').alias('_alt'), pl.lit(0).alias('_prefix'))
     steps = ('suffix', 'prefix') if end_first else ('prefix', 'suffix')
     for step in steps:
         if step == 'prefix':
@@ -114,20 +114,35 @@ def _trimmed(frame: pl.DataFrame, end_first: bool) -> pl.DataFrame:
                 alt.str.head(alt.str.len_chars() - pl.col('_suffix')),
             )
     return frame.select(
-        'pair',
+        'ref',
+        'alt',
         pl.concat_str(
             pl.when(ref == '').then(pl.lit('-')).otherwise(ref),
             pl.when(alt == '').then(pl.lit('-')).otherwise(alt),
-            (pl.col('pos') + pl.col('_prefix')).cast(pl.String),
             separator='_',
-        ).alias('key'),
+        ).alias('_alleles'),
+        '_prefix',
     )
 
 
 def _keys(alleles: pl.DataFrame) -> pl.DataFrame:
-    """The (`pair`, `key`) of each ref/alt pair: left-first, and end-first when an allele is longer than one base."""
-    longer = alleles.filter((pl.col('ref').str.len_chars() > 1) | (pl.col('alt').str.len_chars() > 1))
-    return pl.concat([_trimmed(alleles, end_first=False), _trimmed(longer, end_first=True)]).unique()
+    """The (`pair`, `key`) of each (`ref`, `alt`, `pos`), trimmed as `_trimmed` trims them.
+
+    Every pair is trimmed left-first, and end-first too when an allele is longer than one base.
+    Each distinct (`ref`, `alt`) is trimmed once.
+    """
+    distinct = alleles.select('ref', 'alt').unique()
+    longer = distinct.filter((pl.col('ref').str.len_chars() > 1) | (pl.col('alt').str.len_chars() > 1))
+    trims = pl.concat([_trimmed(distinct, end_first=False), _trimmed(longer, end_first=True)])
+    return (
+        alleles
+        .join(trims, on=['ref', 'alt'])
+        .select(
+            'pair',
+            pl.concat_str('_alleles', (pl.col('pos') + pl.col('_prefix')).cast(pl.String), separator='_').alias('key'),
+        )
+        .unique()
+    )
 
 
 def _reverse_complement(allele: pl.Expr) -> pl.Expr:
