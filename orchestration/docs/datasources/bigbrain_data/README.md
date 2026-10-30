@@ -3,17 +3,18 @@
 This document was updated on 2026-10-29.
 
 ```sh
-gs://bigbrain_data/prod/20261029T125742/config/bigbrain_ingestion.yaml # DAG config of the run
-gs://bigbrain_data/prod/20261029T125742/bin/      # gentropy CLI and cluster init script of the run
-gs://bigbrain_data/prod/20261029T125742/docs/     # this file
-gs://bigbrain_data/prod/20261029T125742/source/   # input files, copied from Zenodo
-gs://bigbrain_data/prod/20261029T125742/output/eqtl/study/
-gs://bigbrain_data/prod/20261029T125742/output/eqtl/credible_set/
-gs://bigbrain_data/prod/20261029T125742/output/eqtl/credible_set_variant/
-gs://bigbrain_data/prod/20261029T125742/output/sqtl/study/
-gs://bigbrain_data/prod/20261029T125742/output/sqtl/credible_set/
-gs://bigbrain_data/prod/20261029T125742/output/sqtl/credible_set_variant/
+gs://bigbrain_data/prod/20261029T162943/config/bigbrain_ingestion.yaml # DAG config of the run 20261029T125742
+gs://bigbrain_data/prod/20261029T162943/config/patch_publication.py  # patch of pubmedId and initialSampleSize
+gs://bigbrain_data/prod/20261029T162943/docs/     # this file
+gs://bigbrain_data/prod/20261029T162943/output/eqtl/study/
+gs://bigbrain_data/prod/20261029T162943/output/eqtl/credible_set/
+gs://bigbrain_data/prod/20261029T162943/output/eqtl/credible_set_variant/
+gs://bigbrain_data/prod/20261029T162943/output/sqtl/study/
+gs://bigbrain_data/prod/20261029T162943/output/sqtl/credible_set/
+gs://bigbrain_data/prod/20261029T162943/output/sqtl/credible_set_variant/
 ```
+
+Use `prod/20261029T162943/`. It is the DAG run `prod/20261029T125742/` with `pubmedId` and `initialSampleSize` of the two study indexes patched (see [Patch of 2026-10-29](#patch-of-2026-10-29)); its credible sets are the same files. `prod/20261029T125742/` keeps the DAG output unchanged, with its `config/`, `bin/` and `source/`.
 
 [BigBrain](https://zenodo.org/records/17226890) is a brain-tissue molecular QTL meta-analysis (Réal, Kailash et al. 2025, "Mapping genetic effects on splicing in ten thousand post-mortem brain samples reveals novel mediators of neurological disease risk"). Its published SuSiE fine-mapping of the European (EUR) release is ingested as credible sets. It was run by BigBrain with PolyFun + SuSiE (L=5, 1 Mb window around the feature) on Z-scores, with in-sample LD from 3,884 European donors. The credible sets are not fine-mapped again.
 
@@ -77,11 +78,11 @@ One row per gene (eQTL) or intron junction (sQTL).
 | `projectId` | `string` | `BigBrain`. |
 | `studyType` | `string` | `eqtl` or `sqtl`. |
 | `biosampleFromSourceId` | `string` | `UBERON_0000955` (brain). |
-| `pubmedId` | `string` | `35058635`, the mmQTL meta-analysis method paper. |
+| `pubmedId` | `string` | `41040686`, the BigBrain paper (medRxiv preprint). |
 | `publicationFirstAuthor` | `string` | `Réal A, Kailash BP`. |
 | `publicationDate` | `string` | `2025`. |
 | `publicationTitle` | `string` | Title of the BigBrain paper. |
-| `initialSampleSize` | `string` | `10,725 donors (EUR)`. 10,725 is the sample count of the whole resource, not split by ancestry. |
+| `initialSampleSize` | `string` | `10,725 samples from 4,656 donors (all ancestries)`: the whole resource, not split by ancestry. |
 | `nSamples` | `integer` | `10725`, as above. |
 | `discoverySamples` | `array<struct<sampleSize: integer, ancestry: string>>` | `[{10725, European}]`. |
 | `ldPopulationStructure` | `array<struct<ldPopulation: string, relativeSampleSize: double>>` | `[{nfe, 1.0}]`. |
@@ -133,7 +134,15 @@ One row per member variant of a credible set.
 | `rescaledDirection` | `tinyint` | Null. |
 | `qualityControls` | `array<string>` | Empty. |
 
+## Patch of 2026-10-29
+
+gentropy `v4.0.0-dev.5` set `pubmedId` to `35058635`, the mmQTL method paper, and `initialSampleSize` to `10,725 donors (EUR)`. The BigBrain paper is PubMed [41040686](https://pubmed.ncbi.nlm.nih.gov/41040686/), and it reports 10,725 samples from 4,656 donors of all ancestries. `config/patch_publication.py` sets both columns in `output/{eqtl,sqtl}/study/` with pyarrow. Other columns, the column types and the row order are unchanged. The gentropy fix is [gentropy#1333](https://github.com/opentargets/gentropy/pull/1333).
+
+Run as `python patch_publication.py <study of 20261029T125742>/part-00000-<id>.zstd.parquet part-00000.zstd.parquet`, once for `eqtl` and once for `sqtl`.
+
 ## Other runs
+
+- `gs://bigbrain_data/prod/20261029T125742/`: the DAG run, before the patch.
 
 - `gs://bigbrain_data/prod/20261015T103255/`: an earlier run from the gentropy#1321 branch (commit `777abba9`), with the eQTL and sQTL credible sets together in `output/credible_set/` and `output/study_index/`. Same counts. See its `docs/README.md`.
 
@@ -143,3 +152,4 @@ One row per member variant of a credible set.
 
 - feat: add the `bigbrain_ingestion` DAG, a StagingDagConfig DAG on gentropy `v4.0.0-dev.5`.
 - docs: describe the outputs of the run `20261029T125742`; the same file is in `docs/` of the run folder.
+- fix: patch `pubmedId` and `initialSampleSize` of the study indexes into `gs://bigbrain_data/prod/20261029T162943/`.
