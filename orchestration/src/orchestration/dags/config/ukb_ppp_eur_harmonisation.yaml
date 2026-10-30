@@ -21,7 +21,7 @@ nodes:
       # all other parameters
       step.tmp_variant_annotation_path: gs://gentropy-tmp/variant_annotation
       step.variant_annotation_path: gs://gnomad_data_2/gnomad_variant_index
-      step.study_index_output_path: gs://ukb_ppp_eur_data/study_index
+      step.study_index_output_path: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index
       step.summary_stats_output_path: gs://ukb_ppp_eur_inputs/harmonised_summary_statistics
       step.session.write_mode: overwrite
 
@@ -32,7 +32,7 @@ nodes:
     params:
       step: locus_breaker_clumping
       step.summary_statistics_input_path: gs://ukb_ppp_eur_inputs/harmonised_summary_statistics
-      step.clumped_study_locus_output_path: gs://ukb_ppp_eur_data/study_locus_lb_clumped
+      step.clumped_study_locus_output_path: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_locus_lb_clumped
       step.lbc_baseline_pvalue: 1.0e-5
       step.lbc_distance_cutoff: 250_000
       step.lbc_pvalue_threshold: 1.7e-11

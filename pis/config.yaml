@@ -846,13 +846,13 @@ steps:
       destination: input/molqtl/credible_set/eqtl_catalogue/r7
 
     - name: copy_many UKBB PPP EUR study
-      sources: gs://ukb_ppp_eur_data/study_index/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/study/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible sets
-      sources: gs://ukb_ppp_eur_data/credible_set_clean/20250129/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set/ukb_ppp_eur

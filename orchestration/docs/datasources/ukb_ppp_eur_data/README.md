@@ -1,137 +1,228 @@
 # UK Biobank Pharma Proteomics Project (UKB-PPP)
 
-This document was updated on 2025-07-22.
+This document was updated on 2026-10-30.
 
-Data source comes from the `https://registry.opendata.aws/ukbppp/`
-
-Data stored under `gs://ukb_ppp_eur_data` and `gs://ukb_ppp_eur_inputs` buckets comes with following structures
-
-```{bash}
-gs://ukb_ppp_eur_data/credible_set_datasets/susie/20250129/
-gs://ukb_ppp_eur_data/credible_set_clean/20250129/
-gs://ukb_ppp_eur_data/docs/
-gs://ukb_ppp_eur_data/finemapping_logs/
-gs://ukb_ppp_eur_data/finemapping_manifests/
-gs://ukb_ppp_eur_data/study_index/
-gs://ukb_ppp_eur_data/study_locus_lb_clumped/
+```sh
+gs://ukb_ppp_eur_data/prod/20260526T131650/config/                                   # DAG configs of the run
+gs://ukb_ppp_eur_data/prod/20260526T131650/docs/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_locus_lb_clumped/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/finemapping_manifests/20250129/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/finemapping_logs/20250129/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_datasets/susie/20250129/
+gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/
+gs://ukb_ppp_eur_inputs/harmonised_summary_statistics/                               # input, not part of the run folder
 ```
 
-```{bash}
-gs://ukb_ppp_eur_inputs/harmonised_summary_statistics/
+Data contained in the run corresponds to the European discovery protein GWAS (pGWAS) of the [UK Biobank Pharma Proteomics Project](https://www.nature.com/articles/s41586-023-06592-6), published in the [UKB-PPP open data registry](https://registry.opendata.aws/ukbppp/).
+
+Data is produced by two DAGs, **ukb_ppp_eur_harmonisation** and **ukb_ppp_eur_finemapping**. The DAG configurations and topologies are in `config/ukb_ppp_eur_harmonisation.yaml` and `config/ukb_ppp_eur_finemapping.yaml` of the run folder (`gs://ukb_ppp_eur_data/prod/20260526T131650/config/`). The steps use these gentropy tags; the links below refer to them:
+
+| DAG | Step | gentropy |
+|---|---|---|
+| ukb_ppp_eur_harmonisation | ukb_ppp_eur_sumstat_preprocess, locus_breaker_clumping | [`v2.3.0-rc.5`](https://github.com/opentargets/gentropy/tree/v2.3.0-rc.5) (`GENTROPY_REF`) |
+| ukb_ppp_eur_finemapping | finemapping_batch_job | [`v2.0.2-rc.2`](https://github.com/opentargets/gentropy/tree/v2.0.2-rc.2) (`gentropy_ref`, the tag of the gentropy image) |
+| ukb_ppp_eur_finemapping | ukb_ppp_eur_data_credible_set_qc | [`v3.2.0`](https://github.com/opentargets/gentropy/tree/v3.2.0) (`GENTROPY_REF`) |
+
+The run folder is named after the data freeze: the move of the release from the top level of `gs://ukb_ppp_eur_data/` into a dated folder. The run outputs were written to the top level of `gs://ukb_ppp_eur_data/`, moved to `gs://ukb_ppp_eur_data/prod/20260526T131650/` on 2026-10-26, and moved under `output/` on 2026-10-30. The fine-mapping outputs keep the `20250129` folder of the fine-mapping run.
+
+Inputs of the run:
+
+```sh
+gs://gentropy-vault/ukb-ppp/
+gs://gentropy-tmp/batch/output/ukb_ppp_eur/study_index.tsv
+gs://gentropy-tmp/batch/output/ukb_ppp_eur/summary_stats.parquet
+gs://gnomad_data_2/gnomad_variant_index
+gs://panukbb-ld-matrixes/UKBB.EUR.ldadj
+gs://panukbb-ld-matrixes/ukb-diverse-pops-public-build-38/UKBB.EUR.ldadj.variant.b38
 ```
 
-> [!TIP]
-> The latest credible sets stored with 20250129 release date.
+`gs://gentropy-vault/ukb-ppp/` is the mirror of the UKB-PPP pGWAS summary statistics, one TAR file per protein, made by hand following the [gentropy-vault protocol](https://github.com/opentargets/gentropy-vault/blob/main/datasets/ukb-ppp.md). [gentropy-input-support](https://github.com/opentargets/gentropy-input-support) (`./submit.py ukb_ppp_eur`, [data_sources.py](https://github.com/opentargets/gentropy-input-support/blob/dc5f8f7aee13a066933f3fd5b18a9b3a5ca71069/data_sources.py#L43-L103)) reads the mirror on Google Batch, outside the DAGs, and writes `study_index.tsv` and `summary_stats.parquet` to `gs://gentropy-tmp/`:
 
-## Processing description
+- The per-chromosome files are extracted from the TAR files and partitioned by chromosome.
+- The study identifier is recreated, because several rows of the source study table share one summary statistics file.
+- Rows of the source study table without a summary statistics file are dropped.
 
-## Pre-steps
+`gs://gentropy-tmp/` deletes its objects after 60 days, so these two inputs no longer exist.
 
-Full description of the process can be found in https://github.com/opentargets/issues/issues/3234
+The harmonisation DAG has 2 steps, run one after another on one Dataproc cluster:
 
-### 1. Mirror
+![ukb_ppp_eur_harmonisation](ukb_ppp_eur_harmonisation.svg)
 
-- **Input.** Original data is hosted on Synapse.
-- **Transformation.**
-  - As we decided in the past, we want to keep the copy of the original data in the Vault.
-  - Protocol is available here: https://github.com/opentargets/gentropy-vault/blob/main/datasets/ukb-ppp.md.
-  - The protocol must be run manually.
-- **Output.** The output of this step is kept forever in the Vault.
+1. ukb_ppp_eur_sumstat_preprocess
+2. locus_breaker_clumping
 
-### 2. Preprocess
+The fine-mapping DAG has 3 steps, run one after another: the index and the fine-mapping jobs on Google Batch, and the quality control on one Dataproc cluster:
 
-- **Input.** The mirrored data from the previous step.
-- **Transformation.**
-  - The data which we mirrored during the previous steps has to undergo several specific transformations which aren't achievable in Spark (especially the first one):
-    - Extract gzipped per-chromosome files from inside the individual TAR files, decompress, partition by chromosome
-    - Recreate the study ID. This is required because multiple rows in the study index can reuse the same summary stats file
-    - Drop certain rows which don't have a corresponding summary stats file
-  - This transformation is done using Google Batch. The code can be found in this new repository: [gentropy-input-support](https://github.com/opentargets/gentropy-input-support). The UKB PPP-specific part is this one: [data_sources.py](https://github.com/opentargets/gentropy-input-support/blob/dc5f8f7aee13a066933f3fd5b18a9b3a5ca71069/data_sources.py#L43-L103).
-  - The command to run is `./submit.py ukb_ppp_eur` inside the `gentropy-input-support`
-  - This step must also be triggered manually, how to do this is described in the repository.
-- **Output.** Precursors of study index and summary stats datasets are output. Because we decided that we don't want to keep the data twice, the output of this step is only kept temporarily and is deleted after 60 days according to the _gs://gentropy-tmp_ bucket lifecycle rules.
+![ukb_ppp_eur_finemapping](ukb_ppp_eur_finemapping.svg)
 
-## Orchestration steps
+1. generate_finemapping_index
+2. finemapping_batch_job
+3. ukb_ppp_eur_data_credible_set_qc
 
-### ukb_ppp_eur_harmonisation dag
+## ukb_ppp_eur_sumstat_preprocess
 
-**Harmonisation dag** contains two steps:
+The step ([`ukb_ppp_eur_sumstat_preprocess.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/ukb_ppp_eur_sumstat_preprocess.py)) builds the study index and harmonises the summary statistics.
 
-- raw sumstat preprocessing (ukb_ppp_eur_sumstat_preprocess)
-- locus breaker clumping (locus_breaker_clumping)
+The study index ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/datasource/ukb_ppp_eur/study_index.py)) has one study per row of `study_index.tsv`. The sample size of a study is the `N` of its chromosome 22 summary statistics; a study without chromosome 22 summary statistics is dropped. The output is `output/study_index/`.
 
-The configuration of the dataproc infrastructure and individual step parameters can be found in `ukb_ppp_eur_harmonisation.yaml` file.
+The summary statistics ([`summary_stats.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/datasource/ukb_ppp_eur/summary_stats.py), [`harmonise.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/common/harmonise.py)) are harmonised one chromosome at a time:
 
-#### ukb_ppp_eur_sumstat_preprocess
+- Chromosome 23 is renamed to X.
+- Variants with an `INFO` below 0.8, or a minor allele frequency below 0.0001, are dropped.
+- Each variant is matched to the gnomAD variant index (`gs://gnomad_data_2/gnomad_variant_index`) in its own allele order or in the flipped order. A flipped variant has its `BETA` negated and its allele frequency replaced by 1 − frequency.
+- A flipped strand-ambiguous SNP (A/T or G/C) is dropped. Variants not in the variant index are dropped.
+- Rows with a null position or a `BETA` of 0 are dropped.
 
-![harmonisation dag](ukb_ppp_eur_harmonisation.svg)
+The output is `gs://ukb_ppp_eur_inputs/harmonised_summary_statistics/`, partitioned by `studyId` and `chromosome`. It is an input bucket, and the run folder does not hold it.
 
-This process **harmonizes the raw pre-processed data** to the [SummaryStatistics](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics/) and creates the [StudyIndex](https://opentargets.github.io/gentropy/python_api/datasets/study_index/).
-The process is runs on **dataproc** cluster.
+## locus_breaker_clumping
 
-The outputs are stored in:
+The step ([`locus_breaker_clumping.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/locus_breaker_clumping.py)) finds the loci of each study in the harmonised summary statistics:
 
-- `gs://ukb_ppp_eur_data/study_index` - study index
-- `gs://ukb_ppp_eur_inputs/harmonised_summary_statistics` - summary statistics
+- Locus-breaker clumping ([`locus_breaker_clumping.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/method/locus_breaker_clumping.py)) joins the variants with a p-value below 1e-5 that are less than 250 kb apart into one locus, keeps the loci whose lead has a p-value below 1.7e-11, and extends each locus by 100 kb on both sides.
+- A locus longer than 1.5 Mb is replaced by the windows of window-based clumping (500 kb, p-value below 1.7e-11) whose lead is inside it. Each such window spans 1.5 Mb centred on its lead.
+- Loci overlapping the MHC region are dropped.
+- The summary statistics of each locus are collected into `locus`.
 
-#### locus_breaker_clumping
+The output is `output/study_locus_lb_clumped/`, partitioned by `studyLocusId`: 17,670 loci.
 
-This process performs locus clumping on previously harmonised summary statistics and results in [StudyLocus](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) dataset stored under `gs://ukb_ppp_eur_data/study_locus_lb_clumped`.
+## generate_finemapping_index
 
-#### Parametrization of dataproc preprocessing jobs
+The step (`BatchIndexOperator`, pointer `finemapping`) lists the loci of `output/study_locus_lb_clumped/` and writes a manifest of their input, output and log paths. The manifests are in `output/finemapping_manifests/20250129/`, in two folders, `20250129091658/` and `20250129143059/`, each with a `chunk_0` manifest.
 
-To parametrize the dataproc cluster one need to update the logic inside the `dataproc` block in `ukb_ppp_eur_harmonisation.yaml` file.
+## finemapping_batch_job
 
-### ukb_ppp_eur_finemapping dag
+The step runs one Google Batch task per locus of the manifest. Each task runs `susie_finemap.sh`, which calls the gentropy step `susie_finemapping` ([`susie_finemapper.py`](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/susie_finemapper.py)):
 
-![finemapping dag](ukb_ppp_eur_finemapping.svg)
+- The LD matrix of the locus is the Pan-UKBB `EUR` LD matrix, for a study whose major LD population is `nfe` ([`ld_matrix_interface.py`](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/method/ld_matrix_interface.py)). Only variants present in both the locus and the LD matrix are fine-mapped. Every UKB-PPP study has the LD population `nfe`.
+- The locus is fine-mapped with [SuSiE-inf](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/method/susie_inf.py), with at most 10 causal variants. Each credible set holds the variants with the largest posterior probabilities, until they sum to 0.95.
+- A credible set is kept when its lead has a p-value of at most 1e-5, its natural log Bayes factor is at least 2 (`credibleSetlog10BF` of at least 0.8686), and its mean and minimum purity r² are at least 0.25.
+- Of two credible sets with the same lead, the one with the lower credible set index is kept. Of two credible sets whose leads have an r² of at least 0.8, the one whose lead has the larger p-value is dropped.
+- Every credible set is flagged `Study locus finemapped without in-sample LD reference`.
 
-This dag performs fine mapping with SuSiE-inf algorithm on clumped study loci to obtain [Credible sets](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/). This is expensive process and is run on google batch.
+The output is `output/credible_set_datasets/susie/20250129/`, one folder per locus: 16,974 folders. The logs of the tasks are in `output/finemapping_logs/20250129/`, one `<studyLocusId>.log` file per locus.
 
-Due to infrastructure, the fine mapping process is divided into a 2-step logic:
+## ukb_ppp_eur_data_credible_set_qc
 
-- [x] Generate manifests - `FinemappingBatchJobManifestOperator`
-- [x] Execute Finemapping batch job (finemapping step per each manifest) - `FinemappingBatchOperator`
+The step ([`credible_set_qc.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/credible_set_qc.py), [`susie_inf.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/method/susie_inf.py), `credible_set_qc`) reads all credible sets of `output/credible_set_datasets/susie/20250129/`:
 
-![finemapping](finemapping.svg)
+- Credible sets with a lead p-value above 1e-5, or a minimum purity r² below 0.25, are dropped.
+- Of the credible sets with the same `studyLocusId`, the one with the largest `credibleSetlog10BF` is kept.
+- No LD clumping is done (`clump: false`).
 
-1. Tasks performed by `FinemappingBatchJobManifestOperator`
+The output is `output/credible_set_clean/20250129/`: 32,179 credible sets from 2,378 studies. This is the dataset that the platform reads.
 
-   - Collect all individual loci parquet files
-   - Partition collected loci into batches with with `max_records_per_chunk` as a limit of the batch size.
-   - For each batch create a manifest file that will be imputed to the fine mapping gentropy step
-   - Save the batch manifests to google cloud storage.
+## Outputs
 
-2. Tasks performed by `FinemappingBatchOperator`
+Schemas as read from the parquet files of the run. Nested columns show their `array<struct<...>>` types. "Empty" marks a column with no values in this run.
 
-   - Execute one google batch job per manifest with `n <= max_records_per_chunk` tasks.
-   - Each task executes finemapping step on single `StudyLocus` record.
+| Output | Rows | Files |
+|---|---|---|
+| `study_index` | 2,957 | 1 |
+| `study_locus_lb_clumped` | 17,670 | 1 per locus |
+| `credible_set_datasets/susie/20250129` | 1 folder per fine-mapped locus (16,974) | 1 or more per locus |
+| `credible_set_clean/20250129` | 32,179 | 16 |
 
-3. Collect logs
+### study_index
 
-The output of finemapping can be found under the:
+One row per protein assay.
 
-- `gs://ukb_ppp_eur_data/credible_set_datasets/susie/20250129` - fine mapped study loci
-- `gs://ukb_ppp_eur_data/finemapping_manifests/` - manifests used during the fine mapping job
-- `gs://ukb_ppp_eur_data/finemapping_logs/` - logs from the individual finemapping tasks
+| Column | Type | Description |
+|---|---|---|
+| `studyId` | `string` | `UKB_PPP_EUR_<gene>_<UniProt>_<OlinkId>_v<version>`, e.g. `UKB_PPP_EUR_A1BG_P04217_OID30771_v1`. |
+| `studyType` | `string` | `pqtl`. |
+| `projectId` | `string` | `UKB_PPP_EUR`. |
+| `traitFromSource` | `string` | UKB-PPP protein identifier, `<gene>:<UniProt>:<OlinkId>:v<version>`. |
+| `biosampleFromSourceId` | `string` | `UBERON_0001969` (blood plasma). |
+| `geneId` | `string` | Ensembl gene of the protein. 2,937 distinct genes. |
+| `hasSumstats` | `boolean` | `true`. |
+| `summarystatsLocation` | `string` | TAR file of the study in the summary statistics mirror, `gs://gentropy-vault/ukb-ppp/…`. |
+| `nSamples` | `integer` | Sample size of the study, 9,216 to 34,090. |
+| `discoverySamples` | `array<struct<sampleSize: integer, ancestry: string>>` | One sample: `nSamples` and the ancestry `European`. |
+| `ldPopulationStructure` | `array<struct<ldPopulation: string, relativeSampleSize: double>>` | `nfe` with a relative sample size of 1.0. |
 
-### Credible set qc
+### study_locus_lb_clumped
 
-After the finemapping is performed, the qc and individual locus collection is run via
-the dataproc cluster job.
+One row per locus, in one folder per `studyLocusId`.
 
-The credible sets that pass the qc are collected in the `gs://ukb_ppp_eur_data/credible_set_clean/`.
+| Column | Type | Description |
+|---|---|---|
+| `studyLocusId` | `string` | Identifier of the locus (the partition folder). |
+| `studyId` | `string` | Study of the locus, as in `study_index`. |
+| `variantId` | `string` | Lead variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
+| `chromosome` | `string` | Chromosome of the lead. |
+| `position` | `integer` | Position of the lead on GRCh38. |
+| `locusStart` | `integer` | Start of the locus. |
+| `locusEnd` | `integer` | End of the locus. |
+| `beta` | `double` | Effect size of the lead. |
+| `standardError` | `double` | Standard error of the lead. |
+| `pValueMantissa` | `float` | Mantissa of the p-value of the lead (p = mantissa × 10^exponent). |
+| `pValueExponent` | `integer` | Exponent of the p-value of the lead. |
+| `effectAlleleFrequencyFromSource` | `float` | Frequency of the effect allele of the lead. |
+| `sampleSize` | `integer` | Sample size of the lead. |
+| `qualityControls` | `array<string>` | Quality control flags of the locus. |
+| `locus` | `array<struct<variantId: string, beta: double, pValueMantissa: float, pValueExponent: integer, standardError: double>>` | Summary statistics of every variant between `locusStart` and `locusEnd`. |
 
-> [!NOTE]
-> The results from fine mapping runs as well as logs and manifests are stored under **dated directories**. The results with the latest date are the most recent ones. Each release contains the full set of results. Date format used follows %Y%m%d format.
+### credible_set_datasets/susie/20250129
 
-#### Parametrization of google batch finemapping job
+One folder per fine-mapped locus, named after the `studyLocusId` of the locus in `study_locus_lb_clumped`. One row per credible set.
 
-The configuration of the google batch infrastructure and individual step parameters can be found in `ukb_ppp_eur_finemapping.yaml` file.
-To adjust the parameters for google batch infrastructure refer to the `google_batch` block in the node configuration.
+| Column | Type | Description |
+|---|---|---|
+| `studyLocusId` | `string` | Identifier of the credible set: a hash of `studyId`, `variantId` and `finemappingMethod`. |
+| `studyId` | `string` | Study of the credible set, as in `study_index`. |
+| `credibleSetIndex` | `integer` | Index of the credible set within the locus, 1 to 10. |
+| `region` | `string` | Fine-mapped region, `<chromosome>:<start>-<end>`. |
+| `variantId` | `string` | Lead variant, the variant of the credible set with the largest posterior probability. |
+| `chromosome` | `string` | Chromosome of the lead. |
+| `position` | `integer` | Position of the lead on GRCh38. |
+| `finemappingMethod` | `string` | `SuSiE-inf`. |
+| `credibleSetlog10BF` | `double` | Log10 Bayes factor of the credible set. |
+| `purityMeanR2` | `double` | Mean r² between the variants of the credible set. |
+| `purityMinR2` | `double` | Minimum r² between the variants of the credible set. |
+| `zScore` | `double` | Z-score of the lead. |
+| `pValueMantissa` | `float` | Mantissa of the p-value of the lead. |
+| `pValueExponent` | `integer` | Exponent of the p-value of the lead. |
+| `locusStart` | `integer` | Start of the locus in `study_locus_lb_clumped`. |
+| `locusEnd` | `integer` | End of the locus in `study_locus_lb_clumped`. |
+| `beta` | `double` | Effect size of the lead, from `locus`. |
+| `qualityControls` | `array<string>` | `Study locus finemapped without in-sample LD reference`. |
+| `locus` | `array<struct<variantId: string, posteriorProbability: double, logBF: double, beta: double>>` | Variants of the credible set with their posterior probability, log Bayes factor and effect. |
 
-> [!WARNING]
-> After running the google batch fine mapping job, ensure that the job tasks have succeeded, otherwise the job requires manual curation.
+### credible_set_clean/20250129
+
+One row per credible set: the rows of `credible_set_datasets/susie/20250129` that pass the quality control, in the `StudyLocus` schema of gentropy `v3.2.0`.
+
+| Column | Type | Description |
+|---|---|---|
+| `studyLocusId` | `string` | Identifier of the credible set, as in `credible_set_datasets/susie/20250129`. |
+| `studyType` | `string` | Empty. |
+| `variantId` | `string` | Lead variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
+| `chromosome` | `string` | Chromosome of the lead. |
+| `position` | `integer` | Position of the lead on GRCh38. |
+| `region` | `string` | Fine-mapped region, `<chromosome>:<start>-<end>`. 12,121 distinct regions. |
+| `studyId` | `string` | Study of the credible set, as in `study_index`. Every study is in `study_index`. |
+| `beta` | `double` | Effect of the lead, from `locus`. |
+| `zScore` | `double` | Z-score of the lead. |
+| `pValueMantissa` | `float` | Mantissa of the p-value of the lead. |
+| `pValueExponent` | `integer` | Exponent of the p-value of the lead. Every p-value is at most 1e-5. |
+| `effectAlleleFrequencyFromSource` | `float` | Empty. |
+| `standardError` | `double` | Empty. |
+| `subStudyDescription` | `string` | Empty. |
+| `qualityControls` | `array<string>` | `Study locus finemapped without in-sample LD reference`. |
+| `finemappingMethod` | `string` | `SuSiE-inf`. |
+| `credibleSetIndex` | `integer` | Index of the credible set within the locus, 1 to 10. |
+| `credibleSetlog10BF` | `double` | Log10 Bayes factor of the credible set. |
+| `purityMeanR2` | `double` | Mean r² between the variants of the credible set. |
+| `purityMinR2` | `double` | Minimum r² between the variants of the credible set, at least 0.25. |
+| `locusStart` | `integer` | Start of the locus. |
+| `locusEnd` | `integer` | End of the locus. |
+| `sampleSize` | `integer` | Empty. |
+| `ldSet` | `array<struct<tagVariantId: string, r2Overall: double>>` | Empty. |
+| `locus` | `array<struct<is95CredibleSet: boolean, is99CredibleSet: boolean, logBF: double, posteriorProbability: double, variantId: string, pValueMantissa: float, pValueExponent: integer, beta: double, standardError: double, r2Overall: double>>` | Variants of the credible set, 1 to 2,848 per credible set. Only `variantId`, `posteriorProbability`, `logBF` and `beta` have values. |
+| `confidence` | `string` | Empty. |
+| `isTransQtl` | `boolean` | Empty. |
 
 ## Changelog
 
@@ -147,3 +238,9 @@ To adjust the parameters for google batch infrastructure refer to the `google_ba
 ### 2026-09-16
 
 - chore: moved the qc step from `credible_set_qc` dag to ukb_ppp_eur_finemapping dag.
+
+### 2026-10-30
+
+- chore: move the UKB-PPP release from the top level of `gs://ukb_ppp_eur_data/` to `gs://ukb_ppp_eur_data/prod/20260526T131650/` (`config/`, `docs/`, `output/`), following [opentargets/issues#4613](https://github.com/opentargets/issues/issues/4613). The DAGs write to `output/` of the run folder.
+- chore: the credible set quality control paths of `ukb_ppp_eur_finemapping` follow `root_path` and `date`, so the `Test` environment no longer writes to the prod bucket.
+- docs: rewrite the docs for the run folder; the fine-mapping LD reference is the Pan-UKBB `EUR` LD matrix.
