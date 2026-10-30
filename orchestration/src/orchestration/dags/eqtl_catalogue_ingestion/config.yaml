@@ -9,13 +9,14 @@ environments:
       eqtl_catalogue: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626
     output: gs://eqtl_catalogue_data/r8/prod/20261030T153207
     scratchpad:
-      gentropy_version: 4.0.0-dev.11
+      # the gentropy dev commit with the pubmedId fix (opentargets/gentropy#1334), not yet in a tag
+      gentropy_ref: 1ef3310751443ffcc1bfa52a9f2a07b3b72dd849
       metadata_uri: https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/fd99d45d3e433dcdf3c3d0acb4db0b7d5e8a7bd3/data_tables/dataset_metadata_r8.tsv
 
 setup:
-  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
     to: '{{output}}/bin/install_dependencies_on_cluster.sh'
-  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/src/gentropy/cli.py
     to: '{{output}}/bin/cli.py'
 
 infrastructure:
@@ -32,7 +33,7 @@ infrastructure:
       worker_disk_size: 512
       idle_delete_ttl: 1800
       metadata:
-        GENTROPY_REF: 'v{{gentropy_version}}'
+        GENTROPY_REF: '{{gentropy_ref}}'
       properties:
         # as the gentropy clusters of the unified pipeline
         'spark:spark.shuffle.service.enabled': 'true'
