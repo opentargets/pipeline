@@ -37,7 +37,13 @@ from pts.transformers.variant.index import (
     read_variant_annotations,
 )
 from pts.transformers.variant.rows import collect_variants
-from pts.transformers.variant.vep import amino_acid_change, generate_dbxrefs, parse_vep, uniprot_accessions
+from pts.transformers.variant.vep import (
+    amino_acid_change,
+    generate_dbxrefs,
+    parse_vep,
+    uniprot_accessions,
+    variant_effect,
+)
 from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant_colocated import cache_line
 from tests.test_variant_loftee import write_bgzip_fasta
@@ -1103,3 +1109,44 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
     assert len(chunked_parts) == 2 + 1 + -(-len(chr22) // 7)
     assert {x['method'] for row in whole['variantEffect'] for x in row} >= {'GPN-Star', 'FoldX', 'GERP'}
     assert whole.equals(chunked)
+
+
+def _loftee(records: pl.LazyFrame, ranked: bool) -> tuple[str, str, str | None]:
+    """The LOFTEE effect's (targetId, assessment, flag): from parse_vep, or as before db4074c1, in record order."""
+    if ranked:
+        [found] = [x for x in parse_vep(records).collect()['variantEffect'][0] if x['method'] == 'LOFTEE']
+    else:
+        canonical = pl.col('transcript_consequences').list.filter(pl.element().struct.field('canonical') == 1)
+        found = records.select(variant_effect(canonical, 'LOFTEE', 'lof', 'lof', 'lof_filter')).collect().item()
+    return found['targetId'], found['assessment'], found['assessmentFlag']
+
+
+@pytest.mark.parametrize('ranked', [False, True])
+def test_loftee_tie_rule_names_the_transcript_but_never_changes_hc_against_lc(ranked):
+    """`LC` beats `HC` on the string, in any order and either rule; only equal calls fall to the order."""
+    high = transcript(gene_id='top', transcript_id='ENST1', consequence_terms=['stop_gained'], lof='HC')
+    low = transcript(
+        gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='F'
+    )
+    for order in ([high, low], [low, high]):
+        records = vep_records({
+            'input': '1\t123\t.\tA\tG',
+            'most_severe_consequence': 'stop_gained',
+            'transcript_consequences': order,
+        })
+        assert _loftee(records, ranked) == ('lower', 'LC', 'F')
+
+
+def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_before():
+    """Two `LC` calls with different flags: the flags follow the transcript the rule picks."""
+    top = transcript(gene_id='top', transcript_id='ENST1', consequence_terms=['stop_gained'], lof='LC', lof_filter='A')
+    lower = transcript(
+        gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='B'
+    )
+    records = vep_records({
+        'input': '1\t123\t.\tA\tG',
+        'most_severe_consequence': 'stop_gained',
+        'transcript_consequences': [lower, top],
+    })
+    assert _loftee(records, ranked=False) == ('lower', 'LC', 'B')
+    assert _loftee(records, ranked=True) == ('top', 'LC', 'A')
