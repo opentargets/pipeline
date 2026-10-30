@@ -5,6 +5,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \
 				upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
+				upload-finngen-gwas-readme upload-finngen-multiome-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 				upload-finngen-meta-readme upload-decode-bucket-readme

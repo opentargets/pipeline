@@ -80,7 +80,7 @@ One row per credible set.
 | Column | Type | Description |
 |---|---|---|
 | `studyId` | `string` | Study of the credible set, as in `study_index`. |
-| `region` | `string` | Fine-mapped region, `chr<chromosome>:<start>-<end>`. |
+| `region` | `string` | Fine-mapped region, `chr<chromosome>:<start>-<end>`. Chromosome X is `chrX`, except in 87 credible sets of `FINNGEN_R12_HEIGHT_IRN`, which FinnGen labels `chr23`. |
 | `credibleSetIndex` | `integer` | Index of the credible set within the region, 1 to 10. |
 | `locus` | `array<struct<variantId: string, posteriorProbability: double, logBF: double, pValueMantissa: float, pValueExponent: integer, beta: double, standardError: double, is95CredibleSet: boolean, is99CredibleSet: boolean>>` | Variants of the credible set, sorted by `posteriorProbability`, with their log Bayes factor (`logBF`), p-value, posterior mean effect (`beta`) and standard error. |
 | `variantId` | `string` | Lead variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
