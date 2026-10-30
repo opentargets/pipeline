@@ -9,7 +9,7 @@ environments:
       gnomad: gs://gnomad_data_2
     output: gs://gwas_catalog_sumstats_pics/prod/20261030T072623
     scratchpad:
-      gentropy_version: 4.0.0-dev.8
+      gentropy_version: 4.0.0-dev.9
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
