@@ -1,4 +1,5 @@
 import datetime
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -8,7 +9,14 @@ import openpyxl
 import polars as pl
 import pytest
 
-from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS, StagedOutput
+from pts.clinical_staging.staged_outputs import (
+    DISEASE_ENTITIES,
+    DRUG_ENTITIES,
+    EXTRACTION,
+    STOP_REASONS,
+    StagedOutput,
+    schema_digest,
+)
 from pts.record_store import publish_snapshot
 from pts.transformers import clinical_report as clinical_report_module
 from pts.transformers.clinical import (
@@ -20,7 +28,7 @@ from pts.transformers.clinical import (
 from pts.transformers.clinical.mining import read_ema_sheet
 from pts.transformers.clinical.providers.aact import replace_with_llm_indications
 from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
-from pts.transformers.clinical.schemas import ClinicalReportOrigin
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,
@@ -668,23 +676,30 @@ def test_unstaged_label_from_any_source_fails() -> None:
         )
 
 
-def _snapshot_metadata(kind: StagedOutput, tag: str | None = None) -> dict[str, Any]:
+def _snapshot_metadata(kind: StagedOutput, tag: str | None = None, **extra: str) -> dict[str, Any]:
     return {
         'kind': kind.name,
         'model': kind.model,
         'tag': tag or kind.tag(dict.fromkeys(kind.hub_models, 'r1')),
         'model_revisions': dict.fromkeys(kind.hub_models, 'r1'),
+        **extra,
     }
 
 
-def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _release_source(
+    tmp_path: Path,
+    disease_tag: str | None = None,
+    drug_extraction_tag: str | None = None,
+    extraction_digest: str | None = None,
+) -> dict[str, str]:
+    """The sources of a release, staged under ``tmp_path``, each with the metadata given."""
+    digest = extraction_digest or schema_digest(ClinicalReportExtractionSchema)
+    extraction_tag = drug_extraction_tag or EXTRACTION.release_tag()
     metadatas = {
         'aact_stop_reasons': _snapshot_metadata(STOP_REASONS),
-        'aact_drug_entities': _snapshot_metadata(DRUG_ENTITIES),
+        'aact_drug_entities': _snapshot_metadata(DRUG_ENTITIES, extraction_tag=extraction_tag),
         'mining_drug_entities': _snapshot_metadata(DRUG_ENTITIES),
-        'mining_disease_entities': _snapshot_metadata(DISEASE_ENTITIES, 'r1-pdeadbeef'),
+        'mining_disease_entities': _snapshot_metadata(DISEASE_ENTITIES, disease_tag),
     }
     kinds = {
         'aact_stop_reasons': STOP_REASONS,
@@ -697,12 +712,51 @@ def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(
         empty = pl.DataFrame(schema=dict.fromkeys(kinds[name].columns.values(), pl.String))
         publish_snapshot(empty, str(tmp_path / name), metadata, None)
         source[name] = str(tmp_path / name)
+    extraction = _extraction('NCT0001', 'asthma', 'aspirin')
+    publish_snapshot(extraction, str(tmp_path / 'extraction'), EXTRACTION.metadata(digest, None), None)
+    source['trial_extraction'] = str(tmp_path / 'extraction')
+    return source
 
-    def no_dump(*args: object, **kwargs: object) -> None:
+
+@pytest.fixture
+def no_dump(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError('dump restored')
 
-    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', no_dump)
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', refuse)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, disease_tag='r1-pdeadbeef')
     with pytest.raises(ValueError, match=r"mining_disease_entities.*'deadbeef'"):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_extraction_of_another_tag(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, extraction_digest='f' * 64)
+    with pytest.raises(ValueError, match=r'ffffffffffff.*this code expects'):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_aact_drug_snapshot_of_another_extraction(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, drug_extraction_tag='ffffffffffff-pdeadbeef')
+    with pytest.raises(
+        ValueError, match=r'aact_drug_entities extraction_tag expected .*found .*ffffffffffff-pdeadbeef'
+    ):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_on_an_aact_drug_snapshot_without_an_extraction_tag(tmp_path: Path) -> None:
+    source = _release_source(tmp_path)
+    metadata_path = Path(source['aact_drug_entities']) / 'metadata.json'
+    metadata = json.loads(metadata_path.read_text())
+    del metadata['extraction_tag']
+    metadata_path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match=r'aact_drug_entities extraction_tag expected'):
         clinical_report_module.clinical_report(source, {}, {}, None)
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 
@@ -46,6 +46,8 @@ def test_pinned_tags_equal_the_code() -> None:
         key = f'{kind.name}_tag'
         expected = kind.tag(revisions)
         assert scratchpad.get(key) == expected, f'set {key} in pis/config.yaml to {expected}'
+    expected = EXTRACTION.release_tag()
+    assert scratchpad.get('extraction_tag') == expected, f'set extraction_tag in pis/config.yaml to {expected}'
 
 
 def test_release_copy_paths_use_the_pinned_tags() -> None:
@@ -58,7 +60,7 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
             STOP_REASONS,
         ),
         'input/clinical_report/aact_drug_entities': (
-            'gs://clinical_staging/aact/{aact_version}/drug_entities',
+            'gs://clinical_staging/aact/{aact_version}/extraction/{extraction_tag}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_drug_entities': (
@@ -73,3 +75,11 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     for destination, (parent, kind) in expected.items():
         directory = f'{parent.format(**scratchpad)}/{scratchpad[f"{kind.name}_tag"]}'
         assert sorted(sources[destination]) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
+
+
+def test_release_copies_the_extraction_of_the_pinned_tag() -> None:
+    """The extraction the release copies is the one directory named by the pinned extraction tag."""
+    scratchpad = _scratchpad()
+    directory = f'gs://clinical_staging/aact/{scratchpad["aact_version"]}/extraction/{scratchpad["extraction_tag"]}'
+    sources = _copy_sources()['input/clinical_report/aact_trial_extraction']
+    assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']

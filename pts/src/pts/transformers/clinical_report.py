@@ -7,7 +7,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, STOP_REASONS
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.postgres import read_dump_tables
 from pts.transformers.clinical import (
     ClinicalReport,
@@ -132,11 +132,15 @@ def clinical_report(
         config: Config object, for the scratch space of the dump restores
     """
     logger.info(f'source paths: {source}')
+    llm_extractions = EXTRACTION.read(source['trial_extraction'])
     stop_reasons = STOP_REASONS.read({'aact_stop_reasons': source['aact_stop_reasons']})
-    drug_entities = DRUG_ENTITIES.read({
-        'aact_drug_entities': source['aact_drug_entities'],
-        'mining_drug_entities': source['mining_drug_entities'],
-    })
+    drug_entities = DRUG_ENTITIES.read(
+        {
+            'aact_drug_entities': source['aact_drug_entities'],
+            'mining_drug_entities': source['mining_drug_entities'],
+        },
+        expect={'aact_drug_entities': {'extraction_tag': EXTRACTION.release_tag()}},
+    )
     disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
@@ -173,7 +177,6 @@ def clinical_report(
 
     molecule_index = scan_dataset(source['chembl_molecule']).select(DRUG_COLUMNS).collect()
     disease_index = scan_dataset(source['disease']).select(DISEASE_COLUMNS).collect()
-    llm_extractions = scan_dataset(source['trial_extraction']).collect()
 
     logger.info('extract clinical report')
     mining = staged_mining_reports(source, disease_entities)

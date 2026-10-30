@@ -1,10 +1,17 @@
 """Tests for chembl_molecule, which joins raw ChEMBL tables straight into polars."""
 
 import random
+from pathlib import Path
+from types import SimpleNamespace
 
 import polars as pl
+import pytest
 
-from pts.transformers.chembl_molecule import _molecule_preprocess, process_molecules
+from pts.clinical_staging.staged_outputs import EXTRACTION, schema_digest
+from pts.record_store import publish_snapshot
+from pts.transformers import chembl_molecule as chembl_molecule_module
+from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecule, process_molecules
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 
 # A short but structurally valid MDL molblock (single carbon atom), with no
 # terminator newline of its own -- the raw variants below add zero, one, or two
@@ -397,8 +404,12 @@ class TestOrderIsDeterministic:
         return {
             'molecule_dictionary': molecule_dictionary,
             'compound_structures': pl.DataFrame(
-                schema={'molregno': pl.Int64, 'canonical_smiles': pl.Utf8,
-                        'standard_inchi_key': pl.Utf8, 'molfile': pl.Utf8}
+                schema={
+                    'molregno': pl.Int64,
+                    'canonical_smiles': pl.Utf8,
+                    'standard_inchi_key': pl.Utf8,
+                    'molfile': pl.Utf8,
+                }
             ),
             'molecule_hierarchy': pl.DataFrame(
                 [(1, 1), *[(child, 1) for child in order]],
@@ -424,10 +435,7 @@ class TestOrderIsDeterministic:
 
     def test_child_order_does_not_depend_on_row_order(self):
         """Element order inside the published `childChemblIds` array."""
-        results = [
-            rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds']
-            for p in self._permutations()
-        ]
+        results = [rows_by_id(_process(self._tables(p)))['CHEMBL0001']['childChemblIds'] for p in self._permutations()]
         assert results[0] == sorted(results[0])
         assert all(r == results[0] for r in results), 'childChemblIds varied with input row order'
 
@@ -443,3 +451,48 @@ class TestOrderIsDeterministic:
         t = self._tables(list(range(2, self.CHILDREN + 2)))
         runs = [_process(t) for _ in range(3)]
         assert all(r.equals(runs[0]) for r in runs), 'repeated runs on one input differed'
+
+
+class TestStepExtraction:
+    """The step reads its optional AACT extraction through `EXTRACTION.read`."""
+
+    @staticmethod
+    def _source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+        t = tables()
+        monkeypatch.setattr(chembl_molecule_module, 'read_dump_tables', lambda *args, **kwargs: t)
+        drugbank_file = tmp_path / 'drugbank.tsv'
+        drugbank_file.write_text("From src:'1'\tTo src:'2'\n")
+        return {'chembl': tmp_path / 'dump', 'drugbank': drugbank_file}
+
+    @staticmethod
+    def _publish(directory: Path, digest: str) -> Path:
+        synonyms = pl.List(pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)}))
+        batch = pl.DataFrame(
+            schema={
+                'id': pl.Utf8,
+                'investigated_drugs': synonyms,
+                'comparator_drugs': synonyms,
+                'supportive_drugs': synonyms,
+            },
+        )
+        publish_snapshot(batch, str(directory), EXTRACTION.metadata(digest, None), None)
+        return directory
+
+    def test_a_matching_extraction_is_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        source = self._source(tmp_path, monkeypatch)
+        source['aact_trial_extraction'] = self._publish(
+            tmp_path / 'extraction', schema_digest(ClinicalReportExtractionSchema)
+        )
+        chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
+        assert pl.read_parquet(tmp_path / 'out').height == tables()['molecule_dictionary'].height
+
+    def test_an_extraction_of_another_tag_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        source = self._source(tmp_path, monkeypatch)
+        source['aact_trial_extraction'] = self._publish(tmp_path / 'extraction', 'f' * 64)
+        with pytest.raises(ValueError, match='this code expects'):
+            chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
+
+    def test_the_step_works_without_an_extraction(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        source = self._source(tmp_path, monkeypatch)
+        chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
+        assert pl.read_parquet(tmp_path / 'out').height == tables()['molecule_dictionary'].height
