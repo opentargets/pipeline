@@ -164,7 +164,7 @@ also gives a new tag.
    computes it; from `pts/`:
 
    ```bash
-   uv run python -c "import hashlib, json; from pts.transformers.clinical import ClinicalReportExtractionSchema as M; print(hashlib.sha256(json.dumps(M.model_json_schema(by_alias=True), sort_keys=True).encode()).hexdigest())"
+   uv run python -c "import hashlib, json; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(hashlib.sha256(json.dumps(M.model_json_schema(by_alias=True), sort_keys=True).encode()).hexdigest())"
    ```
 
    Remove both afterwards: once the schema changes, an `import_extraction_cache`

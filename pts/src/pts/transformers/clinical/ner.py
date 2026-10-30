@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-import polars as pl
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -87,7 +86,7 @@ def _disease_mentions(biobert: Callable[..., Any], text: str) -> list[str]:
 
 
 def disease_entities_with_status(texts: list[str]) -> list[tuple[list[str] | None, str | None]]:
-    """Disease mentions per text as ``extract_disease_entities`` finds them, or ``(None, error)`` where one failed."""
+    """Lower-cased, sorted disease mentions per text, or ``(None, error)`` where one failed; blank texts get ``[]``."""
     if not any(text.strip() for text in texts):
         return [([], None) for _ in texts]
     biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
@@ -102,30 +101,6 @@ def disease_entities_with_status(texts: list[str]) -> list[tuple[list[str] | Non
             logger.debug(f'disease ner failed for {text!r}: {e}')
             results.append((None, f'disease ner failed: {e}'))
     return results
-
-
-def extract_disease_entities(texts: pl.Series) -> pl.Series:
-    """Extract lower-cased, sorted disease mentions from each text; runs the model once per distinct text."""
-    distinct = [t for t in texts.drop_nulls().unique().sort().to_list() if t.strip()]
-    results: dict[str, list[str]] = {}
-    failures = 0
-    if distinct:
-        logger.info(f'extracting disease entities from {len(distinct)} distinct texts')
-        biobert = _create_ner_pipeline(DISEASE_MODEL, DISEASE_MODEL, 'max')
-        for text in distinct:
-            try:
-                results[text] = _disease_mentions(biobert, text)
-            except Exception as e:
-                failures += 1
-                logger.debug(f'disease ner failed for {text!r}: {e}')
-                results[text] = []
-    if failures:
-        logger.warning(f'disease ner failed for {failures} of {len(distinct)} distinct texts; their results are empty')
-    return pl.Series(
-        texts.name,
-        [results.get(t, []) if t is not None else [] for t in texts.to_list()],
-        dtype=pl.List(pl.String),
-    )
 
 
 def _extract_with_regex(text: str, patterns: list[str]) -> set[str]:
@@ -171,21 +146,18 @@ def _process_batch_tiered(
     biobert_pipeline: Callable[..., Any],
     drugtemist_pipeline: Callable[..., Any],
     batch_size: int,
-) -> tuple[list[list[str]], list[str | None], int, int, int]:
-    """Drug names per text, the error of each text whose model batch failed (else None), and the failure counts."""
+) -> tuple[list[list[str]], list[str | None]]:
+    """Drug names per text, and the error of each text whose model batch failed (else None)."""
     all_results: list[list[str] | None] = []
     errors: list[str | None] = [None] * len(texts)
     fallback_texts: list[str] = []
     fallback_indices: list[int] = []
-    biobert_failures = 0
-    drugtemist_failures = 0
 
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]
         regex_results = [_extract_with_regex(text, DRUG_NAME_PATTERNS) if text else set() for text in batch]
         biobert_results, error = _extract_entities_from_batch(batch, biobert_pipeline, BIOBERT_LABELS)
         if error is not None:
-            biobert_failures += len(batch)
             errors[start : start + len(batch)] = [error] * len(batch)
         for offset, (regex_drugs, biobert_drugs, text) in enumerate(
             zip(regex_results, biobert_results, batch, strict=True)
@@ -206,47 +178,26 @@ def _process_batch_tiered(
             indices = fallback_indices[start : start + batch_size]
             drugtemist_results, error = _extract_entities_from_batch(batch, drugtemist_pipeline, DRUGTEMIST_LABELS)
             if error is not None:
-                drugtemist_failures += len(batch)
                 for index in indices:
                     errors[index] = errors[index] or error
             for index, drugs in zip(indices, drugtemist_results, strict=True):
                 all_results[index] = sorted(drugs)
 
     results = [r if r is not None else [] for r in all_results]
-    return results, errors, biobert_failures, drugtemist_failures, len(fallback_texts)
+    return results, errors
 
 
 def drug_entities_with_status(texts: list[str], batch_size: int) -> list[tuple[list[str] | None, str | None]]:
-    """Drug names per text as ``extract_drug_entities`` finds them, or ``(None, error)`` where a model batch failed."""
+    """Sorted drug names per text, or ``(None, error)`` where a model batch failed.
+
+    Regex and BioBERT hits are unioned; DrugTEMIST runs only on texts where both found nothing.
+    """
     if not texts:
         return []
     biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
     drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
-    extracted, errors, *_ = _process_batch_tiered(texts, biobert, drugtemist, batch_size)
+    extracted, errors = _process_batch_tiered(texts, biobert, drugtemist, batch_size)
     return [
         (None, f'ner batch failed: {error}') if error is not None else (drugs, None)
         for drugs, error in zip(extracted, errors, strict=True)
     ]
-
-
-def extract_drug_entities(labels: pl.Series, batch_size: int) -> pl.Series:
-    """Extract sorted drug names from each label: regex and BioBERT, then DrugTEMIST where both found nothing."""
-    distinct = labels.drop_nulls().unique().sort().to_list()
-    results: dict[str, list[str]] = {}
-    if distinct:
-        logger.info(f'extracting drug entities from {len(distinct)} distinct texts (batch_size={batch_size})')
-        biobert = _create_ner_pipeline(CHEMICAL_MODEL, None, 'max')
-        drugtemist = _create_ner_pipeline(DRUGTEMIST_MODEL, None, 'max')
-        extracted, _, biobert_failed, drugtemist_failed, fallback = _process_batch_tiered(
-            distinct, biobert, drugtemist, batch_size
-        )
-        results = dict(zip(distinct, extracted, strict=True))
-        if biobert_failed:
-            logger.warning(f'BioBERT failed for {biobert_failed} of {len(distinct)} texts')
-        if drugtemist_failed:
-            logger.warning(f'DrugTEMIST failed for {drugtemist_failed} of {fallback} texts')
-    return pl.Series(
-        labels.name,
-        [results.get(t, []) if t is not None else [] for t in labels.to_list()],
-        dtype=pl.List(pl.String),
-    )

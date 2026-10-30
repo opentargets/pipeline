@@ -28,7 +28,8 @@ from pts.aact_trial_extraction import (
 )
 from pts.record_store import read_records, text_sha256
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, _import_class
-from pts.transformers.clinical import ClinicalReportExtractionSchema, extract_aact_clinical_report, llm_workflow
+from pts.transformers.clinical import extract_aact_clinical_report, llm_workflow
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 
 

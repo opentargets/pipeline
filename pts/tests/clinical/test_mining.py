@@ -4,13 +4,7 @@ import openpyxl
 import polars as pl
 import pytest
 
-from pts.transformers.clinical import (
-    ClinicalReport,
-    extract_ema_clinical_report,
-    extract_pmda_clinical_report,
-    extract_ttd_clinical_report,
-    extract_ttd_indication,
-)
+from pts.transformers.clinical import ClinicalReport
 from pts.transformers.clinical import mining as mining_module
 from pts.transformers.clinical.mining import (
     RecordingNer,
@@ -19,6 +13,10 @@ from pts.transformers.clinical.mining import (
     report_drug_labels,
     staged_lookup,
 )
+from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
+from pts.transformers.clinical.providers.pmda import extract_clinical_report as extract_pmda_clinical_report
+from pts.transformers.clinical.providers.ttd import extract_clinical_report as extract_ttd_clinical_report
+from pts.transformers.clinical.providers.ttd import extract_indication as extract_ttd_indication
 from pts.transformers.clinical_report import staged_mining_reports
 from tests.test_clinical_report import EMA_BANNER, EMA_HEADER, EMA_NER, _ema_workbook
 

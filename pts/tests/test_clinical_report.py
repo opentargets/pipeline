@@ -14,13 +14,13 @@ from pts.transformers import clinical_report as clinical_report_module
 from pts.transformers.clinical import (
     ClinicalProvider,
     ClinicalReport,
-    ClinicalReportOrigin,
     ClinicalReportType,
     ClinicalSource,
-    extract_ema_clinical_report,
-    replace_with_llm_indications,
 )
 from pts.transformers.clinical.mining import read_ema_sheet
+from pts.transformers.clinical.providers.aact import replace_with_llm_indications
+from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
+from pts.transformers.clinical.schemas import ClinicalReportOrigin
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,

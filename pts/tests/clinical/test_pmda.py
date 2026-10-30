@@ -1,8 +1,8 @@
 import polars as pl
 import pytest
 
-from pts.transformers.clinical import extract_pmda_clinical_report
 from pts.transformers.clinical.providers.pmda import extract_approval_year, find_column_structure
+from pts.transformers.clinical.providers.pmda import extract_clinical_report as extract_pmda_clinical_report
 
 
 @pytest.mark.parametrize(

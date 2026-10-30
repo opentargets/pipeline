@@ -1,7 +1,7 @@
 import polars as pl
 import pytest
 
-from pts.transformers.clinical import extract_ema_clinical_report
+from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
 from pts.transformers.clinical.providers.ema import extract_marketing_year
 
 EMA_COLUMNS = [

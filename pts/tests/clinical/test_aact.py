@@ -95,9 +95,7 @@ def test_detailed_description_value_preserved():
 
 def test_replace_with_llm_indications():
     """Test that LLM indications replace source indications for LLM-covered trials."""
-    from pts.transformers.clinical import (
-        replace_with_llm_indications,
-    )
+    from pts.transformers.clinical.providers.aact import replace_with_llm_indications
 
     _disease_struct = pl.Struct({
         'name': pl.String,

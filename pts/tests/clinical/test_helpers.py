@@ -1,7 +1,7 @@
 import polars as pl
 
 from pts.transformers.clinical import filter_df, union_dfs
-from pts.transformers.clinical.helpers import extract_per_distinct_text, sanitise_nested, sanitise_text
+from pts.transformers.clinical.helpers import extract_per_distinct_text, sanitise_text
 
 
 def test_union_dfs_fills_missing_columns_with_null() -> None:
@@ -78,34 +78,3 @@ class TestSanitiseText:
 
     def test_garbled_null_byte_removed_but_no_reconstruction(self):
         assert sanitise_text('s\x00zary') == 'szary'
-
-
-class TestSanitiseNested:
-    """Unit tests for sanitise_nested."""
-
-    def test_dict_with_string_values(self):
-        data = {'name': 'S\x00e9zary', 'quote': r'pain \[test\]'}
-        expected = {'name': 'Sézary', 'quote': 'pain [test]'}
-        assert sanitise_nested(data) == expected
-
-    def test_list_of_strings(self):
-        data = ['S\x00e9zary', r'K\&L']
-        expected = ['Sézary', 'K&L']
-        assert sanitise_nested(data) == expected
-
-    def test_deeply_nested_structure(self):
-        data = {'a': [{'b': 'S\x00e9zary', 'c': [r'foo \* bar']}]}
-        expected = {'a': [{'b': 'Sézary', 'c': ['foo * bar']}]}
-        assert sanitise_nested(data) == expected
-
-    def test_non_string_values_pass_through_unchanged(self):
-        data = {'x': 42, 'y': None, 'z': True, 'w': 3.14}
-        assert sanitise_nested(data) == data
-
-    def test_mixed_list_preserves_types(self):
-        data = ['text', 42, None, ['nested']]
-        expected = ['text', 42, None, ['nested']]
-        assert sanitise_nested(data) == expected
-
-    def test_plain_string(self):
-        assert sanitise_nested('S\x00e9zary') == 'Sézary'

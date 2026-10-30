@@ -1,11 +1,8 @@
-from collections.abc import Iterator
 from typing import Any
 
-import polars as pl
 import pytest
-from loguru import logger
 
-from pts.transformers.clinical import extract_disease_entities, extract_drug_entities, ner
+from pts.transformers.clinical import ner
 from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
 
 Entity = dict[str, Any]
@@ -48,14 +45,6 @@ def _patch_factory(monkeypatch: pytest.MonkeyPatch, pipelines: dict[str, FakePip
     return created
 
 
-@pytest.fixture
-def warnings() -> Iterator[list[str]]:
-    messages: list[str] = []
-    sink = logger.add(lambda m: messages.append(str(m).strip()), level='WARNING', format='{message}')
-    yield messages
-    logger.remove(sink)
-
-
 def test_disease_filters_and_normalises(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePipeline({
         'text': [
@@ -70,10 +59,9 @@ def test_disease_filters_and_normalises(monkeypatch: pytest.MonkeyPatch) -> None
     })
     created = _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
 
-    out = extract_disease_entities(pl.Series(['text']))
+    out = disease_entities_with_status(['text'])
 
-    assert out.dtype == pl.List(pl.String)
-    assert out.to_list() == [['anaemia', 'asthma', 'breast cancer']]
+    assert out == [(['anaemia', 'asthma', 'breast cancer'], None)]
     assert created == [{'model': DISEASE_MODEL, 'tokenizer': DISEASE_MODEL, 'aggregation_strategy': 'max'}]
 
 
@@ -83,39 +71,9 @@ def test_disease_filter_reads_its_constants(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(ner, 'DISEASE_MIN_LENGTH', 3)
     monkeypatch.setattr(ner, 'DISEASE_DROP_DIGITS', False)
 
-    out = extract_disease_entities(pl.Series(['text']))
+    out = disease_entities_with_status(['text'])
 
-    assert out.to_list() == [['2024', 'abc']]
-
-
-def test_disease_empty_and_blank_text_yield_empty_without_calls(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakePipeline({'a': [_ent('DISEASE', 'gout')]})
-    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
-
-    out = extract_disease_entities(pl.Series(['', '  ', None, 'a']))
-
-    assert out.to_list() == [[], [], [], ['gout']]
-    assert fake.calls == ['a']
-
-
-def test_disease_runs_once_per_distinct_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakePipeline({'a': [_ent('DISEASE', 'gout')], 'b': [_ent('DISEASE', 'flu')]})
-    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
-
-    out = extract_disease_entities(pl.Series(['b', 'a', 'b', 'a', 'b']))
-
-    assert out.to_list() == [['flu'], ['gout'], ['flu'], ['gout'], ['flu']]
-    assert sorted(fake.calls) == ['a', 'b']
-
-
-def test_disease_failure_yields_empty_and_counts(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
-    fake = FakePipeline({'a': [_ent('DISEASE', 'gout')]}, fail_on={'bad', 'worse'})
-    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
-
-    out = extract_disease_entities(pl.Series(['a', 'bad', 'worse', 'bad']))
-
-    assert out.to_list() == [['gout'], [], [], []]
-    assert any('disease ner failed for 2 of 3 distinct texts' in m for m in warnings)
+    assert out == [(['2024', 'abc'], None)]
 
 
 def _drug_pipelines(
@@ -140,11 +98,17 @@ def test_drug_tiers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     created = _patch_factory(monkeypatch, pipelines)
 
-    labels = pl.Series(['pembrolizumab 100mg', 'aspirin tablet', 'brandname', 'nothing', 'pembrolizumab 100mg'])
-    out = extract_drug_entities(labels, batch_size=2)
+    texts = ['pembrolizumab 100mg', 'aspirin tablet', 'brandname', 'nothing', '', 'osimertinib']
+    out = drug_entities_with_status(texts, batch_size=2)
 
-    assert out.dtype == pl.List(pl.String)
-    assert out.to_list() == [['pembrolizumab'], ['aspirin', 'sodium'], ['brandname'], [], ['pembrolizumab']]
+    assert out == [
+        (['pembrolizumab'], None),
+        (['aspirin', 'sodium'], None),
+        (['brandname'], None),
+        ([], None),
+        ([], None),
+        (['osimertinib'], None),
+    ]
     assert [c['model'] for c in created] == [CHEMICAL_MODEL, DRUGTEMIST_MODEL]
     assert all(c['aggregation_strategy'] == 'max' for c in created)
     fallback_texts = [t for call in pipelines[DRUGTEMIST_MODEL].calls for t in call]
@@ -158,29 +122,13 @@ def test_drug_regex_unions_with_biobert_and_skips_drugtemist(monkeypatch: pytest
     )
     _patch_factory(monkeypatch, pipelines)
 
-    out = extract_drug_entities(pl.Series(['osimertinib with Foo']), batch_size=8)
+    out = drug_entities_with_status(['osimertinib with Foo'], batch_size=8)
 
-    assert out.to_list() == [['foo bar', 'osimertinib']]
+    assert out == [(['foo bar', 'osimertinib'], None)]
     assert pipelines[DRUGTEMIST_MODEL].calls == []
 
 
-def test_drug_batch_failure_yields_empty_and_counts(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
-    pipelines = _drug_pipelines(
-        biobert={'a': [_ent('CHEMICAL', 'aspirin')], 'c': [_ent('CHEMICAL', 'ibuprofen')]},
-        drugtemist={},
-        fail_on={'b'},
-    )
-    _patch_factory(monkeypatch, pipelines)
-
-    out = extract_drug_entities(pl.Series(['a', 'b', 'c']), batch_size=1)
-
-    assert out.to_list() == [['aspirin'], [], ['ibuprofen']]
-    assert warnings == ['BioBERT failed for 1 of 3 texts']
-
-
-def test_drug_after_biobert_batch_failure_keeps_regex_hits_and_runs_drugtemist(
-    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
-) -> None:
+def test_drug_after_biobert_batch_failure_still_runs_drugtemist_on_misses(monkeypatch: pytest.MonkeyPatch) -> None:
     pipelines = _drug_pipelines(
         biobert={},
         drugtemist={'b': [_ent('FARMACO', 'Rescued')]},
@@ -188,29 +136,10 @@ def test_drug_after_biobert_batch_failure_keeps_regex_hits_and_runs_drugtemist(
     )
     _patch_factory(monkeypatch, pipelines)
 
-    out = extract_drug_entities(pl.Series(['xmab', 'b']), batch_size=8)
+    out = drug_entities_with_status(['xmab', 'b'], batch_size=8)
 
-    assert out.to_list() == [['xmab'], ['rescued']]
+    assert out == [(None, 'ner batch failed: boom'), (None, 'ner batch failed: boom')]
     assert pipelines[DRUGTEMIST_MODEL].calls == [['b']]
-    assert warnings == ['BioBERT failed for 2 of 2 texts']
-
-
-def test_staging_ner_outputs_equal_extract_drug_entities(monkeypatch: pytest.MonkeyPatch) -> None:
-    pipelines = _drug_pipelines(
-        biobert={
-            'pembrolizumab 100mg': [_ent('CHEMICAL', 'Pembrolizumab')],
-            'aspirin tablet': [_ent('CHEMICAL', 'Aspirin'), _ent('DRUG', '##sodium')],
-        },
-        drugtemist={'brandname': [_ent('FARMACO', 'BrandName')]},
-    )
-    _patch_factory(monkeypatch, pipelines)
-    texts = ['pembrolizumab 100mg', 'aspirin tablet', 'brandname', 'nothing', '', 'osimertinib']
-
-    expected = extract_drug_entities(pl.Series(texts), batch_size=2).to_list()
-    actual = drug_entities_with_status(texts, batch_size=2)
-
-    assert actual == [(drugs, None) for drugs in expected]
-    assert expected[2] == ['brandname']
 
 
 def test_staging_ner_marks_texts_of_a_failed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -259,16 +188,6 @@ def test_disease_status_marks_only_failing_texts(monkeypatch: pytest.MonkeyPatch
 
     assert out == [(['gout'], None), (None, 'disease ner failed: boom'), ([], None), ([], None), (['flu'], None)]
     assert fake.calls == ['a', 'bad', 'b']
-
-
-def test_disease_status_matches_extract_disease_entities(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakePipeline({'t': [_ent('DISEASE', ' Breast Cancer '), _ent('DISEASE', 'x'), _ent('CHEMICAL', 'aspirin')]})
-    _patch_factory(monkeypatch, {DISEASE_MODEL: fake})
-
-    status = disease_entities_with_status(['t'])
-    extracted = extract_disease_entities(pl.Series(['t']))
-
-    assert [found for found, _ in status] == extracted.to_list()
 
 
 def test_disease_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
