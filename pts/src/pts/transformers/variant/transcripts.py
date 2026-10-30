@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 
 from pts.transformers.utils.ensembl import CoreDump, gene_names, transcripts, translation_uniprot
+from pts.transformers.variant.fastvep import DROPPED_BIOTYPES
 
 _MATURE_MIRNA = pl.List(pl.Struct({'start': pl.Int64(), 'end': pl.Int64()}))
 
@@ -83,7 +84,7 @@ def transcript_fields(core: str, chromosome: str) -> pl.DataFrame:
         One row per transcript, sorted by `transcript_id`. `tss` is the transcript's 5' end,
         `transcript_start` and `transcript_end` are genomic and 1-based, `canonical` is 1 or null,
         `mature_mirna` is `[]` when the transcript has none. `swissprot` and `trembl` keep the
-        dump's line order. Readthrough transcripts are left out.
+        dump's line order. Readthrough and `artifact` transcripts are left out.
     """
     dump = CoreDump(core)
     names = gene_names(dump).rename({'id': 'geneId', 'name': 'gene_symbol'})
@@ -91,7 +92,7 @@ def transcript_fields(core: str, chromosome: str) -> pl.DataFrame:
     frame = (
         transcripts(dump)
         .filter(pl.col('chromosome') == chromosome)
-        .filter(~_attribute('readthrough_tra').list.len().gt(0))
+        .filter(~_attribute('readthrough_tra').list.len().gt(0) & ~pl.col('biotype').is_in(list(DROPPED_BIOTYPES)))
         .rename({'transcriptId': 'transcript_id'})
         .join(names, on='geneId', how='left', maintain_order='left')
         .join(xrefs.rename({'transcriptId': 'transcript_id'}), on='transcript_id', how='left', maintain_order='left')
@@ -122,6 +123,10 @@ def transcript_fields(core: str, chromosome: str) -> pl.DataFrame:
 
 
 def canonical_transcript_ids(core: str) -> set[str]:
-    """The stable ids of the Ensembl canonical transcripts on every chromosome, from the core tables."""
+    """The stable ids of the Ensembl canonical transcripts on every chromosome, from the core tables.
+
+    `artifact` transcripts are left out.
+    """
     frame = transcripts(CoreDump(core))
-    return set(frame.filter(_attribute('is_canonical').list.contains('1'))['transcriptId'].to_list())
+    canonical = _attribute('is_canonical').list.contains('1') & ~pl.col('biotype').is_in(list(DROPPED_BIOTYPES))
+    return set(frame.filter(canonical)['transcriptId'].to_list())

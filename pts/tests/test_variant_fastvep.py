@@ -35,6 +35,10 @@ GFF3 = """\
 22\thavana\tCDS\t350\t600\t.\t+\t0\tID=CDS:ENSP02;Parent=transcript:ENST02
 22\thavana\tmRNA\t300\t1800\t.\t+\t.\tID=transcript:ENST03;Parent=gene:ENSG02;tag=basic
 22\thavana\texon\t300\t1800\t.\t+\t.\tParent=transcript:ENST03;Name=ENSE03
+###
+22\thavana\tgene\t3000\t3500\t.\t+\t.\tID=gene:ENSG04;biotype=artifact
+22\thavana\ttranscript\t3000\t3500\t.\t+\t.\tID=transcript:ENST04;Parent=gene:ENSG04;biotype=artifact;tag=basic
+22\thavana\texon\t3000\t3500\t.\t+\t.\tParent=transcript:ENST04;Name=ENSE04
 """
 
 
@@ -66,7 +70,22 @@ def test_prepare_gff3_drops_readthrough(tmp_path: Path) -> None:
 
     kept = prepared.read_text().splitlines()
     assert not [line for line in kept if 'ENST02' in line or 'ENSP02' in line]
-    assert kept == [line for line in GFF3.splitlines() if 'ENST02' not in line and 'ENSP02' not in line]
+    assert kept == [line for line in GFF3.splitlines() if not {'ENST02', 'ENSP02', 'ENST04'} & set(_ids(line))]
+
+
+def _ids(line: str) -> list[str]:
+    return [value.split(':')[-1] for value in line.replace(';', '=').split('=')]
+
+
+def test_prepare_gff3_drops_artifact_transcripts(tmp_path: Path) -> None:
+    source = tmp_path / 'source.gff3'
+    source.write_text(GFF3)
+
+    prepared = prepare_gff3(str(source), tmp_path / 'out').read_text()
+
+    assert 'ENST04' not in prepared
+    assert 'ENSE04' not in prepared
+    assert 'ID=gene:ENSG04;biotype=artifact' in prepared
 
 
 def test_prepare_gff3_reads_plain_text(tmp_path: Path) -> None:

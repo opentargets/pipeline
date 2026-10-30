@@ -31,6 +31,9 @@ VCF_HEADER = '##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINF
 _TRANSCRIPT_ID = re.compile(r'(?:^|;)ID=(transcript:[^;]+)')
 _PARENT = re.compile(r'(?:^|;)Parent=([^;]+)')
 _TAG = re.compile(r'(?:^|;)tag=([^;]+)')
+_BIOTYPE = re.compile(r'(?:^|;)biotype=([^;]+)')
+DROPPED_BIOTYPES = ('artifact',)
+"""Transcript biotypes left out of the GFF3 fastVEP reads and of the core-side transcripts."""
 
 
 def cache_path(gff3: Path) -> Path:
@@ -43,9 +46,9 @@ def _partial(path: Path) -> Path:
 
 
 def prepare_gff3(gff3: str, directory: Path) -> Path:
-    """Copy a GFF3 into `directory` without its `readthrough_transcript` transcripts.
+    """Copy a GFF3 into `directory` without its `readthrough_transcript` and `artifact` transcripts.
 
-    Each such transcript is dropped with every line whose parent it is (exons, CDS, UTRs).
+    Each such transcript is dropped with every line whose parent it is (exons, CDS, UTRs); genes are kept.
     The source may be gzip-compressed; the copy is plain text, named as the source without `.gz`.
     """
     directory.mkdir(parents=True, exist_ok=True)
@@ -63,8 +66,11 @@ def prepare_gff3(gff3: str, directory: Path) -> Path:
             if line.startswith('#'):
                 continue
             attributes = line.rstrip('\n').rsplit('\t', 1)[-1]
-            tag, transcript = _TAG.search(attributes), _TRANSCRIPT_ID.search(attributes)
-            if tag and transcript and 'readthrough_transcript' in tag[1].split(','):
+            transcript = _TRANSCRIPT_ID.search(attributes)
+            if transcript is None:
+                continue
+            tag, biotype = _TAG.search(attributes), _BIOTYPE.search(attributes)
+            if (tag and 'readthrough_transcript' in tag[1].split(',')) or (biotype and biotype[1] in DROPPED_BIOTYPES):
                 dropped.add(transcript[1])
     with copy.open() as handle, target.open('w') as out:
         for line in handle:

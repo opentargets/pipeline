@@ -40,6 +40,7 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (4, 'lncRNA', 131557, 7000, 7400, -1, 504, None, 400, 'ENSG04'),
             (5, 'protein_coding', 10, 100, 900, 1, 505, None, 500, 'ENSG05'),
             (6, 'lncRNA', 131557, 9000, 9100, 1, None, None, 600, 'ENSG06'),
+            (7, 'artifact', 131557, 9500, 9600, 1, None, None, 700, 'ENSG07'),
         ],
     ),
     'transcript': (
@@ -63,6 +64,7 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (401, 4, 131557, 7000, 7400, -1, 'lncRNA', None, 'ENST_READTHROUGH'),
             (500, 5, 10, 100, 900, 1, 'protein_coding', None, 'ENST_CHR1'),
             (600, 6, 131557, 9000, 9100, 1, 'lncRNA', None, 'ENST_NO_SYMBOL'),
+            (700, 7, 131557, 9500, 9600, 1, 'artifact', None, 'ENST_ARTIFACT'),
         ],
     ),
     'translation': (
@@ -109,6 +111,7 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (400, 15, '90-120'),
             (401, 218, 'readthrough'),
             (401, 15, '1-10'),
+            (700, 554, '1'),
         ],
     ),
     'external_db': (
@@ -225,6 +228,10 @@ def test_mature_mirna_spanning_exons_is_split_at_the_intron(core: str) -> None:
 
 def test_readthrough_transcripts_absent(core: str) -> None:
     assert 'ENST_READTHROUGH' not in transcript_fields(core, '22')['transcript_id'].to_list()
+
+
+def test_artifact_transcripts_absent(core: str) -> None:
+    assert 'ENST_ARTIFACT' not in transcript_fields(core, '22')['transcript_id'].to_list()
 
 
 def test_only_the_requested_chromosome(core: str) -> None:
