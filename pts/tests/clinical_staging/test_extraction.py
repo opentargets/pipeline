@@ -88,7 +88,7 @@ def test_prompts_without_publications_match_mira() -> None:
         ],
     })
 
-    prompts = extraction.prompts_for(report, 'schema-digest')
+    prompts = extraction.prompts_for(report)
 
     # mira 1.0.5 build_prompts with publications disabled, via prompts_for
     assert prompts.to_dicts() == [
@@ -192,7 +192,7 @@ def test_prompts_are_independent_of_row_order() -> None:
             conditions=conditions.sample(fraction=1, shuffle=True, seed=seed),
             additional_metadata=[summaries.sample(fraction=1, shuffle=True, seed=seed)],
         )
-        return extraction.prompts_for(report.df, 'digest').sort('id')
+        return extraction.prompts_for(report.df).sort('id')
 
     first = prompts(1)
     for seed in (2, 3, 4):
@@ -202,7 +202,7 @@ def test_prompts_are_independent_of_row_order() -> None:
 
 
 def test_prompts_for_hashes_each_prompt() -> None:
-    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'))
 
     assert prompts.columns == ['id', 'prompt', 'prompt_sha256']
     assert prompts['prompt_sha256'].to_list() == [text_sha256(p) for p in prompts['prompt']]
@@ -328,7 +328,7 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     task = _run(monkeypatch, tmp_path, report)
 
     published = pl.read_parquet(tmp_path / 'v1/extraction/data.parquet')
-    prompts = extraction.prompts_for(report, _digest())
+    prompts = extraction.prompts_for(report)
     old = _old_way(['nct1', 'nct2'], prompts).drop('cache_key', 'computed_at')
     assert published.schema == old.schema
     assert published.sort('id').equals(old.sort('id'))
@@ -344,7 +344,7 @@ def _records(prompts: pl.DataFrame, outputs: dict[str, str]) -> pl.DataFrame:
 
 
 def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
-    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'))
     records = _records(prompts, {'nct1': _model('nct1').model_dump_json(), 'nct2': '{"id": "nct2"}'})
 
     with pytest.raises(ValueError, match='nct2'):
@@ -352,7 +352,7 @@ def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
 
 
 def test_prompt_hash_follows_its_trial_when_a_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
-    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'))
     records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')})
     monkeypatch.setattr(extraction, '_models_to_dataframe', lambda models: _models_to_dataframe(models[1:]))
 
@@ -491,7 +491,7 @@ def _write_old_cache(tmp_path: Path, rows: pl.DataFrame, digest: str) -> str:
 def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch)
     report = _report('nct1', 'nct2')
-    prompts = extraction.prompts_for(report, _digest())
+    prompts = extraction.prompts_for(report)
     cached = _old_way(['nct1', 'nct2'], prompts.with_columns(prompt_sha256=pl.lit('stale')))
     cache_uri = _write_old_cache(tmp_path, cached, _digest())
 
@@ -506,8 +506,8 @@ def test_imported_cache_means_nothing_to_extract(monkeypatch: pytest.MonkeyPatch
 
 
 def test_import_runs_once(tmp_path: Path) -> None:
-    prompts = extraction.prompts_for(_report('nct1', 'nct2'), 'digest')
-    older = extraction.prompts_for(_report('nct1', 'nct2', 'nct3', title='old'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1', 'nct2'))
+    older = extraction.prompts_for(_report('nct1', 'nct2', 'nct3', title='old'))
     cached = _old_way(['nct1', 'nct2', 'nct3'], older).with_columns(
         computed_at=pl.when(pl.col('id') != 'nct2').then(pl.col('computed_at'))
     )
@@ -535,7 +535,7 @@ def test_each_schema_digest_is_imported_once(tmp_path: Path) -> None:
     digests = ['a' * 64, 'b' * 64]
     store = str(tmp_path / 'store')
     for digest in digests:
-        prompts = extraction.prompts_for(_report('nct1'), digest)
+        prompts = extraction.prompts_for(_report('nct1'))
         cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), digest)
 
         assert import_extraction_cache(cache_uri, prompts, store, digest, cast(Any, None)) == 1
@@ -548,7 +548,7 @@ def test_each_schema_digest_is_imported_once(tmp_path: Path) -> None:
 
 
 def test_import_refuses_a_cache_of_another_schema(tmp_path: Path) -> None:
-    prompts = extraction.prompts_for(_report('nct1'), 'digest')
+    prompts = extraction.prompts_for(_report('nct1'))
     cache_uri = _write_old_cache(tmp_path, _old_way(['nct1'], prompts), 'other-digest')
 
     with pytest.raises(ValueError, match='other-digest'):
@@ -613,7 +613,7 @@ def _spec(tmp_path: Path, **spec: Any) -> LlmExtractSpec:
 
 
 def _shard(*ids: str) -> pl.DataFrame:
-    return extraction.prompts_for(_report(*ids), 'digest').select('id', 'prompt')
+    return extraction.prompts_for(_report(*ids)).select('id', 'prompt')
 
 
 def _extract_in_loop(shard: pl.DataFrame, spec: LlmExtractSpec) -> tuple[dict[str, BaseModel], dict[str, str]]:
@@ -776,7 +776,7 @@ def test_open_client_sets_the_timeout_and_retries(tmp_path: Path) -> None:
 )
 def test_stored_json_publishes_as_imported_cache_rows(models: list[ClinicalReportExtractionSchema]) -> None:
     ids = [model.id for model in models]
-    prompts = extraction.prompts_for(_report(*ids), 'digest')
+    prompts = extraction.prompts_for(_report(*ids))
     stored = {model.id: model.model_dump_json() for model in models}
     imported = {row['id']: json.dumps(row) for row in _models_to_dataframe(models).to_dicts()}
     mixed = {trial_id: (stored if n % 2 else imported)[trial_id] for n, trial_id in enumerate(ids)}

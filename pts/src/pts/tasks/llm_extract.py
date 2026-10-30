@@ -114,7 +114,7 @@ class LlmExtract(Task):
 
         archive = StorageHandle(str(self.spec.source['aact']), config=config).absolute
         report = extraction.trial_report(archive, config.work_path, self.spec.sample_size)
-        prompts = extraction.prompts_for(report, schema_digest)
+        prompts = extraction.prompts_for(report)
         logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
         if self.spec.import_extraction_cache:

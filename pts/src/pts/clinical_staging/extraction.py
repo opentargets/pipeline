@@ -106,11 +106,11 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
     return sample_report(report.df, sample_size)
 
 
-def prompts_for(report: pl.DataFrame, schema_digest: str) -> pl.DataFrame:
+def prompts_for(report: pl.DataFrame) -> pl.DataFrame:
     """Render one prompt per trial, with the hash of the prompt.
 
-    The prompt is the record store's text, so ``schema_digest`` does not enter
-    the result; the store keys it as the model revision instead.
+    The prompt is the record store's text. The response schema does not enter
+    it; the store keys the schema digest as the model revision instead.
     """
     if 'drugs' in report.columns:
         report = report.with_columns(
