@@ -28,7 +28,15 @@ _FEATURE_ANALYSES = ['alphafold', 'signalp']
 _XREF_FIELDS = [*_UNIPROT_DBS.values(), *_FEATURE_ANALYSES]
 
 #: `attrib_type.code` values kept on a transcript.
-TRANSCRIPT_ATTRIBUTES = ['is_canonical', 'MANE_Select', 'MANE_Plus_Clinical', 'gencode_primary', 'appris']
+TRANSCRIPT_ATTRIBUTES = [
+    'is_canonical',
+    'MANE_Select',
+    'MANE_Plus_Clinical',
+    'gencode_primary',
+    'appris',
+    'miRNA',
+    'readthrough_tra',
+]
 
 
 def _seq_region_names(dump: CoreDump) -> pl.LazyFrame:
