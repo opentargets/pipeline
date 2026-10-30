@@ -78,6 +78,44 @@ def tasks(tmp_path: Path) -> dict[str, BaseOperator]:
     return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
 
 
+TWO_CLUSTERS = CONFIG.replace(
+    """    main:
+      num_workers: 2
+""",
+    """    main:
+      num_workers: 2
+    other:
+      num_workers: 2
+""",
+).replace(
+    """  second:
+    depends_on: [first]
+    kind: dataproc
+    definition:
+      cluster: main
+""",
+    """  second:
+    depends_on: [first]
+    kind: dataproc
+    definition:
+      cluster: other
+""",
+)
+"""The config with its second step on a second cluster."""
+
+
+@pytest.fixture
+def two_cluster_tasks(tmp_path: Path) -> dict[str, BaseOperator]:
+    """Return the tasks of the DAG built from `TWO_CLUSTERS`, by task id."""
+    dag_dir = tmp_path / 'a_dag'
+    dag_dir.mkdir()
+    (dag_dir / 'config.yaml').write_text(TWO_CLUSTERS)
+    config = StagingDagConfig(dag_dir)
+    with DAG(dag_id=config.dag_id, schedule=None, user_defined_filters=FILTERS) as dag:
+        build_staging_dag(config)
+    return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
+
+
 def rendered(task: Any) -> Any:
     """Render the templated fields of a task for the DAG run `RUN_ID`."""
     task.render_template_fields({'run_id': RUN_ID})
@@ -109,6 +147,15 @@ class TestBuildStagingDag:
         assert tasks['first.run'].upstream_task_ids == {'create_cluster_main'}
         assert tasks['second.run'].upstream_task_ids == {'first.run'}
         assert tasks['delete_cluster_main'].upstream_task_ids == {'second.run'}
+
+    def test_order_of_two_clusters(self, two_cluster_tasks: dict[str, BaseOperator]) -> None:
+        """A cluster whose first step depends on a step of another cluster is created when that step ends."""
+        uploads = {'upload_config', 'upload_bin_install-dependencies-on-cluster-sh', 'upload_bin_cli-py'}
+        assert two_cluster_tasks['create_cluster_main'].upstream_task_ids == uploads
+        assert two_cluster_tasks['create_cluster_other'].upstream_task_ids == {*uploads, 'first.run'}
+        assert two_cluster_tasks['second.run'].upstream_task_ids == {'first.run', 'create_cluster_other'}
+        assert two_cluster_tasks['delete_cluster_main'].upstream_task_ids == {'first.run'}
+        assert two_cluster_tasks['delete_cluster_other'].upstream_task_ids == {'second.run'}
 
     def test_job_is_rendered_for_the_run(self, tasks: dict[str, BaseOperator]) -> None:
         """The job arguments are the gentropy CLI of the run and the paths of the run."""
