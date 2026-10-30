@@ -7,6 +7,7 @@ every option at its default, so splice predictions, `INCOMPLETE_CDS` and the Phy
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 
 import polars as pl
 
@@ -44,7 +45,7 @@ class TranscriptModel:
     coding_start: int | None
     coding_end: int | None
 
-    @property
+    @cached_property
     def introns(self) -> list[tuple[int, int]]:
         """(start, end) of the gap between each pair of consecutive exons, in transcript order."""
         pairs = zip(self.exons, self.exons[1:], strict=False)
@@ -137,30 +138,43 @@ def _number(features: list[tuple[int, int]] | tuple[tuple[int, int], ...], start
     return None
 
 
-def _gerp_weighted_dist(model: TranscriptModel, chromosome: str, position: int, gerp: KentBigWig) -> tuple[float, int]:
-    """LOFTEE `get_gerp_weighted_dist`: GERP summed, and bases counted, from the variant to the stop codon.
+def _stop_segments(model: TranscriptModel, position: int) -> list[tuple[int, int]]:
+    """The (start, end) LOFTEE `get_gerp_weighted_dist` reads, from the variant to the stop codon.
 
     Every exon not upstream of the variant contributes, including exons past the stop codon.
     """
     plus = model.strand == 1
     stop = (model.coding_end if plus else model.coding_start) or 0
-    weighted, distance = 0.0, 0
+    segments = []
     for low, high in model.exons:
         if (plus and position > high) or (not plus and position < low):
             continue
         last = (low < stop <= high) if plus else (low <= stop < high)
         affected = low <= position <= high
         if last:
-            start = position if affected else (low if plus else high)
-            end = stop
+            segments.append((position if affected else (low if plus else high), stop))
         elif affected:
-            start = position
-            end = high if plus else low
+            segments.append((position, high if plus else low))
         else:
-            start, end = low, high
-        weighted = weighted + gerp.interval_gerp(chromosome, start, end)
-        distance = distance + abs(end - start)
-    return weighted, distance
+            segments.append((low, high))
+    return segments
+
+
+class _IntervalGerp:
+    """`KentBigWig.interval_gerp` on one chromosome, each interval read once."""
+
+    def __init__(self, gerp: KentBigWig, chromosome: str):
+        self.gerp, self.chromosome = gerp, chromosome
+        self.sums: dict[tuple[int, int], float] = {}
+
+    def weighted(self, segments: list[tuple[int, int]]) -> float:
+        """LOFTEE's GERP sum over `segments`, in their order."""
+        weighted = 0.0
+        for segment in segments:
+            if segment not in self.sums:
+                self.sums[segment] = self.gerp.interval_gerp(self.chromosome, *segment)
+            weighted = weighted + self.sums[segment]
+        return weighted
 
 
 def _last_exon_coding_length(model: TranscriptModel, exon_index: int) -> int:
@@ -189,10 +203,12 @@ def _filters(
     alleles: tuple[str, str],
     cds_end: int | None,
     sequence: bytes,
-    gerp: KentBigWig,
-    chromosome: str,
+    gerp: _IntervalGerp,
 ) -> list[str]:
-    """The filters LOFTEE pushes before `ANC_ALLELE`, in the plugin's order."""
+    """The filters LOFTEE pushes before `ANC_ALLELE`, in the plugin's order.
+
+    GERP is only read for an `END_TRUNC` candidate within 50 bases of the last exon's end.
+    """
     filters = []
     plus = model.strand == 1
     coding_start, coding_end = model.coding_start or 0, model.coding_end or 0
@@ -201,12 +217,11 @@ def _filters(
     exon = _number(model.exons, start, end)
     introns = model.introns
     intron = _number(introns, start, end)
-    if other_lof and cds_end is not None:
-        weighted, distance = _gerp_weighted_dist(model, chromosome, start, gerp)
-        if exon:
-            last_exon = distance - _last_exon_coding_length(model, exon - 1)
-            if last_exon <= 50 and weighted <= GERP_END_TRUNC_CUTOFF:
-                filters.append('END_TRUNC')
+    if other_lof and cds_end is not None and exon:
+        segments = _stop_segments(model, start)
+        last_exon = sum(abs(high - low) for low, high in segments) - _last_exon_coding_length(model, exon - 1)
+        if last_exon <= 50 and gerp.weighted(segments) <= GERP_END_TRUNC_CUTOFF:
+            filters.append('END_TRUNC')
     if intron:
         low, high = introns[intron - 1]
         if high - low + 1 < MIN_INTRON_SIZE:
@@ -262,10 +277,11 @@ def loftee(
         `lof` and `lof_filter`, row for row; both null without a call.
     """
     has_lof_term = pl.col('consequence_terms').list.eval(pl.element().is_in(LOF_TERMS)).list.any().fill_null(False)
+    protein_coding = [transcript_id for transcript_id, model in models.items() if model.biotype == 'protein_coding']
     candidates = (
         records
         .with_row_index('_index')
-        .filter(has_lof_term)
+        .filter(has_lof_term & pl.col('transcript_id').is_in(protein_coding))
         .select(
             '_index',
             'transcript_id',
@@ -279,11 +295,10 @@ def loftee(
     )
     called: dict[int, list[str]] = {}
     substitutions: dict[int, tuple[int, str]] = {}
+    sums = _IntervalGerp(gerp, chromosome)
     for row, transcript_id, terms, start, end, reference, alternate, cds_end in candidates.iter_rows():
-        model = models.get(transcript_id)
-        if model is None or model.biotype != 'protein_coding':
-            continue
-        called[row] = _filters(model, terms, start, end, (reference, alternate), cds_end, sequence, gerp, chromosome)
+        model = models[transcript_id]
+        called[row] = _filters(model, terms, start, end, (reference, alternate), cds_end, sequence, sums)
         if '-' not in (reference, alternate) and len(reference) == len(alternate) == 1:
             substitutions[row] = (start, alternate.upper())
     ancestral = _ancestral_bases(ancestor, {start for start, _ in substitutions.values()})
