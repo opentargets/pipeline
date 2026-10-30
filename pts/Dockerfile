@@ -5,6 +5,13 @@ RUN apt-get update && \
   apt-get install -y --no-install-recommends git && \
   rm -rf /var/lib/apt/lists/*
 
+ADD --checksum=sha256:f867978bcfc23ee380336fe2832ea7363c983a852c2973705e2c3f6d83524032 \
+  https://github.com/Huang-lab/fastVEP/releases/download/v0.4.0/fastVEP-v0.4.0-x86_64-unknown-linux-gnu.tar.gz \
+  /tmp/fastvep.tar.gz
+RUN tar -xzf /tmp/fastvep.tar.gz -C /tmp && \
+  install -m 0755 /tmp/fastVEP-v0.4.0-x86_64-unknown-linux-gnu/fastvep /usr/local/bin/fastvep && \
+  rm -rf /tmp/fastvep.tar.gz /tmp/fastVEP-v0.4.0-x86_64-unknown-linux-gnu
+
 WORKDIR /app
 COPY . /app
 
