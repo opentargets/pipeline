@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from google.cloud import batch_v1
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from orchestration.models.batch.environment import EnvironmentRegistrySpec
 from orchestration.models.batch.instance import AllocationSpec
@@ -13,6 +13,8 @@ from orchestration.utils.labels import Labels
 
 
 class JobSpec(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     task_group: TaskGroupSpec
     """Specification for the task groups to be executed in the batch job."""
 

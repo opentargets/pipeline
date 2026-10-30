@@ -5,7 +5,8 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \
 				upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
-				upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
+				upload-finngen-gwas-readme upload-finngen-multiome-readme \
+				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 				upload-finngen-meta-readme upload-decode-bucket-readme
 
@@ -70,21 +71,20 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow db migrate
 	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags reserialize
 	@$(foreach dag, \
-		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics \
+		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics/gwas_catalog_sumstats_pics \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_clumping \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_finemapping \
-		datasources/gwas_catalog_data/gwas_catalog_top_hits \
+		datasources/gwas_catalog_data/gwas_catalog_top_hits/gwas_catalog_top_hits \
 		datasources/gwas_catalog_data/gwas_catalog_heritability_estimate \
 		datasources/gnomad_data/gnomad_ingestion \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_finemapping \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_harmonisation \
 		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
-		datasources/finngen_data/finngen_ingestion \
+		datasources/finngen_data/finngen_gwas/finngen_ingestion \
+		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
 		credible_set_qc/credible_set_qc \
-		datasources/lof_annotations/lof_curation_ingestion \
-		datasources/foldx_annotations/foldx_ingestion \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
 
@@ -95,15 +95,26 @@ upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
 	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data gs://ukb_ppp_eur_data/docs
 	@gcloud storage rsync docs/credible_set_qc gs://ukb_ppp_eur_data/docs/credible_set_qc
 
-upload-finngen-bucket-readme: ## Upload finngen_data readme to the bucket
-	@gcloud storage rsync docs/datasources/finngen_data gs://finngen_data/docs
+upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/finngen_data/finngen_gwas $(BUCKET)/docs
+
+upload-finngen-multiome-readme: ## Upload the finngen multiome readme to a run folder: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/finngen_data/finngen_multiome $(BUCKET)/docs
 
 upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
-	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_pics/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_susie/docs
-	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_top_hits/docs
 	@gcloud storage rsync docs/credible_set_qc gs://gwas_catalog_sumstats_susie/docs/credible_set_qc
+
+upload-gwas-catalog-top-hits-readme: ## Upload the gwas_catalog_top_hits readme to a run folder: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_top_hits $(BUCKET)/docs
+
+upload-gwas-catalog-sumstats-pics-readme: ## Upload the gwas_catalog_sumstats_pics readme to a run folder: make upload-gwas-catalog-sumstats-pics-readme BUCKET=gs://gwas_catalog_sumstats_pics/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-gwas-catalog-sumstats-pics-readme BUCKET=gs://gwas_catalog_sumstats_pics/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_sumstats_pics $(BUCKET)/docs
 
 upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 	@gcloud storage rsync docs/datasources/gnomad_data gs://gnomad_data_2/docs
@@ -120,6 +131,6 @@ upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 
 update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-eqtl-catalogue-bucket-readme upload-ukb-ppp-bucket-readme \
-									  upload-finngen-bucket-readme upload-gwas-catalog-buckets-readme \
+									  upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 										upload-finngen-meta-readme upload-decode-bucket-readme

@@ -3,7 +3,7 @@
 from functools import cached_property
 from typing import Annotated
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from orchestration.models.batch.environment import EnvironmentRegistrySpec
 from orchestration.models.batch.job import JobSpec
@@ -26,6 +26,8 @@ class BatchCollectSpec(BaseModel):
         >>> spec.file_glob
         '**.parquet'
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     source_prefix: Annotated[str, StringConstraints(pattern='^gs://.+/.+$')]
     """Source GCS prefix where the google batch task writes nested partition subdirectories."""
@@ -107,6 +109,8 @@ class BatchIndexRow(BaseModel):
     for that job.
     """
 
+    model_config = ConfigDict(extra='forbid')
+
     idx: int
     """Index of the batch job. This can be used to create unique identifiers for batch jobs and their tasks."""
     environments: EnvironmentRegistrySpec
@@ -121,6 +125,8 @@ class ManifestGeneratorSpec(BaseModel):
 
     """
 
+    model_config = ConfigDict(extra='forbid')
+
     generator_options: dict[str, str]
     """Keyword arguments for the manifest generator."""
 
@@ -133,6 +139,8 @@ class BatchIndexOperatorSpec(BaseModel):
         max_task_count (int): Maximum number of tasks per batch job.
 
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     pointer: str
     """Pointer to correct BatchManifest generator."""
@@ -160,6 +168,8 @@ class BatchJobOperatorSpec(BaseModel):
             jobs finish and copy matched files to ``collected_output`` with
             deterministic UUID5 names.
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     job: JobSpec
     """Specification for the batch job."""

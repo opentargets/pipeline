@@ -14,7 +14,7 @@ ANNOTATE_VARIANTS = files('orchestration.assets').joinpath('annotate_variants.sh
     ('script', 'expected_line_count'),
     [
         pytest.param(ANNOTATE_TRANSCRIPTS, 23, id='annotate_transcripts'),
-        pytest.param(ANNOTATE_VARIANTS, 35, id='annotate_variants'),
+        pytest.param(ANNOTATE_VARIANTS, 34, id='annotate_variants'),
     ],
 )
 def test_remove_comments_line_count(script: str, expected_line_count: int) -> None:

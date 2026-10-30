@@ -105,14 +105,6 @@
     "description": "MANE annotation of the transcript"
   },
   {
-    "id": "transcriptConsequences/polyphenPrediction",
-    "description": "Polyphen prediction of the variant impact on the transcript"
-  },
-  {
-    "id": "transcriptConsequences/siftPrediction",
-    "description": "SIFT prediction of the variant impact on the transcript"
-  },
-  {
     "id": "transcriptConsequences/targetId",
     "description": "Open Target target identifier of the transcript [bioregistry:ensembl]",
     "foreign_key": "target/id"

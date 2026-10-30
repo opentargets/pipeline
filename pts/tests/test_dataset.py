@@ -13,6 +13,7 @@ import openpyxl
 import pandas as pd
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from pts.transformers.utils.dataset import (
     check_destinations_absent,
@@ -499,3 +500,29 @@ def test_check_destinations_absent_names_every_existing_path(tmp_path: Path) -> 
     assert str(tmp_path / 'b') not in str(error.value)
     assert str(tmp_path / 'c') in str(error.value)
     check_destinations_absent([str(tmp_path / 'b')])
+
+
+def test_scan_datasets_reads_only_explicit_paths(tmp_path: Path) -> None:
+    """Explicit selections accept directories and single files, retaining duplicate rows."""
+    first = _write_parts(tmp_path / 'selected', pl.DataFrame({'id': ['same']}))
+    second = tmp_path / 'single.parquet'
+    pl.DataFrame({'id': ['same']}).write_parquet(second)
+    _write_parts(tmp_path / 'other', pl.DataFrame({'id': ['unselected']}))
+
+    result = scan_datasets([first, str(second)])
+
+    assert isinstance(result, pl.LazyFrame)
+    assert_frame_equal(result.collect(), pl.DataFrame({'id': ['same', 'same']}))
+
+
+def test_scan_datasets_rejects_empty_path_list() -> None:
+    with pytest.raises(ValueError, match='At least one dataset path'):
+        scan_datasets([])
+
+
+def test_scan_datasets_explicit_paths_union_schemas_without_declared_schema(tmp_path: Path) -> None:
+    first = _write_parts(tmp_path / 'a', pl.DataFrame({'id': ['a'], 'value': pl.Series([1], dtype=pl.Int32)}))
+    second = _write_parts(tmp_path / 'b', pl.DataFrame({'id': ['b'], 'value': [2], 'extra': ['x']}))
+
+    expected = pl.DataFrame({'id': ['a', 'b'], 'value': [1, 2], 'extra': [None, 'x']})
+    assert_frame_equal(scan_datasets([first, second]).collect(), expected)

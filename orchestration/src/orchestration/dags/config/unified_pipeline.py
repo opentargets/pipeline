@@ -92,10 +92,6 @@ class UnifiedPipelineConfig:
         )
         """The internal configuration for GENTROPY steps."""
 
-        if self.is_ppp:
-            self.gentropy = self.gentropy.overwrite(config_path / 'ppp' / 'gentropy.overrides.yaml')
-        """The internal configuration for GENTROPY steps, with PPP-specific overrides."""
-
         boot_image_keys = ('dataproc_image_version_pts', 'dataproc_image_version_gentropy', 'cos_image')
         boot_images = {k: up.get(k) for k in boot_image_keys}
         if missing := [k for k, v in boot_images.items() if not v]:

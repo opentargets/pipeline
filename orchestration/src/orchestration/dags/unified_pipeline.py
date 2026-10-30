@@ -305,32 +305,14 @@ with DAG(
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
-            'gentropy_study': {
-                'step.valid_study_index_path': gsp('gentropy_study', 'step.valid_study_index_path'),
-                'step.invalid_study_index_path': gsp('gentropy_study', 'step.invalid_study_index_path'),
-            },
-            'gentropy_credible_set': {
-                'step.valid_study_locus_path': gsp('gentropy_credible_set', 'step.valid_study_locus_path'),
-                'step.invalid_study_locus_path': gsp('gentropy_credible_set', 'step.invalid_study_locus_path'),
-            },
             'gentropy_colocalisation': {
                 'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
-            },
-            'gentropy_variant_partition': {
-                'step.output_path': gsp('gentropy_variant_partition', 'step.output_path'),
             },
             'gentropy_variant_annotation': {
                 'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
             },
-            'gentropy_variant': {
-                'step.variant_index_path': gsp('gentropy_variant', 'step.variant_index_path'),
-            },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
-            },
-            'gentropy_enhancer_to_gene': {
-                'step.valid_output_path': gsp('gentropy_enhancer_to_gene', 'step.valid_output_path'),
-                'step.invalid_output_path': gsp('gentropy_enhancer_to_gene', 'step.invalid_output_path'),
             },
         }
 

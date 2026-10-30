@@ -12,12 +12,14 @@ from pts.transformers.target.go import build_go, read_tsv
 from tests.target.rows import rows
 
 
-def _gaf(db: str, object_id: str, go_id: str, reference: str, evidence: str, aspect: str) -> str:
+def _gaf(
+    db: str, object_id: str, go_id: str, reference: str, evidence: str, aspect: str, qualifier: str = 'enables'
+) -> str:
     return '\t'.join([
         db,
         object_id,
         'SYM',
-        'enables',
+        qualifier,
         go_id,
         reference,
         evidence,
@@ -76,17 +78,17 @@ def _write(tmp_path: Path, name: str, lines: list[str]) -> str:
     return str(path)
 
 
-def _paths(tmp_path: Path) -> dict[str, str]:
+def _paths(tmp_path: Path, human: list[str] = HUMAN, rna: list[str] = RNA) -> dict[str, str]:
     return {
-        'human': _write(tmp_path, 'goa_human.gaf.gz', HUMAN),
-        'rna': _write(tmp_path, 'goa_human_rna.gaf.gz', RNA),
+        'human': _write(tmp_path, 'goa_human.gaf.gz', human),
+        'rna': _write(tmp_path, 'goa_human_rna.gaf.gz', rna),
         'rna_lookup': _write(tmp_path, 'ensembl.tsv.gz', RNA_LOOKUP),
         'eco': _write(tmp_path, 'goa_human_eco.gpa.gz', ECO),
     }
 
 
-def _go(tmp_path: Path) -> pl.DataFrame:
-    paths = _paths(tmp_path)
+def _go(tmp_path: Path, human: list[str] = HUMAN, rna: list[str] = RNA) -> pl.DataFrame:
+    paths = _paths(tmp_path, human, rna)
     return build_go(
         read_tsv(paths['human'], comment_prefix='!'),
         read_tsv(paths['rna'], comment_prefix='!'),
@@ -140,6 +142,24 @@ def test_rna_annotations_map_through_rnacentral(tmp_path: Path) -> None:
 
 def test_unmapped_annotations_are_dropped(tmp_path: Path) -> None:
     assert set(_by_gene(tmp_path)) == {'ENSG00000141510', 'ENSG00000226803'}
+
+
+def test_not_qualified_annotations_are_dropped(tmp_path: Path) -> None:
+    """Annotations stating the gene product is NOT associated with a term are dropped."""
+    human = [
+        '!gaf-version: 2.2',
+        _gaf('UniProtKB', 'P04637', 'GO:0003725', 'PMID:1', 'IDA', 'F', qualifier='NOT|enables'),
+        _gaf('UniProtKB', 'P04637', 'GO:0005634', 'PMID:3', 'IDA', 'C', qualifier='NOT|located_in'),
+        _gaf('UniProtKB', 'P04637', 'GO:0005634', 'PMID:3', 'TAS', 'C', qualifier='located_in'),
+    ]
+    rna = [
+        '!gaf-version: 2.2',
+        _gaf('RNAcentral', 'URS0000001346_9606', 'GO:0030533', 'GO_REF:0000115', 'IEA', 'F', qualifier='NOT|enables'),
+    ]
+    go = {r['ensemblId']: r['go'] for r in _go(tmp_path, human, rna).to_dicts()}
+    assert {gene: [(g['id'], g['evidence']) for g in annotations] for gene, annotations in go.items()} == {
+        'ENSG00000141510': [('GO:0005634', 'TAS')]
+    }
 
 
 def test_matches_the_spark_output(tmp_path: Path) -> None:

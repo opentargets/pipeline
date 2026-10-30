@@ -1047,6 +1047,13 @@ class TestHashLongVariantIdentifiers:
         assert got.startswith('OTVAR_1_12345_')
         assert got != variant_id
 
+    def test_id_at_the_threshold_is_hashed_as_in_the_variant_index(self) -> None:
+        variant_id = '1_12345_A_' + 'T' * (VARIANT_HASH_LENGTH - 10)
+        assert len(variant_id) == VARIANT_HASH_LENGTH
+        lf = pl.LazyFrame({'variantId': [variant_id]})
+        out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
+        assert out['variantId'][0].startswith('OTVAR_1_12345_')
+
     def test_short_non_matching_id_is_unchanged(self) -> None:
         lf = pl.LazyFrame({'variantId': ['rs12345']})
         out = Evidence(lf).hash_long_variant_identifiers().lf.collect()
