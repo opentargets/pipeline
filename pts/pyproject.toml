@@ -26,7 +26,6 @@ dependencies = [
   "networkx>=3.6.1",
   "pybigwig>=0.3.24",
   "pyfaidx>=0.8.1",
-  "biopython>=1.88",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
 ]

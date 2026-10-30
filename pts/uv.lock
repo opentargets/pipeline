@@ -2110,7 +2110,6 @@ name = "pts"
 version = "26.12.0rc26"
 source = { editable = "." }
 dependencies = [
-    { name = "biopython" },
     { name = "loguru" },
     { name = "networkx" },
     { name = "numpy" },
@@ -2166,7 +2165,6 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "biopython", specifier = ">=1.88" },
     { name = "cellex", marker = "extra == 'baseline-expression'", git = "https://github.com/perslab/CELLEX?rev=119c7ca" },
     { name = "gcsfs", marker = "extra == 'baseline-expression'", specifier = ">=2026.2.0" },
     { name = "huggingface-hub", marker = "extra == 'nlp'", specifier = ">=2.0.0" },
