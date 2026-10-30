@@ -132,14 +132,13 @@ def test_release_drug_labels_are_staged() -> None:
     })
     interventions = pl.DataFrame({'nct_id': ['NCT0'], 'intervention_type': ['DRUG'], 'name': ['Aspirin']})
     conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
-    extractions = _extractions([['Aspirin', ' Ibuprofen ', None], [''], []])
+    raw = ['Aspirin', ' Ibuprofen ', r'drug \[X\]', 'a\x0041b', 'nul\x00x']
+    extractions = _extractions([[*raw, None], [''], []])
 
     report = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
 
-    released = set(report['drugs'].explode().struct.field('drugFromSource').drop_nulls())
-    assert released
-    assert released <= set(llm_drug_labels(extractions))
-    assert llm_drug_labels(extractions).to_list() == ['', ' Ibuprofen ', 'Aspirin']
+    released = report['drugs'].explode().struct.field('drugFromSource').drop_nulls().unique().sort()
+    assert released.to_list() == llm_drug_labels(extractions).to_list() == sorted(['', *raw])
 
 
 def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, models: Models) -> None:
