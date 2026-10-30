@@ -52,6 +52,29 @@ def clinvar_ids(colocated: pl.Expr) -> pl.Expr:
     return clinvar.list.eval(pl.element().filter(pl.element().str.starts_with('VCV'))).list.unique(maintain_order=True)
 
 
+def _ranked(transcripts: pl.Expr) -> pl.Expr:
+    """VEP transcript consequences in the index's order: highest consequence score, then distance, then id.
+
+    Transcripts without a scored consequence term come last.
+    """
+
+    def field(name: str) -> pl.Expr:
+        return pl.element().struct.field(name)
+
+    score = (
+        field('consequence_terms')
+        .list.eval(pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64))
+        .list.max()
+    )
+    return (
+        transcripts.list
+        # Stable sorts, last key first.
+        .eval(pl.element().sort_by(field('transcript_id'), maintain_order=True))
+        .list.eval(pl.element().sort_by(field('distance').fill_null(0), maintain_order=True))
+        .list.eval(pl.element().sort_by(score, descending=True, nulls_last=True, maintain_order=True))
+    )
+
+
 def _highest(transcripts: pl.Expr, field: str) -> pl.Expr:
     """The first transcript with the highest non-null `field`."""
     # `list.arg_max` returns the last maximum for strings, not the first.
@@ -81,7 +104,7 @@ def _effect(
 def variant_effect(
     transcripts: pl.Expr, method: str, score: str, assessment: str | None = None, flag: str | None = None
 ) -> pl.Expr:
-    """The predictor's effect from the transcript with its highest score, if any."""
+    """The predictor's effect from the first transcript with its highest score, if any."""
     transcript = _highest(transcripts, score)
 
     def field(name: str | None) -> pl.Expr:
@@ -315,7 +338,11 @@ def variant_description(consequence: pl.Expr, transcripts: pl.Expr) -> pl.Expr:
 
 
 def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
-    """Turn raw VEP records into variant index rows, keeping canonical transcripts only."""
+    """Turn raw VEP records into variant index rows, keeping canonical transcripts only.
+
+    The canonical transcripts are read in the order of `transcript_consequences`, so an effect
+    whose score ties between transcripts comes from the transcript the index ranks first.
+    """
     fields = pl.col('input').str.split('\t')
     colocated = pl.col('colocated_variants')
     transcripts = pl.col('transcript_consequences')
@@ -336,7 +363,7 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
     )
     return (
         frame
-        .with_columns(transcripts.list.filter(pl.element().struct.field('canonical') == 1))
+        .with_columns(_ranked(transcripts.list.filter(pl.element().struct.field('canonical') == 1)))
         .select(
             pl.concat_str(
                 [fields.list.get(i, null_on_oob=True) for i in (0, 1, 3, 4)], separator='_', ignore_nulls=True

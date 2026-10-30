@@ -263,13 +263,13 @@ def test_all_predictors_without_sift_or_polyphen():
 
 
 def test_predictor_comes_from_the_first_transcript_with_the_highest_score():
-    """Ties keep VEP's transcript order, null scores never win, and no score means no effect."""
+    """Ties keep the index's transcript order, null scores never win, and no score means no effect."""
     result = parsed(
         transcript_consequences=[
-            transcript(gene_id='none'),
-            transcript(gene_id='first', conservation=5),
-            transcript(gene_id='second', conservation=5),
-            transcript(gene_id='lower', conservation=1),
+            transcript(gene_id='none', transcript_id='ENST0'),
+            transcript(gene_id='first', transcript_id='ENST1', conservation=5),
+            transcript(gene_id='second', transcript_id='ENST2', conservation=5),
+            transcript(gene_id='lower', transcript_id='ENST3', conservation=1),
         ]
     )
     effects = {x['method']: x for x in result['variantEffect']}
@@ -278,16 +278,48 @@ def test_predictor_comes_from_the_first_transcript_with_the_highest_score():
 
 
 def test_loftee_ties_keep_the_first_transcript():
-    """Spark ranks LOFTEE by its string value, so `LC` beats `HC`; ties keep VEP's order."""
+    """Spark ranks LOFTEE by its string value, so `LC` beats `HC`; ties keep the index's order."""
     result = parsed(
         transcript_consequences=[
-            transcript(gene_id='high_confidence', lof='HC'),
-            transcript(gene_id='first', lof='LC', lof_filter='A'),
-            transcript(gene_id='second', lof='LC', lof_filter='B'),
+            transcript(gene_id='high_confidence', transcript_id='ENST0', lof='HC'),
+            transcript(gene_id='second', transcript_id='ENST2', lof='LC', lof_filter='B'),
+            transcript(gene_id='first', transcript_id='ENST1', lof='LC', lof_filter='A'),
         ]
     )
     [loftee] = [x for x in result['variantEffect'] if x['method'] == 'LOFTEE']
     assert (loftee['targetId'], loftee['assessment'], loftee['assessmentFlag']) == ('first', 'LC', 'A')
+
+
+RANKED = [
+    transcript(gene_id='severe', transcript_id='ENST9', consequence_terms=['stop_gained'], distance=0),
+    transcript(gene_id='near', transcript_id='ENST8', consequence_terms=['upstream_gene_variant'], distance=10),
+    transcript(gene_id='near_id', transcript_id='ENST9', consequence_terms=['upstream_gene_variant'], distance=10),
+    transcript(gene_id='far', transcript_id='ENST1', consequence_terms=['upstream_gene_variant'], distance=900),
+]
+"""Canonical transcripts in the index's order: consequence score, then distance, then id."""
+
+
+@pytest.mark.parametrize('order', [[0, 1, 2, 3], [3, 2, 1, 0], [2, 3, 0, 1], [1, 0, 3, 2]])
+def test_tied_effects_target_the_top_ranked_transcript(order):
+    """GERP, AlphaMissense and LOFTEE ties go to the transcript ranked first in `transcriptConsequences`."""
+    alphamissense = {'am_class': 'benign', 'am_pathogenicity': 0.1}
+    tied = [{**RANKED[i], 'conservation': 2.5, 'alphamissense': alphamissense, 'lof': 'LC'} for i in order]
+    result = parsed(transcript_consequences=tied)
+    effects = {x['method']: x['targetId'] for x in result['variantEffect']}
+    assert [x['targetId'] for x in result['transcriptConsequences']] == ['severe', 'near', 'near_id', 'far']
+    assert effects == {'GERP': 'severe', 'AlphaMissense': 'severe', 'LOFTEE': 'severe', 'VEP': None}
+
+
+@pytest.mark.parametrize('order', [[0, 1, 2], [2, 1, 0], [1, 2, 0]])
+def test_tied_effects_ignore_transcripts_without_the_score(order):
+    """A top-ranked transcript without a GERP score does not win; the next tied one in the index's order does."""
+    tied = [
+        {**RANKED[1], 'conservation': 4.0},
+        {**RANKED[2], 'conservation': 4.0},
+        {**RANKED[3], 'conservation': 4.0},
+    ]
+    result = parsed(transcript_consequences=[RANKED[0], *(tied[i] for i in order)])
+    assert {x['method']: x['targetId'] for x in result['variantEffect']}['GERP'] == 'near'
 
 
 def test_hgvs_intergenic_fallback():
