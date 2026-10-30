@@ -96,6 +96,74 @@ def uniprot_by_gene(hgnc: pl.DataFrame, uniprot: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def promote_hgnc_swissprot(ensembl: pl.DataFrame, hgnc: pl.DataFrame, entries: pl.DataFrame) -> pl.DataFrame:
+    """Ensembl genes, with HGNC's reviewed UniProt accession added as `uniprot_swissprot` where Ensembl gives none.
+
+    Ensembl links some protein-coding genes to no Swiss-Prot entry although HGNC maps them to a current,
+    reviewed one, e.g. NLRP3 and Q96P20, whose sequences disagree on the start codon
+    (opentargets/issues#4604). Through HGNC alone the accession is only labelled `uniprot_obsolete`, so
+    everything keyed on Swiss-Prot -- GO, ChEMBL mechanisms, coding variants -- misses the gene.
+
+    An accession is added only for a protein-coding gene with no Swiss-Prot accession from Ensembl, only
+    when it is the primary accession of a reviewed entry, and only when no other gene holds it: neither as
+    Ensembl's Swiss-Prot accession nor as another promotion. Other genes are returned unchanged.
+
+    Args:
+        ensembl: the ensembl builder's genes; `id`, `biotype` and `proteinIds` are read.
+        hgnc: the hgnc builder's [ensemblId, uniprotIds, ...].
+        entries: `read_uniprot`'s entries; `reviewed` and `accessions` (primary first) are read.
+
+    Returns:
+        `ensembl`, with the promoted accessions appended to `proteinIds`.
+    """
+    # every accession trimmed as `filter_and_sort_protein_ids` trims it later, so ` P1 ` and `P1` are one accession
+    # in each check here, as they will be in the output
+    source = pl.element().struct.field('source')
+    swissprot = ensembl.select(
+        'id',
+        pl
+        .col('proteinIds')
+        .list.eval(pl.element().filter(source == 'uniprot_swissprot').struct.field('id').str.strip_chars())
+        .list.eval(pl.element().filter(pl.element() != ''))
+        .alias('sp'),
+    )
+    held = swissprot.explode('sp', empty_as_null=False, keep_nulls=False).select(pl.col('sp').alias('uniprotId'))
+    lacking = ensembl.filter(pl.col('biotype') == 'protein_coding').join(
+        swissprot.filter(pl.col('sp').list.len().fill_null(0) == 0), on='id', how='semi'
+    )
+    reviewed = entries.filter(pl.col('reviewed')).select(
+        pl.col('accessions').list.first().str.strip_chars().alias('uniprotId')
+    )
+    candidates = (
+        hgnc
+        .select(pl.col('ensemblId').alias('id'), pl.col('uniprotIds').alias('uniprotId'))
+        .explode('uniprotId', empty_as_null=False, keep_nulls=False)
+        .with_columns(pl.col('uniprotId').str.strip_chars())
+        .join(lacking, on='id', how='semi')
+        .join(reviewed, on='uniprotId', how='semi')
+        .join(held, on='uniprotId', how='anti')
+        .unique(maintain_order=True)
+    )
+    promoted = (
+        candidates
+        .filter(pl.len().over('uniprotId') == 1)
+        .group_by('id', maintain_order=True)
+        .agg(pl.struct(pl.col('uniprotId').alias('id'), pl.lit('uniprot_swissprot').alias('source')).alias('_promoted'))
+    )
+    return (
+        ensembl
+        .join(promoted, on='id', how='left', maintain_order='left')
+        .with_columns(
+            pl
+            .when(pl.col('_promoted').is_not_null())
+            .then(pl.concat_list(pl.col('proteinIds').fill_null([]), '_promoted'))
+            .otherwise(pl.col('proteinIds'))
+            .alias('proteinIds')
+        )
+        .drop('_promoted')
+    )
+
+
 def protein_source_priority(source: pl.Expr) -> pl.Expr:
     """1 swissprot, 2 trembl, 3 uniprot, 4 ensembl, 5 anything else, e.g. uniprot_obsolete."""
     return (

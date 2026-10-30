@@ -26,6 +26,7 @@ def _strip_braces(text: str) -> str:
 
 def _parse_record(lines: list[str]) -> dict:
     entry_id = ''
+    reviewed = False
     accessions: list[str] = []
     names: list[str] = []
     synonyms: list[str] = []
@@ -76,6 +77,8 @@ def _parse_record(lines: list[str]) -> dict:
             tokens = content.split()
             if tokens:
                 entry_id = tokens[0]
+            # `ID   NLRP3_HUMAN   Reviewed;   1036 AA.`; TrEMBL entries read `Unreviewed;`
+            reviewed = 'Reviewed;' in tokens
 
         elif code == 'AC':
             content_clean = _strip_braces(content)
@@ -162,6 +165,7 @@ def _parse_record(lines: list[str]) -> dict:
 
     return {
         'id': entry_id,
+        'reviewed': reviewed,
         'accessions': accessions,
         'names': names,
         'synonyms': synonyms,

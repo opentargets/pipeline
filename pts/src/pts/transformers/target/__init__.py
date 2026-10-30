@@ -14,7 +14,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
-from pts.transformers.target.assemble import assemble
+from pts.transformers.target.assemble import assemble, promote_hgnc_swissprot
 from pts.transformers.target.ensembl import build_ensembl
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.ensembl import CoreDump
@@ -50,6 +50,13 @@ def target(
     logger.info('building hgnc')
     hgnc_df = hgnc.build_hgnc(hgnc.read_hgnc(source['hgnc']))
 
+    logger.info('building uniprot')
+    uniprot_entries = uniprot.read_uniprot(source['uniprot'])
+    uniprot_df = uniprot.build_uniprot(uniprot_entries, uniprot.read_uniprot_ssl(source['uniprot_ssl']))
+
+    # before GO, so GO annotations reach the genes through the promoted accessions too
+    ensembl = promote_hgnc_swissprot(ensembl, hgnc_df, uniprot_entries)
+
     logger.info('building gene ontology')
     go_df = go.build_go(
         go.read_tsv(source['gene_ontology_human'], comment_prefix='!'),
@@ -63,11 +70,6 @@ def target(
     hallmarks_df = hallmarks.build_hallmarks(hallmarks.read_hallmarks(source['hallmarks']))
     ncbi_df = ncbi.build_ncbi(ncbi.read_ncbi(source['ncbi']))
     hpa_df = hpa.build_hpa(hpa.read_hpa(source['hpa']), hpa.read_hpa_ssl(source['hpa_sl']))
-
-    logger.info('building uniprot')
-    uniprot_df = uniprot.build_uniprot(
-        uniprot.read_uniprot(source['uniprot']), uniprot.read_uniprot_ssl(source['uniprot_ssl'])
-    )
 
     logger.info('building constraint and reactome')
     constraint_df = constraint.build_constraint(constraint.read_constraint(source['gnomad']))

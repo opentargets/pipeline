@@ -7,7 +7,8 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.schemas.target import ID_SOURCE
+from pts.schemas.target import ID_SOURCE, UNIPROT_ENTRY
+from pts.transformers.target.assemble import promote_hgnc_swissprot
 from pts.transformers.target.go import build_go, read_tsv
 from tests.target.rows import rows
 
@@ -227,3 +228,31 @@ SPARK_ROWS = [
         ],
     },
 ]
+
+
+def test_annotations_reach_a_gene_through_its_promoted_hgnc_accession(tmp_path: Path) -> None:
+    """NLRP3's GOA rows are keyed by Q96P20, which only HGNC links to the gene (opentargets/issues#4604)."""
+    nlrp3 = 'ENSG00000162711'
+    ensembl = pl.DataFrame(
+        [(nlrp3, 'NLRP3', 'protein_coding', [{'id': 'A0A2R8YEG7', 'source': 'uniprot_trembl'}])],
+        schema={'id': pl.String, 'approvedSymbol': pl.String, 'biotype': pl.String, 'proteinIds': pl.List(ID_SOURCE)},
+        orient='row',
+    )
+    hgnc = pl.DataFrame({'ensemblId': [nlrp3], 'uniprotIds': [['Q96P20']]})
+    entries = pl.DataFrame([{'id': 'NLRP3_HUMAN', 'reviewed': True, 'accessions': ['Q96P20']}], schema=UNIPROT_ENTRY)
+    paths = _paths(
+        tmp_path, human=['!gaf-version: 2.2', _gaf('UniProtKB', 'Q96P20', 'GO:0005737', 'PMID:4', 'IDA', 'C')]
+    )
+
+    def go_ids(genes: pl.DataFrame) -> list[str]:
+        go = build_go(
+            read_tsv(paths['human'], comment_prefix='!'),
+            read_tsv(paths['rna'], comment_prefix='!'),
+            read_tsv(paths['rna_lookup']),
+            read_tsv(paths['eco'], comment_prefix='!'),
+            genes,
+        )
+        return [entry['id'] for gene in go.to_dicts() if gene['ensemblId'] == nlrp3 for entry in gene['go']]
+
+    assert go_ids(ensembl) == []
+    assert go_ids(promote_hgnc_swissprot(ensembl, hgnc, entries)) == ['GO:0005737']

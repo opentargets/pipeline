@@ -59,6 +59,7 @@ HGNC_DOC = pl.Schema({
 
 UNIPROT_ENTRY = pl.Schema({
     'id': pl.String,
+    'reviewed': pl.Boolean,
     'accessions': pl.List(pl.String),
     'names': pl.List(pl.String),
     'synonyms': pl.List(pl.String),
