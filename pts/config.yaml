@@ -80,10 +80,7 @@ steps:
           - input/gwas/study/gcss_pics
           - input/gwas/study/gcss_susie
           - input/gwas/study/finngen
-          - input/molqtl/study/eqtl_catalogue/r7
-          - input/molqtl/study/otar2077/MAGE_OTAR
-          - input/molqtl/study/otar2077/IBDverse
-          - input/molqtl/study/GTEx_v10
+          - input/molqtl/study/eqtl_catalogue/r8
           - input/molqtl/study/ukb_ppp_eur
         target: output/target
         disease: output/disease
@@ -126,10 +123,7 @@ steps:
           - input/gwas/credible_set/gcss_pics
           - input/gwas/credible_set/gcss_susie
           - input/gwas/credible_set/finngen
-          - input/molqtl/credible_set/eqtl_catalogue/r7
-          - input/molqtl/credible_set/otar2077/MAGE_OTAR
-          - input/molqtl/credible_set/otar2077/IBDverse
-          - input/molqtl/credible_set/GTEx_v10
+          - input/molqtl/credible_set/eqtl_catalogue/r8
           - input/molqtl/credible_set/ukb_ppp_eur
         study: output/study
         target: output/target
