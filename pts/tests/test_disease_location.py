@@ -8,7 +8,7 @@ import json
 import polars as pl
 
 from pts.schemas import ontology
-from pts.transformers.disease_location import inherit_locations, stated_locations
+from pts.transformers.disease_location import inherit_locations, most_specific_locations, stated_locations
 
 OBO = 'http://purl.obolibrary.org/obo/'
 LOCATED_IN = f'{OBO}RO_0004026'
@@ -151,3 +151,49 @@ class TestInheritLocations:
             _diseases(('MONDO_A', []), ('MONDO_B', []), ('MONDO_C', ['MONDO_A', 'MONDO_B'])),
         )
         assert [pair for pair in _pairs(out) if pair[0] == 'MONDO_C'] == [('MONDO_C', 'UBERON_1')]
+
+
+COLON, LARGE_INTESTINE, INTESTINE, IMMUNE = 'UBERON_0001155', 'UBERON_0000059', 'UBERON_0000160', 'UBERON_0002405'
+
+
+def _biosample() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            (COLON, [LARGE_INTESTINE, INTESTINE]),
+            (LARGE_INTESTINE, [INTESTINE]),
+            (INTESTINE, []),
+            (IMMUNE, None),
+        ],
+        schema={'biosampleId': pl.String(), 'ancestors': pl.List(pl.String())},
+        orient='row',
+    )
+
+
+def _locations_on(disease: str, *locations: str) -> pl.DataFrame:
+    return _stated(*((disease, location) for location in locations))
+
+
+class TestMostSpecificLocations:
+    """Only locations the biosample index knows survive, and only the most specific of them."""
+
+    def test_location_missing_from_biosample_is_dropped(self) -> None:
+        assert most_specific_locations(_locations_on('D1', 'GO_0000781'), _biosample()).is_empty()
+
+    def test_broader_location_is_dropped(self) -> None:
+        out = most_specific_locations(_locations_on('D1', COLON, LARGE_INTESTINE, INTESTINE), _biosample())
+        assert _pairs(out) == [('D1', COLON)]
+
+    def test_unrelated_locations_are_both_kept(self) -> None:
+        out = most_specific_locations(_locations_on('D1', COLON, IMMUNE), _biosample())
+        assert _pairs(out) == [('D1', COLON), ('D1', IMMUNE)]
+
+    def test_pruning_is_per_disease(self) -> None:
+        pairs = pl.concat([_locations_on('D1', COLON), _locations_on('D2', INTESTINE)])
+        assert _pairs(most_specific_locations(pairs, _biosample())) == [('D1', COLON), ('D2', INTESTINE)]
+
+    def test_location_with_null_ancestors_is_kept(self) -> None:
+        assert _pairs(most_specific_locations(_locations_on('D1', IMMUNE), _biosample())) == [('D1', IMMUNE)]
+
+    def test_uc_shape(self) -> None:
+        pairs = _locations_on('UC', COLON, LARGE_INTESTINE, INTESTINE, IMMUNE)
+        assert _pairs(most_specific_locations(pairs, _biosample())) == [('UC', COLON), ('UC', IMMUNE)]

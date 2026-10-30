@@ -58,3 +58,28 @@ def inherit_locations(stated: pl.DataFrame, disease: pl.DataFrame) -> pl.DataFra
         .select('diseaseId', 'biosampleId')
         .unique()
     )
+
+
+def most_specific_locations(pairs: pl.DataFrame, biosample: pl.DataFrame) -> pl.DataFrame:
+    """Keep the locations the biosample index knows, and of those only the most specific.
+
+    A location is dropped when it is an ancestor, in the biosample index, of another location
+    on the same disease.
+
+    Args:
+        pairs: ``diseaseId`` and ``biosampleId`` pairs.
+        biosample: biosample index rows, with ``biosampleId`` and ``ancestors``.
+
+    Returns:
+        The surviving ``diseaseId`` and ``biosampleId`` pairs.
+    """
+    known = pairs.join(biosample.select('biosampleId'), on='biosampleId', how='semi')
+    broader = (
+        known
+        .join(biosample.select('biosampleId', 'ancestors'), on='biosampleId')
+        .explode('ancestors')
+        .drop_nulls('ancestors')
+        .select('diseaseId', biosampleId=pl.col('ancestors'))
+        .unique()
+    )
+    return known.join(broader, on=['diseaseId', 'biosampleId'], how='anti')
