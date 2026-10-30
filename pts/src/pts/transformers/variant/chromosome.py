@@ -13,6 +13,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import pickle
+import shutil
 from collections.abc import Generator
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from contextlib import contextmanager
@@ -309,7 +310,8 @@ def annotate_chunk(
         part: Where to write the chunk's index.
 
     Returns:
-        `part`, which is only written once the whole chunk is annotated.
+        `part`, which is only written once the whole chunk is annotated. The chunk's fastVEP
+        records are deleted once read.
     """
     offset = chunk * shared.chunk_rows
     frame = pl.scan_parquet(rows).slice(offset, shared.chunk_rows).collect()
@@ -322,6 +324,7 @@ def annotate_chunk(
             .with_columns(pl.col('row') - offset)
             .collect()
         )
+        shutil.rmtree(_records(shared, chromosome, chunk))
         transcripts = pl.read_parquet(directory / 'transcripts.parquet')
         records = records_from_fastvep(fastvep, frame, transcripts, sequence, chromosome).collect()
         del fastvep
