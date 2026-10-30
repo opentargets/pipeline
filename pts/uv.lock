@@ -1990,7 +1990,6 @@ dependencies = [
     { name = "networkx" },
     { name = "numpy" },
     { name = "obonet" },
-    { name = "openai" },
     { name = "openpyxl" },
     { name = "opentargets-otter" },
     { name = "pandas" },
@@ -2015,6 +2014,9 @@ l2g = [
     { name = "skops" },
     { name = "xgboost", marker = "sys_platform != 'linux'" },
     { name = "xgboost-cpu", marker = "sys_platform == 'linux'" },
+]
+llm = [
+    { name = "openai" },
 ]
 nlp = [
     { name = "huggingface-hub" },
@@ -2043,7 +2045,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "obonet", specifier = ">=1.3.0" },
-    { name = "openai", specifier = ">=3.26.0" },
+    { name = "openai", marker = "extra == 'llm'", specifier = ">=3.26.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
     { name = "pandas", specifier = ">=3.0.6" },
@@ -2063,7 +2065,7 @@ requires-dist = [
     { name = "xgboost", marker = "sys_platform != 'linux' and extra == 'l2g'", specifier = ">=3.2.0" },
     { name = "xgboost-cpu", marker = "sys_platform == 'linux' and extra == 'l2g'", specifier = ">=3.2.0" },
 ]
-provides-extras = ["baseline-expression", "nlp", "l2g"]
+provides-extras = ["baseline-expression", "nlp", "llm", "l2g"]
 
 [package.metadata.requires-dev]
 dev = [
