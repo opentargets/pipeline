@@ -184,6 +184,17 @@ steps:
       destination: output/biosample
   ##################################################################################################
 
+  #: DISEASE LOCATION STEP :########################################################################
+  disease_location:
+    - name: transform disease_location
+      transformer: disease_location
+      source:
+        mondo: input/disease/mondo.json
+        disease: output/disease
+        biosample: output/biosample
+      destination: output/disease_location
+  ##################################################################################################
+
   #: EXPRESSION STEP :##############################################################################
   baseline_expression_dice:
     - name: pyspark baseline expression harmonise dice

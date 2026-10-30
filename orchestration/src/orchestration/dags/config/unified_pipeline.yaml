@@ -476,6 +476,11 @@ steps:
     depends_on:
       - pis_biosample
 
+  pts_disease_location:
+    depends_on:
+      - pts_disease
+      - pts_biosample
+
   pts_baseline_expression:
     depends_on:
       - pis_baseline_expression
