@@ -95,7 +95,7 @@ schema = pl.Schema({
                 pl.Struct({
                     'definedClassId': pl.String(),
                     'genusIds': pl.List(pl.String()),
-                    'restictions': pl.List(
+                    'restrictions': pl.List(
                         pl.Struct({
                             'propertyId': pl.String,
                             'fillerId': pl.String,
