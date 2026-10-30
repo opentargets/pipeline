@@ -9,13 +9,39 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
 from pts.transformers.disease.coalescing import (
+    LOCATED_IN,
     absorb_obsolete_content,
+    absorb_obsolete_locations,
     annotate_name_duplicates,
     annotate_xref_duplicates,
     remap_edges,
     resolve_replacement_chains,
 )
 from pts.transformers.utils.dataset import write_dataset
+
+
+def direct_location_ids(n: pl.DataFrame) -> pl.DataFrame:
+    """Collect each term's OTAR_0000021 anatomical locations.
+
+    Args:
+        n: Node DataFrame.
+
+    Returns:
+        DataFrame of ``id`` and a sorted, distinct ``directLocationIds`` list.
+    """
+    return (
+        n
+        .select(id=pl.col('id'), bpv=pl.col('meta').struct['basicPropertyValues'])
+        .explode('bpv', empty_as_null=True)
+        .filter(pl.col('bpv').struct['pred'] == LOCATED_IN)
+        .select(
+            id=pl.col('id').str.split('/').list.last(),
+            directLocationIds=pl.col('bpv').struct['val'].str.split('/').list.last(),
+        )
+        .drop_nulls()
+        .group_by('id')
+        .agg(pl.col('directLocationIds').unique().sort())
+    )
 
 
 def disease(
@@ -58,7 +84,7 @@ def disease(
     # answered to survive the n_clean filter below.  Running this any earlier
     # would feed the donated names back into annotate_xref_duplicates, which
     # matches on exact synonyms.
-    n = absorb_obsolete_content(n)
+    n = absorb_obsolete_locations(absorb_obsolete_content(n))
 
     # clean the nodes
     n_clean = (
@@ -106,19 +132,9 @@ def disease(
         parents=pl.col('parents').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
     )
 
-    # get location_ids by filtering edges with 'located_in' predicate
-    location_ids = (
-        e
-        .filter(pl.col('pred') == 'http://purl.obolibrary.org/obo/BFO_0000050')
-        .with_columns(
-            id=pl.col('sub').str.split('/').list.last(),
-            directLocationIds=pl.col('obj').str.split('/').list.last(),
-        )
-        .group_by('id')
-        .agg(pl.col('directLocationIds').drop_nulls())
-        .drop('directLocationIds')
+    n_location_ids = n_parents.join(direct_location_ids(n), on='id', how='left').with_columns(
+        directLocationIds=pl.col('directLocationIds').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
     )
-    n_location_ids = n_parents.join(location_ids, on='id', how='left')
 
     # get synonyms by:
     # 1. exploding the synonyms column

@@ -21,6 +21,7 @@ from pts.transformers.disease.ontology_ids import (
 )
 
 _IAO_REPLACED_BY = 'http://purl.obolibrary.org/obo/IAO_0100001'
+LOCATED_IN = 'http://www.ebi.ac.uk/efo/OTAR_0000021'
 _BPV_DTYPE = pl.List(pl.Struct({'pred': pl.String(), 'val': pl.String()}))
 _SYNONYM_DTYPE = pl.List(
     pl.Struct({
@@ -336,6 +337,41 @@ def _folded(val: pl.Expr) -> pl.Expr:
     return val.str.replace_all('\n', '').str.strip_chars().str.to_lowercase()
 
 
+def _donor_targets(n: pl.DataFrame) -> pl.DataFrame:
+    """Pair each obsolete CLASS term with the single live term that replaces it.
+
+    Args:
+        n: Node DataFrame whose IAO_0100001 pointers have already been resolved.
+
+    Returns:
+        DataFrame of ``donor`` and ``target`` node ids.
+    """
+    pointers = (
+        n
+        .filter(pl.col('type') == 'CLASS')
+        .unnest('meta')
+        .explode('basicPropertyValues', empty_as_null=True)
+        .unnest('basicPropertyValues')
+        .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
+        .select(donor=pl.col('id'), target=pl.col('val'))
+        .unique()
+    )
+
+    # A term repeating one pointer still names a single successor; two different
+    # pointers is a curation decision to leave alone.
+    ambiguous = pointers.filter(pl.len().over('donor') > 1)
+    if ambiguous.height:
+        donors = ambiguous.get_column('donor').n_unique()
+        logger.info(f'{donors} obsolete terms name more than one replacement, so they donate nothing')
+
+    live = n.filter(
+        pl.col('type') == 'CLASS',
+        ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
+    ).select(target=pl.col('id'))
+
+    return pointers.filter(pl.len().over('donor') == 1).join(live, on='target', how='inner')
+
+
 def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
     """Hand every obsolete term's synonyms and label to the term that replaces it.
 
@@ -373,34 +409,13 @@ def absorb_obsolete_content(n: pl.DataFrame) -> pl.DataFrame:
     Returns:
         DataFrame with the same shape and schema as ``n``.
     """
-    pointers = (
-        n
-        .filter(pl.col('type') == 'CLASS')
-        .unnest('meta')
-        .explode('basicPropertyValues', empty_as_null=True)
-        .unnest('basicPropertyValues')
-        .filter(pl.col('deprecated'), pl.col('pred') == _IAO_REPLACED_BY)
-        .select(donor=pl.col('id'), target=pl.col('val'))
-        .unique()
-    )
-    if pointers.is_empty():
-        return n
-
-    # A term repeating one pointer still names a single successor; two different
-    # pointers is a curation decision to leave alone.
-    ambiguous = pointers.filter(pl.len().over('donor') > 1)
-    if ambiguous.height:
-        donors = ambiguous.get_column('donor').n_unique()
-        logger.info(f'{donors} obsolete terms name more than one replacement, so they donate no synonyms')
-
     live = n.filter(
         pl.col('type') == 'CLASS',
         ~pl.col('meta').struct['deprecated'] | pl.col('meta').struct['deprecated'].is_null(),
     ).select(target=pl.col('id'), target_lbl=pl.col('lbl'))
 
     donations = (
-        pointers
-        .filter(pl.len().over('donor') == 1)
+        _donor_targets(n)
         .join(live, on='target', how='inner')
         .join(
             n.select(donor=pl.col('id'), donor_lbl=pl.col('lbl'), synonyms=pl.col('meta').struct['synonyms']),
@@ -777,3 +792,58 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
         orient='row',
     )
     return _supersede(n, superseded_map)
+
+
+def absorb_obsolete_locations(n: pl.DataFrame) -> pl.DataFrame:
+    """Hand every obsolete term's OTAR_0000021 locations to the term that replaces it.
+
+    Follows the same pointers as ``absorb_obsolete_content`` and refuses the same
+    ones.  A location the survivor already holds is not added twice.
+
+    Args:
+        n: Node DataFrame whose IAO_0100001 pointers have already been resolved.
+
+    Returns:
+        DataFrame with the same shape and schema as ``n``.
+    """
+    held = (
+        n
+        .select(target=pl.col('id'), bpv=pl.col('meta').struct['basicPropertyValues'])
+        .explode('bpv', empty_as_null=True)
+        .filter(pl.col('bpv').struct['pred'] == LOCATED_IN)
+        .select('target', val=pl.col('bpv').struct['val'])
+    )
+    additions = (
+        _donor_targets(n)
+        .join(held.rename({'target': 'donor'}), on='donor', how='inner')
+        .join(held, on=['target', 'val'], how='anti')
+        .unique(subset=['target', 'val'])
+        .sort('target', 'val')
+        .group_by('target', maintain_order=True)
+        .agg(donated=pl.struct(pred=pl.lit(LOCATED_IN), val=pl.col('val')))
+    )
+    if additions.is_empty():
+        return n
+
+    logger.debug(f'{additions.height} terms absorbed locations from the terms they replace')
+
+    return (
+        n
+        .join(additions, left_on='id', right_on='target', how='left', maintain_order='left')
+        .with_columns(
+            meta=pl.col('meta').struct.with_fields(
+                basicPropertyValues=pl
+                .when(pl.col('donated').is_not_null())
+                .then(
+                    pl
+                    .col('meta')
+                    .struct.field('basicPropertyValues')
+                    .fill_null(pl.Series([[]], dtype=_BPV_DTYPE))
+                    .list.concat(pl.col('donated'))
+                )
+                .otherwise(pl.col('meta').struct.field('basicPropertyValues')),
+            )
+        )
+        .drop('donated')
+        .select(n.columns)
+    )
