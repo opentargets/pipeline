@@ -35,3 +35,26 @@ def stated_locations(edges: pl.DataFrame, axioms: pl.DataFrame) -> pl.DataFrame:
         )
     )
     return pl.concat([from_edges, from_axioms]).drop_nulls().unique()
+
+
+def inherit_locations(stated: pl.DataFrame, disease: pl.DataFrame) -> pl.DataFrame:
+    """Give every disease the stated locations of itself and of each of its ancestors.
+
+    Args:
+        stated: ``diseaseId`` and ``biosampleId`` pairs, as stated by the ontology.
+        disease: disease index rows, with ``id`` and ``ancestors``.
+
+    Returns:
+        Distinct ``diseaseId`` and ``biosampleId`` pairs, one disease per index row.
+    """
+    return (
+        disease
+        .select(
+            diseaseId=pl.col('id'),
+            source=pl.concat_list(pl.col('id'), pl.col('ancestors').fill_null([])),
+        )
+        .explode('source')
+        .join(stated.rename({'diseaseId': 'source'}), on='source')
+        .select('diseaseId', 'biosampleId')
+        .unique()
+    )

@@ -8,7 +8,7 @@ import json
 import polars as pl
 
 from pts.schemas import ontology
-from pts.transformers.disease_location import stated_locations
+from pts.transformers.disease_location import inherit_locations, stated_locations
 
 OBO = 'http://purl.obolibrary.org/obo/'
 LOCATED_IN = f'{OBO}RO_0004026'
@@ -102,3 +102,52 @@ class TestStatedLocations:
         df = pl.read_json(io.BytesIO(json.dumps(doc).encode()), schema=ontology.schema)
         axiom = df['graphs'][0][0]['logicalDefinitionAxioms'][0]
         assert axiom['restrictions'][0]['fillerId'] == f'{OBO}UBERON_4'
+
+
+def _stated(*pairs: tuple[str, str]) -> pl.DataFrame:
+    return pl.DataFrame(list(pairs), schema=['diseaseId', 'biosampleId'], orient='row')
+
+
+def _diseases(*rows: tuple[str, list[str] | None]) -> pl.DataFrame:
+    return pl.DataFrame(
+        list(rows),
+        schema={'id': pl.String(), 'ancestors': pl.List(pl.String())},
+        orient='row',
+    )
+
+
+class TestInheritLocations:
+    """A disease takes the stated locations of itself and of every ancestor."""
+
+    def test_disease_gets_its_own_locations(self) -> None:
+        out = inherit_locations(_stated(('MONDO_A', 'UBERON_1')), _diseases(('MONDO_A', [])))
+        assert _pairs(out) == [('MONDO_A', 'UBERON_1')]
+
+    def test_disease_gets_ancestor_locations(self) -> None:
+        out = inherit_locations(
+            _stated(('MONDO_A', 'UBERON_1')),
+            _diseases(('MONDO_A', []), ('ORPHA_1', ['MONDO_A'])),
+        )
+        assert ('ORPHA_1', 'UBERON_1') in _pairs(out)
+
+    def test_unrelated_disease_gets_nothing(self) -> None:
+        out = inherit_locations(
+            _stated(('MONDO_A', 'UBERON_1')),
+            _diseases(('MONDO_A', []), ('MONDO_Z', [])),
+        )
+        assert [pair for pair in _pairs(out) if pair[0] == 'MONDO_Z'] == []
+
+    def test_stated_term_absent_from_index_reaches_no_one(self) -> None:
+        out = inherit_locations(_stated(('MONDO_GONE', 'UBERON_1')), _diseases(('MONDO_A', ['MONDO_B'])))
+        assert out.is_empty()
+
+    def test_null_ancestors_keeps_own_locations(self) -> None:
+        out = inherit_locations(_stated(('MONDO_A', 'UBERON_1')), _diseases(('MONDO_A', None)))
+        assert _pairs(out) == [('MONDO_A', 'UBERON_1')]
+
+    def test_location_from_two_ancestors_appears_once(self) -> None:
+        out = inherit_locations(
+            _stated(('MONDO_A', 'UBERON_1'), ('MONDO_B', 'UBERON_1')),
+            _diseases(('MONDO_A', []), ('MONDO_B', []), ('MONDO_C', ['MONDO_A', 'MONDO_B'])),
+        )
+        assert [pair for pair in _pairs(out) if pair[0] == 'MONDO_C'] == [('MONDO_C', 'UBERON_1')]
