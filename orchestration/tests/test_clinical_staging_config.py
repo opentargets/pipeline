@@ -9,11 +9,10 @@ from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
 
 PIS_CONFIG = Path(__file__).parents[2] / 'pis' / 'config.yaml'
 
-FAKE_REVISIONS = {
-    'stop_reasons_model_revision': 'aaaa1111',
-    'biobert_chemical_ner_revision': 'bbbb2222',
-    'drugtemist_ner_revision': 'cccc3333',
-    'biobert_diseases_ner_revision': 'dddd4444',
+FAKE_TAGS = {
+    'stop_reasons_tag': 'aaaa1111-p11111111',
+    'drug_entities_tag': 'bbbb2222+cccc3333-p22222222',
+    'disease_entities_tag': 'dddd4444-p33333333',
 }
 
 
@@ -85,15 +84,15 @@ def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> Non
     assert config.machine_type_for('pis_clinical_mining') == config.machine_type
 
 
-def test_release_copy_paths_use_the_staging_tags() -> None:
-    """The snapshot paths the release copies end with the tags staging writes.
+def test_release_copy_paths_use_the_pinned_tags() -> None:
+    """The snapshot paths the release copies end with the tags pinned in the pis scratchpad.
 
-    orchestration does not depend on pts, so the tag formats are the literal ones of ``StagedOutput.tag``.
+    orchestration does not depend on pts; pts tests that the pins equal the tags staging writes.
     """
-    text = _release_step_text({'aact_version': 'A', 'clinical_mining_version': 'M', **FAKE_REVISIONS})
-    stop = FAKE_REVISIONS['stop_reasons_model_revision']
-    drug = f'{FAKE_REVISIONS["biobert_chemical_ner_revision"]}+{FAKE_REVISIONS["drugtemist_ner_revision"]}'
-    disease = FAKE_REVISIONS['biobert_diseases_ner_revision']
+    text = _release_step_text({'aact_version': 'A', 'clinical_mining_version': 'M', **FAKE_TAGS})
+    stop = FAKE_TAGS['stop_reasons_tag']
+    drug = FAKE_TAGS['drug_entities_tag']
+    disease = FAKE_TAGS['disease_entities_tag']
     for base in (
         f'gs://clinical_staging/aact/A/stop_reasons/{stop}',
         f'gs://clinical_staging/aact/A/drug_entities/{drug}',
