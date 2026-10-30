@@ -3,8 +3,9 @@
 Each chromosome is run through fastVEP in a pool of processes, the largest first, each fastVEP
 with a few threads; its records are split by row into chunks. Alongside, a second pool prepares
 what every chunk of a chromosome shares: its transcript fields, LOFTEE models, ancestor contig,
-colocated variants, supplementary annotations and GPN-Star scores. Once a chromosome's records and
-preparations are ready, the same pool annotates its chunks, each into one part of the index.
+colocated variants, supplementary annotations and GPN-Star scores, written in position order.
+Once a chromosome's records and preparations are ready, a third pool annotates its chunks, each
+into one part of the index, reading only the prepared rows in the chunk's position range.
 Workers read their inputs from paths and write into the scratch directory.
 """
 
@@ -14,7 +15,7 @@ import multiprocessing
 import os
 import pickle
 import shutil
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -40,7 +41,7 @@ from pts.transformers.variant.index import (
 )
 from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.records import iter_records, records_from_fastvep, unannotated_records
+from pts.transformers.variant.records import CHUNK_BYTES, iter_records, records_from_fastvep, unannotated_records
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
 from pts.transformers.variant.vep import parse_vep
@@ -74,6 +75,8 @@ class Shared:
     """Rows of each chunk of a chromosome."""
     batch_size: int = 5_000
     """Variants per batch when merging the annotations into a chunk."""
+    row_group_rows: int = 10_000
+    """Rows of each row group of the prepared frames, the unit a chunk's position range reads."""
     variant_annotations: tuple[dict[str, list[str]], ...] = ()
     """The Parquet parts of each supplementary variant annotation source, by chromosome."""
     amino_acid_annotations: tuple[str, ...] = ()
@@ -120,12 +123,32 @@ def _prepared(shared: Shared, chromosome: str) -> Path:
     return shared.directory / chromosome / 'prepared'
 
 
-def _write(frame: pl.DataFrame, path: Path) -> Path:
+def _write(frame: pl.DataFrame, path: Path, row_group_rows: int | None = None) -> Path:
     """Write Parquet through a partial file, so that a file at `path` is complete."""
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f'{path.name}.partial')
-    frame.write_parquet(partial, compression='zstd')
+    frame.write_parquet(partial, compression='zstd', row_group_size=row_group_rows)
     return partial.rename(path)
+
+
+def _by_position(frame: pl.DataFrame, path: Path, shared: Shared) -> Path:
+    """Write a prepared frame sorted by `position`, in row groups whose statistics a position range can skip."""
+    return _write(frame.sort('position', maintain_order=True), path, shared.row_group_rows)
+
+
+def in_range(path: Path, positions: pl.Series) -> pl.LazyFrame:
+    """The rows of a Parquet file with `position` between the least and the greatest of `positions`."""
+    return pl.scan_parquet(path).filter(pl.col('position').is_between(positions.min(), positions.max()))
+
+
+def _submit(pool: ProcessPoolExecutor, threads: int, function: Callable[..., object], *args: object) -> Future:
+    """Submit to a spawn pool whose processes run polars with `threads` threads.
+
+    A pool starts its processes as work is submitted, and a spawned process reads
+    `POLARS_MAX_THREADS` from the environment it starts with.
+    """
+    with _environment('POLARS_MAX_THREADS', str(threads)):
+        return pool.submit(function, *args)
 
 
 def annotate(
@@ -144,15 +167,17 @@ def annotate(
     return frame
 
 
-def _split_records(output: Path, rows: int, shared: Shared, chromosome: str) -> None:
+def split_records(output: Path, rows: int, shared: Shared, chromosome: str, chunk_bytes: int = CHUNK_BYTES) -> None:
     """Write the records of a fastVEP output by chunk, each under the chunk of the row it echoes as `id`.
+
+    The JSON is read in slices of about `chunk_bytes`.
 
     Raises:
         ValueError: if the record ids are not the row ordinals 0..rows - 1.
     """
     seen = np.zeros(rows, dtype=bool)
     count = 0
-    for number, frame in enumerate(iter_records(output)):
+    for number, frame in enumerate(iter_records(output, chunk_bytes)):
         ids = frame['row'].to_numpy()
         count += ids.size
         if ids.size and (ids.min() < 0 or ids.max() >= rows or seen[ids].any() or np.unique(ids).size < ids.size):
@@ -198,7 +223,7 @@ def run_chromosome(chromosome: str, rows: Path, shared: Shared) -> tuple[int, bo
     )
     vcf.unlink()
     try:
-        _split_records(output, frame.height, shared, chromosome)
+        split_records(output, frame.height, shared, chromosome)
     finally:
         output.unlink()
     return chunks, True
@@ -208,7 +233,8 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
     """Write what every chunk of the chromosome reads, once, into its `prepared` directory.
 
     That is its transcript fields, LOFTEE models and ancestor contig, its rows' colocated
-    variants, and the supplementary annotations and GPN-Star scores at its rows' loci.
+    variants, and the supplementary annotations and GPN-Star scores at its rows' loci; the last
+    three sorted by position.
 
     Args:
         chromosome: The chromosome of the rows.
@@ -223,7 +249,7 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
     (directory / 'loftee.pickle').write_bytes(pickle.dumps(loftee_models(shared.core, chromosome)))
     (directory / 'ancestor.bin').write_bytes(_sequence(shared.ancestor, chromosome))
     if all_vars is not None:
-        _write(colocated_variants(all_vars, frame), directory / 'colocated.parquet')
+        _by_position(colocated_variants(all_vars, frame), directory / 'colocated.parquet', shared)
     loci = frame.select('chromosome', 'position').unique().lazy()
     for number, located in enumerate(shared.variant_annotations):
         annotations = (
@@ -233,10 +259,10 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
             if chromosome in located
             else pl.DataFrame(schema=variant_schema)
         )
-        _write(annotations, directory / f'annotations-{number:03d}.parquet')
+        _by_position(annotations, directory / f'annotations-{number:03d}.parquet', shared)
     if chromosome in shared.gpn_star and shared.gpn_star_cutoffs is not None:
         scores = read_gpn_star(shared.gpn_star[chromosome], frame['position'].unique(), shared.gpn_star_cutoffs)
-        _write(scores, directory / 'gpn_star.parquet')
+        _by_position(scores, directory / 'gpn_star.parquet', shared)
     logger.info('Prepared chromosome {}', chromosome)
 
 
@@ -268,15 +294,14 @@ def _merged(index: pl.DataFrame, shared: Shared, chromosome: str) -> pl.DataFram
     directory = _prepared(shared, chromosome)
     loci = index.select('chromosome', 'position').unique()
     variant_annotations = [
-        pl
-        .scan_parquet(directory / f'annotations-{number:03d}.parquet')
+        in_range(directory / f'annotations-{number:03d}.parquet', loci['position'])
         .join(loci.lazy(), on=['chromosome', 'position'], how='semi')
         .collect()
         for number in range(len(shared.variant_annotations))
     ]
     scores = directory / 'gpn_star.parquet'
     gpn_star = (
-        pl.scan_parquet(scores).filter(pl.col('position').is_in(loci['position'].implode())).collect()
+        in_range(scores, loci['position']).filter(pl.col('position').is_in(loci['position'].implode())).collect()
         if scores.exists()
         else None
     )
@@ -332,7 +357,7 @@ def annotate_chunk(
         records = unannotated_records(frame, chromosome).collect()
     located = directory / 'colocated.parquet'
     colocated = (
-        pl.scan_parquet(located).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
+        in_range(located, frame['position']).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
         if located.exists()
         else None
     )
@@ -351,22 +376,35 @@ def annotate_chunk(
     return _write(_merged(index, shared, chromosome), part)
 
 
+@dataclass(frozen=True)
+class Pools:
+    """The processes of each pool, and the polars threads of each process."""
+
+    fastvep: int
+    """Chromosomes run through fastVEP at a time."""
+    preparations: int
+    """Chromosomes prepared at a time."""
+    chunks: int
+    """Chunks annotated at a time."""
+    chromosome_threads: int
+    """Polars threads of each fastVEP and preparation process."""
+    chunk_threads: int
+    """Polars threads of each chunk process."""
+
+
 def annotate_chromosomes(
     rows: dict[str, Path],
     sizes: dict[str, int],
     all_vars: dict[str, Path],
     alphamissense: dict[str, str],
     shared: Shared,
-    processes: int,
-    chunk_processes: int,
-    chunk_threads: int,
+    pools: Pools,
 ) -> list[Path]:
     """The annotated index of every chromosome, in chunks, written under `shared.directory / 'parts'`.
 
-    fastVEP runs on `processes` chromosomes at a time, the most rows first. Preparations, then
-    chunks, run `chunk_processes` at a time, a chromosome's chunks once its records and its
-    preparations are ready. Every process runs polars with `chunk_threads` threads. Part
-    `part-<c>-<k>.parquet` holds chunk k of the c-th chromosome in name order.
+    fastVEP and the preparations each run in their own pool, the chromosomes with the most rows
+    first. A chromosome's chunks go to the third pool once its records and its preparation are
+    ready. Part `part-<c>-<k>.parquet` holds chunk k of the c-th chromosome in name order.
 
     Returns:
         The paths of the parts, in name order.
@@ -379,18 +417,25 @@ def annotate_chromosomes(
     context = multiprocessing.get_context('spawn')
     parts: list[Path] = []
     with (
-        _environment('POLARS_MAX_THREADS', str(chunk_threads)),
-        ProcessPoolExecutor(processes, mp_context=context) as fastvep_pool,
-        ProcessPoolExecutor(chunk_processes, mp_context=context) as pool,
+        ProcessPoolExecutor(pools.fastvep, mp_context=context) as fastvep_pool,
+        ProcessPoolExecutor(pools.preparations, mp_context=context) as preparation_pool,
+        ProcessPoolExecutor(pools.chunks, mp_context=context) as chunk_pool,
     ):
         units: dict[Future, tuple[str, str]] = {}
         for chromosome in order:
-            units[pool.submit(prepare_chromosome, chromosome, rows[chromosome], all_vars.get(chromosome), shared)] = (
-                'prepare',
-                chromosome,
-            )
+            run = _submit(fastvep_pool, pools.chromosome_threads, run_chromosome, chromosome, rows[chromosome], shared)
+            units[run] = ('fastvep', chromosome)
         for chromosome in order:
-            units[fastvep_pool.submit(run_chromosome, chromosome, rows[chromosome], shared)] = ('fastvep', chromosome)
+            prepare = _submit(
+                preparation_pool,
+                pools.chromosome_threads,
+                prepare_chromosome,
+                chromosome,
+                rows[chromosome],
+                all_vars.get(chromosome),
+                shared,
+            )
+            units[prepare] = ('prepare', chromosome)
         chunks: dict[str, tuple[int, bool]] = {}
         prepared: set[str] = set()
         pending = set(units)
@@ -412,7 +457,9 @@ def annotate_chromosomes(
                     count, annotated = chunks[chromosome]
                     for chunk in range(count):
                         part = shared.directory / 'parts' / f'part-{numbers[chromosome]:05d}-{chunk:05d}.parquet'
-                        submitted = pool.submit(
+                        submitted = _submit(
+                            chunk_pool,
+                            pools.chunk_threads,
                             annotate_chunk,
                             chromosome,
                             chunk,
@@ -426,8 +473,8 @@ def annotate_chromosomes(
                         pending.add(submitted)
                     logger.info('Annotating chromosome {} in {} chunks', chromosome, count)
         except BaseException:
-            fastvep_pool.shutdown(cancel_futures=True)
-            pool.shutdown(cancel_futures=True)
+            for pool in (fastvep_pool, preparation_pool, chunk_pool):
+                pool.shutdown(cancel_futures=True)
             raise
     logger.info('Annotated {} chromosomes in {} parts', len(rows), len(parts))
     return sorted(parts)

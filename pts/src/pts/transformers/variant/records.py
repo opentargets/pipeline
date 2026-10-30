@@ -64,14 +64,6 @@ def iter_records(path: Path, chunk_bytes: int = CHUNK_BYTES) -> Iterator[pl.Data
             start = end
 
 
-def read_records(path: Path, chunk_bytes: int = CHUNK_BYTES) -> pl.DataFrame:
-    """The fastVEP JSON array in one frame; see `iter_records`."""
-    empty = pl.DataFrame(schema=FASTVEP_SCHEMA).select(
-        pl.col('id').cast(pl.Int64).alias('row'), 'most_severe_consequence', 'transcript_consequences'
-    )
-    return pl.concat([empty, *iter_records(path, chunk_bytes)])
-
-
 def _hgvsg(rows: pl.DataFrame, sequence: bytes, chromosome: str) -> pl.Series:
     """`hgvs_genomic` of each row; null for alleles other than bases or beyond the sequence."""
     ref, alt = pl.col('referenceAllele'), pl.col('alternateAllele')
@@ -225,26 +217,10 @@ def _transcript() -> pl.Expr:
     ])
 
 
-def fastvep_records(
-    output: Path, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
-) -> pl.LazyFrame:
-    """The fastVEP output of one chromosome as the VEP records `parse_vep` reads; see `records_from_fastvep`.
-
-    Raises:
-        ValueError: if the record ids are not the row ordinals of `rows`.
-    """
-    records = read_records(output)
-    if records.height != rows.height:
-        raise ValueError(f'{output}: {records.height} fastVEP records for {rows.height} rows')
-    if records['row'].sort().to_list() != list(range(rows.height)):
-        raise ValueError(f'{output}: fastVEP record ids are not the ordinals 0..{rows.height - 1} of the rows')
-    return records_from_fastvep(records, rows, transcripts, sequence, chromosome)
-
-
 def records_from_fastvep(
     records: pl.DataFrame, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
 ) -> pl.LazyFrame:
-    """The records `read_records` reads for rows of one chromosome, as the VEP records `parse_vep` reads.
+    """The records `iter_records` reads for rows of one chromosome, as the VEP records `parse_vep` reads.
 
     Records join `rows` on the ordinal fastVEP echoes as their `id`, the row's ordinal in `rows`.
     `input` is rebuilt from the original row and `hgvsg` from the reference. Transcript fields

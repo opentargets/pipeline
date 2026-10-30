@@ -11,11 +11,30 @@ from polars.testing import assert_frame_equal
 
 from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import read_chromosome
-from pts.transformers.variant.records import fastvep_records, read_records, unannotated_records
+from pts.transformers.variant.records import (
+    FASTVEP_SCHEMA,
+    iter_records,
+    records_from_fastvep,
+    unannotated_records,
+)
 from pts.transformers.variant.vep import parse_vep
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
 SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'
+
+
+def read_records(path: Path, chunk_bytes: int = 1 << 20) -> pl.DataFrame:
+    """Every record of a fastVEP JSON array in one frame."""
+    empty = pl.DataFrame(schema=FASTVEP_SCHEMA).select(
+        pl.col('id').cast(pl.Int64).alias('row'), 'most_severe_consequence', 'transcript_consequences'
+    )
+    return pl.concat([empty, *iter_records(path, chunk_bytes)])
+
+
+def fastvep_records(
+    path: Path, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
+) -> pl.LazyFrame:
+    return records_from_fastvep(read_records(path), rows, transcripts, sequence, chromosome)
 
 
 @pytest.fixture(scope='module')
@@ -193,18 +212,6 @@ def test_unusable_alleles_have_no_hgvsg(tmp_path: Path) -> None:
     for frame, sequence in ((dots, b'NNNNANNNNN'), (ONE_ROW, b'')):
         found = fastvep_records(path, frame, NO_TRANSCRIPTS, sequence, '22').collect()
         assert found['intergenic_consequences'].to_list() == [[{'hgvsg': None}]]
-
-
-def test_records_must_match_rows(tmp_path: Path) -> None:
-    path = fastvep_json(tmp_path / 'one.json', [synthetic([['intron_variant']], 'intron_variant')])
-    with pytest.raises(ValueError, match='1 fastVEP records for 2 rows'):
-        fastvep_records(path, pl.concat([ONE_ROW, ONE_ROW]), NO_TRANSCRIPTS, b'', '22')
-
-
-def test_ids_must_be_the_row_ordinals(tmp_path: Path) -> None:
-    path = fastvep_json(tmp_path / 'one.json', [{**synthetic([['intron_variant']], 'intron_variant'), 'id': '1'}])
-    with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.0 '):
-        fastvep_records(path, ONE_ROW, NO_TRANSCRIPTS, b'', '22')
 
 
 def test_canonical_from_the_core(tmp_path: Path) -> None:

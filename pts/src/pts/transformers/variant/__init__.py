@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
 from pts.transformers.variant.alleles import contig_spans
 from pts.transformers.variant.alphamissense import partition_alphamissense
-from pts.transformers.variant.chromosome import Shared, annotate_chromosomes
+from pts.transformers.variant.chromosome import Pools, Shared, annotate_chromosomes
 from pts.transformers.variant.colocated import extract_all_vars
 from pts.transformers.variant.fastvep import build_cache, prepare_gff3
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, gpn_star_files
@@ -91,12 +91,16 @@ class VariantSettings(BaseModel):
     """Threads of each fastVEP run."""
     parallel_chromosomes: int = Field(default=4, gt=0)
     """Chromosomes run through fastVEP at the same time."""
+    parallel_preparations: int = Field(default=4, gt=0)
+    """Chromosomes whose shared chunk inputs are prepared at the same time."""
+    chromosome_threads: int = Field(default=8, gt=0)
+    """Polars threads of each fastVEP and preparation process."""
     chunk_rows: int = Field(default=50_000, gt=0)
     """Rows of each chunk a chromosome is annotated in after fastVEP."""
     parallel_chunks: int = Field(default=16, gt=0)
-    """Chromosome preparations and chunks annotated at the same time."""
+    """Chunks annotated at the same time."""
     chunk_threads: int = Field(default=2, gt=0)
-    """Polars threads of each process."""
+    """Polars threads of each chunk process."""
     batch_size: int = Field(default=5_000, gt=0)
     """Variants per batch when merging the annotations into a chunk."""
     gpn_star: GpnStarCutoffs | None = None
@@ -207,9 +211,13 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
         extracted,
         partitions,
         shared,
-        options.parallel_chromosomes,
-        options.parallel_chunks,
-        options.chunk_threads,
+        Pools(
+            fastvep=options.parallel_chromosomes,
+            preparations=options.parallel_preparations,
+            chunks=options.parallel_chunks,
+            chromosome_threads=options.chromosome_threads,
+            chunk_threads=options.chunk_threads,
+        ),
     )
 
 

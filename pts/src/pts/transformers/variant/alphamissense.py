@@ -8,6 +8,7 @@ from pathlib import Path
 import polars as pl
 
 KEY = ['position', 'referenceAllele', 'alternateAllele', 'transcript_id']
+ROW_GROUP_ROWS = 50_000
 SCHEMA = pl.Schema({
     'chromosome': pl.String,
     'position': pl.Int64,
@@ -34,10 +35,13 @@ def _scan(path: str) -> pl.LazyFrame:
     return pl.scan_csv(path, separator='\t', comment_prefix='#', has_header=False, schema=SCHEMA)
 
 
-def partition_alphamissense(path: str, directory: Path, chromosomes: Iterable[str]) -> dict[str, str]:
+def partition_alphamissense(
+    path: str, directory: Path, chromosomes: Iterable[str], row_group_rows: int = ROW_GROUP_ROWS
+) -> dict[str, str]:
     """The AlphaMissense rows of each chromosome, read in one pass, as `directory/<chromosome>.parquet`.
 
-    Every chromosome gets a file, without rows when the source has none for it.
+    Every chromosome gets a file, without rows when the source has none for it, sorted by
+    position in row groups of `row_group_rows`, so that a position range reads only its own.
 
     Returns:
         Chromosome to the path of its file, which `alphamissense` reads in place of the source.
@@ -53,15 +57,21 @@ def partition_alphamissense(path: str, directory: Path, chromosomes: Iterable[st
     parts = {}
     for chromosome, name in names.items():
         parts[chromosome] = str(directory / f'{chromosome}.parquet')
-        frame.filter(pl.col('chromosome') == name).write_parquet(parts[chromosome])
+        frame.filter(pl.col('chromosome') == name).sort('position', maintain_order=True).write_parquet(
+            parts[chromosome], row_group_size=row_group_rows
+        )
     return parts
 
 
-def _predictions(path: str, chromosome: str) -> pl.DataFrame:
-    """The AlphaMissense rows of one chromosome, with the transcript id stripped of its version."""
+def _predictions(path: str, chromosome: str, positions: pl.Series) -> pl.DataFrame:
+    """The AlphaMissense rows of one chromosome between the least and greatest of `positions`.
+
+    The transcript id is stripped of its version.
+    """
     return (
         _scan(path)
         .filter(pl.col('chromosome') == _contig(chromosome))
+        .filter(pl.col('position').is_between(positions.min(), positions.max()))
         .with_columns(pl.col('transcript_id').str.replace(r'\.\d+$', ''))
         .unique(KEY, keep='first', maintain_order=True)
         .select(*KEY, 'am_class', 'am_pathogenicity')
@@ -86,4 +96,4 @@ def alphamissense(path: str, chromosome: str, rows: pl.DataFrame) -> pl.DataFram
         `rows` in the same order with `am_class` and `am_pathogenicity`, null where the file has
         no prediction, including when it has no row for the chromosome.
     """
-    return rows.join(_predictions(path, chromosome), on=KEY, how='left', maintain_order='left')
+    return rows.join(_predictions(path, chromosome, rows['position']), on=KEY, how='left', maintain_order='left')
