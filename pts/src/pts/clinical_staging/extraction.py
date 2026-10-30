@@ -8,7 +8,6 @@ digest of the response schema, and the output the JSON of the validated model.
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +22,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
-from pts.record_store import ComputeAborted, run_exists, text_sha256, write_run
+from pts.record_store import ComputeAborted, read_parquet, run_exists, text_sha256, write_run
 from pts.tasks.llm_extract import import_class
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
@@ -275,8 +274,7 @@ def import_extraction_cache(
 
     pointer, _ = StorageHandle(f'{cache_uri}/latest.json', config=config).read_text()
     snapshot = json.loads(pointer)['snapshot']
-    data, _ = StorageHandle(f'{cache_uri}/snapshots/{snapshot}/rows.parquet', config=config).read()
-    rows = pl.read_parquet(io.BytesIO(data))
+    rows = read_parquet(f'{cache_uri}/snapshots/{snapshot}/rows.parquet', config)
     if 'prompt_sha256' not in rows.columns:
         rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
 

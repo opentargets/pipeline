@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import io
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from loguru import logger
-from otter.storage.synchronous.handle import StorageHandle
 
 from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, STOP_REASONS
-from pts.record_store import RECORD_SCHEMA, run_exists, text_sha256, write_run
+from pts.record_store import RECORD_SCHEMA, read_parquet, run_exists, text_sha256, write_run
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import drug_entities_with_status
@@ -43,10 +41,8 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
         logger.info(f'{SEED_RUN_ID} already imported into {drug_store}')
         return 0
 
-    data, _ = StorageHandle(ner_cache_uri, config=config).read()
     cache = (
-        pl
-        .read_parquet(io.BytesIO(data))
+        read_parquet(ner_cache_uri, config)
         .select('query_label', 'extracted_drugs')
         .drop_nulls('query_label')
         .unique(subset='query_label', keep='first', maintain_order=True)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from otter.util.errors import NotFoundError
 
 from pts import record_store
 from pts.record_store import (
@@ -16,6 +17,7 @@ from pts.record_store import (
     SnapshotConflictError,
     map_texts,
     publish_snapshot,
+    read_parquet,
     read_records,
     run_exists,
     text_sha256,
@@ -222,6 +224,15 @@ def test_run_exists_once_its_manifest_is_written(store_uri):
     Path(store_uri, 'runs', 'run1', 'manifest.json').unlink()
     assert Path(store_uri, 'runs', 'run1').is_dir()
     assert not run_exists(store_uri, 'run1', None)
+
+
+def test_read_parquet_reads_a_file_through_storage(tmp_path):
+    frame = pl.DataFrame({'a': [1, 2], 'b': ['x', None]})
+    frame.write_parquet(tmp_path / 'one.parquet')
+
+    assert read_parquet(str(tmp_path / 'one.parquet'), None).equals(frame)
+    with pytest.raises(NotFoundError):
+        read_parquet(str(tmp_path / 'missing.parquet'), None)
 
 
 def test_newest_ok_wins_over_older_ok(store_uri):

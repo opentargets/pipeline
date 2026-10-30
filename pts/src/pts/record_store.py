@@ -97,7 +97,7 @@ def text_sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-def _read_parquet(uri: str, config: Config) -> pl.DataFrame:
+def read_parquet(uri: str, config: Config) -> pl.DataFrame:
     """Read a parquet file through otter storage, so it works on GCS and locally alike."""
     data, _ = StorageHandle(uri, config=config).read()
     return pl.read_parquet(io.BytesIO(data))
@@ -145,7 +145,7 @@ def read_records(store_uri: str, config: Config, output_dtype: pl.DataType = LIS
         manifests = []
 
     schema = record_schema(output_dtype)
-    frames = [_read_parquet(m.removesuffix('manifest.json') + 'records.parquet', config) for m in manifests]
+    frames = [read_parquet(m.removesuffix('manifest.json') + 'records.parquet', config) for m in manifests]
     if not frames:
         return pl.DataFrame(schema=schema)
     return pl.concat(frames).select(schema.names()).cast(schema)
@@ -440,7 +440,7 @@ def publish_snapshot(df: pl.DataFrame, uri: str, metadata: dict[str, Any], confi
         msg = f'snapshot {uri} exists with different metadata'
         raise SnapshotConflictError(msg)
 
-    published = _read_parquet(f'{uri}/data.parquet', config)
+    published = read_parquet(f'{uri}/data.parquet', config)
     if published.columns != df.columns or not published.sort(published.columns).equals(df.sort(df.columns)):
         msg = f'snapshot {uri} exists with different data'
         raise SnapshotConflictError(msg)
