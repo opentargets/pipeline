@@ -1,0 +1,233 @@
+"""The kinds of model output that staging computes and the release reads.
+
+Each kind names the Hugging Face models it runs, the parameters of the code around
+them, and the columns of its snapshot. Its tag identifies one output revision::
+
+    <hub revision>+<hub revision>-p<digest>
+
+The hub revisions come in the kind's model order; the digest is the first 8 hex of
+the sha256 of the parameters and ``logic_version``. The tag is both the record
+store's ``model_revision`` and the directory a snapshot is published under.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+import polars as pl
+from otter.storage.synchronous.handle import StorageHandle
+
+from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot, tracked
+from pts.transformers.clinical.ner import (
+    BIOBERT_LABELS,
+    CHEMICAL_MODEL,
+    DISEASE_LABELS,
+    DISEASE_MODEL,
+    DISEASE_NER_MODEL,
+    DRUG_NAME_PATTERNS,
+    DRUG_NER_MODEL,
+    DRUGTEMIST_LABELS,
+    DRUGTEMIST_MODEL,
+)
+from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
+from pts.transformers.utils.dataset import scan_dataset
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from otter.config.model import Config
+
+METADATA_KEYS = ('kind', 'model', 'tag', 'model_revisions')
+"""The keys every snapshot's metadata holds."""
+
+MAX_EXAMPLES = 5
+"""Keys quoted in the error raised for conflicting snapshots."""
+
+
+@dataclass
+class StagedResult:
+    """What one staging of a kind produced.
+
+    ``frame`` has the snapshot columns; ``computed`` says whether any text was sent to
+    the model, ``published`` whether a new snapshot was written.
+    """
+
+    frame: pl.DataFrame
+    computed: bool
+    published: bool
+    tag: str
+
+
+@dataclass(frozen=True)
+class StagedOutput:
+    """One kind of staged model output.
+
+    ``name`` is also the record store's name and the destination key. ``columns``
+    maps a record column to its snapshot column; ``key`` is the snapshot column
+    that identifies a row.
+    """
+
+    name: str
+    model: str
+    hub_models: tuple[str, ...]
+    params: dict[str, Any]
+    logic_version: int
+    columns: dict[str, str]
+    key: str
+
+    @property
+    def digest(self) -> str:
+        """The first 8 hex of the sha256 of ``params`` and ``logic_version``."""
+        document = json.dumps({'logic_version': self.logic_version, 'params': self.params}, sort_keys=True)
+        return hashlib.sha256(document.encode('utf-8')).hexdigest()[:8]
+
+    def require(self, revisions: dict[str, str]) -> None:
+        """Check that ``revisions`` names every hub model of this kind.
+
+        Raises:
+            ValueError: listing the missing models.
+        """
+        missing = [m for m in self.hub_models if m not in revisions]
+        if missing:
+            raise ValueError(f'{self.name} needs models that are not staged: {missing}')
+
+    def tag(self, revisions: dict[str, str]) -> str:
+        """The output revision of this kind at the hub ``revisions``."""
+        self.require(revisions)
+        return '+'.join(revisions[m] for m in self.hub_models) + f'-p{self.digest}'
+
+    def stage(
+        self,
+        texts: pl.Series,
+        compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+        revisions: dict[str, str],
+        store_root: str,
+        destination: str,
+        run_id: str,
+        config: Config,
+        max_attempts: int,
+    ) -> StagedResult:
+        """Map ``texts`` through the store ``{store_root}/{name}`` and publish the snapshot ``{destination}/{tag}``.
+
+        Args:
+            texts: The texts to map.
+            compute: Maps a list of texts to one ``(output, None)`` or ``(None, error)`` per text.
+            revisions: The hub revision of each staged model.
+            store_root: Directory holding one record store per kind.
+            destination: Directory holding one snapshot per tag.
+            run_id: Identifies the store run, if anything is computed.
+            config: The otter config, used to resolve storage.
+            max_attempts: Failed records after which a text is no longer retried.
+
+        Returns:
+            StagedResult: The snapshot contents, its tag, and whether anything was computed or published.
+        """
+        tag = self.tag(revisions)
+        calls: list[int] = []
+        records = map_texts(
+            texts,
+            tracked(compute, calls),
+            f'{store_root}/{self.name}',
+            self.model,
+            tag,
+            run_id,
+            config,
+            max_attempts,
+        )
+        frame = records.select(pl.col(record).alias(column) for record, column in self.columns.items())
+        metadata = {
+            'kind': self.name,
+            'model': self.model,
+            'tag': tag,
+            'model_revisions': {m: revisions[m] for m in self.hub_models},
+        }
+        published = publish_snapshot(frame, f'{destination}/{tag}', metadata, config)
+        return StagedResult(frame=frame, computed=bool(calls), published=published, tag=tag)
+
+    def read(self, snapshots: dict[str, str]) -> pl.DataFrame:
+        """The snapshot columns of ``snapshots``, merged into one row per ``key``.
+
+        A single snapshot is returned as staged. Two or more are concatenated, their list
+        outputs sorted, and identical rows dropped.
+
+        Args:
+            snapshots: Each snapshot directory, keyed by its source name.
+
+        Returns:
+            The snapshot columns.
+
+        Raises:
+            ValueError: if a snapshot's metadata lacks a key, is of another kind or was staged
+                by code with other parameters, if the snapshots have different tags, or if a
+                key has different results in two snapshots.
+        """
+        tags = {}
+        for source, uri in sorted(snapshots.items()):
+            metadata = json.loads(StorageHandle(f'{uri}/metadata.json').read_text()[0])
+            missing = [key for key in METADATA_KEYS if key not in metadata]
+            if missing:
+                raise ValueError(f'snapshot {source} metadata lacks {missing}')
+            if metadata['kind'] != self.name:
+                raise ValueError(f'snapshot {source} is of kind {metadata["kind"]!r}, not {self.name!r}')
+            digest = metadata['tag'].rpartition('-p')[2]
+            if digest != self.digest:
+                raise ValueError(
+                    f'snapshot {source} was staged with parameter digest {digest!r}, this code has {self.digest!r}'
+                )
+            tags[source] = metadata['tag']
+        if len(set(tags.values())) > 1:
+            raise ValueError(f'{self.name} snapshots have different tags: {tags}')
+
+        names = list(self.columns.values())
+        frames = [scan_dataset(snapshots[source]).select(names).collect() for source in sorted(snapshots)]
+        if len(frames) == 1:
+            return frames[0]
+
+        output = self.columns['output']
+        schema = pl.Schema({name: LIST_OUTPUT if name == output else pl.String for name in names})
+        merged = pl.concat([frame.cast(schema) for frame in frames]).with_columns(pl.col(output).list.sort()).unique()
+        conflicts = merged.filter(pl.col(self.key).is_duplicated())[self.key].unique().sort()
+        if conflicts.len() > 0:
+            raise ValueError(
+                f'{conflicts.len()} {self.name} keys staged with different results, '
+                f'e.g. {conflicts.head(MAX_EXAMPLES).to_list()}'
+            )
+        return merged.sort(self.key)
+
+
+STOP_REASONS = StagedOutput(
+    name='stop_reasons',
+    model=STOP_REASONS_MODEL,
+    hub_models=(STOP_REASONS_MODEL,),
+    params={'threshold': STOP_REASONS_THRESHOLD},
+    logic_version=1,
+    columns={'text': 'text', 'text_sha256': 'text_sha256', 'output': 'categories'},
+    key='text',
+)
+
+DRUG_ENTITIES = StagedOutput(
+    name='drug_entities',
+    model=DRUG_NER_MODEL,
+    hub_models=(CHEMICAL_MODEL, DRUGTEMIST_MODEL),
+    params={
+        'patterns': DRUG_NAME_PATTERNS,
+        'biobert_labels': BIOBERT_LABELS,
+        'drugtemist_labels': DRUGTEMIST_LABELS,
+    },
+    logic_version=1,
+    columns={'text': 'label', 'output': 'extracted_drugs'},
+    key='label',
+)
+
+DISEASE_ENTITIES = StagedOutput(
+    name='disease_entities',
+    model=DISEASE_NER_MODEL,
+    hub_models=(DISEASE_MODEL,),
+    params={'labels': DISEASE_LABELS, 'min_length': 2, 'drop_digits': True},
+    logic_version=1,
+    columns={'text': 'text', 'output': 'extracted_diseases'},
+    key='text',
+)
