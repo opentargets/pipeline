@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 import zlib
 from collections.abc import Iterator
+from importlib.metadata import requires
 from pathlib import Path
 
 import polars as pl
@@ -267,6 +269,11 @@ def test_utr_splice(ancestor: str, gerp: KentBigWig):
 
 def test_anc_allele(ancestor: str, gerp: KentBigWig):
     assert calls(ancestor, gerp, consequence('TP', ['stop_gained'], 160, 'A', 'T')) == [('LC', 'ANC_ALLELE')]
+
+
+def test_bgzip_ancestor_reader_is_a_direct_dependency():
+    """pyfaidx reads the bgzip ancestor with `Bio.bgzf`, so pts depends on biopython itself."""
+    assert any(re.match(r'biopython\b', requirement) for requirement in requires('pts') or [])
 
 
 def test_filters_in_plugin_order(ancestor: str, gerp: KentBigWig):
