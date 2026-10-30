@@ -199,3 +199,21 @@ def test_records_must_match_rows(tmp_path: Path) -> None:
     path = fastvep_json(tmp_path / 'one.json', [synthetic([['intron_variant']], 'intron_variant')])
     with pytest.raises(ValueError, match='1 fastVEP records for 2 rows'):
         fastvep_records(path, pl.concat([ONE_ROW, ONE_ROW]), NO_TRANSCRIPTS, b'', '22')
+
+
+def test_ids_must_be_the_row_ordinals(tmp_path: Path) -> None:
+    path = fastvep_json(tmp_path / 'one.json', [{**synthetic([['intron_variant']], 'intron_variant'), 'id': '1'}])
+    with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.0 '):
+        fastvep_records(path, ONE_ROW, NO_TRANSCRIPTS, b'', '22')
+
+
+def test_canonical_from_the_core(tmp_path: Path) -> None:
+    item = synthetic([['intron_variant'], ['intron_variant']], 'intron_variant')
+    item['transcript_consequences'][0]['canonical'] = None
+    path = fastvep_json(tmp_path / 'canonical.json', [item])
+    core = pl.concat(
+        [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [1, 0]})], how='diagonal'
+    )
+    found = fastvep_records(path, ONE_ROW, core, b'NNNNANNNNN', '22').collect()
+    kept = found['transcript_consequences'][0]
+    assert [(tc['transcript_id'], tc['canonical']) for tc in kept] == [('ENST00', 1)]

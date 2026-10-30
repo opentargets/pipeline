@@ -228,15 +228,17 @@ def fastvep_records(
     (`transcript_fields`), with APPRIS written as VEP does (`P1`, `A2`). VEP's
     `transcript_ablation` and `mature_miRNA_variant` are applied, and the most severe
     consequence is ranked over every transcript fastVEP reported, by VEP's ranks. Only
-    canonical transcripts are kept. A row without a transcript gets `intergenic_consequences`.
+    transcripts canonical in `transcripts` are kept. A row without a transcript gets `intergenic_consequences`.
     `colocated_variants` is empty; `conservation`, `alphamissense`, `lof` and `lof_filter` are null.
 
     Raises:
         ValueError: if the record ids are not the row ordinals of `rows`.
     """
     records = read_records(output)
-    if records['row'].sort().to_list() != list(range(rows.height)):
+    if records.height != rows.height:
         raise ValueError(f'{output}: {records.height} fastVEP records for {rows.height} rows')
+    if records['row'].sort().to_list() != list(range(rows.height)):
+        raise ValueError(f'{output}: fastVEP record ids are not the ordinals 0..{rows.height - 1} of the rows')
     variants = _variants(rows, sequence, chromosome)
     consequences = _consequences(records, variants, transcripts)
     rank = pl.col('consequence_terms').list.eval(
@@ -248,7 +250,7 @@ def fastvep_records(
     )
     canonical = (
         consequences
-        .filter(pl.col('canonical') == 1)
+        .filter(pl.col('core_canonical') == 1)
         .group_by('row', maintain_order=True)
         .agg(_transcript().alias('transcript_consequences'))
     )
