@@ -98,6 +98,12 @@ evidence_schema: dict[str, Any] = {
     'releaseVersion': pl.String,
     'statisticalMethod': pl.String,
     'targetRole': pl.String,
+    'validationReadouts': pl.List(pl.Struct([
+        pl.Field('hsaValue', pl.Float64),
+        pl.Field('isValidated', pl.Boolean),
+        pl.Field('readoutMethodName', pl.String),
+        pl.Field('screen', pl.String),
+    ])),
     'pmcIds': pl.List(pl.String),
     'publicationYear': pl.Int64,
     'textMiningSentences': pl.List(pl.Struct([

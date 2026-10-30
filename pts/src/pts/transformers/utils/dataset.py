@@ -34,6 +34,8 @@ from openpyxl.cell.cell import TYPE_ERROR, TYPE_NUMERIC
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
+from pts.schemas.dataset import DatasetModel, to_pandera
+
 #: Target size per written part. `pl.PartitionBy` sizes against the IN-MEMORY frame, not the
 #: compressed output, so the resulting file size depends on how well a dataset compresses.
 #: Calibrated against the worst compression ratio observed across the release rather than the
@@ -320,6 +322,7 @@ def write_dataset(
     frame: pl.LazyFrame | pl.DataFrame,
     path: str,
     *,
+    schema: type[DatasetModel] | None = None,
     approximate_bytes_per_file: int = _DEFAULT_TARGET_BYTES,
 ) -> None:
     """Write one dataset as a directory of size-capped zstd parquet parts.
@@ -346,13 +349,43 @@ def write_dataset(
     Args:
         frame: the data to write; a `DataFrame` is made lazy so there is one code path.
         path: destination directory, used as given -- never a parent or a derived path.
+        schema: an optional dataset model to validate `frame` against before writing (see
+            `validate_dataset`, which collects a lazy `frame`). Pass one only where the frame fits
+            in memory.
         approximate_bytes_per_file: target part size, measured against the IN-MEMORY frame. See
             `_DEFAULT_TARGET_BYTES` for the calibration and its limits.
 
     Raises:
         ValueError: if anything already exists at `path`, file or directory.
+        pandera.errors.SchemaErrors: if `schema` is given and `frame` violates it.
     """
+    if schema is not None:
+        # checked first, so an occupied destination fails before the frame is computed
+        check_destinations_absent([path])
+        frame = validate_dataset(frame, schema)
     sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
+
+
+def validate_dataset(frame: pl.LazyFrame | pl.DataFrame, schema: type[DatasetModel]) -> pl.DataFrame:
+    """Validate a dataset against the pandera schema derived from its model.
+
+    A lazy `frame` is COLLECTED: pandera's value-level checks (ranges, patterns, allowed values,
+    nested-field rules, registered checks) need materialised data, unlike the dtype and column
+    checks. All violations are collected before raising (`lazy=True`), rather than failing on the
+    first one found.
+
+    Args:
+        frame: the data to validate.
+        schema: the dataset model (`pts.schemas.dataset.DatasetModel`) to validate against.
+
+    Returns:
+        The validated, collected frame.
+
+    Raises:
+        pandera.errors.SchemaErrors: if `frame` violates `schema`.
+    """
+    df = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+    return to_pandera(schema).validate(df, lazy=True)
 
 
 def check_destinations_absent(paths: Iterable[str]) -> None:

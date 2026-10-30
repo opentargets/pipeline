@@ -5,16 +5,20 @@ from __future__ import annotations
 import datetime
 import gzip
 import json
+import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 import openpyxl
 import pandas as pd
+import pandera.errors as pe
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
+from pydantic import Field
 
+from pts.schemas.dataset import DatasetModel, PrimaryKey
 from pts.transformers.utils.dataset import (
     check_destinations_absent,
     read_spreadsheet,
@@ -266,6 +270,32 @@ def test_write_refuses_when_the_destination_is_a_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='already exists'):
         write_dataset(pl.DataFrame({'a': [1]}), str(path))
+
+
+class _Scores(DatasetModel):
+    dataset_name: ClassVar[str] = '_scores'
+    dataset_title: ClassVar[str] = 'scores'
+    dataset_description: ClassVar[str] = 'scores'
+    example: ClassVar[dict] = {'id': 'a', 'score': 0.5}
+
+    id: Annotated[str, PrimaryKey()]
+    score: float = Field(ge=0.0, le=1.0)
+
+
+def test_write_validates_against_a_schema(tmp_path: Path) -> None:
+    path = str(tmp_path / 'ds')
+
+    write_dataset(pl.LazyFrame({'id': ['a', 'b'], 'score': [0.1, 1.0]}), path, schema=_Scores)
+
+    assert scan_dataset(path).collect().height == 2
+
+
+def test_write_refuses_a_frame_violating_its_schema(tmp_path: Path) -> None:
+    path = tmp_path / 'ds'
+
+    with pytest.raises(pe.SchemaErrors, match=re.escape('score: <= 1.0')):
+        write_dataset(pl.DataFrame({'id': ['a', 'a'], 'score': [0.1, 1.5]}), str(path), schema=_Scores)
+    assert not path.exists()
 
 
 def test_round_trip(tmp_path: Path) -> None:
