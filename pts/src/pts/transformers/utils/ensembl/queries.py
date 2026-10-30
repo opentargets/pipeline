@@ -245,3 +245,37 @@ def translation_xrefs(dump: CoreDump) -> pl.DataFrame:
         .sort('translationId')
         .collect()
     )
+
+
+def translation_uniprot(dump: CoreDump) -> pl.DataFrame:
+    """Swiss-Prot and TrEMBL accessions of the translations of `transcripts`, in the dump's `object_xref` line order.
+
+    Returns:
+        One row per translation with any accession, sorted by `transcriptId`: `transcriptId`,
+        `uniprot_swissprot` and `uniprot_trembl`, each list unique in first-line order and `[]` when empty.
+    """
+    databases = {name: field for name, field in _UNIPROT_DBS.items() if field != 'uniprot_isoform'}
+    external_db = dump.scan('external_db', schema.EXTERNAL_DB).filter(pl.col('db_name').is_in(list(databases)))
+    transcript = _canonical_transcripts(dump).select('transcript_id', pl.col('stable_id').alias('transcriptId'))
+    translation = (
+        dump
+        .scan('translation', schema.TRANSLATION)
+        .join(transcript, on='transcript_id', how='inner')
+        .select('translation_id', 'transcriptId')
+    )
+    accessions = (
+        dump
+        .scan('object_xref', schema.OBJECT_XREF)
+        .with_row_index('line')
+        .filter(pl.col('ensembl_object_type') == 'Translation')
+        .join(dump.scan('xref', schema.XREF), on='xref_id', how='inner')
+        .join(external_db, on='external_db_id', how='inner')
+        .join(translation, left_on='ensembl_id', right_on='translation_id', how='inner')
+        .sort('line')
+        .group_by('transcriptId', maintain_order=True)
+        .agg([
+            pl.col('dbprimary_acc').filter(pl.col('db_name') == name).unique(maintain_order=True).alias(field)
+            for name, field in databases.items()
+        ])
+    )
+    return accessions.sort('transcriptId').collect()

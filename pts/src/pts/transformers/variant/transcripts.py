@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.utils.ensembl import CoreDump, gene_names, transcripts, translation_xrefs
+from pts.transformers.utils.ensembl import CoreDump, gene_names, transcripts, translation_uniprot
 
 _MATURE_MIRNA = pl.List(pl.Struct({'start': pl.Int64(), 'end': pl.Int64()}))
 
@@ -82,11 +82,12 @@ def transcript_fields(core: str, chromosome: str) -> pl.DataFrame:
     Returns:
         One row per transcript, sorted by `transcript_id`. `tss` is the transcript's 5' end,
         `transcript_start` and `transcript_end` are genomic and 1-based, `canonical` is 1 or null,
-        `mature_mirna` is `[]` when the transcript has none. Readthrough transcripts are left out.
+        `mature_mirna` is `[]` when the transcript has none. `swissprot` and `trembl` keep the
+        dump's line order. Readthrough transcripts are left out.
     """
     dump = CoreDump(core)
     names = gene_names(dump).rename({'id': 'geneId', 'name': 'gene_symbol'})
-    xrefs = translation_xrefs(dump).select('transcriptId', 'uniprot_swissprot', 'uniprot_trembl')
+    xrefs = translation_uniprot(dump)
     frame = (
         transcripts(dump)
         .filter(pl.col('chromosome') == chromosome)
