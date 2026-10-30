@@ -35,6 +35,9 @@ scratchpad:
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
   biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
   drugtemist_ner_revision: 8cd97116de5fdc911817166df8cb41a022874b10
+  stop_reasons_tag: 5594f9e5cb210524efe8053c25788e5e2bc3bb14-p8ae94e84
+  drug_entities_tag: b57181cea10a3943c35cf31bb375ff9217886730+8cd97116de5fdc911817166df8cb41a022874b10-pbd6d0afb
+  disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
@@ -286,7 +289,7 @@ steps:
 
   #: CLINICAL_REPORT STEP :#########################################################################
   # Everything is copied from gs://clinical_staging, written by the staging DAG. The tags in the
-  # snapshot paths are the ones pts.transformers.clinical.hf_models.revision_tags writes.
+  # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
   clinical_report:
     - name: copy aact dump
       source: gs://clinical_staging/aact/${aact_version}/input/aact.zip
@@ -316,26 +319,26 @@ steps:
 
     - name: copy_many aact stop reasons
       sources:
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_model_revision}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_model_revision}/metadata.json
+        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/metadata.json
       destination: input/clinical_report/aact_stop_reasons
 
     - name: copy_many aact drug entities
       sources:
-        - gs://clinical_staging/aact/${aact_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/metadata.json
+        - gs://clinical_staging/aact/${aact_version}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/aact/${aact_version}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/aact_drug_entities
 
     - name: copy_many mining drug entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${biobert_chemical_ner_revision}+${drugtemist_ner_revision}/metadata.json
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/mining_drug_entities
 
     - name: copy_many mining disease entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${biobert_diseases_ner_revision}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${biobert_diseases_ner_revision}/metadata.json
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/metadata.json
       destination: input/clinical_report/mining_disease_entities
   ##################################################################################################
 
