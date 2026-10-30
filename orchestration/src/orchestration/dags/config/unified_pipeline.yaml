@@ -118,6 +118,7 @@ steps:
       - pis_variant_ppp
   pts_variant:
     machine_type: n2d-highmem-32
+    disk_size: 500
     depends_on:
       - pis_variant
       - pis_target

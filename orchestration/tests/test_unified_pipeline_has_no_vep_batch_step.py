@@ -50,3 +50,12 @@ def test_variant_runs_on_a_highmem_vm() -> None:
 @pytest.mark.parametrize('module', STANDALONE_BATCH_DAGS)
 def test_standalone_dags_still_import_batch(module: str) -> None:
     importlib.import_module(module)
+
+
+def test_variant_gets_a_500_gb_work_disk_and_other_steps_keep_the_default(dag_bag) -> None:
+    config = UnifiedPipelineConfig()
+    assert pts_step_from_config('pts_variant', config).disk_size == 500
+    assert pts_step_from_config('pts_target', config).disk_size == config.pts_disk_size == 300
+    dag = dag_bag.dags['unified_pipeline']
+    assert dag.get_task('pts_variant.run_pts_variant').work_disk_size_gb == 500
+    assert dag.get_task('pts_target.run_pts_target').work_disk_size_gb == 300

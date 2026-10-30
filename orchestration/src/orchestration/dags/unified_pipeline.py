@@ -190,7 +190,7 @@ with DAG(
                         container_scopes=config.service_account_extra_scopes,
                         container_files={config_uri: '/config.yaml'},
                         container_secret_files=step_definition.get('gce_secret_files'),
-                        work_disk_size_gb=config.pts_disk_size,
+                        work_disk_size_gb=s.disk_size,
                         boot_disk_size_gb=config.pts_boot_disk_size,
                         machine_type=s.machine_type,
                         source_image=config.cos_image,
