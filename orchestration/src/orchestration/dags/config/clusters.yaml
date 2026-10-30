@@ -28,33 +28,6 @@ clusters:
     init_actions_uris:
       - '{{pts_init_action_uri}}'
 
-  # The variant index (PySpark, ported from Gentropy) joins the VEP output with gnomAD and
-  # FoldX. It is CPU-bound (parsing ~110 GB of VEP JSON): 16 n1-highmem-16 workers finished in
-  # ~6 min at 17 GB peak executor heap, ~25 GB disk per node and no spill, so 4 workers take
-  # proportionally longer for the same compute. A fixed primary pool, because the shared
-  # autoscaling policy pins primaries at 2 and only adds spot secondaries, which lose shuffle
-  # data on preemption. pd-ssd throughput scales with size, so worker disks stay at 256 GB.
-  # The driver collects nothing, so the master stays small.
-  pts_variant:
-    image_version: '{{dataproc_image_version_pts}}'
-    num_masters: 1
-    num_workers: 4
-    worker_machine_type: n1-highmem-16
-    master_machine_type: n1-standard-8
-    master_disk_size: 128
-    worker_disk_size: 256
-    worker_disk_type: pd-ssd
-    idle_delete_ttl: 3600
-    internal_ip_only: false
-    metadata:
-      PTS_REF: 'pts%40v{{pts_version}}'
-    properties:
-      'spark:spark.sql.adaptive.enabled': 'true'
-      'spark:spark.sql.parquet.compression.codec': 'zstd'
-      'spark:spark.sql.ansi.enabled': 'false'
-    init_actions_uris:
-      - '{{pts_init_action_uri}}'
-
   gentropy:
     image_version: '{{dataproc_image_version_gentropy}}'
     num_masters: 1

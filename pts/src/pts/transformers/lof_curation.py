@@ -3,7 +3,6 @@
 from typing import Any
 
 import polars as pl
-import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict
@@ -89,11 +88,7 @@ def _transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
     if result.is_empty():
         raise ValueError('LoF curation input is empty')
     result = result.with_columns(
-        pl
-        .when(pl.col('chromosome').is_null() | pl.col('position').is_null())
-        .then(pl.lit('OTVAR_') + plh.col('variantId').nchash.md5())
-        .otherwise(hash_long_variant_ids(pl.col('variantId')))
-        .alias('variantId')
+        hash_long_variant_ids(pl.col('variantId'), pl.col('chromosome'), pl.col('position')).alias('variantId')
     )
     duplicate_ids = result.filter(pl.col('variantId').is_duplicated()).get_column('variantId').unique().to_list()
     if duplicate_ids:

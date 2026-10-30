@@ -3,7 +3,7 @@ environment_specs:
   - name: Prod
     vars:
       input_path: gs://finngen-public-data-r12
-      output_path: gs://finngen_data/r12
+      output_path: gs://finngen_data/gwas/prod/20260526T131014/output
       curation_tag: '26.05'
 
 env: Prod

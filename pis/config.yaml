@@ -35,6 +35,7 @@ scratchpad:
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
   biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
   drugtemist_ner_revision: 8cd97116de5fdc911817166df8cb41a022874b10
+  gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
   cosmic_version: '2025-06-24'
@@ -649,6 +650,37 @@ steps:
     - name: copy_many gnomad variant index
       sources: gs://gnomad_data_2/v4.1/variant_index/*.parquet
       destination: input/variant/gnomad
+
+    - name: explode gpn-star llr scores
+      foreach:
+        - llr_chr1.parquet
+        - llr_chr2.parquet
+        - llr_chr3.parquet
+        - llr_chr4.parquet
+        - llr_chr5.parquet
+        - llr_chr6.parquet
+        - llr_chr7.parquet
+        - llr_chr8.parquet
+        - llr_chr9.parquet
+        - llr_chr10.parquet
+        - llr_chr11.parquet
+        - llr_chr12.parquet
+        - llr_chr13.parquet
+        - llr_chr14.parquet
+        - llr_chr15.parquet
+        - llr_chr16.parquet
+        - llr_chr17.parquet
+        - llr_chr18.parquet
+        - llr_chr19.parquet
+        - llr_chr20.parquet
+        - llr_chr21.parquet
+        - llr_chr22.parquet
+        - llr_chrX.parquet
+        - llr_chrY.parquet
+      do:
+        - name: copy gpn-star llr ${each}
+          source: https://huggingface.co/datasets/songlab/gpn-star-scores/resolve/${gpn_star_revision}/data/gpn-star-hg38-m447-200m/llr/${each}
+          destination: input/variant/gpn_star/${each}
   ##################################################################################################
 
   #: ENCODE STEP :##################################################################################
@@ -718,11 +750,11 @@ steps:
       destination: input/gwas/credible_set/gcss_susie
 
     - name: copy_many finngen study
-      sources: gs://finngen_data/r12/study_index/*.parquet
+      sources: gs://finngen_data/gwas/prod/20260526T131014/output/study_index/*.parquet
       destination: input/gwas/study/finngen
 
     - name: copy_many finngen credible sets
-      sources: gs://finngen_data/r12/credible_set_datasets/susie/*.parquet
+      sources: gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/*.parquet
       destination: input/gwas/credible_set/finngen
   ##################################################################################################
 
