@@ -25,6 +25,7 @@ from pts.transformers.variant.loftee import (
 )
 from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 from tests.ensembl_fixtures import cells, ddl, write_dump
+from tests.variant_fixtures import consequences
 
 ATM = json.loads((Path(__file__).parent / 'test_data' / 'loftee_atm_ENST00000675843.json').read_text())
 LENGTH = 4000
@@ -361,21 +362,13 @@ def test_ancestor_is_grch38(tmp_path: Path):
     assert flipped == [('LC', 'ANC_ALLELE')]
 
 
-def consequence_frame(*rows: dict) -> pl.DataFrame:
-    """A consequences frame over `consequence` rows, with the other columns null."""
-    frame = pl.DataFrame(list(rows), schema=CONSEQUENCES)
-    return frame.select([
-        pl.col(name) if name in frame.columns else pl.lit(None, dtype).alias(name)
-        for name, dtype in CONSEQUENCES_SCHEMA.items()
-    ])
-
-
 def test_add_loftee_adds_the_calls_in_row_order(ancestor: bytes, gerp: KentBigWig):
-    frame = consequence_frame(
+    rows = [
         consequence('TP', ['stop_gained'], 610, 'A', 'T'),
         consequence('TQ', ['missense_variant'], 610, 'A', 'T'),
         consequence('TP', ['frameshift_variant'], 170, 'GA', 'G'),
-    )
+    ]
+    frame = consequences(row=[0, 0, 1], **{name: [row[name] for row in rows] for name in CONSEQUENCES.names()})
     filled = add_loftee(frame, MODELS, genome(), ancestor, gerp, '1')
     assert filled.columns == [*CONSEQUENCES_SCHEMA.names(), 'lof', 'lof_filter']
     assert filled.drop('lof', 'lof_filter').equals(frame)

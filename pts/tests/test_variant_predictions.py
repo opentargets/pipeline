@@ -13,6 +13,7 @@ from pts.transformers.variant import predictions
 from pts.transformers.variant.alleles import vep_allele_form
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
+from tests.variant_fixtures import consequences
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
 
@@ -41,29 +42,20 @@ def bigwig(tmp_path_factory: pytest.TempPathFactory) -> str:
     return path
 
 
-def consequences(*rows: tuple[int, int, str, str, str]) -> pl.DataFrame:
+def consequence_rows(*rows: tuple[int, int, str, str, str]) -> pl.DataFrame:
     """One consequence per (row, position, reference, alternate, transcript id), in VEP's coordinates."""
-    frame = pl.DataFrame(
-        [
-            {
-                'row': row,
-                'position': position,
-                'referenceAllele': ref,
-                'alternateAllele': alt,
-                'transcript_id': transcript,
-            }
-            for row, position, ref, alt, transcript in rows
-        ],
-        schema={
-            name: CONSEQUENCES_SCHEMA[name]
-            for name in ('row', 'position', 'referenceAllele', 'alternateAllele', 'transcript_id')
-        },
+    row, position, reference, alternate, transcript = (list(column) for column in zip(*rows, strict=True))
+    alleles = vep_allele_form(
+        pl.DataFrame({'position': position, 'referenceAllele': reference, 'alternateAllele': alternate}).lazy()
+    ).collect()
+    return consequences(
+        row=row,
+        position=position,
+        referenceAllele=reference,
+        alternateAllele=alternate,
+        transcript_id=transcript,
+        **{name: alleles[name].to_list() for name in ('vepStart', 'vepEnd', 'vepReference', 'vepAlternate')},
     )
-    frame = vep_allele_form(frame.lazy()).collect()
-    return frame.select([
-        pl.col(name).cast(dtype) if name in frame.columns else pl.lit(None, dtype).alias(name)
-        for name, dtype in CONSEQUENCES_SCHEMA.items()
-    ])
 
 
 def effects(found: pl.DataFrame) -> list[tuple]:
@@ -75,7 +67,7 @@ def effects(found: pl.DataFrame) -> list[tuple]:
 
 def test_fill_conservation_and_alphamissense(bigwig: str, tsv: str):
     found = add_gerp_and_alphamissense(
-        consequences(
+        consequence_rows(
             (0, 945518, 'C', 'A', 'ENST00000327044'),
             (0, 945518, 'C', 'A', 'ENST00000999999'),
             (1, 946175, 'G', 'A', 'ENST00000327044'),
@@ -93,7 +85,7 @@ def test_fill_conservation_and_alphamissense(bigwig: str, tsv: str):
 
 def test_fill_deletion_and_insertion_spans(bigwig: str, tsv: str):
     found = add_gerp_and_alphamissense(
-        consequences(
+        consequence_rows(
             (0, 945517, 'TCA', 'T', 'ENST00000327044'),
             (1, 945518, 'C', 'CT', 'ENST00000327044'),
         ),
@@ -106,12 +98,12 @@ def test_fill_deletion_and_insertion_spans(bigwig: str, tsv: str):
 
 
 def test_fill_leaves_missing_data_null(bigwig: str, tsv: str):
-    found = add_gerp_and_alphamissense(consequences((0, 500, 'C', 'A', 'ENST00000327044')), bigwig, tsv, '1')
+    found = add_gerp_and_alphamissense(consequence_rows((0, 500, 'C', 'A', 'ENST00000327044')), bigwig, tsv, '1')
     assert effects(found) == [('ENST00000327044', None, None, None)]
 
 
 def test_fill_chromosome_without_contig_or_rows(bigwig: str, tsv: str):
-    found = add_gerp_and_alphamissense(consequences((0, 945518, 'C', 'A', 'ENST00000327044')), bigwig, tsv, 'MT')
+    found = add_gerp_and_alphamissense(consequence_rows((0, 945518, 'C', 'A', 'ENST00000327044')), bigwig, tsv, 'MT')
     assert effects(found) == [('ENST00000327044', None, None, None)]
 
 
@@ -125,7 +117,7 @@ def test_gerp_is_computed_once_per_variant(bigwig: str, tsv: str, monkeypatch: p
 
     monkeypatch.setattr(predictions, 'gerp_max', spy)
     found = add_gerp_and_alphamissense(
-        consequences((0, 945518, 'C', 'A', 'ENST00000327044'), (0, 945518, 'C', 'A', 'ENST00000999999')),
+        consequence_rows((0, 945518, 'C', 'A', 'ENST00000327044'), (0, 945518, 'C', 'A', 'ENST00000999999')),
         bigwig,
         tsv,
         '1',

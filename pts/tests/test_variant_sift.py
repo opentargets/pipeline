@@ -18,6 +18,7 @@ from pts.transformers.variant.index import normalise_score
 from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, ChunkFrames, vep_records
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
 from pts.transformers.variant.vep import parse_vep
+from tests.variant_fixtures import consequences as variant_consequences
 
 #: Ensembl 116 rows for the canonical translations of ENST00000354588, ENST00000524958,
 #: ENST00000390321 and ENST00000526893 (see `test_data/sift/README.md`).
@@ -141,23 +142,16 @@ def test_matrices_keep_the_wanted_transcripts(matrices: pl.DataFrame):
 
 def consequence_frame(*transcripts: tuple[str, str, str, int]) -> pl.DataFrame:
     """One variant with a canonical missense consequence per (transcript, gene, amino acids, position)."""
-    rows = [
-        {
-            'row': 0,
-            'transcript_id': transcript_id,
-            'gene_id': gene_id,
-            'amino_acids': amino_acids,
-            'protein_end': position,
-            'consequence_terms': ['missense_variant'],
-            'biotype': 'protein_coding',
-        }
-        for transcript_id, gene_id, amino_acids, position in transcripts
-    ]
-    frame = pl.DataFrame(rows, schema={name: CONSEQUENCES_SCHEMA[name] for name in rows[0]})
-    return frame.select([
-        pl.col(name) if name in frame.columns else pl.lit(None, dtype).alias(name)
-        for name, dtype in CONSEQUENCES_SCHEMA.items()
-    ])
+    transcript_id, gene_id, amino_acids, position = (list(column) for column in zip(*transcripts, strict=True))
+    return variant_consequences(
+        row=[0] * len(transcripts),
+        transcript_id=transcript_id,
+        gene_id=gene_id,
+        amino_acids=amino_acids,
+        protein_end=position,
+        consequence_terms=[['missense_variant']] * len(transcripts),
+        biotype=['protein_coding'] * len(transcripts),
+    )
 
 
 def index_of(input_line: str, consequences: pl.DataFrame) -> pl.DataFrame:
