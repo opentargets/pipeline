@@ -40,7 +40,7 @@ The fine-mapping step runs after the study index: both `spark-submit` calls reso
 
 ## study_index
 
-The step ([`finngen_studies.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_studies.py)) builds one study per phenotype of the FinnGen phenotype API ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/study_index.py)). The study identifier is the phenotype code prefixed with `FINNGEN_R12_`. The ontology terms of a study are the curation rows whose `STUDY` contains `FINNGEN` and `R12` and whose `PROPERTY_VALUE` equals the phenotype name ([`efo_mapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/efo_mapping.py)). A study with no matching curation row keeps an empty list of ontology terms. The output is `output/study/`: 2,470 studies, 29 of them without ontology terms.
+The step ([`finngen_studies.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_studies.py)) builds one study per phenotype of the FinnGen phenotype API ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/study_index.py)). The study identifier is the phenotype code prefixed with `FINNGEN_R12_`. The ontology terms of a study are the curation rows whose `STUDY` contains `FINNGEN` and `R12` and whose `PROPERTY_VALUE` equals the phenotype name ([`efo_mapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/efo_mapping.py)). A study with no matching curation row keeps an empty list of ontology terms. The output is `output/study/`.
 
 ## finemapping
 
@@ -53,7 +53,7 @@ The step ([`finngen_finemapping_ingestion.py`](https://github.com/opentargets/ge
 - The log Bayes factor of a credible set is the natural log Bayes factor of its single effect over every variant of the region, with a uniform prior over those variants ([`stats.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/common/stats.py)).
 - The allele frequency of a variant is the alternative allele frequency `AF` of the annotated variants file.
 
-The outputs are `output/credible_set/`: 21,457 credible sets from 1,302 studies, in one file, and `output/credible_set_variant/`: 1,100,722 variants, in one file (`session.output_partitions` 1). Every study of the credible sets is in `study`, and every lead is in `credible_set_variant`.
+The outputs are `output/credible_set/`, one row per credible set, in one file, and `output/credible_set_variant/`, one row per variant of a credible set, in `session.output_partitions` (1) files. Every study of the credible sets is in `study`, and every lead is in `credible_set_variant`.
 
 ## Outputs
 
@@ -89,7 +89,7 @@ One row per FinnGen phenotype.
 
 ### credible_set
 
-One row per credible set.
+One row per credible set; 1,302 studies have at least one.
 
 | Column | Type | Description |
 |---|---|---|
