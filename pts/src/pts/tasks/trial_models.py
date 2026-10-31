@@ -58,10 +58,9 @@ class TrialModels(Task):
     def run(self) -> Self:
         from pts.clinical_staging import trial_models
         from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION
-        from pts.postgres import read_dump_tables
         from pts.record_store import new_run_id
         from pts.transformers.clinical.hf_models import staged_model_revisions
-        from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
+        from pts.transformers.clinical.providers.aact import read_aact_tables
 
         config = self.context.config
         models_uri = StorageHandle(self.spec.source['models'], config=config).absolute
@@ -79,13 +78,7 @@ class TrialModels(Task):
             logger.info(f'seeded {seeded} drug entity records')
 
         archive = StorageHandle(self.spec.source['aact'], config=config).absolute
-        studies = read_dump_tables(
-            archive,
-            {'studies': ['nct_id', 'why_stopped']},
-            schema_name=AACT_SCHEMA_NAME,
-            archive_member=AACT_ARCHIVE_MEMBER,
-            scratch_root=config.work_path,
-        )['studies']
+        studies = read_aact_tables(archive, ['studies'], config.work_path)['studies']
         extraction_dir = StorageHandle(self.spec.source['extraction'], config=config).absolute.rstrip('/')
         extractions = trial_models.read_extraction(extraction_dir, config)
 

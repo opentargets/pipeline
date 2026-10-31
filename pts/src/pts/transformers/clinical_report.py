@@ -23,7 +23,7 @@ from pts.transformers.clinical import (
 )
 from pts.transformers.clinical.mapping import require_staged
 from pts.transformers.clinical.mining import build_mining_reports, staged_lookup
-from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
+from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -53,27 +53,6 @@ CHEMBL_ORDER_BY = {
     'warning_refs': ['warning_id', 'ref_type', 'ref_id', 'ref_url'],
 }
 """Reads collected into published arrays, ordered by their whole projection."""
-
-AACT_TABLES = {
-    'studies': [
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
-    ],
-    'interventions': ['nct_id', 'intervention_type', 'name'],
-    'conditions': ['nct_id', 'downcase_name'],
-    'study_references': ['nct_id', 'pmid', 'reference_type'],
-    'designs': ['nct_id', 'primary_purpose'],
-    'brief_summaries': ['nct_id', 'description'],
-    'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
-}
-
-AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
 OUTPUT_COLUMNS = (
     'id',
@@ -159,13 +138,10 @@ def clinical_report(
     chembl_drug_warning_references = chembl_tables['warning_refs']
 
     logger.info(f'restoring aact tables from {source["aact"]}')
-    aact_tables = read_dump_tables(
+    aact_tables = read_aact_tables(
         str(source['aact']),
-        AACT_TABLES,
-        schema_name=AACT_SCHEMA_NAME,
-        archive_member=AACT_ARCHIVE_MEMBER,
-        order_by=AACT_ORDER_BY,
-        scratch_root=config.work_path,
+        ['studies', 'interventions', 'conditions', 'study_references', 'designs', 'brief_summaries', 'sponsors'],
+        config.work_path,
     )
     aact_studies = aact_tables['studies']
     aact_interventions = aact_tables['interventions']

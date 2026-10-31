@@ -1,4 +1,11 @@
+from typing import Any
+
 import polars as pl
+import pytest
+
+from pts.clinical_staging import extraction
+from pts.transformers.clinical.providers import aact as aact_provider
+from pts.transformers.clinical.providers.aact import read_aact_tables
 
 
 def _make_studies() -> pl.DataFrame:
@@ -274,3 +281,84 @@ def test_extract_clinical_report_with_study_references():
         {'id': '12345678', 'type': 'result'},
         {'id': '99999999', 'type': 'background'},
     ]
+
+
+_STUDIES_COLUMNS = [
+    'nct_id',
+    'overall_status',
+    'phase',
+    'study_type',
+    'start_date',
+    'why_stopped',
+    'number_of_arms',
+    'official_title',
+]
+_REFERENCES_ORDER = ['nct_id', 'pmid', 'reference_type']
+
+
+def _record_restore(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake(source: str, tables: Any, **kwargs: Any) -> dict[str, pl.DataFrame]:
+        captured.update(source=source, tables=dict(tables), **kwargs)
+        return {name: pl.DataFrame({column: [] for column in columns}) for name, columns in tables.items()}
+
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', fake)
+    return captured
+
+
+def test_read_aact_tables_passes_catalogue_schema_member_and_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _record_restore(monkeypatch)
+
+    read_aact_tables('a.zip', ['studies', 'study_references'], '/s')
+
+    assert captured == {
+        'source': 'a.zip',
+        'tables': {'studies': _STUDIES_COLUMNS, 'study_references': ['nct_id', 'pmid', 'reference_type']},
+        'schema_name': 'ctgov',
+        'archive_member': 'postgres.dmp',
+        'order_by': {'study_references': _REFERENCES_ORDER},
+        'scratch_root': '/s',
+    }
+
+
+def test_read_aact_tables_orders_only_the_requested_tables(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _record_restore(monkeypatch)
+
+    read_aact_tables('a.zip', ['studies'], '/s')
+
+    assert captured['order_by'] == {}
+
+
+def test_read_aact_tables_rejects_unknown_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    _record_restore(monkeypatch)
+
+    with pytest.raises(KeyError, match='no_such_table'):
+        read_aact_tables('a.zip', ['studies', 'no_such_table'], '/s')
+
+
+def test_extraction_restores_todays_aact_tables(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    baseline = {
+        'studies': _STUDIES_COLUMNS,
+        'interventions': ['nct_id', 'intervention_type', 'name'],
+        'conditions': ['nct_id', 'downcase_name'],
+        'study_references': ['nct_id', 'pmid', 'reference_type'],
+        'brief_summaries': ['nct_id', 'description'],
+        'detailed_descriptions': ['nct_id', 'description'],
+    }
+    captured = _record_restore(monkeypatch)
+
+    def stop(**kwargs: Any) -> None:
+        raise _StopError
+
+    monkeypatch.setattr(extraction, 'extract_aact_clinical_report', stop)
+    with pytest.raises(_StopError):
+        extraction.trial_report('a.zip', str(tmp_path), None)
+
+    assert captured['tables'] == baseline
+    assert captured['order_by'] == {'study_references': _REFERENCES_ORDER}
+    assert captured['scratch_root'] == str(tmp_path)
+
+
+class _StopError(Exception):
+    pass

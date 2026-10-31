@@ -34,6 +34,7 @@ from pts.record_store import ComputeAborted, read_records, text_sha256
 from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.llm_workflow import Extracted, Failed
+from pts.transformers.clinical.providers import aact as aact_provider
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 from tests.fake_openai import FakeClient, Outcome, bad_request, connection_error, unprocessable
@@ -147,7 +148,7 @@ def test_trial_report_passes_detailed_description_to_the_aact_provider(
         captured.update(kwargs)
         return SimpleNamespace(df=pl.DataFrame({'id': ['nct1']}))
 
-    monkeypatch.setattr(extraction, 'read_dump_tables', lambda *args, **kwargs: tables)
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', lambda *args, **kwargs: tables)
     monkeypatch.setattr(extraction, 'extract_aact_clinical_report', fake_extract_clinical_report)
     monkeypatch.setattr(extraction, 'sample_report', lambda report, sample_size: report)
 

@@ -8,6 +8,7 @@ from typing import Any
 import openpyxl
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.clinical_staging.staged_outputs import (
     DISEASE_ENTITIES,
@@ -26,6 +27,7 @@ from pts.transformers.clinical import (
     ClinicalSource,
 )
 from pts.transformers.clinical.mining import read_ema_sheet
+from pts.transformers.clinical.providers import aact as aact_provider
 from pts.transformers.clinical.providers.aact import replace_with_llm_indications
 from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
@@ -724,6 +726,56 @@ def no_dump(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError('dump restored')
 
     monkeypatch.setattr(clinical_report_module, 'read_dump_tables', refuse)
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', refuse)
+
+
+def test_release_restores_todays_aact_tables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    studies = [
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
+        'official_title',
+    ]
+    baseline = {
+        'studies': studies,
+        'interventions': ['nct_id', 'intervention_type', 'name'],
+        'conditions': ['nct_id', 'downcase_name'],
+        'study_references': ['nct_id', 'pmid', 'reference_type'],
+        'designs': ['nct_id', 'primary_purpose'],
+        'brief_summaries': ['nct_id', 'description'],
+        'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
+    }
+    captured: dict[str, Any] = {}
+
+    class StopError(Exception):
+        pass
+
+    def aact_restore(source: str, tables: Any, **kwargs: Any) -> None:
+        captured.update(tables=dict(tables), **kwargs)
+        raise StopError
+
+    chembl = dict.fromkeys(
+        ['drug_indication', 'indication_refs', 'molecule_dictionary', 'drug_warning', 'warning_refs'],
+        pl.DataFrame(),
+    )
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', lambda *args, **kwargs: chembl)
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', aact_restore)
+
+    with pytest.raises(StopError):
+        clinical_report_module.clinical_report(
+            _release_source(tmp_path),
+            {},
+            {},
+            Config(step='clinical_report', steps=['clinical_report'], work_path=tmp_path),
+        )
+
+    assert captured['tables'] == baseline
+    assert captured['order_by'] == {'study_references': ['nct_id', 'pmid', 'reference_type']}
+    assert captured['scratch_root'] == tmp_path
 
 
 @pytest.mark.usefixtures('no_dump')

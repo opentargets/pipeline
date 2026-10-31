@@ -1,9 +1,12 @@
 """Utils to transform AACT database to drug/indication relationships."""
 
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import polars as pl
 
+from pts.postgres import read_dump_tables
 from pts.transformers.clinical.datasets import ClinicalReport
 from pts.transformers.clinical.schemas import (
     ClinicalProvider,
@@ -14,6 +17,42 @@ from pts.transformers.clinical.schemas import (
 
 AACT_SCHEMA_NAME = 'ctgov'
 AACT_ARCHIVE_MEMBER = 'postgres.dmp'
+
+AACT_TABLES = {
+    'studies': [
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
+        'official_title',
+    ],
+    'interventions': ['nct_id', 'intervention_type', 'name'],
+    'conditions': ['nct_id', 'downcase_name'],
+    'study_references': ['nct_id', 'pmid', 'reference_type'],
+    'designs': ['nct_id', 'primary_purpose'],
+    'brief_summaries': ['nct_id', 'description'],
+    'detailed_descriptions': ['nct_id', 'description'],
+    'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
+}
+AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+
+
+def read_aact_tables(archive: str, tables: Sequence[str], scratch_root: str | Path) -> dict[str, pl.DataFrame]:
+    """Restore the named AACT tables, with the columns and ordering the catalogue gives them."""
+    unknown = [table for table in tables if table not in AACT_TABLES]
+    if unknown:
+        raise KeyError(f'unknown AACT tables {unknown}; known: {sorted(AACT_TABLES)}')
+    return read_dump_tables(
+        archive,
+        {table: AACT_TABLES[table] for table in tables},
+        schema_name=AACT_SCHEMA_NAME,
+        archive_member=AACT_ARCHIVE_MEMBER,
+        order_by={table: AACT_ORDER_BY[table] for table in tables if table in AACT_ORDER_BY},
+        scratch_root=scratch_root,
+    )
 
 
 def process_interventions(interventions: pl.DataFrame) -> pl.DataFrame:

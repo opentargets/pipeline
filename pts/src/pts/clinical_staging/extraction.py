@@ -23,7 +23,6 @@ from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ValidationError
 
-from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, read_parquet, run_exists, text_sha256, write_run
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
@@ -33,7 +32,7 @@ from pts.transformers.clinical.llm_workflow import (
     client_timeout,
     extract_prompts,
 )
-from pts.transformers.clinical.providers.aact import AACT_ARCHIVE_MEMBER, AACT_SCHEMA_NAME
+from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
 
 if TYPE_CHECKING:
@@ -41,24 +40,6 @@ if TYPE_CHECKING:
 
     from pts.tasks.llm_extract import LlmExtractSpec
 
-AACT_TABLES = {
-    'studies': [
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
-    ],
-    'interventions': ['nct_id', 'intervention_type', 'name'],
-    'conditions': ['nct_id', 'downcase_name'],
-    'study_references': ['nct_id', 'pmid', 'reference_type'],
-    'brief_summaries': ['nct_id', 'description'],
-    'detailed_descriptions': ['nct_id', 'description'],
-}
-AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 EXTRACTION_MODEL = 'aact_llm_extraction'
 """Model name of the extraction records; their model revision is the response schema digest."""
 IMPORT_RUN_PREFIX = 'import-extraction-cache'
@@ -113,13 +94,10 @@ def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None
     here.
     """
     logger.info(f'restoring AACT tables from {archive}')
-    tables = read_dump_tables(
+    tables = read_aact_tables(
         archive,
-        AACT_TABLES,
-        schema_name=AACT_SCHEMA_NAME,
-        archive_member=AACT_ARCHIVE_MEMBER,
-        order_by=AACT_ORDER_BY,
-        scratch_root=scratch_root,
+        ['studies', 'interventions', 'conditions', 'study_references', 'brief_summaries', 'detailed_descriptions'],
+        scratch_root,
     )
 
     report = extract_aact_clinical_report(
