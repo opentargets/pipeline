@@ -358,7 +358,9 @@ def test_hgvs_intergenic_fallback():
 
 
 def test_null_first_transcript_hgvs_does_not_fall_back():
-    result = parsed(transcripts=[transcript()], hgvsg=None)
+    """A variant without HGVS has no hgvsId, even with a canonical transcript fastVEP reported."""
+    result = parsed(transcripts=[transcript()], hgvsg=None, reported_transcripts=True)
+    assert result['transcriptConsequences'] != []
     assert result['hgvsId'] is None
 
 
@@ -372,16 +374,16 @@ def test_only_non_canonical_transcripts_keep_severity_and_null_hgvs():
 
 
 def test_unscored_transcript_can_supply_an_effect():
-    """A canonical transcript without a scored term gives GERP its target, but is not a transcript consequence."""
-    result = parsed(
-        transcripts=[
-            transcript(gene_id='scored', transcript_id='ENST1'),
-            transcript(gene_id='unscored', transcript_id='ENST2', consequence_terms=['unknown'], conservation=2.0),
-        ]
-    )
+    """An unscored canonical transcript gives GERP its target and the HGVS, but is not a transcript consequence."""
+    unscored = transcript(gene_id='unscored', transcript_id='ENST2', consequence_terms=['unknown'], conservation=2.0)
+    hgvs = {'hgvsg': '1:g.123A>G', 'reported_transcripts': True}
+    result = parsed(transcripts=[transcript(gene_id='scored', transcript_id='ENST1'), unscored], **hgvs)
     assert {x['method']: x['targetId'] for x in result['variantEffect']}['GERP'] == 'unscored'
     assert [x['targetId'] for x in result['transcriptConsequences']] == ['scored']
-    assert result['hgvsId'] is None
+    alone = parsed(transcripts=[unscored], **hgvs)
+    assert {x['method']: x['targetId'] for x in alone['variantEffect']}['GERP'] == 'unscored'
+    assert alone['transcriptConsequences'] == []
+    assert alone['hgvsId'] == '1:g.123A>G'
 
 
 def test_transcript_index_follows_rank_among_scored_transcripts():

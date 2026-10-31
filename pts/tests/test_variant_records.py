@@ -281,6 +281,7 @@ def test_only_non_canonical_transcripts_keep_severity_and_null_hgvs(tmp_path: Pa
         [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [0, 0]})], how='diagonal'
     )
     found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
+    assert found.variants['hgvsg'][0] is not None
     assert found.consequences.height == 0
     [row] = index_of(found).to_dicts()
     assert row['mostSevereConsequenceId'] == 'SO_0001583'
