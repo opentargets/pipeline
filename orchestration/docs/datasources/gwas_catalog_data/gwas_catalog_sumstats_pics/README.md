@@ -15,7 +15,7 @@ gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/credible_set_variant
 
 The summary statistics PICS credible sets are the PICS fine-mapping of the GWAS Catalog summary statistics harmonised to the Open Targets [SummaryStatistics dataset](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/dataset/summary_statistics.py).
 
-Data is produced by **gwas_catalog_sumstats_pics DAG**. The DAG configuration and topology are in `config/gwas_catalog_sumstats_pics.yaml` of the run folder (`gs://gwas_catalog_sumstats_pics/prod/20261030T072623/config/`). The run uses gentropy [`v4.0.0-dev.9`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.9); the links below refer to that tag. `study_index` and `window_clumping` ran on `v4.0.0-dev.8`, whose code of these two steps is the same as in `v4.0.0-dev.9`. The gentropy CLI (`cli.py`) and the cluster init script (`install_dependencies_on_cluster.sh`) of the tag are copied to `bin/` of the run folder.
+Data is produced by **gwas_catalog_sumstats_pics DAG**. The DAG configuration and topology are in `config/gwas_catalog_sumstats_pics.yaml` of the run folder (`gs://gwas_catalog_sumstats_pics/prod/20261030T072623/config/`). The run uses gentropy [`v4.0.0-dev.9`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.9); the links below refer to that tag.
 
 Inputs of the run:
 
@@ -31,15 +31,6 @@ The two GWAS Catalog files are synced from the [EBI FTP](https://ftp.ebi.ac.uk/p
 The DAG has 4 steps, run on two Dataproc clusters:
 
 ![gwas_catalog_sumstats_pics](gwas_catalog_sumstats_pics.svg)
-
-| Step | Cluster | After |
-|---|---|---|
-| study_index | `otg-gwascatalog-sumstats-clumping` | |
-| window_clumping | `otg-gwascatalog-sumstats-clumping` | |
-| ld_annotation | `otg-gwascatalog-sumstats-pics` | study_index, window_clumping |
-| pics | `otg-gwascatalog-sumstats-pics` | ld_annotation |
-
-The clumping cluster has 20 primary and up to 100 spot secondary `n2d-highmem-16` workers (autoscaling policy `otg-efm`), with the shuffle on the primary workers only (Enhanced Flexibility Mode). The PICS cluster has 10 `n2d-highmem-16` workers and is created when the window clumping ends.
 
 ## study_index
 
