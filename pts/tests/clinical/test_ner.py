@@ -1,3 +1,5 @@
+import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -202,6 +204,29 @@ def test_disease_model_load_failure_raises(monkeypatch: pytest.MonkeyPatch) -> N
         disease_entities_with_status(['a'])
     assert disease_entities_with_status(['', ' ']) == [([], None), ([], None)]
     assert ner.DISEASE_NER_MODEL == DISEASE_MODEL
+
+
+def test_created_pipeline_forwards_batch_size_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_pipeline(*args: Any, **kwargs: Any) -> Any:
+        def run(texts: Any, batch_size: int = 1) -> list[Any]:
+            seen['batch_size'] = batch_size
+            return [[] for _ in texts]
+
+        return run
+
+    model = SimpleNamespace(to=lambda _: model)
+    fake_transformers = SimpleNamespace(
+        pipeline=fake_pipeline,
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **k: object()),
+        AutoModelForTokenClassification=SimpleNamespace(from_pretrained=lambda *a, **k: model),
+    )
+    monkeypatch.setitem(sys.modules, 'transformers', fake_transformers)
+
+    ner._create_ner_pipeline('m')(['a'], batch_size=32)
+
+    assert seen['batch_size'] == 32
 
 
 def test_drug_chunk_calls_pass_the_model_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -53,16 +53,17 @@ and its version. Each step runs on its own short-lived GCE VM.
    the distinct `why_stopped` texts and the drug NER over the distinct drug
    labels, and publishes `stop_reasons/<tag>` and
    `extraction/<extraction_tag>/drug_entities/<tag>`. The drug NER runs the
-   model in batches of 32 (`ner_model_batch_size`). It reads the extraction
-   of the tag its own code computes, and fails naming the expected path if
-   there is none.
+   model on 32 labels per forward pass (`ner_model_batch_size`). It reads the
+   extraction of the tag its own code computes, and fails naming the expected
+   path if there is none.
 4. `pis_clinical_mining` — copies the TTD, EMA, PMDA and ChEMBL mapping inputs
    and the chemical, drugtemist and disease models.
 5. `pts_clinical_mining_models` (n2d-standard-16) — runs the drug and disease
    NER over the TTD, EMA and PMDA texts and publishes `drug_entities/<tag>` and
-   `disease_entities/<tag>`. The drug NER runs the model in batches of 32
-   (`ner_model_batch_size`), the disease NER one text at a time. It waits for `pts_aact_trial_models`, because both
-   write the shared drug-entity store.
+   `disease_entities/<tag>`. The drug NER runs the model on 32 labels per
+   forward pass (`ner_model_batch_size`), the disease NER on one text at a
+   time. It waits for `pts_aact_trial_models`, because both write the shared
+   drug-entity store.
 
 ChEMBL is not staged. The release fails on any drug label with no id that no
 snapshot covers, whatever its source.
@@ -215,11 +216,11 @@ Only AACT trials with an extraction row are included in the clinical report.
 
 ### 2026-10-31
 
-- The drug NER runs the model in batches of 32 (`ner_model_batch_size`); the
-  disease NER stays at one text at a time, as batching it was slower. Output
-  is identical to the unbatched runs for all 81,974 AACT and mining drug
-  labels, and drug NER is about 4x faster on an n2d-standard-16. Tags and
-  `logic_version` are unchanged.
+- The drug NER runs the model on 32 labels per forward pass
+  (`ner_model_batch_size`); the disease NER stays at one text at a time, as
+  batching it was slower. Output is identical to the unbatched runs for all
+  81,974 AACT and mining drug labels, and drug NER is about 4x faster on an
+  n2d-standard-16. Tags and `logic_version` are unchanged.
 
 ### 2026-10-30
 

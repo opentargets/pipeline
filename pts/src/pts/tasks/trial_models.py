@@ -17,6 +17,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import TaskValidationError
+from pydantic import Field
 
 
 class TrialModelsSpec(Spec):
@@ -33,9 +34,9 @@ class TrialModelsSpec(Spec):
         directory so a text seen in an earlier version is not computed again."""
     snapshot: str
     """The AACT version, which names the records this run writes."""
-    ner_batch_size: int = 256
+    ner_batch_size: int = Field(default=256, gt=0)
     """Labels per drug NER batch."""
-    ner_model_batch_size: int = 32
+    ner_model_batch_size: int = Field(default=32, gt=0)
     """Labels per drug NER forward pass, within a batch."""
     stop_reasons_batch_size: int = 32
     """Texts per stop reasons batch."""

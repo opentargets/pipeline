@@ -17,6 +17,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import TaskValidationError
+from pydantic import Field
 
 
 class MiningModelsSpec(Spec):
@@ -31,9 +32,9 @@ class MiningModelsSpec(Spec):
         label seen there is not computed again."""
     snapshot: str
     """The clinical_mining version, which names the records this run writes."""
-    ner_batch_size: int = 256
+    ner_batch_size: int = Field(default=256, gt=0)
     """Texts per disease and drug NER batch."""
-    ner_model_batch_size: int = 32
+    ner_model_batch_size: int = Field(default=32, gt=0)
     """Labels per drug NER forward pass, within a batch. The disease NER runs one text at a time."""
     max_attempts: int = 3
     """Failed records after which a text is no longer retried."""

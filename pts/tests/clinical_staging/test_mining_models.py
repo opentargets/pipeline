@@ -176,10 +176,12 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        mining_models, 'disease_entities_with_status', lambda texts, *_: [([f'd:{t}'], None) for t in texts]
+        mining_models, 'disease_entities_with_status', lambda texts, batch_size: [([f'd:{t}'], None) for t in texts]
     )
     monkeypatch.setattr(
-        mining_models, 'drug_entities_with_status', lambda texts, *_: [([f'drug:{t}'], None) for t in texts]
+        mining_models,
+        'drug_entities_with_status',
+        lambda texts, batch_size, model_batch_size: [([f'drug:{t}'], None) for t in texts],
     )
     ttd, ema, pmda = inputs['ttd'], inputs['ema'], inputs['pmda']
 
