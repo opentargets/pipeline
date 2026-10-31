@@ -43,7 +43,7 @@ def stage_mining_models(
     with offline_hf_models(models_uri):
         disease = DISEASE_ENTITIES.stage(
             disease_texts,
-            lambda texts: disease_entities_with_status(texts, ner_batch_size, ner_model_batch_size),
+            lambda texts: disease_entities_with_status(texts, ner_batch_size),
             revisions,
             store_uri,
             destination['disease_entities'],

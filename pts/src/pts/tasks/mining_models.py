@@ -33,8 +33,8 @@ class MiningModelsSpec(Spec):
     """The clinical_mining version, which names the records this run writes."""
     ner_batch_size: int = 256
     """Texts per disease and drug NER batch."""
-    ner_model_batch_size: int = 1
-    """Texts per disease and drug NER forward pass, within a batch."""
+    ner_model_batch_size: int = 32
+    """Labels per drug NER forward pass, within a batch. The disease NER runs one text at a time."""
     max_attempts: int = 3
     """Failed records after which a text is no longer retried."""
 

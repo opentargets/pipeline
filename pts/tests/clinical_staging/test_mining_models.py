@@ -60,7 +60,7 @@ class Models:
         return {key: _report(labels) for key, labels in self.labels.items()}
 
     def diseases(
-        self, texts: list[str], batch_size: int, model_batch_size: int
+        self, texts: list[str], batch_size: int, model_batch_size: int = 1
     ) -> list[tuple[list[str] | None, str | None]]:
         self.disease_calls.append(list(texts))
         self.batch_sizes['disease'].append((batch_size, model_batch_size))
@@ -98,10 +98,12 @@ def _stage(tmp_path: Path, models_uri: str, run_id: str) -> dict[str, Any]:
     )
 
 
-def test_mining_models_pass_both_batch_sizes_to_both_models(tmp_path: Path, models_uri: str, models: Models) -> None:
+def test_mining_models_pass_the_model_batch_size_to_drug_ner_only(
+    tmp_path: Path, models_uri: str, models: Models
+) -> None:
     _stage(tmp_path, models_uri, 'r1')
 
-    assert models.batch_sizes == {'disease': [(4, 3)], 'drug': [(4, 3)]}
+    assert models.batch_sizes == {'disease': [(4, 1)], 'drug': [(4, 3)]}
 
 
 def test_stage_mining_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:

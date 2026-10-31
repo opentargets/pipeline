@@ -95,7 +95,7 @@ def _disease_chunk(
             raise ValueError(f'expected {len(texts)} results, got {len(batch_entities)}')
         return [(_disease_mentions(entities), None) for entities in batch_entities]
     except Exception as e:
-        logger.debug(f'disease ner chunk of {len(texts)} failed, retrying per text: {e}')
+        logger.warning(f'disease ner chunk of {len(texts)} failed, retrying per text: {e}')
     results: list[tuple[list[str] | None, str | None]] = []
     for text in texts:
         try:
