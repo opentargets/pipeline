@@ -62,7 +62,7 @@ class Shared:
     ancestor: str
     """The local gzip human ancestor FASTA."""
     core: str
-    """Directory of the Ensembl core database dump."""
+    """Directory of the local Ensembl core database dump."""
     sift: Path
     """`sift_matrices`, as Parquet."""
     binary: str

@@ -124,6 +124,17 @@ def _local(path: str, directory: Path) -> str:
     return str(target)
 
 
+def _local_directory(path: str, directory: Path) -> str:
+    """`path` itself when it is local, else a copy of the files directly in it, in `directory`."""
+    if '://' not in path:
+        return path
+    directory.mkdir(parents=True, exist_ok=True)
+    for file in StorageHandle(path.rstrip('/')).glob('*'):
+        if not file.endswith('/'):
+            _local(file, directory)
+    return str(directory)
+
+
 def amino_acid_projection(path: str, target: Path) -> Path:
     """The columns of an amino-acid annotation source that the chunks merge, written to `target`.
 
@@ -154,14 +165,14 @@ def _reference(
     return plain, spans, gff3
 
 
-def _sift(sources: VariantSource, path: Path) -> Path:
-    """The SIFT matrices of the canonical transcripts, written to `path`."""
+def _sift(sources: VariantSource, core: str, path: Path) -> Path:
+    """The SIFT matrices of the canonical transcripts of the core dump `core`, written to `path`."""
     matrices = sift_matrices(
         sources.sift_predictions,
         sources.sift_translation_md5,
         sources.sift_attrib,
         sources.peptides,
-        canonical_transcript_ids(sources.core),
+        canonical_transcript_ids(core),
     )
     matrices.write_parquet(path)
     return path
@@ -203,7 +214,8 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
         reference = pool.submit(_reference, sources, options.fastvep_binary, scratch / 'reference')
         all_vars = pool.submit(extract_all_vars, sources.vep_cache, scratch / 'all_vars')
         alphamissense = pool.submit(partition_alphamissense, sources.alphamissense, scratch / 'alphamissense', rows)
-        sift = pool.submit(_sift, sources, scratch / 'sift.parquet')
+        core = pool.submit(_local_directory, sources.core, scratch / 'core')
+        sift = pool.submit(lambda: _sift(sources, core.result(), scratch / 'sift.parquet'))
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
         ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
         plain_fasta, contigs, gff3 = reference.result()
@@ -213,7 +225,7 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
             gff3=gff3,
             gerp=gerp.result(),
             ancestor=ancestor.result(),
-            core=sources.core,
+            core=core.result(),
             sift=sift.result(),
             binary=options.fastvep_binary,
             threads=options.fastvep_threads,
