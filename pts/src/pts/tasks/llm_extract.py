@@ -42,9 +42,9 @@ class LlmExtractSpec(Spec):
     destination: dict[str, str]
     """Where to publish. Key: ``extraction``, the directory holding one snapshot per tag."""
     store_uri: str
-    """Root of the record store of extractions, an absolute URI. Must sit outside
-        the dataset version directory so a trial whose prompt did not change
-        between two AACT snapshots is not extracted again."""
+    """Root of the record stores, an absolute URI. Must sit outside the dataset
+        version directory so a trial whose prompt did not change between two AACT
+        snapshots is not extracted again."""
     snapshot: str
     """The AACT version. Prefixes the id of the runs this task writes to the store."""
     openai_key_path: str = '/var/run/secrets/openai-api-key'
@@ -107,7 +107,7 @@ class LlmExtract(Task):
         digest = schema_digest(model_cls)
         extraction.polars_schema(model_cls)
         config = self.context.config
-        store_uri = self.spec.store_uri.rstrip('/')
+        store_uri = f'{self.spec.store_uri.rstrip("/")}/{EXTRACTION.name}'
 
         archive = StorageHandle(str(self.spec.source['aact']), config=config).absolute
         report = extraction.trial_report(archive, config.work_path, self.spec.sample_size)

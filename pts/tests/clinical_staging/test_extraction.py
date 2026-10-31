@@ -347,6 +347,18 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     assert all(client.closed for client in llm.clients)
 
 
+def test_llm_extract_writes_under_the_extraction_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    FakeLlm(monkeypatch)
+
+    task = _run(monkeypatch, tmp_path, _report('nct1', 'nct2'))
+
+    runs = sorted(path.name for path in (tmp_path / 'store/extraction/runs').iterdir())
+    assert len(runs) == 1
+    assert runs[0].startswith('v1-')
+    assert [artifact.source for artifact in task.artifacts or []] == [str(tmp_path / 'store/extraction')]
+    assert not (tmp_path / 'store/runs').exists()
+
+
 def test_a_rerun_publishes_nothing_and_a_new_digest_publishes_beside_the_old(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -596,7 +608,7 @@ def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.M
     _run(monkeypatch, tmp_path, report)
 
     assert llm.calls == [['nct00', *bad], bad, bad]
-    records = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String())
+    records = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String())
     failed = records.filter(pl.col('status') == 'failed')
     assert failed.height == 33
     assert failed.group_by('text').len()['len'].to_list() == [3] * 11
@@ -632,7 +644,9 @@ def test_failed_trial_is_left_out_and_not_retried_on_rerun(
     assert published['id'].to_list() == ['nct1']
     assert task.stats['failed'] == 1
     assert any(m.startswith('1 of 2 trials (50.0%) have no extraction') for m in logged)
-    failed = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String()).filter(pl.col('status') == 'failed')
+    failed = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String()).filter(
+        pl.col('status') == 'failed'
+    )
     assert failed['error'].to_list() == [_validation_error('nct2')] * 3
     snapshot = (tmp_path / f'v1/extraction/{TAG}/data.parquet').stat().st_mtime_ns
     llm.clients.clear()
@@ -798,7 +812,7 @@ def test_fewer_than_ten_systemic_failures_do_not_abort(monkeypatch: pytest.Monke
     assert task.manifest.failure_reason is not None
     assert 'no trial of 9 was extracted' in task.manifest.failure_reason
     assert llm.calls == [ids, ids, ids]
-    failed = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String())
+    failed = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String())
     assert failed['status'].to_list() == ['failed'] * 27
     assert set(failed['error']) == {'APIConnectionError: Connection error.'}
 
@@ -814,7 +828,7 @@ def test_a_systemic_retry_round_aborts_and_keeps_the_first_round(
     assert task.manifest.failure_reason is not None
     assert 'none of 10 trials returned an extraction' in task.manifest.failure_reason
     assert llm.calls == [['nct00', *bad], bad]
-    records = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String()).sort('text')
+    records = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String()).sort('text')
     assert records['status'].to_list() == ['ok'] + ['failed'] * 10
     assert json.loads(records['output'][0])['id'] == 'nct00'
     assert not (tmp_path / 'v1/extraction').exists()
@@ -827,7 +841,7 @@ def test_a_one_trial_shard_makes_one_call(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     assert llm.calls == [['nct1']]
     assert len(llm.clients[0].calls) == 1
-    records = read_records(str(tmp_path / 'store'), cast(Any, None), pl.String())
+    records = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String())
     assert records['status'].to_list() == ['ok']
     assert ClinicalReportExtractionSchema.model_validate_json(records['output'][0]) == _model('nct1')
     assert pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')['id'].to_list() == ['nct1']

@@ -943,7 +943,7 @@ steps:
         aact: input/aact.zip
       destination:
         extraction: extraction
-      store_uri: gs://clinical_staging/store/llm_extraction
+      store_uri: gs://clinical_staging/store
       # the AACT version, prefixing the store runs this step writes
       snapshot: '{{snapshot}}'
       model: gpt-5-nano-2025-08-07

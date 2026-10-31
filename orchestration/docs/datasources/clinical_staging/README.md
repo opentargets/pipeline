@@ -26,7 +26,7 @@ hand under `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/`.
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,llm_extraction}/  # record stores, shared across versions
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction}/  # record stores, shared across versions
 gs://clinical_staging/aact/<aact_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
 gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
 gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/drug_entities/<tag>/
