@@ -13,7 +13,13 @@ from pts.clinical_staging import mining_models
 from pts.clinical_staging.mining_models import stage_mining_models
 from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.record_store import map_texts
-from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
+from pts.transformers.clinical.mining import (
+    RecordingNer,
+    mining_reports,
+    read_mining_inputs,
+    report_drug_labels,
+    staged_lookup,
+)
 from pts.transformers.clinical.ner import (
     CHEMICAL_MODEL,
     DISEASE_MODEL,
@@ -51,11 +57,17 @@ class Models:
         self.batch_sizes: dict[str, list[tuple[int, int]]] = {'disease': [], 'drug': []}
         self.labels = {'ttd': ['aspirin'], 'ema': ['ibuprofen'], 'pmda': ['aspirin', 'x']}
         self.texts = ['pain', 'fever']
-        monkeypatch.setattr(mining_models, 'build_mining_reports', self.reports)
+        self.reads: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(mining_models, 'read_mining_inputs', self.read_inputs)
+        monkeypatch.setattr(mining_models, 'mining_reports', self.reports)
         monkeypatch.setattr(mining_models, 'disease_entities_with_status', self.diseases)
         monkeypatch.setattr(mining_models, 'drug_entities_with_status', self.drug_entities)
 
-    def reports(self, ttd: str, ema: str, pmda: str, extract_diseases: Any) -> dict[str, Any]:
+    def read_inputs(self, ttd: str, ema: str, pmda: str) -> object:
+        self.reads.append((ttd, ema, pmda))
+        return object()
+
+    def reports(self, parsed: object, extract_diseases: Any) -> dict[str, Any]:
         extract_diseases(pl.Series('text', self.texts))
         return {key: _report(labels) for key, labels in self.labels.items()}
 
@@ -104,6 +116,12 @@ def test_mining_models_pass_the_model_batch_size_to_drug_ner_only(
     _stage(tmp_path, models_uri, 'r1')
 
     assert models.batch_sizes == {'disease': [(4, 1)], 'drug': [(4, 3)]}
+
+
+def test_staging_reads_the_inputs_once(tmp_path: Path, models_uri: str, models: Models) -> None:
+    _stage(tmp_path, models_uri, 'r1')
+
+    assert models.reads == [('ttd', 'ema', 'pmda')]
 
 
 def test_stage_mining_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -204,8 +222,9 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
 
     staged = pl.read_parquet(tmp_path / f'snap/disease_entities/{DISEASE_TAG}/data.parquet')
     lookup = staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts')
-    expected = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, lookup).values())
-    blind = report_drug_labels(r.df for r in build_mining_reports(ttd, ema, pmda, RecordingNer()).values())
+    parsed = read_mining_inputs(ttd, ema, pmda)
+    expected = report_drug_labels(r.df for r in mining_reports(parsed, lookup).values())
+    blind = report_drug_labels(r.df for r in mining_reports(parsed, RecordingNer()).values())
     labels = pl.read_parquet(tmp_path / f'snap/drug_entities/{DRUG_TAG}/data.parquet')['label']
     assert labels.to_list() == expected.to_list()
     assert set(blind.to_list()) < set(expected.to_list())

@@ -22,7 +22,7 @@ from pts.transformers.clinical import (
     union_dfs,
 )
 from pts.transformers.clinical.mapping import require_staged
-from pts.transformers.clinical.mining import build_mining_reports, staged_lookup
+from pts.transformers.clinical.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
@@ -240,10 +240,8 @@ def staged_mining_reports(source: dict[str, str], staged: pl.DataFrame) -> dict[
     Raises:
         ValueError: if an EMA or PMDA indication text is not staged.
     """
-    return build_mining_reports(
-        source['ttd'],
-        source['ema'],
-        source['pmda'],
+    return mining_reports(
+        read_mining_inputs(source['ttd'], source['ema'], source['pmda']),
         staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts'),
     )
 

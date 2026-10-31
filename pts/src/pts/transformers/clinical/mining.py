@@ -1,6 +1,7 @@
 """The TTD, EMA and PMDA reports, built the same way for staging and for the release."""
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from io import BytesIO
 
 import pdfplumber
@@ -37,31 +38,64 @@ def read_ema_sheet(path: str) -> pl.DataFrame:
     )
 
 
-def build_mining_reports(
-    ttd: str,
-    ema: str,
-    pmda: str,
-    extract_diseases: Callable[[pl.Series], pl.Series],
-) -> dict[str, ClinicalReport]:
-    """The TTD, EMA and PMDA reports.
+@dataclass(frozen=True)
+class MiningInputs:
+    """The TTD, EMA and PMDA inputs, read and parsed.
+
+    Attributes:
+        ttd_lines: the lines of the TTD indications file.
+        ema_sheet: the EMA list of medicines, as returned by :func:`read_ema_sheet`.
+        pmda_approvals: the PMDA approvals, as parsed by :func:`parse_pmda_approvals`.
+    """
+
+    ttd_lines: list[str]
+    ema_sheet: pl.DataFrame
+    pmda_approvals: pl.DataFrame
+
+
+def read_mining_inputs(ttd: str, ema: str, pmda: str) -> MiningInputs:
+    """Read the TTD, EMA and PMDA inputs and parse the PMDA PDF.
 
     Args:
         ttd: the TTD indications text file.
         ema: the EMA medicines workbook.
         pmda: the PMDA approvals PDF.
+
+    Returns:
+        The parsed inputs, ready for :func:`mining_reports`.
+    """
+    pmda_bytes, _ = StorageHandle(pmda).read()
+    pmda_pdf = pdfplumber.open(BytesIO(pmda_bytes))
+    return MiningInputs(
+        ttd_lines=StorageHandle(ttd).open('r').read().split('\n'),
+        ema_sheet=read_ema_sheet(ema),
+        pmda_approvals=parse_pmda_approvals(pmda_pdf),
+    )
+
+
+def mining_reports(
+    inputs: MiningInputs,
+    extract_diseases: Callable[[pl.Series], pl.Series],
+) -> dict[str, ClinicalReport]:
+    """The TTD, EMA and PMDA reports.
+
+    The inputs are not changed, so one `MiningInputs` can be built into reports any number of times. The PMDA
+    drug labels depend on the disease results: a row whose notes yield no disease is dropped, and with it its
+    active ingredients. Reports built with a NER that finds nothing therefore have fewer drug labels than
+    reports built with the real disease results.
+
+    Args:
+        inputs: the parsed inputs, from :func:`read_mining_inputs`.
         extract_diseases: disease NER for the EMA and PMDA indication texts, mapping a String series of texts
             to a ``List(String)`` series of the same length.
 
     Returns:
         The reports, keyed `ttd`, `ema` and `pmda`.
     """
-    pmda_bytes, _ = StorageHandle(pmda).read()
-    pmda_pdf = pdfplumber.open(BytesIO(pmda_bytes))
-    ttd_lines = StorageHandle(ttd).open('r').read().split('\n')
     return {
-        'pmda': extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), extract_diseases=extract_diseases),
-        'ttd': extract_ttd_clinical_report(indications=extract_ttd_indication(ttd_lines)),
-        'ema': extract_ema_clinical_report(read_ema_sheet(ema), extract_diseases=extract_diseases),
+        'pmda': extract_pmda_clinical_report(df=inputs.pmda_approvals, extract_diseases=extract_diseases),
+        'ttd': extract_ttd_clinical_report(indications=extract_ttd_indication(inputs.ttd_lines)),
+        'ema': extract_ema_clinical_report(inputs.ema_sheet, extract_diseases=extract_diseases),
     }
 
 

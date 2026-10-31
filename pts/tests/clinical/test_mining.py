@@ -3,13 +3,15 @@ from pathlib import Path
 import openpyxl
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from pts.transformers.clinical import ClinicalReport
 from pts.transformers.clinical import mining as mining_module
 from pts.transformers.clinical.mining import (
     RecordingNer,
-    build_mining_reports,
+    mining_reports,
     read_ema_sheet,
+    read_mining_inputs,
     report_drug_labels,
     staged_lookup,
 )
@@ -95,19 +97,35 @@ def _comparable(report: ClinicalReport) -> list[dict]:
     return report.df.sort('id').with_columns(pl.col('drugs', 'diseases').list.sort()).to_dicts()
 
 
-def test_build_mining_reports_matches_the_release_path(inputs: dict[str, str]) -> None:
+def test_mining_reports_matches_the_release_path(inputs: dict[str, str]) -> None:
     expected = {
         'ttd': extract_ttd_clinical_report(indications=extract_ttd_indication(TTD_LINES)),
         'ema': extract_ema_clinical_report(read_ema_sheet(inputs['ema']), extract_diseases=_ner),
         'pmda': extract_pmda_clinical_report(df=APPROVALS, extract_diseases=_ner),
     }
 
-    reports = build_mining_reports(inputs['ttd'], inputs['ema'], inputs['pmda'], _ner)
+    reports = mining_reports(read_mining_inputs(inputs['ttd'], inputs['ema'], inputs['pmda']), _ner)
 
     assert sorted(reports) == ['ema', 'pmda', 'ttd']
     for name, report in reports.items():
         assert report.df.height > 0
         assert _comparable(report) == _comparable(expected[name])
+
+
+def test_mining_reports_is_repeatable(inputs: dict[str, str]) -> None:
+    parsed = read_mining_inputs(inputs['ttd'], inputs['ema'], inputs['pmda'])
+    ttd_lines, ema_sheet, approvals = list(parsed.ttd_lines), parsed.ema_sheet.clone(), parsed.pmda_approvals.clone()
+
+    first = mining_reports(parsed, _ner)
+    second = mining_reports(parsed, _ner)
+    fresh = mining_reports(read_mining_inputs(inputs['ttd'], inputs['ema'], inputs['pmda']), _ner)
+
+    assert sorted(first) == sorted(second) == sorted(fresh)
+    for name in first:
+        assert _comparable(first[name]) == _comparable(second[name]) == _comparable(fresh[name])
+    assert parsed.ttd_lines == ttd_lines
+    assert_frame_equal(parsed.ema_sheet, ema_sheet)
+    assert_frame_equal(parsed.pmda_approvals, approvals)
 
 
 def test_recorded_disease_texts_are_what_the_providers_pass(tmp_path: Path, inputs: dict[str, str]) -> None:
@@ -127,7 +145,7 @@ def test_recorded_disease_texts_are_what_the_providers_pass(tmp_path: Path, inpu
     workbook.save(tmp_path / 'blanks.xlsx')
 
     recorder = RecordingNer()
-    build_mining_reports(inputs['ttd'], str(tmp_path / 'blanks.xlsx'), inputs['pmda'], recorder)
+    mining_reports(read_mining_inputs(inputs['ttd'], str(tmp_path / 'blanks.xlsx'), inputs['pmda']), recorder)
 
     assert recorder.texts == {
         'treatment of asthma',
@@ -147,16 +165,14 @@ def _stage_diseases(texts: list[str]) -> pl.DataFrame:
 
 def test_ema_and_pmda_diseases_come_from_staging(inputs: dict[str, str]) -> None:
     recorder = RecordingNer()
-    build_mining_reports(inputs['ttd'], inputs['ema'], inputs['pmda'], recorder)
+    mining_reports(read_mining_inputs(inputs['ttd'], inputs['ema'], inputs['pmda']), recorder)
     texts = sorted(recorder.texts)
     staged = _stage_diseases(texts)
 
     reports = staged_mining_reports(inputs, staged)
 
-    expected = build_mining_reports(
-        inputs['ttd'],
-        inputs['ema'],
-        inputs['pmda'],
+    expected = mining_reports(
+        read_mining_inputs(inputs['ttd'], inputs['ema'], inputs['pmda']),
         lambda texts: pl.Series([[f'staged {text}'] for text in texts], dtype=pl.List(pl.String)),
     )
     assert sorted(reports) == ['ema', 'pmda', 'ttd']

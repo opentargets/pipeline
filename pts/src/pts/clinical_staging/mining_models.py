@@ -8,7 +8,13 @@ import polars as pl
 
 from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
-from pts.transformers.clinical.mining import RecordingNer, build_mining_reports, report_drug_labels, staged_lookup
+from pts.transformers.clinical.mining import (
+    RecordingNer,
+    mining_reports,
+    read_mining_inputs,
+    report_drug_labels,
+    staged_lookup,
+)
 from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
 
 if TYPE_CHECKING:
@@ -30,14 +36,19 @@ def stage_mining_models(
 ) -> dict[str, Any]:
     """Run disease NER over the EMA and PMDA indication texts and drug NER over the unresolved drug labels.
 
+    The inputs are read once. The reports are built twice: first with a recording NER, to collect the disease
+    texts, then with the staged disease results. The second build is needed for the drug labels, because a PMDA
+    row whose notes yield no disease is dropped, and its active ingredients with it.
+
     Returns:
         dict[str, Any]: Per model, the number of texts and whether it computed or published anything.
     """
     revisions = staged_model_revisions(models_uri)
     DISEASE_ENTITIES.require(revisions)
     DRUG_ENTITIES.require(revisions)
+    inputs = read_mining_inputs(ttd, ema, pmda)
     recorder = RecordingNer()
-    build_mining_reports(ttd, ema, pmda, recorder)
+    mining_reports(inputs, recorder)
     disease_texts = pl.Series('text', sorted(recorder.texts), dtype=pl.String)
 
     with offline_hf_models(models_uri):
@@ -51,9 +62,7 @@ def stage_mining_models(
             config,
             max_attempts,
         )
-        reports = build_mining_reports(
-            ttd, ema, pmda, staged_lookup(disease.frame, 'text', 'extracted_diseases', 'disease texts')
-        )
+        reports = mining_reports(inputs, staged_lookup(disease.frame, 'text', 'extracted_diseases', 'disease texts'))
         drug_labels = report_drug_labels(report.df for report in reports.values())
         ner = DRUG_ENTITIES.stage(
             drug_labels,
