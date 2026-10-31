@@ -25,7 +25,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
-from pts.transformers.variant.alleles import contig_spans
+from pts.transformers.variant.alleles import contig_spans, write_fai
 from pts.transformers.variant.alphamissense import partition_alphamissense
 from pts.transformers.variant.chromosome import Pools, Shared, annotate_chromosomes
 from pts.transformers.variant.colocated import extract_all_vars
@@ -122,8 +122,10 @@ def _local(path: str, directory: Path) -> str:
     return str(target)
 
 
-def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[Path, Path]:
-    """The FASTA uncompressed, and the prepared GFF3 with its fastVEP cache."""
+def _reference(
+    sources: VariantSource, binary: str, directory: Path
+) -> tuple[Path, dict[str, tuple[int, int]], Path]:
+    """The FASTA uncompressed with its `.fai`, its `contig_spans`, and the prepared GFF3 with its fastVEP cache."""
     directory.mkdir(parents=True)
     fasta = _local(sources.fasta, directory)
     plain = directory / Path(fasta).name.removesuffix('.gz')
@@ -131,9 +133,11 @@ def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[Pa
         shutil.copyfileobj(source, out, COPY_BYTES)
     if fasta != sources.fasta:
         Path(fasta).unlink()
+    spans = contig_spans(plain)
+    write_fai(plain, spans)
     gff3 = prepare_gff3(sources.gff3, directory)
     build_cache(gff3, plain, binary)
-    return plain, gff3
+    return plain, spans, gff3
 
 
 def _sift(sources: VariantSource, path: Path) -> Path:
@@ -186,10 +190,10 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
         sift = pool.submit(_sift, sources, scratch / 'sift.parquet')
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
         ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
-        plain_fasta, gff3 = reference.result()
+        plain_fasta, contigs, gff3 = reference.result()
         shared = Shared(
             plain_fasta=plain_fasta,
-            contigs=contig_spans(plain_fasta),
+            contigs=contigs,
             gff3=gff3,
             gerp=gerp.result(),
             ancestor=ancestor.result(),

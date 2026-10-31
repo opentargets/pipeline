@@ -4,6 +4,7 @@ import gzip
 import mmap
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
@@ -58,6 +59,48 @@ def read_contig(fasta: Path, span: tuple[int, int]) -> bytes:
     with fasta.open('rb') as handle:
         handle.seek(start)
         return handle.read(end - start).translate(None, b' \t\r\n').upper()
+
+
+def _fai_row(buffer: mmap.mmap, name: str, span: tuple[int, int]) -> str | None:
+    """The faidx row of one contig; None if its lines are uneven."""
+    start, end = span
+    sequence = np.frombuffer(buffer, dtype=np.uint8, count=end - start, offset=start)
+    if sequence.size == 0:
+        return f'{name}\t0\t{start}\t0\t0'
+    ends = np.flatnonzero(sequence == ord('\n')) + 1
+    if ends.size == 0 or ends[-1] != sequence.size:
+        ends = np.append(ends, sequence.size)
+    widths = np.diff(ends, prepend=0)
+    newline = sequence[ends - 1] == ord('\n')
+    carriage = newline & (widths > 1) & (sequence[np.maximum(ends - 2, 0)] == ord('\r'))
+    bases = widths - newline - carriage
+    width, line_bases, last = int(widths[0]), int(bases[0]), int(bases[-1])
+    if (widths[:-1] != width).any() or (bases[:-1] != line_bases).any() or not 0 < last <= line_bases:
+        return None
+    return f'{name}\t{line_bases * (ends.size - 1) + last}\t{start}\t{line_bases}\t{width}'
+
+
+def write_fai(fasta: Path, spans: dict[str, tuple[int, int]]) -> Path:
+    """Write the samtools faidx index of an uncompressed FASTA next to it, at `<fasta>.fai`.
+
+    `spans` are the FASTA's `contig_spans`; each gets one row of name, length, offset, line
+    bases and line width, in file order. The index is written to a temporary file, then renamed.
+
+    Raises:
+        ValueError: if a contig's lines, other than its last, differ in length, or its last
+            line is longer than the others; no index is written.
+    """
+    rows = []
+    if spans:
+        with fasta.open('rb') as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+            rows = [_fai_row(buffer, name, span) for name, span in spans.items()]
+    for name, row in zip(spans, rows, strict=True):
+        if row is None:
+            raise ValueError(f'contig {name} of {fasta} has uneven line lengths: faidx cannot index it')
+    fai = fasta.with_name(f'{fasta.name}.fai')
+    partial = fai.with_name(f'{fai.name}.partial')
+    partial.write_text(''.join(f'{row}\n' for row in rows))
+    return partial.replace(fai)
 
 
 def shared_prefix_length(left: pl.Expr, right: pl.Expr) -> pl.Expr:

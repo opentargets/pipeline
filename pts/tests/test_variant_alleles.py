@@ -7,7 +7,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.alleles import contig_spans, hgvs_genomic, read_chromosome, read_contig, vep_allele_form
+from pts.transformers.variant.alleles import (
+    contig_spans,
+    hgvs_genomic,
+    read_chromosome,
+    read_contig,
+    vep_allele_form,
+    write_fai,
+)
 
 #: Ensembl 116 GRCh38 bases around each test variant, one contig per chromosome. Each contig
 #: holds only a window, whose first position is in its header and in `WINDOW_START`.
@@ -133,3 +140,56 @@ def test_contig_spans_keep_the_first_contig_of_a_name_and_a_last_line_without_ne
     plain.write_bytes(b'>1 dna:chromosome\nacgt\nAC\n>2\nGG\n>1\nTTTT\n>3\nCA')
     spans = contig_spans(plain)
     assert {name: read_contig(plain, span) for name, span in spans.items()} == {'1': b'ACGTAC', '2': b'GG', '3': b'CA'}
+
+
+@pytest.mark.parametrize(
+    ('fasta', 'expected'),
+    [
+        pytest.param(
+            b'>1 dna:chromosome\nACGT\nACGT\nAC\n>2\nGGGG\n>3\nTTTT\nTT\n',
+            ['1\t10\t18\t4\t5', '2\t4\t34\t4\t5', '3\t6\t42\t4\t5'],
+            id='short-last-line-and-one-full-line',
+        ),
+        pytest.param(b'>1\nACGT\nAC', ['1\t6\t3\t4\t5'], id='last-line-without-newline'),
+        pytest.param(b'>1\r\nACGT\r\nAC\r\n>2\r\nGG\r\n', ['1\t6\t4\t4\t6', '2\t2\t18\t2\t4'], id='crlf'),
+        pytest.param(b'>1\n>2\nAC\n', ['1\t0\t3\t0\t0', '2\t2\t6\t2\t3'], id='empty-contig'),
+        pytest.param(b'>1\nAC\n>2\nGG\n>1\nTTTT\n', ['1\t2\t3\t2\t3', '2\t2\t9\t2\t3'], id='first-of-a-name'),
+    ],
+)
+def test_write_fai(tmp_path: Path, fasta: bytes, expected: list[str]):
+    plain = tmp_path / 'reference.fa'
+    plain.write_bytes(fasta)
+    fai = write_fai(plain, contig_spans(plain))
+    assert fai == tmp_path / 'reference.fa.fai'
+    assert fai.read_text().splitlines() == expected
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['reference.fa', 'reference.fa.fai']
+
+
+@pytest.mark.parametrize(
+    'fasta',
+    [
+        pytest.param(b'>1\nACGT\nAC\nACGT\n>2\nGG\n', id='short-line-inside'),
+        pytest.param(b'>1\nAC\nACGT\n', id='long-last-line'),
+        pytest.param(b'>1\nACGT\n\nACGT\n', id='blank-line'),
+    ],
+)
+def test_write_fai_refuses_uneven_lines(tmp_path: Path, fasta: bytes):
+    plain = tmp_path / 'reference.fa'
+    plain.write_bytes(fasta)
+    (tmp_path / 'reference.fa.fai').write_text('stale\n')
+    with pytest.raises(ValueError, match=r'contig 1 .*uneven'):
+        write_fai(plain, contig_spans(plain))
+    assert (tmp_path / 'reference.fa.fai').read_text() == 'stale\n'
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['reference.fa', 'reference.fa.fai']
+
+
+def test_fai_rows_address_the_contigs_read_contig_reads(tmp_path: Path):
+    plain = tmp_path / 'reference.fa'
+    plain.write_bytes(gzip.decompress(Path(FASTA).read_bytes()))
+    spans = contig_spans(plain)
+    data = plain.read_bytes()
+    for line in write_fai(plain, spans).read_text().splitlines():
+        name, length, offset, bases, width = line.split('\t')
+        length, offset, bases, width = int(length), int(offset), int(bases), int(width)
+        lines = [data[offset + i * width : offset + i * width + bases] for i in range(-(-length // bases))]
+        assert b''.join(lines)[:length].upper() == read_contig(plain, spans[name])
