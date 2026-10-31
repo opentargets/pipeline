@@ -190,45 +190,14 @@ def sift_scores(records: pl.DataFrame, matrices: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame({'sift_score': scores, 'sift_prediction': predictions}, schema=_SCORES)
 
 
-def add_sift(records: pl.LazyFrame, matrices: pl.DataFrame) -> pl.LazyFrame:
-    """Fill `sift_score` and `sift_prediction` of every transcript consequence of the records.
+def add_sift(consequences: pl.DataFrame, matrices: pl.DataFrame) -> pl.DataFrame:
+    """Add `sift_score` and `sift_prediction` to the consequences.
 
     Args:
-        records: VEP-shaped records.
+        consequences: The consequences frame of one chromosome.
         matrices: `sift_matrices`.
 
     Returns:
-        The records, row for row; see `sift_scores`.
+        The consequences, row for row, with the two columns added; see `sift_scores`.
     """
-    frame = records.collect()
-    consequences = (
-        frame
-        .select(pl.col('transcript_consequences').alias('transcript'))
-        .with_row_index('row')
-        .filter(pl.col('transcript').list.len() > 0)
-        .explode('transcript')
-        .rechunk()
-        .with_columns(pl.col('transcript').struct.field('transcript_id', 'amino_acids', 'protein_end'))
-    )
-    scores = sift_scores(consequences, matrices)
-    filled = (
-        consequences
-        .with_columns(scores.select(pl.col('sift_score').alias('_score'), pl.col('sift_prediction').alias('_pred')))
-        .rechunk()
-        .select(
-            'row',
-            pl.col('transcript').struct.with_fields(
-                pl.col('_score').alias('sift_score'), pl.col('_pred').alias('sift_prediction')
-            ),
-        )
-        .group_by('row', maintain_order=True)
-        .agg(pl.col('transcript').alias('filled'))
-    )
-    return (
-        frame
-        .with_row_index('row')
-        .join(filled, on='row', how='left', maintain_order='left')
-        .with_columns(pl.coalesce('filled', 'transcript_consequences').alias('transcript_consequences'))
-        .select(frame.columns)
-        .lazy()
-    )
+    return consequences.with_columns(sift_scores(consequences, matrices))

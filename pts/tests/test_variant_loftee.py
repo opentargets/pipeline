@@ -12,7 +12,6 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.chromosome import _sequence
 from pts.transformers.variant.gerp import KentBigWig
@@ -24,7 +23,7 @@ from pts.transformers.variant.loftee import (
     loftee,
     loftee_models,
 )
-from pts.transformers.variant.vep import parse_vep
+from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
 ATM = json.loads((Path(__file__).parent / 'test_data' / 'loftee_atm_ENST00000675843.json').read_text())
@@ -362,49 +361,35 @@ def test_ancestor_is_grch38(tmp_path: Path):
     assert flipped == [('LC', 'ANC_ALLELE')]
 
 
-def line(position: int, ref: str, alt: str) -> str:
-    return '\t'.join(['1', str(position), '.', ref, alt, '.', '.', '.'])
+def consequence_frame(*rows: dict) -> pl.DataFrame:
+    """A consequences frame over `consequence` rows, with the other columns null."""
+    frame = pl.DataFrame(list(rows), schema=CONSEQUENCES)
+    return frame.select([
+        pl.col(name) if name in frame.columns else pl.lit(None, dtype).alias(name)
+        for name, dtype in CONSEQUENCES_SCHEMA.items()
+    ])
 
 
-def test_add_loftee_fills_canonical_consequences_for_parse_vep(ancestor: bytes, gerp: KentBigWig):
-    lof = {'canonical': 1, 'gene_id': 'G1', 'biotype': 'protein_coding', 'cds_end': 10}
-    records = pl.DataFrame(
-        [
-            {
-                'input': line(610, 'A', 'T'),
-                'most_severe_consequence': 'stop_gained',
-                'transcript_consequences': [
-                    {**lof, 'transcript_id': 'TP', 'consequence_terms': ['stop_gained']},
-                    {**lof, 'transcript_id': 'TQ', 'consequence_terms': ['missense_variant']},
-                ],
-            },
-            {'input': line(3000, 'A', 'G'), 'most_severe_consequence': 'intergenic_variant'},
-            {
-                'input': line(170, 'GA', 'G'),
-                'most_severe_consequence': 'frameshift_variant',
-                'transcript_consequences': [
-                    {**lof, 'transcript_id': 'TP', 'consequence_terms': ['frameshift_variant']},
-                    {**lof, 'canonical': None, 'transcript_id': 'TI', 'consequence_terms': ['stop_gained']},
-                ],
-            },
-        ],
-        schema=vep_schema,
-    ).with_columns(pl.col('transcript_consequences').fill_null(pl.lit([], dtype=vep_schema['transcript_consequences'])))
-    filled = add_loftee(records.lazy(), MODELS, genome(), ancestor, gerp, '1').collect()
-    assert filled.schema == vep_schema
-    assert filled['input'].to_list() == records['input'].to_list()
-    lofs = [
-        [(tc['transcript_id'], tc['lof'], tc['lof_filter']) for tc in tcs] for tcs in filled['transcript_consequences']
+def test_add_loftee_adds_the_calls_in_row_order(ancestor: bytes, gerp: KentBigWig):
+    frame = consequence_frame(
+        consequence('TP', ['stop_gained'], 610, 'A', 'T'),
+        consequence('TQ', ['missense_variant'], 610, 'A', 'T'),
+        consequence('TP', ['frameshift_variant'], 170, 'GA', 'G'),
+    )
+    filled = add_loftee(frame, MODELS, genome(), ancestor, gerp, '1')
+    assert filled.columns == [*CONSEQUENCES_SCHEMA.names(), 'lof', 'lof_filter']
+    assert filled.drop('lof', 'lof_filter').equals(frame)
+    assert filled.select('transcript_id', 'lof', 'lof_filter').rows() == [
+        ('TP', 'LC', 'END_TRUNC'),
+        ('TQ', None, None),
+        ('TP', 'HC', None),
     ]
-    assert lofs == [[('TP', 'LC', 'END_TRUNC'), ('TQ', None, None)], [], [('TP', 'HC', None), ('TI', None, None)]]
-    index = parse_vep(filled.lazy()).collect()
-    # parse_vep keeps canonical transcripts only
-    assert [[tc['lofteePrediction'] for tc in tcs] for tcs in index['transcriptConsequences']] == [
-        ['LC', None],
-        [],
-        ['HC'],
-    ]
-    assert index['variantDescription'][2].endswith(' A high-confidence loss-of-function variant by loftee.')
+
+
+def test_effects_accept_an_empty_consequences_frame(ancestor: bytes, gerp: KentBigWig):
+    found = add_loftee(pl.DataFrame(schema=CONSEQUENCES_SCHEMA), MODELS, genome(), ancestor, gerp, '1')
+    assert found.height == 0
+    assert found.select('lof', 'lof_filter').schema == pl.Schema({'lof': pl.String, 'lof_filter': pl.String})
 
 
 def test_loftee_models_from_the_core(tmp_path: Path):

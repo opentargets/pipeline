@@ -1,4 +1,4 @@
-"""Tests for GERP and AlphaMissense filled into the VEP-shaped records."""
+"""Tests for GERP and AlphaMissense as columns of the consequences frame."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.schemas.vep import vep_schema
+from pts.transformers.variant import predictions
+from pts.transformers.variant.alleles import vep_allele_form
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
+from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
 
@@ -39,73 +41,104 @@ def bigwig(tmp_path_factory: pytest.TempPathFactory) -> str:
     return path
 
 
-def records(*lines: tuple[str, list[str]]) -> pl.LazyFrame:
-    """One record per `input` line, with a transcript consequence for each transcript id."""
-    return pl.DataFrame(
+def consequences(*rows: tuple[int, int, str, str, str]) -> pl.DataFrame:
+    """One consequence per (row, position, reference, alternate, transcript id), in VEP's coordinates."""
+    frame = pl.DataFrame(
         [
-            {'input': line, 'transcript_consequences': [{'transcript_id': t} for t in transcripts]}
-            for line, transcripts in lines
+            {
+                'row': row,
+                'position': position,
+                'referenceAllele': ref,
+                'alternateAllele': alt,
+                'transcript_id': transcript,
+            }
+            for row, position, ref, alt, transcript in rows
         ],
-        schema={name: vep_schema[name] for name in ('input', 'transcript_consequences')},
-    ).lazy()
+        schema={
+            name: CONSEQUENCES_SCHEMA[name]
+            for name in ('row', 'position', 'referenceAllele', 'alternateAllele', 'transcript_id')
+        },
+    )
+    frame = vep_allele_form(frame.lazy()).collect()
+    return frame.select([
+        pl.col(name).cast(dtype) if name in frame.columns else pl.lit(None, dtype).alias(name)
+        for name, dtype in CONSEQUENCES_SCHEMA.items()
+    ])
 
 
-def line(position: int, ref: str, alt: str) -> str:
-    return '\t'.join(['1', str(position), '.', ref, alt, '.', '.', '.'])
+def effects(found: pl.DataFrame) -> list[tuple]:
+    return [
+        (tc['transcript_id'], tc['conservation'], tc['am_class'], tc['am_pathogenicity'])
+        for tc in found.iter_rows(named=True)
+    ]
 
 
 def test_fill_conservation_and_alphamissense(bigwig: str, tsv: str):
     found = add_gerp_and_alphamissense(
-        records(
-            (line(945518, 'C', 'A'), ['ENST00000327044', 'ENST00000999999']),
-            (line(946175, 'G', 'A'), ['ENST00000327044']),
+        consequences(
+            (0, 945518, 'C', 'A', 'ENST00000327044'),
+            (0, 945518, 'C', 'A', 'ENST00000999999'),
+            (1, 946175, 'G', 'A', 'ENST00000327044'),
         ),
         bigwig,
         tsv,
         '1',
-    ).collect()
-    first, second = (row['transcript_consequences'] for row in found.iter_rows(named=True))
-    assert [(tc['transcript_id'], tc['conservation'], tc['alphamissense']) for tc in first] == [
-        ('ENST00000327044', -1.75, {'am_class': 'likely_benign', 'am_pathogenicity': 0.1719}),
-        ('ENST00000999999', -1.75, None),
-    ]
-    assert [(tc['conservation'], tc['alphamissense']) for tc in second] == [
-        (0.062, {'am_class': 'likely_benign', 'am_pathogenicity': 0.1618})
+    )
+    assert effects(found) == [
+        ('ENST00000327044', -1.75, 'likely_benign', 0.1719),
+        ('ENST00000999999', -1.75, None, None),
+        ('ENST00000327044', 0.062, 'likely_benign', 0.1618),
     ]
 
 
 def test_fill_deletion_and_insertion_spans(bigwig: str, tsv: str):
     found = add_gerp_and_alphamissense(
-        records(
-            (line(945517, 'TCA', 'T'), ['ENST00000327044']),
-            (line(945518, 'C', 'CT'), ['ENST00000327044']),
+        consequences(
+            (0, 945517, 'TCA', 'T', 'ENST00000327044'),
+            (1, 945518, 'C', 'CT', 'ENST00000327044'),
         ),
         bigwig,
         tsv,
         '1',
-    ).collect()
-    scores = [row['transcript_consequences'][0]['conservation'] for row in found.iter_rows(named=True)]
+    )
     # the deletion removes 945518 and 945519; the insertion sits between 945518 and 945519
-    assert scores == [-1.75, -1.75]
-    assert all(row['transcript_consequences'][0]['alphamissense'] is None for row in found.iter_rows(named=True))
+    assert [(c, a) for _, c, a, _ in effects(found)] == [(-1.75, None), (-1.75, None)]
 
 
 def test_fill_leaves_missing_data_null(bigwig: str, tsv: str):
-    found = add_gerp_and_alphamissense(
-        records((line(500, 'C', 'A'), ['ENST00000327044']), (line(700, 'G', 'T'), [])),
-        bigwig,
-        tsv,
-        '1',
-    ).collect()
-    assert found['transcript_consequences'].to_list() == [
-        [{**found['transcript_consequences'][0][0], 'conservation': None, 'alphamissense': None}],
-        [],
-    ]
+    found = add_gerp_and_alphamissense(consequences((0, 500, 'C', 'A', 'ENST00000327044')), bigwig, tsv, '1')
+    assert effects(found) == [('ENST00000327044', None, None, None)]
 
 
 def test_fill_chromosome_without_contig_or_rows(bigwig: str, tsv: str):
+    found = add_gerp_and_alphamissense(consequences((0, 945518, 'C', 'A', 'ENST00000327044')), bigwig, tsv, 'MT')
+    assert effects(found) == [('ENST00000327044', None, None, None)]
+
+
+def test_gerp_is_computed_once_per_variant(bigwig: str, tsv: str, monkeypatch: pytest.MonkeyPatch):
+    spans: list[int] = []
+    gerp_max = predictions.gerp_max
+
+    def spy(path: str, chromosome: str, rows: pl.DataFrame) -> pl.Series:
+        spans.append(rows.height)
+        return gerp_max(path, chromosome, rows)
+
+    monkeypatch.setattr(predictions, 'gerp_max', spy)
     found = add_gerp_and_alphamissense(
-        records((line(945518, 'C', 'A'), ['ENST00000327044'])), bigwig, tsv, 'MT'
-    ).collect()
-    tc = found['transcript_consequences'][0][0]
-    assert (tc['conservation'], tc['alphamissense']) == (None, None)
+        consequences((0, 945518, 'C', 'A', 'ENST00000327044'), (0, 945518, 'C', 'A', 'ENST00000999999')),
+        bigwig,
+        tsv,
+        '1',
+    )
+    assert spans == [1]
+    assert found['conservation'].to_list() == [-1.75, -1.75]
+
+
+def test_effects_accept_an_empty_consequences_frame():
+    found = add_gerp_and_alphamissense(pl.DataFrame(schema=CONSEQUENCES_SCHEMA), '/no/gerp.bw', '/no/am.tsv.gz', '1')
+    assert found.height == 0
+    assert found.select('conservation', 'am_class', 'am_pathogenicity').schema == pl.Schema({
+        'conservation': pl.Float64,
+        'am_class': pl.String,
+        'am_pathogenicity': pl.Float64,
+    })

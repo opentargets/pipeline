@@ -13,7 +13,6 @@ import polars as pl
 
 from pts.schemas.ensembl_core import EXON, TRANSCRIPT
 from pts.transformers.utils.ensembl import CoreDump, transcripts
-from pts.transformers.variant.alleles import vep_allele_form
 from pts.transformers.variant.gerp import KentBigWig
 
 LOF_TERMS = ['stop_gained', 'frameshift_variant', 'splice_acceptor_variant', 'splice_donor_variant']
@@ -315,80 +314,25 @@ def loftee(
 
 
 def add_loftee(
-    records: pl.LazyFrame,
+    consequences: pl.DataFrame,
     models: dict[str, TranscriptModel],
     sequence: bytes,
     ancestor: bytes,
     gerp: KentBigWig,
     chromosome: str,
-) -> pl.LazyFrame:
-    """Fill `lof` and `lof_filter` of the canonical transcript consequences of the records.
-
-    Coordinates and alleles are VEP's, from each record's `input` line; consequence terms and
-    `cds_end` are the consequence's own. See `loftee`.
+) -> pl.DataFrame:
+    """Add `lof` and `lof_filter` to the consequences. See `loftee`.
 
     Args:
-        records: The VEP-shaped records of one chromosome, with VCF-form `input` lines.
+        consequences: The consequences frame of one chromosome.
         models: `loftee_models` of the chromosome.
         sequence: The chromosome's reference, byte i being position i + 1.
         ancestor: The chromosome's GRCh38 human ancestor in upper case, byte i being position
             i + 1; empty for a chromosome the ancestor lacks.
         gerp: The GERP bigWig.
-        chromosome: The chromosome of the records.
+        chromosome: The chromosome of the consequences.
 
     Returns:
-        The records, row for row; other transcript consequences are unchanged.
+        The consequences, row for row, with the two columns added.
     """
-    frame = records.collect()
-    fields = pl.col('input').str.split('\t')
-    variants = vep_allele_form(
-        frame.select(
-            fields.list.get(1).cast(pl.Int64).alias('position'),
-            fields.list.get(3).alias('referenceAllele'),
-            fields.list.get(4).alias('alternateAllele'),
-        ).lazy()
-    ).collect()
-    consequences = (
-        frame
-        .select(pl.col('transcript_consequences').alias('transcript'))
-        .with_columns(
-            pl.Series('row', range(frame.height), dtype=pl.UInt32),
-            *variants.select('vepStart', 'vepEnd', 'vepReference', 'vepAlternate').get_columns(),
-        )
-        .filter(pl.col('transcript').list.len() > 0)
-        .explode('transcript')
-        .rechunk()
-        .with_columns(pl.col('transcript').struct.field('canonical', 'transcript_id', 'consequence_terms', 'cds_end'))
-    )
-    canonical = pl.col('canonical') == 1
-    calls = loftee(
-        consequences.with_columns(pl.when(canonical).then('consequence_terms').alias('consequence_terms')),
-        models,
-        sequence,
-        ancestor,
-        gerp,
-        chromosome,
-    )
-    filled = (
-        consequences
-        .with_columns(calls.select(pl.col('lof').alias('_lof'), pl.col('lof_filter').alias('_lof_filter')))
-        .rechunk()
-        .select(
-            'row',
-            pl.col('transcript').struct.with_fields(
-                pl.when(canonical).then('_lof').otherwise(pl.field('lof')).alias('lof'),
-                pl.when(canonical).then('_lof_filter').otherwise(pl.field('lof_filter')).alias('lof_filter'),
-            ),
-        )
-        .group_by('row', maintain_order=True)
-        .agg(pl.col('transcript').alias('filled'))
-    )
-    return (
-        frame
-        .with_row_index('row')
-        .join(filled, on='row', how='left', maintain_order='left')
-        .with_columns(pl.coalesce('filled', 'transcript_consequences').alias('transcript_consequences'))
-        .drop('row', 'filled')
-        .select(frame.columns)
-        .lazy()
-    )
+    return consequences.with_columns(loftee(consequences, models, sequence, ancestor, gerp, chromosome))

@@ -323,9 +323,21 @@ def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
     return ChunkFrames(variants, pl.DataFrame(schema=CONSEQUENCES_SCHEMA))
 
 
-def _transcript() -> pl.Expr:
+def _transcript(columns: list[str]) -> pl.Expr:
     """The VEP transcript consequence struct; fields other tasks fill are null."""
     fields = {name: pl.col(name) for name in (*_FIELDS, 'hgvsg')} | {'canonical': pl.lit(1, pl.Int64)}
+    if 'conservation' in columns:
+        fields['conservation'] = pl.col('conservation')
+    if 'am_class' in columns:
+        fields['alphamissense'] = (
+            pl
+            .when(pl.col('am_class').is_not_null())
+            .then(pl.struct('am_class', 'am_pathogenicity'))
+            .cast(_TRANSCRIPT.to_schema()['alphamissense'])
+        )
+    for name in ('lof', 'lof_filter', 'sift_score', 'sift_prediction'):
+        if name in columns:
+            fields[name] = pl.col(name)
     return pl.struct([
         fields[name].cast(dtype).alias(name) if name in fields else pl.lit(None, dtype).alias(name)
         for name, dtype in _TRANSCRIPT.to_schema().items()
@@ -335,8 +347,9 @@ def _transcript() -> pl.Expr:
 def vep_records(frames: ChunkFrames) -> pl.DataFrame:
     """The VEP records `parse_vep` reads, rebuilt from the frames.
 
-    `input` carries `.` for the rsID. `colocated_variants` is empty; `conservation`,
-    `alphamissense`, `lof` and `lof_filter` are null.
+    `input` carries `.` for the rsID. `colocated_variants` is empty. The effect columns of the
+    consequences, when present, fill `conservation`, `alphamissense`, `lof`, `lof_filter`,
+    `sift_score` and `sift_prediction`; the others are null.
     """
     variants, consequences = frames
     nested = (
@@ -344,7 +357,7 @@ def vep_records(frames: ChunkFrames) -> pl.DataFrame:
         .join(variants.select('row', 'hgvsg'), on='row', how='left', maintain_order='left')
         .rechunk()
         .group_by('row', maintain_order=True)
-        .agg(_transcript().alias('transcript_consequences'))
+        .agg(_transcript(consequences.columns).alias('transcript_consequences'))
     )
     return (
         variants
@@ -370,4 +383,3 @@ def vep_records(frames: ChunkFrames) -> pl.DataFrame:
             pl.col('transcript_consequences').fill_null(pl.lit([], dtype=vep_schema['transcript_consequences'])),
         )
     )
-

@@ -43,6 +43,7 @@ from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.records import (
     CHUNK_BYTES,
+    ChunkFrames,
     chunk_frames,
     iter_records,
     unannotated_frames,
@@ -381,10 +382,23 @@ def annotate_chunk(
         )
         shutil.rmtree(_records(shared, chromosome, chunk))
         transcripts = pl.read_parquet(directory / 'transcripts.parquet')
-        records = vep_records(chunk_frames(fastvep, frame, transcripts, sequence, chromosome))
+        frames = chunk_frames(fastvep, frame, transcripts, sequence, chromosome)
         del fastvep
     else:
-        records = vep_records(unannotated_frames(frame, chromosome))
+        frames = unannotated_frames(frame, chromosome)
+    models = pickle.loads((directory / 'loftee.pickle').read_bytes())
+    ancestor = (directory / 'ancestor.bin').read_bytes()
+    consequences = add_gerp_and_alphamissense(frames.consequences, shared.gerp, alphamissense, chromosome)
+    with KentBigWig(shared.gerp) as gerp:
+        consequences = add_loftee(consequences, models, sequence, ancestor, gerp, chromosome)
+    matrices = (
+        pl
+        .scan_parquet(shared.sift)
+        .join(consequences.select('transcript_id').unique().lazy(), on='transcript_id', how='semi')
+        .collect()
+    )
+    consequences = add_sift(consequences, matrices)
+    records = vep_records(ChunkFrames(frames.variants, consequences))
     located = directory / 'colocated.parquet'
     colocated = (
         in_range(located, frame['position']).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
@@ -392,16 +406,7 @@ def annotate_chunk(
         else None
     )
     records = with_colocated(records, frame, colocated)
-    filled = add_gerp_and_alphamissense(records.lazy(), shared.gerp, alphamissense, chromosome)
-    models = pickle.loads((directory / 'loftee.pickle').read_bytes())
-    ancestor = (directory / 'ancestor.bin').read_bytes()
-    with KentBigWig(shared.gerp) as gerp:
-        filled = add_loftee(filled, models, sequence, ancestor, gerp, chromosome).collect()
-    transcript_ids = filled.select(
-        pl.col('transcript_consequences').explode().struct.field('transcript_id').drop_nulls().unique()
-    )
-    matrices = pl.scan_parquet(shared.sift).join(transcript_ids.lazy(), on='transcript_id', how='semi').collect()
-    index = parse_vep(add_sift(filled.lazy(), matrices), shared.hash_threshold).collect()
+    index = parse_vep(records.lazy(), shared.hash_threshold).collect()
     logger.info('Annotating {} variants of chromosome {}, chunk {}', index.height, chromosome, chunk)
     return _write(_merged(index, shared, chromosome), part)
 
