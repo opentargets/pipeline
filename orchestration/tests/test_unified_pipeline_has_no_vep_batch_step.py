@@ -59,3 +59,12 @@ def test_variant_gets_a_500_gb_work_disk_and_other_steps_keep_the_default(dag_ba
     dag = dag_bag.dags['unified_pipeline']
     assert dag.get_task('pts_variant.run_pts_variant').work_disk_size_gb == 500
     assert dag.get_task('pts_target.run_pts_target').work_disk_size_gb == 300
+
+
+def test_every_gentropy_step_runs_on_a_cluster(dag_bag) -> None:
+    config = UnifiedPipelineConfig()
+    assert config.steps('gentropy_')
+    for step_name in config.steps('gentropy_'):
+        assert config.step_cluster_definition(step_name) is not None, step_name
+    dag = dag_bag.dags['unified_pipeline']
+    assert not [task.task_id for task in dag.tasks if type(task).__module__ == 'orchestration.operators.batch']
