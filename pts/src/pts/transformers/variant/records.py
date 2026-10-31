@@ -156,8 +156,6 @@ def _consequences(records: pl.DataFrame, variants: pl.DataFrame, transcripts: pl
         deletion & (pl.col('vepStart') <= pl.col('transcript_start')) & (pl.col('vepEnd') >= pl.col('transcript_end'))
     ).fill_null(False)
     terms = pl.col('consequence_terms')
-    halves = pl.col('amino_acids').str.split_exact('/', 1)
-    synonymous = halves.struct.field('field_0') == halves.struct.field('field_1')
     return joined.with_columns(
         pl
         .when(ablation)
@@ -174,10 +172,7 @@ def _consequences(records: pl.DataFrame, variants: pl.DataFrame, transcripts: pl
         .otherwise(terms)
         .alias('consequence_terms'),
         pl.when(ablation).then(pl.lit('HIGH')).otherwise('impact').alias('impact'),
-        pl
-        .when(~ablation)
-        .then(pl.when(synonymous).then(halves.struct.field('field_0')).otherwise('amino_acids'))
-        .alias('amino_acids'),
+        pl.when(~ablation).then('amino_acids').alias('amino_acids'),
         pl.when(~ablation).then('codons').alias('codons'),
         pl.when(~ablation).then('protein_end').alias('protein_end'),
     )

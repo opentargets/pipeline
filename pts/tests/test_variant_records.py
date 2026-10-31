@@ -151,6 +151,18 @@ def test_synonymous_amino_acids_are_single(records: pl.DataFrame) -> None:
     assert '/' in transcript(record(records, 19723939), 'ENST00000366425')['amino_acids']
 
 
+def test_amino_acids_as_fastvep_writes_them(tmp_path: Path) -> None:
+    item = synthetic([['synonymous_variant'], ['missense_variant']], 'missense_variant')
+    item['transcript_consequences'][0]['amino_acids'] = 'L/L'
+    item['transcript_consequences'][1]['amino_acids'] = 'L/P'
+    path = fastvep_json(tmp_path / 'amino.json', [item])
+    core = pl.concat(
+        [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [1, 1]})], how='diagonal'
+    )
+    found = fastvep_records(path, ONE_ROW, core, b'NNNNANNNNN', '22').collect()
+    assert [tc['amino_acids'] for tc in found['transcript_consequences'][0]] == ['L/L', 'L/P']
+
+
 def test_cds_end_from_fastvep(records: pl.DataFrame) -> None:
     assert transcript(record(records, 19723939), 'ENST00000366425')['cds_end'] == 96
     assert transcript(record(records, 19723858), 'ENST00000366425')['cds_end'] is not None
