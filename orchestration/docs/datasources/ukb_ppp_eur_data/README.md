@@ -1,6 +1,6 @@
 # UK Biobank Pharma Proteomics Project (UKB-PPP)
 
-This document was updated on 2026-10-30.
+This document was updated on 2026-10-31.
 
 ```sh
 gs://ukb_ppp_eur_data/prod/20260526T131650/config/                                   # DAG configs of the run
@@ -14,17 +14,9 @@ gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/
 gs://ukb_ppp_eur_inputs/harmonised_summary_statistics/                               # input, not part of the run folder
 ```
 
-Data contained in the run corresponds to the European discovery protein GWAS (pGWAS) of the [UK Biobank Pharma Proteomics Project](https://www.nature.com/articles/s41586-023-06592-6), published in the [UKB-PPP open data registry](https://registry.opendata.aws/ukbppp/).
+Full description of the process can be found in https://github.com/opentargets/issues/issues/3234.
 
-Data is produced by two DAGs, **ukb_ppp_eur_harmonisation** and **ukb_ppp_eur_finemapping**. The DAG configurations and topologies are in `config/ukb_ppp_eur_harmonisation.yaml` and `config/ukb_ppp_eur_finemapping.yaml` of the run folder (`gs://ukb_ppp_eur_data/prod/20260526T131650/config/`). The steps use these gentropy tags; the links below refer to them:
-
-| DAG | Step | gentropy |
-|---|---|---|
-| ukb_ppp_eur_harmonisation | ukb_ppp_eur_sumstat_preprocess, locus_breaker_clumping | [`v2.3.0-rc.5`](https://github.com/opentargets/gentropy/tree/v2.3.0-rc.5) (`GENTROPY_REF`) |
-| ukb_ppp_eur_finemapping | finemapping_batch_job | [`v2.0.2-rc.2`](https://github.com/opentargets/gentropy/tree/v2.0.2-rc.2) (`gentropy_ref`, the tag of the gentropy image) |
-| ukb_ppp_eur_finemapping | ukb_ppp_eur_data_credible_set_qc | [`v3.2.0`](https://github.com/opentargets/gentropy/tree/v3.2.0) (`GENTROPY_REF`) |
-
-The run folder is named after the data freeze: the move of the release from the top level of `gs://ukb_ppp_eur_data/` into a dated folder. The run outputs were written to the top level of `gs://ukb_ppp_eur_data/`, moved to `gs://ukb_ppp_eur_data/prod/20260526T131650/` on 2026-10-26, and moved under `output/` on 2026-10-30. The fine-mapping outputs keep the `20250129` folder of the fine-mapping run.
+Data is produced by two DAGs, **ukb_ppp_eur_harmonisation** and **ukb_ppp_eur_finemapping**. The DAG configurations and topologies are in `config/ukb_ppp_eur_harmonisation.yaml` and `config/ukb_ppp_eur_finemapping.yaml` of the run folder (`gs://ukb_ppp_eur_data/prod/20260526T131650/config/`).
 
 Inputs of the run:
 
@@ -37,13 +29,31 @@ gs://panukbb-ld-matrixes/UKBB.EUR.ldadj
 gs://panukbb-ld-matrixes/ukb-diverse-pops-public-build-38/UKBB.EUR.ldadj.variant.b38
 ```
 
-`gs://gentropy-vault/ukb-ppp/` is the mirror of the UKB-PPP pGWAS summary statistics, one TAR file per protein, made by hand following the [gentropy-vault protocol](https://github.com/opentargets/gentropy-vault/blob/main/datasets/ukb-ppp.md). [gentropy-input-support](https://github.com/opentargets/gentropy-input-support) (`./submit.py ukb_ppp_eur`, [data_sources.py](https://github.com/opentargets/gentropy-input-support/blob/dc5f8f7aee13a066933f3fd5b18a9b3a5ca71069/data_sources.py#L43-L103)) reads the mirror on Google Batch, outside the DAGs, and writes `study_index.tsv` and `summary_stats.parquet` to `gs://gentropy-tmp/`:
+## Pre-steps
 
-- The per-chromosome files are extracted from the TAR files and partitioned by chromosome.
-- The study identifier is recreated, because several rows of the source study table share one summary statistics file.
-- Rows of the source study table without a summary statistics file are dropped.
+### 1. Mirror
 
-`gs://gentropy-tmp/` deletes its objects after 60 days, so these two inputs no longer exist.
+- **Input.** Original data is hosted on Synapse.
+- **Transformation.**
+  - As we decided in the past, we want to keep the copy of the original data in the Vault.
+  - Protocol is available here: https://github.com/opentargets/gentropy-vault/blob/main/datasets/ukb-ppp.md.
+  - The protocol must be run manually.
+- **Output.** The output of this step is kept forever in the Vault.
+
+### 2. Preprocess
+
+- **Input.** The mirrored data from the previous step.
+- **Transformation.**
+  - The data which we mirrored during the previous steps has to undergo several specific transformations which aren't achievable in Spark (especially the first one):
+    - Extract gzipped per-chromosome files from inside the individual TAR files, decompress, partition by chromosome
+    - Recreate the study ID. This is required because multiple rows in the study index can reuse the same summary stats file
+    - Drop certain rows which don't have a corresponding summary stats file
+  - This transformation is done using Google Batch. The code can be found in this new repository: [gentropy-input-support](https://github.com/opentargets/gentropy-input-support). The UKB PPP-specific part is this one: [data_sources.py](https://github.com/opentargets/gentropy-input-support/blob/dc5f8f7aee13a066933f3fd5b18a9b3a5ca71069/data_sources.py#L43-L103).
+  - The command to run is `./submit.py ukb_ppp_eur` inside the `gentropy-input-support`
+  - This step must also be triggered manually, how to do this is described in the repository.
+- **Output.** Precursors of study index and summary stats datasets are output. Because we decided that we don't want to keep the data twice, the output of this step is only kept temporarily and is deleted after 60 days according to the _gs://gentropy-tmp_ bucket lifecycle rules.
+
+## Orchestration steps
 
 The harmonisation DAG has 2 steps, run one after another on one Dataproc cluster:
 
@@ -64,7 +74,7 @@ The fine-mapping DAG has 3 steps, run one after another: the index and the fine-
 
 The step ([`ukb_ppp_eur_sumstat_preprocess.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/ukb_ppp_eur_sumstat_preprocess.py)) builds the study index and harmonises the summary statistics.
 
-The study index ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/datasource/ukb_ppp_eur/study_index.py)) has one study per row of `study_index.tsv`. The sample size of a study is the `N` of its chromosome 22 summary statistics; a study without chromosome 22 summary statistics is dropped. The output is `output/study_index/`.
+The study index ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/datasource/ukb_ppp_eur/study_index.py)) has one study per row of `study_index.tsv`. The output is `output/study_index/`.
 
 The summary statistics ([`summary_stats.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/datasource/ukb_ppp_eur/summary_stats.py), [`harmonise.py`](https://github.com/opentargets/gentropy/blob/v2.3.0-rc.5/src/gentropy/common/harmonise.py)) are harmonised one chromosome at a time:
 
@@ -73,8 +83,6 @@ The summary statistics ([`summary_stats.py`](https://github.com/opentargets/gent
 - Each variant is matched to the gnomAD variant index (`gs://gnomad_data_2/gnomad_variant_index`) in its own allele order or in the flipped order. A flipped variant has its `BETA` negated and its allele frequency replaced by 1 − frequency.
 - A flipped strand-ambiguous SNP (A/T or G/C) is dropped. Variants not in the variant index are dropped.
 - Rows with a null position or a `BETA` of 0 are dropped.
-
-The output is `gs://ukb_ppp_eur_inputs/harmonised_summary_statistics/`, partitioned by `studyId` and `chromosome`. It is an input bucket, and the run folder does not hold it.
 
 ## locus_breaker_clumping
 
