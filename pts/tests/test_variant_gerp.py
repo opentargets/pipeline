@@ -90,10 +90,8 @@ def test_missing_contig_is_null(bigwig: str):
     assert values(bigwig, (11, 13), chromosome='X') == [None]
 
 
-def test_kent_summary_max_matches_exact_for_short_spans(bigwig: str):
+def test_kent_summary_mean_matches_exact_for_short_spans(bigwig: str):
     with KentBigWig(bigwig) as reader:
-        assert reader.summary_max('22', 10, 13) == pytest.approx(-0.466, abs=1e-6)
-        assert reader.summary_max('X', 10, 13) is None
         assert reader.summary_mean('22', 20, 22) == pytest.approx((7.0e-05 + 1.97) / 2, abs=1e-6)
 
 

@@ -182,20 +182,6 @@ class KentBigWig:
             return 0.0
         return (end - start + 1) * mean
 
-    def summary_max(self, chrom: str, start0: int, end: int) -> float | None:
-        """MaxVal of bigWigSummaryArrayExtended(chrom, start0, end, 1); None if no data."""
-        if start0 >= end or chrom not in self.chrom_ids:
-            return None
-        level = self.best_zoom((end - start0) // 2)
-        if level is not None:
-            starts, ends, valid, _, maxes = self._zoom_records(level, chrom)
-            lo = np.searchsorted(ends, start0, side='right')
-            hi = np.searchsorted(starts, end, side='left')
-            hits = [maxes[i] for i in range(lo, hi) if min(end, ends[i]) - max(start0, starts[i]) > 0 and valid[i] > 0]
-            return max(hits) if hits else None
-        ivs = self.bw.intervals(chrom, start0, end)
-        return max(v for _, _, v in ivs) if ivs else None
-
 
 WINDOW_GAP = 1 << 12
 WINDOW_BASES = 1 << 22
