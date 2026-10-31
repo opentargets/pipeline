@@ -42,6 +42,8 @@ def read_ema_sheet(path: str) -> pl.DataFrame:
 class MiningInputs:
     """The TTD, EMA and PMDA inputs, read and parsed.
 
+    The contents are shared between builds and must not be mutated.
+
     Attributes:
         ttd_lines: the lines of the TTD indications file.
         ema_sheet: the EMA list of medicines, as returned by :func:`read_ema_sheet`.

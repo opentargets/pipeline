@@ -58,6 +58,8 @@ class Models:
         self.labels = {'ttd': ['aspirin'], 'ema': ['ibuprofen'], 'pmda': ['aspirin', 'x']}
         self.texts = ['pain', 'fever']
         self.reads: list[tuple[str, str, str]] = []
+        self.built_from: list[object] = []
+        self.sentinel = object()
         monkeypatch.setattr(mining_models, 'read_mining_inputs', self.read_inputs)
         monkeypatch.setattr(mining_models, 'mining_reports', self.reports)
         monkeypatch.setattr(mining_models, 'disease_entities_with_status', self.diseases)
@@ -65,9 +67,10 @@ class Models:
 
     def read_inputs(self, ttd: str, ema: str, pmda: str) -> object:
         self.reads.append((ttd, ema, pmda))
-        return object()
+        return self.sentinel
 
     def reports(self, parsed: object, extract_diseases: Any) -> dict[str, Any]:
+        self.built_from.append(parsed)
         extract_diseases(pl.Series('text', self.texts))
         return {key: _report(labels) for key, labels in self.labels.items()}
 
@@ -122,6 +125,7 @@ def test_staging_reads_the_inputs_once(tmp_path: Path, models_uri: str, models: 
     _stage(tmp_path, models_uri, 'r1')
 
     assert models.reads == [('ttd', 'ema', 'pmda')]
+    assert models.built_from == [models.sentinel, models.sentinel]
 
 
 def test_stage_mining_models_names_missing_models(tmp_path: Path, models_uri: str, models: Models) -> None:
