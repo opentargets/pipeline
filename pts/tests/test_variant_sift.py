@@ -12,9 +12,9 @@ import pytest
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.variant.index import normalise_score
+from pts.transformers.variant.index_rows import index_rows
 from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, _ranked
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
-from pts.transformers.variant.vep import index_rows
 from tests.variant_fixtures import consequences as variant_consequences
 from tests.variant_fixtures import variants, with_effects
 

@@ -7,8 +7,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.variant.index_rows import uniprot_accessions
 from pts.transformers.variant.transcripts import canonical_transcript_ids, transcript_fields
-from pts.transformers.variant.vep import uniprot_accessions
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
 #: Table name to (columns in DDL order, rows). Transcripts 301752 and 304535 are the human miRNAs

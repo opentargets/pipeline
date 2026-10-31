@@ -11,6 +11,7 @@ from polars.testing import assert_frame_equal
 
 from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.colocated import add_colocated
+from pts.transformers.variant.index_rows import index_rows
 from pts.transformers.variant.records import (
     CONSEQUENCES_SCHEMA,
     FASTVEP_SCHEMA,
@@ -19,7 +20,6 @@ from pts.transformers.variant.records import (
     iter_records,
     unannotated_frames,
 )
-from pts.transformers.variant.vep import index_rows
 from tests.variant_fixtures import with_effects
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'

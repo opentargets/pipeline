@@ -38,12 +38,12 @@ from pts.transformers.variant.index import (
     annotate_with_amino_acid_consequences,
     read_variant_annotations,
 )
+from pts.transformers.variant.index_rows import index_rows, uniprot_accessions
 from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
-from pts.transformers.variant.vep import index_rows, uniprot_accessions
 
 
 @dataclass(frozen=True)
