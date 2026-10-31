@@ -15,6 +15,7 @@ from pts.record_store import (
     ComputeAborted,
     RecordStoreError,
     SnapshotConflictError,
+    import_run,
     map_texts,
     new_run_id,
     publish_snapshot,
@@ -57,10 +58,14 @@ def store_uri(tmp_path):
     return str(tmp_path / 'store')
 
 
-def run(texts, compute, store_uri, run_id, revision=REVISION, **kwargs):
+def run_mapped(texts, compute, store_uri, run_id, revision=REVISION, **kwargs):
     return map_texts(
         pl.Series('text', texts, dtype=pl.String), compute, store_uri, MODEL, revision, run_id, None, **kwargs
     )
+
+
+def run(texts, compute, store_uri, run_id, revision=REVISION, **kwargs):
+    return run_mapped(texts, compute, store_uri, run_id, revision, **kwargs).frame
 
 
 def record(run_id, output, when, text='a'):
@@ -484,3 +489,41 @@ def test_strict_store_is_unchanged(store_uri):
     with pytest.raises(RecordStoreError):
         run(['a', 'bad'], Recorder(fails={'bad'}), store_uri, 'r1')
     assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1']
+
+
+def test_map_texts_reports_computed_and_failed(store_uri):
+    write_run(record('r0', 'A', datetime(2026, 1, 1, tzinfo=UTC)), store_uri, 'r0', None)
+
+    mapped = run_mapped(['a', 'b', 'c'], Recorder(fails={'c'}), store_uri, 'r1', allow_failures=True, max_attempts=2)
+
+    assert mapped.computed == 2
+    assert mapped.failed == 1
+    assert mapped.frame['text'].to_list() == ['a', 'b']
+
+
+def test_map_texts_counts_nothing_when_the_store_answers(store_uri):
+    run_mapped(['a', 'b'], Recorder(), store_uri, 'r1')
+
+    mapped = run_mapped(['a', 'b'], Recorder(), store_uri, 'r2')
+
+    assert mapped.computed == 0
+    assert mapped.failed == 0
+
+
+def test_map_texts_counts_texts_across_shards(store_uri):
+    mapped = run_mapped(['a', 'b', 'c'], Recorder(), store_uri, 'r1', shard_size=1)
+
+    assert mapped.computed == 3
+    assert mapped.failed == 0
+
+
+def test_import_run_writes_once(store_uri):
+    records = record('import', 'A', datetime(2026, 1, 1, tzinfo=UTC))
+
+    def refuse():
+        msg = 'records built for a run that exists'
+        raise AssertionError(msg)
+
+    assert import_run(lambda: records, store_uri, 'import', None) == 1
+    assert import_run(refuse, store_uri, 'import', None) == 0
+    assert read_records(store_uri, None)['run_id'].to_list() == ['import']

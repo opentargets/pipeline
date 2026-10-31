@@ -342,7 +342,7 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     metadata = json.loads((tmp_path / f'v1/extraction/{TAG}/metadata.json').read_text())
     assert metadata == EXTRACTION.metadata(_digest(), None)
     assert metadata['model_revisions'] == {EXTRACTION_MODEL: _digest()}
-    assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'failed': 0, 'published': True}
+    assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'computed': 2, 'failed': 0, 'published': True}
     assert llm.keys == ['test-key']
     assert all(client.closed for client in llm.clients)
 

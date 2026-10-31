@@ -157,8 +157,20 @@ def test_mining_models_publishes_both_snapshots(tmp_path: Path, models_uri: str,
     for kind, tag, model, hub in kinds:
         metadata = json.loads((tmp_path / f'snap/{kind.name}/{tag}/metadata.json').read_text())
         assert metadata == {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
-    assert stats['disease_entities'] == {'texts': 2, 'computed': True, 'published': True, 'tag': DISEASE_TAG}
-    assert stats['drug_entities'] == {'texts': 3, 'computed': True, 'published': True, 'tag': DRUG_TAG}
+    assert stats['disease_entities'] == {
+        'texts': 2,
+        'computed': True,
+        'computed_texts': 2,
+        'published': True,
+        'tag': DISEASE_TAG,
+    }
+    assert stats['drug_entities'] == {
+        'texts': 3,
+        'computed': True,
+        'computed_texts': 3,
+        'published': True,
+        'tag': DRUG_TAG,
+    }
 
 
 def test_mining_rerun_computes_nothing(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -169,8 +181,20 @@ def test_mining_rerun_computes_nothing(tmp_path: Path, models_uri: str, models: 
     stats = _stage(tmp_path, models_uri, 'r2')
 
     assert models.disease_calls == models.ner_calls == []
-    assert stats['disease_entities'] == {'texts': 2, 'computed': False, 'published': False, 'tag': DISEASE_TAG}
-    assert stats['drug_entities'] == {'texts': 3, 'computed': False, 'published': False, 'tag': DRUG_TAG}
+    assert stats['disease_entities'] == {
+        'texts': 2,
+        'computed': False,
+        'computed_texts': 0,
+        'published': False,
+        'tag': DISEASE_TAG,
+    }
+    assert stats['drug_entities'] == {
+        'texts': 3,
+        'computed': False,
+        'computed_texts': 0,
+        'published': False,
+        'tag': DRUG_TAG,
+    }
 
 
 def test_a_label_shared_with_aact_is_not_recomputed(tmp_path: Path, models_uri: str, models: Models) -> None:

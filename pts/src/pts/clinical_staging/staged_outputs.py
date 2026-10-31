@@ -23,7 +23,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
-from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot, tracked
+from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot
 from pts.transformers.clinical.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -78,18 +78,26 @@ def read_metadata(source: str, uri: str) -> dict[str, Any]:
 class StagedResult:
     """What one staging of a kind produced.
 
-    ``frame`` has the snapshot columns; ``computed`` says whether any text was sent to
-    the model, ``published`` whether a new snapshot was written.
+    ``frame`` has the snapshot columns; ``computed_texts`` is the number of texts sent to
+    the model, ``computed`` whether there were any, ``published`` whether a new snapshot
+    was written.
     """
 
     frame: pl.DataFrame
     computed: bool
+    computed_texts: int
     published: bool
     tag: str
 
     def stats(self) -> dict[str, Any]:
-        """Return the number of texts, whether anything was computed or published, and the tag."""
-        return {'texts': self.frame.height, 'computed': self.computed, 'published': self.published, 'tag': self.tag}
+        """Return the number of texts, how many were computed, whether a snapshot was published, and the tag."""
+        return {
+            'texts': self.frame.height,
+            'computed': self.computed,
+            'computed_texts': self.computed_texts,
+            'published': self.published,
+            'tag': self.tag,
+        }
 
 
 @dataclass(frozen=True)
@@ -156,13 +164,12 @@ class StagedOutput:
             extra_metadata: Further keys for the snapshot's metadata.
 
         Returns:
-            StagedResult: The snapshot contents, its tag, and whether anything was computed or published.
+            StagedResult: The snapshot contents, its tag, the texts computed, and whether a snapshot was published.
         """
         tag = self.tag(revisions)
-        calls: list[int] = []
-        records = map_texts(
+        mapped = map_texts(
             texts,
-            tracked(compute, calls),
+            compute,
             f'{store_root}/{self.name}',
             self.model,
             tag,
@@ -170,7 +177,7 @@ class StagedOutput:
             config,
             max_attempts,
         )
-        frame = records.select(pl.col(record).alias(column) for record, column in self.columns.items())
+        frame = mapped.frame.select(pl.col(record).alias(column) for record, column in self.columns.items())
         metadata = {
             'kind': self.name,
             'model': self.model,
@@ -179,7 +186,9 @@ class StagedOutput:
             **(extra_metadata or {}),
         }
         published = publish_snapshot(frame, f'{destination}/{tag}', metadata, config)
-        return StagedResult(frame=frame, computed=bool(calls), published=published, tag=tag)
+        return StagedResult(
+            frame=frame, computed=mapped.computed > 0, computed_texts=mapped.computed, published=published, tag=tag
+        )
 
     def read(self, snapshots: dict[str, str], expect: dict[str, dict[str, str]] | None = None) -> pl.DataFrame:
         """The snapshot columns of ``snapshots``, merged into one row per ``key``.

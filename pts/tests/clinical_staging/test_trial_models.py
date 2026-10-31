@@ -178,8 +178,20 @@ def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, 
         if kind is DRUG_ENTITIES:
             expected['extraction_tag'] = EXTRACTION.release_tag()
         assert metadata == expected
-    assert stats['stop_reasons'] == {'texts': 2, 'computed': True, 'published': True, 'tag': STOP_TAG}
-    assert stats['drug_entities'] == {'texts': 2, 'computed': True, 'published': True, 'tag': DRUG_TAG}
+    assert stats['stop_reasons'] == {
+        'texts': 2,
+        'computed': True,
+        'computed_texts': 2,
+        'published': True,
+        'tag': STOP_TAG,
+    }
+    assert stats['drug_entities'] == {
+        'texts': 2,
+        'computed': True,
+        'computed_texts': 2,
+        'published': True,
+        'tag': DRUG_TAG,
+    }
 
 
 def test_trial_models_publish_under_their_tags(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -207,8 +219,20 @@ def test_rerun_computes_nothing_and_rewrites_nothing(tmp_path: Path, models_uri:
     stats = _stage(tmp_path, models_uri, studies, extractions, 'r2')
 
     assert models.stop_calls == models.ner_calls == []
-    assert stats['stop_reasons'] == {'texts': 2, 'computed': False, 'published': False, 'tag': STOP_TAG}
-    assert stats['drug_entities'] == {'texts': 1, 'computed': False, 'published': False, 'tag': DRUG_TAG}
+    assert stats['stop_reasons'] == {
+        'texts': 2,
+        'computed': False,
+        'computed_texts': 0,
+        'published': False,
+        'tag': STOP_TAG,
+    }
+    assert stats['drug_entities'] == {
+        'texts': 1,
+        'computed': False,
+        'computed_texts': 0,
+        'published': False,
+        'tag': DRUG_TAG,
+    }
     assert (tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet').stat().st_mtime_ns == snapshot
     assert not (tmp_path / 'store/stop_reasons/runs/r2').exists()
 
@@ -337,7 +361,7 @@ def test_seed_never_outranks_a_computed_record(tmp_path: Path) -> None:
 
     seed_drug_entities(str(cache), store, DRUG_NER_MODEL, revision, None)
 
-    result = map_texts(pl.Series(['a']), lambda texts: [], drug_store, DRUG_NER_MODEL, revision, 'r2', None)
+    result = map_texts(pl.Series(['a']), lambda texts: [], drug_store, DRUG_NER_MODEL, revision, 'r2', None).frame
     assert result['output'].to_list() == [['computed']]
 
 

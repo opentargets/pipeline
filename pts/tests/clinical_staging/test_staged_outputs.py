@@ -155,8 +155,8 @@ def test_stats_count_the_texts_and_report_the_staging(tmp_path: Path) -> None:
     first = stage(DRUG_ENTITIES, tmp_path, ['x', 'y', 'x'], 'r1')
     second = stage(DRUG_ENTITIES, tmp_path, ['x', 'y'], 'r2')
 
-    assert first.stats() == {'texts': 2, 'computed': True, 'published': True, 'tag': first.tag}
-    assert second.stats() == {'texts': 2, 'computed': False, 'published': False, 'tag': first.tag}
+    assert first.stats() == {'texts': 2, 'computed': True, 'computed_texts': 2, 'published': True, 'tag': first.tag}
+    assert second.stats() == {'texts': 2, 'computed': False, 'computed_texts': 0, 'published': False, 'tag': first.tag}
 
 
 def test_read_merges_snapshots_of_one_kind(tmp_path: Path) -> None:

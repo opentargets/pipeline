@@ -23,7 +23,7 @@ from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ValidationError
 
-from pts.record_store import ComputeAborted, read_parquet, run_exists, text_sha256, write_run
+from pts.record_store import ComputeAborted, import_run, read_parquet, text_sha256
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
     SYSTEMIC_ERROR_TYPES,
@@ -274,39 +274,37 @@ def import_extraction_cache(
         raise ValueError(msg)
 
     run_id = f'{IMPORT_RUN_PREFIX}-{schema_digest[:12]}'
-    if run_exists(store_uri, run_id, config):
-        logger.info(f'{run_id} already imported into {store_uri}')
-        return 0
 
-    pointer, _ = StorageHandle(f'{cache_uri}/latest.json', config=config).read_text()
-    snapshot = json.loads(pointer)['snapshot']
-    rows = read_parquet(f'{cache_uri}/snapshots/{snapshot}/rows.parquet', config)
-    if 'prompt_sha256' not in rows.columns:
-        rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
+    def records() -> pl.DataFrame:
+        pointer, _ = StorageHandle(f'{cache_uri}/latest.json', config=config).read_text()
+        snapshot = json.loads(pointer)['snapshot']
+        rows = read_parquet(f'{cache_uri}/snapshots/{snapshot}/rows.parquet', config)
+        if 'prompt_sha256' not in rows.columns:
+            rows = rows.with_columns(prompt_sha256=pl.lit(None, dtype=pl.String))
 
-    current = prompts.select('id', 'prompt', current_sha256='prompt_sha256').unique(subset='id')
-    adopted = (
-        rows
-        .join(current, on='id')
-        .with_columns(is_current=(pl.col('prompt_sha256') == pl.col('current_sha256')).fill_null(False))
-        .sort(['is_current', 'computed_at'], descending=True, nulls_last=True)
-        .unique(subset='id', keep='first', maintain_order=True)
-        .sort('id')
-    )
-    outputs = adopted.drop('cache_key', 'prompt_sha256', 'computed_at', 'prompt', 'current_sha256', 'is_current')
-    records = adopted.select(
-        text_sha256=pl.col('current_sha256'),
-        text=pl.col('prompt'),
-        model=pl.lit(EXTRACTION_MODEL),
-        model_revision=pl.lit(schema_digest),
-        output=pl.Series([json.dumps(row) for row in outputs.to_dicts()], dtype=pl.String),
-        status=pl.lit('ok'),
-        error=pl.lit(None, dtype=pl.String),
-        computed_at=pl.col('computed_at').fill_null(IMPORT_COMPUTED_AT),
-        run_id=pl.lit(run_id),
-    )
-    write_run(records, store_uri, run_id, config, output_dtype=pl.String())
-    return records.height
+        current = prompts.select('id', 'prompt', current_sha256='prompt_sha256').unique(subset='id')
+        adopted = (
+            rows
+            .join(current, on='id')
+            .with_columns(is_current=(pl.col('prompt_sha256') == pl.col('current_sha256')).fill_null(False))
+            .sort(['is_current', 'computed_at'], descending=True, nulls_last=True)
+            .unique(subset='id', keep='first', maintain_order=True)
+            .sort('id')
+        )
+        outputs = adopted.drop('cache_key', 'prompt_sha256', 'computed_at', 'prompt', 'current_sha256', 'is_current')
+        return adopted.select(
+            text_sha256=pl.col('current_sha256'),
+            text=pl.col('prompt'),
+            model=pl.lit(EXTRACTION_MODEL),
+            model_revision=pl.lit(schema_digest),
+            output=pl.Series([json.dumps(row) for row in outputs.to_dicts()], dtype=pl.String),
+            status=pl.lit('ok'),
+            error=pl.lit(None, dtype=pl.String),
+            computed_at=pl.col('computed_at').fill_null(IMPORT_COMPUTED_AT),
+            run_id=pl.lit(run_id),
+        )
+
+    return import_run(records, store_uri, run_id, config, output_dtype=pl.String())
 
 
 def _open_client(spec: LlmExtractSpec, openai_key: str) -> AsyncOpenAI:

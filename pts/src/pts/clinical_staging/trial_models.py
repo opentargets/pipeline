@@ -6,11 +6,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
-from loguru import logger
 from otter.util.errors import NotFoundError
 
 from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
-from pts.record_store import RECORD_SCHEMA, read_parquet, run_exists, text_sha256, write_run
+from pts.record_store import RECORD_SCHEMA, import_run, read_parquet, text_sha256
 from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import drug_entities_with_status
@@ -38,29 +37,27 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
         int: The number of records written, 0 if the seed run already exists.
     """
     drug_store = f'{store_uri}/drug_entities'
-    if run_exists(drug_store, SEED_RUN_ID, config):
-        logger.info(f'{SEED_RUN_ID} already imported into {drug_store}')
-        return 0
 
-    cache = (
-        read_parquet(ner_cache_uri, config)
-        .select('query_label', 'extracted_drugs')
-        .drop_nulls('query_label')
-        .unique(subset='query_label', keep='first', maintain_order=True)
-    )
-    records = cache.select(
-        text_sha256=pl.col('query_label').map_elements(text_sha256, return_dtype=pl.String),
-        text=pl.col('query_label'),
-        model=pl.lit(model),
-        model_revision=pl.lit(model_revision),
-        output=pl.col('extracted_drugs').fill_null([]),
-        status=pl.lit('ok'),
-        error=pl.lit(None, dtype=pl.String),
-        computed_at=pl.lit(SEED_COMPUTED_AT),
-        run_id=pl.lit(SEED_RUN_ID),
-    )
-    write_run(records.cast(RECORD_SCHEMA), drug_store, SEED_RUN_ID, config)
-    return records.height
+    def records() -> pl.DataFrame:
+        cache = (
+            read_parquet(ner_cache_uri, config)
+            .select('query_label', 'extracted_drugs')
+            .drop_nulls('query_label')
+            .unique(subset='query_label', keep='first', maintain_order=True)
+        )
+        return cache.select(
+            text_sha256=pl.col('query_label').map_elements(text_sha256, return_dtype=pl.String),
+            text=pl.col('query_label'),
+            model=pl.lit(model),
+            model_revision=pl.lit(model_revision),
+            output=pl.col('extracted_drugs').fill_null([]),
+            status=pl.lit('ok'),
+            error=pl.lit(None, dtype=pl.String),
+            computed_at=pl.lit(SEED_COMPUTED_AT),
+            run_id=pl.lit(SEED_RUN_ID),
+        ).cast(RECORD_SCHEMA)
+
+    return import_run(records, drug_store, SEED_RUN_ID, config)
 
 
 def read_extraction(extraction_uri: str, config: Config) -> pl.DataFrame:

@@ -120,7 +120,7 @@ class LlmExtract(Task):
             )
             logger.info(f'imported {imported} cached extractions into {store_uri}')
 
-        records = map_texts(
+        mapped = map_texts(
             prompts['prompt'],
             extraction.extraction_compute(prompts, self.spec, system_prompt),
             store_uri,
@@ -133,7 +133,7 @@ class LlmExtract(Task):
             allow_failures=True,
             shard_size=self.spec.shard_size,
         )
-        extractions = extraction.extractions_from_records(records, prompts, model_cls)
+        extractions = extraction.extractions_from_records(mapped.frame, prompts, model_cls)
         if prompts.height and extractions.is_empty():
             msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
             raise TaskRunError(msg)
@@ -151,7 +151,8 @@ class LlmExtract(Task):
             'trials': report.height,
             'prompts': prompts.height,
             'extracted': extractions.height,
-            'failed': prompts.height - extractions.height,
+            'computed': mapped.computed,
+            'failed': mapped.failed,
             'published': published,
         }
         logger.info(f'extraction complete: {self.stats}')

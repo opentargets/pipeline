@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -90,6 +91,20 @@ class ComputeAborted(Exception):  # noqa: N818
 
 class SnapshotConflictError(Exception):
     """A snapshot already exists at the location with different content."""
+
+
+@dataclass(frozen=True)
+class Mapped:
+    """What :py:func:`map_texts` returned and what it took to get there.
+
+    ``frame`` has ``text``, ``text_sha256`` and ``output`` per distinct text, sorted by
+    text. ``computed`` is the number of texts sent to the model, a text retried within the
+    run counting once. ``failed`` is the number of texts left without an ok record.
+    """
+
+    frame: pl.DataFrame
+    computed: int
+    failed: int
 
 
 def text_sha256(text: str) -> str:
@@ -279,16 +294,6 @@ def _compute_with_retries(
     return pl.concat(rounds)
 
 
-def tracked(compute: Callable[[list[str]], Any], calls: list[int]) -> Callable[[list[str]], Any]:
-    """Wrap ``compute`` so the caller can tell whether it was asked for anything."""
-
-    def wrapped(texts: list[str]) -> Any:
-        calls.append(len(texts))
-        return compute(texts)
-
-    return wrapped
-
-
 def map_texts(
     texts: pl.Series,
     compute: Callable[[list[str]], list[tuple[Any, str | None]]],
@@ -301,7 +306,7 @@ def map_texts(
     output_dtype: pl.DataType = LIST_OUTPUT,
     allow_failures: bool = False,
     shard_size: int | None = None,
-) -> pl.DataFrame:
+) -> Mapped:
     """Return the model output for every distinct text, computing only what the store lacks.
 
     A text is computed when it has no record for this model and revision, or only
@@ -336,7 +341,8 @@ def map_texts(
         shard_size: Number of texts per run, or None for a single run.
 
     Returns:
-        pl.DataFrame: ``text``, ``text_sha256`` and ``output`` per distinct text, sorted by text.
+        Mapped: The ``text``, ``text_sha256`` and ``output`` of every distinct text with an ok record,
+            sorted by text, with the number of texts computed and the number left without one.
 
     Raises:
         ValueError: If ``texts`` contains nulls, or ``shard_size`` is not positive.
@@ -384,6 +390,7 @@ def map_texts(
 
     shards = [todo] if shard_size is None else [todo.slice(i, shard_size) for i in range(0, todo.height, shard_size)]
     written = [pl.DataFrame(schema=schema)]
+    computed = 0
     for n, shard in enumerate(shards):
         if not shard.height:
             continue
@@ -399,10 +406,12 @@ def map_texts(
             fresh = _compute_round(shard, compute, model, model_revision, shard_run_id, schema)
         write_run(fresh, store_uri, shard_run_id, config, output_dtype)
         written.append(fresh)
+        computed += shard.height
 
     current = _current(pl.concat([existing, *written]))
     done = wanted.join(current.filter(pl.col('status') == 'ok').select('text_sha256', 'output'), on='text_sha256')
-    if done.height < wanted.height:
+    failed = wanted.height - done.height
+    if failed:
         missing = wanted.join(done.select('text_sha256'), on='text_sha256', how='anti')['text'].to_list()
         examples = ', '.join(repr(t) for t in missing[:MAX_EXAMPLES])
         if not allow_failures:
@@ -410,7 +419,34 @@ def map_texts(
             raise RecordStoreError(msg)
         logger.warning(f'{len(missing)} texts have no ok record for {model}@{model_revision}, e.g. {examples}')
 
-    return done.select('text', 'text_sha256', 'output').sort('text')
+    return Mapped(done.select('text', 'text_sha256', 'output').sort('text'), computed, failed)
+
+
+def import_run(
+    records: Callable[[], pl.DataFrame],
+    store_uri: str,
+    run_id: str,
+    config: Config,
+    output_dtype: pl.DataType = LIST_OUTPUT,
+) -> int:
+    """Write the run ``run_id`` from ``records()``, once.
+
+    Args:
+        records: Builds the records of the run. Not called if the run exists.
+        store_uri: Root of the store, an absolute URI.
+        run_id: Identifies the run.
+        config: The otter config, used to resolve storage.
+        output_dtype: Dtype of the store's ``output`` column.
+
+    Returns:
+        int: The number of records written, 0 if the run already exists.
+    """
+    if run_exists(store_uri, run_id, config):
+        logger.info(f'{run_id} already imported into {store_uri}')
+        return 0
+    frame = records()
+    write_run(frame, store_uri, run_id, config, output_dtype)
+    return frame.height
 
 
 def publish_snapshot(df: pl.DataFrame, uri: str, metadata: dict[str, Any], config: Config) -> bool:
