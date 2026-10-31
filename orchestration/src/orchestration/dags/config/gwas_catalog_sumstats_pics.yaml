@@ -3,7 +3,7 @@ environment_specs:
   - name: Prod
     vars:
       input_path: gs://gwas_catalog_inputs
-      output_path: gs://gwas_catalog_sumstats_pics
+      output_path: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output
       sync_date: '20260802'
 
 env: Prod

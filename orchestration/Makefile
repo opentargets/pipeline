@@ -70,7 +70,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow db migrate
 	@AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags reserialize
 	@$(foreach dag, \
-		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics \
+		datasources/gwas_catalog_data/gwas_catalog_sumstats_pics/gwas_catalog_sumstats_pics \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_clumping \
 		datasources/gwas_catalog_data/gwas_catalog_sumstats_susie_finemapping \
 		datasources/gwas_catalog_data/gwas_catalog_top_hits/gwas_catalog_top_hits \
@@ -98,13 +98,16 @@ upload-finngen-bucket-readme: ## Upload finngen_data readme to the bucket
 
 upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
-	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_pics/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_susie/docs
 	@gcloud storage rsync docs/credible_set_qc gs://gwas_catalog_sumstats_susie/docs/credible_set_qc
 
 upload-gwas-catalog-top-hits-readme: ## Upload the gwas_catalog_top_hits readme to a run folder: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-gwas-catalog-top-hits-readme BUCKET=gs://gwas_catalog_top_hits/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_top_hits $(BUCKET)/docs
+
+upload-gwas-catalog-sumstats-pics-readme: ## Upload the gwas_catalog_sumstats_pics readme to a run folder: make upload-gwas-catalog-sumstats-pics-readme BUCKET=gs://gwas_catalog_sumstats_pics/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-gwas-catalog-sumstats-pics-readme BUCKET=gs://gwas_catalog_sumstats_pics/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/gwas_catalog_data/gwas_catalog_sumstats_pics $(BUCKET)/docs
 
 upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 	@gcloud storage rsync docs/datasources/gnomad_data gs://gnomad_data_2/docs
