@@ -94,7 +94,7 @@ One row per credible set; 1,302 studies have at least one.
 | Column | Type | Description |
 |---|---|---|
 | `id` | `string` | Identifier of the credible set: the md5 hash of `studyId`, `chromosome`, `locusStart`, `locusEnd`, `leadVariantId` and `fineMappingMethod`. |
-| `chromosome` | `string` | Chromosome of the region; `X` for chromosome X. |
+| `chromosome` | `string` | Chromosome of the lead variant; `X` for chromosome X. |
 | `locusStart` | `integer` | Start of the fine-mapped region, from `region` of the source. |
 | `locusEnd` | `integer` | End of the fine-mapped region, from `region` of the source. |
 | `studyId` | `string` | Study of the credible set, as in `study`. |
@@ -124,12 +124,14 @@ One row per variant of a credible set. The posterior probabilities of the varian
 | `posteriorProbability` | `float` | Posterior inclusion probability of the variant in the single effect of the credible set (`alpha<cs>`). |
 | `logBayesFactor` | `float` | Natural log Bayes factor of the variant in the single effect (`lbf_variable<cs>`). |
 | `r2Overall` | `float` | In-sample r² with FinnGen's lead of the credible set (`lead_r2`). FinnGen's lead is the variant with the highest overall posterior inclusion probability (`prob`); it is the lead of `credible_set` in 21,250 credible sets, and the lead's `r2Overall` is below 1 in the other 207. |
-| `conditionalBeta` | `float` | Posterior mean effect given that the variant is causal, `mean<cs> / alpha<cs>`. |
-| `conditionalStandardError` | `float` | Posterior standard deviation of the effect given that the variant is causal, `sqrt((sd<cs>² + mean<cs>²) / alpha<cs> − conditionalBeta²)`. |
+| `conditionalBeta` | `float` | Posterior mean effect given that the variant is causal, `mean<cs> / alpha<cs>`. FinnGen writes `mean<l>` as `alpha·mu / scale` ([`run_susieR.R`](https://github.com/FINNGEN/finemapping-pipeline/blob/master/R/run_susieR.R)), so the ratio is `mu / scale`, the effect per allele. |
+| `conditionalStandardError` | `float` | Posterior standard deviation of the effect given that the variant is causal, `sqrt((sd<cs>² + mean<cs>²) / alpha<cs> − conditionalBeta²)`. FinnGen writes `sd<l>` as `sqrt(alpha·mu2 − (alpha·mu)²) / scale`, so this is `sqrt(mu2 − mu²) / scale`. |
 | `rescaledAbsBeta` | `float` | Empty. |
 | `rescaledStandardError` | `float` | Empty. |
 | `rescaledDirection` | `tinyint` | Empty. |
 | `qualityControls` | `array<string>` | `Allele frequency reported by the study` when `effectAlleleFrequency` is set, otherwise empty. |
+
+Some SuSiE fits of FinnGen give a conditional effect far from the marginal one, mostly at rare variants of case-control phenotypes. The values are FinnGen's: for `11_46259135_G_A` in `FINNGEN_R12_I9_CARDMYOHYP`, FinnGen reports `alpha1` 1, `mean1` 94.0, `sd1` 0.216 and `lbf_variable1` 94,434, against a marginal `beta` of 2.58 (`se` 0.221). Of the 2,896 leads with a posterior probability above 0.9, 11 have a `conditionalBeta` more than 3 times `reportedBeta` (one with the opposite sign), in 7 studies: `FINNGEN_R12_I9_CARDMYOHYP`, `FINNGEN_R12_I9_HYPERTROCARDMYOP`, `FINNGEN_R12_G6_MYOTDIS`, `FINNGEN_R12_G6_MUSDYST`, `FINNGEN_R12_E4_PLASMAPROT`, `FINNGEN_R12_L12_ACTINKERA` and `FINNGEN_R12_D3_COAGOTHER`. 18 of the 2,896 leads have a variant `logBayesFactor` above 1,000. No quality control flags them.
 
 ## Changelog
 
