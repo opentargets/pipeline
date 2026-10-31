@@ -130,3 +130,35 @@ One row per variant of a credible set. The posterior probabilities of the varian
 | `rescaledStandardError` | `float` | Empty. |
 | `rescaledDirection` | `tinyint` | Empty. |
 | `qualityControls` | `array<string>` | `Allele frequency reported by the study` when `effectAlleleFrequency` is set, otherwise empty. |
+
+## Changelog
+
+### 2025-02-05
+
+- [fix: updating info in finngen study index ingestion (#972)](https://github.com/opentargets/gentropy/pull/972)
+
+### 2025-04-11
+
+- chore: removal of r11 and r10 data to prevent data duplication.
+
+### 2025-07-24
+
+- [feat: updated finngen studyIndex to contain pubmedId upon ingestion](https://github.com/opentargets/issues/issues/3946)
+
+### 2026-05-20
+
+- [feat: rerun study index generation to include latest EFO changes](https://github.com/opentargets/issues/issues/4344)
+
+### 2026-10-29
+
+- chore: move the FinnGen GWAS release (run of 2026-05-26) from `gs://finngen_data/r12/` to `gs://finngen_data/gwas/prod/20260526T131014/` (`config/`, `docs/`, `output/`), and split its docs into this README.
+- chore: remove the top-level `gs://finngen_data/docs/`; the docs of each run are under `docs/` of its run folder.
+- chore: remove `gs://finngen_data/100_3mb_carma/`, CARMA fine-mapping outputs that no DAG produces or reads.
+
+### 2026-10-31
+
+- feat: replace the `finngen_ingestion` DAG with `finngen_gwas_ingestion`, a StagingDagConfig DAG on gentropy `v4.0.0-dev.11` writing the `study`, `credible_set` and `credible_set_variant` datasets to `gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/`. Its first run, `gs://finngen_data/gwas/prod/20261029T152531/`, differs from the frozen release:
+  - credible sets whose lead has a p-value above 1e-5 are dropped (676 credible sets of the frozen release, flagged `Subsignificant p-value` there): 21,457 credible sets, with the same lead and region as in the frozen release;
+  - `effectAlleleFrequency` is the alternative allele frequency `AF` of the FinnGen annotated variants file, where the frozen release had the minor allele frequency `maf`;
+  - the EFO mappings come from curation tag `26.09.2` (`26.05` in the frozen release): 1,314 studies are mapped to different terms, e.g. EFO terms replaced by MONDO terms.
+- docs: remove the `finngen_data/README.md` bucket index; each FinnGen source keeps its own README, with its changelog.
