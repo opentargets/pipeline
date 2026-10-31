@@ -1,6 +1,6 @@
 # FinnGen multiome
 
-This document was updated on 2026-10-29.
+This document was updated on 2026-10-31.
 
 ```sh
 gs://finngen_data/multiome/prod/20261029T125742/bin/                                   # gentropy CLI and cluster init script of the run
@@ -119,3 +119,14 @@ One row per variant of a credible set.
 | `rescaledStandardError` | `float` | Empty. |
 | `rescaledDirection` | `tinyint` | Empty. |
 | `qualityControls` | `array<string>` | `Allele frequency reported by the study`. |
+
+## Changelog
+
+### 2026-10-29
+
+- feat: add the `finngen_multiome_ingestion` DAG, a StagingDagConfig DAG on gentropy `v4.0.0-dev.5` writing to `gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/`.
+- docs: add this README, uploaded to `docs/` of the run folder `gs://finngen_data/multiome/prod/20261029T125742/`.
+
+### 2026-10-31
+
+- docs: remove the `finngen_data/README.md` bucket index; each FinnGen source keeps its own README, with its changelog.
