@@ -97,29 +97,15 @@ The output is `output/study_locus_lb_clumped/`, partitioned by `studyLocusId`: 1
 
 ## generate_finemapping_index
 
-The step (`BatchIndexOperator`, pointer `finemapping`) lists the loci of `output/study_locus_lb_clumped/` and writes a manifest of their input, output and log paths. The manifests are in `output/finemapping_manifests/20250129/`, in two folders, `20250129091658/` and `20250129143059/`, each with a `chunk_0` manifest.
+The step writes a manifest of the loci in `output/study_locus_lb_clumped/` to `output/finemapping_manifests/20250129/`.
 
 ## finemapping_batch_job
 
-The step runs one Google Batch task per locus of the manifest. Each task runs `susie_finemap.sh`, which calls the gentropy step `susie_finemapping` ([`susie_finemapper.py`](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/susie_finemapper.py)):
-
-- The LD matrix of the locus is the Pan-UKBB `EUR` LD matrix, for a study whose major LD population is `nfe` ([`ld_matrix_interface.py`](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/method/ld_matrix_interface.py)). Only variants present in both the locus and the LD matrix are fine-mapped. Every UKB-PPP study has the LD population `nfe`.
-- The locus is fine-mapped with [SuSiE-inf](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/method/susie_inf.py), with at most 10 causal variants. Each credible set holds the variants with the largest posterior probabilities, until they sum to 0.95.
-- A credible set is kept when its lead has a p-value of at most 1e-5, its natural log Bayes factor is at least 2 (`credibleSetlog10BF` of at least 0.8686), and its mean and minimum purity r² are at least 0.25.
-- Of two credible sets with the same lead, the one with the lower credible set index is kept. Of two credible sets whose leads have an r² of at least 0.8, the one whose lead has the larger p-value is dropped.
-- Every credible set is flagged `Study locus finemapped without in-sample LD reference`.
-
-The output is `output/credible_set_datasets/susie/20250129/`, one folder per locus: 16,974 folders. The logs of the tasks are in `output/finemapping_logs/20250129/`, one `<studyLocusId>.log` file per locus.
+The step fine-maps each locus of the manifest with [SuSiE-inf](https://github.com/opentargets/gentropy/blob/v2.0.2-rc.2/src/gentropy/susie_finemapper.py) in one Google Batch task per locus, and writes the credible sets to `output/credible_set_datasets/susie/20250129/` and the task logs to `output/finemapping_logs/20250129/`.
 
 ## ukb_ppp_eur_data_credible_set_qc
 
-The step ([`credible_set_qc.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/credible_set_qc.py), [`susie_inf.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/method/susie_inf.py), `credible_set_qc`) reads all credible sets of `output/credible_set_datasets/susie/20250129/`:
-
-- Credible sets with a lead p-value above 1e-5, or a minimum purity r² below 0.25, are dropped.
-- Of the credible sets with the same `studyLocusId`, the one with the largest `credibleSetlog10BF` is kept.
-- No LD clumping is done (`clump: false`).
-
-The output is `output/credible_set_clean/20250129/`: 32,179 credible sets from 2,378 studies. This is the dataset that the platform reads.
+The step ([`credible_set_qc.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/credible_set_qc.py)) filters and deduplicates the credible sets, and writes them to `output/credible_set_clean/20250129/`, the dataset that the platform reads.
 
 ## Outputs
 
