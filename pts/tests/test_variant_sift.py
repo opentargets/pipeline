@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import io
-import json
 from pathlib import Path
 
 import numpy as np
@@ -13,12 +11,12 @@ import polars as pl
 import pytest
 
 from pts.schemas.variant import variant_schema
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.index import normalise_score
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, ChunkFrames, vep_records
+from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, _ranked
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
-from pts.transformers.variant.vep import parse_vep
+from pts.transformers.variant.vep import index_rows
 from tests.variant_fixtures import consequences as variant_consequences
+from tests.variant_fixtures import variants, with_effects
 
 #: Ensembl 116 rows for the canonical translations of ENST00000354588, ENST00000524958,
 #: ENST00000390321 and ENST00000526893 (see `test_data/sift/README.md`).
@@ -157,21 +155,19 @@ def consequence_frame(*transcripts: tuple[str, str, str, int]) -> pl.DataFrame:
 def index_of(input_line: str, consequences: pl.DataFrame) -> pl.DataFrame:
     """The variant index of one variant over the consequences."""
     chromosome, position, _, reference, alternate = input_line.split('\t')
-    variants = pl.DataFrame({
-        'row': [0],
-        'chromosome': [chromosome],
-        'position': [int(position)],
-        'referenceAllele': [reference],
-        'alternateAllele': [alternate],
-        'vepStart': [int(position)],
-        'vepEnd': [int(position)],
-        'vepReference': [reference],
-        'vepAlternate': [alternate],
-        'hgvsg': [None],
-        'most_severe_consequence': ['missense_variant'],
-        'reported_transcripts': [True],
-    })
-    return parse_vep(vep_records(ChunkFrames(variants, consequences)).lazy()).collect()
+    frame = variants(
+        row=[0],
+        chromosome=[chromosome],
+        position=[int(position)],
+        referenceAllele=[reference],
+        alternateAllele=[alternate],
+        most_severe_consequence=['missense_variant'],
+        reported_transcripts=[True],
+        rsIds=[[]],
+        clinvarIds=[[]],
+        omimIds=[[]],
+    )
+    return index_rows(frame, with_effects(_ranked(consequences)))
 
 
 def sift_effect(index: pl.DataFrame) -> dict:
@@ -227,42 +223,41 @@ def test_effects_accept_an_empty_consequences_frame(matrices: pl.DataFrame):
     })
 
 
-def vep_record(*transcripts: dict) -> pl.LazyFrame:
-    record = {
-        'input': '1\t123\t.\tA\tG',
-        'most_severe_consequence': 'missense_variant',
-        'transcript_consequences': [
-            {'canonical': 1, 'consequence_terms': ['missense_variant'], **transcript} for transcript in transcripts
-        ],
-    }
-    return pl.read_ndjson(io.BytesIO(json.dumps(record).encode()), schema=vep_schema).lazy()
+def canonical(*transcripts: dict) -> pl.DataFrame:
+    """Canonical missense consequences of one variant, one per transcript's columns."""
+    names = [*dict.fromkeys(name for transcript in transcripts for name in transcript)]
+    return variant_consequences(
+        row=[0] * len(transcripts),
+        consequence_terms=[['missense_variant']] * len(transcripts),
+        **{name: [transcript.get(name) for transcript in transcripts] for name in names},
+    )
 
 
 def test_equal_scores_and_predictions_break_by_transcript_id():
-    """Non-canonical and unscored transcripts never win."""
-    index = parse_vep(
-        vep_record(
+    """Unscored transcripts never win."""
+    index = index_of(
+        '1\t123\t.\tA\tG',
+        canonical(
             {'transcript_id': 'ENST3', 'gene_id': 'g3'},
             {'transcript_id': 'ENST2', 'gene_id': 'g2', 'sift_score': 0.2, 'sift_prediction': 'tolerated'},
             {'transcript_id': 'ENST1', 'gene_id': 'g1', 'sift_score': 0.2, 'sift_prediction': 'tolerated'},
-            {'transcript_id': 'ENST0', 'gene_id': 'g0', 'sift_score': 0.0, 'sift_prediction': 'deleterious'}
-            | {'canonical': None},
-        )
-    ).collect()
+        ),
+    )
     effect = sift_effect(index)
     assert (effect['assessment'], effect['targetId']) == ('tolerated', 'g1')
     assert effect['score'] == pytest.approx(0.2)
 
 
 def test_no_sift_no_entry():
-    index = parse_vep(vep_record({'transcript_id': 'ENST1', 'gene_id': 'g1'})).collect()
+    index = index_of('1\t123\t.\tA\tG', canonical({'transcript_id': 'ENST1', 'gene_id': 'g1'}))
     assert [effect['method'] for effect in index['variantEffect'][0]] == ['VEP']
 
 
 def test_sift_prediction_not_in_transcripts():
-    index = parse_vep(
-        vep_record({'transcript_id': 'ENST1', 'gene_id': 'g1', 'sift_score': 0.0, 'sift_prediction': 'deleterious'})
-    ).collect()
+    index = index_of(
+        '1\t123\t.\tA\tG',
+        canonical({'transcript_id': 'ENST1', 'gene_id': 'g1', 'sift_score': 0.0, 'sift_prediction': 'deleterious'}),
+    )
     assert index.schema == variant_schema
     [transcript] = index['transcriptConsequences'][0]
     assert not [name for name in transcript if 'sift' in name.lower()]

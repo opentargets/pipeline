@@ -10,6 +10,7 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from pts.transformers.variant.alleles import read_chromosome
+from pts.transformers.variant.colocated import add_colocated
 from pts.transformers.variant.records import (
     CONSEQUENCES_SCHEMA,
     FASTVEP_SCHEMA,
@@ -17,9 +18,9 @@ from pts.transformers.variant.records import (
     chunk_frames,
     iter_records,
     unannotated_frames,
-    vep_records,
 )
-from pts.transformers.variant.vep import parse_vep
+from pts.transformers.variant.vep import index_rows
+from tests.variant_fixtures import with_effects
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
 SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'
@@ -61,7 +62,12 @@ def frames(rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes) -> Ch
 
 @pytest.fixture(scope='module')
 def index(frames: ChunkFrames) -> pl.DataFrame:
-    return parse_vep(vep_records(frames).lazy()).collect()
+    return index_of(frames)
+
+
+def index_of(frames: ChunkFrames) -> pl.DataFrame:
+    """The index rows of the frames, without colocated variants or effects."""
+    return index_rows(add_colocated(frames.variants, None), with_effects(frames.consequences))
 
 
 def variant(frames: ChunkFrames, position: int) -> dict:
@@ -267,6 +273,22 @@ def test_unusable_alleles_have_no_hgvsg(tmp_path: Path) -> None:
         assert found.variants['reported_transcripts'].to_list() == [False]
 
 
+def test_only_non_canonical_transcripts_keep_severity_and_null_hgvs(tmp_path: Path) -> None:
+    """The most severe consequence is ranked over every transcript, canonical or not; the HGVS needs a canonical one."""
+    item = synthetic([['intron_variant'], ['missense_variant']], 'intron_variant')
+    path = fastvep_json(tmp_path / 'non_canonical.json', [item])
+    core = pl.concat(
+        [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [0, 0]})], how='diagonal'
+    )
+    found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
+    assert found.consequences.height == 0
+    [row] = index_of(found).to_dicts()
+    assert row['mostSevereConsequenceId'] == 'SO_0001583'
+    assert [x['assessment'] for x in row['variantEffect']] == ['missense_variant']
+    assert row['transcriptConsequences'] == []
+    assert row['hgvsId'] is None
+
+
 def test_canonical_from_the_core(tmp_path: Path) -> None:
     item = synthetic([['intron_variant'], ['intron_variant']], 'intron_variant')
     item['transcript_consequences'][0]['canonical'] = None
@@ -286,6 +308,4 @@ def test_unannotated_frames_are_intergenic() -> None:
     [row] = found.variants.to_dicts()
     assert row['hgvsg'] is None
     assert (row['most_severe_consequence'], row['reported_transcripts']) == ('intergenic_variant', False)
-    records = vep_records(found)
-    assert records['intergenic_consequences'].to_list() == [[{'hgvsg': None}]]
-    assert parse_vep(records.lazy()).collect()['hgvsId'].to_list() == [None]
+    assert index_of(found)['hgvsId'].to_list() == [None]

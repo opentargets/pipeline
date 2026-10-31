@@ -6,12 +6,11 @@ import io
 import mmap
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import numpy as np
 import polars as pl
 
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import hgvs_genomic, vep_allele_form
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, RANKS
 
@@ -41,7 +40,6 @@ CHUNK_BYTES = 256 << 20
 _RANK = {term: rank for rank, term in enumerate(RANKS)}
 _TERM = dict(enumerate(RANKS))
 _RECORD = b'\n{\n'
-_TRANSCRIPT = cast(pl.Struct, cast(pl.List, vep_schema['transcript_consequences']).inner)
 _BASES = r'^[ACGTN]+$'
 
 
@@ -174,24 +172,24 @@ class ChunkFrames(NamedTuple):
     consequences: pl.DataFrame
 
 
-_FIELDS = (
-    'transcript_id',
-    'gene_id',
-    'gene_symbol',
-    'biotype',
-    'appris',
-    'mane_select',
-    'tssdistance',
-    'cds_end',
-    'codons',
-    'consequence_terms',
-    'distance',
-    'impact',
-    'amino_acids',
-    'protein_end',
-    'swissprot',
-    'trembl',
-)
+_FIELDS = pl.Schema({
+    'transcript_id': pl.String,
+    'gene_id': pl.String,
+    'gene_symbol': pl.String,
+    'biotype': pl.String,
+    'appris': pl.String,
+    'mane_select': pl.String,
+    'tssdistance': pl.Int64,
+    'cds_end': pl.Int64,
+    'codons': pl.String,
+    'consequence_terms': pl.List(pl.String),
+    'distance': pl.Int64,
+    'impact': pl.String,
+    'amino_acids': pl.String,
+    'protein_end': pl.Int64,
+    'swissprot': pl.List(pl.String),
+    'trembl': pl.List(pl.String),
+})
 CONSEQUENCES_SCHEMA = pl.Schema({
     'row': pl.Int64,
     'position': pl.Int32,
@@ -201,7 +199,7 @@ CONSEQUENCES_SCHEMA = pl.Schema({
     'vepEnd': pl.Int64,
     'vepReference': pl.String,
     'vepAlternate': pl.String,
-    **{name: _TRANSCRIPT.to_schema()[name] for name in _FIELDS},
+    **_FIELDS,
     'rank': pl.Int32,
 })
 """The columns of the consequences frame, before any effect adds its own."""
@@ -221,8 +219,7 @@ def _fields() -> list[pl.Expr]:
         'swissprot': pl.when(pl.col('swissprot').list.len() > 0).then(pl.col('swissprot')),
         'trembl': pl.when(pl.col('trembl').list.len() > 0).then(pl.col('trembl')),
     }
-    dtypes = _TRANSCRIPT.to_schema()
-    return [computed.get(name, pl.col(name)).cast(dtypes[name]).alias(name) for name in _FIELDS]
+    return [computed.get(name, pl.col(name)).cast(dtype).alias(name) for name, dtype in _FIELDS.items()]
 
 
 def _ranked(consequences: pl.DataFrame) -> pl.DataFrame:
@@ -321,65 +318,3 @@ def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
         pl.lit(False).alias('reported_transcripts'),
     )
     return ChunkFrames(variants, pl.DataFrame(schema=CONSEQUENCES_SCHEMA))
-
-
-def _transcript(columns: list[str]) -> pl.Expr:
-    """The VEP transcript consequence struct; fields other tasks fill are null."""
-    fields = {name: pl.col(name) for name in (*_FIELDS, 'hgvsg')} | {'canonical': pl.lit(1, pl.Int64)}
-    if 'conservation' in columns:
-        fields['conservation'] = pl.col('conservation')
-    if 'am_class' in columns:
-        fields['alphamissense'] = (
-            pl
-            .when(pl.col('am_class').is_not_null())
-            .then(pl.struct('am_class', 'am_pathogenicity'))
-            .cast(_TRANSCRIPT.to_schema()['alphamissense'])
-        )
-    for name in ('lof', 'lof_filter', 'sift_score', 'sift_prediction'):
-        if name in columns:
-            fields[name] = pl.col(name)
-    return pl.struct([
-        fields[name].cast(dtype).alias(name) if name in fields else pl.lit(None, dtype).alias(name)
-        for name, dtype in _TRANSCRIPT.to_schema().items()
-    ])
-
-
-def vep_records(frames: ChunkFrames) -> pl.DataFrame:
-    """The VEP records `parse_vep` reads, rebuilt from the frames.
-
-    `input` carries `.` for the rsID. `colocated_variants` is empty. The effect columns of the
-    consequences, when present, fill `conservation`, `alphamissense`, `lof`, `lof_filter`,
-    `sift_score` and `sift_prediction`; the others are null.
-    """
-    variants, consequences = frames
-    nested = (
-        consequences
-        .join(variants.select('row', 'hgvsg'), on='row', how='left', maintain_order='left')
-        .rechunk()
-        .group_by('row', maintain_order=True)
-        .agg(_transcript(consequences.columns).alias('transcript_consequences'))
-    )
-    return (
-        variants
-        .join(nested, on='row', how='left', maintain_order='left')
-        .rechunk()
-        .select(
-            pl.concat_str(
-                'chromosome',
-                pl.col('position').cast(pl.String),
-                pl.lit('.'),
-                'referenceAllele',
-                'alternateAllele',
-                pl.lit('.\t.\t.'),
-                separator='\t',
-            ).alias('input'),
-            'most_severe_consequence',
-            pl
-            .when(~pl.col('reported_transcripts'))
-            .then(pl.concat_list(pl.struct('hgvsg')))
-            .cast(vep_schema['intergenic_consequences'])
-            .alias('intergenic_consequences'),
-            pl.lit([], dtype=vep_schema['colocated_variants']).alias('colocated_variants'),
-            pl.col('transcript_consequences').fill_null(pl.lit([], dtype=vep_schema['transcript_consequences'])),
-        )
-    )

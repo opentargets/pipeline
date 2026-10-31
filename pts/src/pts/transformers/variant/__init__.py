@@ -3,12 +3,12 @@
 The variant rows are collected from the evidence and credible sets, then annotated by
 `chromosome.annotate_chromosomes`: fastVEP on each chromosome, then, on chunks of each
 chromosome's rows in parallel, joins on the mirrored Ensembl data (transcript fields, colocated
-variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the VEP records that `parse_vep` turns into
-index rows. GPN-Star scores, supplementary variant annotations (gnomAD, LoF curation) merged by
-variant, and amino-acid level predictions (FoldX) through each variant's first transcript with an
-amino-acid change are merged into each chunk. The inputs these share are prepared once, before the
-chromosomes run, the remote ones read into local scratch, and each chunk is written as one part of
-the output once every chunk has succeeded.
+variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the variants and consequences frames that
+`index_rows` turns into index rows. GPN-Star scores, supplementary variant annotations (gnomAD, LoF
+curation) merged by variant, and amino-acid level predictions (FoldX) through each variant's first
+transcript with an amino-acid change are merged into each chunk. The inputs these share are prepared
+once, before the chromosomes run, the remote ones read into local scratch, and each chunk is written
+as one part of the output once every chunk has succeeded.
 """
 
 from __future__ import annotations

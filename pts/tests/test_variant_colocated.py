@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import gzip
 import io
-import json
 import random
 import tarfile
 from pathlib import Path
@@ -12,10 +11,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import shared_prefix_length
-from pts.transformers.variant.colocated import _keys, colocated_variants, extract_all_vars
-from pts.transformers.variant.vep import parse_vep
+from pts.transformers.variant.colocated import ID_LISTS, KEY, _keys, add_colocated, colocated_variants, extract_all_vars
+from pts.transformers.variant.vep import index_rows
+from tests.variant_fixtures import consequences, variants, with_effects
 
 CACHE_COLUMNS = (
     'chr',
@@ -73,7 +72,7 @@ def ids(result: pl.DataFrame) -> dict[str, list[str]]:
     """The colocated ids of each row, by variant id."""
     return {
         '_'.join(str(row[key]) for key in ('chromosome', 'position', 'referenceAllele', 'alternateAllele')): [
-            variant['id'] for variant in row['colocated_variants']
+            *row['rsIds']
         ]
         for row in result.to_dicts()
     }
@@ -170,7 +169,7 @@ def test_rows_without_colocated_variants_absent(tmp_path: Path) -> None:
     assert ids(result) == {'1_100_A_G': ['rs1']}
 
 
-def test_colocated_variants_in_vep_shape(tmp_path: Path) -> None:
+def test_colocated_variants_as_id_lists(tmp_path: Path) -> None:
     cache = all_vars(
         tmp_path / 'all_vars.gz',
         cache_line('rs1', 100, 100, 'A/G', var_synonyms='ClinVar::RCV000001,VCV000002--OMIM::171834.0000'),
@@ -178,26 +177,24 @@ def test_colocated_variants_in_vep_shape(tmp_path: Path) -> None:
         cache_line('rs3', 100, 100, 'A/G'),
     )
     result = colocated_variants(cache, rows('1_100_A_G'))
-    assert result.schema['colocated_variants'] == vep_schema['colocated_variants']
-    assert result['colocated_variants'].to_list() == [
-        [
-            {
-                'id': 'rs1',
-                'allele_string': 'A/G',
-                'start': 100,
-                'end': 100,
-                'var_synonyms': {'ClinVar': ['RCV000001', 'VCV000002'], 'OMIM': ['171834.0000']},
-            },
-            {
-                'id': 'rs2',
-                'allele_string': 'A/G',
-                'start': 100,
-                'end': 100,
-                'var_synonyms': {'ClinVar': None, 'OMIM': None},
-            },
-            {'id': 'rs3', 'allele_string': 'A/G', 'start': 100, 'end': 100, 'var_synonyms': None},
-        ]
-    ]
+    assert result.schema == pl.Schema({**rows('1_100_A_G').select(KEY).schema, **ID_LISTS})
+    assert result.select(*ID_LISTS).rows() == [(['rs1', 'rs2', 'rs3'], ['VCV000002'], ['171834#0000'])]
+
+
+def index_of(variant_id: str, colocated: pl.DataFrame | None) -> dict:
+    """The index row of an intergenic variant with its colocated ids from `colocated`."""
+    chromosome, position, reference, alternate = variant_id.split('_')
+    frame = variants(
+        row=[0],
+        chromosome=[chromosome],
+        position=[int(position)],
+        referenceAllele=[reference],
+        alternateAllele=[alternate],
+        most_severe_consequence=['intergenic_variant'],
+        reported_transcripts=[False],
+    ).drop(*ID_LISTS)
+    [row] = index_rows(add_colocated(frame, colocated), with_effects(consequences())).to_dicts()
+    return row
 
 
 def test_clinvar_ids_deduplicated(tmp_path: Path) -> None:
@@ -206,12 +203,9 @@ def test_clinvar_ids_deduplicated(tmp_path: Path) -> None:
         cache_line('rs1', 100, 100, 'A/G', var_synonyms='ClinVar::RCV000001,VCV000009--OMIM::171834.0000'),
         cache_line('COSV1', 100, 100, 'A/G', var_synonyms='ClinVar::RCV000002,VCV000009,VCV000003'),
     )
-    colocated = colocated_variants(cache, rows('1_100_A_G'))['colocated_variants'].to_list()[0]
-    record = {'input': '1\t100\t.\tA\tG', 'most_severe_consequence': 'intergenic_variant'}
-    frame = pl.read_ndjson(io.BytesIO(json.dumps(record).encode()), schema=vep_schema).with_columns(
-        pl.Series('colocated_variants', [colocated], dtype=vep_schema['colocated_variants'])
-    )
-    [row] = parse_vep(frame.lazy()).collect().to_dicts()
+    colocated = colocated_variants(cache, rows('1_100_A_G'))
+    assert colocated['clinvarIds'].to_list() == [['VCV000009', 'VCV000003']]
+    row = index_of('1_100_A_G', colocated)
     assert [(x['id'], x['source']) for x in row['dbXrefs']] == [
         ('rs1', 'ensembl_variation'),
         ('COSV1', 'ensembl_variation'),
@@ -219,6 +213,19 @@ def test_clinvar_ids_deduplicated(tmp_path: Path) -> None:
         ('VCV000009', 'clinvar'),
         ('VCV000003', 'clinvar'),
     ]
+
+
+@pytest.mark.parametrize('located', [False, True])
+def test_variants_without_colocated_have_empty_id_lists(tmp_path: Path, located: bool) -> None:
+    """No colocated file for the chromosome, or no colocated variant of the row: `[]`, never null."""
+    cache = all_vars(tmp_path / 'all_vars.gz', cache_line('rs1', 100, 100, 'A/G'))
+    colocated = colocated_variants(cache, rows('1_100_A_G')) if located else None
+    row = index_of('1_200_A_G', colocated)
+    assert (row['rsIds'], row['dbXrefs']) == ([], [])
+    key = rows('1_200_A_G').select(KEY)
+    found = add_colocated(variants(**key.to_dict()).drop(*ID_LISTS), colocated).select(*ID_LISTS)
+    assert found.schema == ID_LISTS
+    assert found.rows() == [([], [], [])]
 
 
 def tarball(path: Path, members: dict[str, bytes]) -> Path:

@@ -1,10 +1,9 @@
-"""Variant index: VEP parsing, annotation merging and the end-to-end step."""
+"""Variant index: index rows from the chunk frames, annotation merging and the end-to-end step."""
 
 from __future__ import annotations
 
 import gzip
 import hashlib
-import io
 import json
 import re
 import stat
@@ -22,11 +21,12 @@ from loguru import logger
 from pydantic import ValidationError
 
 from pts.schemas.variant import variant_schema
-from pts.schemas.vep import vep_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
+from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.chromosome import annotate
+from pts.transformers.variant.colocated import add_colocated, colocated_variants
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.index import (
@@ -37,38 +37,57 @@ from pts.transformers.variant.index import (
     normalise_score,
     read_variant_annotations,
 )
+from pts.transformers.variant.records import _ranked, chunk_frames, iter_records
 from pts.transformers.variant.rows import collect_variants
 from pts.transformers.variant.vep import (
     amino_acid_change,
     generate_dbxrefs,
-    parse_vep,
+    index_rows,
     uniprot_accessions,
     variant_effect,
 )
 from tests.ensembl_fixtures import cells, ddl, write_dump
-from tests.test_variant_colocated import cache_line
+from tests.test_variant_colocated import all_vars, cache_line
+from tests.test_variant_colocated import rows as colocated_rows
 from tests.test_variant_loftee import write_bgzip_fasta
+from tests.variant_fixtures import EFFECTS_SCHEMA, consequences, variants, with_effects
 
-SAMPLE = Path(__file__).parent / 'test_data' / 'vep_sample.jsonl'
+FASTVEP = Path(__file__).parent / 'test_data' / 'fastvep'
 EFFECTS = variant_schema['variantEffect']
+VARIANT = {
+    'row': 0,
+    'chromosome': '1',
+    'position': 123,
+    'referenceAllele': 'A',
+    'alternateAllele': 'G',
+    'most_severe_consequence': 'intergenic_variant',
+}
+"""The variant `parsed` indexes, unless updated."""
 
 
-def vep_records(*records: dict) -> pl.LazyFrame:
-    """Raw VEP records read through the same schema as the JSON reader."""
-    lines = '\n'.join(json.dumps(record) for record in records).encode()
-    return pl.read_ndjson(io.BytesIO(lines), schema=vep_schema).lazy()
+def consequence_frame(*transcripts: dict) -> pl.DataFrame:
+    """Canonical consequences in fastVEP's order, of row 0 unless given, ranked as `chunk_frames` ranks them.
+
+    Columns no transcript gives are null, effect columns included.
+    """
+    names = [*dict.fromkeys(name for transcript in transcripts for name in transcript)]
+    columns = {name: [transcript.get(name) for transcript in transcripts] for name in names}
+    rows = columns.pop('row', [0] * len(transcripts))
+    effects = {name: [None] * len(transcripts) for name in EFFECTS_SCHEMA if name not in columns}
+    return _ranked(consequences(row=rows, **columns, **effects))
 
 
-def parsed(hash_threshold: int = 300, **updates: object) -> dict:
-    record = {'input': '1\t123\t.\tA\tG', 'most_severe_consequence': 'intergenic_variant', **updates}
-    [row] = parse_vep(vep_records(record), hash_threshold).collect().to_dicts()
+def parsed(hash_threshold: int = 300, transcripts: tuple[dict, ...] | list[dict] = (), **updates: object) -> dict:
+    """The index row of `VARIANT` with `updates`, over the canonical `transcripts`."""
+    variant = {**VARIANT, 'reported_transcripts': bool(transcripts), **updates}
+    frame = variants(**{name: [value] for name, value in variant.items()})
+    [row] = index_rows(frame, consequence_frame(*transcripts), hash_threshold).to_dicts()
     return row
 
 
 def transcript(**updates: object) -> dict:
     """Canonical protein coding transcript with sensible default annotations."""
     return {
-        'canonical': 1,
         'gene_id': 'ENSG1',
         'transcript_id': 'ENST1',
         'consequence_terms': ['missense_variant'],
@@ -90,20 +109,28 @@ def effect(method: str = 'VEP', score: float | None = 1.0, assessment: str | Non
     }
 
 
-def index_rows(rows: list[dict]) -> pl.DataFrame:
+def index_frame(rows: list[dict]) -> pl.DataFrame:
     """Variant index rows; fields not given are null, arrays not given are empty."""
     arrays = {name for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)}
     full = [{name: row.get(name, [] if name in arrays else None) for name in variant_schema.names()} for row in rows]
     return pl.DataFrame(full, schema=variant_schema)
 
 
-# --- VEP reader ---------------------------------------------------------------------------------
+# --- index rows ---------------------------------------------------------------------------------
 
 
 def test_sample_preserves_count_and_full_schema():
-    result = parse_vep(pl.scan_ndjson(SAMPLE, schema=vep_schema)).collect()
+    rows = pl.read_parquet(FASTVEP / 'chr22_slice_rows.parquet')
+    frames = chunk_frames(
+        pl.concat(iter_records(FASTVEP_SAMPLE)),
+        rows,
+        pl.read_parquet(FASTVEP / 'chr22_slice_transcripts.parquet'),
+        read_chromosome(str(FASTVEP / 'chr22_slice.fa.gz'), '22'),
+        '22',
+    )
+    result = index_rows(add_colocated(frames.variants, None), with_effects(frames.consequences))
     assert result.schema == variant_schema
-    assert result.height == 4
+    assert result.height == rows.height
     for row in result.to_dicts():
         transcripts = row['transcriptConsequences']
         assert [x['transcriptIndex'] for x in transcripts] == list(range(1, len(transcripts) + 1))
@@ -154,9 +181,9 @@ def test_incomplete_terminal_codon_uses_the_sequence_ontology_term():
 # --- parsing ------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('transcripts', [None, []])
-def test_no_transcripts_has_vep_prediction_and_empty_arrays(transcripts):
-    result = parsed(transcript_consequences=transcripts)
+@pytest.mark.parametrize('reported', [False, True])
+def test_no_transcripts_has_vep_prediction_and_empty_arrays(reported):
+    result = parsed(reported_transcripts=reported)
     assert result['transcriptConsequences'] == []
     assert result['rsIds'] == []
     assert result['dbXrefs'] == []
@@ -174,16 +201,15 @@ def test_no_transcripts_has_vep_prediction_and_empty_arrays(transcripts):
     assert result['variantDescription'] == 'Intergenic variant no gene in window'
 
 
-def test_canonical_filter_sort_and_stable_ties():
+def test_sort_and_stable_ties():
     records = [
-        transcript(gene_id='g0', canonical=0, consequence_terms=['stop_gained']),
         transcript(gene_id='g1', distance=100),
         transcript(gene_id='g2', distance=50),
         transcript(gene_id='g3', distance=50),
         transcript(gene_id='g4', consequence_terms=['stop_gained'], distance=1000),
         transcript(gene_id='g5', consequence_terms=['unknown']),
     ]
-    result = parsed(transcript_consequences=records)['transcriptConsequences']
+    result = parsed(transcripts=records)['transcriptConsequences']
     assert [x['targetId'] for x in result] == ['g4', 'g2', 'g3', 'g1']
     assert [x['transcriptIndex'] for x in result] == [1, 2, 3, 4]
 
@@ -191,21 +217,20 @@ def test_canonical_filter_sort_and_stable_ties():
 def test_cross_references_hgvs_amino_acid_and_transcript_annotations():
     result = parsed(
         most_severe_consequence='missense_variant',
-        transcript_consequences=[
+        hgvsg='1:g.123A>G',
+        transcripts=[
             transcript(
                 amino_acids='A/B',
                 protein_end=12,
-                hgvsg='1:g.123A>G',
                 tssdistance=234,
                 swissprot=['P1.2'],
                 trembl=['P2.1'],
                 lof='HC',
             )
         ],
-        colocated_variants=[
-            {'id': 'rs1', 'var_synonyms': {'OMIM': [610266.0003], 'ClinVar': ['RCV123', 'VCV123']}},
-            {'id': None},
-        ],
+        rsIds=['rs1', None],
+        omimIds=['610266#0003'],
+        clinvarIds=['VCV123'],
     )
     assert result['variantId'] == '1_123_A_G'
     assert result['rsIds'] == ['rs1', None]
@@ -227,37 +252,36 @@ def test_cross_references_hgvs_amino_acid_and_transcript_annotations():
     )
 
 
-def test_omim_ids_keep_their_four_digit_suffix():
-    """VEP writes OMIM IDs as JSON numbers, sometimes without the suffix's trailing zero."""
-    record = (
-        json
-        .dumps({
-            'input': '1\t123\t.\tA\tG',
-            'most_severe_consequence': 'intergenic_variant',
-            'colocated_variants': [{'id': 'rs1', 'var_synonyms': {'OMIM': ['ENTRY_A', 'ENTRY_B', 'ENTRY_C']}}],
-        })
-        .replace('"ENTRY_A"', '600234.0010')
-        .replace('"ENTRY_B"', '171834.0100')
-        .replace('"ENTRY_C"', '159530.001')
+def test_omim_ids_keep_their_four_digit_suffix(tmp_path):
+    """The cache writes OMIM IDs as VEP's numbers, sometimes without the suffix's trailing zero."""
+    cache = all_vars(
+        tmp_path / 'all_vars.gz',
+        cache_line('rs1', 123, 123, 'A/G', var_synonyms='OMIM::600234.0010,171834.0100,159530.001'),
     )
-    [row] = parse_vep(pl.read_ndjson(io.BytesIO(record.encode()), schema=vep_schema).lazy()).collect().to_dicts()
+    frame = variants(**{name: [value] for name, value in VARIANT.items()}, reported_transcripts=[False])
+    colocated = colocated_variants(cache, colocated_rows('1_123_A_G'))
+    [row] = index_rows(
+        add_colocated(frame.drop('rsIds', 'clinvarIds', 'omimIds'), colocated), consequence_frame()
+    ).to_dicts()
     assert [x['id'] for x in row['dbXrefs'] if x['source'] == 'omim'] == ['600234#0010', '171834#0100', '159530#0010']
 
 
 def test_all_predictors_without_sift_or_polyphen():
     result = parsed(
-        transcript_consequences=[
+        transcripts=[
             transcript(
                 lof='HC',
                 lof_filter='flag',
                 conservation=3,
-                alphamissense={'am_class': 'likely_pathogenic', 'am_pathogenicity': 0.8},
+                am_class='likely_pathogenic',
+                am_pathogenicity=0.8,
             ),
             transcript(
                 gene_id='g2',
                 lof='LC',
                 conservation=5,
-                alphamissense={'am_class': 'benign', 'am_pathogenicity': 0.9},
+                am_class='benign',
+                am_pathogenicity=0.9,
             ),
         ],
     )
@@ -272,7 +296,7 @@ def test_all_predictors_without_sift_or_polyphen():
 def test_predictor_comes_from_the_first_transcript_with_the_highest_score():
     """Ties keep the index's transcript order, null scores never win, and no score means no effect."""
     result = parsed(
-        transcript_consequences=[
+        transcripts=[
             transcript(gene_id='none', transcript_id='ENST0'),
             transcript(gene_id='first', transcript_id='ENST1', conservation=5),
             transcript(gene_id='second', transcript_id='ENST2', conservation=5),
@@ -287,7 +311,7 @@ def test_predictor_comes_from_the_first_transcript_with_the_highest_score():
 def test_loftee_ties_keep_the_first_transcript():
     """Spark ranks LOFTEE by its string value, so `LC` beats `HC`; ties keep the index's order."""
     result = parsed(
-        transcript_consequences=[
+        transcripts=[
             transcript(gene_id='high_confidence', transcript_id='ENST0', lof='HC'),
             transcript(gene_id='second', transcript_id='ENST2', lof='LC', lof_filter='B'),
             transcript(gene_id='first', transcript_id='ENST1', lof='LC', lof_filter='A'),
@@ -310,8 +334,8 @@ RANKED = [
 def test_tied_effects_target_the_top_ranked_transcript(order):
     """GERP, AlphaMissense and LOFTEE ties go to the transcript ranked first in `transcriptConsequences`."""
     alphamissense = {'am_class': 'benign', 'am_pathogenicity': 0.1}
-    tied = [{**RANKED[i], 'conservation': 2.5, 'alphamissense': alphamissense, 'lof': 'LC'} for i in order]
-    result = parsed(transcript_consequences=tied)
+    tied = [{**RANKED[i], 'conservation': 2.5, **alphamissense, 'lof': 'LC'} for i in order]
+    result = parsed(transcripts=tied)
     effects = {x['method']: x['targetId'] for x in result['variantEffect']}
     assert [x['targetId'] for x in result['transcriptConsequences']] == ['severe', 'near', 'near_id', 'far']
     assert effects == {'GERP': 'severe', 'AlphaMissense': 'severe', 'LOFTEE': 'severe', 'VEP': None}
@@ -325,23 +349,77 @@ def test_tied_effects_ignore_transcripts_without_the_score(order):
         {**RANKED[2], 'conservation': 4.0},
         {**RANKED[3], 'conservation': 4.0},
     ]
-    result = parsed(transcript_consequences=[RANKED[0], *(tied[i] for i in order)])
+    result = parsed(transcripts=[RANKED[0], *(tied[i] for i in order)])
     assert {x['method']: x['targetId'] for x in result['variantEffect']}['GERP'] == 'near'
 
 
 def test_hgvs_intergenic_fallback():
-    assert parsed(intergenic_consequences=[{'hgvsg': '1:g.123A>G'}])['hgvsId'] == '1:g.123A>G'
+    assert parsed(hgvsg='1:g.123A>G', reported_transcripts=False)['hgvsId'] == '1:g.123A>G'
 
 
 def test_null_first_transcript_hgvs_does_not_fall_back():
-    result = parsed(transcript_consequences=[transcript()], intergenic_consequences=[{'hgvsg': 'fallback'}])
+    result = parsed(transcripts=[transcript()], hgvsg=None)
     assert result['hgvsId'] is None
+
+
+def test_only_non_canonical_transcripts_keep_severity_and_null_hgvs():
+    """fastVEP reported transcripts, none canonical: the most severe consequence stays, the HGVS does not."""
+    result = parsed(most_severe_consequence='missense_variant', hgvsg='1:g.123A>G', reported_transcripts=True)
+    assert result['mostSevereConsequenceId'] == 'SO_0001583'
+    assert [x['assessment'] for x in result['variantEffect']] == ['missense_variant']
+    assert result['transcriptConsequences'] == []
+    assert result['hgvsId'] is None
+
+
+def test_unscored_transcript_can_supply_an_effect():
+    """A canonical transcript without a scored term gives GERP its target, but is not a transcript consequence."""
+    result = parsed(
+        transcripts=[
+            transcript(gene_id='scored', transcript_id='ENST1'),
+            transcript(gene_id='unscored', transcript_id='ENST2', consequence_terms=['unknown'], conservation=2.0),
+        ]
+    )
+    assert {x['method']: x['targetId'] for x in result['variantEffect']}['GERP'] == 'unscored'
+    assert [x['targetId'] for x in result['transcriptConsequences']] == ['scored']
+    assert result['hgvsId'] is None
+
+
+def test_transcript_index_follows_rank_among_scored_transcripts():
+    """Ranking on the double precision score orders every pair of terms as their single precision score does.
+
+    Each row holds a less severe term on the lower id and distance, so a tie in single precision
+    would put it first; an unscored transcript, first in fastVEP's order, is dropped.
+    """
+    terms = sorted(CONSEQUENCE_SCORES, key=CONSEQUENCE_SCORES.__getitem__)
+    pairs = [(low, high) for i, low in enumerate(terms) for high in terms[i + 1 :]]
+    transcripts = [
+        transcript(row=row, gene_id=gene_id, transcript_id=transcript_id, consequence_terms=[term], distance=distance)
+        for row, (low, high) in enumerate(pairs)
+        for gene_id, transcript_id, term, distance in (
+            ('unscored', 'ENST0', 'unknown', 0),
+            ('low', 'ENST1', low, 0),
+            ('high', 'ENST2', high, 1),
+        )
+    ]
+    frame = variants(**{name: [value] * len(pairs) for name, value in VARIANT.items() if name != 'row'})
+    frame = frame.with_columns(
+        pl.int_range(len(pairs), dtype=pl.Int64).alias('row'), pl.lit(True).alias('reported_transcripts')
+    )
+    result = index_rows(frame, consequence_frame(*transcripts))
+    assert result.height == len(pairs)
+    for row in result['transcriptConsequences'].to_list():
+        assert [x['transcriptIndex'] for x in row] == [1, 2]
+        assert [x['targetId'] for x in row] == ['high', 'low']
+        by_single_precision = sorted(
+            row, key=lambda x: (-x['consequenceScore'], x['distanceFromFootprint'], x['transcriptId'])
+        )
+        assert by_single_precision == row
 
 
 def test_non_coding_description_and_distance_formatting():
     result = parsed(
         most_severe_consequence='non_coding_transcript_variant',
-        transcript_consequences=[
+        transcripts=[
             transcript(
                 gene_id='lnc',
                 gene_symbol=None,
@@ -359,12 +437,15 @@ def test_non_coding_description_and_distance_formatting():
 
 
 def test_invalid_position_is_dropped():
-    assert parse_vep(vep_records({'input': '1\tnot_an_int\t.\tA\tG'})).collect().height == 0
+    frame = variants(**{name: [value] for name, value in VARIANT.items()}).with_columns(
+        pl.lit(None, pl.Int32).alias('position')
+    )
+    assert index_rows(frame, consequence_frame()).height == 0
 
 
 def test_hashed_variant_keeps_unhashed_protvar_xref():
     alternate = 'G' * 300
-    result = parsed(hash_threshold=30, input=f'1\t123\t.\tA\t{alternate}', transcript_consequences=[transcript()])
+    result = parsed(hash_threshold=30, alternateAllele=alternate, transcripts=[transcript()])
     assert result['variantId'].startswith('OTVAR_1_123_')
     assert result['dbXrefs'][-1]['id'] == f'1_123_A_{alternate}'
 
@@ -474,18 +555,18 @@ def test_annotation_parts_tolerate_parts_with_different_columns(tmp_path):
 def test_add_annotation_removes_repeats_only_where_an_annotation_joined():
     """Spark's union removes repeats in the index's array; with nothing joined it keeps them."""
     repeated = [effect('VEP'), effect('VEP')]
-    index = index_rows([
+    index = index_frame([
         {'variantId': 'joined', 'variantEffect': repeated},
         {'variantId': 'alone', 'variantEffect': repeated},
     ])
-    rows = {row['variantId']: row for row in add_annotation(index, index_rows([{'variantId': 'joined'}])).to_dicts()}
+    rows = {row['variantId']: row for row in add_annotation(index, index_frame([{'variantId': 'joined'}])).to_dicts()}
     assert len(rows['joined']['variantEffect']) == 1
     assert len(rows['alone']['variantEffect']) == 2
-    assert [row['variantId'] for row in add_annotation(index, index_rows([])).to_dicts()] == ['joined', 'alone']
+    assert [row['variantId'] for row in add_annotation(index, index_frame([])).to_dicts()] == ['joined', 'alone']
 
 
 def test_add_annotation_unions_arrays_and_prefers_index_values():
-    index = index_rows([
+    index = index_frame([
         {
             'variantId': 'v1',
             'chromosome': '1',
@@ -495,7 +576,7 @@ def test_add_annotation_unions_arrays_and_prefers_index_values():
         },
         {'variantId': 'v2', 'chromosome': '1'},
     ])
-    annotations = index_rows([
+    annotations = index_frame([
         {
             'variantId': 'v1',
             'chromosome': 'X',
@@ -518,8 +599,8 @@ def test_add_annotation_unions_arrays_and_prefers_index_values():
 
 def test_add_annotation_sorts_struct_arrays_descending_as_spark():
     """Spark's `safe_array_union` sorts both sides descending, null fields last, before the union."""
-    index = index_rows([{'variantId': 'v1', 'variantEffect': [effect('A'), effect('C', None), effect('C', 2.0)]}])
-    annotations = index_rows([{'variantId': 'v1', 'variantEffect': [effect('B')]}])
+    index = index_frame([{'variantId': 'v1', 'variantEffect': [effect('A'), effect('C', None), effect('C', 2.0)]}])
+    annotations = index_frame([{'variantId': 'v1', 'variantEffect': [effect('B')]}])
     [row] = add_annotation(index, annotations).to_dicts()
     assert [(x['method'], x['score']) for x in row['variantEffect']] == [
         ('C', 2.0),
@@ -535,7 +616,7 @@ def _consequence(change: str | None, accessions: list[str] | None) -> dict:
 
 
 def test_amino_acid_annotation_keeps_variants_without_accessions_and_ignores_unrelated():
-    index = index_rows([
+    index = index_frame([
         {
             'variantId': 'annotated',
             'variantEffect': [effect('VEP')],
@@ -568,7 +649,7 @@ def test_amino_acid_annotation_keeps_variants_without_accessions_and_ignores_unr
 
 
 def test_amino_acid_keys_cover_every_transcript_change():
-    index = index_rows([
+    index = index_frame([
         {'variantId': 'v1', 'transcriptConsequences': [_consequence('A1T', ['P1', 'P2']), _consequence('C2G', [])]},
         {'variantId': 'v2', 'transcriptConsequences': [_consequence(None, ['P3'])]},
     ])
@@ -1138,13 +1219,16 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
     assert chunked.equals(annotate(without_foldx, [], [foldx]))
 
 
-def _loftee(records: pl.LazyFrame, ranked: bool) -> tuple[str, str, str | None]:
-    """The LOFTEE effect's (targetId, assessment, flag): from parse_vep, or as before db4074c1, in record order."""
+def _loftee(transcripts: list[dict], ranked: bool) -> tuple[str, str, str | None]:
+    """The LOFTEE effect's (targetId, assessment, flag): from index_rows, or as before db4074c1, in fastVEP's order."""
     if ranked:
-        [found] = [x for x in parse_vep(records).collect()['variantEffect'][0] if x['method'] == 'LOFTEE']
+        effects = parsed(most_severe_consequence='stop_gained', transcripts=transcripts)['variantEffect']
+        [found] = [x for x in effects if x['method'] == 'LOFTEE']
     else:
-        canonical = pl.col('transcript_consequences').list.filter(pl.element().struct.field('canonical') == 1)
-        found = records.select(variant_effect(canonical, 'LOFTEE', 'lof', 'lof', 'lof_filter')).collect().item()
+        in_order = consequence_frame(*transcripts).with_columns(
+            pl.int_range(1, pl.len() + 1, dtype=pl.Int32).over('row').alias('rank')
+        )
+        [found] = variant_effect(in_order, 'LOFTEE', 'lof', 'lof', 'lof_filter')['LOFTEE'].to_list()
     return found['targetId'], found['assessment'], found['assessmentFlag']
 
 
@@ -1156,12 +1240,7 @@ def test_loftee_tie_rule_names_the_transcript_but_never_changes_hc_against_lc(ra
         gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='F'
     )
     for order in ([high, low], [low, high]):
-        records = vep_records({
-            'input': '1\t123\t.\tA\tG',
-            'most_severe_consequence': 'stop_gained',
-            'transcript_consequences': order,
-        })
-        assert _loftee(records, ranked) == ('lower', 'LC', 'F')
+        assert _loftee(order, ranked) == ('lower', 'LC', 'F')
 
 
 def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_before():
@@ -1170,10 +1249,5 @@ def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_be
     lower = transcript(
         gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='B'
     )
-    records = vep_records({
-        'input': '1\t123\t.\tA\tG',
-        'most_severe_consequence': 'stop_gained',
-        'transcript_consequences': [lower, top],
-    })
-    assert _loftee(records, ranked=False) == ('lower', 'LC', 'B')
-    assert _loftee(records, ranked=True) == ('top', 'LC', 'A')
+    assert _loftee([lower, top], ranked=False) == ('lower', 'LC', 'B')
+    assert _loftee([lower, top], ranked=True) == ('top', 'LC', 'A')

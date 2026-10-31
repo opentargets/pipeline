@@ -5,12 +5,10 @@ from __future__ import annotations
 import shutil
 import tarfile
 from pathlib import Path
-from typing import cast
 
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import shared_prefix_length, vep_allele_form
 
 KEY = ['chromosome', 'position', 'referenceAllele', 'alternateAllele']
@@ -26,8 +24,8 @@ CACHE_COLUMNS = {
 }
 """The `all_vars` columns read, by their zero-based index in the cache's `variation_cols`."""
 
-_COLOCATED = cast(pl.List, vep_schema['colocated_variants'])
-_SYNONYMS = cast(pl.Struct, cast(pl.Struct, _COLOCATED.inner).to_schema()['var_synonyms'])
+ID_LISTS = pl.Schema({'rsIds': pl.List(pl.String), 'clinvarIds': pl.List(pl.String), 'omimIds': pl.List(pl.String)})
+"""The identifiers of each row's colocated variants, as `colocated_variants` returns them."""
 
 
 def extract_all_vars(tarball: str, directory: Path) -> dict[str, Path]:
@@ -167,6 +165,30 @@ def _synonyms(source: str) -> pl.Expr:
     return pl.when(found.list.len() > 0).then(found)
 
 
+def omim_ids(colocated: pl.Expr) -> pl.Expr:
+    """OMIM cross-references, written `<entry>#<variant>` as on omim.org.
+
+    The variant suffix is padded to its four digits, which VEP's numbers do not always keep
+    (`600234.001` -> `600234#0010`).
+    """
+    synonyms = colocated.list.eval(
+        pl.element().struct.field('var_synonyms').struct.field('OMIM').drop_nulls().explode()
+    )
+    parts = pl.element().str.split_exact('.', 1)
+    entry, suffix = parts.struct.field('field_0'), parts.struct.field('field_1')
+    return synonyms.list.eval(
+        pl.when(suffix.is_null()).then(entry).otherwise(pl.concat_str(entry, pl.lit('#'), suffix.str.pad_end(4, '0')))
+    )
+
+
+def clinvar_ids(colocated: pl.Expr) -> pl.Expr:
+    """ClinVar variation (VCV) identifiers, each once, in first-occurrence order."""
+    clinvar = colocated.list.eval(
+        pl.element().struct.field('var_synonyms').struct.field('ClinVar').drop_nulls().explode()
+    )
+    return clinvar.list.eval(pl.element().filter(pl.element().str.starts_with('VCV'))).list.unique(maintain_order=True)
+
+
 def colocated_variants(all_vars: Path, rows: pl.DataFrame) -> pl.DataFrame:
     """The known variants VEP 116 reports as colocated with each row, from the cache's `all_vars.gz`.
 
@@ -178,8 +200,9 @@ def colocated_variants(all_vars: Path, rows: pl.DataFrame) -> pl.DataFrame:
     Each id is kept once, in cache line order.
 
     Returns:
-        `chromosome`, `position`, `referenceAllele`, `alternateAllele` and `colocated_variants`
-        in VEP's shape, for the distinct rows with at least one colocated variant, in row order.
+        `chromosome`, `position`, `referenceAllele`, `alternateAllele` and the `ID_LISTS` of
+        the colocated variants (`omim_ids`, `clinvar_ids`), for the distinct rows with at least
+        one colocated variant, in row order.
     """
     variants = vep_allele_form(rows.lazy().select(KEY).unique(maintain_order=True)).with_row_index('variant').collect()
     windows = variants.select(
@@ -221,17 +244,26 @@ def colocated_variants(all_vars: Path, rows: pl.DataFrame) -> pl.DataFrame:
         .agg(
             pl.struct(
                 pl.col('variation_name').alias('id'),
-                'allele_string',
-                'start',
-                'end',
                 pl
                 .when(pl.col('var_synonyms').is_not_null())
                 .then(pl.struct(_synonyms('ClinVar').alias('ClinVar'), _synonyms('OMIM').alias('OMIM')))
-                .cast(_SYNONYMS)
                 .alias('var_synonyms'),
-            ).alias('colocated_variants')
+            ).alias('colocated')
         )
     )
+    found = pl.col('colocated')
     return variants.join(colocated, on='variant', how='inner', maintain_order='left').select(
-        *KEY, pl.col('colocated_variants').cast(_COLOCATED)
+        *KEY,
+        found.list.eval(pl.element().struct.field('id')).alias('rsIds'),
+        clinvar_ids(found).alias('clinvarIds'),
+        omim_ids(found).alias('omimIds'),
+    )
+
+
+def add_colocated(variants: pl.DataFrame, colocated: pl.DataFrame | None) -> pl.DataFrame:
+    """The variants with the `ID_LISTS` of their colocated variants, `[]` for none or without `colocated`."""
+    if colocated is None:
+        return variants.with_columns(pl.lit([], dtype).alias(name) for name, dtype in ID_LISTS.items())
+    return variants.join(colocated.select(*KEY, *ID_LISTS), on=KEY, how='left', maintain_order='left').with_columns(
+        pl.col(name).fill_null(pl.lit([], dtype)) for name, dtype in ID_LISTS.items()
     )

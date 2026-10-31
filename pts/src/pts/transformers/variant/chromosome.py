@@ -27,9 +27,8 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import read_chromosome, read_contig
-from pts.transformers.variant.colocated import KEY, colocated_variants
+from pts.transformers.variant.colocated import KEY, add_colocated, colocated_variants
 from pts.transformers.variant.fastvep import run_fastvep, write_vcf
 from pts.transformers.variant.gerp import KentBigWig
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, add_gpn_star, read_gpn_star
@@ -41,17 +40,10 @@ from pts.transformers.variant.index import (
 )
 from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.records import (
-    CHUNK_BYTES,
-    ChunkFrames,
-    chunk_frames,
-    iter_records,
-    unannotated_frames,
-    vep_records,
-)
+from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
-from pts.transformers.variant.vep import parse_vep, uniprot_accessions
+from pts.transformers.variant.vep import index_rows, uniprot_accessions
 
 
 @dataclass(frozen=True)
@@ -297,29 +289,6 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
     logger.info('Prepared chromosome {}', chromosome)
 
 
-def with_colocated(records: pl.DataFrame, rows: pl.DataFrame, colocated: pl.DataFrame | None) -> pl.DataFrame:
-    """The records with the colocated variants of their row, `[]` for none or without `colocated`.
-
-    Records are matched to the `colocated_variants` rows on the VCF fields of their `input` line.
-    """
-    if colocated is None:
-        return records
-    fields = pl.col('input').str.split('\t')
-    return (
-        records
-        .drop('colocated_variants')
-        .with_columns(
-            fields.list.get(0).alias('chromosome'),
-            fields.list.get(1).cast(rows.schema['position']).alias('position'),
-            fields.list.get(3).alias('referenceAllele'),
-            fields.list.get(4).alias('alternateAllele'),
-        )
-        .join(colocated, on=KEY, how='left', maintain_order='left')
-        .with_columns(pl.col('colocated_variants').fill_null(pl.lit([], dtype=vep_schema['colocated_variants'])))
-        .select(records.columns)
-    )
-
-
 def _merged(index: pl.DataFrame, shared: Shared, chromosome: str) -> pl.DataFrame:
     """The index rows of a chunk with the prepared annotations of its loci merged in, by `annotate`."""
     directory = _prepared(shared, chromosome)
@@ -398,15 +367,14 @@ def annotate_chunk(
         .collect()
     )
     consequences = add_sift(consequences, matrices)
-    records = vep_records(ChunkFrames(frames.variants, consequences))
     located = directory / 'colocated.parquet'
     colocated = (
         in_range(located, frame['position']).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
         if located.exists()
         else None
     )
-    records = with_colocated(records, frame, colocated)
-    index = parse_vep(records.lazy(), shared.hash_threshold).collect()
+    variants = add_colocated(frames.variants, colocated)
+    index = index_rows(variants, consequences, shared.hash_threshold)
     logger.info('Annotating {} variants of chromosome {}, chunk {}', index.height, chromosome, chunk)
     return _write(_merged(index, shared, chromosome), part)
 

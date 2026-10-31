@@ -1,4 +1,4 @@
-"""Parse VEP records (`pts.schemas.vep`) into the variant index, ported from Gentropy's VEP parser.
+"""Build the variant index rows from a chunk's variants and consequences frames, ported from Gentropy's VEP parser.
 
 Differences from Gentropy: consequence terms use the corrected Sequence Ontology spelling
 (see `consequences.py`), SIFT comes from the canonical transcript with the lowest score rather
@@ -28,59 +28,20 @@ def generate_dbxrefs(ids: pl.Expr, source: str) -> pl.Expr:
     )
 
 
-def omim_ids(colocated: pl.Expr) -> pl.Expr:
-    """OMIM cross-references, written `<entry>#<variant>` as on omim.org.
-
-    The variant suffix is padded to its four digits, which VEP's numbers do not always keep
-    (`600234.001` -> `600234#0010`).
-    """
-    synonyms = colocated.list.eval(
-        pl.element().struct.field('var_synonyms').struct.field('OMIM').drop_nulls().explode()
-    )
-    parts = pl.element().str.split_exact('.', 1)
-    entry, suffix = parts.struct.field('field_0'), parts.struct.field('field_1')
-    return synonyms.list.eval(
-        pl.when(suffix.is_null()).then(entry).otherwise(pl.concat_str(entry, pl.lit('#'), suffix.str.pad_end(4, '0')))
-    )
+def _ranked(consequences: pl.DataFrame) -> pl.DataFrame:
+    """The consequences in the index's order within each row: by `rank`."""
+    return consequences.sort('row', 'rank', maintain_order=True)
 
 
-def clinvar_ids(colocated: pl.Expr) -> pl.Expr:
-    """ClinVar variation (VCV) identifiers, each once, in first-occurrence order."""
-    clinvar = colocated.list.eval(
-        pl.element().struct.field('var_synonyms').struct.field('ClinVar').drop_nulls().explode()
-    )
-    return clinvar.list.eval(pl.element().filter(pl.element().str.starts_with('VCV'))).list.unique(maintain_order=True)
+def _picked(consequences: pl.DataFrame, effect: pl.Expr) -> pl.DataFrame:
+    """`row` and the `effect` of the first consequence of each row."""
+    return consequences.unique('row', keep='first', maintain_order=True).select('row', effect)
 
 
-def _ranked(transcripts: pl.Expr) -> pl.Expr:
-    """VEP transcript consequences in the index's order: highest consequence score, then distance, then id.
-
-    Transcripts without a scored consequence term come last.
-    """
-
-    def field(name: str) -> pl.Expr:
-        return pl.element().struct.field(name)
-
-    score = (
-        field('consequence_terms')
-        .list.eval(pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64))
-        .list.max()
-    )
-    return (
-        transcripts.list
-        # Stable sorts, last key first.
-        .eval(pl.element().sort_by(field('transcript_id'), maintain_order=True))
-        .list.eval(pl.element().sort_by(field('distance').fill_null(0), maintain_order=True))
-        .list.eval(pl.element().sort_by(score, descending=True, nulls_last=True, maintain_order=True))
-    )
-
-
-def _highest(transcripts: pl.Expr, field: str) -> pl.Expr:
-    """The first transcript with the highest non-null `field`."""
-    # `list.arg_max` returns the last maximum for strings, not the first.
-    values = transcripts.list.eval(pl.element().struct.field(field))
-    first = values.list.eval((pl.element() == pl.element().max()).arg_true().first())
-    return transcripts.list.get(first.list.first(), null_on_oob=True)
+def _highest(consequences: pl.DataFrame, field: str) -> pl.DataFrame:
+    """The consequences with the highest non-null `field` of their row, in the index's order."""
+    value = pl.col(field)
+    return _ranked(consequences).filter(value == value.max().over('row'))
 
 
 def _effect(
@@ -102,67 +63,52 @@ def _effect(
 
 
 def variant_effect(
-    transcripts: pl.Expr, method: str, score: str, assessment: str | None = None, flag: str | None = None
-) -> pl.Expr:
-    """The predictor's effect from the first transcript with its highest score, if any."""
-    transcript = _highest(transcripts, score)
+    consequences: pl.DataFrame, method: str, score: str, assessment: str | None = None, flag: str | None = None
+) -> pl.DataFrame:
+    """`row` and the predictor's effect, as `method`, from the first transcript with its row's highest score."""
 
     def field(name: str | None) -> pl.Expr:
-        return pl.lit(None, dtype=pl.String) if name is None else transcript.struct.field(name).cast(pl.String)
+        return pl.lit(None, dtype=pl.String) if name is None else pl.col(name).cast(pl.String)
 
-    return pl.when(transcript.is_not_null()).then(
-        _effect(
-            method, field(assessment), transcript.struct.field(score), field(flag), transcript.struct.field('gene_id')
-        )
+    return _picked(
+        _highest(consequences, score),
+        _effect(method, field(assessment), pl.col(score), field(flag), pl.col('gene_id')).alias(method),
     )
 
 
-def sift_effect(transcripts: pl.Expr) -> pl.Expr:
-    """SIFT from the transcript with the lowest score, then the more severe prediction, then the lowest id."""
-
-    def field(name: str) -> pl.Expr:
-        return pl.element().struct.field(name)
-
+def sift_effect(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and SIFT from the transcript with the lowest score, then the more severe prediction, then the lowest id."""
     severity = {prediction: rank for rank, prediction in enumerate(SEVERITY)}
-    transcript = (
-        transcripts.list
-        .eval(pl.element().filter(field('sift_score').is_not_null()))
-        # Stable sorts, last key first.
-        .list.eval(pl.element().sort_by(field('transcript_id'), maintain_order=True))
-        .list.eval(
-            pl.element().sort_by(
-                field('sift_prediction').replace_strict(severity, default=len(severity), return_dtype=pl.Int32),
-                maintain_order=True,
-            )
+    transcripts = (
+        _ranked(consequences)
+        .filter(pl.col('sift_score').is_not_null())
+        .sort(
+            'row',
+            'sift_score',
+            pl.col('sift_prediction').replace_strict(severity, default=len(severity), return_dtype=pl.Int32),
+            'transcript_id',
+            maintain_order=True,
         )
-        .list.eval(pl.element().sort_by(field('sift_score'), maintain_order=True))
-        .list.first()
     )
-    return pl.when(transcript.is_not_null()).then(
+    return _picked(
+        transcripts,
         _effect(
-            'SIFT',
-            transcript.struct.field('sift_prediction'),
-            transcript.struct.field('sift_score'),
-            pl.lit(None, dtype=pl.String),
-            transcript.struct.field('gene_id'),
-        )
+            'SIFT', pl.col('sift_prediction'), pl.col('sift_score'), pl.lit(None, dtype=pl.String), pl.col('gene_id')
+        ).alias('SIFT'),
     )
 
 
-def alpha_missense_effect(transcripts: pl.Expr) -> pl.Expr:
-    """AlphaMissense from the first transcript that has a prediction."""
-    transcript = transcripts.list.eval(
-        pl.element().filter(pl.element().struct.field('alphamissense').is_not_null())
-    ).list.first()
-    prediction = transcript.struct.field('alphamissense')
-    return pl.when(transcript.is_not_null()).then(
+def alpha_missense_effect(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and AlphaMissense from the first transcript that has a prediction."""
+    return _picked(
+        _ranked(consequences).filter(pl.col('am_class').is_not_null()),
         _effect(
             'AlphaMissense',
-            prediction.struct.field('am_class'),
-            prediction.struct.field('am_pathogenicity'),
+            pl.col('am_class'),
+            pl.col('am_pathogenicity'),
             pl.lit(None, dtype=pl.String),
-            transcript.struct.field('gene_id'),
-        )
+            pl.col('gene_id'),
+        ).alias('AlphaMissense'),
     )
 
 
@@ -196,52 +142,44 @@ def uniprot_accessions(swissprot: pl.Expr, trembl: pl.Expr) -> pl.Expr:
     )
 
 
-def transcript_consequences(transcripts: pl.Expr) -> pl.Expr:
-    """Transcript consequences ranked by severity, then distance, then id; unscored transcripts are dropped."""
-
-    def field(name: str) -> pl.Expr:
-        return pl.element().struct.field(name)
-
-    terms = field('consequence_terms')
-    consequences = transcripts.list.eval(
-        pl.struct(
-            terms.list.eval(pl.element().replace_strict(SEQUENCE_ONTOLOGY, default=None, return_dtype=pl.String)).alias(
-                'variantFunctionalConsequenceIds'
-            ),
-            amino_acid_change(field('amino_acids'), field('protein_end')).alias('aminoAcidChange'),
-            uniprot_accessions(field('swissprot'), field('trembl')).alias('uniprotAccessions'),
-            (field('canonical') == 1).fill_null(False).alias('isEnsemblCanonical'),
-            field('codons').alias('codons'),
-            field('distance').fill_null(0).alias('distanceFromFootprint'),
-            field('tssdistance').alias('distanceFromTss'),
-            field('appris').alias('appris'),
-            field('mane_select').alias('maneSelect'),
-            field('gene_id').alias('targetId'),
-            field('impact').alias('impact'),
-            field('lof').alias('lofteePrediction'),
-            terms.list
-            .eval(pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64))
-            .list.max()
-            .cast(pl.Float32)
-            .alias('consequenceScore'),
-            pl.lit(None, dtype=pl.Int32).alias('transcriptIndex'),
-            field('gene_symbol').alias('approvedSymbol'),
-            field('biotype').alias('biotype'),
-            field('transcript_id').alias('transcriptId'),
-        )
+def transcript_consequences(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and its transcript consequences in the index's order, numbered; unscored transcripts are dropped."""
+    terms = pl.col('consequence_terms')
+    score = (
+        terms.list
+        .eval(pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64))
+        .list.max()
+        .cast(pl.Float32)
     )
     return (
-        consequences.list
-        .eval(pl.element().filter(pl.element().struct.field('consequenceScore').is_not_null()))
-        # Stable sorts, last key first.
-        .list.eval(pl.element().sort_by(pl.element().struct.field('transcriptId'), maintain_order=True))
-        .list.eval(pl.element().sort_by(pl.element().struct.field('distanceFromFootprint'), maintain_order=True))
-        .list.eval(
-            pl.element().sort_by(pl.element().struct.field('consequenceScore'), descending=True, maintain_order=True)
+        _ranked(consequences)
+        .filter(score.is_not_null())
+        .select(
+            'row',
+            pl.struct(
+                terms.list.eval(
+                    pl.element().replace_strict(SEQUENCE_ONTOLOGY, default=None, return_dtype=pl.String)
+                ).alias('variantFunctionalConsequenceIds'),
+                amino_acid_change(pl.col('amino_acids'), pl.col('protein_end')).alias('aminoAcidChange'),
+                uniprot_accessions(pl.col('swissprot'), pl.col('trembl')).alias('uniprotAccessions'),
+                pl.lit(True).alias('isEnsemblCanonical'),
+                pl.col('codons').alias('codons'),
+                pl.col('distance').fill_null(0).alias('distanceFromFootprint'),
+                pl.col('tssdistance').alias('distanceFromTss'),
+                pl.col('appris').alias('appris'),
+                pl.col('mane_select').alias('maneSelect'),
+                pl.col('gene_id').alias('targetId'),
+                pl.col('impact').alias('impact'),
+                pl.col('lof').alias('lofteePrediction'),
+                score.alias('consequenceScore'),
+                pl.int_range(1, pl.len() + 1, dtype=pl.Int32).over('row').alias('transcriptIndex'),
+                pl.col('gene_symbol').alias('approvedSymbol'),
+                pl.col('biotype').alias('biotype'),
+                pl.col('transcript_id').alias('transcriptId'),
+            ).alias('transcriptConsequences'),
         )
-        .list.eval(
-            pl.element().struct.with_fields(pl.int_range(1, pl.len() + 1, dtype=pl.Int32).alias('transcriptIndex'))
-        )
+        .group_by('row', maintain_order=True)
+        .agg('transcriptConsequences')
     )
 
 
@@ -337,24 +275,25 @@ def variant_description(consequence: pl.Expr, transcripts: pl.Expr) -> pl.Expr:
     )
 
 
-def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
-    """Turn raw VEP records into variant index rows, keeping canonical transcripts only.
+def index_rows(variants: pl.DataFrame, consequences: pl.DataFrame, hash_threshold: int = 300) -> pl.DataFrame:
+    """The variant index rows of a chunk, one per variant with a position, in row order.
 
-    The canonical transcripts are read in the order of `transcript_consequences`, so an effect
-    whose score ties between transcripts comes from the transcript the index ranks first.
+    `variants` carries the `ID_LISTS` of `add_colocated`, and `consequences` the effect columns.
+    Effects whose score ties between transcripts come from the transcript ranked first.
     """
-    fields = pl.col('input').str.split('\t')
-    colocated = pl.col('colocated_variants')
-    transcripts = pl.col('transcript_consequences')
     consequence = pl.col('most_severe_consequence')
-    rsids = colocated.list.eval(pl.element().struct.field('id'))
-    effects = pl.concat_list(
-        sift_effect(transcripts),
-        variant_effect(transcripts, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
-        variant_effect(transcripts, 'GERP', 'conservation'),
-        alpha_missense_effect(transcripts),
-        vep_prediction(consequence),
-    ).list.drop_nulls()
+    effects = [
+        sift_effect(consequences),
+        variant_effect(consequences, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
+        variant_effect(consequences, 'GERP', 'conservation'),
+        alpha_missense_effect(consequences),
+        transcript_consequences(consequences),
+    ]
+    frame = variants
+    for found in effects:
+        frame = frame.join(found, on='row', how='left', maintain_order='left')
+    frame = frame.rechunk()
+    canonical = pl.col('row').is_in(consequences['row'].unique().implode())
     missense = (
         pl
         .col('transcriptConsequences')
@@ -363,32 +302,34 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
     )
     return (
         frame
-        .with_columns(_ranked(transcripts.list.filter(pl.element().struct.field('canonical') == 1)))
         .select(
             pl.concat_str(
-                [fields.list.get(i, null_on_oob=True) for i in (0, 1, 3, 4)], separator='_', ignore_nulls=True
+                pl.col('chromosome'),
+                pl.col('position').cast(pl.String),
+                pl.col('referenceAllele'),
+                pl.col('alternateAllele'),
+                separator='_',
+                ignore_nulls=True,
             ).alias('variantId'),
-            fields.list.get(0, null_on_oob=True).alias('chromosome'),
-            fields.list.get(1, null_on_oob=True).cast(pl.Int32, strict=False).alias('position'),
-            fields.list.get(3, null_on_oob=True).alias('referenceAllele'),
-            fields.list.get(4, null_on_oob=True).alias('alternateAllele'),
-            effects.alias('variantEffect'),
+            'chromosome',
+            pl.col('position').cast(pl.Int32),
+            'referenceAllele',
+            'alternateAllele',
+            pl
+            .concat_list('SIFT', 'LOFTEE', 'GERP', 'AlphaMissense', vep_prediction(consequence))
+            .list.drop_nulls()
+            .alias('variantEffect'),
             consequence.replace_strict(SEQUENCE_ONTOLOGY, default=None, return_dtype=pl.String).alias(
                 'mostSevereConsequenceId'
             ),
             consequence,
-            pl
-            .when(transcripts.list.len() > 0)
-            .then(transcripts.list.first().struct.field('hgvsg'))
-            .when(pl.col('intergenic_consequences').list.len() > 0)
-            .then(pl.col('intergenic_consequences').list.first().struct.field('hgvsg'))
-            .alias('hgvsId'),
-            transcript_consequences(transcripts).alias('transcriptConsequences'),
-            rsids.alias('rsIds'),
+            pl.when(canonical | ~pl.col('reported_transcripts')).then(pl.col('hgvsg')).alias('hgvsId'),
+            'transcriptConsequences',
+            'rsIds',
             pl.lit([], dtype=variant_schema['alleleFrequencies']).alias('alleleFrequencies'),
-            generate_dbxrefs(rsids, 'ensembl_variation').alias('_ensembl'),
-            generate_dbxrefs(omim_ids(colocated), 'omim').alias('_omim'),
-            generate_dbxrefs(clinvar_ids(colocated), 'clinvar').alias('_clinvar'),
+            generate_dbxrefs(pl.col('rsIds'), 'ensembl_variation').alias('_ensembl'),
+            generate_dbxrefs(pl.col('omimIds'), 'omim').alias('_omim'),
+            generate_dbxrefs(pl.col('clinvarIds'), 'clinvar').alias('_clinvar'),
         )
         # The protvar cross-reference uses the identifier before long ones are hashed:
         .with_columns(
@@ -410,5 +351,7 @@ def parse_vep(frame: pl.LazyFrame, hash_threshold: int = 300) -> pl.LazyFrame:
         )
         .filter(pl.col('position').is_not_null())
         .select(variant_schema.names())
+        .lazy()
         .pipe(fill_null_arrays)
+        .collect()
     )
