@@ -173,11 +173,6 @@
       matchPackageNames: ['python', 'cellex'],
       enabled: false,
     },
-    // pinned to the spark_nlp_version jar staged by orchestration
-    {
-      matchPackageNames: ['spark-nlp'],
-      enabled: false,
-    },
     // Spark 4.1 on the Dataproc 3.0 image
     {
       matchFileNames: ['pts/**'],

@@ -1,20 +1,46 @@
-import socket
+import datetime
+import json
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
-import huggingface_hub.constants as hf_constants
+import openpyxl
 import polars as pl
 import pytest
-from huggingface_hub import hf_hub_download
-from mira.dataset import ClinicalReport
-from mira.provider.aact.clinical_report import replace_with_llm_indications
-from mira.schemas import ClinicalProvider, ClinicalReportOrigin, ClinicalReportType, ClinicalSource
+from otter.config.model import Config
 
-from pts.pyspark.clinical_report import (
+from pts.clinical_staging.staged_outputs import (
+    DISEASE_ENTITIES,
+    DRUG_ENTITIES,
+    EXTRACTION,
+    STOP_REASONS,
+    StagedOutput,
+    schema_digest,
+)
+from pts.record_store import publish_snapshot
+from pts.transformers import clinical_report as clinical_report_module
+from pts.transformers.clinical import (
+    ClinicalProvider,
+    ClinicalReport,
+    ClinicalReportType,
+    ClinicalSource,
+)
+from pts.transformers.clinical.mining import read_ema_sheet
+from pts.transformers.clinical.providers import aact as aact_provider
+from pts.transformers.clinical.providers.aact import replace_with_llm_indications
+from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
+from pts.transformers.clinical_report import (
     ClinicalReportFlags,
+    attach_stop_reasons,
     flag_indirect_primary_purpose,
-    offline_hf_models,
+    map_report_entities,
+    order_output_columns,
+    require_staged,
     validate_disease,
 )
+from tests.clinical.mapping_fixtures import DISEASE, DRUG
 
 
 def _build_reports(entries) -> ClinicalReport:
@@ -193,7 +219,7 @@ def test_flag_indirect_primary_purpose_non_aact_not_flagged() -> None:
 
 
 def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
-    """A minimal frame in `ClinicalReportExtractionSchema` shape, as `parse_batch_results` returns."""
+    """A minimal frame in `ClinicalReportExtractionSchema` shape, as the extraction snapshot holds it."""
     return pl.DataFrame({
         'id': [nct_id],
         'drug_intent': ['therapeutic'],
@@ -204,7 +230,7 @@ def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
 
 
 def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
-    """`clinical_report` must hand the extraction to Mira unprojected."""
+    """`clinical_report` must hand the extraction to the AACT provider unprojected."""
     studies = pl.DataFrame({
         'nct_id': ['NCT0001'],
         'diseaseFromSource': ['from-aact'],
@@ -221,32 +247,625 @@ def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
         replace_with_llm_indications(studies, pre_projected)
 
 
-def test_offline_hf_models_serves_staged_files_without_the_network(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    revision = 'a' * 40
-    staged = tmp_path / 'models' / 'some-org' / 'some-model' / revision
-    staged.mkdir(parents=True)
-    (staged / 'config.json').write_text('{"staged": true}')
+EMA_BANNER = [
+    'Content type:',
+    'Medicine',
+    'Output automatically generated from content on www.ema.europa.eu on:',
+    '27/05/2026 - 06:15',
+]
+EMA_HEADER = [
+    'Category',
+    'Name of medicine',
+    'EMA product number',
+    'Medicine status',
+    'International non-proprietary name (INN) / common name',
+    'Active substance',
+    'Therapeutic area (MeSH)',
+    'Therapeutic indication',
+    'Marketing authorisation date',
+    'Medicine URL',
+    'Revision number',
+]
+EMA_ROWS = [
+    [
+        'Human',
+        'Alpha',
+        'EMEA/H/C/000001',
+        'Authorised',
+        'alphamab',
+        'alphamab',
+        'Asthma',
+        '  treatment of asthma  ',
+        '15/01/2020',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/alpha',
+        3,
+    ],
+    [
+        'Human',
+        'Beta',
+        'EMEA/H/C/000002',
+        'Withdrawn',
+        'N/A',
+        'betanib',
+        None,
+        'treatment of copd',
+        datetime.datetime(2019, 3, 4),
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/beta',
+        2.5,
+    ],
+    [
+        'Human',
+        'Gamma',
+        'EMEA/H/C/000003',
+        'Authorised',
+        'gammastat',
+        'gammastat',
+        None,
+        'nothing to extract',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
+        None,
+    ],
+    [
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '   ',
+        'None',
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        ' \t ',
+    ],
+    [
+        'Veterinary',
+        'Vetix',
+        'EMEA/V/C/000004',
+        'Authorised',
+        None,
+        'vetixin',
+        None,
+        'mastitis',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/veterinary/EPAR/vetix',
+        1,
+    ],
+]
 
-    def no_network(*args, **kwargs):
-        raise AssertionError('network access attempted')
+EMA_NER = {
+    'treatment of asthma': ['asthma'],
+    'treatment of copd': ['chronic obstructive pulmonary disease'],
+    'nothing to extract': [],
+}
 
-    monkeypatch.setattr(socket, 'create_connection', no_network)
-    previous = hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE
+READ_EXCEL_COLUMNS = [*EMA_BANNER, *(f'__UNNAMED__{i}' for i in range(len(EMA_BANNER), len(EMA_HEADER)))]
+READ_EXCEL_ROWS = [
+    tuple(EMA_HEADER),
+    (
+        'Human',
+        'Alpha',
+        'EMEA/H/C/000001',
+        'Authorised',
+        'alphamab',
+        'alphamab',
+        'Asthma',
+        '  treatment of asthma  ',
+        '15/01/2020',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/alpha',
+        '3',
+    ),
+    (
+        'Human',
+        'Beta',
+        'EMEA/H/C/000002',
+        'Withdrawn',
+        None,
+        'betanib',
+        None,
+        'treatment of copd',
+        '2019-03-04 00:00:00',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/beta',
+        '2.5',
+    ),
+    (
+        'Human',
+        'Gamma',
+        'EMEA/H/C/000003',
+        'Authorised',
+        'gammastat',
+        'gammastat',
+        None,
+        'nothing to extract',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/gamma',
+        None,
+    ),
+    (
+        'Human',
+        'Delta',
+        'EMEA/H/C/000005',
+        'Authorised',
+        None,
+        '',
+        None,
+        'treatment of copd',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/human/EPAR/delta',
+        '',
+    ),
+    (
+        'Veterinary',
+        'Vetix',
+        'EMEA/V/C/000004',
+        'Authorised',
+        None,
+        'vetixin',
+        None,
+        'mastitis',
+        '01/02/2003',
+        'https://www.ema.europa.eu/en/medicines/veterinary/EPAR/vetix',
+        '1',
+    ),
+]
+"""`pl.read_excel(<bytes>, sheet_name='Medicine')` of `_ema_workbook`, captured with fastexcel 0.21.0.
 
-    with offline_hf_models(str(tmp_path / 'models')) as cache:
-        assert hf_constants.HF_HUB_OFFLINE
-        path = Path(hf_hub_download('some-org/some-model', 'config.json'))
-        assert path.read_text() == '{"staged": true}'
-        assert path.resolve().is_relative_to(cache.resolve())
-        assert (cache / 'models--some-org--some-model' / 'refs' / 'main').read_text() == revision
-
-    assert previous == (hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE)
+Its 'N/A' and 'None' cells are set to null, as `read_ema_sheet` reads them.
+"""
 
 
-def test_offline_hf_models_fails_when_nothing_is_staged(tmp_path: Path) -> None:
-    (tmp_path / 'models').mkdir()
+def _ema_workbook(path: Path, blank_rows: int = 0) -> str:
+    """The EMA medicines workbook: a banner row, `blank_rows` blank rows, the header, then the medicines."""
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = 'Medicine'
+    for i, row in enumerate([EMA_BANNER, *[[None]] * blank_rows, EMA_HEADER, *EMA_ROWS]):
+        for j, value in enumerate(row):
+            sheet.cell(row=i + 1, column=j + 1, value=value)
+    workbook.save(path)
+    return str(path)
 
-    with pytest.raises(ValueError, match='no models staged'), offline_hf_models(str(tmp_path / 'models')):
+
+def _stub_ner(texts: pl.Series) -> pl.Series:
+    return pl.Series([EMA_NER[text] for text in texts], dtype=pl.List(pl.String))
+
+
+def _sorted_reports(reports: ClinicalReport) -> list[dict]:
+    return reports.df.sort('id').with_columns(pl.col('drugs', 'diseases').list.sort()).to_dicts()
+
+
+def test_ema_sheet_matches_read_excel(tmp_path: Path) -> None:
+    """The sheet is `pl.read_excel`'s, except missing-value strings ('N/A', 'None', ...), null by design."""
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+    read_excel = pl.DataFrame(READ_EXCEL_ROWS, schema=dict.fromkeys(READ_EXCEL_COLUMNS, pl.String), orient='row')
+
+    assert sheet.dtypes == [pl.String] * len(READ_EXCEL_COLUMNS)
+    assert sheet.columns[: len(EMA_BANNER)] == EMA_BANNER
+    assert sheet.rows() == READ_EXCEL_ROWS
+    assert _sorted_reports(extract_ema_clinical_report(sheet, _stub_ner)) == _sorted_reports(
+        extract_ema_clinical_report(read_excel, _stub_ner)
+    )
+
+
+def test_ema_sheet_skips_blank_rows_below_the_banner(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx', blank_rows=7))
+
+    assert sheet.columns == read_ema_sheet(_ema_workbook(tmp_path / 'plain.xlsx')).columns
+    assert sheet.rows() == READ_EXCEL_ROWS
+    assert sorted(extract_ema_clinical_report(sheet, _stub_ner).df['id'].to_list()) == [
+        'emea/h/c/000001',
+        'emea/h/c/000002',
+        'emea/h/c/000005',
+    ]
+
+
+def test_ema_row_without_mesh_or_ner_dropped(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+
+    reports = extract_ema_clinical_report(sheet, _stub_ner).df
+
+    assert sorted(reports['id'].to_list()) == ['emea/h/c/000001', 'emea/h/c/000002', 'emea/h/c/000005']
+
+
+def test_ema_missing_value_inn_falls_back_to_the_active_substance(tmp_path: Path) -> None:
+    sheet = read_ema_sheet(_ema_workbook(tmp_path / 'ema.xlsx'))
+
+    reports = extract_ema_clinical_report(sheet, _stub_ner).df
+
+    drugs = reports.filter(pl.col('id') == 'emea/h/c/000002')['drugs'].to_list()
+    assert drugs == [[{'drugFromSource': 'betanib', 'drugId': None}]]
+
+
+PUBLISHED_COLUMNS = [
+    'id',
+    'clinicalStage',
+    'origin',
+    'type',
+    'source',
+    'provider',
+    'drugs',
+    'countries',
+    'trialDescription',
+    'phaseFromSource',
+    'trialOfficialTitle',
+    'trialSponsor',
+    'diseases',
+    'trialLiterature',
+    'sideEffects',
+    'trialPhase',
+    'trialWhyStopped',
+    'trialStudyType',
+    'qualityControls',
+    'trialPrimaryPurpose',
+    'title',
+    'trialNumberOfArms',
+    'trialOverallStatus',
+    'year',
+    'trialStopReasonCategories',
+    'url',
+    'trialStartDate',
+]
+"""The parquet column order of `gs://open-targets-pipeline-runs/do/platform-2610-2/output/clinical_report`."""
+
+
+def test_output_column_order_matches_published() -> None:
+    reports = pl.DataFrame({column: [None] for column in sorted(PUBLISHED_COLUMNS, reverse=True)})
+
+    assert order_output_columns(reports).columns == PUBLISHED_COLUMNS
+
+
+def test_output_column_order_rejects_unpublished_columns() -> None:
+    reports = pl.DataFrame({column: [None] for column in [*PUBLISHED_COLUMNS, 'drug_intent']})
+
+    with pytest.raises(ValueError, match='drug_intent'):
+        order_output_columns(reports)
+
+
+def test_map_report_entities_maps_each_drug_and_disease_of_a_report() -> None:
+    reports = pl.DataFrame(
+        [
+            {
+                **_report('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value),
+                'drugs': [
+                    {'drugFromSource': 'Aspirin', 'drugId': None},
+                    {'drugFromSource': 'Kalydeco', 'drugId': None},
+                ],
+                'diseases': [{'diseaseFromSource': 'Cystic fibrosis', 'diseaseId': None}],
+            },
+            {
+                **_report('NCT02', ClinicalSource.CLINICAL_TRIALS_GOV.value),
+                'drugs': [{'drugFromSource': 'Ecotrin', 'drugId': None}],
+                'diseases': None,
+            },
+        ],
+        schema_overrides={'diseases': pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))},
+    )
+
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        drug_entities=_staged_drug_entities(),
+    )
+
+    rows = {
+        r['id']: (sorted(r['drugs'], key=str), r['diseases'])
+        for r in mapped.df.select('id', 'drugs', 'diseases').iter_rows(named=True)
+    }
+    assert rows == {
+        'nct01': (
+            [
+                {'drugFromSource': 'Aspirin', 'drugId': 'CHEMBL25'},
+                {'drugFromSource': 'Kalydeco', 'drugId': 'CHEMBL2010601'},
+            ],
+            [{'diseaseFromSource': 'Cystic fibrosis', 'diseaseId': 'MONDO_0009061'}],
+        ),
+        'nct02': ([{'drugFromSource': 'Ecotrin', 'drugId': 'CHEMBL25'}], None),
+    }
+
+
+STAGED_DRUG_ENTITIES_SCHEMA = {'label': pl.String, 'extracted_drugs': pl.List(pl.String)}
+
+
+def _staged_drug_entities(*rows: tuple[str, list[str]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=STAGED_DRUG_ENTITIES_SCHEMA, orient='row')
+
+
+def _staged_stop_reasons(*rows: tuple[str, list[str]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        [(text, f'sha-{text}', categories) for text, categories in rows],
+        schema={'text': pl.String, 'text_sha256': pl.String, 'categories': pl.List(pl.String)},
+        orient='row',
+    )
+
+
+def _drug_reports(*rows: tuple[str, str, str]) -> pl.DataFrame:
+    """Reports of (id, source, drug label), each with one unmapped drug and no disease."""
+    return pl.DataFrame(
+        [
+            {
+                **_report(id_, source),
+                'drugs': [{'drugFromSource': label, 'drugId': None}],
+                'diseases': None,
+            }
+            for id_, source, label in rows
+        ],
+        schema_overrides={'diseases': pl.List(pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String}))},
+    )
+
+
+def _drug_ids(mapped: ClinicalReport) -> dict[tuple[str, str], list]:
+    """The drug ids of each (source, drug label) of the mapped reports."""
+    drugs = mapped.df.select('source', 'drugs').explode('drugs').unnest('drugs')
+    return {
+        (row['source'], row['drugFromSource']): sorted(row['drugId'], key=str)
+        for row in drugs.group_by('source', 'drugFromSource').agg('drugId').iter_rows(named=True)
+    }
+
+
+def test_stop_reasons_come_from_staging() -> None:
+    aact = pl.DataFrame({
+        'id': ['NCT01', 'NCT02', 'NCT03', 'NCT04'],
+        'trialWhyStopped': ['funding', None, '', 'funding'],
+    })
+    staged = _staged_stop_reasons(('funding', ['Insufficient_Funding']), ('', ['Uncategorised']), ('other', ['Other']))
+
+    attached = attach_stop_reasons(aact, staged)
+
+    assert attached.columns == ['id', 'trialWhyStopped', 'trialStopReasonCategories']
+    assert attached.schema['trialStopReasonCategories'] == pl.List(pl.String)
+    assert sorted(attached.rows()) == [
+        ('NCT01', 'funding', ['Insufficient_Funding']),
+        ('NCT02', None, None),
+        ('NCT03', '', ['Uncategorised']),
+        ('NCT04', 'funding', ['Insufficient_Funding']),
+    ]
+
+
+def test_missing_staged_why_stopped_fails_with_count_and_examples() -> None:
+    missing = [f'reason {i}' for i in range(7)]
+    aact = pl.DataFrame({'id': [f'NCT{i}' for i in range(9)], 'trialWhyStopped': [*missing, 'funding', 'funding']})
+    staged = _staged_stop_reasons(('funding', ['Insufficient_Funding']))
+
+    with pytest.raises(ValueError, match='7 stop reasons') as error:
+        attach_stop_reasons(aact, staged)
+    assert sum(text in str(error.value) for text in missing) == 5
+
+
+def test_require_staged_ignores_nulls_and_repeats() -> None:
+    require_staged(pl.Series(['a', None, 'a', '']), pl.Series(['', 'a']), 'labels')
+
+
+def test_staged_names_serve_a_label_of_every_source() -> None:
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'),
+        ('TTD01', ClinicalSource.TTD.value, 'mystery pill'),
+        ('X01', None, 'unknownium'),
+    )
+
+    mapped = map_report_entities(
+        reports,
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco']), ('unknownium', [])),
+    )
+
+    assert _drug_ids(mapped) == {
+        (ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'): ['CHEMBL2010601'],
+        (ClinicalSource.TTD.value, 'mystery pill'): ['CHEMBL2010601'],
+        (None, 'unknownium'): [None],
+    }
+
+
+def test_unstaged_label_from_any_source_fails() -> None:
+    reports = _drug_reports(
+        ('NCT01', ClinicalSource.CLINICAL_TRIALS_GOV.value, 'mystery pill'),
+        ('TTD01', ClinicalSource.TTD.value, 'ttd unstaged'),
+        ('CHEMBL_IND1', ClinicalSource.DailyMed.value, 'chembl unstaged'),
+        ('CHEMBL_IND2', ClinicalSource.DailyMed.value, 'Aspirin'),
+    )
+
+    with pytest.raises(ValueError, match=r"^2 drug labels not staged, e\.g\. \['chembl unstaged', 'ttd unstaged'\]$"):
+        map_report_entities(
+            reports,
+            DISEASE,
+            DRUG,
+            chembl_curation=None,
+            drug_entities=_staged_drug_entities(('mystery pill', ['kalydeco'])),
+        )
+
+
+def _snapshot_metadata(kind: StagedOutput, tag: str | None = None, **extra: str) -> dict[str, Any]:
+    return {
+        'kind': kind.name,
+        'model': kind.model,
+        'tag': tag or kind.tag(dict.fromkeys(kind.hub_models, 'r1')),
+        'model_revisions': dict.fromkeys(kind.hub_models, 'r1'),
+        **extra,
+    }
+
+
+def _release_source(
+    tmp_path: Path,
+    disease_tag: str | None = None,
+    drug_extraction_tag: str | None = None,
+    extraction_digest: str | None = None,
+) -> dict[str, str]:
+    """The sources of a release, staged under ``tmp_path``, each with the metadata given."""
+    digest = extraction_digest or schema_digest(ClinicalReportExtractionSchema)
+    extraction_tag = drug_extraction_tag or EXTRACTION.release_tag()
+    metadatas = {
+        'aact_stop_reasons': _snapshot_metadata(STOP_REASONS),
+        'aact_drug_entities': _snapshot_metadata(DRUG_ENTITIES, extraction_tag=extraction_tag),
+        'mining_drug_entities': _snapshot_metadata(DRUG_ENTITIES),
+        'mining_disease_entities': _snapshot_metadata(DISEASE_ENTITIES, disease_tag),
+    }
+    kinds = {
+        'aact_stop_reasons': STOP_REASONS,
+        'aact_drug_entities': DRUG_ENTITIES,
+        'mining_drug_entities': DRUG_ENTITIES,
+        'mining_disease_entities': DISEASE_ENTITIES,
+    }
+    source = {'chembl': 'unused', 'aact': 'unused'}
+    for name, metadata in metadatas.items():
+        empty = pl.DataFrame(schema=dict.fromkeys(kinds[name].columns.values(), pl.String))
+        publish_snapshot(empty, str(tmp_path / name), metadata, None)
+        source[name] = str(tmp_path / name)
+    extraction = _extraction('NCT0001', 'asthma', 'aspirin')
+    publish_snapshot(extraction, str(tmp_path / 'extraction'), EXTRACTION.metadata(digest, None), None)
+    source['trial_extraction'] = str(tmp_path / 'extraction')
+    return source
+
+
+@pytest.fixture
+def no_dump(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError('dump restored')
+
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', refuse)
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', refuse)
+
+
+def test_release_restores_todays_aact_tables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    studies = [
+        'nct_id',
+        'overall_status',
+        'phase',
+        'study_type',
+        'start_date',
+        'why_stopped',
+        'number_of_arms',
+        'official_title',
+    ]
+    baseline = {
+        'studies': studies,
+        'interventions': ['nct_id', 'intervention_type', 'name'],
+        'conditions': ['nct_id', 'downcase_name'],
+        'study_references': ['nct_id', 'pmid', 'reference_type'],
+        'designs': ['nct_id', 'primary_purpose'],
+        'brief_summaries': ['nct_id', 'description'],
+        'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
+    }
+    captured: dict[str, Any] = {}
+
+    class StopError(Exception):
         pass
+
+    def aact_restore(source: str, tables: Any, **kwargs: Any) -> None:
+        captured.update(tables=dict(tables), **kwargs)
+        raise StopError
+
+    chembl = dict.fromkeys(
+        ['drug_indication', 'indication_refs', 'molecule_dictionary', 'drug_warning', 'warning_refs'],
+        pl.DataFrame(),
+    )
+    monkeypatch.setattr(clinical_report_module, 'read_dump_tables', lambda *args, **kwargs: chembl)
+    monkeypatch.setattr(aact_provider, 'read_dump_tables', aact_restore)
+
+    with pytest.raises(StopError):
+        clinical_report_module.clinical_report(
+            _release_source(tmp_path),
+            {},
+            {},
+            Config(step='clinical_report', steps=['clinical_report'], work_path=tmp_path),
+        )
+
+    assert captured['tables'] == baseline
+    assert captured['order_by'] == {'study_references': ['nct_id', 'pmid', 'reference_type']}
+    assert str(captured['scratch_root']) == str(tmp_path)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, disease_tag='r1-pdeadbeef')
+    with pytest.raises(ValueError, match=r"mining_disease_entities.*'deadbeef'"):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_extraction_of_another_tag(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, extraction_digest='f' * 64)
+    with pytest.raises(ValueError, match=r'ffffffffffff.*this code expects'):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_aact_drug_snapshot_of_another_extraction(tmp_path: Path) -> None:
+    source = _release_source(tmp_path, drug_extraction_tag='ffffffffffff-pdeadbeef')
+    with pytest.raises(
+        ValueError, match=r'aact_drug_entities extraction_tag expected .*found .*ffffffffffff-pdeadbeef'
+    ):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_on_an_aact_drug_snapshot_without_an_extraction_tag(tmp_path: Path) -> None:
+    source = _release_source(tmp_path)
+    metadata_path = Path(source['aact_drug_entities']) / 'metadata.json'
+    metadata = json.loads(metadata_path.read_text())
+    del metadata['extraction_tag']
+    metadata_path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match=r'aact_drug_entities extraction_tag expected'):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+RELEASE_MAPPING = """
+import sys
+
+import polars as pl
+
+from pts.transformers.clinical.mining import staged_lookup
+import pts.clinical_staging.staged_outputs
+from pts.transformers.clinical_report import map_report_entities
+from tests.clinical.mapping_fixtures import DISEASE, DRUG
+from tests.test_clinical_report import _drug_reports, _staged_drug_entities
+
+drugs = _staged_drug_entities(('mystery pill', ['kalydeco']))
+map_report_entities(_drug_reports(('TTD01', 'TTD', 'mystery pill')), DISEASE, DRUG, None, drugs)
+diseases = pl.DataFrame({'text': ['asthma'], 'extracted_diseases': [['asthma']]})
+staged_lookup(diseases, 'text', 'extracted_diseases', 'disease texts')(pl.Series(['asthma']))
+print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torch', 'transformers', 'huggingface_hub'}))
+"""
+
+
+TRIAL_MODELS_STEP = """
+import sys
+
+import pts.clinical_staging.trial_models
+import pts.postgres
+import pts.tasks.trial_models
+import pts.transformers.clinical.hf_models
+import pts.transformers.clinical.ner
+import pts.transformers.clinical.providers.aact
+
+print(sorted({module.split('.')[0] for module in sys.modules} & {'openai'}))
+"""
+
+
+def test_trial_models_step_imports_no_openai() -> None:
+    result = subprocess.run(
+        [sys.executable, '-c', TRIAL_MODELS_STEP],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == '[]'
+
+
+def test_release_imports_no_torch_or_openai() -> None:
+    result = subprocess.run(
+        [sys.executable, '-c', RELEASE_MAPPING],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == '[]'

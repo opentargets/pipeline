@@ -125,9 +125,7 @@ class UploadRemoteFileOperator(BaseOperator):
     def _source_size(self) -> int | None:
         """Size the source advertises, or None when it cannot be established."""
         try:
-            r = requests.head(
-                self.src_url, timeout=self.timeout, allow_redirects=True, headers=_IDENTITY
-            )
+            r = requests.head(self.src_url, timeout=self.timeout, allow_redirects=True, headers=_IDENTITY)
             r.raise_for_status()
             return self._declared_size(r.headers)
         except requests.RequestException as err:
@@ -159,9 +157,7 @@ class UploadRemoteFileOperator(BaseOperator):
         if expected is None:
             recorded = (blob.metadata or {}).get(_VERIFIED_BYTES)
             if recorded is not None and str(blob.size) == str(recorded):
-                self.log.info(
-                    'source size unknown, keeping %s (verified at %s bytes)', self.dst_uri, recorded
-                )
+                self.log.info('source size unknown, keeping %s (verified at %s bytes)', self.dst_uri, recorded)
                 return True
             self.log.warning(
                 'source size unknown and %s carries no matching verified size, re-staging',
@@ -191,9 +187,7 @@ class UploadRemoteFileOperator(BaseOperator):
             temp_file = Path(tmp_file.name)
 
         try:
-            with requests.get(
-                self.src_url, stream=True, timeout=self.timeout, headers=_IDENTITY
-            ) as r:
+            with requests.get(self.src_url, stream=True, timeout=self.timeout, headers=_IDENTITY) as r:
                 r.raise_for_status()
                 expected = self._declared_size(r.headers)
                 with open(temp_file, 'wb') as f:
@@ -219,11 +213,9 @@ class UploadRemoteFileOperator(BaseOperator):
             if expected is not None:
                 blob.metadata = {**(blob.metadata or {}), _VERIFIED_BYTES: str(downloaded)}
             blob.upload_from_filename(temp_file)
-            self.log.info(
-                'uploaded %s bytes from %s to: %s', downloaded, self.src_url, self.dst_uri
-            )
+            self.log.info('uploaded %s bytes from %s to: %s', downloaded, self.src_url, self.dst_uri)
         finally:
-            # A ~629 MB artifact left behind on every failed attempt fills the
+            # A large artifact left behind on every failed attempt fills the
             # worker's disk across retries.
             temp_file.unlink(missing_ok=True)
 

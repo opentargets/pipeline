@@ -928,34 +928,60 @@ steps:
   ##################################################################################################
 
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
-  # Not part of a release. The `aact_trial_extraction` DAG runs this step with
-  # release_uri pointed at gs://aact_data/${aact_version}, so every path below
-  # resolves inside that snapshot, except for the cache
+  # Not part of a release. The `clinical_staging` DAG runs this step with
+  # release_uri pointed at gs://clinical_staging/aact/${aact_version}, so every path below
+  # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
     - name: llm_extract aact trials
       source:
         aact: input/aact.zip
       destination:
-        prompts: prompts/prompts.parquet
-        extraction: extraction/extractions.parquet
-        errors: errors/errors.jsonl
-      cache_uri: gs://aact_data/cache/trial_extraction
-      # the AACT version, so a rerun against the same archive resumes from the
-      # shards the last attempt finished instead of paying for them again
+        extraction: extraction
+      store_uri: gs://clinical_staging/store
+      # the AACT version, prefixing the store runs this step writes
       snapshot: '{{snapshot}}'
       model: gpt-5-nano-2025-08-07
       service_tier: auto
       concurrency: 75
       shard_size: 200
-      publications:
-        # see PublicationsSpec — this fetches abstracts for every trial, not
-        # only cache misses, so it needs its own cache before a full run
-        enabled: false
+  ##################################################################################################
+
+  #: AACT_TRIAL_MODELS STEP :######################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG, with
+  # release_uri pointed at gs://clinical_staging/aact/${aact_version}; the record stores sit outside it
+  aact_trial_models:
+    - name: trial_models aact trials
+      source:
+        aact: input/aact.zip
+        extraction: extraction
+        models: input/models
+      destination:
+        stop_reasons: stop_reasons
+      store_uri: gs://clinical_staging/store
+      snapshot: '{{snapshot}}'
+  ##################################################################################################
+
+  #: CLINICAL_MINING_MODELS STEP :#################################################################
+  # Not part of a release. Runs with release_uri pointed at
+  # gs://clinical_staging/clinical_mining/${clinical_mining_version}; the record stores sit outside it
+  clinical_mining_models:
+    - name: mining_models clinical mining
+      source:
+        ttd: input/ttd.txt
+        ema: input/ema_medicines.xlsx
+        pmda: input/pmda.pdf
+        models: input/models
+      destination:
+        drug_entities: drug_entities
+        disease_entities: disease_entities
+      store_uri: gs://clinical_staging/store
+      snapshot: '{{snapshot}}'
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
   clinical_report:
-    - name: pyspark clinical_report
+    - name: transform clinical_report
+      transformer: clinical_report
       source:
         chembl_molecule: intermediate/chembl_molecule
         disease: output/disease
@@ -966,13 +992,12 @@ steps:
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction: input/clinical_report/aact_trial_extraction
-        ner_cache_path: input/clinical_report/ner_cache.parquet
-        models: input/clinical_report/models
+        aact_stop_reasons: input/clinical_report/aact_stop_reasons
+        aact_drug_entities: input/clinical_report/aact_drug_entities
+        mining_drug_entities: input/clinical_report/mining_drug_entities
+        mining_disease_entities: input/clinical_report/mining_disease_entities
       destination:
         output: output/clinical_report
-      settings:
-        ner_batch_size: 256
-      pyspark: clinical_report
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################

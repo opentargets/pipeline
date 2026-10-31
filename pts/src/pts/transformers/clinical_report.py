@@ -1,33 +1,30 @@
 """Clinical report dataset generation."""
 
-from collections.abc import Generator
-from contextlib import contextmanager
 from enum import StrEnum
-from functools import lru_cache
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import Any
 
-import huggingface_hub.constants as hf_constants
-import pdfplumber
 import polars as pl
-import torch
 from loguru import logger
-from mira.dataset import ClinicalReport
-from mira.provider.aact import extract_clinical_report as extract_aact_clinical_report
-from mira.provider.chembl.drug_warnings import extract_clinical_report as extract_drug_warning_clinical_report
-from mira.provider.chembl.indications import extract_clinical_report as extract_chembl_clinical_report
-from mira.provider.ema import extract_clinical_report as extract_ema_clinical_report
-from mira.provider.pmda import extract_clinical_report as extract_pmda_clinical_report
-from mira.provider.pmda import parse_pmda_approvals
-from mira.provider.ttd import extract_clinical_report as extract_ttd_clinical_report
-from mira.provider.ttd import extract_indication as extract_ttd_indication
-from mira.schemas import ClinicalReportType, ClinicalSource, ClinicalStageCategory
-from mira.utils.polars_helpers import filter_df, union_dfs
-from mira.utils.spark_helpers import spark_session
-from otter.storage.synchronous.handle import StorageHandle
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from otter.config.model import Config
 
+from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.postgres import read_dump_tables
+from pts.transformers.clinical import (
+    ClinicalReport,
+    ClinicalReportType,
+    ClinicalSource,
+    ClinicalStageCategory,
+    extract_aact_clinical_report,
+    extract_chembl_clinical_report,
+    extract_drug_warning_clinical_report,
+    filter_df,
+    map_entities,
+    union_dfs,
+)
+from pts.transformers.clinical.mapping import require_staged
+from pts.transformers.clinical.mining import mining_reports, read_mining_inputs, staged_lookup
+from pts.transformers.clinical.providers.aact import read_aact_tables
+from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -57,30 +54,36 @@ CHEMBL_ORDER_BY = {
 }
 """Reads collected into published arrays, ordered by their whole projection."""
 
-AACT_SCHEMA_NAME = 'ctgov'
-
-AACT_ARCHIVE_MEMBER = 'postgres.dmp'
-
-AACT_TABLES = {
-    'studies': [
-        'nct_id',
-        'overall_status',
-        'phase',
-        'study_type',
-        'start_date',
-        'why_stopped',
-        'number_of_arms',
-        'official_title',
-    ],
-    'interventions': ['nct_id', 'intervention_type', 'name'],
-    'conditions': ['nct_id', 'downcase_name'],
-    'study_references': ['nct_id', 'pmid', 'reference_type'],
-    'designs': ['nct_id', 'primary_purpose'],
-    'brief_summaries': ['nct_id', 'description'],
-    'sponsors': ['nct_id', 'agency_class', 'lead_or_collaborator', 'name'],
-}
-
-AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
+OUTPUT_COLUMNS = (
+    'id',
+    'clinicalStage',
+    'origin',
+    'type',
+    'source',
+    'provider',
+    'drugs',
+    'countries',
+    'trialDescription',
+    'phaseFromSource',
+    'trialOfficialTitle',
+    'trialSponsor',
+    'diseases',
+    'trialLiterature',
+    'sideEffects',
+    'trialPhase',
+    'trialWhyStopped',
+    'trialStudyType',
+    'qualityControls',
+    'trialPrimaryPurpose',
+    'title',
+    'trialNumberOfArms',
+    'trialOverallStatus',
+    'year',
+    'trialStopReasonCategories',
+    'url',
+    'trialStartDate',
+)
+"""The columns of `output/clinical_report`, in their published order."""
 
 
 class ClinicalReportFlags(StrEnum):
@@ -93,7 +96,10 @@ class ClinicalReportFlags(StrEnum):
 
 
 def clinical_report(
-    source: dict[str, str], destination: dict[str, str], settings: dict[str, str], properties: dict[str, str]
+    source: dict[str, str],
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
 ) -> None:
     """Generate clinical report dataset from ChEMBL molecules and disease data.
 
@@ -101,54 +107,29 @@ def clinical_report(
         source: Dictionary containing paths to input data
         destination: Dictionary containing paths to output data:
             - output: Path to write clinical reports (output/clinical_report)
-        settings: Dictionary containing step variables
-        properties: Dictionary containing Spark properties
+        settings: Dictionary containing step variables, none used
+        config: Config object, for the scratch space of the dump restores
     """
-    with offline_hf_models(source['models']):
-        _clinical_report(source, destination, settings)
-
-
-@contextmanager
-def offline_hf_models(models_uri: str) -> Generator[Path]:
-    """Serve the Hugging Face models staged under ``models_uri`` from a local hub cache, with the hub offline.
-
-    ``models_uri`` holds ``<org>/<name>/<revision>/<file>``.
-    """
-    with TemporaryDirectory(prefix='hf-hub-') as cache:
-        root = StorageHandle(models_uri)
-        prefix = root.absolute.rstrip('/')
-        paths = list(root.glob('*/*/*/*'))
-        if not paths:
-            raise ValueError(f'no models staged under {models_uri}')
-        for path in paths:
-            org, name, revision, filename = path.removeprefix(prefix).strip('/').split('/')
-            model_dir = Path(cache) / f'models--{org}--{name}'
-            target = model_dir / 'snapshots' / revision / filename
-            target.parent.mkdir(parents=True, exist_ok=True)
-            data, _ = StorageHandle(path).read()
-            target.write_bytes(data)
-            (model_dir / 'refs').mkdir(exist_ok=True)
-            (model_dir / 'refs' / 'main').write_text(revision)
-        logger.info(f'staged hugging face models from {models_uri}: {sorted(p.name for p in Path(cache).iterdir())}')
-
-        previous = hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE
-        hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE = True, cache
-        try:
-            yield Path(cache)
-        finally:
-            hf_constants.HF_HUB_OFFLINE, hf_constants.HF_HUB_CACHE = previous
-
-
-def _clinical_report(source: dict[str, str], destination: dict[str, str], settings: dict[str, str]) -> None:
     logger.info(f'source paths: {source}')
+    llm_extractions = EXTRACTION.read(source['trial_extraction'])
+    stop_reasons = STOP_REASONS.read({'aact_stop_reasons': source['aact_stop_reasons']})
+    drug_entities = DRUG_ENTITIES.read(
+        {
+            'aact_drug_entities': source['aact_drug_entities'],
+            'mining_drug_entities': source['mining_drug_entities'],
+        },
+        expect={'aact_drug_entities': {'extraction_tag': EXTRACTION.release_tag()}},
+    )
+    disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
 
-    # The restores use no Spark, so the session starts after them rather than
-    # sitting idle. No `scratch_root`: a pyspark step gets no `Config`, and
-    # /mnt/disks/work is not mounted on the Dataproc master.
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
-        str(source['chembl']), CHEMBL_TABLES, schema_name=CHEMBL_SCHEMA_NAME, order_by=CHEMBL_ORDER_BY
+        str(source['chembl']),
+        CHEMBL_TABLES,
+        schema_name=CHEMBL_SCHEMA_NAME,
+        order_by=CHEMBL_ORDER_BY,
+        scratch_root=config.work_path,
     )
     chembl_indication = chembl_tables['drug_indication']
     chembl_indication_references = chembl_tables['indication_refs']
@@ -157,12 +138,10 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     chembl_drug_warning_references = chembl_tables['warning_refs']
 
     logger.info(f'restoring aact tables from {source["aact"]}')
-    aact_tables = read_dump_tables(
+    aact_tables = read_aact_tables(
         str(source['aact']),
-        AACT_TABLES,
-        schema_name=AACT_SCHEMA_NAME,
-        archive_member=AACT_ARCHIVE_MEMBER,
-        order_by=AACT_ORDER_BY,
+        ['studies', 'interventions', 'conditions', 'study_references', 'designs', 'brief_summaries', 'sponsors'],
+        config.work_path,
     )
     aact_studies = aact_tables['studies']
     aact_interventions = aact_tables['interventions']
@@ -172,15 +151,11 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     aact_summaries = aact_tables['brief_summaries']
     aact_lead_sponsors = aact_tables['sponsors'].filter(pl.col('lead_or_collaborator') == 'lead')
 
-    spark = spark_session()
-    molecule_index_spark = spark.read.parquet(source['chembl_molecule'])
-    disease_index_spark = spark.read.parquet(source['disease'])
-    llm_extractions = scan_dataset(source['trial_extraction']).collect()
+    molecule_index = scan_dataset(source['chembl_molecule']).select(DRUG_COLUMNS).collect()
+    disease_index = scan_dataset(source['disease']).select(DISEASE_COLUMNS).collect()
 
     logger.info('extract clinical report')
-    pmda_pdf_handler = StorageHandle(source['pmda'])
-    pmda_pdf = pdfplumber.open(pmda_pdf_handler.open('rb'))
-    pmda = extract_pmda_clinical_report(df=parse_pmda_approvals(pmda_pdf), spark=spark)
+    mining = staged_mining_reports(source, disease_entities)
     aact = extract_aact_clinical_report(
         studies=aact_studies,
         interventions=aact_interventions,
@@ -210,17 +185,8 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
         },
         llm_extractions=llm_extractions,
     )
-    aact_stop_reasons = aact.df.select('id', 'trialWhyStopped').filter(pl.col('trialWhyStopped').is_not_null())
-    if aact_stop_reasons.height > 0:
-        logger.info(f'categorise stop reasons... input rows: {aact_stop_reasons.height}')
-        predictions = predict_trial_stop_reasons(aact_stop_reasons['trialWhyStopped'].to_list())
-        stop_reason_predictions = aact_stop_reasons.select('id').with_columns(
-            trialStopReasonCategories=pl.Series('trialStopReasonCategories', predictions)
-        )
-        aact = ClinicalReport(df=aact.df.join(stop_reason_predictions, on='id', how='left'))
-        logger.info('categorise stop reasons... complete')
-    else:
-        aact = ClinicalReport(df=aact.df.with_columns(trialStopReasonCategories=pl.lit(None, dtype=pl.List(pl.String))))
+    logger.info(f'attach stop reasons staged at {source["aact_stop_reasons"]}')
+    aact = ClinicalReport(df=attach_stop_reasons(aact.df, stop_reasons))
     chembl_indication_report = extract_chembl_clinical_report(
         drug_indication=chembl_indication,
         molecule_dictionary=chembl_molecule_dictionary,
@@ -231,39 +197,26 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
         molecule_dictionary=chembl_molecule_dictionary,
         warning_refs=chembl_drug_warning_references,
     )
-    ttd_txt_handler = StorageHandle(source['ttd'])
-    ttd_txt_lines = ttd_txt_handler.open('r').read().split('\n')
-    ttd_indications = extract_ttd_indication(ttd_txt_lines)
-    ttd = extract_ttd_clinical_report(indications=ttd_indications)
-    ema_excel_handler = StorageHandle(source['ema'])
-    ema_excel = ema_excel_handler.open('rb').read()
-    ema = extract_ema_clinical_report(ema_excel, spark)
 
     reports = union_dfs([
-        pmda.df,
+        mining['pmda'].df,
         aact.df,
         # Remove ClinicalTrials reports from ChEMBL indications as they are already included in AACT
         chembl_indication_report.pipe(lambda self: ClinicalReport(filter_df(self.df, "source != 'ClinicalTrials'"))).df,
         chembl_drug_warning_report.df,
-        ttd.df,
-        ema.df,
+        mining['ttd'].df,
+        mining['ema'].df,
     ])
     logger.info('reports generated. map entities...')
     output = (
-        ClinicalReport
-        .map_entities(
-            spark=spark,
+        map_report_entities(
             reports=reports,
-            disease_index=disease_index_spark,
-            drug_index=molecule_index_spark,
+            disease_index=disease_index,
+            drug_index=molecule_index,
             chembl_curation=chembl_curation,
-            drug_column_name='drugFromSource',
-            disease_column_name='diseaseFromSource',
-            ner_extract_drug=True,
-            ner_batch_size=int(settings['ner_batch_size']),
-            ner_cache_path=source['ner_cache_path'],
+            drug_entities=drug_entities,
         )
-        .pipe(validate_disease, disease_index=scan_dataset(source['disease']).select('id', 'obsoleteTerms').collect())
+        .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
         .pipe(flag_null_diseases)
         .pipe(flag_null_drugs)
@@ -274,7 +227,114 @@ def _clinical_report(source: dict[str, str], destination: dict[str, str], settin
     )
 
     logger.info(f'destination paths: {destination}')
-    write_dataset(output.df, destination['output'])
+    write_dataset(order_output_columns(output.df), destination['output'])
+
+
+def staged_mining_reports(source: dict[str, str], staged: pl.DataFrame) -> dict[str, ClinicalReport]:
+    """The TTD, EMA and PMDA reports, with the EMA and PMDA diseases staged in `staged`.
+
+    Args:
+        source: the paths of the TTD, EMA and PMDA inputs.
+        staged: the staged disease entities, with `text` and `extracted_diseases`.
+
+    Raises:
+        ValueError: if an EMA or PMDA indication text is not staged.
+    """
+    return mining_reports(
+        read_mining_inputs(source['ttd'], source['ema'], source['pmda']),
+        staged_lookup(staged, 'text', 'extracted_diseases', 'disease texts'),
+    )
+
+
+def attach_stop_reasons(aact: pl.DataFrame, staged: pl.DataFrame) -> pl.DataFrame:
+    """The AACT reports with `trialStopReasonCategories`, the staged categories of their `trialWhyStopped`.
+
+    Args:
+        aact: AACT reports.
+        staged: the staged stop reasons, with `text` and `categories`.
+
+    Returns:
+        `aact` with `trialStopReasonCategories`, null where `trialWhyStopped` is null.
+
+    Raises:
+        ValueError: if a `trialWhyStopped` is not staged.
+    """
+    require_staged(aact['trialWhyStopped'], staged['text'], 'stop reasons')
+    return aact.join(
+        staged.select(pl.col('text').alias('trialWhyStopped'), pl.col('categories').alias('trialStopReasonCategories')),
+        on='trialWhyStopped',
+        how='left',
+        maintain_order='left',
+    )
+
+
+def map_report_entities(
+    reports: pl.DataFrame,
+    disease_index: pl.DataFrame,
+    drug_index: pl.DataFrame,
+    chembl_curation: pl.DataFrame | None,
+    drug_entities: pl.DataFrame,
+) -> ClinicalReport:
+    """Map the drugs and diseases of each report to ids.
+
+    Args:
+        reports: the reports of every provider.
+        disease_index: disease index, with `DISEASE_COLUMNS`.
+        drug_index: drug molecules, with `DRUG_COLUMNS`.
+        chembl_curation: ChEMBL's clinical trial curation.
+        drug_entities: the staged drug NER, used in place of NER.
+
+    Returns:
+        ClinicalReport with the ids found.
+
+    Raises:
+        ValueError: if a drug label reaching NER is not staged.
+    """
+    exploded_reports = (
+        reports
+        .explode('drugs', empty_as_null=True)
+        .explode('diseases', empty_as_null=True)
+        .unnest(['drugs', 'diseases'])
+    )
+    mapped_exploded_reports = map_entities(exploded_reports, disease_index, drug_index, chembl_curation, drug_entities)
+
+    mapped_reports = (
+        mapped_exploded_reports
+        .with_columns(
+            disease=pl.when(
+                pl.any_horizontal(pl.col('diseaseFromSource').is_not_null(), pl.col('diseaseId').is_not_null())
+            ).then(pl.struct(pl.col('diseaseFromSource'), pl.col('diseaseId'))),
+            drug=pl.when(
+                pl.any_horizontal(pl.col('drugFromSource').is_not_null(), pl.col('drugId').is_not_null())
+            ).then(pl.struct(pl.col('drugFromSource'), pl.col('drugId'))),
+        )
+        .drop(['diseaseFromSource', 'drugFromSource', 'diseaseId', 'drugId'])
+        .unique()
+    )
+
+    return ClinicalReport(
+        df=(
+            mapped_reports
+            .group_by([c for c in mapped_reports.columns if c not in ['disease', 'drug']])
+            .agg(
+                pl.col('disease').drop_nulls().unique().alias('diseases'),
+                pl.col('drug').drop_nulls().unique().alias('drugs'),
+            )
+            .with_columns(pl.when(pl.col(c).list.len() > 0).then(pl.col(c)) for c in ['diseases', 'drugs'])
+        )
+    )
+
+
+def order_output_columns(reports: pl.DataFrame) -> pl.DataFrame:
+    """The reports' columns in the published order of `output/clinical_report`.
+
+    Raises:
+        ValueError: if the reports have a column `output/clinical_report` does not.
+    """
+    extra = [c for c in reports.columns if c not in OUTPUT_COLUMNS]
+    if extra:
+        raise ValueError(f'columns not in output/clinical_report: {extra}')
+    return reports.select(OUTPUT_COLUMNS)
 
 
 def validate_disease(reports: ClinicalReport, disease_index: pl.DataFrame) -> ClinicalReport:
@@ -607,86 +667,3 @@ def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
             flag_text=ClinicalReportFlags.SAFETY_REPORT.value,
         )
     )
-
-
-# STOP REASONS UTILS
-
-
-def get_device() -> torch.device:
-    """Return the best available torch device (MPS > CUDA > CPU)."""
-    if torch.backends.mps.is_available():
-        return torch.device('mps')
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    return torch.device('cpu')
-
-
-@lru_cache(maxsize=1)
-def _load_model_assets(model_name: str) -> tuple[PreTrainedTokenizerBase, PreTrainedModel, dict[int, str]]:
-    """Load the tokenizer, model, and label mapping — only once, the model is cached."""
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer is None:
-        raise ValueError(f'{model_name} has no tokenizer')
-
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
-    model.to(get_device())
-    model.eval()
-
-    id2label = {int(k): v for k, v in model.config.id2label.items()}
-
-    return tokenizer, model, id2label
-
-
-def _predict_batch(
-    texts: list[str],
-    tokenizer: PreTrainedTokenizerBase,
-    model: PreTrainedModel,
-    id2label: dict[int, str],
-    threshold: float,
-) -> list[list[str]]:
-    """Run inference on a single batch and return predicted labels per text."""
-    device = next(model.parameters()).device
-
-    encoded = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
-    encoded = {k: v.to(device) for k, v in encoded.items()}
-
-    logits = model(**encoded).logits
-    probs = torch.sigmoid(logits).cpu()
-
-    results = []
-    for prob_row in probs.tolist():
-        labels = [id2label[i] for i, prob in enumerate(prob_row) if prob >= threshold]
-        results.append(labels or ['Uncategorised'])
-
-    return results
-
-
-def predict_trial_stop_reasons(
-    texts: list[str],
-    *,
-    model_name: str = 'opentargets/clinical_trial_stop_reasons',
-    threshold: float = 0.3,
-    batch_size: int = 32,
-) -> list[list[str]]:
-    """Classify clinical trial stop reasons for a list of texts.
-
-    Args:
-        texts:      Input texts to classify.
-        model_name: Stop reasons classifier in HuggingFace (default 'opentargets/clinical_trial_stop_reasons').
-        threshold:  Minimum sigmoid probability to assign a label (default 0.3).
-        batch_size: Number of texts processed per forward pass (default 32).
-
-    Returns:
-        A list of predicted label lists, one per input text.
-        Texts with no label above the threshold are assigned ['Uncategorised'].
-    """
-    tokenizer, model, id2label = _load_model_assets(model_name)
-    results = []
-
-    with torch.inference_mode():
-        for batch_start in range(0, len(texts), batch_size):
-            batch_texts = texts[batch_start : batch_start + batch_size]
-            batch_results = _predict_batch(batch_texts, tokenizer, model, id2label, threshold)
-            results.extend(batch_results)
-
-    return results

@@ -12,6 +12,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.clinical_staging.staged_outputs import EXTRACTION
 from pts.postgres import read_dump_tables
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -48,16 +49,16 @@ def chembl_molecule(
         _settings: Custom settings (not used).
         config: Config object, for ``work_path``.
     """
+    aact_batch = None
+    if 'aact_trial_extraction' in source:
+        logger.info(f'Reading AACT extraction from {source["aact_trial_extraction"]}')
+        aact_batch = EXTRACTION.read(str(source['aact_trial_extraction']))
+
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
 
     logger.info(f'Reading drugbank lookup from {source["drugbank"]}')
     drugbank_lookup = scan_dataset(str(source['drugbank']), format='tsv', has_header=True).collect()
-
-    aact_batch = None
-    if 'aact_trial_extraction' in source:
-        logger.info(f'Reading AACT extraction from {source["aact_trial_extraction"]}')
-        aact_batch = scan_dataset(str(source['aact_trial_extraction'])).collect()
 
     logger.info('Processing molecules')
     output_df = process_molecules(
@@ -89,8 +90,8 @@ def process_molecules(
         molecule_hierarchy: Raw ChEMBL molecule_hierarchy table.
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
-        aact_batch: (optional) Parsed AACT batch extractions, as returned by
-            :func:`mira.provider.aact.llm_extractor.parse_batch_results`.
+        aact_batch: (optional) AACT trial extractions, as published by
+            :py:mod:`pts.tasks.llm_extract`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.

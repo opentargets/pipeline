@@ -1,0 +1,529 @@
+"""Tests for the append-only record store and write-once snapshots."""
+
+import hashlib
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import polars as pl
+import pytest
+from otter.util.errors import NotFoundError
+
+from pts import record_store
+from pts.record_store import (
+    RECORD_SCHEMA,
+    ComputeAborted,
+    RecordStoreError,
+    SnapshotConflictError,
+    import_run,
+    map_texts,
+    new_run_id,
+    publish_snapshot,
+    read_parquet,
+    read_records,
+    run_exists,
+    text_sha256,
+    write_run,
+)
+
+MODEL = 'org/model'
+REVISION = 'rev1'
+
+
+class Recorder:
+    """A compute function that remembers what it was asked to compute.
+
+    Texts in ``fails`` come back as failures, which is how a model reports one.
+    """
+
+    def __init__(self, fails: set[str] | None = None, raises: bool = False) -> None:
+        self.calls: list[list[str]] = []
+        self.fails = fails or set()
+        self.raises = raises
+
+    def __call__(self, texts: list[str]) -> list[tuple[list[str] | None, str | None]]:
+        self.calls.append(list(texts))
+        if self.raises:
+            msg = 'model exploded'
+            raise RuntimeError(msg)
+        return [(None, 'bad text') if t in self.fails else ([t.upper()], None) for t in texts]
+
+    @property
+    def computed(self) -> list[str]:
+        return [t for call in self.calls for t in call]
+
+
+@pytest.fixture
+def store_uri(tmp_path):
+    return str(tmp_path / 'store')
+
+
+def run_mapped(texts, compute, store_uri, run_id, revision=REVISION, **kwargs):
+    return map_texts(
+        pl.Series('text', texts, dtype=pl.String), compute, store_uri, MODEL, revision, run_id, None, **kwargs
+    )
+
+
+def run(texts, compute, store_uri, run_id, revision=REVISION, **kwargs):
+    return run_mapped(texts, compute, store_uri, run_id, revision, **kwargs).frame
+
+
+def record(run_id, output, when, text='a'):
+    return pl.DataFrame(
+        {
+            'text_sha256': [text_sha256(text)],
+            'text': [text],
+            'model': [MODEL],
+            'model_revision': [REVISION],
+            'output': [[output]],
+            'status': ['ok'],
+            'error': [None],
+            'computed_at': [when],
+            'run_id': [run_id],
+        },
+        schema=RECORD_SCHEMA,
+    )
+
+
+def test_text_sha256_is_sha256_of_utf8():
+    assert text_sha256('café') == hashlib.sha256('café'.encode()).hexdigest()
+
+
+def test_first_run_computes_each_distinct_text_once(store_uri):
+    compute = Recorder()
+    out = run(['b', 'a', 'b', ''], compute, store_uri, 'run1')
+
+    assert compute.calls == [['', 'a', 'b']]
+    assert out.columns == ['text', 'text_sha256', 'output']
+    assert out['text'].to_list() == ['', 'a', 'b']
+    assert out['output'].to_list() == [[''], ['A'], ['B']]
+    assert out['text_sha256'].to_list() == [text_sha256(t) for t in ['', 'a', 'b']]
+
+
+def test_second_run_computes_nothing(store_uri):
+    run(['a', 'b'], Recorder(), store_uri, 'run1')
+
+    compute = Recorder()
+    out = run(['a', 'b'], compute, store_uri, 'run2')
+
+    assert compute.calls == []
+    assert out['output'].to_list() == [['A'], ['B']]
+    assert not Path(store_uri, 'runs', 'run2').exists()
+
+
+def test_new_revision_recomputes_and_keeps_old_records(store_uri):
+    run(['a'], Recorder(), store_uri, 'run1')
+
+    compute = Recorder()
+    run(['a'], compute, store_uri, 'run2', revision='rev2')
+
+    assert compute.computed == ['a']
+    records = read_records(store_uri, None)
+    assert sorted(records['model_revision'].to_list()) == ['rev1', 'rev2']
+
+
+def test_failed_text_is_recorded_and_the_run_fails(store_uri):
+    with pytest.raises(RecordStoreError, match=r'1 text'):
+        run(['a', 'b'], Recorder(fails={'b'}), store_uri, 'run1')
+
+    records = read_records(store_uri, None).sort('text')
+    assert records['status'].to_list() == ['ok', 'failed']
+    assert records['error'].to_list() == [None, 'bad text']
+    assert records['output'].to_list() == [['A'], None]
+
+
+def test_failed_text_is_retried_and_succeeds(store_uri):
+    with pytest.raises(RecordStoreError):
+        run(['a', 'b'], Recorder(fails={'b'}), store_uri, 'run1')
+
+    compute = Recorder()
+    out = run(['a', 'b'], compute, store_uri, 'run2')
+
+    assert compute.computed == ['b']
+    assert out['output'].to_list() == [['A'], ['B']]
+
+
+def test_retries_stop_after_max_attempts(store_uri):
+    for i in range(3):
+        with pytest.raises(RecordStoreError):
+            run(['a', 'b'], Recorder(fails={'b'}), store_uri, f'run{i}')
+
+    compute = Recorder()
+    with pytest.raises(RecordStoreError, match=r'1 text'):
+        run(['a', 'b'], compute, store_uri, 'run3')
+
+    assert compute.computed == []
+    assert not Path(store_uri, 'runs', 'run3').exists()
+
+
+def test_error_names_the_count_and_at_most_five_examples(store_uri):
+    texts = [f't{i}' for i in range(8)]
+    with pytest.raises(RecordStoreError) as exc:
+        run(texts, Recorder(fails=set(texts)), store_uri, 'run1')
+
+    message = str(exc.value)
+    assert '8 texts' in message
+    assert 't4' in message
+    assert 't5' not in message
+
+
+def test_compute_raising_aborts_the_call_and_writes_no_records(store_uri):
+    with pytest.raises(ComputeAborted, match=r'2 texts.*model exploded') as exc:
+        run(['a', 'b'], Recorder(raises=True), store_uri, 'run1')
+
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert not Path(store_uri, 'runs').exists()
+    assert read_records(store_uri, None).height == 0
+
+
+def test_a_rerun_after_a_raising_compute_computes_the_texts_again(store_uri):
+    for i in range(4):
+        with pytest.raises(ComputeAborted):
+            run(['a', 'b'], Recorder(raises=True), store_uri, f'run{i}')
+
+    compute = Recorder()
+    out = run(['a', 'b'], compute, store_uri, 'run4')
+
+    assert compute.computed == ['a', 'b']
+    assert out['output'].to_list() == [['A'], ['B']]
+
+
+def test_run_without_manifest_is_ignored(store_uri):
+    run(['a'], Recorder(), store_uri, 'run1')
+    Path(store_uri, 'runs', 'run1', 'manifest.json').unlink()
+
+    assert read_records(store_uri, None).is_empty()
+
+    compute = Recorder()
+    run(['a'], compute, store_uri, 'run1')
+    assert compute.computed == ['a']
+
+
+def test_empty_store_reads_as_empty_frame(store_uri):
+    records = read_records(store_uri, None)
+
+    assert records.is_empty()
+    assert records.schema == RECORD_SCHEMA
+
+
+def test_write_run_refuses_an_existing_run(store_uri):
+    records = record('run1', 'A', datetime(2026, 1, 1, tzinfo=UTC))
+    write_run(records, store_uri, 'run1', None)
+
+    manifest = json.loads(Path(store_uri, 'runs', 'run1', 'manifest.json').read_text())
+    assert manifest['run_id'] == 'run1'
+    assert manifest['ok'] == 1
+    assert manifest['failed'] == 0
+    assert manifest['models'] == [{'model': MODEL, 'model_revision': REVISION}]
+    assert 'written_at' in manifest
+
+    with pytest.raises(RecordStoreError, match='run1'):
+        write_run(records, store_uri, 'run1', None)
+
+
+def test_run_exists_once_its_manifest_is_written(store_uri):
+    assert not run_exists(store_uri, 'run1', None)
+
+    write_run(record('run1', 'A', datetime(2026, 1, 1, tzinfo=UTC)), store_uri, 'run1', None)
+    assert run_exists(store_uri, 'run1', None)
+
+    Path(store_uri, 'runs', 'run1', 'manifest.json').unlink()
+    assert Path(store_uri, 'runs', 'run1').is_dir()
+    assert not run_exists(store_uri, 'run1', None)
+
+
+def test_read_parquet_reads_a_file_through_storage(tmp_path):
+    frame = pl.DataFrame({'a': [1, 2], 'b': ['x', None]})
+    frame.write_parquet(tmp_path / 'one.parquet')
+
+    assert read_parquet(str(tmp_path / 'one.parquet'), None).equals(frame)
+    with pytest.raises(NotFoundError):
+        read_parquet(str(tmp_path / 'missing.parquet'), None)
+
+
+def test_new_run_id_is_the_snapshot_and_the_utc_time(monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 30, 7, 5, 3, 123456, tzinfo=tz)
+
+    monkeypatch.setattr(record_store, 'datetime', Clock)
+
+    assert new_run_id('20261001') == '20261001-20261030T070503Z'
+
+
+def test_newest_ok_wins_over_older_ok(store_uri):
+    write_run(record('run1', 'old', datetime(2026, 1, 1, tzinfo=UTC)), store_uri, 'run1', None)
+    write_run(record('run2', 'new', datetime(2026, 2, 1, tzinfo=UTC)), store_uri, 'run2', None)
+
+    out = run(['a'], Recorder(), store_uri, 'run3')
+    assert out['output'].to_list() == [['new']]
+
+
+def test_null_text_is_rejected(store_uri):
+    with pytest.raises(ValueError, match='null'):
+        run(['a', None], Recorder(), store_uri, 'run1')
+
+
+def snapshot(rows=('a', 'b')) -> pl.DataFrame:
+    return pl.DataFrame({'text': list(rows), 'output': [[r.upper()] for r in rows]})
+
+
+def test_publish_writes_data_then_metadata(tmp_path):
+    uri = str(tmp_path / 'snap')
+
+    assert publish_snapshot(snapshot(), uri, {'version': '1'}, None) is True
+
+    assert pl.read_parquet(Path(uri, 'data.parquet')).equals(snapshot())
+    assert json.loads(Path(uri, 'metadata.json').read_text()) == {'version': '1'}
+    assert Path(uri, 'data.parquet').stat().st_mtime_ns <= Path(uri, 'metadata.json').stat().st_mtime_ns
+
+
+def test_publish_identical_is_a_noop(tmp_path):
+    uri = str(tmp_path / 'snap')
+    publish_snapshot(snapshot(), uri, {'version': '1'}, None)
+    before = Path(uri, 'metadata.json').stat().st_mtime_ns
+
+    assert publish_snapshot(snapshot(('b', 'a')), uri, {'version': '1'}, None) is False
+    assert Path(uri, 'metadata.json').stat().st_mtime_ns == before
+
+
+def test_publish_refuses_different_data(tmp_path):
+    uri = str(tmp_path / 'snap')
+    publish_snapshot(snapshot(), uri, {'version': '1'}, None)
+
+    with pytest.raises(SnapshotConflictError):
+        publish_snapshot(snapshot(('a', 'c')), uri, {'version': '1'}, None)
+
+
+def test_publish_refuses_different_metadata(tmp_path):
+    uri = str(tmp_path / 'snap')
+    publish_snapshot(snapshot(), uri, {'model_revision': 'rev1'}, None)
+
+    with pytest.raises(SnapshotConflictError):
+        publish_snapshot(snapshot(), uri, {'model_revision': 'rev2'}, None)
+
+
+def test_publish_snapshot_with_a_trailing_slash_writes_single_slash_names(tmp_path, monkeypatch):
+    uris = []
+    handle = record_store.StorageHandle
+    monkeypatch.setattr(record_store, 'StorageHandle', lambda uri, **kw: uris.append(uri) or handle(uri, **kw))
+
+    assert publish_snapshot(snapshot(), f'{tmp_path}/snap/', {'version': '1'}, None) is True
+
+    assert sorted(p.name for p in (tmp_path / 'snap').iterdir()) == ['data.parquet', 'metadata.json']
+    assert publish_snapshot(snapshot(), f'{tmp_path}/snap', {'version': '1'}, None) is False
+    assert not [u for u in uris if '//' in u.removeprefix(str(tmp_path))]
+
+
+class Crash(BaseException):
+    """Stands in for a process dying, which `map_texts` must not catch."""
+
+
+class JsonRecorder(Recorder):
+    """A compute function whose outputs are JSON strings, as an LLM extraction's are.
+
+    A text in ``fail_times`` fails that many times before it succeeds.
+    """
+
+    def __init__(self, fails=None, fail_times=None, crash_on=None) -> None:
+        super().__init__(fails)
+        self.fail_times = fail_times or {}
+        self.crash_on = crash_on
+
+    def __call__(self, texts):
+        before = self.computed
+        self.calls.append(list(texts))
+        if self.crash_on in texts:
+            raise Crash
+        return [
+            (None, 'bad text')
+            if t in self.fails or before.count(t) < self.fail_times.get(t, 0)
+            else (json.dumps({'text': t}), None)
+            for t in texts
+        ]
+
+
+def test_list_and_string_outputs_round_trip(store_uri):
+    listed = run(['a', 'b'], Recorder(), store_uri + '/list', 'r1')
+    strings = run(['a', 'b'], JsonRecorder(), store_uri + '/json', 'r1', output_dtype=pl.String)
+
+    assert listed['output'].to_list() == [['A'], ['B']]
+    assert strings['output'].to_list() == ['{"text": "a"}', '{"text": "b"}']
+    assert read_records(store_uri + '/json', None, pl.String).schema == record_store.record_schema(pl.String)
+    again = JsonRecorder()
+    assert run(['a', 'b'], again, store_uri + '/json', 'r2', output_dtype=pl.String).equals(strings)
+    assert again.calls == []
+
+
+def test_tolerated_failures_retry_in_run_then_publish_the_rest(store_uri):
+    compute = JsonRecorder(fails={'bad'})
+
+    result = run(['good', 'bad'], compute, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    assert result['text'].to_list() == ['good']
+    assert compute.calls == [['bad', 'good'], ['bad'], ['bad']]
+    again = JsonRecorder(fails={'bad'})
+    assert run(['good', 'bad'], again, store_uri, 'r2', output_dtype=pl.String, allow_failures=True).equals(result)
+    assert again.calls == []
+
+
+def test_a_later_success_in_the_same_run_counts(store_uri):
+    compute = JsonRecorder(fail_times={'a': 1})
+
+    result = run(['a', 'b'], compute, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    assert result['text'].to_list() == ['a', 'b']
+    assert compute.calls == [['a', 'b'], ['a']]
+    records = read_records(store_uri, None, pl.String)
+    assert records.filter(pl.col('text') == 'a')['status'].sort().to_list() == ['failed', 'ok']
+    assert set(records['run_id']) == {'r1'}
+
+
+def test_earlier_failures_count_toward_the_attempts_of_a_tolerant_run(store_uri):
+    with pytest.raises(RecordStoreError):
+        run(['bad'], JsonRecorder(fails={'bad'}), store_uri, 'r1', output_dtype=pl.String, max_attempts=2)
+    compute = JsonRecorder(fails={'bad'})
+
+    result = run(['bad'], compute, store_uri, 'r2', output_dtype=pl.String, allow_failures=True, max_attempts=3)
+
+    assert result.height == 0
+    assert compute.calls == [['bad'], ['bad']]
+
+
+def test_finished_shards_survive_a_crash(store_uri):
+    texts = [f't{i}' for i in range(6)]
+    with pytest.raises(Crash):
+        run(texts, JsonRecorder(crash_on='t4'), store_uri, 'r1', output_dtype=pl.String, shard_size=2)
+
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000', 'r1-0001']
+    rerun = JsonRecorder()
+    result = run(texts, rerun, store_uri, 'r2', output_dtype=pl.String, shard_size=2)
+
+    assert rerun.computed == ['t4', 't5']
+    assert result['text'].to_list() == texts
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000', 'r1-0001', 'r2-0000']
+
+
+def test_compute_aborted_writes_nothing_for_that_call(store_uri):
+    texts = [f't{i}' for i in range(4)]
+
+    def abort_on_t2(batch):
+        if 't2' in batch:
+            msg = 'no key'
+            raise ComputeAborted(msg)
+        return [(json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='no key'):
+        run(texts, abort_on_t2, store_uri, 'r1', output_dtype=pl.String, allow_failures=True, shard_size=2)
+
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1-0000']
+    assert read_records(store_uri, None, pl.String)['text'].to_list() == ['t0', 't1']
+
+
+def test_an_abort_in_a_retry_round_keeps_the_finished_rounds(store_uri):
+    def abort_on_retry(batch):
+        if batch == ['bad']:
+            msg = 'no key'
+            raise ComputeAborted(msg)
+        return [(None, 'bad text') if t == 'bad' else (json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='no key'):
+        run(['good', 'bad'], abort_on_retry, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    records = read_records(store_uri, None, pl.String).sort('text')
+    assert records.select('text', 'status', 'run_id').rows() == [('bad', 'failed', 'r1'), ('good', 'ok', 'r1')]
+    rerun = JsonRecorder()
+    result = run(['good', 'bad'], rerun, store_uri, 'r2', output_dtype=pl.String, allow_failures=True)
+    assert rerun.calls == [['bad']]
+    assert result['text'].to_list() == ['bad', 'good']
+
+
+def test_a_raise_in_a_retry_round_keeps_the_finished_rounds_and_nothing_else(store_uri):
+    def raise_on_retry(batch):
+        if batch == ['bad']:
+            msg = 'client closed'
+            raise RuntimeError(msg)
+        return [(None, 'bad text') if t == 'bad' else (json.dumps({'text': t}), None) for t in batch]
+
+    with pytest.raises(ComputeAborted, match='client closed'):
+        run(['good', 'bad'], raise_on_retry, store_uri, 'r1', output_dtype=pl.String, allow_failures=True)
+
+    records = read_records(store_uri, None, pl.String).sort('text')
+    assert records.select('text', 'status', 'error').rows() == [('bad', 'failed', 'bad text'), ('good', 'ok', None)]
+    rerun = JsonRecorder()
+    result = run(['good', 'bad'], rerun, store_uri, 'r2', output_dtype=pl.String, allow_failures=True)
+    assert rerun.calls == [['bad']]
+    assert result['text'].to_list() == ['bad', 'good']
+
+
+def test_failures_kept_by_aborted_runs_add_up_to_max_attempts(store_uri):
+    class AbortAfterFirstRound:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, batch):
+            self.calls.append(list(batch))
+            if len(self.calls) > 1:
+                msg = 'no key'
+                raise ComputeAborted(msg)
+            return [(None, 'bad text') for _ in batch]
+
+    for run_id in ('r1', 'r2'):
+        with pytest.raises(ComputeAborted, match='no key'):
+            run(['bad'], AbortAfterFirstRound(), store_uri, run_id, output_dtype=pl.String, allow_failures=True)
+
+    assert read_records(store_uri, None, pl.String)['run_id'].sort().to_list() == ['r1', 'r2']
+    last = AbortAfterFirstRound()
+    result = run(['bad'], last, store_uri, 'r3', output_dtype=pl.String, allow_failures=True)
+    assert result.height == 0
+    assert last.calls == [['bad']]
+    assert read_records(store_uri, None, pl.String)['run_id'].sort().to_list() == ['r1', 'r2', 'r3']
+    after = JsonRecorder()
+    assert run(['bad'], after, store_uri, 'r4', output_dtype=pl.String, allow_failures=True).height == 0
+    assert after.calls == []
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1', 'r2', 'r3']
+
+
+def test_strict_store_is_unchanged(store_uri):
+    with pytest.raises(RecordStoreError):
+        run(['a', 'bad'], Recorder(fails={'bad'}), store_uri, 'r1')
+    assert sorted(p.name for p in Path(store_uri, 'runs').iterdir()) == ['r1']
+
+
+def test_map_texts_reports_computed_and_failed(store_uri):
+    write_run(record('r0', 'A', datetime(2026, 1, 1, tzinfo=UTC)), store_uri, 'r0', None)
+
+    mapped = run_mapped(['a', 'b', 'c'], Recorder(fails={'c'}), store_uri, 'r1', allow_failures=True, max_attempts=2)
+
+    assert mapped.computed == 2
+    assert mapped.failed == 1
+    assert mapped.frame['text'].to_list() == ['a', 'b']
+
+
+def test_map_texts_counts_nothing_when_the_store_answers(store_uri):
+    run_mapped(['a', 'b'], Recorder(), store_uri, 'r1')
+
+    mapped = run_mapped(['a', 'b'], Recorder(), store_uri, 'r2')
+
+    assert mapped.computed == 0
+    assert mapped.failed == 0
+
+
+def test_map_texts_counts_texts_across_shards(store_uri):
+    mapped = run_mapped(['a', 'b', 'c'], Recorder(), store_uri, 'r1', shard_size=1)
+
+    assert mapped.computed == 3
+    assert mapped.failed == 0
+
+
+def test_import_run_writes_once(store_uri):
+    records = record('import', 'A', datetime(2026, 1, 1, tzinfo=UTC))
+
+    def refuse():
+        msg = 'records built for a run that exists'
+        raise AssertionError(msg)
+
+    assert import_run(lambda: records, store_uri, 'import', None) == 1
+    assert import_run(refuse, store_uri, 'import', None) == 0
+    assert read_records(store_uri, None)['run_id'].to_list() == ['import']

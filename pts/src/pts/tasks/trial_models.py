@@ -1,0 +1,115 @@
+"""Task that runs the stop reason classifier and drug NER over AACT texts, once per AACT version.
+
+The models run through the record store of :py:mod:`pts.record_store`, so a text
+that already has an answer for the model revision is not computed again, and the
+result is published as a write-once snapshot next to the AACT version.
+
+The work lives in :py:mod:`pts.clinical_staging.trial_models`.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Self
+
+from loguru import logger
+from otter.manifest.model import Artifact
+from otter.storage.synchronous.handle import StorageHandle
+from otter.task.model import Spec, Task, TaskContext
+from otter.task.task_reporter import report
+from otter.util.errors import TaskValidationError
+from pydantic import Field
+
+
+class TrialModelsSpec(Spec):
+    """Configuration fields for the trial_models task."""
+
+    source: dict[str, str]
+    """Inputs. Keys: ``aact`` (the dump archive), ``extraction`` (the directory of
+        tagged extractions), ``models`` (the staged Hugging Face models)."""
+    destination: dict[str, str]
+    """Where to publish the snapshots. Key: ``stop_reasons``. The drug entities go
+        under the extraction they were staged from."""
+    store_uri: str
+    """Root of the record stores, an absolute URI. Sits outside the AACT version
+        directory so a text seen in an earlier version is not computed again."""
+    snapshot: str
+    """The AACT version, which names the records this run writes."""
+    ner_batch_size: int = Field(default=256, gt=0)
+    """Labels per drug NER batch."""
+    ner_model_batch_size: int = Field(default=32, gt=0)
+    """Labels per drug NER forward pass, within a batch."""
+    stop_reasons_batch_size: int = 32
+    """Texts per stop reasons batch."""
+    max_attempts: int = 3
+    """Failed records after which a text is no longer retried."""
+    seed_ner_cache: str | None = None
+    """Optional one-off release NER cache (parquet) to import into the drug entities store."""
+
+
+class TrialModels(Task):
+    """Stage stop reasons and drug entities for the texts of one AACT version."""
+
+    def __init__(self, spec: TrialModelsSpec, context: TaskContext) -> None:
+        super().__init__(spec, context)
+        self.spec: TrialModelsSpec
+        self.stats: dict[str, Any] = {}
+
+    @report
+    def run(self) -> Self:
+        from pts.clinical_staging import trial_models
+        from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION
+        from pts.record_store import new_run_id
+        from pts.transformers.clinical.hf_models import staged_model_revisions
+        from pts.transformers.clinical.providers.aact import read_aact_tables
+
+        config = self.context.config
+        models_uri = StorageHandle(self.spec.source['models'], config=config).absolute
+        store_uri = self.spec.store_uri.rstrip('/')
+
+        if self.spec.seed_ner_cache:
+            revision = DRUG_ENTITIES.tag(staged_model_revisions(models_uri))
+            seeded = trial_models.seed_drug_entities(
+                StorageHandle(self.spec.seed_ner_cache, config=config).absolute,
+                store_uri,
+                DRUG_ENTITIES.model,
+                revision,
+                config,
+            )
+            logger.info(f'seeded {seeded} drug entity records')
+
+        archive = StorageHandle(self.spec.source['aact'], config=config).absolute
+        studies = read_aact_tables(archive, ['studies'], config.work_path)['studies']
+        extraction_dir = StorageHandle(self.spec.source['extraction'], config=config).absolute.rstrip('/')
+        extractions = trial_models.read_extraction(extraction_dir, config)
+
+        run_id = new_run_id(self.spec.snapshot)
+        extraction_tag = EXTRACTION.release_tag()
+        destination = {
+            'stop_reasons': StorageHandle(self.spec.destination['stop_reasons'], config=config).absolute,
+            'drug_entities': f'{extraction_dir}/{extraction_tag}/drug_entities',
+        }
+        self.stats = trial_models.stage_trial_models(
+            studies,
+            extractions,
+            models_uri,
+            destination,
+            store_uri,
+            run_id,
+            config,
+            ner_batch_size=self.spec.ner_batch_size,
+            ner_model_batch_size=self.spec.ner_model_batch_size,
+            stop_reasons_batch_size=self.spec.stop_reasons_batch_size,
+            max_attempts=self.spec.max_attempts,
+            extraction_tag=extraction_tag,
+        )
+        logger.info(f'trial models staged: {self.stats}')
+
+        self.artifacts = [Artifact(source=store_uri, destination=uri) for uri in destination.values()]
+        return self
+
+    @report
+    def validate(self) -> Self:
+        """Check the run produced statistics for both models."""
+        if not self.stats:
+            raise TaskValidationError('run produced no statistics')
+        return self
