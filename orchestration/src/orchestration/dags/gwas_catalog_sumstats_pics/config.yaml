@@ -1,0 +1,178 @@
+---
+description: Open Targets Genetics — GWAS Catalog summary statistics PICS
+env: prod
+
+environments:
+  prod:
+    input:
+      gwas_catalog: gs://gwas_catalog_inputs
+      gnomad: gs://gnomad_data_2
+    output: gs://gwas_catalog_sumstats_pics/prod/20261030T072623
+    scratchpad:
+      gentropy_version: 4.0.0-dev.9
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-gwascatalog-sumstats-clumping:
+      project_id: open-targets-genetics-dev
+      # the cluster of the window clumping, and of the study index, which runs alongside it.
+      # 20 primary workers and up to 100 spot secondary workers (otg-efm). Under
+      # Enhanced Flexibility Mode the shuffle is stored on the primary workers only, so
+      # a preempted secondary worker loses no shuffle data. The reads of the summary
+      # statistics of about 160,000 studies and the shuffles of locus (the summary
+      # statistics within 500 kb of each lead) scale with the cores: the locus-breaker
+      # clumping of the same summary statistics took 4.2 hours on 480 cores (2026-08-27).
+      # 512 GB primary disks: about 10 TB of disk for the shuffles and the cached locus
+      autoscaling_policy: otg-efm
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 20
+      worker_machine_type: n2d-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 512
+      secondary_worker_machine_type: n2d-highmem-16
+      # secondary workers hold no shuffle under EFM, only spills
+      secondary_worker_disk_size: 124
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # Enhanced Flexibility Mode: shuffle files on the primary workers only
+        # https://cloud.google.com/dataproc/docs/concepts/configuring-clusters/flex
+        'dataproc:efm.spark.shuffle': 'primary-worker'
+        # more connections per primary worker for the shuffle fetches, as decode_ingestion
+        'spark:spark.shuffle.io.numConnectionsPerPeer': '5'
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # broadcast the joins with a side of up to 64 MiB: the study index. The joins of
+        # the gnomAD tables and of the locus bounds are broadcast by gentropy itself. At
+        # 512 MiB, a join of pics with the entries of locus was broadcast, and its
+        # collect exceeded spark.driver.maxResultSize (4.1 GiB)
+        'spark:spark.sql.autoBroadcastJoinThreshold': '67108864'
+        # broadcast the map output statuses above 20 MiB, as the v3 clumping steps:
+        # the summary statistics are read with many tasks
+        'spark:spark.shuffle.mapOutput.minSizeForBroadcast': '20m'
+        # the shuffles of locus are large: many shuffle partitions, which adaptive
+        # execution merges into partitions of about 256 MB, and split skewed join partitions
+        'spark:spark.sql.shuffle.partitions': '16000'
+        'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
+        'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+        # list the summary statistics of about 160,000 studies in parallel
+        'spark:spark.sql.sources.parallelPartitionDiscovery.parallelism': '100000'
+        # pack the summary statistics files, about 3 million of about 7 MB, into splits
+        # of up to 512 MiB: a split of 128 MiB and an open cost of 4 MiB gave 500,940
+        # tasks per read of the input, mostly spent opening files
+        'spark:spark.sql.files.maxPartitionBytes': '536870912'
+        'spark:spark.sql.files.openCostInBytes': '1048576'
+        # broadcasts are collected on the driver
+        'spark:spark.driver.maxResultSize': '4g'
+        # gwas_catalog_inputs is a requester pays bucket
+        'core:fs.gs.requester.pays.mode': 'AUTO'
+        'core:fs.gs.requester.pays.project.id': 'open-targets-genetics-dev'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+    otg-gwascatalog-sumstats-pics:
+      project_id: open-targets-genetics-dev
+      # the cluster of the LD annotation and PICS, created when the window clumping ends.
+      # A fixed cluster, with no secondary workers. Both steps read the study loci with
+      # locus (about 190 GiB) and PICS shuffles their entries (about 1.4 TB); on 1,928
+      # cores the LD annotation took 3 minutes and the shuffle stages of PICS 2 minutes
+      # (2026-10-29). 160 cores; 512 GB disks: about 5 TB of disk for the shuffles,
+      # about 140 GB of shuffle per worker
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 10
+      worker_machine_type: n2d-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 512
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # broadcast the joins with a side of up to 64 MiB: the study index. The joins of
+        # the LD index are broadcast by gentropy itself. At 512 MiB, a join of pics with
+        # the entries of locus was broadcast, and its collect exceeded
+        # spark.driver.maxResultSize (4.1 GiB)
+        'spark:spark.sql.autoBroadcastJoinThreshold': '67108864'
+        # the shuffles of locus are large: many shuffle partitions, which adaptive
+        # execution merges into partitions of about 256 MB, and split skewed join partitions
+        'spark:spark.sql.shuffle.partitions': '16000'
+        'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
+        'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+        # broadcasts are collected on the driver
+        'spark:spark.driver.maxResultSize': '4g'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  study_index:
+    kind: dataproc
+    definition:
+      cluster: otg-gwascatalog-sumstats-clumping
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=gwas_catalog_study_index \
+          "step.catalog_study_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_studies.tsv']" \
+          "step.catalog_ancestry_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_ancestries.tsv']" \
+          step.study_index_path={{output}}/output/study \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn
+
+  window_clumping:
+    kind: dataproc
+    definition:
+      cluster: otg-gwascatalog-sumstats-clumping
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=window_based_clumping \
+          step.summary_statistics_input_path={{input.gwas_catalog}}/harmonised_summary_statistics \
+          step.study_locus_output_path={{output}}/output/study_locus \
+          step.collect_locus=true \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1000 \
+          step.session.spark_uri=yarn
+
+  ld_annotation:
+    depends_on: [study_index, window_clumping]
+    kind: dataproc
+    definition:
+      cluster: otg-gwascatalog-sumstats-pics
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=ld_based_clumping \
+          step.ld_index_path={{input.gnomad}}/v2.1.1/ld_index \
+          step.study_locus_input_path={{output}}/output/study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.clumped_study_locus_output_path={{output}}/output/ld_annotated_study_locus \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1000 \
+          step.session.spark_uri=yarn
+
+  pics:
+    depends_on: [ld_annotation]
+    kind: dataproc
+    definition:
+      cluster: otg-gwascatalog-sumstats-pics
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=pics \
+          step.study_locus_ld_annotated_in={{output}}/output/ld_annotated_study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.picsed_study_locus_out={{output}}/output/credible_set \
+          step.picsed_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=400 \
+          step.session.spark_uri=yarn
