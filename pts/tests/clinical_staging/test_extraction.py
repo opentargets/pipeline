@@ -23,9 +23,10 @@ from pydantic import BaseModel, ValidationError
 from pts.clinical_staging import extraction
 from pts.clinical_staging.extraction import (
     EXTRACTION_MODEL,
-    _models_to_dataframe,
     import_class,
     import_extraction_cache,
+    models_to_frame,
+    polars_schema,
 )
 from pts.clinical_staging.staged_outputs import EXTRACTION
 from pts.record_store import ComputeAborted, read_records, text_sha256
@@ -315,7 +316,7 @@ def _digest() -> str:
 
 def _old_way(ids: list[str], prompts: pl.DataFrame) -> pl.DataFrame:
     """Rows as the cache-backed task cached them; it published them without ``computed_at``."""
-    extracted = _models_to_dataframe([_model(i) for i in ids])
+    extracted = models_to_frame([_model(i) for i in ids], ClinicalReportExtractionSchema)
     keys = prompts.select('id', cache_key=pl.lit('k'), prompt_sha256='prompt_sha256')
     return (
         extracted
@@ -397,11 +398,87 @@ def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
 def test_prompt_hash_follows_its_trial_when_a_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts = extraction.prompts_for(_report('nct1', 'nct2'))
     records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')})
-    monkeypatch.setattr(extraction, '_models_to_dataframe', lambda models: _models_to_dataframe(models[1:]))
+    monkeypatch.setattr(
+        extraction, 'models_to_frame', lambda models, model_class: models_to_frame(models[1:], model_class)
+    )
 
     extractions = extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
     assert extractions.select('id', 'prompt_sha256').rows() == [('nct2', prompts['prompt_sha256'][1])]
+
+
+_DISEASE = pl.Struct({
+    'name': pl.String,
+    'severity': pl.String,
+    'stage': pl.String,
+    'onset': pl.String,
+    'etiology': pl.String,
+    'evidence_quote': pl.String,
+})
+_DRUG = pl.Struct({
+    'drug': pl.String,
+    'route': pl.String,
+    'formulation': pl.String,
+    'synonyms': pl.List(pl.String),
+    'dosages': pl.List(pl.String),
+    'evidence_quote': pl.String,
+})
+PUBLISHED_EXTRACTION_SCHEMA = pl.Schema({
+    'id': pl.String,
+    'drug_intent': pl.String,
+    'drug_intent_confidence': pl.Float64,
+    'primary_indications': pl.List(_DISEASE),
+    'background_conditions': pl.List(_DISEASE),
+    'investigated_drugs': pl.List(_DRUG),
+    'comparator_drugs': pl.List(_DRUG),
+    'supportive_drugs': pl.List(_DRUG),
+    'conclusion': pl.String,
+    'prompt_sha256': pl.String,
+})
+"""The parquet schema of the published extraction at tag 82af315af627-pfd3cdab9."""
+
+
+def test_the_extraction_schema_is_the_published_one() -> None:
+    derived = pl.Schema({**polars_schema(ClinicalReportExtractionSchema), 'prompt_sha256': pl.String})
+
+    assert derived == PUBLISHED_EXTRACTION_SCHEMA
+
+
+def test_null_and_empty_fields_keep_their_declared_dtype() -> None:
+    data = json.loads(SAMPLE_EXTRACTION.replace('nct00031889', 'nct1'))
+    data['background_conditions'] = []
+    model = ClinicalReportExtractionSchema.model_validate(data)
+    prompts = extraction.prompts_for(_report('nct1'))
+    records = _records(prompts, {'nct1': model.model_dump_json()})
+
+    extractions = extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+
+    assert extractions.schema == PUBLISHED_EXTRACTION_SCHEMA
+    row = extractions.row(0, named=True)
+    assert row['background_conditions'] == []
+    assert row['comparator_drugs'] is None
+    assert row['supportive_drugs'] is None
+    assert row['conclusion'] is None
+    assert row['investigated_drugs'][0]['synonyms'] is None
+
+
+def test_no_extractions_have_the_full_schema() -> None:
+    prompts = extraction.prompts_for(_report('nct1'))
+    records = _records(prompts, {'nct1': _model('nct1').model_dump_json()}).clear()
+
+    extractions = extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
+
+    assert extractions.is_empty()
+    assert extractions.schema == PUBLISHED_EXTRACTION_SCHEMA
+
+
+def test_a_field_type_without_a_polars_dtype_raises() -> None:
+    class Unsupported(BaseModel):
+        id: str
+        payload: dict[str, str]
+
+    with pytest.raises(TypeError, match=r'no polars dtype for dict\[str, str\]'):
+        polars_schema(Unsupported)
 
 
 def test_missing_key_aborts_without_recording_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -821,7 +898,9 @@ def test_stored_json_publishes_as_imported_cache_rows(models: list[ClinicalRepor
     ids = [model.id for model in models]
     prompts = extraction.prompts_for(_report(*ids))
     stored = {model.id: model.model_dump_json() for model in models}
-    imported = {row['id']: json.dumps(row) for row in _models_to_dataframe(models).to_dicts()}
+    imported = {
+        row['id']: json.dumps(row) for row in models_to_frame(models, ClinicalReportExtractionSchema).to_dicts()
+    }
     mixed = {trial_id: (stored if n % 2 else imported)[trial_id] for n, trial_id in enumerate(ids)}
 
     def publish(outputs: dict[str, str]) -> pl.DataFrame:

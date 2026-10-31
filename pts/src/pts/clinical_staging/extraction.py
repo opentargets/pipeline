@@ -14,7 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import NoneType, UnionType
+from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
 
 import polars as pl
 from loguru import logger
@@ -66,12 +67,28 @@ IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
+POLARS_SCALARS: dict[Any, type[pl.DataType]] = {str: pl.String, int: pl.Int64, float: pl.Float64, bool: pl.Boolean}
+"""Polars dtype of each scalar type a response model field can hold."""
 
 
 def import_class(dotted_path: str) -> type[BaseModel]:
     """Import a pydantic model class from a dotted module path."""
     module_path, class_name = dotted_path.rsplit('.', 1)
     return getattr(import_module(module_path), class_name)
+
+
+def polars_schema(model_class: type[BaseModel]) -> pl.Schema:
+    """The polars schema of ``model_class``'s ``model_dump``: one column per field, in declared order.
+
+    Raises:
+        TypeError: If a field's type has no polars dtype here.
+    """
+    return pl.Schema({name: _polars_dtype(field.annotation) for name, field in model_class.model_fields.items()})
+
+
+def models_to_frame(models: Sequence[BaseModel], model_class: type[BaseModel]) -> pl.DataFrame:
+    """One row per model, with the schema :py:func:`polars_schema` derives from ``model_class``."""
+    return pl.DataFrame([model.model_dump() for model in models], schema=polars_schema(model_class))
 
 
 def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None) -> pl.DataFrame:
@@ -231,9 +248,7 @@ def extractions_from_records(
         except ValidationError as exc:
             msg = f'stored extraction of {trial_id} does not validate against {model_class.__name__}: {exc}'
             raise ValueError(msg) from exc
-    extractions = _models_to_dataframe(models)
-    if extractions.is_empty():
-        return pl.DataFrame(schema={'id': pl.String, 'prompt_sha256': pl.String})
+    extractions = models_to_frame(models, model_class)
     hashes = joined.select('id', 'prompt_sha256').unique(subset='id', keep='first', maintain_order=True)
     return extractions.join(hashes, on='id', how='left', maintain_order='left')
 
@@ -308,30 +323,21 @@ def _open_client(spec: LlmExtractSpec, openai_key: str) -> AsyncOpenAI:
     return AsyncOpenAI(api_key=openai_key, timeout=client_timeout(spec.service_tier), max_retries=spec.max_retries)
 
 
-def _models_to_dataframe(extractions: Sequence[BaseModel]) -> pl.DataFrame:
-    """Convert validated model results to one dataframe, inferring the schema from every row.
-
-    If the rows cannot be combined at once, each row is converted on its own and
-    the rows that still fail are dropped with an error logged.
-    """
-    if not extractions:
-        return pl.DataFrame()
-
-    rows = [extraction.model_dump() for extraction in extractions]
-    try:
-        return pl.from_dicts(rows, infer_schema_length=None)
-    except pl.exceptions.PolarsError as error:
-        logger.warning(
-            f'could not combine {len(rows)} extractions at once: {error}; falling back to row-wise conversion'
-        )
-
-    converted: list[pl.DataFrame] = []
-    for row in rows:
-        try:
-            converted.append(pl.from_dicts([row], infer_schema_length=None))
-        except pl.exceptions.PolarsError as error:
-            logger.error(f'dropping one validated extraction during dataframe conversion: {error}')
-
-    if not converted:
-        return pl.DataFrame()
-    return pl.concat(converted, how='diagonal_relaxed')
+def _polars_dtype(annotation: Any) -> pl.DataType:
+    """The polars dtype of a response model field's type."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin in (Union, UnionType):
+        present = [arg for arg in args if arg is not NoneType]
+        if len(present) == 1:
+            return _polars_dtype(present[0])
+    elif origin is Literal and all(isinstance(arg, str) for arg in args):
+        return pl.String()
+    elif origin is list:
+        return pl.List(_polars_dtype(args[0]))
+    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return pl.Struct(polars_schema(annotation))
+    elif annotation in POLARS_SCALARS:
+        return POLARS_SCALARS[annotation]()
+    msg = f'no polars dtype for {annotation!r}'
+    raise TypeError(msg)
