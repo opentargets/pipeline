@@ -57,8 +57,6 @@ The outputs are `output/credible_set/`, one row per credible set, in one file, a
 
 ## Outputs
 
-Schemas as read from the parquet files of the run. Nested columns show their `array<struct<...>>` types. "Empty" marks a column with no values in this run.
-
 | Output | Rows | Files |
 |---|---|---|
 | `study` | 2,470 | 1 |
@@ -89,7 +87,7 @@ One row per FinnGen phenotype.
 
 ### credible_set
 
-One row per credible set; 1,302 studies have at least one.
+One row per credible set.
 
 | Column | Type | Description |
 |---|---|---|
@@ -130,8 +128,6 @@ One row per variant of a credible set. The posterior probabilities of the varian
 | `rescaledStandardError` | `float` | Empty. |
 | `rescaledDirection` | `tinyint` | Empty. |
 | `qualityControls` | `array<string>` | `Allele frequency reported by the study` when `effectAlleleFrequency` is set, otherwise empty. |
-
-Some SuSiE fits of FinnGen give a conditional effect far from the marginal one, mostly at rare variants of case-control phenotypes. The values are FinnGen's: for `11_46259135_G_A` in `FINNGEN_R12_I9_CARDMYOHYP`, FinnGen reports `alpha1` 1, `mean1` 94.0, `sd1` 0.216 and `lbf_variable1` 94,434, against a marginal `beta` of 2.58 (`se` 0.221). Of the 2,896 leads with a posterior probability above 0.9, 11 have a `conditionalBeta` more than 3 times `reportedBeta` (one with the opposite sign), in 7 studies: `FINNGEN_R12_I9_CARDMYOHYP`, `FINNGEN_R12_I9_HYPERTROCARDMYOP`, `FINNGEN_R12_G6_MYOTDIS`, `FINNGEN_R12_G6_MUSDYST`, `FINNGEN_R12_E4_PLASMAPROT`, `FINNGEN_R12_L12_ACTINKERA` and `FINNGEN_R12_D3_COAGOTHER`. 18 of the 2,896 leads have a variant `logBayesFactor` above 1,000. No quality control flags them.
 
 ## Changelog
 
