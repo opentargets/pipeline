@@ -15,8 +15,6 @@ Data contained in `gwas` corresponds to the SuSiE fine-mapping results of [FinnG
 
 Data is produced by **finngen_gwas_ingestion DAG**. The DAG configuration and topology are in `config/finngen_gwas_ingestion.yaml` of the run folder (`gs://finngen_data/gwas/prod/20261029T152531/config/`). The run of 2026-10-31 uses gentropy [`v4.0.0-dev.11`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.11); the links below refer to that tag. The gentropy CLI (`cli.py`) and the cluster init script (`install_dependencies_on_cluster.sh`) of the tag are copied to `bin/` of the run folder.
 
-The previous release, produced by the `finngen_ingestion` DAG on gentropy v3.2.0 in the StudyLocus schema, is frozen in `gs://finngen_data/gwas/prod/20260526T131014/`, with its own docs under `docs/`.
-
 Inputs of the run:
 
 ```sh
@@ -35,25 +33,6 @@ The DAG has 2 steps, run one after another on one Dataproc cluster:
 
 1. study_index
 2. finemapping
-
-The fine-mapping step runs after the study index: both `spark-submit` calls resolve the `hadoop-bam` package of the block gzip codec into the ivy cache of the cluster master, and two at the same time break each other's downloads.
-
-## study_index
-
-The step ([`finngen_studies.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_studies.py)) builds one study per phenotype of the FinnGen phenotype API ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/study_index.py)). The study identifier is the phenotype code prefixed with `FINNGEN_R12_`. The ontology terms of a study are the curation rows whose `STUDY` contains `FINNGEN` and `R12` and whose `PROPERTY_VALUE` equals the phenotype name ([`efo_mapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/efo_mapping.py)). A study with no matching curation row keeps an empty list of ontology terms. The output is `output/study/`.
-
-## finemapping
-
-The step ([`finngen_finemapping_ingestion.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_finemapping_ingestion.py)) builds one credible set per FinnGen SuSiE credible set ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/finemapping.py)):
-
-- The variants of a credible set are the variants of the `*.snp.bgz` files assigned to it (`cs` > 0), the 95% credible set of the single effect.
-- A credible set is kept when it is the first credible set of its region, or when its `cs_log10bf` is above 0.8686 (log10(e²), the threshold of the FinnGen publication). `cs_log10bf` is used only for this filter.
-- The lead variant of a credible set is its variant with the highest posterior probability, ties broken by `variantId` ([`credible_set.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/dataset/credible_set.py)).
-- A credible set whose lead has a p-value above 1e-5 is dropped with its variants.
-- The log Bayes factor of a credible set is the natural log Bayes factor of its single effect over every variant of the region, with a uniform prior over those variants ([`stats.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/common/stats.py)).
-- The allele frequency of a variant is the alternative allele frequency `AF` of the annotated variants file.
-
-The outputs are `output/credible_set/`, one row per credible set, in one file, and `output/credible_set_variant/`, one row per variant of a credible set, in `session.output_partitions` (1) files. Every study of the credible sets is in `study`, and every lead is in `credible_set_variant`.
 
 ## Outputs
 
