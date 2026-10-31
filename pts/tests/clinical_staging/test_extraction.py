@@ -24,11 +24,12 @@ from pts.clinical_staging import extraction
 from pts.clinical_staging.extraction import (
     EXTRACTION_MODEL,
     _models_to_dataframe,
+    import_class,
     import_extraction_cache,
 )
 from pts.clinical_staging.staged_outputs import EXTRACTION
 from pts.record_store import ComputeAborted, read_records, text_sha256
-from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec, import_class
+from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.llm_workflow import Extracted, Failed
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema

@@ -17,7 +17,7 @@ The extraction work lives in :py:mod:`pts.clinical_staging.extraction`.
 
 from __future__ import annotations
 
-from importlib import import_module, resources
+from importlib import resources
 from typing import Any, Self
 
 import polars as pl
@@ -27,7 +27,6 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import TaskRunError, TaskValidationError
-from pydantic import BaseModel
 
 from pts.record_store import map_texts, new_run_id, publish_snapshot
 
@@ -104,7 +103,7 @@ class LlmExtract(Task):
         from pts.clinical_staging.staged_outputs import EXTRACTION, schema_digest
 
         system_prompt = self._system_prompt()
-        model_cls = import_class(self.spec.model_class)
+        model_cls = extraction.import_class(self.spec.model_class)
         digest = schema_digest(model_cls)
         config = self.context.config
         store_uri = self.spec.store_uri.rstrip('/')
@@ -177,9 +176,3 @@ class LlmExtract(Task):
                 f'a negative result is still a row, so these failed all of their attempts'
             )
         return self
-
-
-def import_class(dotted_path: str) -> type[BaseModel]:
-    """Import a pydantic model class from a dotted module path."""
-    module_path, class_name = dotted_path.rsplit('.', 1)
-    return getattr(import_module(module_path), class_name)

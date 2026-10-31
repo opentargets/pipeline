@@ -12,6 +12,7 @@ import json
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,6 @@ from pydantic import BaseModel, ValidationError
 
 from pts.postgres import read_dump_tables
 from pts.record_store import ComputeAborted, read_parquet, run_exists, text_sha256, write_run
-from pts.tasks.llm_extract import import_class
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
     SYSTEMIC_ERROR_TYPES,
@@ -66,6 +66,12 @@ IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
+
+
+def import_class(dotted_path: str) -> type[BaseModel]:
+    """Import a pydantic model class from a dotted module path."""
+    module_path, class_name = dotted_path.rsplit('.', 1)
+    return getattr(import_module(module_path), class_name)
 
 
 def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None) -> pl.DataFrame:
