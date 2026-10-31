@@ -1,17 +1,19 @@
 # Finngen
 
-This document was updated on 2026-10-29.
+This document was updated on 2026-10-31.
 
 Bucket `gs://finngen_data` holds the FinnGen datasets ingested by Open Targets. Each DAG run writes to its own folder, `prod/<YYYYMMDDTHHMMSS>/`, with the DAG config of the run under `config/` and its outputs under `output/`. The docs of a run are under `docs/` of its run folder; the bucket has no top-level `docs/`.
 
 ```sh
-gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/       # FinnGen GWAS, finngen_ingestion DAG
+gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/       # FinnGen GWAS, finngen_gwas_ingestion DAG
 gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/   # FinnGen multiome, finngen_multiome_ingestion DAG
 ```
 
 ## FinnGen GWAS
 
-The SuSiE fine-mapping of [FinnGen Data Freeze 12](https://r12.finngen.fi/) is read from `gs://finngen-public-data-r12/` and ingested by the `finngen_ingestion` DAG into a study index and credible sets. The DAG config is `dags/config/finngen_ingestion.yaml`. The current release is `gs://finngen_data/gwas/prod/20260526T131014/`, see [FinnGen GWAS](finngen_gwas/README.md).
+The SuSiE fine-mapping of [FinnGen Data Freeze 12](https://r12.finngen.fi/) is read from `gs://finngen-public-data-r12/` and ingested by the `finngen_gwas_ingestion` DAG into a study index, credible sets and credible set variants. The DAG config is `dags/finngen_gwas_ingestion/config.yaml`. The latest run is `gs://finngen_data/gwas/prod/20261029T152531/`, see [FinnGen GWAS](finngen_gwas/README.md).
+
+The previous release, in the StudyLocus schema of gentropy v3, is frozen in `gs://finngen_data/gwas/prod/20260526T131014/`, with its docs under `docs/`. It was produced by the `finngen_ingestion` DAG, removed in favour of `finngen_gwas_ingestion`.
 
 ## FinnGen multiome
 
@@ -42,3 +44,10 @@ The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](htt
 - docs: add [FinnGen multiome](finngen_multiome/README.md), uploaded to `docs/` of the run folder `gs://finngen_data/multiome/prod/20261029T125742/`.
 - chore: remove the top-level `gs://finngen_data/docs/`; the docs of each run are under `docs/` of its run folder.
 - chore: remove `gs://finngen_data/100_3mb_carma/`, CARMA fine-mapping outputs that no DAG produces or reads.
+
+### 2026-10-31
+
+- feat: replace the `finngen_ingestion` DAG with `finngen_gwas_ingestion`, a StagingDagConfig DAG on gentropy `v4.0.0-dev.11` writing the `study`, `credible_set` and `credible_set_variant` datasets to `gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/`. Its first run, `gs://finngen_data/gwas/prod/20261029T152531/`, differs from the frozen release:
+  - credible sets whose lead has a p-value above 1e-5 are dropped (676 credible sets of the frozen release, flagged `Subsignificant p-value` there): 21,457 credible sets, with the same lead and region as in the frozen release;
+  - `effectAlleleFrequency` is the alternative allele frequency `AF` of the FinnGen annotated variants file, where the frozen release had the minor allele frequency `maf`;
+  - the EFO mappings come from curation tag `26.09.2` (`26.05` in the frozen release): 1,314 studies are mapped to different terms, e.g. EFO terms replaced by MONDO terms.
