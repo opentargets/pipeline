@@ -26,6 +26,7 @@ from pts.schemas.vep import vep_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
+from pts.transformers.variant.chromosome import annotate
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY
 from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.index import (
@@ -624,7 +625,8 @@ with open(out, 'w') as handle:
     handle.write('[\n' + ',\n'.join(json.dumps(record, indent=2) for record in records) + '\n]\n')
 """
 
-#: Ensembl core tables: one canonical protein coding transcript on each of chromosomes 1 and MT.
+#: Ensembl core tables: one canonical protein coding transcript on each of chromosomes 1 and MT,
+#: translated to proteins P1 and P2.
 CORE_TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
     'coord_system': (['coord_system_id', 'species_id', 'name'], [(1, 1, 'chromosome')]),
     'seq_region': (
@@ -665,11 +667,16 @@ CORE_TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
     'external_db': (['external_db_id', 'db_name'], [(2200, 'Uniprot/SWISSPROT'), (1100, 'HGNC')]),
     'xref': (
         ['xref_id', 'external_db_id', 'dbprimary_acc', 'display_label'],
-        [(501, 1100, 'HGNC:1', 'GENE1'), (502, 1100, 'HGNC:2', 'GENEMT'), (601, 2200, 'P1', 'P1')],
+        [
+            (501, 1100, 'HGNC:1', 'GENE1'),
+            (502, 1100, 'HGNC:2', 'GENEMT'),
+            (601, 2200, 'P1', 'P1'),
+            (602, 2200, 'P2', 'P2'),
+        ],
     ),
     'object_xref': (
         ['object_xref_id', 'ensembl_id', 'ensembl_object_type', 'xref_id'],
-        [(1, 1000, 'Translation', 601)],
+        [(1, 1000, 'Translation', 601), (2, 2000, 'Translation', 602)],
     ),
     'analysis': (['analysis_id', 'created', 'logic_name'], [(30, None, 'signalp')]),
     'protein_feature': (['protein_feature_id', 'translation_id', 'hit_name', 'analysis_id'], [(1, 1000, 'x', 30)]),
@@ -989,7 +996,14 @@ def test_variant_step_rejects_an_empty_annotation_source(tmp_path, step_inputs, 
     """An empty gnomAD or FoldX input fails the step instead of silently annotating nothing."""
     empty = tmp_path / 'empty'
     empty.mkdir()
-    pl.DataFrame(schema={'variantId': pl.String}).write_parquet(empty / 'part.parquet')
+    pl.DataFrame(
+        schema={
+            'variantId': pl.String,
+            'uniprotAccession': pl.String,
+            'aminoAcidChange': pl.String,
+            'variantEffect': EFFECTS,
+        }
+    ).write_parquet(empty / 'part.parquet')
     with pytest.raises(ValueError, match='No annotations found'):
         _run_step(tmp_path, step_inputs, [('1_123_A_G', None)], source={source: [str(empty)]})
 
@@ -1074,10 +1088,15 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
         schema_overrides={'position': pl.Int32},
     ).write_parquet(tmp_path / 'gnomad' / 'part.parquet')
     (tmp_path / 'foldx').mkdir()
-    pl.DataFrame(
-        {'uniprotAccession': ['P1'], 'aminoAcidChange': ['A1T'], 'variantEffect': [[effect('FoldX', 1.0)]]},
+    foldx = pl.DataFrame(
+        {
+            'uniprotAccession': ['P9', 'P2', 'P1', 'P2'],
+            'aminoAcidChange': ['A1T', 'A1T', 'A1T', 'A2T'],
+            'variantEffect': [[effect('FoldX', score)] for score in [0.125, 0.25, 1.0, 0.5]],
+        },
         schema={'uniprotAccession': pl.String, 'aminoAcidChange': pl.String, 'variantEffect': EFFECTS},
-    ).write_parquet(tmp_path / 'foldx' / 'part.parquet')
+    )
+    foldx.write_parquet(tmp_path / 'foldx' / 'part.parquet')
     _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
     _write_gpn_star(
         tmp_path / 'gpn_star',
@@ -1090,7 +1109,7 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
         'gpn_star': str(tmp_path / 'gpn_star'),
     }
 
-    def run(name: str, **settings: object) -> tuple[pl.DataFrame, list[str]]:
+    def run(name: str, source: dict[str, object], **settings: object) -> tuple[pl.DataFrame, list[str]]:
         output = _run_step(
             tmp_path,
             step_inputs,
@@ -1102,13 +1121,21 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
         parts = sorted(path.name for path in output.glob('*.parquet'))
         return pl.read_parquet([output / part for part in parts]), parts
 
-    whole, whole_parts = run('whole', chunk_rows=1_000_000)
-    chunked, chunked_parts = run('chunked', chunk_rows=7, parallel_chunks=3, batch_size=3)
+    whole, whole_parts = run('whole', source, chunk_rows=1_000_000)
+    chunked, chunked_parts = run('chunked', source, chunk_rows=7, parallel_chunks=3, batch_size=3)
+    without_foldx, _ = run('without_foldx', {**source, 'amino_acid_annotations': []}, chunk_rows=1_000_000)
 
     assert len(whole_parts) == 4
     assert len(chunked_parts) == 2 + 1 + -(-len(chr22) // 7)
     assert {x['method'] for row in whole['variantEffect'] for x in row} >= {'GPN-Star', 'FoldX', 'GERP'}
+    foldx_scores = {
+        row['variantId']: [x['score'] for x in row['variantEffect'] if x['method'] == 'FoldX']
+        for row in chunked.to_dicts()
+    }
+    assert foldx_scores['1_123_A_G'] == [1.0]
+    assert foldx_scores['MT_123_G_A'] == [0.25]
     assert whole.equals(chunked)
+    assert chunked.equals(annotate(without_foldx, [], [foldx]))
 
 
 def _loftee(records: pl.LazyFrame, ranked: bool) -> tuple[str, str, str | None]:

@@ -3,7 +3,8 @@
 Each chromosome is run through fastVEP in a pool of processes, the largest first, each fastVEP
 with a few threads; its records are split by row into chunks. Alongside, a second pool prepares
 what every chunk of a chromosome shares: its transcript fields, LOFTEE models, ancestor contig,
-colocated variants, supplementary annotations and GPN-Star scores, written in position order.
+colocated variants, supplementary annotations and GPN-Star scores, written in position order, and
+the amino-acid annotations of its transcripts' proteins.
 Once a chromosome's records and preparations are ready, a third pool annotates its chunks, each
 into one part of the index, reading only the prepared rows in the chunk's position range.
 Workers read their inputs from paths and write into the scratch directory.
@@ -27,7 +28,6 @@ from loguru import logger
 
 from pts.schemas.variant import variant_schema
 from pts.schemas.vep import vep_schema
-from pts.transformers.utils.dataset import scan_dataset
 from pts.transformers.variant.alleles import read_chromosome, read_contig
 from pts.transformers.variant.colocated import KEY, colocated_variants
 from pts.transformers.variant.fastvep import run_fastvep, write_vcf
@@ -44,7 +44,7 @@ from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.records import CHUNK_BYTES, iter_records, records_from_fastvep, unannotated_records
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
-from pts.transformers.variant.vep import parse_vep
+from pts.transformers.variant.vep import parse_vep, uniprot_accessions
 
 
 @dataclass(frozen=True)
@@ -79,8 +79,8 @@ class Shared:
     """Rows of each row group of the prepared frames, the unit a chunk's position range reads."""
     variant_annotations: tuple[dict[str, list[str]], ...] = ()
     """The Parquet parts of each supplementary variant annotation source, by chromosome."""
-    amino_acid_annotations: tuple[str, ...] = ()
-    """Amino-acid annotation sources (FoldX)."""
+    amino_acid_annotations: tuple[Path, ...] = ()
+    """The local `amino_acid_projection` of each amino-acid annotation source (FoldX)."""
     gpn_star: dict[str, str] = field(default_factory=dict)
     """The GPN-Star file of each chromosome that has one."""
     gpn_star_cutoffs: GpnStarCutoffs | None = None
@@ -229,12 +229,33 @@ def run_chromosome(chromosome: str, rows: Path, shared: Shared) -> tuple[int, bo
     return chunks, True
 
 
+AMINO_ACID_COLUMNS = ('uniprotAccession', 'aminoAcidChange', 'variantEffect')
+
+
+def amino_acid_annotations(path: Path, transcripts: pl.DataFrame) -> pl.DataFrame:
+    """The rows of an amino-acid annotation file on a UniProt accession of one of `transcripts`."""
+    accessions = (
+        transcripts
+        .select(uniprot_accessions(pl.col('swissprot'), pl.col('trembl')).alias('uniprotAccession'))
+        .explode('uniprotAccession')
+        .drop_nulls()
+        .unique()
+    )
+    return (
+        pl
+        .scan_parquet(path)
+        .select(AMINO_ACID_COLUMNS)
+        .join(accessions.lazy(), on='uniprotAccession', how='semi', maintain_order='left')
+        .collect()
+    )
+
+
 def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, shared: Shared) -> None:
     """Write what every chunk of the chromosome reads, once, into its `prepared` directory.
 
     That is its transcript fields, LOFTEE models and ancestor contig, its rows' colocated
-    variants, and the supplementary annotations and GPN-Star scores at its rows' loci; the last
-    three sorted by position.
+    variants, the supplementary annotations and GPN-Star scores at its rows' loci, the last
+    three sorted by position, and the amino-acid annotations of its transcripts' proteins.
 
     Args:
         chromosome: The chromosome of the rows.
@@ -245,7 +266,8 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
     frame = pl.read_parquet(rows)
     directory = _prepared(shared, chromosome)
     directory.mkdir(parents=True)
-    _write(transcript_fields(shared.core, chromosome), directory / 'transcripts.parquet')
+    transcripts = transcript_fields(shared.core, chromosome)
+    _write(transcripts, directory / 'transcripts.parquet')
     (directory / 'loftee.pickle').write_bytes(pickle.dumps(loftee_models(shared.core, chromosome)))
     (directory / 'ancestor.bin').write_bytes(_sequence(shared.ancestor, chromosome))
     if all_vars is not None:
@@ -263,6 +285,8 @@ def prepare_chromosome(chromosome: str, rows: Path, all_vars: Path | None, share
     if chromosome in shared.gpn_star and shared.gpn_star_cutoffs is not None:
         scores = read_gpn_star(shared.gpn_star[chromosome], frame['position'].unique(), shared.gpn_star_cutoffs)
         _by_position(scores, directory / 'gpn_star.parquet', shared)
+    for number, path in enumerate(shared.amino_acid_annotations):
+        _write(amino_acid_annotations(path, transcripts), directory / f'amino-acids-{number:03d}.parquet')
     logger.info('Prepared chromosome {}', chromosome)
 
 
@@ -307,11 +331,11 @@ def _merged(index: pl.DataFrame, shared: Shared, chromosome: str) -> pl.DataFram
     )
     keys = amino_acid_keys(index.lazy()).collect().lazy()
     amino_acid_annotations = [
-        scan_dataset(path)
-        .select('uniprotAccession', 'aminoAcidChange', 'variantEffect')
+        pl
+        .scan_parquet(directory / f'amino-acids-{number:03d}.parquet')
         .join(keys, on=['uniprotAccession', 'aminoAcidChange'], how='semi')
-        .collect(engine='streaming')
-        for path in shared.amino_acid_annotations
+        .collect()
+        for number in range(len(shared.amino_acid_annotations))
     ]
     batches = [
         annotate(batch, variant_annotations, amino_acid_annotations, gpn_star)

@@ -12,7 +12,15 @@ import polars as pl
 import pyarrow.parquet as pq
 import pytest
 
-from pts.transformers.variant.chromosome import Shared, _by_position, _submit, in_range, lower_priority, split_records
+from pts.transformers.variant.chromosome import (
+    Shared,
+    _by_position,
+    _submit,
+    amino_acid_annotations,
+    in_range,
+    lower_priority,
+    split_records,
+)
 
 
 def shared(directory: Path, chunk_rows: int = 2, row_group_rows: int = 10) -> Shared:
@@ -126,3 +134,20 @@ def test_each_pool_runs_at_its_own_niceness() -> None:
         found = [pool.submit(_niceness).result() for pool in (fastvep, preparations, chunks, chunks)]
     assert found == [step, max(step, 5), max(step, 15), max(step, 15)]
     assert os.nice(0) == step
+
+
+def test_amino_acid_annotations_keep_the_accessions_of_the_chromosomes_transcripts(tmp_path: Path) -> None:
+    """Swiss-Prot and TrEMBL accessions, without their version, select the rows; every change of one is kept."""
+    path = tmp_path / 'foldx.parquet'
+    pl.DataFrame({
+        'uniprotAccession': ['P1', 'Q9', 'P2', 'P1', 'P3'],
+        'aminoAcidChange': ['A1T', 'A1T', 'G2C', 'M3V', 'A1T'],
+        'variantEffect': [[0.5], [0.1], [0.2], [0.3], [0.4]],
+    }).write_parquet(path)
+    transcripts = pl.DataFrame(
+        {'transcript_id': ['ENST1', 'ENST2'], 'swissprot': [['P1.2'], []], 'trembl': [[], ['P2']]},
+        schema={'transcript_id': pl.String, 'swissprot': pl.List(pl.String), 'trembl': pl.List(pl.String)},
+    )
+    found = amino_acid_annotations(path, transcripts)
+    assert found.columns == ['uniprotAccession', 'aminoAcidChange', 'variantEffect']
+    assert found.rows() == [('P1', 'A1T', [0.5]), ('P2', 'G2C', [0.2]), ('P1', 'M3V', [0.3])]

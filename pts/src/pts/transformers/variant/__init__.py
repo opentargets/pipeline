@@ -7,7 +7,8 @@ variants, GERP, AlphaMissense, LOFTEE and SIFT) fill in the VEP records that `pa
 index rows. GPN-Star scores, supplementary variant annotations (gnomAD, LoF curation) merged by
 variant, and amino-acid level predictions (FoldX) through each variant's first transcript with an
 amino-acid change are merged into each chunk. The inputs these share are prepared once, before the
-chromosomes run, and each chunk is written as one part of the output once every chunk has succeeded.
+chromosomes run, the remote ones read into local scratch, and each chunk is written as one part of
+the output once every chunk has succeeded.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+import polars as pl
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
@@ -27,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
 from pts.transformers.variant.alleles import contig_spans, write_fai
 from pts.transformers.variant.alphamissense import partition_alphamissense
-from pts.transformers.variant.chromosome import Pools, Shared, annotate_chromosomes
+from pts.transformers.variant.chromosome import AMINO_ACID_COLUMNS, Pools, Shared, annotate_chromosomes
 from pts.transformers.variant.colocated import extract_all_vars
 from pts.transformers.variant.fastvep import build_cache, prepare_gff3
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, gpn_star_files
@@ -122,6 +124,18 @@ def _local(path: str, directory: Path) -> str:
     return str(target)
 
 
+def amino_acid_projection(path: str, target: Path) -> Path:
+    """The columns of an amino-acid annotation source that the chunks merge, written to `target`.
+
+    Raises:
+        ValueError: if the source has no rows.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    scan_dataset(path).select(AMINO_ACID_COLUMNS).sink_parquet(target)
+    require_rows(pl.scan_parquet(target), path)
+    return target
+
+
 def _reference(
     sources: VariantSource, binary: str, directory: Path
 ) -> tuple[Path, dict[str, tuple[int, int]], Path]:
@@ -177,8 +191,10 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
     for path in sources.variant_annotations:
         logger.info('Locating variant annotations in {}', path)
         located.append(annotation_parts_by_chromosome(path))
-    for path in sources.amino_acid_annotations:
-        require_rows(scan_dataset(path), path)
+    amino_acids = tuple(
+        amino_acid_projection(path, scratch / 'amino_acids' / f'{number:03d}.parquet')
+        for number, path in enumerate(sources.amino_acid_annotations)
+    )
     rows, sizes = _rows(sources, scratch / 'rows')
     for chromosome in sorted(rows):
         if options.gpn_star is not None and chromosome not in gpn_star and chromosome in STANDARD:
@@ -206,7 +222,7 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
             chunk_rows=options.chunk_rows,
             batch_size=options.batch_size,
             variant_annotations=tuple(located),
-            amino_acid_annotations=tuple(sources.amino_acid_annotations),
+            amino_acid_annotations=amino_acids,
             gpn_star=gpn_star if options.gpn_star is not None else {},
             gpn_star_cutoffs=options.gpn_star,
         )
