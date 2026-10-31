@@ -105,6 +105,7 @@ class LlmExtract(Task):
         system_prompt = self._system_prompt()
         model_cls = extraction.import_class(self.spec.model_class)
         digest = schema_digest(model_cls)
+        extraction.polars_schema(model_cls)
         config = self.context.config
         store_uri = self.spec.store_uri.rstrip('/')
 

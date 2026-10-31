@@ -6,10 +6,11 @@ import sys
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from threading import Barrier, Event
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import polars as pl
 import pytest
@@ -18,7 +19,7 @@ from openai import AsyncOpenAI
 from otter.config.model import Config
 from otter.scratchpad.model import Scratchpad
 from otter.task.model import TaskContext
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from pts.clinical_staging import extraction
 from pts.clinical_staging.extraction import (
@@ -395,16 +396,15 @@ def test_an_invalid_stored_extraction_raises_with_its_trial() -> None:
         extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
 
-def test_prompt_hash_follows_its_trial_when_a_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompt_hash_is_attached_by_trial_id_not_by_position() -> None:
     prompts = extraction.prompts_for(_report('nct1', 'nct2'))
-    records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')})
-    monkeypatch.setattr(
-        extraction, 'models_to_frame', lambda models, model_class: models_to_frame(models[1:], model_class)
-    )
+    records = _records(prompts, {i: _model(i).model_dump_json() for i in ('nct1', 'nct2')}).reverse()
 
     extractions = extraction.extractions_from_records(records, prompts, ClinicalReportExtractionSchema)
 
-    assert extractions.select('id', 'prompt_sha256').rows() == [('nct2', prompts['prompt_sha256'][1])]
+    assert extractions.select('id', 'prompt_sha256').rows() == list(
+        reversed(prompts.select('id', 'prompt_sha256').rows())
+    )
 
 
 _DISEASE = pl.Struct({
@@ -462,7 +462,7 @@ def test_null_and_empty_fields_keep_their_declared_dtype() -> None:
     assert row['investigated_drugs'][0]['synonyms'] is None
 
 
-def test_no_extractions_have_the_full_schema() -> None:
+def test_zero_extractions_have_the_full_schema() -> None:
     prompts = extraction.prompts_for(_report('nct1'))
     records = _records(prompts, {'nct1': _model('nct1').model_dump_json()}).clear()
 
@@ -472,13 +472,56 @@ def test_no_extractions_have_the_full_schema() -> None:
     assert extractions.schema == PUBLISHED_EXTRACTION_SCHEMA
 
 
-def test_a_field_type_without_a_polars_dtype_raises() -> None:
-    class Unsupported(BaseModel):
-        id: str
-        payload: dict[str, str]
+class Colour(StrEnum):
+    RED = 'red'
 
-    with pytest.raises(TypeError, match=r'no polars dtype for dict\[str, str\]'):
-        polars_schema(Unsupported)
+
+class EnumField(BaseModel):
+    id: str
+    payload: Colour
+
+
+class AnnotatedInList(BaseModel):
+    id: str
+    payload: list[Annotated[str, Field(min_length=1)]]
+
+
+class ExcludedField(BaseModel):
+    id: str
+    payload: str = Field(default='', exclude=True)
+
+
+class DictField(BaseModel):
+    id: str
+    payload: dict[str, str]
+
+
+class UnsupportedExtraction(ClinicalReportExtractionSchema):
+    payload: Colour | None = None
+
+
+@pytest.mark.parametrize('model_class', [EnumField, AnnotatedInList, ExcludedField, DictField])
+def test_an_unsupported_field_raises_naming_it(model_class: type[BaseModel]) -> None:
+    with pytest.raises(TypeError, match=rf'^{model_class.__name__}\.payload[: ]'):
+        polars_schema(model_class)
+
+
+def test_an_unsupported_response_model_fails_before_any_llm_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    llm = FakeLlm(monkeypatch)
+
+    task = _attempt(
+        monkeypatch,
+        tmp_path,
+        _report('nct1', 'nct2'),
+        model_class='tests.clinical_staging.test_extraction.UnsupportedExtraction',
+    )
+
+    assert task.manifest.failure_reason is not None
+    assert 'UnsupportedExtraction.payload' in task.manifest.failure_reason
+    assert llm.calls == []
+    assert not (tmp_path / 'store').exists()
 
 
 def test_missing_key_aborts_without_recording_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

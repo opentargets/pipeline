@@ -80,10 +80,23 @@ def import_class(dotted_path: str) -> type[BaseModel]:
 def polars_schema(model_class: type[BaseModel]) -> pl.Schema:
     """The polars schema of ``model_class``'s ``model_dump``: one column per field, in declared order.
 
+    Strings, numbers, booleans, string ``Literal``s, nested models, lists and optionals are supported. Enums,
+    ``Annotated`` types inside a container, and fields excluded from ``model_dump`` are not.
+
     Raises:
-        TypeError: If a field's type has no polars dtype here.
+        TypeError: If a field is excluded from ``model_dump`` or its type has no polars dtype here, naming the field.
     """
-    return pl.Schema({name: _polars_dtype(field.annotation) for name, field in model_class.model_fields.items()})
+    schema = {}
+    for name, field in model_class.model_fields.items():
+        if field.exclude:
+            msg = f'{model_class.__name__}.{name} is excluded from model_dump'
+            raise TypeError(msg)
+        try:
+            schema[name] = _polars_dtype(field.annotation)
+        except TypeError as exc:
+            msg = f'{model_class.__name__}.{name}: {exc}'
+            raise TypeError(msg) from exc
+    return pl.Schema(schema)
 
 
 def models_to_frame(models: Sequence[BaseModel], model_class: type[BaseModel]) -> pl.DataFrame:
