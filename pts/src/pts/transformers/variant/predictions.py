@@ -53,6 +53,7 @@ def add_gerp_and_alphamissense(
         'transcript_id',
     )
     predictions = alphamissense(alphamissense_path, chromosome, keys)
-    return consequences.join(conservation, on='row', how='left', maintain_order='left').with_columns(
-        predictions.select('am_class', 'am_pathogenicity')
+    attached = consequences.select('row').join(conservation, on='row', how='left', maintain_order='left')
+    return consequences.with_columns(
+        attached['conservation'], *predictions.select('am_class', 'am_pathogenicity').get_columns()
     )

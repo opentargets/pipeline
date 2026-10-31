@@ -62,10 +62,10 @@ def frames(rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes) -> Ch
 
 @pytest.fixture(scope='module')
 def index(frames: ChunkFrames) -> pl.DataFrame:
-    return index_of(frames)
+    return index_of_frames(frames)
 
 
-def index_of(frames: ChunkFrames) -> pl.DataFrame:
+def index_of_frames(frames: ChunkFrames) -> pl.DataFrame:
     """The index rows of the frames, without colocated variants or effects."""
     return index_rows(add_colocated(frames.variants, None), with_effects(frames.consequences))
 
@@ -283,7 +283,7 @@ def test_only_non_canonical_transcripts_keep_severity_and_null_hgvs(tmp_path: Pa
     found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
     assert found.variants['hgvsg'][0] is not None
     assert found.consequences.height == 0
-    [row] = index_of(found).to_dicts()
+    [row] = index_of_frames(found).to_dicts()
     assert row['mostSevereConsequenceId'] == 'SO_0001583'
     assert [x['assessment'] for x in row['variantEffect']] == ['missense_variant']
     assert row['transcriptConsequences'] == []
@@ -309,4 +309,4 @@ def test_unannotated_frames_are_intergenic() -> None:
     [row] = found.variants.to_dicts()
     assert row['hgvsg'] is None
     assert (row['most_severe_consequence'], row['reported_transcripts']) == ('intergenic_variant', False)
-    assert index_of(found)['hgvsId'].to_list() == [None]
+    assert index_of_frames(found)['hgvsId'].to_list() == [None]

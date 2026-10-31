@@ -12,7 +12,7 @@ import numpy as np
 import polars as pl
 
 from pts.transformers.variant.alleles import hgvs_genomic, vep_allele_form
-from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, RANKS
+from pts.transformers.variant.consequences import RANKS, consequence_score
 
 FASTVEP_SCHEMA = pl.Schema({
     'id': pl.String,
@@ -190,8 +190,9 @@ _FIELDS = pl.Schema({
     'swissprot': pl.List(pl.String),
     'trembl': pl.List(pl.String),
 })
-CONSEQUENCES_SCHEMA = pl.Schema({
+VARIANTS_SCHEMA = pl.Schema({
     'row': pl.Int64,
+    'chromosome': pl.String,
     'position': pl.Int32,
     'referenceAllele': pl.String,
     'alternateAllele': pl.String,
@@ -199,6 +200,24 @@ CONSEQUENCES_SCHEMA = pl.Schema({
     'vepEnd': pl.Int64,
     'vepReference': pl.String,
     'vepAlternate': pl.String,
+    'hgvsg': pl.String,
+    'most_severe_consequence': pl.String,
+    'reported_transcripts': pl.Boolean,
+})
+"""The columns of the variants frame, before `add_colocated` adds its id lists."""
+
+_COPIED = [
+    'row',
+    'position',
+    'referenceAllele',
+    'alternateAllele',
+    'vepStart',
+    'vepEnd',
+    'vepReference',
+    'vepAlternate',
+]
+CONSEQUENCES_SCHEMA = pl.Schema({
+    **{name: VARIANTS_SCHEMA[name] for name in _COPIED},
     **_FIELDS,
     'rank': pl.Int32,
 })
@@ -222,15 +241,15 @@ def _fields() -> list[pl.Expr]:
     return [computed.get(name, pl.col(name)).cast(dtype).alias(name) for name, dtype in _FIELDS.items()]
 
 
-def _ranked(consequences: pl.DataFrame) -> pl.DataFrame:
+def rank_consequences(consequences: pl.DataFrame) -> pl.DataFrame:
     """The consequences with `rank`: highest consequence score, then distance, then transcript id, within a row."""
-    score = pl.col('consequence_terms').list.eval(
-        pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64)
-    )
     return (
         consequences
         .with_row_index('_i')
-        .with_columns(score.list.max().alias('_score'), pl.col('distance').fill_null(0).alias('_distance'))
+        .with_columns(
+            consequence_score(pl.col('consequence_terms')).alias('_score'),
+            pl.col('distance').fill_null(0).alias('_distance'),
+        )
         .sort(
             ['row', '_score', '_distance', 'transcript_id'],
             descending=[False, True, False, False],
@@ -273,7 +292,7 @@ def chunk_frames(
             how='left',
             maintain_order='left',
         )
-        .select(*CONSEQUENCES_SCHEMA.names()[:8], *_fields())
+        .select(*_COPIED, *_fields())
     )
     variants = (
         variants
@@ -281,21 +300,12 @@ def chunk_frames(
         .join(severity, on='row', how='left', maintain_order='left')
         .rechunk()
         .select(
-            'row',
-            'chromosome',
-            'position',
-            'referenceAllele',
-            'alternateAllele',
-            'vepStart',
-            'vepEnd',
-            'vepReference',
-            'vepAlternate',
-            'hgvsg',
+            *VARIANTS_SCHEMA.names()[:10],
             pl.coalesce('_most_severe', 'most_severe_consequence').alias('most_severe_consequence'),
             pl.col('_transcripts').is_not_null().alias('reported_transcripts'),
         )
     )
-    return ChunkFrames(variants, _ranked(canonical))
+    return ChunkFrames(variants, rank_consequences(canonical))
 
 
 def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
@@ -304,16 +314,7 @@ def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
     Each variant is intergenic, with a null `hgvsg` and no transcript consequence.
     """
     variants = _variants(rows, b'', chromosome).select(
-        'row',
-        'chromosome',
-        'position',
-        'referenceAllele',
-        'alternateAllele',
-        'vepStart',
-        'vepEnd',
-        'vepReference',
-        'vepAlternate',
-        'hgvsg',
+        *VARIANTS_SCHEMA.names()[:10],
         pl.lit('intergenic_variant').alias('most_severe_consequence'),
         pl.lit(False).alias('reported_transcripts'),
     )

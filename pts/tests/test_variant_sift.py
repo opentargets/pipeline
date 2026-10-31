@@ -12,11 +12,9 @@ import pytest
 
 from pts.schemas.variant import variant_schema
 from pts.transformers.variant.index import normalise_score
-from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, _ranked
+from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
-from tests.variant_fixtures import consequences as variant_consequences
-from tests.variant_fixtures import variants, with_effects
+from tests.variant_fixtures import consequence_frame, index_of
 
 #: Ensembl 116 rows for the canonical translations of ENST00000354588, ENST00000524958,
 #: ENST00000390321 and ENST00000526893 (see `test_data/sift/README.md`).
@@ -138,36 +136,21 @@ def test_matrices_keep_the_wanted_transcripts(matrices: pl.DataFrame):
     assert wanted['transcript_id'].to_list() == ['ENST00000390321']
 
 
-def consequence_frame(*transcripts: tuple[str, str, str, int]) -> pl.DataFrame:
+def missense_frame(*transcripts: tuple[str, str, str, int]) -> pl.DataFrame:
     """One variant with a canonical missense consequence per (transcript, gene, amino acids, position)."""
-    transcript_id, gene_id, amino_acids, position = (list(column) for column in zip(*transcripts, strict=True))
-    return variant_consequences(
-        row=[0] * len(transcripts),
-        transcript_id=transcript_id,
-        gene_id=gene_id,
-        amino_acids=amino_acids,
-        protein_end=position,
-        consequence_terms=[['missense_variant']] * len(transcripts),
-        biotype=['protein_coding'] * len(transcripts),
+    return consequence_frame(
+        *(
+            {
+                'transcript_id': transcript_id,
+                'gene_id': gene_id,
+                'amino_acids': amino_acids,
+                'protein_end': position,
+                'consequence_terms': ['missense_variant'],
+                'biotype': 'protein_coding',
+            }
+            for transcript_id, gene_id, amino_acids, position in transcripts
+        )
     )
-
-
-def index_of(input_line: str, consequences: pl.DataFrame) -> pl.DataFrame:
-    """The variant index of one variant over the consequences."""
-    chromosome, position, _, reference, alternate = input_line.split('\t')
-    frame = variants(
-        row=[0],
-        chromosome=[chromosome],
-        position=[int(position)],
-        referenceAllele=[reference],
-        alternateAllele=[alternate],
-        most_severe_consequence=['missense_variant'],
-        reported_transcripts=[True],
-        rsIds=[[]],
-        clinvarIds=[[]],
-        omimIds=[[]],
-    )
-    return index_rows(frame, with_effects(_ranked(consequences)))
 
 
 def sift_effect(index: pl.DataFrame) -> dict:
@@ -177,7 +160,7 @@ def sift_effect(index: pl.DataFrame) -> dict:
 
 def test_minimum_score_wins(matrices: pl.DataFrame):
     filled = add_sift(
-        consequence_frame(
+        missense_frame(
             ('ENST00000524958', 'ENSG00000278615', 'R/W', 54),
             ('ENST00000354588', 'ENSG00000162194', 'A/V', 220),
         ),
@@ -188,7 +171,7 @@ def test_minimum_score_wins(matrices: pl.DataFrame):
         ('ENST00000524958', 0.09, 'tolerated'),
         ('ENST00000354588', 0.01, 'deleterious_low_confidence'),
     ]
-    effect = sift_effect(index_of('11\t62664853\t.\tG\tA', filled))
+    effect = sift_effect(index_of(filled, chromosome='11', position=62664853, referenceAllele='G', alternateAllele='A'))
     assert (effect['assessment'], effect['targetId'], effect['assessmentFlag']) == (
         'deleterious_low_confidence',
         'ENSG00000162194',
@@ -205,10 +188,10 @@ def test_tie_break(matrices: pl.DataFrame, reverse: bool):
         ('ENST00000390321', 'ENSG00000211675', 'P/Q', 35),
         ('ENST00000526893', 'ENSG00000254709', 'P/Q', 143),
     ]
-    filled = add_sift(consequence_frame(*(transcripts[::-1] if reverse else transcripts)), matrices)
+    filled = add_sift(missense_frame(*(transcripts[::-1] if reverse else transcripts)), matrices)
     scores = dict(filled.select('transcript_id', 'sift_prediction').iter_rows())
     assert scores == {'ENST00000390321': 'deleterious_low_confidence', 'ENST00000526893': 'deleterious'}
-    effect = sift_effect(index_of('22\t22895477\t.\tC\tA', filled))
+    effect = sift_effect(index_of(filled, chromosome='22', position=22895477, referenceAllele='C', alternateAllele='A'))
     assert (effect['assessment'], effect['targetId']) == ('deleterious', 'ENSG00000254709')
     assert effect['score'] == pytest.approx(0.01)
     assert effect['normalisedScore'] == pytest.approx(0.9)
@@ -225,18 +208,12 @@ def test_effects_accept_an_empty_consequences_frame(matrices: pl.DataFrame):
 
 def canonical(*transcripts: dict) -> pl.DataFrame:
     """Canonical missense consequences of one variant, one per transcript's columns."""
-    names = [*dict.fromkeys(name for transcript in transcripts for name in transcript)]
-    return variant_consequences(
-        row=[0] * len(transcripts),
-        consequence_terms=[['missense_variant']] * len(transcripts),
-        **{name: [transcript.get(name) for transcript in transcripts] for name in names},
-    )
+    return consequence_frame(*({'consequence_terms': ['missense_variant'], **transcript} for transcript in transcripts))
 
 
 def test_equal_scores_and_predictions_break_by_transcript_id():
     """Unscored transcripts never win."""
     index = index_of(
-        '1\t123\t.\tA\tG',
         canonical(
             {'transcript_id': 'ENST3', 'gene_id': 'g3'},
             {'transcript_id': 'ENST2', 'gene_id': 'g2', 'sift_score': 0.2, 'sift_prediction': 'tolerated'},
@@ -249,13 +226,12 @@ def test_equal_scores_and_predictions_break_by_transcript_id():
 
 
 def test_no_sift_no_entry():
-    index = index_of('1\t123\t.\tA\tG', canonical({'transcript_id': 'ENST1', 'gene_id': 'g1'}))
+    index = index_of(canonical({'transcript_id': 'ENST1', 'gene_id': 'g1'}))
     assert [effect['method'] for effect in index['variantEffect'][0]] == ['VEP']
 
 
 def test_sift_prediction_not_in_transcripts():
     index = index_of(
-        '1\t123\t.\tA\tG',
         canonical({'transcript_id': 'ENST1', 'gene_id': 'g1', 'sift_score': 0.0, 'sift_prediction': 'deleterious'}),
     )
     assert index.schema == variant_schema

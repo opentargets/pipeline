@@ -248,7 +248,7 @@ def _ancestral_bases(ancestor: bytes, positions: set[int]) -> dict[int, str]:
 
 
 def loftee(
-    records: pl.DataFrame,
+    consequences: pl.DataFrame,
     models: dict[str, TranscriptModel],
     sequence: bytes,
     ancestor: bytes,
@@ -263,14 +263,14 @@ def loftee(
     A chromosome the bigWig or the ancestor lacks scores no GERP or has no ancestral allele.
 
     Args:
-        records: One row per transcript consequence, with VEP's `vepStart`, `vepEnd`,
+        consequences: One row per transcript consequence, with VEP's `vepStart`, `vepEnd`,
             `vepReference` and `vepAlternate`, and `transcript_id`, `consequence_terms` and `cds_end`.
         models: `loftee_models` of the chromosome.
         sequence: The chromosome's reference, byte i being position i + 1.
         ancestor: The chromosome's GRCh38 human ancestor in upper case, byte i being position
             i + 1; empty for a chromosome the ancestor lacks.
         gerp: The GERP bigWig.
-        chromosome: The chromosome of the records.
+        chromosome: The chromosome of the consequences.
 
     Returns:
         `lof` and `lof_filter`, row for row; both null without a call.
@@ -278,7 +278,7 @@ def loftee(
     has_lof_term = pl.col('consequence_terms').list.eval(pl.element().is_in(LOF_TERMS)).list.any().fill_null(False)
     protein_coding = [transcript_id for transcript_id, model in models.items() if model.biotype == 'protein_coding']
     candidates = (
-        records
+        consequences
         .with_row_index('_index')
         .filter(has_lof_term & pl.col('transcript_id').is_in(protein_coding))
         .select(
@@ -301,8 +301,8 @@ def loftee(
         if '-' not in (reference, alternate) and len(reference) == len(alternate) == 1:
             substitutions[row] = (start, alternate.upper())
     ancestral = _ancestral_bases(ancestor, {start for start, _ in substitutions.values()})
-    lof: list[str | None] = [None] * records.height
-    lof_filter: list[str | None] = [None] * records.height
+    lof: list[str | None] = [None] * consequences.height
+    lof_filter: list[str | None] = [None] * consequences.height
     for row, filters in called.items():
         if row in substitutions:
             start, alternate = substitutions[row]

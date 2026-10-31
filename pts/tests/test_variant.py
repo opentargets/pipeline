@@ -44,13 +44,13 @@ from pts.transformers.variant.index_rows import (
     uniprot_accessions,
     variant_effect,
 )
-from pts.transformers.variant.records import _ranked, chunk_frames, iter_records
+from pts.transformers.variant.records import chunk_frames, iter_records
 from pts.transformers.variant.rows import collect_variants
 from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant_colocated import all_vars, cache_line
 from tests.test_variant_colocated import rows as colocated_rows
 from tests.test_variant_loftee import write_bgzip_fasta
-from tests.variant_fixtures import EFFECTS_SCHEMA, consequences, variants, with_effects
+from tests.variant_fixtures import consequence_frame, variants, with_effects
 
 FASTVEP = Path(__file__).parent / 'test_data' / 'fastvep'
 EFFECTS = variant_schema['variantEffect']
@@ -65,23 +65,11 @@ VARIANT = {
 """The variant `parsed` indexes, unless updated."""
 
 
-def consequence_frame(*transcripts: dict) -> pl.DataFrame:
-    """Canonical consequences in fastVEP's order, of row 0 unless given, ranked as `chunk_frames` ranks them.
-
-    Columns no transcript gives are null, effect columns included.
-    """
-    names = [*dict.fromkeys(name for transcript in transcripts for name in transcript)]
-    columns = {name: [transcript.get(name) for transcript in transcripts] for name in names}
-    rows = columns.pop('row', [0] * len(transcripts))
-    effects = {name: [None] * len(transcripts) for name in EFFECTS_SCHEMA if name not in columns}
-    return _ranked(consequences(row=rows, **columns, **effects))
-
-
 def parsed(hash_threshold: int = 300, transcripts: tuple[dict, ...] | list[dict] = (), **updates: object) -> dict:
     """The index row of `VARIANT` with `updates`, over the canonical `transcripts`."""
     variant = {**VARIANT, 'reported_transcripts': bool(transcripts), **updates}
     frame = variants(**{name: [value] for name, value in variant.items()})
-    [row] = index_rows(frame, consequence_frame(*transcripts), hash_threshold).to_dicts()
+    [row] = index_rows(frame, with_effects(consequence_frame(*transcripts)), hash_threshold).to_dicts()
     return row
 
 
@@ -261,7 +249,7 @@ def test_omim_ids_keep_their_four_digit_suffix(tmp_path):
     frame = variants(**{name: [value] for name, value in VARIANT.items()}, reported_transcripts=[False])
     colocated = colocated_variants(cache, colocated_rows('1_123_A_G'))
     [row] = index_rows(
-        add_colocated(frame.drop('rsIds', 'clinvarIds', 'omimIds'), colocated), consequence_frame()
+        add_colocated(frame.drop('rsIds', 'clinvarIds', 'omimIds'), colocated), with_effects(consequence_frame())
     ).to_dicts()
     assert [x['id'] for x in row['dbXrefs'] if x['source'] == 'omim'] == ['600234#0010', '171834#0100', '159530#0010']
 
@@ -407,7 +395,7 @@ def test_transcript_index_follows_rank_among_scored_transcripts():
     frame = frame.with_columns(
         pl.int_range(len(pairs), dtype=pl.Int64).alias('row'), pl.lit(True).alias('reported_transcripts')
     )
-    result = index_rows(frame, consequence_frame(*transcripts))
+    result = index_rows(frame, with_effects(consequence_frame(*transcripts)))
     assert result.height == len(pairs)
     for row in result['transcriptConsequences'].to_list():
         assert [x['transcriptIndex'] for x in row] == [1, 2]
@@ -442,7 +430,7 @@ def test_invalid_position_is_dropped():
     frame = variants(**{name: [value] for name, value in VARIANT.items()}).with_columns(
         pl.lit(None, pl.Int32).alias('position')
     )
-    assert index_rows(frame, consequence_frame()).height == 0
+    assert index_rows(frame, with_effects(consequence_frame())).height == 0
 
 
 def test_hashed_variant_keeps_unhashed_protvar_xref():
@@ -661,7 +649,6 @@ def test_amino_acid_keys_cover_every_transcript_change():
 
 # --- step and configuration ---------------------------------------------------------------------
 
-FASTVEP_FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
 FASTVEP_SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'
 SIFT_FIXTURES = Path(__file__).parent / 'test_data' / 'sift'
 CONTIG_LENGTH = 1000
@@ -773,7 +760,7 @@ def _write_fasta(path: Path) -> None:
         lines = [base * 60] * (CONTIG_LENGTH // 60) + [base * (CONTIG_LENGTH % 60)]
         return gzip.compress(f'>{name}\n'.encode() + '\n'.join(lines).encode() + b'\n')
 
-    slice_ = (FASTVEP_FIXTURES / 'chr22_slice.fa.gz').read_bytes()
+    slice_ = (FASTVEP / 'chr22_slice.fa.gz').read_bytes()
     path.write_bytes(contig('1', 'A') + contig('2', 'C') + slice_ + contig('MT', 'G'))
 
 
@@ -815,7 +802,7 @@ def step_inputs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     )
     return {
         'fasta': str(directory / 'reference.fa.gz'),
-        'gff3': str(FASTVEP_FIXTURES / 'chr22_slice.gff3.gz'),
+        'gff3': str(FASTVEP / 'chr22_slice.gff3.gz'),
         'gerp': str(directory / 'gerp.bw'),
         'vep_cache': str(directory / 'vep_cache.tar.gz'),
         'sift_predictions': str(SIFT_FIXTURES / 'protein_function_predictions.txt.gz'),
@@ -888,7 +875,7 @@ def _run_step(
 
 def _slice_variants() -> list[tuple[str, str | None]]:
     """The variants of the chromosome 22 fixture, in its order, with their rsIDs."""
-    rows = pl.read_parquet(FASTVEP_FIXTURES / 'chr22_slice_rows.parquet')
+    rows = pl.read_parquet(FASTVEP / 'chr22_slice_rows.parquet')
     return [
         (f'{chromosome}_{position}_{reference}_{alternate}', None if rs_id == '.' else rs_id)
         for chromosome, position, rs_id, reference, alternate in rows.iter_rows()
@@ -1227,7 +1214,7 @@ def _loftee(transcripts: list[dict], ranked: bool) -> tuple[str, str, str | None
         effects = parsed(most_severe_consequence='stop_gained', transcripts=transcripts)['variantEffect']
         [found] = [x for x in effects if x['method'] == 'LOFTEE']
     else:
-        in_order = consequence_frame(*transcripts).with_columns(
+        in_order = with_effects(consequence_frame(*transcripts)).with_columns(
             pl.int_range(1, pl.len() + 1, dtype=pl.Int32).over('row').alias('rank')
         )
         [found] = variant_effect(in_order, 'LOFTEE', 'lof', 'lof', 'lof_filter')['LOFTEE'].to_list()

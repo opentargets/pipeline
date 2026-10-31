@@ -7,7 +7,9 @@ from collections.abc import Sequence
 import polars as pl
 
 from pts.transformers.variant.colocated import ID_LISTS
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
+from pts.transformers.variant.index_rows import index_rows
+from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, rank_consequences
+from pts.transformers.variant.records import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
 
 EFFECTS_SCHEMA = pl.Schema({
     'conservation': pl.Float64,
@@ -20,21 +22,7 @@ EFFECTS_SCHEMA = pl.Schema({
 })
 """The columns the effects add to the consequences frame."""
 
-VARIANTS_SCHEMA = pl.Schema({
-    'row': pl.Int64,
-    'chromosome': pl.String,
-    'position': pl.Int32,
-    'referenceAllele': pl.String,
-    'alternateAllele': pl.String,
-    'vepStart': pl.Int64,
-    'vepEnd': pl.Int64,
-    'vepReference': pl.String,
-    'vepAlternate': pl.String,
-    'hgvsg': pl.String,
-    'most_severe_consequence': pl.String,
-    'reported_transcripts': pl.Boolean,
-    **ID_LISTS,
-})
+VARIANTS_SCHEMA = BASE_VARIANTS_SCHEMA | ID_LISTS
 """The columns of the variants frame, with the colocated id lists `add_colocated` adds."""
 
 
@@ -42,8 +30,8 @@ def consequences(**columns: Sequence[object]) -> pl.DataFrame:
     """A consequences frame of the given columns, one list of values per column.
 
     Columns of `CONSEQUENCES_SCHEMA` that are not given are null; the given ones are cast to
-    their dtype. The effect columns of `EFFECTS_SCHEMA` are added after them, in the order given,
-    only when given.
+    their dtype. The effect columns of `EFFECTS_SCHEMA` are added after them, in `EFFECTS_SCHEMA`
+    order, only when given.
 
     Raises:
         ValueError: on a column that is in neither schema.
@@ -88,3 +76,37 @@ def variants(**columns: Sequence[object]) -> pl.DataFrame:
     return given.select(
         pl.col(name) if name in columns else pl.lit(None, dtype).alias(name) for name, dtype in VARIANTS_SCHEMA.items()
     ).head(height)
+
+
+def consequence_frame(*transcripts: dict) -> pl.DataFrame:
+    """Consequences of row 0 unless given, one per transcript's columns, ranked as `chunk_frames` ranks them.
+
+    Columns no transcript gives are null; effect columns are only there when a transcript gives them.
+    """
+    names = [*dict.fromkeys(name for transcript in transcripts for name in transcript)]
+    columns = {name: [transcript.get(name) for transcript in transcripts] for name in names}
+    rows = columns.pop('row', [0] * len(transcripts))
+    return rank_consequences(consequences(row=rows, **columns))
+
+
+def index_of(consequence_rows: pl.DataFrame, hash_threshold: int = 300, **updates: object) -> pl.DataFrame:
+    """The variant index of one variant over the consequences, with every effect column added.
+
+    The variant is `1:123 A>G` of row 0 with `missense_variant` as its most severe consequence,
+    unless `updates` change its columns.
+    """
+    variant = {
+        'row': 0,
+        'chromosome': '1',
+        'position': 123,
+        'referenceAllele': 'A',
+        'alternateAllele': 'G',
+        'most_severe_consequence': 'missense_variant',
+        'reported_transcripts': True,
+        'rsIds': [],
+        'clinvarIds': [],
+        'omimIds': [],
+        **updates,
+    }
+    frame = variants(**{name: [value] for name, value in variant.items()})
+    return index_rows(frame, with_effects(rank_consequences(consequence_rows)), hash_threshold)

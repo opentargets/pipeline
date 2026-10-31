@@ -1,4 +1,4 @@
-"""The variant index of each chromosome, from fastVEP, the joins that complete its records and its annotations.
+"""The variant index of each chromosome, from fastVEP, the joins that complete its consequences and its annotations.
 
 Each chromosome is run through fastVEP in a pool of processes, the largest first, each fastVEP
 with a few threads; its records are split by row into chunks. Alongside, a second pool prepares
@@ -351,13 +351,13 @@ def annotate_chunk(
         )
         shutil.rmtree(_records(shared, chromosome, chunk))
         transcripts = pl.read_parquet(directory / 'transcripts.parquet')
-        frames = chunk_frames(fastvep, frame, transcripts, sequence, chromosome)
+        variants, consequences = chunk_frames(fastvep, frame, transcripts, sequence, chromosome)
         del fastvep
     else:
-        frames = unannotated_frames(frame, chromosome)
+        variants, consequences = unannotated_frames(frame, chromosome)
     models = pickle.loads((directory / 'loftee.pickle').read_bytes())
     ancestor = (directory / 'ancestor.bin').read_bytes()
-    consequences = add_gerp_and_alphamissense(frames.consequences, shared.gerp, alphamissense, chromosome)
+    consequences = add_gerp_and_alphamissense(consequences, shared.gerp, alphamissense, chromosome)
     with KentBigWig(shared.gerp) as gerp:
         consequences = add_loftee(consequences, models, sequence, ancestor, gerp, chromosome)
     matrices = (
@@ -373,7 +373,7 @@ def annotate_chunk(
         if located.exists()
         else None
     )
-    variants = add_colocated(frames.variants, colocated)
+    variants = add_colocated(variants, colocated)
     index = index_rows(variants, consequences, shared.hash_threshold)
     logger.info('Annotating {} variants of chromosome {}, chunk {}', index.height, chromosome, chunk)
     return _write(_merged(index, shared, chromosome), part)
