@@ -117,7 +117,7 @@ steps:
     depends_on:
       - pis_variant_ppp
   pts_variant:
-    machine_type: n2d-highmem-32
+    machine_type: n2d-standard-64
     disk_size: 500
     depends_on:
       - pis_variant

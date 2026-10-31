@@ -39,6 +39,8 @@ steps:
         output: output/variant
       settings:
         hash_threshold: 300
+        parallel_chromosomes: 8
+        parallel_chunks: 32
         # songlab/gpn-star-scores@204d08a92bdf07117f5d869db667c45f9029ed48: genome-wide quantiles 0.1 / 0.01 / 0.001 and minimum
         # measured with cutoffs_from_histogram(llr_histogram(sorted(gpn_star_files(<mirror>).values())))
         gpn_star:

@@ -41,10 +41,10 @@ def test_variant_depends_on_the_step_sources_only() -> None:
     ]
 
 
-def test_variant_runs_on_a_highmem_vm() -> None:
+def test_variant_runs_on_a_64_core_vm() -> None:
     step = pts_step_from_config('pts_variant', UnifiedPipelineConfig())
     assert step.is_gce
-    assert step.machine_type == 'n2d-highmem-32'
+    assert step.machine_type == 'n2d-standard-64'
 
 
 @pytest.mark.parametrize('module', STANDALONE_BATCH_DAGS)
