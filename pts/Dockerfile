@@ -6,7 +6,7 @@ RUN git init -q . && \
   git checkout -q FETCH_HEAD && \
   cargo build --release --locked -p fastvep-cli
 
-FROM python:3.12-slim
+FROM python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /uvx /bin/
 
 RUN apt-get update && \
