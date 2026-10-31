@@ -775,7 +775,7 @@ def test_release_restores_todays_aact_tables(tmp_path: Path, monkeypatch: pytest
 
     assert captured['tables'] == baseline
     assert captured['order_by'] == {'study_references': ['nct_id', 'pmid', 'reference_type']}
-    assert captured['scratch_root'] == tmp_path
+    assert str(captured['scratch_root']) == str(tmp_path)
 
 
 @pytest.mark.usefixtures('no_dump')
