@@ -1,57 +1,71 @@
 # FinnGen GWAS
 
-This document was updated on 2026-10-29.
+This document was updated on 2026-10-31.
 
 ```sh
-gs://finngen_data/gwas/prod/20260526T131014/config/finngen_ingestion.yaml # DAG config of the run
-gs://finngen_data/gwas/prod/20260526T131014/docs/
-gs://finngen_data/gwas/prod/20260526T131014/output/study_index/
-gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/
+gs://finngen_data/gwas/prod/20261029T152531/bin/                               # gentropy CLI and cluster init script of the run
+gs://finngen_data/gwas/prod/20261029T152531/config/finngen_gwas_ingestion.yaml # DAG config of the run
+gs://finngen_data/gwas/prod/20261029T152531/docs/
+gs://finngen_data/gwas/prod/20261029T152531/output/study/
+gs://finngen_data/gwas/prod/20261029T152531/output/credible_set/
+gs://finngen_data/gwas/prod/20261029T152531/output/credible_set_variant/
 ```
 
 Data contained in `gwas` corresponds to the SuSiE fine-mapping results of [FinnGen Data Freeze 12](https://r12.finngen.fi/) (November 4 2024), published by FinnGen in `gs://finngen-public-data-r12/`.
 
-Data is produced by **finngen_ingestion DAG**. The DAG configuration and topology are in `config/finngen_ingestion.yaml` of the run folder (`gs://finngen_data/gwas/prod/20260526T131014/config/`). The run uses gentropy [`v3.2.0`](https://github.com/opentargets/gentropy/tree/v3.2.0) (`GENTROPY_REF`); the links below refer to that tag.
+Data is produced by **finngen_gwas_ingestion DAG**. The DAG configuration and topology are in `config/finngen_gwas_ingestion.yaml` of the run folder (`gs://finngen_data/gwas/prod/20261029T152531/config/`). The run of 2026-10-31 uses gentropy [`v4.0.0-dev.11`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.11); the links below refer to that tag. The gentropy CLI (`cli.py`) and the cluster init script (`install_dependencies_on_cluster.sh`) of the tag are copied to `bin/` of the run folder.
 
-The run folder is named after the write time of the first output of the run, the `study_index` part file (2026-05-26 13:10:14 UTC). The run outputs were written to `gs://finngen_data/r12/` and moved to the run folder on 2026-10-29.
+The previous release, produced by the `finngen_ingestion` DAG on gentropy v3.2.0 in the StudyLocus schema, is frozen in `gs://finngen_data/gwas/prod/20260526T131014/`, with its own docs under `docs/`.
 
 Inputs of the run:
 
 ```sh
 gs://finngen-public-data-r12/finemap/full/susie/*.snp.bgz
 gs://finngen-public-data-r12/finemap/summary/*SUSIE.cred.summary.tsv
+gs://finngen-public-data-r12/annotations/finnge_R12_annotated_variants_v1.gz
 https://r12.finngen.fi/api/phenos
-https://raw.githubusercontent.com/opentargets/curation/refs/tags/26.05/mappings/disease/manual_string.tsv
+https://raw.githubusercontent.com/opentargets/curation/refs/tags/26.09.2/mappings/disease/manual_string.tsv
 ```
 
-The `*.snp.bgz` files hold the SuSiE results per variant, one file per phenotype. The `*SUSIE.cred.summary.tsv` files hold the summary of each credible set: its log10 Bayes factor and purity. The FinnGen phenotype API lists the phenotypes with their case and control counts. The `manual_string.tsv` file of the Open Targets curation repository, at tag `26.05`, maps FinnGen phenotypes to ontology terms.
+The `*.snp.bgz` files hold every variant of each fine-mapped region of a phenotype, with its marginal statistics and the SuSiE statistics of each of the 10 single effects. The `*SUSIE.cred.summary.tsv` files hold the summary of each credible set: its log10 Bayes factor and purity. The annotated variants file (block gzipped, 30 GiB) holds the allele frequencies of the FinnGen R12 variants. The FinnGen phenotype API lists the phenotypes with their case and control counts. The `manual_string.tsv` file of the Open Targets curation repository, at tag `26.09.2`, maps FinnGen phenotypes to ontology terms.
 
-The DAG has 2 steps, run in parallel on one Dataproc cluster:
+The DAG has 2 steps, run one after another on one Dataproc cluster:
 
-![finngen_ingestion](finngen_ingestion.svg)
+![finngen_gwas_ingestion](finngen_gwas_ingestion.svg)
 
-1. finngen_studies
-2. finngen_finemapping_ingestion
+1. study_index
+2. finemapping
 
-## finngen_studies
+The fine-mapping step runs after the study index: both `spark-submit` calls resolve the `hadoop-bam` package of the block gzip codec into the ivy cache of the cluster master, and two at the same time break each other's downloads.
 
-The step ([`finngen_studies.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/finngen_studies.py)) builds one study per phenotype of the FinnGen phenotype API ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/datasource/finngen/study_index.py)). The study identifier is the phenotype code prefixed with `FINNGEN_R12_`. The ontology terms of a study are the curation rows whose `STUDY` contains `FINNGEN` and `R12` and whose `PROPERTY_VALUE` equals the phenotype name ([`efo_mapping.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/datasource/finngen/efo_mapping.py)). A study with no matching curation row keeps an empty list of ontology terms. The output is `output/study_index/`: 2,470 studies, 29 of them without ontology terms.
+## study_index
 
-## finngen_finemapping_ingestion
+The step ([`finngen_studies.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_studies.py)) builds one study per phenotype of the FinnGen phenotype API ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/study_index.py)). The study identifier is the phenotype code prefixed with `FINNGEN_R12_`. The ontology terms of a study are the curation rows whose `STUDY` contains `FINNGEN` and `R12` and whose `PROPERTY_VALUE` equals the phenotype name ([`efo_mapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/efo_mapping.py)). A study with no matching curation row keeps an empty list of ontology terms. The output is `output/study/`.
 
-The step ([`finngen_finemapping_ingestion.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/finngen_finemapping_ingestion.py)) builds one credible set per FinnGen SuSiE credible set ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/datasource/finngen/finemapping.py)):
+## finemapping
 
-- The variants of a credible set are the variants of the `*.snp.bgz` files assigned to it (`cs` > 0).
-- A credible set is kept when it is the first credible set of its region, or when its log10 Bayes factor is above 0.8686 (log10(e²), the threshold of the FinnGen publication).
-- The lead variant of a credible set is its variant with the highest posterior probability.
-- A credible set whose lead has a p-value above 1e-5 is flagged `Subsignificant p-value`.
-- Within `locus`, variants are sorted by posterior probability, and `is95CredibleSet` and `is99CredibleSet` mark the variants needed to reach a cumulative posterior probability of 0.95 and 0.99 ([`study_locus.py`](https://github.com/opentargets/gentropy/blob/v3.2.0/src/gentropy/dataset/study_locus.py)).
+The step ([`finngen_finemapping_ingestion.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/finngen_finemapping_ingestion.py)) builds one credible set per FinnGen SuSiE credible set ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/datasource/finngen/finemapping.py)):
 
-The output is `output/credible_set_datasets/susie/`: 22,133 credible sets from 1,302 studies, 676 of them flagged `Subsignificant p-value`. Every study of the credible sets is in `study_index`.
+- The variants of a credible set are the variants of the `*.snp.bgz` files assigned to it (`cs` > 0), the 95% credible set of the single effect.
+- A credible set is kept when it is the first credible set of its region, or when its `cs_log10bf` is above 0.8686 (log10(e²), the threshold of the FinnGen publication). `cs_log10bf` is used only for this filter.
+- The lead variant of a credible set is its variant with the highest posterior probability, ties broken by `variantId` ([`credible_set.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/dataset/credible_set.py)).
+- A credible set whose lead has a p-value above 1e-5 is dropped with its variants.
+- The log Bayes factor of a credible set is the natural log Bayes factor of its single effect over every variant of the region, with a uniform prior over those variants ([`stats.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.11/src/gentropy/common/stats.py)).
+- The allele frequency of a variant is the alternative allele frequency `AF` of the annotated variants file.
+
+The outputs are `output/credible_set/`, one row per credible set, in one file, and `output/credible_set_variant/`, one row per variant of a credible set, in `session.output_partitions` (1) files. Every study of the credible sets is in `study`, and every lead is in `credible_set_variant`.
 
 ## Outputs
 
-### study_index
+Schemas as read from the parquet files of the run. Nested columns show their `array<struct<...>>` types. "Empty" marks a column with no values in this run.
+
+| Output | Rows | Files |
+|---|---|---|
+| `study` | 2,470 | 1 |
+| `credible_set` | 21,457 | 1 |
+| `credible_set_variant` | 1,100,722 | 1 |
+
+### study
 
 One row per FinnGen phenotype.
 
@@ -73,29 +87,78 @@ One row per FinnGen phenotype.
 | `ldPopulationStructure` | `array<struct<ldPopulation: string, relativeSampleSize: double>>` | `fin` with a relative sample size of 1.0. |
 | `traitFromSourceMappedIds` | `array<string>` | Ontology terms of the phenotype, from the curation file. Empty for 29 studies. |
 
-### credible_set_datasets/susie
+### credible_set
 
-One row per credible set.
+One row per credible set; 1,302 studies have at least one.
 
 | Column | Type | Description |
 |---|---|---|
-| `studyId` | `string` | Study of the credible set, as in `study_index`. |
-| `region` | `string` | Fine-mapped region, `chr<chromosome>:<start>-<end>`. Chromosome X is `chrX`, except in 87 credible sets of `FINNGEN_R12_HEIGHT_IRN`, which FinnGen labels `chr23`. |
-| `credibleSetIndex` | `integer` | Index of the credible set within the region, 1 to 10. |
-| `locus` | `array<struct<variantId: string, posteriorProbability: double, logBF: double, pValueMantissa: float, pValueExponent: integer, beta: double, standardError: double, is95CredibleSet: boolean, is99CredibleSet: boolean>>` | Variants of the credible set, sorted by `posteriorProbability`, with their log Bayes factor (`logBF`), p-value, posterior mean effect (`beta`) and standard error. |
-| `variantId` | `string` | Lead variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
-| `chromosome` | `string` | Chromosome of the lead variant. |
-| `position` | `integer` | Position of the lead variant on GRCh38. |
-| `beta` | `double` | Posterior mean effect of the lead in the credible set. |
-| `pValueMantissa` | `float` | Mantissa of the p-value of the lead (p = mantissa × 10^exponent). |
-| `pValueExponent` | `integer` | Exponent of the p-value of the lead. |
-| `effectAlleleFrequencyFromSource` | `float` | Minor allele frequency of the lead (`maf` of the source), at most 0.5. |
-| `standardError` | `double` | Standard error of the lead. |
-| `finemappingMethod` | `string` | `SuSie`. |
-| `credibleSetlog10BF` | `double` | Log10 Bayes factor of the credible set. Null for 31 credible sets. |
-| `purityMeanR2` | `double` | Mean r² between the variants of the credible set. |
-| `purityMinR2` | `double` | Minimum r² between the variants of the credible set. |
-| `locusStart` | `integer` | Start of `region`. |
-| `locusEnd` | `integer` | End of `region`. |
-| `studyLocusId` | `string` | Identifier of the credible set: a hash of `studyId`, `variantId` and `finemappingMethod`. |
-| `qualityControls` | `array<string>` | `Subsignificant p-value` for a lead with a p-value above 1e-5, otherwise empty. |
+| `id` | `string` | Identifier of the credible set: the md5 hash of `studyId`, `chromosome`, `locusStart`, `locusEnd`, `leadVariantId` and `fineMappingMethod`. |
+| `chromosome` | `string` | Chromosome of the region; `X` for chromosome X. |
+| `locusStart` | `integer` | Start of the fine-mapped region, from `region` of the source. |
+| `locusEnd` | `integer` | End of the fine-mapped region, from `region` of the source. |
+| `studyId` | `string` | Study of the credible set, as in `study`. |
+| `studyType` | `string` | `gwas`. |
+| `leadVariantId` | `string` | Lead variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
+| `fineMappingMethod` | `string` | `SuSiE`. |
+| `logBayesFactor` | `double` | Natural log Bayes factor of the single effect over every variant of the region. |
+| `confidence` | `tinyint` | Empty. |
+| `purityMeanR2` | `double` | Mean r² between the variants of the credible set (`cs_avg_r2`). |
+| `purityMinR2` | `double` | Minimum r² between the variants of the credible set (`cs_min_r2`). |
+| `qualityControls` | `array<string>` | Empty for every credible set. |
+
+### credible_set_variant
+
+One row per variant of a credible set. The posterior probabilities of the variants of a credible set sum to at least 0.95.
+
+| Column | Type | Description |
+|---|---|---|
+| `credibleSetId` | `string` | Credible set of the variant, as `id` in `credible_set`. |
+| `variantId` | `string` | Variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
+| `pValueMantissa` | `float` | Mantissa of the marginal p-value (p = mantissa × 10^exponent). |
+| `pValueExponent` | `integer` | Exponent of the marginal p-value. |
+| `effectAlleleFrequency` | `float` | Frequency of the alternative allele, `AF` of the annotated variants file. Null for 34,116 variants missing from the file. |
+| `sampleSize` | `integer` | Empty: the source gives no per-variant sample size. |
+| `reportedBeta` | `double` | Marginal effect of the alternative allele (`beta`). |
+| `reportedStandardError` | `double` | Standard error of `reportedBeta` (`se`). |
+| `posteriorProbability` | `float` | Posterior inclusion probability of the variant in the single effect of the credible set (`alpha<cs>`). |
+| `logBayesFactor` | `float` | Natural log Bayes factor of the variant in the single effect (`lbf_variable<cs>`). |
+| `r2Overall` | `float` | In-sample r² with FinnGen's lead of the credible set (`lead_r2`). FinnGen's lead is the variant with the highest overall posterior inclusion probability (`prob`); it is the lead of `credible_set` in 21,250 credible sets, and the lead's `r2Overall` is below 1 in the other 207. |
+| `conditionalBeta` | `float` | Posterior mean effect given that the variant is causal, `mean<cs> / alpha<cs>`. |
+| `conditionalStandardError` | `float` | Posterior standard deviation of the effect given that the variant is causal, `sqrt((sd<cs>² + mean<cs>²) / alpha<cs> − conditionalBeta²)`. |
+| `rescaledAbsBeta` | `float` | Empty. |
+| `rescaledStandardError` | `float` | Empty. |
+| `rescaledDirection` | `tinyint` | Empty. |
+| `qualityControls` | `array<string>` | `Allele frequency reported by the study` when `effectAlleleFrequency` is set, otherwise empty. |
+
+## Changelog
+
+### 2025-02-05
+
+- [fix: updating info in finngen study index ingestion (#972)](https://github.com/opentargets/gentropy/pull/972)
+
+### 2025-04-11
+
+- chore: removal of r11 and r10 data to prevent data duplication.
+
+### 2025-07-24
+
+- [feat: updated finngen studyIndex to contain pubmedId upon ingestion](https://github.com/opentargets/issues/issues/3946)
+
+### 2026-05-20
+
+- [feat: rerun study index generation to include latest EFO changes](https://github.com/opentargets/issues/issues/4344)
+
+### 2026-10-29
+
+- chore: move the FinnGen GWAS release (run of 2026-05-26) from `gs://finngen_data/r12/` to `gs://finngen_data/gwas/prod/20260526T131014/` (`config/`, `docs/`, `output/`), and split its docs into this README.
+- chore: remove the top-level `gs://finngen_data/docs/`; the docs of each run are under `docs/` of its run folder.
+- chore: remove `gs://finngen_data/100_3mb_carma/`, CARMA fine-mapping outputs that no DAG produces or reads.
+
+### 2026-10-31
+
+- feat: replace the `finngen_ingestion` DAG with `finngen_gwas_ingestion`, a StagingDagConfig DAG on gentropy `v4.0.0-dev.11` writing the `study`, `credible_set` and `credible_set_variant` datasets to `gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/`. Its first run, `gs://finngen_data/gwas/prod/20261029T152531/`, differs from the frozen release:
+  - credible sets whose lead has a p-value above 1e-5 are dropped (676 credible sets of the frozen release, flagged `Subsignificant p-value` there): 21,457 credible sets, with the same lead and region as in the frozen release;
+  - `effectAlleleFrequency` is the alternative allele frequency `AF` of the FinnGen annotated variants file, where the frozen release had the minor allele frequency `maf`;
+  - the EFO mappings come from curation tag `26.09.2` (`26.05` in the frozen release): 1,314 studies are mapped to different terms, e.g. EFO terms replaced by MONDO terms.
+- docs: remove the `finngen_data/README.md` bucket index; each FinnGen source keeps its own README, with its changelog.
