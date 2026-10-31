@@ -1,4 +1,4 @@
-"""Tests for reading fastVEP output into VEP-shaped records."""
+"""Tests for reading fastVEP output into the variants and consequences frames."""
 
 from __future__ import annotations
 
@@ -9,13 +9,15 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.records import (
+    CONSEQUENCES_SCHEMA,
     FASTVEP_SCHEMA,
+    ChunkFrames,
+    chunk_frames,
     iter_records,
-    records_from_fastvep,
-    unannotated_records,
+    unannotated_frames,
+    vep_records,
 )
 from pts.transformers.variant.vep import parse_vep
 
@@ -31,10 +33,10 @@ def read_records(path: Path, chunk_bytes: int = 1 << 20) -> pl.DataFrame:
     return pl.concat([empty, *iter_records(path, chunk_bytes)])
 
 
-def fastvep_records(
+def fastvep_frames(
     path: Path, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
-) -> pl.LazyFrame:
-    return records_from_fastvep(read_records(path), rows, transcripts, sequence, chromosome)
+) -> ChunkFrames:
+    return chunk_frames(read_records(path), rows, transcripts, sequence, chromosome)
 
 
 @pytest.fixture(scope='module')
@@ -53,24 +55,29 @@ def transcripts() -> pl.DataFrame:
 
 
 @pytest.fixture(scope='module')
-def records(rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes) -> pl.DataFrame:
-    return fastvep_records(SAMPLE, rows, transcripts, sequence, '22').collect()
+def frames(rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes) -> ChunkFrames:
+    return fastvep_frames(SAMPLE, rows, transcripts, sequence, '22')
 
 
 @pytest.fixture(scope='module')
-def index(records: pl.DataFrame) -> pl.DataFrame:
-    return parse_vep(records.lazy()).collect()
+def index(frames: ChunkFrames) -> pl.DataFrame:
+    return parse_vep(vep_records(frames).lazy()).collect()
 
 
-def record(records: pl.DataFrame, position: int) -> dict:
-    """The record of the fixture variant at `position`."""
-    found = records.filter(pl.col('input').str.split('\t').list.get(1) == str(position))
+def variant(frames: ChunkFrames, position: int) -> dict:
+    """The variants row of the fixture variant at `position`."""
+    found = frames.variants.filter(pl.col('position') == position)
     assert found.height == 1
     return found.row(0, named=True)
 
 
-def transcript(found: dict, transcript_id: str) -> dict:
-    return next(tc for tc in found['transcript_consequences'] if tc['transcript_id'] == transcript_id)
+def transcripts_of(frames: ChunkFrames, position: int) -> list[dict]:
+    """The canonical consequences of the fixture variant at `position`, in fastVEP's order."""
+    return frames.consequences.filter(pl.col('position') == position).to_dicts()
+
+
+def transcript(frames: ChunkFrames, position: int, transcript_id: str) -> dict:
+    return next(tc for tc in transcripts_of(frames, position) if tc['transcript_id'] == transcript_id)
 
 
 def order(index: pl.DataFrame, variant_id: str) -> list[str]:
@@ -108,19 +115,26 @@ def test_reads_json_in_slices() -> None:
     assert_frame_equal(read_records(SAMPLE, chunk_bytes=1024), whole)
 
 
-def test_records_conform_to_vep_schema(records: pl.DataFrame, rows: pl.DataFrame) -> None:
-    assert records.schema == vep_schema
-    assert records.height == rows.height
-    first = rows.row(0, named=True)
-    assert records['input'][0] == '22\t18521430\t{}\tA\tG\t.\t.\t.'.format(first['rsId'])
-    assert records['colocated_variants'].to_list() == [[]] * rows.height
-    fields = records.select(pl.col('transcript_consequences').explode().struct.unnest())
-    assert (
-        fields.select('conservation', 'alphamissense', 'lof', 'lof_filter').null_count().row(0) == (fields.height,) * 4
+def test_frames_conform_to_their_schemas(frames: ChunkFrames, rows: pl.DataFrame) -> None:
+    variants, consequences = frames
+    assert variants.height == rows.height
+    assert variants['row'].to_list() == list(range(rows.height))
+    assert variants.columns[:5] == ['row', 'chromosome', 'position', 'referenceAllele', 'alternateAllele']
+    assert consequences.schema == CONSEQUENCES_SCHEMA
+    assert consequences['rank'].min() == 1
+
+
+def test_variants_frame_keeps_original_and_vep_alleles() -> None:
+    row = pl.DataFrame(
+        {'chromosome': ['22'], 'position': [100], 'rsId': [None], 'referenceAllele': ['AT'], 'alternateAllele': ['A']},
+        schema_overrides={'position': pl.Int32},
     )
+    [found] = unannotated_frames(row, '22').variants.to_dicts()
+    assert (found['referenceAllele'], found['alternateAllele']) == ('AT', 'A')
+    assert (found['vepReference'], found['vepAlternate'], found['vepStart']) == ('T', '-', 101)
 
 
-def test_most_severe_uses_vep_ranks(tmp_path: Path, records: pl.DataFrame) -> None:
+def test_most_severe_uses_vep_ranks(tmp_path: Path, frames: ChunkFrames) -> None:
     fifth = fastvep_json(
         tmp_path / 'fifth.json',
         [
@@ -136,19 +150,30 @@ def test_most_severe_uses_vep_ranks(tmp_path: Path, records: pl.DataFrame) -> No
     )
     sequence = b'NNNNANNNNN'
     for path, expected in ((fifth, 'splice_donor_5th_base_variant'), (acceptor, 'splice_acceptor_variant')):
-        found = fastvep_records(path, ONE_ROW, NO_TRANSCRIPTS, sequence, '22').collect()
-        assert found['most_severe_consequence'].to_list() == [expected]
+        found = fastvep_frames(path, ONE_ROW, NO_TRANSCRIPTS, sequence, '22')
+        assert found.variants['most_severe_consequence'].to_list() == [expected]
     # OTVAR_22_20048859_…: acceptor, donor and 5th base in one record.
-    assert record(records, 20048859)['most_severe_consequence'] == 'splice_acceptor_variant'
+    assert variant(frames, 20048859)['most_severe_consequence'] == 'splice_acceptor_variant'
     # 22_19766007_G_A: 5th base.
-    assert record(records, 19766007)['most_severe_consequence'] == 'splice_donor_5th_base_variant'
+    assert variant(frames, 19766007)['most_severe_consequence'] == 'splice_donor_5th_base_variant'
 
 
-def test_synonymous_amino_acids_are_single(records: pl.DataFrame) -> None:
-    assert transcript(record(records, 19723858), 'ENST00000366425')['amino_acids'] == 'P'
-    assert {tc['amino_acids'] for tc in record(records, 19760885)['transcript_consequences']} >= {'S'}
+def test_most_severe_ranks_over_all_transcripts(tmp_path: Path) -> None:
+    item = synthetic([['intron_variant'], ['stop_gained']], 'intron_variant')
+    path = fastvep_json(tmp_path / 'noncanonical.json', [item])
+    core = pl.concat(
+        [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [1, 0]})], how='diagonal'
+    )
+    found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
+    assert found.variants['most_severe_consequence'].to_list() == ['stop_gained']
+    assert found.consequences['transcript_id'].to_list() == ['ENST00']
+
+
+def test_synonymous_amino_acids_are_single(frames: ChunkFrames) -> None:
+    assert transcript(frames, 19723858, 'ENST00000366425')['amino_acids'] == 'P'
+    assert {tc['amino_acids'] for tc in transcripts_of(frames, 19760885)} >= {'S'}
     # 22_19723939_C_A, stop gained: a change keeps both halves.
-    assert '/' in transcript(record(records, 19723939), 'ENST00000366425')['amino_acids']
+    assert '/' in transcript(frames, 19723939, 'ENST00000366425')['amino_acids']
 
 
 def test_amino_acids_as_fastvep_writes_them(tmp_path: Path) -> None:
@@ -159,43 +184,43 @@ def test_amino_acids_as_fastvep_writes_them(tmp_path: Path) -> None:
     core = pl.concat(
         [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [1, 1]})], how='diagonal'
     )
-    found = fastvep_records(path, ONE_ROW, core, b'NNNNANNNNN', '22').collect()
-    assert [tc['amino_acids'] for tc in found['transcript_consequences'][0]] == ['L/L', 'L/P']
+    found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
+    assert found.consequences['amino_acids'].to_list() == ['L/L', 'L/P']
 
 
-def test_cds_end_from_fastvep(records: pl.DataFrame) -> None:
-    assert transcript(record(records, 19723939), 'ENST00000366425')['cds_end'] == 96
-    assert transcript(record(records, 19723858), 'ENST00000366425')['cds_end'] is not None
+def test_cds_end_from_fastvep(frames: ChunkFrames) -> None:
+    assert transcript(frames, 19723939, 'ENST00000366425')['cds_end'] == 96
+    assert transcript(frames, 19723858, 'ENST00000366425')['cds_end'] is not None
 
 
-def test_intergenic_placeholder_transcript_dropped(records: pl.DataFrame, index: pl.DataFrame) -> None:
-    found = record(records, 18521430)
-    assert found['transcript_consequences'] == []
-    assert found['intergenic_consequences'] == [{'hgvsg': '22:g.18521430A>G'}]
+def test_intergenic_placeholder_transcript_dropped(frames: ChunkFrames, index: pl.DataFrame) -> None:
+    found = variant(frames, 18521430)
+    assert transcripts_of(frames, 18521430) == []
+    assert found['reported_transcripts'] is False
+    assert found['hgvsg'] == '22:g.18521430A>G'
     assert found['most_severe_consequence'] == 'intergenic_variant'
     assert index.filter(pl.col('variantId') == '22_18521430_A_G')['hgvsId'].to_list() == ['22:g.18521430A>G']
-    assert record(records, 19723858)['intergenic_consequences'] is None
+    assert variant(frames, 19723858)['reported_transcripts'] is True
 
 
-def test_transcript_ablation(records: pl.DataFrame) -> None:
-    found = record(records, 19721911)
-    ablated = transcript(found, 'ENST00000366425')
+def test_transcript_ablation(frames: ChunkFrames) -> None:
+    found = variant(frames, 19721911)
+    ablated = transcript(frames, 19721911, 'ENST00000366425')
     assert ablated['consequence_terms'] == ['transcript_ablation']
     assert ablated['impact'] == 'HIGH'
     assert (ablated['amino_acids'], ablated['codons'], ablated['protein_end']) == (None, None, None)
     assert ablated['tssdistance'] == -1251
     assert found['most_severe_consequence'] == 'transcript_ablation'
     # Transcripts the deletion only overlaps keep fastVEP's calls.
-    others = [tc for tc in found['transcript_consequences'] if tc['transcript_id'] != 'ENST00000366425']
+    others = [tc for tc in transcripts_of(frames, 19721911) if tc['transcript_id'] != 'ENST00000366425']
     assert all('transcript_ablation' not in tc['consequence_terms'] for tc in others)
 
 
-def test_mature_mirna_variant(records: pl.DataFrame) -> None:
-    found = record(records, 19963756)
-    assert transcript(found, 'ENST00000585066')['consequence_terms'] == ['mature_miRNA_variant']
-    assert transcript(found, 'ENST00000361682')['consequence_terms'] == ['missense_variant']
+def test_mature_mirna_variant(frames: ChunkFrames) -> None:
+    assert transcript(frames, 19963756, 'ENST00000585066')['consequence_terms'] == ['mature_miRNA_variant']
+    assert transcript(frames, 19963756, 'ENST00000361682')['consequence_terms'] == ['missense_variant']
     # 22_19941808_G_T is upstream of the miRNA, not in it.
-    assert transcript(record(records, 19941808), 'ENST00000585066')['consequence_terms'] == ['upstream_gene_variant']
+    assert transcript(frames, 19941808, 'ENST00000585066')['consequence_terms'] == ['upstream_gene_variant']
 
 
 def test_ties_ordered_by_transcript_id(index: pl.DataFrame) -> None:
@@ -203,18 +228,33 @@ def test_ties_ordered_by_transcript_id(index: pl.DataFrame) -> None:
     assert order(index, '22_19969950_A_C')[:2] == ['ENST00000263207', 'ENST00000361682']
 
 
-def test_transcript_fields(records: pl.DataFrame) -> None:
-    found = transcript(record(records, 19723858), 'ENST00000366425')
-    assert (found['appris'], found['mane_select'], found['canonical']) == ('P2', 'NM_000407.5', 1)
+def test_rank_orders_by_score_then_distance_then_id(tmp_path: Path) -> None:
+    item = synthetic([['missense_variant'], ['missense_variant'], ['intron_variant']], 'missense_variant')
+    for entry, transcript_id in zip(item['transcript_consequences'], ['ENST3', 'ENST1', 'ENST2'], strict=True):
+        entry['transcript_id'] = transcript_id
+    item['transcript_consequences'][1]['distance'] = 5
+    path = fastvep_json(tmp_path / 'rank.json', [item])
+    core = pl.concat(
+        [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST3', 'ENST1', 'ENST2'], 'canonical': [1, 1, 1]})],
+        how='diagonal',
+    )
+    found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22').consequences
+    # Rows stay in fastVEP's order; `rank` does not reorder them.
+    assert found['transcript_id'].to_list() == ['ENST3', 'ENST1', 'ENST2']
+    assert found['rank'].to_list() == [1, 2, 3]
+
+
+def test_transcript_fields(frames: ChunkFrames) -> None:
+    found = transcript(frames, 19723858, 'ENST00000366425')
+    assert (found['appris'], found['mane_select']) == ('P2', 'NM_000407.5')
     assert found['swissprot'] == ['P13224']
-    assert found['hgvsg'] == '22:g.19723858G>A'
     assert found['tssdistance'] == -319
     # 22_19760999_C_CCCG: an insertion ends before it starts.
-    insertion = record(records, 19760999)
-    assert transcript(insertion, 'ENST00000649276')['tssdistance'] == -221
-    assert transcript(insertion, 'ENST00000816392')['tssdistance'] == 11894
-    assert transcript(insertion, 'ENST00000816392')['distance'] == 11893
-    assert transcript(insertion, 'ENST00000649276')['hgvsg'] == '22:g.19761013_19761015dup'
+    assert transcript(frames, 19760999, 'ENST00000649276')['tssdistance'] == -221
+    assert transcript(frames, 19760999, 'ENST00000816392')['tssdistance'] == 11894
+    assert transcript(frames, 19760999, 'ENST00000816392')['distance'] == 11893
+    assert variant(frames, 19723858)['hgvsg'] == '22:g.19723858G>A'
+    assert variant(frames, 19760999)['hgvsg'] == '22:g.19761013_19761015dup'
 
 
 def test_unusable_alleles_have_no_hgvsg(tmp_path: Path) -> None:
@@ -222,8 +262,9 @@ def test_unusable_alleles_have_no_hgvsg(tmp_path: Path) -> None:
     path.write_text(path.read_text().replace('"ENST00"', '"-"'))
     dots = ONE_ROW.with_columns(pl.lit('.').alias('alternateAllele'))
     for frame, sequence in ((dots, b'NNNNANNNNN'), (ONE_ROW, b'')):
-        found = fastvep_records(path, frame, NO_TRANSCRIPTS, sequence, '22').collect()
-        assert found['intergenic_consequences'].to_list() == [[{'hgvsg': None}]]
+        found = fastvep_frames(path, frame, NO_TRANSCRIPTS, sequence, '22')
+        assert found.variants['hgvsg'].to_list() == [None]
+        assert found.variants['reported_transcripts'].to_list() == [False]
 
 
 def test_canonical_from_the_core(tmp_path: Path) -> None:
@@ -233,19 +274,18 @@ def test_canonical_from_the_core(tmp_path: Path) -> None:
     core = pl.concat(
         [NO_TRANSCRIPTS, pl.DataFrame({'transcript_id': ['ENST00', 'ENST01'], 'canonical': [1, 0]})], how='diagonal'
     )
-    found = fastvep_records(path, ONE_ROW, core, b'NNNNANNNNN', '22').collect()
-    kept = found['transcript_consequences'][0]
-    assert [(tc['transcript_id'], tc['canonical']) for tc in kept] == [('ENST00', 1)]
+    found = fastvep_frames(path, ONE_ROW, core, b'NNNNANNNNN', '22')
+    assert found.consequences['transcript_id'].to_list() == ['ENST00']
+    assert found.variants['reported_transcripts'].to_list() == [True]
 
 
-def test_unannotated_records_are_intergenic() -> None:
-    found = unannotated_records(ONE_ROW, 'Y').collect()
-    assert found.schema == vep_schema
-    assert found.row(0, named=True) | {'input': None} == {
-        'input': None,
-        'most_severe_consequence': 'intergenic_variant',
-        'intergenic_consequences': [{'hgvsg': None}],
-        'colocated_variants': [],
-        'transcript_consequences': [],
-    }
-    assert parse_vep(found.lazy()).collect()['hgvsId'].to_list() == [None]
+def test_unannotated_frames_are_intergenic() -> None:
+    found = unannotated_frames(ONE_ROW, 'Y')
+    assert found.consequences.schema == CONSEQUENCES_SCHEMA
+    assert found.consequences.height == 0
+    [row] = found.variants.to_dicts()
+    assert row['hgvsg'] is None
+    assert (row['most_severe_consequence'], row['reported_transcripts']) == ('intergenic_variant', False)
+    records = vep_records(found)
+    assert records['intergenic_consequences'].to_list() == [[{'hgvsg': None}]]
+    assert parse_vep(records.lazy()).collect()['hgvsId'].to_list() == [None]

@@ -1,4 +1,4 @@
-"""The fastVEP JSON output read into the VEP records that `parse_vep` reads."""
+"""The fastVEP JSON output read into the variants and consequences frames of a chunk."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import io
 import mmap
 from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 import numpy as np
 import polars as pl
 
 from pts.schemas.vep import vep_schema
 from pts.transformers.variant.alleles import hgvs_genomic, vep_allele_form
-from pts.transformers.variant.consequences import RANKS
+from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, RANKS
 
 FASTVEP_SCHEMA = pl.Schema({
     'id': pl.String,
@@ -93,22 +93,11 @@ def _hgvsg(rows: pl.DataFrame, sequence: bytes, chromosome: str) -> pl.Series:
 
 
 def _variants(rows: pl.DataFrame, sequence: bytes, chromosome: str) -> pl.DataFrame:
-    """The rows with their ordinal, VEP's `input` line, VEP's coordinates and the genomic HGVS."""
+    """The rows with their ordinal, VEP's coordinates and the genomic HGVS."""
     return (
         vep_allele_form(rows.lazy().with_row_index('row').with_columns(pl.col('row').cast(pl.Int64)))
         .collect()
-        .with_columns(
-            pl.concat_str(
-                'chromosome',
-                pl.col('position').cast(pl.String),
-                pl.col('rsId').fill_null('.'),
-                'referenceAllele',
-                'alternateAllele',
-                pl.lit('.\t.\t.'),
-                separator='\t',
-            ).alias('input'),
-            _hgvsg(rows, sequence, chromosome),
-        )
+        .with_columns(_hgvsg(rows, sequence, chromosome))
     )
 
 
@@ -143,7 +132,7 @@ def _consequences(records: pl.DataFrame, variants: pl.DataFrame, transcripts: pl
             maintain_order='left',
         )
         .join(
-            variants.select('row', 'vepStart', 'vepEnd', 'vepReference', 'vepAlternate', 'hgvsg'),
+            variants.select('row', 'vepStart', 'vepEnd', 'vepReference', 'vepAlternate'),
             on='row',
             how='left',
             maintain_order='left',
@@ -178,107 +167,207 @@ def _consequences(records: pl.DataFrame, variants: pl.DataFrame, transcripts: pl
     )
 
 
-def _transcript() -> pl.Expr:
-    """The VEP transcript consequence struct; fields other tasks fill are null."""
-    fields = {
-        'amino_acids': pl.col('amino_acids'),
-        'hgvsg': pl.col('hgvsg'),
-        'gene_symbol': pl.col('gene_symbol'),
-        'biotype': pl.col('biotype'),
+class ChunkFrames(NamedTuple):
+    """The annotation of one chunk: a row per variant and a row per canonical transcript consequence."""
+
+    variants: pl.DataFrame
+    consequences: pl.DataFrame
+
+
+_FIELDS = (
+    'transcript_id',
+    'gene_id',
+    'gene_symbol',
+    'biotype',
+    'appris',
+    'mane_select',
+    'tssdistance',
+    'cds_end',
+    'codons',
+    'consequence_terms',
+    'distance',
+    'impact',
+    'amino_acids',
+    'protein_end',
+    'swissprot',
+    'trembl',
+)
+CONSEQUENCES_SCHEMA = pl.Schema({
+    'row': pl.Int64,
+    'position': pl.Int32,
+    'referenceAllele': pl.String,
+    'alternateAllele': pl.String,
+    'vepStart': pl.Int64,
+    'vepEnd': pl.Int64,
+    'vepReference': pl.String,
+    'vepAlternate': pl.String,
+    **{name: _TRANSCRIPT.to_schema()[name] for name in _FIELDS},
+    'rank': pl.Int32,
+})
+"""The columns of the consequences frame, before any effect adds its own."""
+
+
+def _fields() -> list[pl.Expr]:
+    """The transcript fields of the consequences frame, written as VEP writes them."""
+    computed = {
         'appris': pl
         .col('appris')
         .str.replace('principal', 'P', literal=True)
         .str.replace('alternative', 'A', literal=True),
-        'mane_select': pl.col('mane_select'),
         'tssdistance': pl
         .when(pl.col('strand') == 1)
         .then(pl.col('tss') - pl.col('vepEnd'))
         .otherwise(pl.col('vepStart') - pl.col('tss')),
-        'canonical': pl.col('core_canonical'),
-        'cds_end': pl.col('cds_end'),
-        'codons': pl.col('codons'),
-        'consequence_terms': pl.col('consequence_terms'),
-        'distance': pl.col('distance'),
-        'gene_id': pl.col('gene_id'),
-        'impact': pl.col('impact'),
-        'protein_end': pl.col('protein_end'),
         'swissprot': pl.when(pl.col('swissprot').list.len() > 0).then(pl.col('swissprot')),
-        'transcript_id': pl.col('transcript_id'),
         'trembl': pl.when(pl.col('trembl').list.len() > 0).then(pl.col('trembl')),
     }
+    dtypes = _TRANSCRIPT.to_schema()
+    return [computed.get(name, pl.col(name)).cast(dtypes[name]).alias(name) for name in _FIELDS]
+
+
+def _ranked(consequences: pl.DataFrame) -> pl.DataFrame:
+    """The consequences with `rank`: highest consequence score, then distance, then transcript id, within a row."""
+    score = pl.col('consequence_terms').list.eval(
+        pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64)
+    )
+    return (
+        consequences
+        .with_row_index('_i')
+        .with_columns(score.list.max().alias('_score'), pl.col('distance').fill_null(0).alias('_distance'))
+        .sort(
+            ['row', '_score', '_distance', 'transcript_id'],
+            descending=[False, True, False, False],
+            nulls_last=True,
+            maintain_order=True,
+        )
+        .with_columns(pl.int_range(1, pl.len() + 1, dtype=pl.Int32).over('row').alias('rank'))
+        .sort('_i')
+        .drop('_i', '_score', '_distance')
+    )
+
+
+def chunk_frames(
+    records: pl.DataFrame, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
+) -> ChunkFrames:
+    """The records `iter_records` reads for rows of one chromosome, as a variants and a consequences frame.
+
+    Records join `rows` on the ordinal fastVEP echoes as their `id`, the row's ordinal in `rows`.
+    `hgvsg` is rebuilt from the reference. Transcript fields come from `transcripts`
+    (`transcript_fields`), with APPRIS written as VEP does (`P1`, `A2`). VEP's `transcript_ablation`
+    and `mature_miRNA_variant` are applied, and the most severe consequence is ranked over every
+    transcript fastVEP reported, by VEP's ranks. `consequences` keeps only transcripts canonical in
+    `transcripts`, in fastVEP's order, each with its `rank` among them.
+    """
+    variants = _variants(rows, sequence, chromosome)
+    reported = _consequences(records, variants, transcripts)
+    rank = pl.col('consequence_terms').list.eval(
+        pl.element().replace_strict(_RANK, default=len(RANKS), return_dtype=pl.Int32)
+    )
+    severity = reported.group_by('row').agg(
+        rank.list.min().min().replace_strict(_TERM, default=None, return_dtype=pl.String).alias('_most_severe'),
+        pl.len().alias('_transcripts'),
+    )
+    canonical = (
+        reported
+        .filter(pl.col('core_canonical') == 1)
+        .join(
+            variants.select('row', 'position', 'referenceAllele', 'alternateAllele'),
+            on='row',
+            how='left',
+            maintain_order='left',
+        )
+        .select(*CONSEQUENCES_SCHEMA.names()[:8], *_fields())
+    )
+    variants = (
+        variants
+        .join(records.select('row', 'most_severe_consequence'), on='row', how='left', maintain_order='left')
+        .join(severity, on='row', how='left', maintain_order='left')
+        .rechunk()
+        .select(
+            'row',
+            'chromosome',
+            'position',
+            'referenceAllele',
+            'alternateAllele',
+            'vepStart',
+            'vepEnd',
+            'vepReference',
+            'vepAlternate',
+            'hgvsg',
+            pl.coalesce('_most_severe', 'most_severe_consequence').alias('most_severe_consequence'),
+            pl.col('_transcripts').is_not_null().alias('reported_transcripts'),
+        )
+    )
+    return ChunkFrames(variants, _ranked(canonical))
+
+
+def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
+    """The frames of rows on a chromosome without reference sequence.
+
+    Each variant is intergenic, with a null `hgvsg` and no transcript consequence.
+    """
+    variants = _variants(rows, b'', chromosome).select(
+        'row',
+        'chromosome',
+        'position',
+        'referenceAllele',
+        'alternateAllele',
+        'vepStart',
+        'vepEnd',
+        'vepReference',
+        'vepAlternate',
+        'hgvsg',
+        pl.lit('intergenic_variant').alias('most_severe_consequence'),
+        pl.lit(False).alias('reported_transcripts'),
+    )
+    return ChunkFrames(variants, pl.DataFrame(schema=CONSEQUENCES_SCHEMA))
+
+
+def _transcript() -> pl.Expr:
+    """The VEP transcript consequence struct; fields other tasks fill are null."""
+    fields = {name: pl.col(name) for name in (*_FIELDS, 'hgvsg')} | {'canonical': pl.lit(1, pl.Int64)}
     return pl.struct([
         fields[name].cast(dtype).alias(name) if name in fields else pl.lit(None, dtype).alias(name)
         for name, dtype in _TRANSCRIPT.to_schema().items()
     ])
 
 
-def records_from_fastvep(
-    records: pl.DataFrame, rows: pl.DataFrame, transcripts: pl.DataFrame, sequence: bytes, chromosome: str
-) -> pl.LazyFrame:
-    """The records `iter_records` reads for rows of one chromosome, as the VEP records `parse_vep` reads.
+def vep_records(frames: ChunkFrames) -> pl.DataFrame:
+    """The VEP records `parse_vep` reads, rebuilt from the frames.
 
-    Records join `rows` on the ordinal fastVEP echoes as their `id`, the row's ordinal in `rows`.
-    `input` is rebuilt from the original row and `hgvsg` from the reference. Transcript fields
-    come from `transcripts` (`transcript_fields`), with APPRIS written as VEP does (`P1`, `A2`).
-    VEP's `transcript_ablation` and `mature_miRNA_variant` are applied, and the most severe
-    consequence is ranked over every transcript fastVEP reported, by VEP's ranks. Only
-    transcripts canonical in `transcripts` are kept. A row without a transcript gets `intergenic_consequences`.
-    `colocated_variants` is empty; `conservation`, `alphamissense`, `lof` and `lof_filter` are null.
+    `input` carries `.` for the rsID. `colocated_variants` is empty; `conservation`,
+    `alphamissense`, `lof` and `lof_filter` are null.
     """
-    variants = _variants(rows, sequence, chromosome)
-    consequences = _consequences(records, variants, transcripts)
-    rank = pl.col('consequence_terms').list.eval(
-        pl.element().replace_strict(_RANK, default=len(RANKS), return_dtype=pl.Int32)
-    )
-    severity = consequences.group_by('row').agg(
-        rank.list.min().min().replace_strict(_TERM, default=None, return_dtype=pl.String).alias('_most_severe'),
-        pl.len().alias('_transcripts'),
-    )
-    canonical = (
+    variants, consequences = frames
+    nested = (
         consequences
-        .filter(pl.col('core_canonical') == 1)
+        .join(variants.select('row', 'hgvsg'), on='row', how='left', maintain_order='left')
+        .rechunk()
         .group_by('row', maintain_order=True)
         .agg(_transcript().alias('transcript_consequences'))
     )
-    located = vep_schema['colocated_variants']
     return (
         variants
-        .select('row', 'input', 'hgvsg')
-        .join(records.select('row', 'most_severe_consequence'), on='row', how='left', maintain_order='left')
-        .join(severity, on='row', how='left', maintain_order='left')
-        .join(canonical, on='row', how='left', maintain_order='left')
+        .join(nested, on='row', how='left', maintain_order='left')
         .rechunk()
         .select(
-            'input',
-            pl.coalesce('_most_severe', 'most_severe_consequence').alias('most_severe_consequence'),
+            pl.concat_str(
+                'chromosome',
+                pl.col('position').cast(pl.String),
+                pl.lit('.'),
+                'referenceAllele',
+                'alternateAllele',
+                pl.lit('.\t.\t.'),
+                separator='\t',
+            ).alias('input'),
+            'most_severe_consequence',
             pl
-            .when(pl.col('_transcripts').is_null())
+            .when(~pl.col('reported_transcripts'))
             .then(pl.concat_list(pl.struct('hgvsg')))
             .cast(vep_schema['intergenic_consequences'])
             .alias('intergenic_consequences'),
-            pl.lit([], dtype=located).alias('colocated_variants'),
+            pl.lit([], dtype=vep_schema['colocated_variants']).alias('colocated_variants'),
             pl.col('transcript_consequences').fill_null(pl.lit([], dtype=vep_schema['transcript_consequences'])),
         )
-        .lazy()
     )
 
-
-def unannotated_records(rows: pl.DataFrame, chromosome: str) -> pl.LazyFrame:
-    """The VEP records of rows on a chromosome without reference sequence.
-
-    Each record is intergenic, with a null `hgvsg` and no transcript or colocated variants.
-    """
-    return (
-        _variants(rows, b'', chromosome)
-        .select(
-            'input',
-            pl.lit('intergenic_variant').alias('most_severe_consequence'),
-            pl
-            .concat_list(pl.struct('hgvsg'))
-            .cast(vep_schema['intergenic_consequences'])
-            .alias('intergenic_consequences'),
-            pl.lit([], dtype=vep_schema['colocated_variants']).alias('colocated_variants'),
-            pl.lit([], dtype=vep_schema['transcript_consequences']).alias('transcript_consequences'),
-        )
-        .lazy()
-    )

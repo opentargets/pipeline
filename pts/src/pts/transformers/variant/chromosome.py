@@ -41,7 +41,13 @@ from pts.transformers.variant.index import (
 )
 from pts.transformers.variant.loftee import add_loftee, loftee_models
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.records import CHUNK_BYTES, iter_records, records_from_fastvep, unannotated_records
+from pts.transformers.variant.records import (
+    CHUNK_BYTES,
+    chunk_frames,
+    iter_records,
+    unannotated_frames,
+    vep_records,
+)
 from pts.transformers.variant.sift import add_sift
 from pts.transformers.variant.transcripts import transcript_fields
 from pts.transformers.variant.vep import parse_vep, uniprot_accessions
@@ -375,10 +381,10 @@ def annotate_chunk(
         )
         shutil.rmtree(_records(shared, chromosome, chunk))
         transcripts = pl.read_parquet(directory / 'transcripts.parquet')
-        records = records_from_fastvep(fastvep, frame, transcripts, sequence, chromosome).collect()
+        records = vep_records(chunk_frames(fastvep, frame, transcripts, sequence, chromosome))
         del fastvep
     else:
-        records = unannotated_records(frame, chromosome).collect()
+        records = vep_records(unannotated_frames(frame, chromosome))
     located = directory / 'colocated.parquet'
     colocated = (
         in_range(located, frame['position']).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
