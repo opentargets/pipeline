@@ -17,8 +17,8 @@ from pts.transformers.variant.fastvep import build_cache, cache_path, prepare_gf
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
 SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'
 
-#: A real fastVEP v0.4.0 binary for `test_run_fastvep_chr22_slice`: the `FASTVEP_BINARY`
-#: environment variable, else `fastvep` on the PATH. The test is skipped when neither exists.
+#: A real fastVEP binary, built at the commit pts/Dockerfile pins, for `test_run_fastvep_chr22_slice`:
+#: the `FASTVEP_BINARY` environment variable, else `fastvep` on the PATH. The test is skipped when neither exists.
 FASTVEP_BINARY = os.environ.get('FASTVEP_BINARY') or shutil.which('fastvep')
 
 GFF3 = """\
