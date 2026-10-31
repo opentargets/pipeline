@@ -221,13 +221,13 @@ class ClinicalReport:
 class ClinicalIndication:
     """A dataset for drug-indication relationships, wrapping a Polars DataFrame."""
 
-    AGGREGATION_FIELDS = {
+    AGGREGATION_FIELDS = (
         'id',
         'drugName',
         'diseaseName',
         'drugId',
         'diseaseId',
-    }
+    )
 
     def __init__(self, df: pl.DataFrame):
         """Initialises the dataset, validating and aligning the DataFrame.
@@ -242,7 +242,7 @@ class ClinicalIndication:
     @classmethod
     def _get_study_metadata_columns(cls, df: pl.DataFrame) -> list[str]:
         """Get all columns that represent study metadata (everything except aggregation fields)."""
-        return sorted(set(df.columns) - cls.AGGREGATION_FIELDS)
+        return sorted(set(df.columns) - set(cls.AGGREGATION_FIELDS))
 
     @classmethod
     def from_report(cls, report: pl.DataFrame) -> 'ClinicalIndication':
@@ -285,7 +285,7 @@ class ClinicalIndication:
                     ),
                 )
                 .sort('clinicalStageRank')
-                .group_by(list(cls.AGGREGATION_FIELDS), maintain_order=True)
+                .group_by(cls.AGGREGATION_FIELDS, maintain_order=True)
                 .agg(
                     pl.col('clinicalReportId').unique().alias('clinicalReportIds'),
                     # Get the maximum clinical stage (minimum rank = highest priority)

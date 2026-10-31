@@ -12,12 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 def validate_schema(df: pl.DataFrame, model: type[BaseModel]) -> pl.DataFrame:
     """Validates that all mandatory schema fields are present.
 
-    Resulting DataFrame is reordered to show core fields first.
+    Resulting DataFrame is reordered to show core fields first, in the order the model declares them, followed by
+    the other columns in their input order.
     """
     mandatory_fields = [field_name for field_name, field in model.model_fields.items() if field.is_required()]
     if not all(field in df.columns for field in mandatory_fields):
         raise ValueError(f'Missing mandatory fields: {set(mandatory_fields) - set(df.columns)}')
-    extra_fields = list(set(df.columns) - set(mandatory_fields))
+    extra_fields = [column for column in df.columns if column not in mandatory_fields]
     return df.select(mandatory_fields + extra_fields)
 
 
