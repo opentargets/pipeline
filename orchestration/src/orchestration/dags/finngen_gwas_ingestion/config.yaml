@@ -60,6 +60,7 @@ steps:
           step.sample_size=500348 \
           step.efo_curation_mapping_url=https://raw.githubusercontent.com/opentargets/curation/refs/tags/{{curation_tag}}/mappings/disease/manual_string.tsv \
           step.finngen_study_index_out={{output}}/output/study \
+          step.session.start_hail=false \
           step.session.write_mode=overwrite \
           step.session.output_partitions=1 \
           step.session.spark_uri=yarn
