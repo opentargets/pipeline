@@ -194,7 +194,6 @@ def amino_acid_keys(frame: pl.DataFrame) -> pl.DataFrame:
     """Every (accession, amino-acid change) pair any transcript of `frame` carries."""
     return (
         frame
-        .lazy()
         .select('transcriptConsequences')
         .explode('transcriptConsequences', keep_nulls=False)
         .unnest('transcriptConsequences')
@@ -202,7 +201,6 @@ def amino_acid_keys(frame: pl.DataFrame) -> pl.DataFrame:
         .drop_nulls('aminoAcidChange')
         .explode('uniprotAccession', keep_nulls=False)
         .unique()
-        .collect()
     )
 
 

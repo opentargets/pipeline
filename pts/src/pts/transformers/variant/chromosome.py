@@ -305,11 +305,11 @@ def _merged(index: pl.DataFrame, shared: Shared, chromosome: str) -> pl.DataFram
         if scores.exists()
         else None
     )
-    keys = amino_acid_keys(index).lazy()
+    keys = amino_acid_keys(index)
     amino_acid_annotations = [
         pl
         .scan_parquet(directory / f'amino-acids-{number:03d}.parquet')
-        .join(keys, on=['uniprotAccession', 'aminoAcidChange'], how='semi')
+        .join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi')
         .collect()
         for number in range(len(shared.amino_acid_annotations))
     ]

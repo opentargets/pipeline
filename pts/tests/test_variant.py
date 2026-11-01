@@ -1224,8 +1224,8 @@ def test_loftee_tie_rule_names_the_transcript_but_never_changes_hc_against_lc():
         assert _loftee(order) == ('lower', 'LC', 'F')
 
 
-def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_before():
-    """Two `LC` calls with different flags: the flags follow the transcript the rule picks."""
+def test_loftee_tie_between_equal_calls_follows_the_rank():
+    """Two `LC` calls with different flags: the flags follow the transcript ranked first."""
     top = transcript(gene_id='top', transcript_id='ENST1', consequence_terms=['stop_gained'], lof='LC', lof_filter='A')
     lower = transcript(
         gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='B'
@@ -1238,3 +1238,9 @@ def test_index_rows_names_a_missing_effect_column():
     found = with_effects(consequence_frame(transcript())).drop('sift_score')
     with pytest.raises(ValueError, match='sift_score'):
         index_rows(frame, found)
+
+
+def test_index_rows_names_a_missing_id_list():
+    frame = variants(**{name: [value] for name, value in {**VARIANT, 'reported_transcripts': True}.items()})
+    with pytest.raises(ValueError, match='rsIds'):
+        index_rows(frame.drop('rsIds'), with_effects(consequence_frame(transcript())))
