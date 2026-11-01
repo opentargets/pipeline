@@ -29,11 +29,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
 from pts.transformers.variant.alleles import contig_spans, write_fai
 from pts.transformers.variant.alphamissense import partition_alphamissense
-from pts.transformers.variant.chromosome import AMINO_ACID_COLUMNS, Pools, Shared, annotate_chromosomes
+from pts.transformers.variant.chromosome import FastvepReference, Pools, annotate_chromosomes
 from pts.transformers.variant.colocated import extract_all_vars
 from pts.transformers.variant.fastvep import build_cache, prepare_gff3
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, gpn_star_files
 from pts.transformers.variant.index import annotation_parts_by_chromosome, require_rows
+from pts.transformers.variant.prepared import (
+    AMINO_ACID_COLUMNS,
+    ChunkSettings,
+    PreparationSources,
+    PreparedChromosome,
+)
 from pts.transformers.variant.rows import collect_variants
 from pts.transformers.variant.sift import sift_matrices
 from pts.transformers.variant.transcripts import canonical_transcript_ids
@@ -219,34 +225,50 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
         ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
         plain_fasta, contigs, gff3 = reference.result()
-        shared = Shared(
-            plain_fasta=plain_fasta,
-            contigs=contigs,
-            gff3=gff3,
+        preparation = PreparationSources(
             gerp=gerp.result(),
             ancestor=ancestor.result(),
             core=core.result(),
             sift=sift.result(),
-            binary=options.fastvep_binary,
-            threads=options.fastvep_threads,
-            hash_threshold=options.hash_threshold,
-            directory=scratch / 'chromosomes',
-            chunk_rows=options.chunk_rows,
-            batch_size=options.batch_size,
             variant_annotations=tuple(located),
             amino_acid_annotations=amino_acids,
             gpn_star=gpn_star if options.gpn_star is not None else {},
             gpn_star_cutoffs=options.gpn_star,
         )
         extracted, partitions = all_vars.result(), alphamissense.result()
+    settings = ChunkSettings(
+        chunk_rows=options.chunk_rows, batch_size=options.batch_size, hash_threshold=options.hash_threshold
+    )
+    prepared = {
+        chromosome: PreparedChromosome(
+            chromosome=chromosome,
+            directory=scratch / 'chromosomes' / chromosome,
+            rows=path,
+            plain_fasta=plain_fasta,
+            span=contigs.get(chromosome),
+            all_vars=extracted.get(chromosome),
+            alphamissense=partitions[chromosome],
+            gerp=preparation.gerp,
+            sift=preparation.sift,
+            settings=settings,
+            annotation_sources=len(located),
+            amino_acid_sources=len(amino_acids),
+        )
+        for chromosome, path in rows.items()
+    }
     for chromosome in sorted(set(rows) - set(extracted)):
         logger.warning('No colocated variants for chromosome {}: the VEP cache has no all_vars', chromosome)
     return annotate_chromosomes(
-        rows,
+        prepared,
         sizes,
-        extracted,
-        partitions,
-        shared,
+        FastvepReference(
+            plain_fasta=plain_fasta,
+            contigs=contigs,
+            gff3=gff3,
+            binary=options.fastvep_binary,
+            threads=options.fastvep_threads,
+        ),
+        preparation,
         Pools(
             fastvep=options.parallel_chromosomes,
             preparations=options.parallel_preparations,
@@ -256,6 +278,7 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
             preparation_niceness=options.preparation_niceness,
             chunk_niceness=options.chunk_niceness,
         ),
+        scratch / 'chromosomes' / 'parts',
     )
 
 

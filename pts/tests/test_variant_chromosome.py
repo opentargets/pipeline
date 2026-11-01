@@ -12,34 +12,31 @@ import polars as pl
 import pyarrow.parquet as pq
 import pytest
 
-from pts.transformers.variant.chromosome import (
-    Shared,
+from pts.transformers.variant.chromosome import _submit, lower_priority, split_records
+from pts.transformers.variant.prepared import (
+    ChunkSettings,
+    PreparedChromosome,
     _by_position,
-    _submit,
     amino_acid_annotations,
     in_range,
-    lower_priority,
-    split_records,
 )
 
 
-def shared(directory: Path, chunk_rows: int = 2, row_group_rows: int = 10) -> Shared:
-    """Shared inputs for the units that only read the scratch directory and the chunk settings."""
-    unused = directory / 'unused'
-    return Shared(
-        plain_fasta=unused,
-        contigs={},
-        gff3=unused,
-        gerp=str(unused),
-        ancestor=str(unused),
-        core=str(unused),
-        sift=unused,
-        binary='fastvep',
-        threads=1,
-        hash_threshold=300,
-        directory=directory / 'chromosomes',
-        chunk_rows=chunk_rows,
-        row_group_rows=row_group_rows,
+def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
+    """A handle on chromosome 22 for the units that only read its scratch directory and chunk settings."""
+    return PreparedChromosome(
+        chromosome='22',
+        directory=directory / 'chromosomes' / '22',
+        rows=directory / 'rows.parquet',
+        plain_fasta=directory / 'reference.fa',
+        span=None,
+        all_vars=None,
+        alphamissense=str(directory / 'alphamissense.parquet'),
+        gerp=str(directory / 'gerp.bw'),
+        sift=directory / 'sift.parquet',
+        settings=ChunkSettings(chunk_rows=chunk_rows),
+        annotation_sources=0,
+        amino_acid_sources=0,
     )
 
 
@@ -53,8 +50,7 @@ def fastvep_json(path: Path, ids: list[int]) -> Path:
 
 
 def test_split_records_writes_each_record_under_the_chunk_of_its_row(tmp_path: Path) -> None:
-    units = shared(tmp_path)
-    split_records(fastvep_json(tmp_path / 'out.json', [3, 0, 4, 1, 2]), 5, units, '22', chunk_bytes=64)
+    split_records(fastvep_json(tmp_path / 'out.json', [3, 0, 4, 1, 2]), 5, prepared(tmp_path), chunk_bytes=64)
     chunks = sorted((tmp_path / 'chromosomes' / '22' / 'records').iterdir())
     assert [chunk.name for chunk in chunks] == ['00000', '00001', '00002']
     rows = [sorted(pl.read_parquet(chunk / '*.parquet')['row'].to_list()) for chunk in chunks]
@@ -64,24 +60,24 @@ def test_split_records_writes_each_record_under_the_chunk_of_its_row(tmp_path: P
 
 def test_split_records_fails_on_a_missing_record(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='2 fastVEP records for 3 rows'):
-        split_records(fastvep_json(tmp_path / 'out.json', [0, 2]), 3, shared(tmp_path), '22')
+        split_records(fastvep_json(tmp_path / 'out.json', [0, 2]), 3, prepared(tmp_path))
 
 
 def test_split_records_fails_on_an_id_repeated_across_slices(tmp_path: Path) -> None:
     path = fastvep_json(tmp_path / 'out.json', [0, 1, 0])
     with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.2 '):
-        split_records(path, 3, shared(tmp_path), '22', chunk_bytes=64)
+        split_records(path, 3, prepared(tmp_path), chunk_bytes=64)
 
 
 def test_split_records_fails_on_an_id_repeated_within_a_slice(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.1 '):
-        split_records(fastvep_json(tmp_path / 'out.json', [1, 1]), 2, shared(tmp_path), '22')
+        split_records(fastvep_json(tmp_path / 'out.json', [1, 1]), 2, prepared(tmp_path))
 
 
 @pytest.mark.parametrize('ids', [[0, 2], [-1, 0]])
 def test_split_records_fails_on_an_id_out_of_range(tmp_path: Path, ids: list[int]) -> None:
     with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.1 '):
-        split_records(fastvep_json(tmp_path / 'out.json', ids), 2, shared(tmp_path), '22')
+        split_records(fastvep_json(tmp_path / 'out.json', ids), 2, prepared(tmp_path))
 
 
 def test_prepared_frames_are_read_by_position_range(tmp_path: Path) -> None:
@@ -90,7 +86,7 @@ def test_prepared_frames_are_read_by_position_range(tmp_path: Path) -> None:
     frame = pl.DataFrame({'position': positions, 'value': [str(p) for p in positions]}).with_columns(
         pl.col('position').cast(pl.Int32)
     )
-    path = _by_position(frame, tmp_path / 'prepared.parquet', shared(tmp_path, row_group_rows=10))
+    path = _by_position(frame, tmp_path / 'prepared.parquet', 10)
 
     metadata = pq.ParquetFile(path).metadata
     bounds = [
