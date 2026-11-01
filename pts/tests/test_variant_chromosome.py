@@ -2,24 +2,40 @@
 
 from __future__ import annotations
 
-import json
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import polars as pl
-import pyarrow.parquet as pq
 import pytest
 
-from pts.transformers.variant.chromosome import _submit, lower_priority, split_records
-from pts.transformers.variant.prepared import (
-    ChunkSettings,
-    PreparedChromosome,
-    _by_position,
-    amino_acid_annotations,
-    in_range,
-)
+from pts.transformers.variant.chromosome import _submit, annotate_inputs, lower_priority, split_records
+from pts.transformers.variant.colocated import colocated_variants
+from pts.transformers.variant.loftee import TranscriptModel
+from pts.transformers.variant.prepared import ChunkSettings, PreparedChromosome, amino_acid_annotations
+from pts.transformers.variant.records import iter_records
+from pts.transformers.variant.sift import MATRICES
+from pts.transformers.variant.transcripts import transcript_fields
+from tests.ensembl_fixtures import cells, ddl, write_dump
+from tests.test_variant import CONTIG_LENGTH, CORE_TABLES
+from tests.test_variant_colocated import all_vars, cache_line
+from tests.test_variant_colocated import rows as colocated_rows
+from tests.variant_fixtures import fastvep_json, write_bigwig
+
+MISSENSE = {
+    'transcript_id': 'ENST_1',
+    'gene_id': 'ENSG_1',
+    'biotype': 'protein_coding',
+    'canonical': 1,
+    'consequence_terms': ['missense_variant'],
+    'impact': 'MODERATE',
+    'amino_acids': 'A/T',
+    'codons': 'Gcc/Acc',
+    'protein_end': 1,
+}
+"""The canonical consequence on `ENST_1` of chromosome 1 of `CORE_TABLES`."""
 
 
 def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
@@ -41,15 +57,6 @@ def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
         annotation_sources=0,
         amino_acid_sources=0,
     )
-
-
-def fastvep_json(path: Path, ids: list[int]) -> Path:
-    """A fastVEP JSON array, one record per id, as fastVEP writes it (a record opens on its own line)."""
-    records = [
-        {'id': str(row), 'most_severe_consequence': 'intron_variant', 'transcript_consequences': []} for row in ids
-    ]
-    path.write_text('[\n' + ',\n'.join(json.dumps(record, indent=2) for record in records) + '\n]\n')
-    return path
 
 
 def test_split_records_writes_each_record_under_the_chunk_of_its_row(tmp_path: Path) -> None:
@@ -81,27 +88,6 @@ def test_split_records_fails_on_an_id_repeated_within_a_slice(tmp_path: Path) ->
 def test_split_records_fails_on_an_id_out_of_range(tmp_path: Path, ids: list[int]) -> None:
     with pytest.raises(ValueError, match=r'ids are not the ordinals 0\.\.1 '):
         split_records(fastvep_json(tmp_path / 'out.json', ids), 2, prepared(tmp_path))
-
-
-def test_prepared_frames_are_read_by_position_range(tmp_path: Path) -> None:
-    """Prepared frames are sorted into row groups by position; a chunk reads only its range."""
-    positions = list(range(100, 0, -1))
-    frame = pl.DataFrame({'position': positions, 'value': [str(p) for p in positions]}).with_columns(
-        pl.col('position').cast(pl.Int32)
-    )
-    path = _by_position(frame, tmp_path / 'prepared.parquet', 10)
-
-    metadata = pq.ParquetFile(path).metadata
-    bounds = [
-        (metadata.row_group(i).column(0).statistics.min, metadata.row_group(i).column(0).statistics.max)
-        for i in range(metadata.num_row_groups)
-    ]
-    assert bounds == [(start, start + 9) for start in range(1, 101, 10)]
-    chunk = pl.Series([25, 18, 33])
-    scan = in_range(path, chunk)
-    assert 'SELECTION: col("position").is_between([18, 33])' in scan.explain()
-    assert [low for low, high in bounds if low <= 33 and high >= 18] == [11, 21, 31]
-    assert scan.collect()['position'].to_list() == list(range(18, 34))
 
 
 def _polars_threads() -> int:
@@ -150,3 +136,68 @@ def test_amino_acid_annotations_keep_the_accessions_of_the_chromosomes_transcrip
     found = amino_acid_annotations(path, transcripts)
     assert found.columns == ['uniprotAccession', 'aminoAcidChange', 'variantEffect']
     assert found.rows() == [('P1', 'A1T', [0.5]), ('P2', 'G2C', [0.2]), ('P1', 'M3V', [0.3])]
+
+
+@dataclass(frozen=True)
+class MemoryInputs:
+    """A chunk's inputs held in memory, with no supplementary annotation, GPN-Star score or SIFT matrix."""
+
+    chromosome: str
+    rows: pl.DataFrame
+    sequence: bytes
+    records: pl.DataFrame | None
+    transcripts: pl.DataFrame | None
+    colocated: pl.DataFrame | None
+    gerp: str
+    alphamissense: str
+    models: dict[str, TranscriptModel] = field(default_factory=dict)
+    ancestor: bytes = b''
+
+    def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
+        return pl.DataFrame(schema=MATRICES)
+
+    def annotations(self, loci: pl.DataFrame) -> list[pl.DataFrame]:
+        return []
+
+    def gpn_star(self, positions: pl.Series) -> pl.DataFrame | None:
+        return None
+
+    def amino_acids(self, keys: pl.DataFrame) -> list[pl.DataFrame]:
+        return []
+
+
+def test_annotate_inputs_on_memory_inputs(tmp_path: Path) -> None:
+    """Two canonical missense consequences; the first variant also has a colocated id, GERP and AlphaMissense."""
+    core = tmp_path / 'core'
+    core.mkdir()
+    write_dump(
+        core,
+        {name: [cells(*row) for row in table] for name, (_, table) in CORE_TABLES.items()},
+        ddl({name: columns for name, (columns, _) in CORE_TABLES.items()}),
+    )
+    alphamissense = tmp_path / 'alphamissense.tsv'
+    alphamissense.write_text(
+        '# AlphaMissense\n'
+        '#CHROM\tPOS\tREF\tALT\tgenome\tuniprot_id\ttranscript_id\tprotein_variant\tam_pathogenicity\tam_class\n'
+        'chr1\t123\tA\tG\thg38\tP1\tENST_1.1\tA1T\t0.9\tlikely_pathogenic\n'
+    )
+    frame = colocated_rows('1_123_A_G', '1_200_A_T')
+    records = fastvep_json(tmp_path / 'fastvep.json', [0, 1], [MISSENSE], most_severe='missense_variant')
+    inputs = MemoryInputs(
+        chromosome='1',
+        rows=frame,
+        sequence=b'A' * CONTIG_LENGTH,
+        records=pl.concat(iter_records(records)),
+        transcripts=transcript_fields(str(core), '1'),
+        colocated=colocated_variants(all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G')), frame),
+        gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {123: 2.5}),
+        alphamissense=str(alphamissense),
+    )
+    index = annotate_inputs(inputs, ChunkSettings())
+    assert index['variantId'].to_list() == ['1_123_A_G', '1_200_A_T']
+    assert index['rsIds'].to_list() == [['rs123'], []]
+    assert index['transcriptConsequences'].list.len().to_list() == [1, 1]
+    assert [sorted({x['method'] for x in effects}) for effects in index['variantEffect']] == [
+        ['AlphaMissense', 'GERP', 'VEP'],
+        ['VEP'],
+    ]

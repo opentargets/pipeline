@@ -6,7 +6,8 @@ what every chunk of a chromosome shares: its transcript fields, LOFTEE models, a
 colocated variants, supplementary annotations and GPN-Star scores, written in position order, and
 the amino-acid annotations of its transcripts' proteins.
 Once a chromosome's records and preparations are ready, a third pool annotates its chunks, each
-into one part of the index, reading only the prepared rows in the chunk's position range.
+into one part of the index: `PreparedChromosome.chunk` reads a chunk's inputs, and
+`annotate_inputs` annotates them without reading a prepared file.
 Workers read their inputs from paths and write into the scratch directory.
 """
 
@@ -14,8 +15,6 @@ from __future__ import annotations
 
 import multiprocessing
 import os
-import pickle
-import shutil
 from collections.abc import Callable, Generator
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from contextlib import contextmanager
@@ -27,7 +26,7 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.colocated import KEY, add_colocated
+from pts.transformers.variant.colocated import add_colocated
 from pts.transformers.variant.fastvep import run_fastvep, write_vcf
 from pts.transformers.variant.gerp import KentBigWig
 from pts.transformers.variant.gpn_star import add_gpn_star
@@ -35,7 +34,13 @@ from pts.transformers.variant.index import add_annotation, amino_acid_keys, anno
 from pts.transformers.variant.index_rows import index_rows
 from pts.transformers.variant.loftee import add_loftee
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.prepared import PreparationSources, PreparedChromosome, _write, in_range
+from pts.transformers.variant.prepared import (
+    ChunkInputs,
+    ChunkSettings,
+    PreparationSources,
+    PreparedChromosome,
+    write_complete,
+)
 from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 from pts.transformers.variant.sift import add_sift
 
@@ -112,7 +117,7 @@ def split_records(output: Path, rows: int, prepared: PreparedChromosome, chunk_b
         seen[ids] = True
         chunks = frame.with_columns((pl.col('row') // prepared.settings.chunk_rows).alias('_chunk'))
         for (chunk,), part in chunks.partition_by('_chunk', as_dict=True).items():
-            _write(part.drop('_chunk'), prepared.record_slice(int(chunk), number))
+            write_complete(part.drop('_chunk'), prepared.record_slice(int(chunk), number))
     if count != rows:
         raise ValueError(f'{output}: {count} fastVEP records for {rows} rows')
 
@@ -162,34 +167,35 @@ def prepare_chromosome(prepared: PreparedChromosome, sources: PreparationSources
     prepared.write(sources)
 
 
-def _merged(index: pl.DataFrame, prepared: PreparedChromosome) -> pl.DataFrame:
+def _merged(index: pl.DataFrame, inputs: ChunkInputs, batch_size: int) -> pl.DataFrame:
     """The index rows of a chunk with the prepared annotations of its loci merged in, by `annotate`."""
     loci = index.select('chromosome', 'position').unique()
-    variant_annotations = [
-        in_range(prepared.annotations_file(number), loci['position'])
-        .join(loci.lazy(), on=['chromosome', 'position'], how='semi')
-        .collect()
-        for number in range(prepared.annotation_sources)
-    ]
-    scores = prepared.gpn_star_file()
-    gpn_star = (
-        in_range(scores, loci['position']).filter(pl.col('position').is_in(loci['position'].implode())).collect()
-        if scores.exists()
-        else None
-    )
-    keys = amino_acid_keys(index)
-    amino_acid_annotations = [
-        pl
-        .scan_parquet(prepared.amino_acids_file(number))
-        .join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi')
-        .collect()
-        for number in range(prepared.amino_acid_sources)
-    ]
+    variant_annotations = inputs.annotations(loci)
+    gpn_star = inputs.gpn_star(loci['position'])
+    amino_acid_annotations = inputs.amino_acids(amino_acid_keys(index))
     batches = [
         annotate(batch, variant_annotations, amino_acid_annotations, gpn_star)
-        for batch in index.iter_slices(prepared.settings.batch_size)
+        for batch in index.iter_slices(batch_size)
     ]
     return pl.concat(batches).sort('position', maintain_order=True).select(variant_schema.names())
+
+
+def annotate_inputs(inputs: ChunkInputs, settings: ChunkSettings) -> pl.DataFrame:
+    """The annotated variant index of one chunk of a chromosome's rows, from its inputs."""
+    chromosome = inputs.chromosome
+    if inputs.records is None or inputs.transcripts is None:
+        variants, consequences = unannotated_frames(inputs.rows, chromosome)
+    else:
+        variants, consequences = chunk_frames(
+            inputs.records, inputs.rows, inputs.transcripts, inputs.sequence, chromosome
+        )
+    consequences = add_gerp_and_alphamissense(consequences, inputs.gerp, inputs.alphamissense, chromosome)
+    with KentBigWig(inputs.gerp) as gerp:
+        consequences = add_loftee(consequences, inputs.models, inputs.sequence, inputs.ancestor, gerp, chromosome)
+    consequences = add_sift(consequences, inputs.sift_matrices(consequences['transcript_id']))
+    variants = add_colocated(variants, inputs.colocated)
+    index = index_rows(variants, consequences, settings.hash_threshold)
+    return _merged(index, inputs, settings.batch_size)
 
 
 def annotate_chunk(prepared: PreparedChromosome, chunk: int, annotated: bool, part: Path) -> Path:
@@ -205,40 +211,11 @@ def annotate_chunk(prepared: PreparedChromosome, chunk: int, annotated: bool, pa
         `part`, which is only written once the whole chunk is annotated. The chunk's fastVEP
         records are deleted once read.
     """
-    chromosome, settings = prepared.chromosome, prepared.settings
-    offset = chunk * settings.chunk_rows
-    frame = pl.scan_parquet(prepared.rows).slice(offset, settings.chunk_rows).collect()
-    sequence = prepared.sequence()
+    inputs = prepared.chunk(chunk, annotated)
     if annotated:
-        fastvep = pl.scan_parquet(prepared.records(chunk) / '*.parquet').with_columns(pl.col('row') - offset).collect()
-        shutil.rmtree(prepared.records(chunk))
-        transcripts = pl.read_parquet(prepared.transcripts_file())
-        variants, consequences = chunk_frames(fastvep, frame, transcripts, sequence, chromosome)
-        del fastvep
-    else:
-        variants, consequences = unannotated_frames(frame, chromosome)
-    models = pickle.loads(prepared.loftee_file().read_bytes())
-    ancestor = prepared.ancestor_file().read_bytes()
-    consequences = add_gerp_and_alphamissense(consequences, prepared.gerp, prepared.alphamissense, chromosome)
-    with KentBigWig(prepared.gerp) as gerp:
-        consequences = add_loftee(consequences, models, sequence, ancestor, gerp, chromosome)
-    matrices = (
-        pl
-        .scan_parquet(prepared.sift)
-        .join(consequences.select('transcript_id').unique().lazy(), on='transcript_id', how='semi')
-        .collect()
-    )
-    consequences = add_sift(consequences, matrices)
-    located = prepared.colocated_file()
-    colocated = (
-        in_range(located, frame['position']).join(frame.lazy().select(KEY), on=KEY, how='semi').collect()
-        if located.exists()
-        else None
-    )
-    variants = add_colocated(variants, colocated)
-    index = index_rows(variants, consequences, settings.hash_threshold)
-    logger.info('Annotating {} variants of chromosome {}, chunk {}', index.height, chromosome, chunk)
-    return _write(_merged(index, prepared), part)
+        prepared.release(chunk)
+    logger.info('Annotating {} variants of chromosome {}, chunk {}', inputs.rows.height, prepared.chromosome, chunk)
+    return write_complete(annotate_inputs(inputs, prepared.settings), part)
 
 
 @dataclass(frozen=True)

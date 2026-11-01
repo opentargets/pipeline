@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from pathlib import Path
 
 import polars as pl
+import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 
 from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS
 from pts.transformers.variant.frames import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
@@ -99,3 +102,34 @@ def index_of(consequence_rows: pl.DataFrame, hash_threshold: int = 300, **update
     }
     frame = variants(**{name: [value] for name, value in variant.items()})
     return index_rows(frame, with_effects(rank_consequences(consequence_rows)), hash_threshold)
+
+
+def fastvep_json(
+    path: Path, ids: list[int], consequences: Sequence[dict] = (), most_severe: str = 'intron_variant'
+) -> Path:
+    """A fastVEP JSON array, one record per id, as fastVEP writes it (a record opens on its own line).
+
+    Every record reports `most_severe` and the transcript `consequences`.
+    """
+    records = [
+        {'id': str(row), 'most_severe_consequence': most_severe, 'transcript_consequences': [*consequences]}
+        for row in ids
+    ]
+    path.write_text('[\n' + ',\n'.join(json.dumps(record, indent=2) for record in records) + '\n]\n')
+    return path
+
+
+def write_bigwig(path: Path, chromosome: str, length: int, scores: dict[int, float]) -> str:
+    """A GERP bigWig of one contig, with a score at each of the one-based `scores` positions."""
+    bigwig = pyBigWig.open(str(path), 'w')
+    bigwig.addHeader([(chromosome, length)])
+    if scores:
+        positions = sorted(scores)
+        bigwig.addEntries(
+            [chromosome] * len(positions),
+            [position - 1 for position in positions],
+            ends=positions,
+            values=[scores[position] for position in positions],
+        )
+    bigwig.close()
+    return str(path)
