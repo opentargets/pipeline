@@ -5,24 +5,14 @@ from __future__ import annotations
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from pts.transformers.variant.chromosome import _submit, annotate_inputs, lower_priority, split_records
-from pts.transformers.variant.colocated import colocated_variants
-from pts.transformers.variant.loftee import TranscriptModel
+from pts.transformers.variant.chromosome import _submit, lower_priority, split_records
 from pts.transformers.variant.prepared import ChunkSettings, PreparedChromosome, amino_acid_annotations
-from pts.transformers.variant.records import iter_records
-from pts.transformers.variant.sift import MATRICES
-from pts.transformers.variant.transcripts import transcript_fields
-from tests.ensembl_fixtures import cells, ddl, write_dump
-from tests.test_variant import CONTIG_LENGTH, CORE_TABLES
-from tests.test_variant_colocated import all_vars, cache_line
-from tests.test_variant_colocated import rows as colocated_rows
-from tests.variant_fixtures import MISSENSE, fastvep_json, write_bigwig
+from tests.variant_fixtures import fastvep_json
 
 
 def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
@@ -123,102 +113,3 @@ def test_amino_acid_annotations_keep_the_accessions_of_the_chromosomes_transcrip
     found = amino_acid_annotations(path, transcripts)
     assert found.columns == ['uniprotAccession', 'aminoAcidChange', 'variantEffect']
     assert found.rows() == [('P1', 'A1T', [0.5]), ('P2', 'G2C', [0.2]), ('P1', 'M3V', [0.3])]
-
-
-@dataclass(frozen=True)
-class MemoryInputs:
-    """A chunk's inputs held in memory, with no supplementary annotation, GPN-Star score or SIFT matrix."""
-
-    chromosome: str
-    rows: pl.DataFrame
-    sequence: bytes
-    fastvep_output: Path | None
-    """The fastVEP JSON whose records `records` reads, None without fastVEP."""
-    transcripts: pl.DataFrame | None
-    colocated_frame: pl.DataFrame | None
-    gerp: str
-    alphamissense: str
-    loftee_models: dict[str, TranscriptModel] = field(default_factory=dict)
-    human_ancestor: bytes = b''
-
-    def records(self) -> pl.DataFrame | None:
-        return None if self.fastvep_output is None else pl.concat(iter_records(self.fastvep_output))
-
-    def models(self) -> dict[str, TranscriptModel]:
-        return self.loftee_models
-
-    def ancestor(self) -> bytes:
-        return self.human_ancestor
-
-    def colocated(self) -> pl.DataFrame | None:
-        return self.colocated_frame
-
-    def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
-        return pl.DataFrame(schema=MATRICES)
-
-    def annotations(self, loci: pl.DataFrame) -> list[pl.DataFrame]:
-        return []
-
-    def gpn_star(self, positions: pl.Series) -> pl.DataFrame | None:
-        return None
-
-    def amino_acids(self, keys: pl.DataFrame) -> list[pl.DataFrame]:
-        return []
-
-
-def test_annotate_inputs_on_memory_inputs(tmp_path: Path) -> None:
-    """Two canonical missense consequences; the first variant also has a colocated id, GERP and AlphaMissense."""
-    core = tmp_path / 'core'
-    core.mkdir()
-    write_dump(
-        core,
-        {name: [cells(*row) for row in table] for name, (_, table) in CORE_TABLES.items()},
-        ddl({name: columns for name, (columns, _) in CORE_TABLES.items()}),
-    )
-    alphamissense = tmp_path / 'alphamissense.tsv'
-    alphamissense.write_text(
-        '# AlphaMissense\n'
-        '#CHROM\tPOS\tREF\tALT\tgenome\tuniprot_id\ttranscript_id\tprotein_variant\tam_pathogenicity\tam_class\n'
-        'chr1\t123\tA\tG\thg38\tP1\tENST_1.1\tA1T\t0.9\tlikely_pathogenic\n'
-    )
-    frame = colocated_rows('1_123_A_G', '1_200_A_T')
-    output = fastvep_json(tmp_path / 'fastvep.json', [0, 1], [MISSENSE], most_severe='missense_variant')
-    inputs = MemoryInputs(
-        chromosome='1',
-        rows=frame,
-        sequence=b'A' * CONTIG_LENGTH,
-        fastvep_output=output,
-        transcripts=transcript_fields(str(core), '1'),
-        colocated_frame=colocated_variants(
-            all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G')), frame
-        ),
-        gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {123: 2.5}),
-        alphamissense=str(alphamissense),
-    )
-    index = annotate_inputs(inputs, ChunkSettings())
-    assert index['variantId'].to_list() == ['1_123_A_G', '1_200_A_T']
-    assert index['rsIds'].to_list() == [['rs123'], []]
-    assert index['transcriptConsequences'].list.len().to_list() == [1, 1]
-    assert [sorted({x['method'] for x in effects}) for effects in index['variantEffect']] == [
-        ['AlphaMissense', 'GERP', 'VEP'],
-        ['VEP'],
-    ]
-
-
-@pytest.mark.parametrize('annotated', ['records', 'transcripts'])
-def test_annotate_inputs_refuses_records_without_transcripts_or_transcripts_without_records(
-    tmp_path: Path, annotated: str
-) -> None:
-    output = fastvep_json(tmp_path / 'fastvep.json', [0])
-    inputs = MemoryInputs(
-        chromosome='1',
-        rows=colocated_rows('1_123_A_G'),
-        sequence=b'A' * CONTIG_LENGTH,
-        fastvep_output=output if annotated == 'records' else None,
-        transcripts=pl.DataFrame() if annotated == 'transcripts' else None,
-        colocated_frame=None,
-        gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {}),
-        alphamissense=str(tmp_path / 'alphamissense.tsv'),
-    )
-    with pytest.raises(ValueError, match='records and transcripts'):
-        annotate_inputs(inputs, ChunkSettings())

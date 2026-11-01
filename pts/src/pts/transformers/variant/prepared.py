@@ -4,8 +4,8 @@ A `PreparedChromosome` names a chromosome's rows, reference contig and per-chrom
 and the files `write` prepares under its directory: its transcript fields, LOFTEE models,
 ancestor contig, colocated variants, supplementary annotations and GPN-Star scores, the last
 three sorted by position, and the amino-acid annotations of its transcripts' proteins. It holds
-only paths, strings and numbers, so it crosses a spawn pool. Its `chunk` reads one chunk's
-`ChunkInputs` from those files, the position-sorted ones only in the chunk's position range.
+only paths, strings and numbers, so it crosses a spawn pool. Its `chunk` gives one chunk's
+`PreparedChunk`, which reads those files, the position-sorted ones only in the chunk's position range.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import pickle
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
 
 import polars as pl
 from loguru import logger
@@ -262,75 +261,9 @@ class PreparedChromosome:
         shutil.rmtree(self.records(chunk))
 
 
-class ChunkInputs(Protocol):
-    """What the annotation of one chunk of a chromosome's rows reads."""
-
-    @property
-    def chromosome(self) -> str:
-        """The chromosome of the rows."""
-        ...
-
-    @property
-    def rows(self) -> pl.DataFrame:
-        """The chunk's rows."""
-        ...
-
-    @property
-    def sequence(self) -> bytes:
-        """The chromosome's reference, empty for a contig the reference lacks."""
-        ...
-
-    @property
-    def transcripts(self) -> pl.DataFrame | None:
-        """The chromosome's `transcript_fields`, None without fastVEP."""
-        ...
-
-    @property
-    def gerp(self) -> str:
-        """The GERP bigWig."""
-        ...
-
-    @property
-    def alphamissense(self) -> str:
-        """The chromosome's AlphaMissense predictions."""
-        ...
-
-    def records(self) -> pl.DataFrame | None:
-        """The chunk's fastVEP records, `row` the ordinal in `rows`, read anew on each call; None without fastVEP."""
-        ...
-
-    def models(self) -> dict[str, TranscriptModel]:
-        """The chromosome's `loftee_models`, read anew on each call; empty without fastVEP."""
-        ...
-
-    def ancestor(self) -> bytes:
-        """The chromosome's human ancestor, read anew on each call; empty without fastVEP."""
-        ...
-
-    def colocated(self) -> pl.DataFrame | None:
-        """The colocated variants of the chunk's rows, read anew on each call; None without `all_vars`."""
-        ...
-
-    def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
-        """The SIFT matrices of the transcripts."""
-        ...
-
-    def annotations(self, loci: pl.DataFrame) -> list[pl.DataFrame]:
-        """Each supplementary variant annotation source's rows at the `chromosome`, `position` loci."""
-        ...
-
-    def gpn_star(self, positions: pl.Series) -> pl.DataFrame | None:
-        """The GPN-Star scores at the positions, None for a chromosome without GPN-Star scores."""
-        ...
-
-    def amino_acids(self, keys: pl.DataFrame) -> list[pl.DataFrame]:
-        """Each amino-acid annotation source's rows on the `uniprotAccession`, `aminoAcidChange` keys."""
-        ...
-
-
 @dataclass(frozen=True)
 class PreparedChunk:
-    """The `ChunkInputs` of one chunk, read from its chromosome's prepared files."""
+    """What the annotation of one chunk of a chromosome's rows reads, from its chromosome's prepared files."""
 
     chromosome: str
     rows: pl.DataFrame

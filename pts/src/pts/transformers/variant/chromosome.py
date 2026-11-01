@@ -6,8 +6,8 @@ what every chunk of a chromosome shares: its transcript fields, LOFTEE models, a
 colocated variants, supplementary annotations and GPN-Star scores, written in position order, and
 the amino-acid annotations of its transcripts' proteins.
 Once a chromosome's records and preparations are ready, a third pool annotates its chunks, each
-into one part of the index: `PreparedChromosome.chunk` reads a chunk's inputs, and
-`annotate_inputs` annotates them without reading a prepared file.
+into one part of the index: `PreparedChromosome.chunk` gives a chunk's inputs, and
+`annotate_inputs` annotates them.
 Workers read their inputs from paths and write into the scratch directory.
 """
 
@@ -35,10 +35,10 @@ from pts.transformers.variant.index_rows import index_rows
 from pts.transformers.variant.loftee import add_loftee
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.prepared import (
-    ChunkInputs,
     ChunkSettings,
     PreparationSources,
     PreparedChromosome,
+    PreparedChunk,
     write_complete,
 )
 from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
@@ -166,7 +166,7 @@ def prepare_chromosome(prepared: PreparedChromosome, sources: PreparationSources
     prepared.write(sources)
 
 
-def _merged(index: pl.DataFrame, inputs: ChunkInputs, batch_size: int) -> pl.DataFrame:
+def _merged(index: pl.DataFrame, inputs: PreparedChunk, batch_size: int) -> pl.DataFrame:
     """The index rows of a chunk with the prepared annotations of its loci merged in, by `annotate`."""
     loci = index.select('chromosome', 'position').unique()
     variant_annotations = inputs.annotations(loci)
@@ -179,7 +179,7 @@ def _merged(index: pl.DataFrame, inputs: ChunkInputs, batch_size: int) -> pl.Dat
     return pl.concat(batches).sort('position', maintain_order=True).select(variant_schema.names())
 
 
-def annotate_inputs(inputs: ChunkInputs, settings: ChunkSettings) -> pl.DataFrame:
+def annotate_inputs(inputs: PreparedChunk, settings: ChunkSettings) -> pl.DataFrame:
     """The annotated variant index of one chunk of a chromosome's rows, from its inputs.
 
     Raises:

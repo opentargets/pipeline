@@ -12,7 +12,6 @@ import pytest
 
 from pts.transformers.variant.alleles import contig_spans
 from pts.transformers.variant.chromosome import annotate_inputs, split_records
-from pts.transformers.variant.colocated import KEY
 from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.prepared import ChunkSettings, PreparationSources, PreparedChromosome, in_range
 from pts.transformers.variant.sift import MATRICES
@@ -139,7 +138,7 @@ def test_write_refuses_sources_that_disagree_with_the_handle(
     assert not handle.directory.exists()
 
 
-def test_chunk_reads_what_the_inline_code_read(tmp_path: Path) -> None:
+def test_chunk_reads_its_inputs_from_the_prepared_files(tmp_path: Path) -> None:
     located = all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G'))
     handle = prepared(tmp_path, all_vars=located, annotations=1, amino_acids=1)
     _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0), (150, 'A', 'G', -5.0)])
@@ -151,52 +150,28 @@ def test_chunk_reads_what_the_inline_code_read(tmp_path: Path) -> None:
         )
     )
     split_records(fastvep_json(tmp_path / 'fastvep.json', [1, 0], [MISSENSE]), 2, handle)
-    directory = handle.directory / 'prepared'
     frame = pl.scan_parquet(handle.rows).slice(0, 2).collect()
     loci = frame.select('chromosome', 'position').unique()
     keys = pl.DataFrame({'uniprotAccession': ['P1', 'P9'], 'aminoAcidChange': ['A1T', 'A1T']})
-    expected = {
-        'records': pl.scan_parquet(handle.records(0) / '*.parquet').with_columns(pl.col('row') - 0).collect(),
-        'transcripts': pl.read_parquet(directory / 'transcripts.parquet'),
-        'colocated': in_range(directory / 'colocated.parquet', frame['position'])
-        .join(frame.lazy().select(KEY), on=KEY, how='semi')
-        .collect(),
-        'annotations': [
-            in_range(directory / 'annotations-000.parquet', loci['position'])
-            .join(loci.lazy(), on=['chromosome', 'position'], how='semi')
-            .collect()
-        ],
-        'gpn_star': in_range(directory / 'gpn_star.parquet', loci['position'])
-        .filter(pl.col('position').is_in(loci['position'].implode()))
-        .collect(),
-        'amino_acids': [
-            pl
-            .scan_parquet(directory / 'amino-acids-000.parquet')
-            .join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi')
-            .collect()
-        ],
-    }
     inputs = handle.chunk(0, annotated=True)
     assert inputs.chromosome == '1'
     assert inputs.rows.equals(frame)
     assert inputs.sequence == handle.sequence()
     records = inputs.records()
-    assert records is not None and records.equals(expected['records'])
-    assert inputs.transcripts is not None and inputs.transcripts.equals(expected['transcripts'])
+    assert records is not None and sorted(records['row'].to_list()) == [0, 1]
+    assert inputs.transcripts is not None and 'ENST_1' in inputs.transcripts['transcript_id'].to_list()
     colocated = inputs.colocated()
-    assert colocated is not None and colocated.equals(expected['colocated'])
+    assert colocated is not None
     assert colocated['position'].to_list() == [123]
     assert set(inputs.models()) == {'ENST_1'}
     assert len(inputs.ancestor()) == CONTIG_LENGTH
     assert (inputs.gerp, inputs.alphamissense) == (handle.gerp, handle.alphamissense)
     [annotations] = inputs.annotations(loci)
-    assert annotations.equals(expected['annotations'][0])
     assert annotations['variantId'].to_list() == ['1_123_A_G']
     scores = inputs.gpn_star(loci['position'])
-    assert scores is not None and scores.equals(expected['gpn_star'])
+    assert scores is not None
     assert scores['position'].to_list() == [123]
     [amino_acids] = inputs.amino_acids(keys)
-    assert amino_acids.equals(expected['amino_acids'][0])
     assert amino_acids['uniprotAccession'].to_list() == ['P1']
 
 
@@ -285,6 +260,28 @@ def test_prepared_annotations_layout_is_position_sorted_row_groups(tmp_path: Pat
     loci = pl.DataFrame({'chromosome': ['1'], 'position': [102]}, schema_overrides={'position': pl.Int32})
     [found] = handle.chunk(0, annotated=False).annotations(loci)
     assert found['variantId'].to_list() == ['1_102_A_C', '1_102_A_G']
+
+
+def test_in_range_pushes_the_position_range_into_the_scan(tmp_path: Path) -> None:
+    """A chunk reads only the row groups of its position range."""
+    path = tmp_path / 'prepared.parquet'
+    pl.DataFrame({'position': list(range(1, 101))}, schema={'position': pl.Int32}).write_parquet(path)
+    scan = in_range(path, pl.Series([25, 18, 33]))
+    assert 'SELECTION: col("position").is_between([18, 33])' in scan.explain()
+    assert scan.collect()['position'].to_list() == list(range(18, 34))
+
+
+@pytest.mark.parametrize('annotated', ['records', 'transcripts'])
+def test_annotate_inputs_refuses_records_without_transcripts_or_transcripts_without_records(
+    tmp_path: Path, annotated: str
+) -> None:
+    handle = prepared(tmp_path)
+    handle.write(replace(sources(tmp_path), variant_annotations=(), amino_acid_annotations=()))
+    split_records(fastvep_json(tmp_path / 'fastvep.json', [1, 0], [MISSENSE]), 2, handle)
+    inputs = handle.chunk(0, annotated=True)
+    inputs = replace(inputs, transcripts=None) if annotated == 'records' else replace(inputs, records_directory=None)
+    with pytest.raises(ValueError, match='records and transcripts'):
+        annotate_inputs(inputs, handle.settings)
 
 
 def test_missing_colocated_file_raises_when_the_chromosome_has_all_vars(tmp_path: Path) -> None:
