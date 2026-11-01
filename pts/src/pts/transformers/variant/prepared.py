@@ -46,14 +46,10 @@ class ChunkSettings:
 class PreparationSources:
     """The local inputs every chromosome's preparation reads."""
 
-    gerp: str
-    """The local GERP bigWig."""
     ancestor: str
     """The local gzip human ancestor FASTA."""
     core: str
     """Directory of the local Ensembl core database dump."""
-    sift: Path
-    """`sift_matrices`, as Parquet."""
     variant_annotations: tuple[dict[str, list[str]], ...] = ()
     """The Parquet parts of each supplementary variant annotation source, by chromosome."""
     amino_acid_annotations: tuple[Path, ...] = ()
@@ -142,6 +138,10 @@ class PreparedChromosome:
         """The directory of one chunk's fastVEP records."""
         return self.directory / 'records' / f'{chunk:05d}'
 
+    def record_slice(self, chunk: int, number: int) -> Path:
+        """The file of one chunk's records from the `number`-th slice of the fastVEP output."""
+        return self.records(chunk) / f'{number:05d}.parquet'
+
     @property
     def _prepared(self) -> Path:
         return self.directory / 'prepared'
@@ -177,8 +177,15 @@ class PreparedChromosome:
         three sorted by position, and the amino-acid annotations of its transcripts' proteins.
 
         Raises:
+            ValueError: if `sources` has a number of annotation sources other than the handle's.
             FileExistsError: if the chromosome is already, or partly, prepared.
         """
+        counts = (len(sources.variant_annotations), len(sources.amino_acid_annotations))
+        if counts != (self.annotation_sources, self.amino_acid_sources):
+            raise ValueError(
+                f'chromosome {self.chromosome}: {counts} variant and amino-acid annotation sources for a handle '
+                f'of {(self.annotation_sources, self.amino_acid_sources)}'
+            )
         chromosome, row_group_rows = self.chromosome, self.settings.row_group_rows
         frame = pl.read_parquet(self.rows)
         self._prepared.mkdir(parents=True)

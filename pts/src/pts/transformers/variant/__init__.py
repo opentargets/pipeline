@@ -226,16 +226,15 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
         ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
         plain_fasta, contigs, gff3 = reference.result()
         preparation = PreparationSources(
-            gerp=gerp.result(),
             ancestor=ancestor.result(),
             core=core.result(),
-            sift=sift.result(),
             variant_annotations=tuple(located),
             amino_acid_annotations=amino_acids,
             gpn_star=gpn_star if options.gpn_star is not None else {},
             gpn_star_cutoffs=options.gpn_star,
         )
         extracted, partitions = all_vars.result(), alphamissense.result()
+        gerp_path, sift_path = gerp.result(), sift.result()
     settings = ChunkSettings(
         chunk_rows=options.chunk_rows, batch_size=options.batch_size, hash_threshold=options.hash_threshold
     )
@@ -248,11 +247,11 @@ def _parts(sources: VariantSource, options: VariantSettings, scratch: Path) -> l
             span=contigs.get(chromosome),
             all_vars=extracted.get(chromosome),
             alphamissense=partitions[chromosome],
-            gerp=preparation.gerp,
-            sift=preparation.sift,
+            gerp=gerp_path,
+            sift=sift_path,
             settings=settings,
-            annotation_sources=len(located),
-            amino_acid_sources=len(amino_acids),
+            annotation_sources=len(preparation.variant_annotations),
+            amino_acid_sources=len(preparation.amino_acid_annotations),
         )
         for chromosome, path in rows.items()
     }

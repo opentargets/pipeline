@@ -112,7 +112,7 @@ def split_records(output: Path, rows: int, prepared: PreparedChromosome, chunk_b
         seen[ids] = True
         chunks = frame.with_columns((pl.col('row') // prepared.settings.chunk_rows).alias('_chunk'))
         for (chunk,), part in chunks.partition_by('_chunk', as_dict=True).items():
-            _write(part.drop('_chunk'), prepared.records(int(chunk)) / f'{number:05d}.parquet')
+            _write(part.drop('_chunk'), prepared.record_slice(int(chunk), number))
     if count != rows:
         raise ValueError(f'{output}: {count} fastVEP records for {rows} rows')
 

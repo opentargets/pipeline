@@ -61,10 +61,8 @@ def sources(directory: Path) -> PreparationSources:
         'variantEffect': [[0.5], [0.1]],
     }).write_parquet(foldx)
     return PreparationSources(
-        gerp=str(directory / 'gerp.bw'),
         ancestor=write_bgzip_fasta(directory / 'ancestor.fa.gz', {'1': (CONTIG_LENGTH, 1, 'a' * CONTIG_LENGTH)}),
         core=str(core),
-        sift=directory / 'sift.parquet',
         variant_annotations=({'1': [str(annotations)]},),
         amino_acid_annotations=(foldx,),
     )
@@ -85,6 +83,7 @@ def test_sequence_of_a_contig_the_reference_lacks_is_empty(tmp_path: Path) -> No
 def test_records_are_one_directory_per_chunk(tmp_path: Path) -> None:
     handle = prepared(tmp_path)
     assert handle.records(3) == tmp_path / 'chromosomes' / '1' / 'records' / '00003'
+    assert handle.record_slice(3, 12) == handle.records(3) / '00012.parquet'
 
 
 def test_writing_over_an_existing_preparation_raises(tmp_path: Path) -> None:
@@ -112,3 +111,13 @@ def test_write_produces_the_prepared_files(tmp_path: Path) -> None:
     assert pl.read_parquet(directory / 'annotations-000.parquet')['variantId'].to_list() == ['1_123_A_G']
     assert pl.read_parquet(directory / 'amino-acids-000.parquet')['uniprotAccession'].to_list() == ['P1']
     assert pl.read_parquet(directory / 'transcripts.parquet')['transcript_id'].to_list() == ['ENST_1']
+
+
+@pytest.mark.parametrize(('annotations', 'amino_acids'), [(0, 1), (2, 1), (1, 0), (1, 2)])
+def test_write_refuses_sources_that_disagree_with_the_handle(
+    tmp_path: Path, annotations: int, amino_acids: int
+) -> None:
+    handle = prepared(tmp_path, annotations=annotations, amino_acids=amino_acids)
+    with pytest.raises(ValueError, match='sources'):
+        handle.write(sources(tmp_path))
+    assert not handle.directory.exists()

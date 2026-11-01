@@ -23,7 +23,10 @@ from pts.transformers.variant.prepared import (
 
 
 def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
-    """A handle on chromosome 22 for the units that only read its scratch directory and chunk settings."""
+    """A handle on chromosome 22 for the units that only read its scratch directory and chunk settings.
+
+    Its input paths are never read.
+    """
     return PreparedChromosome(
         chromosome='22',
         directory=directory / 'chromosomes' / '22',
