@@ -42,7 +42,6 @@ from pts.transformers.variant.index_rows import (
     generate_dbxrefs,
     index_rows,
     uniprot_accessions,
-    variant_effect,
 )
 from pts.transformers.variant.records import chunk_frames, iter_records
 from pts.transformers.variant.rows import collect_variants
@@ -643,7 +642,7 @@ def test_amino_acid_keys_cover_every_transcript_change():
         {'variantId': 'v1', 'transcriptConsequences': [_consequence('A1T', ['P1', 'P2']), _consequence('C2G', [])]},
         {'variantId': 'v2', 'transcriptConsequences': [_consequence(None, ['P3'])]},
     ])
-    keys = amino_acid_keys(index.lazy()).collect().sort('uniprotAccession').rows()
+    keys = amino_acid_keys(index).sort('uniprotAccession').rows()
     assert keys == [('P1', 'A1T'), ('P2', 'A1T')]
 
 
@@ -1208,28 +1207,21 @@ def test_chunked_step_matches_an_unchunked_run(tmp_path, step_inputs):
     assert chunked.equals(annotate(without_foldx, [], [foldx]))
 
 
-def _loftee(transcripts: list[dict], ranked: bool) -> tuple[str, str, str | None]:
-    """The LOFTEE effect's (targetId, assessment, flag): from index_rows, or as before db4074c1, in fastVEP's order."""
-    if ranked:
-        effects = parsed(most_severe_consequence='stop_gained', transcripts=transcripts)['variantEffect']
-        [found] = [x for x in effects if x['method'] == 'LOFTEE']
-    else:
-        in_order = with_effects(consequence_frame(*transcripts)).with_columns(
-            pl.int_range(1, pl.len() + 1, dtype=pl.Int32).over('row').alias('rank')
-        )
-        [found] = variant_effect(in_order, 'LOFTEE', 'lof', 'lof', 'lof_filter')['LOFTEE'].to_list()
+def _loftee(transcripts: list[dict]) -> tuple[str, str, str | None]:
+    """The LOFTEE effect's (targetId, assessment, flag), from index_rows."""
+    effects = parsed(most_severe_consequence='stop_gained', transcripts=transcripts)['variantEffect']
+    [found] = [x for x in effects if x['method'] == 'LOFTEE']
     return found['targetId'], found['assessment'], found['assessmentFlag']
 
 
-@pytest.mark.parametrize('ranked', [False, True])
-def test_loftee_tie_rule_names_the_transcript_but_never_changes_hc_against_lc(ranked):
-    """`LC` beats `HC` on the string, in any order and either rule; only equal calls fall to the order."""
+def test_loftee_tie_rule_names_the_transcript_but_never_changes_hc_against_lc():
+    """`LC` beats `HC` on the string, in any order; only equal calls fall to the order."""
     high = transcript(gene_id='top', transcript_id='ENST1', consequence_terms=['stop_gained'], lof='HC')
     low = transcript(
         gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='F'
     )
     for order in ([high, low], [low, high]):
-        assert _loftee(order, ranked) == ('lower', 'LC', 'F')
+        assert _loftee(order) == ('lower', 'LC', 'F')
 
 
 def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_before():
@@ -1238,5 +1230,11 @@ def test_loftee_tie_between_equal_calls_follows_the_rank_now_and_record_order_be
     lower = transcript(
         gene_id='lower', transcript_id='ENST2', consequence_terms=['intron_variant'], lof='LC', lof_filter='B'
     )
-    assert _loftee([lower, top], ranked=False) == ('lower', 'LC', 'B')
-    assert _loftee([lower, top], ranked=True) == ('top', 'LC', 'A')
+    assert _loftee([lower, top]) == ('top', 'LC', 'A')
+
+
+def test_index_rows_names_a_missing_effect_column():
+    frame = variants(**{name: [value] for name, value in {**VARIANT, 'reported_transcripts': True}.items()})
+    found = with_effects(consequence_frame(transcript())).drop('sift_score')
+    with pytest.raises(ValueError, match='sift_score'):
+        index_rows(frame, found)

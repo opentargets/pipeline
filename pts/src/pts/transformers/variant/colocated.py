@@ -10,6 +10,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.variant.alleles import shared_prefix_length, vep_allele_form
+from pts.transformers.variant.frames import ID_LISTS
 
 KEY = ['chromosome', 'position', 'referenceAllele', 'alternateAllele']
 CACHE_COLUMNS = {
@@ -23,9 +24,6 @@ CACHE_COLUMNS = {
     'var_synonyms': 14,
 }
 """The `all_vars` columns read, by their zero-based index in the cache's `variation_cols`."""
-
-ID_LISTS = pl.Schema({'rsIds': pl.List(pl.String), 'clinvarIds': pl.List(pl.String), 'omimIds': pl.List(pl.String)})
-"""The identifiers of each row's colocated variants, as `colocated_variants` returns them."""
 
 
 def extract_all_vars(tarball: str, directory: Path) -> dict[str, Path]:

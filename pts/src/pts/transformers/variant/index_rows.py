@@ -13,6 +13,7 @@ import polars as pl
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY, consequence_score
+from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS, VARIANTS_SCHEMA, require
 from pts.transformers.variant.index import fill_null_arrays, normalise_score
 from pts.transformers.variant.sift import SEVERITY
 
@@ -57,10 +58,13 @@ def _effect(
     )
 
 
-def variant_effect(
+def _variant_effect(
     consequences: pl.DataFrame, method: str, score: str, assessment: str | None = None, flag: str | None = None
 ) -> pl.DataFrame:
-    """`row` and the predictor's effect, as `method`, from the first transcript with its row's highest score."""
+    """`row` and the predictor's effect, as `method`, from the first transcript with its row's highest score.
+
+    Takes consequences in (row, rank) order.
+    """
 
     def field(name: str | None) -> pl.Expr:
         return pl.lit(None, dtype=pl.String) if name is None else pl.col(name).cast(pl.String)
@@ -71,8 +75,11 @@ def variant_effect(
     )
 
 
-def sift_effect(consequences: pl.DataFrame) -> pl.DataFrame:
-    """`row` and SIFT from the transcript with the lowest score, then the more severe prediction, then the lowest id."""
+def _sift_effect(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and SIFT from the transcript with the lowest score, then the more severe prediction, then the lowest id.
+
+    Takes consequences in (row, rank) order.
+    """
     severity = {prediction: rank for rank, prediction in enumerate(SEVERITY)}
     transcripts = consequences.filter(pl.col('sift_score').is_not_null()).sort(
         'row',
@@ -89,8 +96,11 @@ def sift_effect(consequences: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def alpha_missense_effect(consequences: pl.DataFrame) -> pl.DataFrame:
-    """`row` and AlphaMissense from the first transcript that has a prediction."""
+def _alpha_missense_effect(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and AlphaMissense from the first transcript that has a prediction.
+
+    Takes consequences in (row, rank) order.
+    """
     return _picked(
         consequences.filter(pl.col('am_class').is_not_null()),
         _effect(
@@ -133,8 +143,11 @@ def uniprot_accessions(swissprot: pl.Expr, trembl: pl.Expr) -> pl.Expr:
     )
 
 
-def transcript_consequences(consequences: pl.DataFrame) -> pl.DataFrame:
-    """`row` and its transcript consequences in the index's order, numbered; unscored transcripts are dropped."""
+def _transcript_consequences(consequences: pl.DataFrame) -> pl.DataFrame:
+    """`row` and its transcript consequences in the index's order, numbered; unscored transcripts are dropped.
+
+    Takes consequences in (row, rank) order.
+    """
     terms = pl.col('consequence_terms')
     score = consequence_score(terms).cast(pl.Float32)
     return (
@@ -264,18 +277,21 @@ def variant_description(consequence: pl.Expr, transcripts: pl.Expr) -> pl.Expr:
 def index_rows(variants: pl.DataFrame, consequences: pl.DataFrame, hash_threshold: int = 300) -> pl.DataFrame:
     """The variant index rows of a chunk, one per variant with a position, in row order.
 
-    `variants` carries the `ID_LISTS` of `add_colocated`, and `consequences` the effect columns; the effect builders
-    take consequences in `rank` order within each row, as `index_rows` sorts them.
+    `variants` carries the `VARIANTS_SCHEMA` columns and the `ID_LISTS` of `add_colocated`, and `consequences` the
+    `CONSEQUENCES_SCHEMA` and `EFFECTS_SCHEMA` columns. Consequences are sorted into (row, rank) order here, once,
+    and the effect builders take them in that order.
     Effects whose score ties between transcripts come from the transcript ranked first.
     """
+    require(variants, VARIANTS_SCHEMA | ID_LISTS, 'variants')
+    require(consequences, CONSEQUENCES_SCHEMA | EFFECTS_SCHEMA, 'consequences')
     consequence = pl.col('most_severe_consequence')
     consequences = consequences.sort('row', 'rank', maintain_order=True)
     effects = [
-        sift_effect(consequences),
-        variant_effect(consequences, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
-        variant_effect(consequences, 'GERP', 'conservation'),
-        alpha_missense_effect(consequences),
-        transcript_consequences(consequences),
+        _sift_effect(consequences),
+        _variant_effect(consequences, 'LOFTEE', 'lof', 'lof', 'lof_filter'),
+        _variant_effect(consequences, 'GERP', 'conservation'),
+        _alpha_missense_effect(consequences),
+        _transcript_consequences(consequences),
     ]
     frame = variants
     for found in effects:
@@ -340,4 +356,4 @@ def index_rows(variants: pl.DataFrame, consequences: pl.DataFrame, hash_threshol
         .filter(pl.col('position').is_not_null())
         .select(variant_schema.names())
     )
-    return fill_null_arrays(result.lazy()).collect()
+    return fill_null_arrays(result)

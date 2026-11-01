@@ -6,21 +6,10 @@ from collections.abc import Sequence
 
 import polars as pl
 
-from pts.transformers.variant.colocated import ID_LISTS
+from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS
+from pts.transformers.variant.frames import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
 from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA, rank_consequences
-from pts.transformers.variant.records import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
-
-EFFECTS_SCHEMA = pl.Schema({
-    'conservation': pl.Float64,
-    'am_class': pl.String,
-    'am_pathogenicity': pl.Float64,
-    'lof': pl.String,
-    'lof_filter': pl.String,
-    'sift_score': pl.Float64,
-    'sift_prediction': pl.String,
-})
-"""The columns the effects add to the consequences frame."""
+from pts.transformers.variant.records import rank_consequences
 
 VARIANTS_SCHEMA = BASE_VARIANTS_SCHEMA | ID_LISTS
 """The columns of the variants frame, with the colocated id lists `add_colocated` adds."""

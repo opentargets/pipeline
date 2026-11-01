@@ -11,8 +11,8 @@ import pytest
 
 from pts.transformers.variant import predictions
 from pts.transformers.variant.alleles import vep_allele_form
+from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 from tests.variant_fixtures import consequences
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'

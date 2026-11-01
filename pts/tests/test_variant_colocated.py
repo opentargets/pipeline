@@ -12,7 +12,8 @@ import polars as pl
 import pytest
 
 from pts.transformers.variant.alleles import shared_prefix_length
-from pts.transformers.variant.colocated import ID_LISTS, KEY, _keys, add_colocated, colocated_variants, extract_all_vars
+from pts.transformers.variant.colocated import KEY, _keys, add_colocated, colocated_variants, extract_all_vars
+from pts.transformers.variant.frames import ID_LISTS
 from pts.transformers.variant.index_rows import index_rows
 from tests.variant_fixtures import consequences, variants, with_effects
 

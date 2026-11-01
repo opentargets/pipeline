@@ -6,13 +6,19 @@ import io
 import mmap
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NamedTuple
 
 import numpy as np
 import polars as pl
 
 from pts.transformers.variant.alleles import hgvs_genomic, vep_allele_form
 from pts.transformers.variant.consequences import RANKS, consequence_score
+from pts.transformers.variant.frames import (
+    CONSEQUENCES_SCHEMA,
+    COPIED,
+    FIELDS,
+    VARIANT_COLUMNS,
+    ChunkFrames,
+)
 
 FASTVEP_SCHEMA = pl.Schema({
     'id': pl.String,
@@ -165,65 +171,6 @@ def _consequences(records: pl.DataFrame, variants: pl.DataFrame, transcripts: pl
     )
 
 
-class ChunkFrames(NamedTuple):
-    """The annotation of one chunk: a row per variant and a row per canonical transcript consequence."""
-
-    variants: pl.DataFrame
-    consequences: pl.DataFrame
-
-
-_FIELDS = pl.Schema({
-    'transcript_id': pl.String,
-    'gene_id': pl.String,
-    'gene_symbol': pl.String,
-    'biotype': pl.String,
-    'appris': pl.String,
-    'mane_select': pl.String,
-    'tssdistance': pl.Int64,
-    'cds_end': pl.Int64,
-    'codons': pl.String,
-    'consequence_terms': pl.List(pl.String),
-    'distance': pl.Int64,
-    'impact': pl.String,
-    'amino_acids': pl.String,
-    'protein_end': pl.Int64,
-    'swissprot': pl.List(pl.String),
-    'trembl': pl.List(pl.String),
-})
-VARIANTS_SCHEMA = pl.Schema({
-    'row': pl.Int64,
-    'chromosome': pl.String,
-    'position': pl.Int32,
-    'referenceAllele': pl.String,
-    'alternateAllele': pl.String,
-    'vepStart': pl.Int64,
-    'vepEnd': pl.Int64,
-    'vepReference': pl.String,
-    'vepAlternate': pl.String,
-    'hgvsg': pl.String,
-    'most_severe_consequence': pl.String,
-    'reported_transcripts': pl.Boolean,
-})
-"""The columns of the variants frame, before `add_colocated` adds its id lists."""
-
-_COPIED = [
-    'row',
-    'position',
-    'referenceAllele',
-    'alternateAllele',
-    'vepStart',
-    'vepEnd',
-    'vepReference',
-    'vepAlternate',
-]
-CONSEQUENCES_SCHEMA = pl.Schema({
-    **{name: VARIANTS_SCHEMA[name] for name in _COPIED},
-    **_FIELDS,
-    'rank': pl.Int32,
-})
-"""The columns of the consequences frame, before any effect adds its own."""
-
-
 def _fields() -> list[pl.Expr]:
     """The transcript fields of the consequences frame, written as VEP writes them."""
     computed = {
@@ -238,7 +185,7 @@ def _fields() -> list[pl.Expr]:
         'swissprot': pl.when(pl.col('swissprot').list.len() > 0).then(pl.col('swissprot')),
         'trembl': pl.when(pl.col('trembl').list.len() > 0).then(pl.col('trembl')),
     }
-    return [computed.get(name, pl.col(name)).cast(dtype).alias(name) for name, dtype in _FIELDS.items()]
+    return [computed.get(name, pl.col(name)).cast(dtype).alias(name) for name, dtype in FIELDS.items()]
 
 
 def rank_consequences(consequences: pl.DataFrame) -> pl.DataFrame:
@@ -292,7 +239,7 @@ def chunk_frames(
             how='left',
             maintain_order='left',
         )
-        .select(*_COPIED, *_fields())
+        .select(*COPIED, *_fields())
     )
     variants = (
         variants
@@ -300,7 +247,7 @@ def chunk_frames(
         .join(severity, on='row', how='left', maintain_order='left')
         .rechunk()
         .select(
-            *VARIANTS_SCHEMA.names()[:10],
+            *VARIANT_COLUMNS,
             pl.coalesce('_most_severe', 'most_severe_consequence').alias('most_severe_consequence'),
             pl.col('_transcripts').is_not_null().alias('reported_transcripts'),
         )
@@ -314,7 +261,7 @@ def unannotated_frames(rows: pl.DataFrame, chromosome: str) -> ChunkFrames:
     Each variant is intergenic, with a null `hgvsg` and no transcript consequence.
     """
     variants = _variants(rows, b'', chromosome).select(
-        *VARIANTS_SCHEMA.names()[:10],
+        *VARIANT_COLUMNS,
         pl.lit('intergenic_variant').alias('most_severe_consequence'),
         pl.lit(False).alias('reported_transcripts'),
     )

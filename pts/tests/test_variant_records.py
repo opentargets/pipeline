@@ -11,15 +11,9 @@ from polars.testing import assert_frame_equal
 
 from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.colocated import add_colocated
+from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, VARIANTS_SCHEMA, ChunkFrames
 from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.records import (
-    CONSEQUENCES_SCHEMA,
-    FASTVEP_SCHEMA,
-    ChunkFrames,
-    chunk_frames,
-    iter_records,
-    unannotated_frames,
-)
+from pts.transformers.variant.records import FASTVEP_SCHEMA, chunk_frames, iter_records, unannotated_frames
 from tests.variant_fixtures import with_effects
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
@@ -310,3 +304,8 @@ def test_unannotated_frames_are_intergenic() -> None:
     assert row['hgvsg'] is None
     assert (row['most_severe_consequence'], row['reported_transcripts']) == ('intergenic_variant', False)
     assert index_of_frames(found)['hgvsId'].to_list() == [None]
+
+
+def test_chunk_frames_match_the_variants_schema(frames: ChunkFrames) -> None:
+    assert frames.variants.schema == VARIANTS_SCHEMA
+    assert unannotated_frames(ONE_ROW, 'Y').variants.schema == VARIANTS_SCHEMA

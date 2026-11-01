@@ -11,8 +11,8 @@ import polars as pl
 import pytest
 
 from pts.schemas.variant import variant_schema
+from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA
 from pts.transformers.variant.index import normalise_score
-from pts.transformers.variant.records import CONSEQUENCES_SCHEMA
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
 from tests.variant_fixtures import consequence_frame, index_of
 

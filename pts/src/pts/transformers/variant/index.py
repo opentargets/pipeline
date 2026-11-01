@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import overload
+
 import polars as pl
 
 from pts.schemas.variant import variant_schema
@@ -12,7 +14,11 @@ ANNOTATION_PREFIX = 'annotation_'
 _ARRAYS = [name for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
 
 
-def fill_null_arrays(frame: pl.LazyFrame) -> pl.LazyFrame:
+@overload
+def fill_null_arrays(frame: pl.DataFrame) -> pl.DataFrame: ...
+@overload
+def fill_null_arrays(frame: pl.LazyFrame) -> pl.LazyFrame: ...
+def fill_null_arrays(frame: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     """Replace null arrays with empty ones, so array unions never nullify a value."""
     return frame.with_columns(pl.col(name).fill_null([]) for name in _ARRAYS if name in frame.collect_schema())
 
@@ -184,10 +190,11 @@ def add_annotation(frame: pl.DataFrame, annotations: pl.DataFrame) -> pl.DataFra
     return pl.DataFrame(columns)
 
 
-def amino_acid_keys(frame: pl.LazyFrame) -> pl.LazyFrame:
+def amino_acid_keys(frame: pl.DataFrame) -> pl.DataFrame:
     """Every (accession, amino-acid change) pair any transcript of `frame` carries."""
     return (
         frame
+        .lazy()
         .select('transcriptConsequences')
         .explode('transcriptConsequences', keep_nulls=False)
         .unnest('transcriptConsequences')
@@ -195,6 +202,7 @@ def amino_acid_keys(frame: pl.LazyFrame) -> pl.LazyFrame:
         .drop_nulls('aminoAcidChange')
         .explode('uniprotAccession', keep_nulls=False)
         .unique()
+        .collect()
     )
 
 
