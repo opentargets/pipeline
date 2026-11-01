@@ -181,14 +181,20 @@ def _merged(index: pl.DataFrame, inputs: ChunkInputs, batch_size: int) -> pl.Dat
 
 
 def annotate_inputs(inputs: ChunkInputs, settings: ChunkSettings) -> pl.DataFrame:
-    """The annotated variant index of one chunk of a chromosome's rows, from its inputs."""
+    """The annotated variant index of one chunk of a chromosome's rows, from its inputs.
+
+    Raises:
+        ValueError: if the inputs have records without transcripts, or transcripts without records.
+    """
     chromosome = inputs.chromosome
-    if inputs.records is None or inputs.transcripts is None:
+    records = inputs.records()
+    if records is None and inputs.transcripts is None:
         variants, consequences = unannotated_frames(inputs.rows, chromosome)
+    elif records is None or inputs.transcripts is None:
+        raise ValueError(f'chromosome {chromosome}: a chunk needs both its records and transcripts, or neither')
     else:
-        variants, consequences = chunk_frames(
-            inputs.records, inputs.rows, inputs.transcripts, inputs.sequence, chromosome
-        )
+        variants, consequences = chunk_frames(records, inputs.rows, inputs.transcripts, inputs.sequence, chromosome)
+    del records
     consequences = add_gerp_and_alphamissense(consequences, inputs.gerp, inputs.alphamissense, chromosome)
     with KentBigWig(inputs.gerp) as gerp:
         consequences = add_loftee(consequences, inputs.models, inputs.sequence, inputs.ancestor, gerp, chromosome)
@@ -209,13 +215,14 @@ def annotate_chunk(prepared: PreparedChromosome, chunk: int, annotated: bool, pa
 
     Returns:
         `part`, which is only written once the whole chunk is annotated. The chunk's fastVEP
-        records are deleted once read.
+        records are deleted once it is annotated, before `part` is written.
     """
     inputs = prepared.chunk(chunk, annotated)
+    logger.info('Annotating {} variants of chromosome {}, chunk {}', inputs.rows.height, prepared.chromosome, chunk)
+    index = annotate_inputs(inputs, prepared.settings)
     if annotated:
         prepared.release(chunk)
-    logger.info('Annotating {} variants of chromosome {}, chunk {}', inputs.rows.height, prepared.chromosome, chunk)
-    return write_complete(annotate_inputs(inputs, prepared.settings), part)
+    return write_complete(index, part)
 
 
 @dataclass(frozen=True)

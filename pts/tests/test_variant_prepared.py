@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
 
 from pts.transformers.variant.alleles import contig_spans
@@ -19,19 +20,7 @@ from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant import CONTIG_LENGTH, CORE_TABLES, GPN_STAR_CUTOFFS, _write_gpn_star
 from tests.test_variant_colocated import all_vars, cache_line, rows
 from tests.test_variant_loftee import write_bgzip_fasta
-from tests.variant_fixtures import fastvep_json, write_bigwig
-
-MISSENSE = {
-    'transcript_id': 'ENST_1',
-    'gene_id': 'ENSG_1',
-    'biotype': 'protein_coding',
-    'canonical': 1,
-    'consequence_terms': ['missense_variant'],
-    'impact': 'MODERATE',
-    'amino_acids': 'A/T',
-    'codons': 'Gcc/Acc',
-    'protein_end': 1,
-}
+from tests.variant_fixtures import MISSENSE, fastvep_json, write_bigwig
 
 
 def prepared(
@@ -191,7 +180,8 @@ def test_chunk_reads_what_the_inline_code_read(tmp_path: Path) -> None:
     assert inputs.chromosome == '1'
     assert inputs.rows.equals(frame)
     assert inputs.sequence == handle.sequence()
-    assert inputs.records is not None and inputs.records.equals(expected['records'])
+    records = inputs.records()
+    assert records is not None and records.equals(expected['records'])
     assert inputs.transcripts is not None and inputs.transcripts.equals(expected['transcripts'])
     assert inputs.colocated is not None and inputs.colocated.equals(expected['colocated'])
     assert inputs.colocated['position'].to_list() == [123]
@@ -215,7 +205,7 @@ def test_unannotated_chunk_does_not_read_loftee_or_ancestor(tmp_path: Path) -> N
     for name in ('loftee.pickle', 'ancestor.bin'):
         (handle.directory / 'prepared' / name).unlink()
     inputs = handle.chunk(0, annotated=False)
-    assert (inputs.records, inputs.transcripts, inputs.models, inputs.ancestor) == (None, None, {}, b'')
+    assert (inputs.records(), inputs.transcripts, inputs.models, inputs.ancestor) == (None, None, {}, b'')
     index = annotate_inputs(inputs, handle.settings)
     assert index['variantId'].to_list() == ['1_123_A_G', '1_200_C_T']
     assert index['transcriptConsequences'].to_list() == [[], []]
@@ -245,9 +235,10 @@ def test_last_chunk_rebases_its_records(tmp_path: Path) -> None:
     split_records(fastvep_json(tmp_path / 'fastvep.json', [4, 3, 2, 1, 0], [MISSENSE]), 5, handle)
     middle, last = handle.chunk(1, annotated=True), handle.chunk(2, annotated=True)
     assert middle.rows['position'].to_list() == [103, 104]
-    assert middle.records is not None and sorted(middle.records['row'].to_list()) == [0, 1]
+    middle_records, last_records = middle.records(), last.records()
+    assert middle_records is not None and sorted(middle_records['row'].to_list()) == [0, 1]
     assert last.rows['position'].to_list() == [105]
-    assert last.records is not None and last.records['row'].to_list() == [0]
+    assert last_records is not None and last_records['row'].to_list() == [0]
     index = annotate_inputs(last, handle.settings)
     assert index['variantId'].to_list() == ['1_105_A_G']
     assert index['transcriptConsequences'].list.len().to_list() == [1]
@@ -259,3 +250,34 @@ def test_release_deletes_only_its_chunks_records(tmp_path: Path) -> None:
     handle.release(1)
     assert not handle.records(1).exists()
     assert handle.records(0).exists()
+
+
+def test_prepared_annotations_are_written_in_position_sorted_row_groups(tmp_path: Path) -> None:
+    """Six annotation rows over three positions, given unsorted, in row groups of two: one position each."""
+    handle = replace(
+        prepared(tmp_path, annotations=1, variant_ids=('1_101_A_G', '1_102_A_G', '1_103_A_G')),
+        settings=ChunkSettings(chunk_rows=2, row_group_rows=2),
+    )
+    variant_ids = ['1_103_A_G', '1_101_A_G', '1_102_A_C', '1_103_A_T', '1_101_A_C', '1_102_A_G']
+    annotations = tmp_path / 'unsorted.parquet'
+    pl.DataFrame(
+        {
+            'variantId': variant_ids,
+            'chromosome': ['1'] * len(variant_ids),
+            'position': [int(variant_id.split('_')[1]) for variant_id in variant_ids],
+        },
+        schema_overrides={'position': pl.Int32},
+    ).write_parquet(annotations)
+    handle.write(
+        replace(sources(tmp_path), variant_annotations=({'1': [str(annotations)]},), amino_acid_annotations=())
+    )
+    metadata = pq.ParquetFile(handle.directory / 'prepared' / 'annotations-000.parquet').metadata
+    column = metadata.schema.names.index('position')
+    bounds = [
+        (metadata.row_group(i).column(column).statistics.min, metadata.row_group(i).column(column).statistics.max)
+        for i in range(metadata.num_row_groups)
+    ]
+    assert bounds == [(101, 101), (102, 102), (103, 103)]
+    loci = pl.DataFrame({'chromosome': ['1'], 'position': [102]}, schema_overrides={'position': pl.Int32})
+    [found] = handle.chunk(0, annotated=False).annotations(loci)
+    assert found['variantId'].to_list() == ['1_102_A_C', '1_102_A_G']

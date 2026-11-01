@@ -16,6 +16,18 @@ from pts.transformers.variant.records import rank_consequences
 
 VARIANTS_SCHEMA = BASE_VARIANTS_SCHEMA | ID_LISTS
 """The columns of the variants frame, with the colocated id lists `add_colocated` adds."""
+MISSENSE = {
+    'transcript_id': 'ENST_1',
+    'gene_id': 'ENSG_1',
+    'biotype': 'protein_coding',
+    'canonical': 1,
+    'consequence_terms': ['missense_variant'],
+    'impact': 'MODERATE',
+    'amino_acids': 'A/T',
+    'codons': 'Gcc/Acc',
+    'protein_end': 1,
+}
+"""A fastVEP canonical missense consequence on `ENST_1`, the transcript of chromosome 1 of `CORE_TABLES`."""
 
 
 def consequences(**columns: Sequence[object]) -> pl.DataFrame:

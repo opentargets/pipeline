@@ -225,11 +225,10 @@ class PreparedChromosome:
         """
         offset = chunk * self.settings.chunk_rows
         rows = pl.scan_parquet(self.rows).slice(offset, self.settings.chunk_rows).collect()
-        records = transcripts = None
+        transcripts = None
         models: dict[str, TranscriptModel] = {}
         ancestor = b''
         if annotated:
-            records = pl.scan_parquet(self.records(chunk) / '*.parquet').with_columns(pl.col('row') - offset).collect()
             transcripts = pl.read_parquet(self._transcripts())
             models = pickle.loads(self._loftee().read_bytes())
             ancestor = self._ancestor().read_bytes()
@@ -244,7 +243,8 @@ class PreparedChromosome:
             chromosome=self.chromosome,
             rows=rows,
             sequence=self.sequence(),
-            records=records,
+            records_directory=self.records(chunk) if annotated else None,
+            offset=offset,
             transcripts=transcripts,
             models=models,
             ancestor=ancestor,
@@ -281,13 +281,8 @@ class ChunkInputs(Protocol):
         ...
 
     @property
-    def records(self) -> pl.DataFrame | None:
-        """The chunk's fastVEP records, `row` the ordinal in `rows`; None, as `transcripts`, without fastVEP."""
-        ...
-
-    @property
     def transcripts(self) -> pl.DataFrame | None:
-        """The chromosome's `transcript_fields`."""
+        """The chromosome's `transcript_fields`, None without fastVEP."""
         ...
 
     @property
@@ -315,6 +310,10 @@ class ChunkInputs(Protocol):
         """The colocated variants of the chunk's rows, None without `all_vars`."""
         ...
 
+    def records(self) -> pl.DataFrame | None:
+        """The chunk's fastVEP records, `row` the ordinal in `rows`, read anew on each call; None without fastVEP."""
+        ...
+
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
         """The SIFT matrices of the transcripts."""
         ...
@@ -339,7 +338,6 @@ class PreparedChunk:
     chromosome: str
     rows: pl.DataFrame
     sequence: bytes
-    records: pl.DataFrame | None
     transcripts: pl.DataFrame | None
     models: dict[str, TranscriptModel]
     ancestor: bytes
@@ -350,6 +348,15 @@ class PreparedChunk:
     annotation_files: tuple[Path, ...]
     gpn_star_file: Path | None
     amino_acid_files: tuple[Path, ...]
+    records_directory: Path | None
+    """The chunk's records, None without fastVEP."""
+    offset: int
+    """The ordinal of the chunk's first row among the chromosome's rows."""
+
+    def records(self) -> pl.DataFrame | None:
+        if self.records_directory is None:
+            return None
+        return pl.scan_parquet(self.records_directory / '*.parquet').with_columns(pl.col('row') - self.offset).collect()
 
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
         wanted = transcript_ids.to_frame('transcript_id').unique()

@@ -22,20 +22,7 @@ from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant import CONTIG_LENGTH, CORE_TABLES
 from tests.test_variant_colocated import all_vars, cache_line
 from tests.test_variant_colocated import rows as colocated_rows
-from tests.variant_fixtures import fastvep_json, write_bigwig
-
-MISSENSE = {
-    'transcript_id': 'ENST_1',
-    'gene_id': 'ENSG_1',
-    'biotype': 'protein_coding',
-    'canonical': 1,
-    'consequence_terms': ['missense_variant'],
-    'impact': 'MODERATE',
-    'amino_acids': 'A/T',
-    'codons': 'Gcc/Acc',
-    'protein_end': 1,
-}
-"""The canonical consequence on `ENST_1` of chromosome 1 of `CORE_TABLES`."""
+from tests.variant_fixtures import MISSENSE, fastvep_json, write_bigwig
 
 
 def prepared(directory: Path, chunk_rows: int = 2) -> PreparedChromosome:
@@ -145,13 +132,17 @@ class MemoryInputs:
     chromosome: str
     rows: pl.DataFrame
     sequence: bytes
-    records: pl.DataFrame | None
+    fastvep_output: Path | None
+    """The fastVEP JSON whose records `records` reads, None without fastVEP."""
     transcripts: pl.DataFrame | None
     colocated: pl.DataFrame | None
     gerp: str
     alphamissense: str
     models: dict[str, TranscriptModel] = field(default_factory=dict)
     ancestor: bytes = b''
+
+    def records(self) -> pl.DataFrame | None:
+        return None if self.fastvep_output is None else pl.concat(iter_records(self.fastvep_output))
 
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
         return pl.DataFrame(schema=MATRICES)
@@ -182,12 +173,12 @@ def test_annotate_inputs_on_memory_inputs(tmp_path: Path) -> None:
         'chr1\t123\tA\tG\thg38\tP1\tENST_1.1\tA1T\t0.9\tlikely_pathogenic\n'
     )
     frame = colocated_rows('1_123_A_G', '1_200_A_T')
-    records = fastvep_json(tmp_path / 'fastvep.json', [0, 1], [MISSENSE], most_severe='missense_variant')
+    output = fastvep_json(tmp_path / 'fastvep.json', [0, 1], [MISSENSE], most_severe='missense_variant')
     inputs = MemoryInputs(
         chromosome='1',
         rows=frame,
         sequence=b'A' * CONTIG_LENGTH,
-        records=pl.concat(iter_records(records)),
+        fastvep_output=output,
         transcripts=transcript_fields(str(core), '1'),
         colocated=colocated_variants(all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G')), frame),
         gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {123: 2.5}),
@@ -201,3 +192,22 @@ def test_annotate_inputs_on_memory_inputs(tmp_path: Path) -> None:
         ['AlphaMissense', 'GERP', 'VEP'],
         ['VEP'],
     ]
+
+
+@pytest.mark.parametrize('annotated', ['records', 'transcripts'])
+def test_annotate_inputs_refuses_records_without_transcripts_or_transcripts_without_records(
+    tmp_path: Path, annotated: str
+) -> None:
+    output = fastvep_json(tmp_path / 'fastvep.json', [0])
+    inputs = MemoryInputs(
+        chromosome='1',
+        rows=colocated_rows('1_123_A_G'),
+        sequence=b'A' * CONTIG_LENGTH,
+        fastvep_output=output if annotated == 'records' else None,
+        transcripts=pl.DataFrame() if annotated == 'transcripts' else None,
+        colocated=None,
+        gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {}),
+        alphamissense=str(tmp_path / 'alphamissense.tsv'),
+    )
+    with pytest.raises(ValueError, match='records and transcripts'):
+        annotate_inputs(inputs, ChunkSettings())
