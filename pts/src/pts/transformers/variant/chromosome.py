@@ -146,13 +146,12 @@ def run_chromosome(prepared: PreparedChromosome, reference: FastvepReference) ->
             frame.height,
         )
         return chunks, False
-    directory = prepared.directory / 'fastvep'
-    directory.mkdir(parents=True)
-    vcf = directory / 'rows.vcf'
+    prepared.fastvep_directory().mkdir(parents=True)
+    vcf = prepared.fastvep_vcf()
     write_vcf(frame, vcf, sequence)
     logger.info('Running fastVEP on {} variants of chromosome {}', frame.height, chromosome)
     output = run_fastvep(
-        vcf, reference.gff3, reference.plain_fasta, directory / 'fastvep.json', reference.threads, reference.binary
+        vcf, reference.gff3, reference.plain_fasta, prepared.fastvep_json(), reference.threads, reference.binary
     )
     vcf.unlink()
     try:
@@ -195,11 +194,13 @@ def annotate_inputs(inputs: ChunkInputs, settings: ChunkSettings) -> pl.DataFram
     else:
         variants, consequences = chunk_frames(records, inputs.rows, inputs.transcripts, inputs.sequence, chromosome)
     del records
+    models, ancestor = inputs.models(), inputs.ancestor()
     consequences = add_gerp_and_alphamissense(consequences, inputs.gerp, inputs.alphamissense, chromosome)
     with KentBigWig(inputs.gerp) as gerp:
-        consequences = add_loftee(consequences, inputs.models, inputs.sequence, inputs.ancestor, gerp, chromosome)
+        consequences = add_loftee(consequences, models, inputs.sequence, ancestor, gerp, chromosome)
+    del models, ancestor
     consequences = add_sift(consequences, inputs.sift_matrices(consequences['transcript_id']))
-    variants = add_colocated(variants, inputs.colocated)
+    variants = add_colocated(variants, inputs.colocated())
     index = index_rows(variants, consequences, settings.hash_threshold)
     return _merged(index, inputs, settings.batch_size)
 

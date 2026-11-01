@@ -183,10 +183,11 @@ def test_chunk_reads_what_the_inline_code_read(tmp_path: Path) -> None:
     records = inputs.records()
     assert records is not None and records.equals(expected['records'])
     assert inputs.transcripts is not None and inputs.transcripts.equals(expected['transcripts'])
-    assert inputs.colocated is not None and inputs.colocated.equals(expected['colocated'])
-    assert inputs.colocated['position'].to_list() == [123]
-    assert set(inputs.models) == {'ENST_1'}
-    assert len(inputs.ancestor) == CONTIG_LENGTH
+    colocated = inputs.colocated()
+    assert colocated is not None and colocated.equals(expected['colocated'])
+    assert colocated['position'].to_list() == [123]
+    assert set(inputs.models()) == {'ENST_1'}
+    assert len(inputs.ancestor()) == CONTIG_LENGTH
     assert (inputs.gerp, inputs.alphamissense) == (handle.gerp, handle.alphamissense)
     [annotations] = inputs.annotations(loci)
     assert annotations.equals(expected['annotations'][0])
@@ -205,7 +206,7 @@ def test_unannotated_chunk_does_not_read_loftee_or_ancestor(tmp_path: Path) -> N
     for name in ('loftee.pickle', 'ancestor.bin'):
         (handle.directory / 'prepared' / name).unlink()
     inputs = handle.chunk(0, annotated=False)
-    assert (inputs.records(), inputs.transcripts, inputs.models, inputs.ancestor) == (None, None, {}, b'')
+    assert (inputs.records(), inputs.transcripts, inputs.models(), inputs.ancestor()) == (None, None, {}, b'')
     index = annotate_inputs(inputs, handle.settings)
     assert index['variantId'].to_list() == ['1_123_A_G', '1_200_C_T']
     assert index['transcriptConsequences'].to_list() == [[], []]
@@ -218,7 +219,7 @@ def test_chunk_without_optional_inputs_reads_as_no_data(tmp_path: Path) -> None:
     inputs = handle.chunk(0, annotated=False)
     loci = inputs.rows.select('chromosome', 'position').unique()
     keys = pl.DataFrame({'uniprotAccession': ['P1'], 'aminoAcidChange': ['A1T']})
-    assert inputs.colocated is None
+    assert inputs.colocated() is None
     assert inputs.gpn_star(loci['position']) is None
     assert inputs.annotations(loci) == []
     assert inputs.amino_acids(keys) == []
@@ -252,8 +253,11 @@ def test_release_deletes_only_its_chunks_records(tmp_path: Path) -> None:
     assert handle.records(0).exists()
 
 
-def test_prepared_annotations_are_written_in_position_sorted_row_groups(tmp_path: Path) -> None:
-    """Six annotation rows over three positions, given unsorted, in row groups of two: one position each."""
+def test_prepared_annotations_layout_is_position_sorted_row_groups(tmp_path: Path) -> None:
+    """Pins the layout of the written file, not the range a reader prunes to: that is invisible to equality.
+
+    Six annotation rows over three positions, given unsorted, in row groups of two: one position each.
+    """
     handle = replace(
         prepared(tmp_path, annotations=1, variant_ids=('1_101_A_G', '1_102_A_G', '1_103_A_G')),
         settings=ChunkSettings(chunk_rows=2, row_group_rows=2),
@@ -281,3 +285,12 @@ def test_prepared_annotations_are_written_in_position_sorted_row_groups(tmp_path
     loci = pl.DataFrame({'chromosome': ['1'], 'position': [102]}, schema_overrides={'position': pl.Int32})
     [found] = handle.chunk(0, annotated=False).annotations(loci)
     assert found['variantId'].to_list() == ['1_102_A_C', '1_102_A_G']
+
+
+def test_missing_colocated_file_raises_when_the_chromosome_has_all_vars(tmp_path: Path) -> None:
+    located = all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G'))
+    handle = prepared(tmp_path, all_vars=located)
+    handle.write(replace(sources(tmp_path), variant_annotations=(), amino_acid_annotations=()))
+    (handle.directory / 'prepared' / 'colocated.parquet').unlink()
+    with pytest.raises(FileNotFoundError):
+        handle.chunk(0, annotated=False).colocated()

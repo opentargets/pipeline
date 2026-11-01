@@ -137,6 +137,18 @@ class PreparedChromosome:
         """The chromosome's contig of the uncompressed reference, empty for a contig it lacks."""
         return b'' if self.span is None else read_contig(self.plain_fasta, self.span)
 
+    def fastvep_directory(self) -> Path:
+        """The scratch directory of the chromosome's fastVEP run."""
+        return self.directory / 'fastvep'
+
+    def fastvep_vcf(self) -> Path:
+        """The VCF fastVEP reads."""
+        return self.fastvep_directory() / 'rows.vcf'
+
+    def fastvep_json(self) -> Path:
+        """The JSON fastVEP writes."""
+        return self.fastvep_directory() / 'fastvep.json'
+
     def records(self, chunk: int) -> Path:
         """The directory of one chunk's fastVEP records."""
         return self.directory / 'records' / f'{chunk:05d}'
@@ -225,19 +237,7 @@ class PreparedChromosome:
         """
         offset = chunk * self.settings.chunk_rows
         rows = pl.scan_parquet(self.rows).slice(offset, self.settings.chunk_rows).collect()
-        transcripts = None
-        models: dict[str, TranscriptModel] = {}
-        ancestor = b''
-        if annotated:
-            transcripts = pl.read_parquet(self._transcripts())
-            models = pickle.loads(self._loftee().read_bytes())
-            ancestor = self._ancestor().read_bytes()
-        located = self._colocated()
-        colocated = (
-            in_range(located, rows['position']).join(rows.lazy().select(KEY), on=KEY, how='semi').collect()
-            if located.exists()
-            else None
-        )
+        transcripts = pl.read_parquet(self._transcripts()) if annotated else None
         scores = self._gpn_star()
         return PreparedChunk(
             chromosome=self.chromosome,
@@ -246,11 +246,11 @@ class PreparedChromosome:
             records_directory=self.records(chunk) if annotated else None,
             offset=offset,
             transcripts=transcripts,
-            models=models,
-            ancestor=ancestor,
+            loftee_file=self._loftee() if annotated else None,
+            ancestor_file=self._ancestor() if annotated else None,
             gerp=self.gerp,
             alphamissense=self.alphamissense,
-            colocated=colocated,
+            colocated_file=self._colocated() if self.all_vars is not None else None,
             sift=self.sift,
             annotation_files=tuple(self._annotations(number) for number in range(self.annotation_sources)),
             gpn_star_file=scores if scores.exists() else None,
@@ -286,16 +286,6 @@ class ChunkInputs(Protocol):
         ...
 
     @property
-    def models(self) -> dict[str, TranscriptModel]:
-        """The chromosome's `loftee_models`, empty without fastVEP."""
-        ...
-
-    @property
-    def ancestor(self) -> bytes:
-        """The chromosome's human ancestor, empty without fastVEP."""
-        ...
-
-    @property
     def gerp(self) -> str:
         """The GERP bigWig."""
         ...
@@ -305,13 +295,20 @@ class ChunkInputs(Protocol):
         """The chromosome's AlphaMissense predictions."""
         ...
 
-    @property
-    def colocated(self) -> pl.DataFrame | None:
-        """The colocated variants of the chunk's rows, None without `all_vars`."""
-        ...
-
     def records(self) -> pl.DataFrame | None:
         """The chunk's fastVEP records, `row` the ordinal in `rows`, read anew on each call; None without fastVEP."""
+        ...
+
+    def models(self) -> dict[str, TranscriptModel]:
+        """The chromosome's `loftee_models`, read anew on each call; empty without fastVEP."""
+        ...
+
+    def ancestor(self) -> bytes:
+        """The chromosome's human ancestor, read anew on each call; empty without fastVEP."""
+        ...
+
+    def colocated(self) -> pl.DataFrame | None:
+        """The colocated variants of the chunk's rows, read anew on each call; None without `all_vars`."""
         ...
 
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
@@ -339,11 +336,14 @@ class PreparedChunk:
     rows: pl.DataFrame
     sequence: bytes
     transcripts: pl.DataFrame | None
-    models: dict[str, TranscriptModel]
-    ancestor: bytes
+    loftee_file: Path | None
+    """The chromosome's LOFTEE models, None without fastVEP."""
+    ancestor_file: Path | None
+    """The chromosome's human ancestor, None without fastVEP."""
     gerp: str
     alphamissense: str
-    colocated: pl.DataFrame | None
+    colocated_file: Path | None
+    """The chromosome's colocated variants, None without `all_vars`."""
     sift: Path
     annotation_files: tuple[Path, ...]
     gpn_star_file: Path | None
@@ -354,26 +354,46 @@ class PreparedChunk:
     """The ordinal of the chunk's first row among the chromosome's rows."""
 
     def records(self) -> pl.DataFrame | None:
+        """The chunk's fastVEP records, `row` rebased to the chunk, read anew on each call."""
         if self.records_directory is None:
             return None
         return pl.scan_parquet(self.records_directory / '*.parquet').with_columns(pl.col('row') - self.offset).collect()
 
+    def models(self) -> dict[str, TranscriptModel]:
+        """The LOFTEE models, read anew on each call; empty without fastVEP."""
+        return {} if self.loftee_file is None else pickle.loads(self.loftee_file.read_bytes())
+
+    def ancestor(self) -> bytes:
+        """The human ancestor, read anew on each call; empty without fastVEP."""
+        return b'' if self.ancestor_file is None else self.ancestor_file.read_bytes()
+
+    def colocated(self) -> pl.DataFrame | None:
+        """The colocated variants at the chunk's rows, read anew on each call; None without `all_vars`."""
+        if self.colocated_file is None:
+            return None
+        located = in_range(self.colocated_file, self.rows['position'])
+        return located.join(self.rows.lazy().select(KEY), on=KEY, how='semi').collect()
+
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
+        """The SIFT matrices of the transcripts, read from the SIFT file."""
         wanted = transcript_ids.to_frame('transcript_id').unique()
         return pl.scan_parquet(self.sift).join(wanted.lazy(), on='transcript_id', how='semi').collect()
 
     def annotations(self, loci: pl.DataFrame) -> list[pl.DataFrame]:
+        """Each annotation source's rows at the loci, read from the prepared files."""
         return [
             in_range(path, loci['position']).join(loci.lazy(), on=['chromosome', 'position'], how='semi').collect()
             for path in self.annotation_files
         ]
 
     def gpn_star(self, positions: pl.Series) -> pl.DataFrame | None:
+        """The GPN-Star scores at the positions; None without a GPN-Star file."""
         if self.gpn_star_file is None:
             return None
         return in_range(self.gpn_star_file, positions).filter(pl.col('position').is_in(positions.implode())).collect()
 
     def amino_acids(self, keys: pl.DataFrame) -> list[pl.DataFrame]:
+        """Each amino-acid annotation source's rows on the keys, read from the prepared files."""
         return [
             pl.scan_parquet(path).join(keys.lazy(), on=['uniprotAccession', 'aminoAcidChange'], how='semi').collect()
             for path in self.amino_acid_files

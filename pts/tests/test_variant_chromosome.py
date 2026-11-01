@@ -135,14 +135,23 @@ class MemoryInputs:
     fastvep_output: Path | None
     """The fastVEP JSON whose records `records` reads, None without fastVEP."""
     transcripts: pl.DataFrame | None
-    colocated: pl.DataFrame | None
+    colocated_frame: pl.DataFrame | None
     gerp: str
     alphamissense: str
-    models: dict[str, TranscriptModel] = field(default_factory=dict)
-    ancestor: bytes = b''
+    loftee_models: dict[str, TranscriptModel] = field(default_factory=dict)
+    human_ancestor: bytes = b''
 
     def records(self) -> pl.DataFrame | None:
         return None if self.fastvep_output is None else pl.concat(iter_records(self.fastvep_output))
+
+    def models(self) -> dict[str, TranscriptModel]:
+        return self.loftee_models
+
+    def ancestor(self) -> bytes:
+        return self.human_ancestor
+
+    def colocated(self) -> pl.DataFrame | None:
+        return self.colocated_frame
 
     def sift_matrices(self, transcript_ids: pl.Series) -> pl.DataFrame:
         return pl.DataFrame(schema=MATRICES)
@@ -180,7 +189,9 @@ def test_annotate_inputs_on_memory_inputs(tmp_path: Path) -> None:
         sequence=b'A' * CONTIG_LENGTH,
         fastvep_output=output,
         transcripts=transcript_fields(str(core), '1'),
-        colocated=colocated_variants(all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G')), frame),
+        colocated_frame=colocated_variants(
+            all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G')), frame
+        ),
         gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {123: 2.5}),
         alphamissense=str(alphamissense),
     )
@@ -205,7 +216,7 @@ def test_annotate_inputs_refuses_records_without_transcripts_or_transcripts_with
         sequence=b'A' * CONTIG_LENGTH,
         fastvep_output=output if annotated == 'records' else None,
         transcripts=pl.DataFrame() if annotated == 'transcripts' else None,
-        colocated=None,
+        colocated_frame=None,
         gerp=write_bigwig(tmp_path / 'gerp.bw', '1', CONTIG_LENGTH, {}),
         alphamissense=str(tmp_path / 'alphamissense.tsv'),
     )
