@@ -86,7 +86,7 @@ the records for its texts as a snapshot: a `data.parquet` plus a
 
 The hub revisions come in the order of the kind's models. The digest is the
 first 8 hex digits of the sha256 of the kind's parameters and its
-`logic_version`, both in `pts/src/pts/clinical_staging/staged_outputs.py`. The tag is the store's
+`logic_version`, both in `pts/src/pts/transformers/clinical_staging/staged_outputs.py`. The tag is the store's
 revision and the snapshot directory name, so one tag means one output.
 
 | Snapshot | Hub revisions in the tag |
@@ -177,16 +177,16 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
 
 1. Release pts and pis, and bump `pts_version` and `pis_version` in
    `clinical_staging.yaml`, and the pins in `pis/config.yaml`.
-2. First run only, in `pts/config.yaml`: set `import_extraction_cache` on the
-   `aact_trial_extraction` step (task `llm_extract`) to
+2. First run only, in `pts/config.yaml`: set `import_extraction_cache` under
+   the `settings` of the `aact_trial_extraction` step to
    `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
-   on the `aact_trial_models` step (task `trial_models`) to
+   under the `settings` of the `aact_trial_models` step to
    `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/ner_cache.parquet`.
    The schema digest is the full 64 hex digest of the response schema, as the
    step computes it; from `pts/`:
 
    ```bash
-   uv run python -c "from pts.clinical_staging.staged_outputs import schema_digest; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
+   uv run python -c "from pts.transformers.clinical_staging.staged_outputs import schema_digest; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
    ```
 
    Remove both afterwards: once the schema changes, an `import_extraction_cache`
