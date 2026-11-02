@@ -79,7 +79,7 @@ def test_ontoma_ported_sources_have_no_postprocess_step(source: str) -> None:
 
 @pytest.mark.parametrize('source', ONTOMA_PORTED_SOURCES)
 def test_association_depends_on_ontoma_ported_sources(source: str) -> None:
-    assert f'pts_evidence_{source}' in dependencies('pts_association')
+    assert f'pts_evidence_{source}' in ancestors('pts_association')
 
 
 @pytest.mark.parametrize('step', [*(f'evidence_{s}' for s in ONTOMA_PORTED_SOURCES), 'pharmacogenetics'])
