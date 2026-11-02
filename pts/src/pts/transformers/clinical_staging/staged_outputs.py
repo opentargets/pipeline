@@ -23,7 +23,6 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
-from pts.record_store import LIST_OUTPUT, map_texts, publish_snapshot
 from pts.transformers.clinical.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -40,6 +39,7 @@ from pts.transformers.clinical.ner import (
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
+from pts.transformers.clinical_staging.record_store import LIST_OUTPUT, map_texts, publish_snapshot
 from pts.transformers.utils.dataset import scan_dataset
 
 if TYPE_CHECKING:

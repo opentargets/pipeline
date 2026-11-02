@@ -1,6 +1,6 @@
 """Implementation of the :py:mod:`pts.tasks.llm_extract` task.
 
-Each trial's extraction is a record in a :py:mod:`pts.record_store` store: the
+Each trial's extraction is a record in a :py:mod:`pts.transformers.clinical_staging.record_store` store: the
 text is the rendered prompt, the model ``aact_llm_extraction``, the revision the
 digest of the response schema, and the output the JSON of the validated model.
 """
@@ -23,7 +23,6 @@ from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ValidationError
 
-from pts.record_store import ComputeAborted, import_run, read_parquet, text_sha256
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
     SYSTEMIC_ERROR_TYPES,
@@ -34,6 +33,7 @@ from pts.transformers.clinical.llm_workflow import (
 )
 from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
+from pts.transformers.clinical_staging.record_store import ComputeAborted, import_run, read_parquet, text_sha256
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -219,7 +219,8 @@ def extractions_from_records(
     """Build the published extraction from the store's output per prompt.
 
     Args:
-        records: ``text`` and ``output`` per prompt, as :py:func:`pts.record_store.map_texts` returns them.
+        records: ``text`` and ``output`` per prompt, as
+            :py:func:`pts.transformers.clinical_staging.record_store.map_texts` returns them.
         prompts: Output of :py:func:`prompts_for`.
         model_class: The model each output is validated against. It has an ``id`` field.
 

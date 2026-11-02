@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
-from pts.clinical_staging.staged_outputs import EXTRACTION, schema_digest
-from pts.record_store import publish_snapshot
 from pts.transformers import chembl_molecule as chembl_molecule_module
 from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecule, process_molecules
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical_staging.record_store import publish_snapshot
+from pts.transformers.clinical_staging.staged_outputs import EXTRACTION, schema_digest
 
 # A short but structurally valid MDL molblock (single carbon atom), with no
 # terminator newline of its own -- the raw variants below add zero, one, or two

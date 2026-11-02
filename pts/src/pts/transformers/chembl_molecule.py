@@ -12,8 +12,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.clinical_staging.staged_outputs import EXTRACTION
 from pts.postgres import read_dump_tables
+from pts.transformers.clinical_staging.staged_outputs import EXTRACTION
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 

@@ -8,10 +8,11 @@ from otter.config.model import Config
 from otter.scratchpad.model import Scratchpad
 from otter.task.model import TaskContext
 
-from pts.clinical_staging import extraction, trial_models
 from pts.tasks.trial_models import TrialModels, TrialModelsSpec
 from pts.transformers.clinical.providers import aact as aact_provider
 from pts.transformers.clinical.providers.aact import read_aact_tables
+from pts.transformers.clinical_staging import aact_trial_extraction as extraction
+from pts.transformers.clinical_staging import aact_trial_models as trial_models
 
 
 def _make_studies() -> pl.DataFrame:

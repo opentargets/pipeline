@@ -9,10 +9,6 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts.clinical_staging import mining_models
-from pts.clinical_staging.mining_models import stage_mining_models
-from pts.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
-from pts.record_store import map_texts
 from pts.transformers.clinical.mining import (
     RecordingNer,
     mining_reports,
@@ -27,6 +23,10 @@ from pts.transformers.clinical.ner import (
     DRUG_NER_MODEL,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical_staging import clinical_mining_models as mining_models
+from pts.transformers.clinical_staging.clinical_mining_models import stage_mining_models
+from pts.transformers.clinical_staging.record_store import map_texts
+from pts.transformers.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from tests.clinical.test_mining import inputs  # noqa: F401
 
 REVISIONS = {DISEASE_MODEL: 'rx', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}

@@ -1,10 +1,10 @@
 """Task that runs the stop reason classifier and drug NER over AACT texts, once per AACT version.
 
-The models run through the record store of :py:mod:`pts.record_store`, so a text
+The models run through the record store of :py:mod:`pts.transformers.clinical_staging.record_store`, so a text
 that already has an answer for the model revision is not computed again, and the
 result is published as a write-once snapshot next to the AACT version.
 
-The work lives in :py:mod:`pts.clinical_staging.trial_models`.
+The work lives in :py:mod:`pts.transformers.clinical_staging.aact_trial_models`.
 """
 
 from __future__ import annotations
@@ -56,11 +56,11 @@ class TrialModels(Task):
 
     @report
     def run(self) -> Self:
-        from pts.clinical_staging import trial_models
-        from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION
-        from pts.record_store import new_run_id
         from pts.transformers.clinical.hf_models import staged_model_revisions
         from pts.transformers.clinical.providers.aact import read_aact_tables
+        from pts.transformers.clinical_staging import aact_trial_models as trial_models
+        from pts.transformers.clinical_staging.record_store import new_run_id
+        from pts.transformers.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION
 
         config = self.context.config
         models_uri = StorageHandle(self.spec.source['models'], config=config).absolute

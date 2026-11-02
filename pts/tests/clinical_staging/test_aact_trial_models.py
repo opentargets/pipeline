@@ -9,21 +9,21 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts.clinical_staging import trial_models
-from pts.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
-from pts.clinical_staging.trial_models import (
-    read_extraction,
-    seed_drug_entities,
-    stage_trial_models,
-    why_stopped_texts,
-)
-from pts.record_store import map_texts, read_records, text_sha256
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.hf_models import staged_model_revisions
 from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
 from pts.transformers.clinical.providers.aact import llm_drug_labels
 from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_report import attach_stop_reasons
+from pts.transformers.clinical_staging import aact_trial_models as trial_models
+from pts.transformers.clinical_staging.aact_trial_models import (
+    read_extraction,
+    seed_drug_entities,
+    stage_trial_models,
+    why_stopped_texts,
+)
+from pts.transformers.clinical_staging.record_store import map_texts, read_records, text_sha256
+from pts.transformers.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 STOP_TAG = STOP_REASONS.tag(REVISIONS)

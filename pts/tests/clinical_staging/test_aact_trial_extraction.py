@@ -21,21 +21,21 @@ from otter.scratchpad.model import Scratchpad
 from otter.task.model import TaskContext
 from pydantic import BaseModel, Field, ValidationError
 
-from pts.clinical_staging import extraction
-from pts.clinical_staging.extraction import (
+from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec
+from pts.transformers.clinical import extract_aact_clinical_report
+from pts.transformers.clinical.llm_workflow import Extracted, Failed
+from pts.transformers.clinical.providers import aact as aact_provider
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical_staging import aact_trial_extraction as extraction
+from pts.transformers.clinical_staging.aact_trial_extraction import (
     EXTRACTION_MODEL,
     import_class,
     import_extraction_cache,
     models_to_frame,
     polars_schema,
 )
-from pts.clinical_staging.staged_outputs import EXTRACTION
-from pts.record_store import ComputeAborted, read_records, text_sha256
-from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec
-from pts.transformers.clinical import extract_aact_clinical_report
-from pts.transformers.clinical.llm_workflow import Extracted, Failed
-from pts.transformers.clinical.providers import aact as aact_provider
-from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical_staging.record_store import ComputeAborted, read_records, text_sha256
+from pts.transformers.clinical_staging.staged_outputs import EXTRACTION
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 from tests.fake_openai import FakeClient, Outcome, bad_request, connection_error, unprocessable
 
@@ -374,7 +374,7 @@ def test_a_rerun_publishes_nothing_and_a_new_digest_publishes_beside_the_old(
     assert again.stats['published'] is False
     assert data.stat().st_mtime_ns == written
 
-    monkeypatch.setattr('pts.clinical_staging.staged_outputs.schema_digest', lambda model_cls: 'f' * 64)
+    monkeypatch.setattr('pts.transformers.clinical_staging.staged_outputs.schema_digest', lambda model_cls: 'f' * 64)
     monkeypatch.setattr('pts.tasks.llm_extract.new_run_id', lambda snapshot: f'{snapshot}-other-digest')
     other = EXTRACTION.tag('f' * 64, None)
     _run(monkeypatch, tmp_path, report)
@@ -528,7 +528,7 @@ def test_an_unsupported_response_model_fails_before_any_llm_call(
         monkeypatch,
         tmp_path,
         _report('nct1', 'nct2'),
-        model_class='tests.clinical_staging.test_extraction.UnsupportedExtraction',
+        model_class='tests.clinical_staging.test_aact_trial_extraction.UnsupportedExtraction',
     )
 
     assert task.manifest.failure_reason is not None

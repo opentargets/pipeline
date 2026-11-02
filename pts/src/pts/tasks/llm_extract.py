@@ -2,7 +2,7 @@
 
 The extraction itself lives in :py:mod:`pts.transformers.clinical`; this task is the part that
 makes it repeatable. It builds one prompt per trial, asks the
-:py:mod:`pts.record_store` store for the ones not yet extracted under the current
+:py:mod:`pts.transformers.clinical_staging.record_store` store for the ones not yet extracted under the current
 response schema, and publishes the extraction as a write-once snapshot the
 release reads directly.
 
@@ -12,7 +12,7 @@ identity, so changing them re-extracts nothing. A trial that fails every attempt
 of a run is left out of the snapshot, and a rerun of the same AACT version does
 not try it again.
 
-The extraction work lives in :py:mod:`pts.clinical_staging.extraction`.
+The extraction work lives in :py:mod:`pts.transformers.clinical_staging.aact_trial_extraction`.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import TaskRunError, TaskValidationError
 
-from pts.record_store import map_texts, new_run_id, publish_snapshot
+from pts.transformers.clinical_staging.record_store import map_texts, new_run_id, publish_snapshot
 
 DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
 """Packaged system prompt."""
@@ -99,8 +99,8 @@ class LlmExtract(Task):
 
     @report
     def run(self) -> Self:
-        from pts.clinical_staging import extraction
-        from pts.clinical_staging.staged_outputs import EXTRACTION, schema_digest
+        from pts.transformers.clinical_staging import aact_trial_extraction as extraction
+        from pts.transformers.clinical_staging.staged_outputs import EXTRACTION, schema_digest
 
         system_prompt = self._system_prompt()
         model_cls = extraction.import_class(self.spec.model_class)
