@@ -8,6 +8,7 @@ from typing import Any
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.hf_models import staged_model_revisions
@@ -17,6 +18,7 @@ from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_report import attach_stop_reasons
 from pts.transformers.clinical_staging import aact_trial_models as trial_models
 from pts.transformers.clinical_staging.aact_trial_models import (
+    aact_trial_models,
     read_extraction,
     seed_drug_entities,
     stage_trial_models,
@@ -394,3 +396,41 @@ def test_read_extraction_names_the_path_it_expected(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError, match=re.escape(f'extraction/{EXTRACTION.release_tag()}/data.parquet')):
         read_extraction(str(tmp_path / 'extraction'), None)
+
+
+def test_the_transformer_stages_both_snapshots_from_its_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, Any]] = []
+    extractions = pl.DataFrame({'id': ['nct1']})
+
+    def fake_stage(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append({'args': args, **kwargs})
+        return {}
+
+    monkeypatch.setattr(trial_models, 'read_aact_tables', lambda *args: {'studies': pl.DataFrame({'nct_id': ['n']})})
+    monkeypatch.setattr(trial_models, 'read_extraction', lambda uri, config: extractions)
+    monkeypatch.setattr(trial_models, 'stage_trial_models', fake_stage)
+
+    aact_trial_models(
+        {'aact': 'aact.zip', 'extraction': f'{tmp_path}/extraction/', 'models': 'models'},
+        {'stop_reasons': 'stop_reasons'},
+        {'store_uri': 'store/', 'snapshot': '2026-10', 'ner_batch_size': 8, 'stop_reasons_batch_size': 4},
+        Config(step='test', steps=['test'], work_path=tmp_path),
+    )
+
+    (call,) = calls
+    _, staged, models_uri, destination, store_uri, run_id, _ = call['args']
+    assert staged is extractions
+    assert models_uri == 'models'
+    assert destination == {
+        'stop_reasons': 'stop_reasons',
+        'drug_entities': f'{tmp_path}/extraction/{EXTRACTION.release_tag()}/drug_entities',
+    }
+    assert store_uri == 'store'
+    assert run_id.startswith('2026-10-')
+    assert call['ner_batch_size'] == 8
+    assert call['ner_model_batch_size'] == 32
+    assert call['stop_reasons_batch_size'] == 4
+    assert call['max_attempts'] == 3
+    assert call['extraction_tag'] == EXTRACTION.release_tag()

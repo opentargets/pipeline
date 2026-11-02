@@ -7,13 +7,9 @@ response schema, and publishes the extraction as a write-once snapshot the relea
 
 Each trial's extraction is a record in the store: the text is the rendered prompt, the model
 ``aact_llm_extraction``, the revision the digest of the response schema, and the output the JSON of the validated
-model.
-
-A record's text is the rendered prompt, so a trial whose text changed is
-extracted again. The model and system instructions are not part of the record's
-identity, so changing them re-extracts nothing. A trial that fails every attempt
-of a run is left out of the snapshot, and a rerun of the same AACT version does
-not try it again.
+model. So a trial whose text changed is extracted again, while the model and system instructions are not part of the
+record's identity and changing them re-extracts nothing. A trial that fails every attempt of a run is left out of the
+snapshot, and a rerun of the same AACT version does not try it again.
 """
 
 from __future__ import annotations
@@ -83,7 +79,7 @@ class AactTrialExtractionSettings(BaseModel):
         version directory so a trial whose prompt did not change between two AACT
         snapshots is not extracted again."""
     snapshot: str
-    """The AACT version. Prefixes the id of the runs this task writes to the store."""
+    """The AACT version. Prefixes the id of the runs this step writes to the store."""
     openai_key_path: str = '/var/run/secrets/openai-api-key'
     """Path the OpenAI key is mounted at, injected from Secret Manager by the
         DAG. Never put the key itself in config."""
@@ -104,7 +100,7 @@ class AactTrialExtractionSettings(BaseModel):
     """SDK-level retries for transient errors."""
     shard_size: int = 2000
     """Trials per shard. Each shard is written to the store as it finishes, so a
-        retry of this task resumes rather than paying for the same calls twice."""
+        retry of this step resumes rather than paying for the same calls twice."""
     max_attempts: int = 3
     """Attempts per trial, within a run and across runs, before it is left out."""
     sample_size: int | None = None
@@ -406,61 +402,70 @@ def _system_prompt(settings: AactTrialExtractionSettings, config: Config) -> str
     return (resources.files(package) / filename).read_text(encoding='utf-8')
 
 
-def aact_trial_extraction(
-    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
-) -> None:
-    """Extract structured evidence from AACT trials, reusing prior extractions.
+def stage_extraction(
+    archive: str, destination: str, settings: AactTrialExtractionSettings, config: Config
+) -> dict[str, Any]:
+    """Extract structured evidence from the trials of an AACT dump and publish it as a snapshot.
 
     Args:
-        source: Key ``aact``, the AACT dump archive. The tables required are restored inline.
-        destination: Key ``extraction``, the directory holding one snapshot per tag.
-        settings: See :py:class:`AactTrialExtractionSettings`.
+        archive: The AACT dump archive. The tables required are restored inline.
+        destination: The directory holding one snapshot per tag.
+        settings: The validated settings.
         config: The otter config.
+
+    Returns:
+        dict[str, Any]: The number of trials, prompts, extractions, computed and failed records, and whether a
+        snapshot was published.
 
     Raises:
         TaskRunError: If no trial of a non-empty set was extracted.
     """
-    s = AactTrialExtractionSettings.model_validate(settings)
-    system_prompt = _system_prompt(s, config)
-    model_cls = import_class(s.model_class)
+    system_prompt = _system_prompt(settings, config)
+    model_cls = import_class(settings.model_class)
     digest = schema_digest(model_cls)
     polars_schema(model_cls)
-    store_uri = f'{s.store_uri.rstrip("/")}/{EXTRACTION.name}'
+    store_uri = f'{settings.store_uri.rstrip("/")}/{EXTRACTION.name}'
 
-    report = trial_report(source['aact'], config.work_path, s.sample_size)
+    report = trial_report(archive, config.work_path, settings.sample_size)
     prompts = prompts_for(report)
     logger.info(f'built {prompts.height} prompts from {report.height} trials')
 
-    if s.import_extraction_cache:
-        imported = import_extraction_cache(s.import_extraction_cache, prompts, store_uri, digest, config)
+    if settings.import_extraction_cache:
+        imported = import_extraction_cache(settings.import_extraction_cache, prompts, store_uri, digest, config)
         logger.info(f'imported {imported} cached extractions into {store_uri}')
 
     mapped = map_texts(
         prompts['prompt'],
-        extraction_compute(prompts, s, system_prompt),
+        extraction_compute(prompts, settings, system_prompt),
         store_uri,
         EXTRACTION_MODEL,
         digest,
-        new_run_id(s.snapshot),
+        new_run_id(settings.snapshot),
         config,
-        max_attempts=s.max_attempts,
+        max_attempts=settings.max_attempts,
         output_dtype=pl.String(),
         allow_failures=True,
-        shard_size=s.shard_size,
+        shard_size=settings.shard_size,
     )
     extractions = extractions_from_records(mapped.frame, prompts, model_cls)
     if prompts.height and extractions.is_empty():
         msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
         raise TaskRunError(msg)
 
-    tag = EXTRACTION.tag(digest, s.sample_size)
+    tag = EXTRACTION.tag(digest, settings.sample_size)
     published = publish_snapshot(
         extractions,
-        f'{destination["extraction"]}/{tag}',
-        EXTRACTION.metadata(digest, s.sample_size),
+        f'{destination}/{tag}',
+        EXTRACTION.metadata(digest, settings.sample_size),
         config,
     )
-    stats = {
+    if extractions.height < prompts.height:
+        missing = prompts.height - extractions.height
+        logger.warning(
+            f'{missing} of {prompts.height} trials ({missing / prompts.height:.1%}) have no extraction. '
+            f'a negative result is still a row, so these failed all of their attempts'
+        )
+    return {
         'trials': report.height,
         'prompts': prompts.height,
         'extracted': extractions.height,
@@ -468,10 +473,19 @@ def aact_trial_extraction(
         'failed': mapped.failed,
         'published': published,
     }
-    if extractions.height < prompts.height:
-        missing = prompts.height - extractions.height
-        logger.warning(
-            f'{missing} of {prompts.height} trials ({missing / prompts.height:.1%}) have no extraction. '
-            f'a negative result is still a row, so these failed all of their attempts'
-        )
+
+
+def aact_trial_extraction(
+    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
+) -> None:
+    """Extract structured evidence from AACT trials, reusing prior extractions.
+
+    Args:
+        source: Key ``aact``, the AACT dump archive.
+        destination: Key ``extraction``, the directory holding one snapshot per tag.
+        settings: See :py:class:`AactTrialExtractionSettings`.
+        config: The otter config.
+    """
+    s = AactTrialExtractionSettings.model_validate(settings)
+    stats = stage_extraction(source['aact'], destination['extraction'], s, config)
     logger.info(f'extraction complete: {stats}')

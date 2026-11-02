@@ -8,6 +8,7 @@ from typing import Any
 
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.transformers.clinical.mining import (
     RecordingNer,
@@ -24,7 +25,7 @@ from pts.transformers.clinical.ner import (
     DRUGTEMIST_MODEL,
 )
 from pts.transformers.clinical_staging import clinical_mining_models as mining_models
-from pts.transformers.clinical_staging.clinical_mining_models import stage_mining_models
+from pts.transformers.clinical_staging.clinical_mining_models import clinical_mining_models, stage_mining_models
 from pts.transformers.clinical_staging.record_store import map_texts
 from pts.transformers.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 from tests.clinical.test_mining import inputs  # noqa: F401
@@ -257,3 +258,32 @@ def test_mining_drug_labels_come_from_reports_built_with_staged_diseases(
     assert labels.to_list() == expected.to_list()
     assert set(blind.to_list()) < set(expected.to_list())
     assert {'alphamab', 'gammastat'} <= set(labels.to_list())
+
+
+def test_the_transformer_stages_the_providers_from_its_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_stage(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append({'args': args, **kwargs})
+        return {}
+
+    monkeypatch.setattr(mining_models, 'stage_mining_models', fake_stage)
+
+    clinical_mining_models(
+        {'ttd': 'ttd.txt', 'ema': 'ema.xlsx', 'pmda': 'pmda.pdf', 'models': 'models'},
+        {'drug_entities': 'drugs', 'disease_entities': 'diseases'},
+        {'store_uri': 'store/', 'snapshot': '2026-10', 'ner_model_batch_size': 4},
+        Config(step='test', steps=['test'], work_path=tmp_path),
+    )
+
+    (call,) = calls
+    ttd, ema, pmda, models_uri, destination, store_uri, run_id, _ = call['args']
+    assert (ttd, ema, pmda, models_uri) == ('ttd.txt', 'ema.xlsx', 'pmda.pdf', 'models')
+    assert destination == {'drug_entities': 'drugs', 'disease_entities': 'diseases'}
+    assert store_uri == 'store'
+    assert run_id.startswith('2026-10-')
+    assert call['ner_batch_size'] == 256
+    assert call['ner_model_batch_size'] == 4
+    assert call['max_attempts'] == 3
