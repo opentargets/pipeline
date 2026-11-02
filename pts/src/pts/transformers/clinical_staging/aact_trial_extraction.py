@@ -1,8 +1,19 @@
-"""Implementation of the :py:mod:`pts.tasks.llm_extract` task.
+"""Transformer that extracts structured drug and disease evidence from clinical trials with an LLM.
 
-Each trial's extraction is a record in a :py:mod:`pts.transformers.clinical_staging.record_store` store: the
-text is the rendered prompt, the model ``aact_llm_extraction``, the revision the
-digest of the response schema, and the output the JSON of the validated model.
+The extraction itself lives in :py:mod:`pts.transformers.clinical`; this transformer is the part that
+makes it repeatable. It builds one prompt per trial, asks the
+:py:mod:`pts.transformers.clinical_staging.record_store` store for the ones not yet extracted under the current
+response schema, and publishes the extraction as a write-once snapshot the release reads directly.
+
+Each trial's extraction is a record in the store: the text is the rendered prompt, the model
+``aact_llm_extraction``, the revision the digest of the response schema, and the output the JSON of the validated
+model.
+
+A record's text is the rendered prompt, so a trial whose text changed is
+extracted again. The model and system instructions are not part of the record's
+identity, so changing them re-extracts nothing. A trial that fails every attempt
+of a run is left out of the snapshot, and a rerun of the same AACT version does
+not try it again.
 """
 
 from __future__ import annotations
@@ -12,7 +23,7 @@ import json
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from importlib import import_module
+from importlib import import_module, resources
 from pathlib import Path
 from types import NoneType, UnionType
 from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
@@ -21,7 +32,8 @@ import polars as pl
 from loguru import logger
 from openai import AsyncOpenAI
 from otter.storage.synchronous.handle import StorageHandle
-from pydantic import BaseModel, ValidationError
+from otter.util.errors import TaskRunError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pts.transformers.clinical import build_prompts, extract_aact_clinical_report, sample_report
 from pts.transformers.clinical.llm_workflow import (
@@ -33,13 +45,22 @@ from pts.transformers.clinical.llm_workflow import (
 )
 from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
-from pts.transformers.clinical_staging.record_store import ComputeAborted, import_run, read_parquet, text_sha256
+from pts.transformers.clinical_staging.record_store import (
+    ComputeAborted,
+    import_run,
+    map_texts,
+    new_run_id,
+    publish_snapshot,
+    read_parquet,
+    text_sha256,
+)
+from pts.transformers.clinical_staging.staged_outputs import EXTRACTION, schema_digest
 
 if TYPE_CHECKING:
     from otter.config.model import Config
 
-    from pts.tasks.llm_extract import LlmExtractSpec
-
+DEFAULT_SYSTEM_PROMPT = ('pts.transformers.clinical.prompts', 'aact_llm.txt')
+"""Packaged system prompt."""
 EXTRACTION_MODEL = 'aact_llm_extraction'
 """Model name of the extraction records; their model revision is the response schema digest."""
 IMPORT_RUN_PREFIX = 'import-extraction-cache'
@@ -50,6 +71,47 @@ SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
 POLARS_SCALARS: dict[Any, type[pl.DataType]] = {str: pl.String, int: pl.Int64, float: pl.Float64, bool: pl.Boolean}
 """Polars dtype of each scalar type a response model field can hold."""
+
+
+class AactTrialExtractionSettings(BaseModel):
+    """Settings for the aact_trial_extraction transformer."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    store_uri: str
+    """Root of the record stores, an absolute URI. Must sit outside the dataset
+        version directory so a trial whose prompt did not change between two AACT
+        snapshots is not extracted again."""
+    snapshot: str
+    """The AACT version. Prefixes the id of the runs this task writes to the store."""
+    openai_key_path: str = '/var/run/secrets/openai-api-key'
+    """Path the OpenAI key is mounted at, injected from Secret Manager by the
+        DAG. Never put the key itself in config."""
+    model: str = 'gpt-5-nano-2025-08-07'
+    """OpenAI model. Not part of a record's identity."""
+    model_class: str = 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
+    """Dotted path to the pydantic model the response is validated against. The
+        digest of its JSON schema is the records' model revision."""
+    system_prompt: str | None = None
+    """Path to a system prompt overriding the packaged one, relative to the
+        release root. Its contents are not part of a record's identity."""
+    service_tier: str = 'flex'
+    """OpenAI service tier. ``flex`` is roughly half price for higher latency,
+        with an automatic fallback to standard when flex capacity runs out."""
+    concurrency: int = 50
+    """Parallel API calls in flight."""
+    max_retries: int = 2
+    """SDK-level retries for transient errors."""
+    shard_size: int = 2000
+    """Trials per shard. Each shard is written to the store as it finishes, so a
+        retry of this task resumes rather than paying for the same calls twice."""
+    max_attempts: int = 3
+    """Attempts per trial, within a run and across runs, before it is left out."""
+    sample_size: int | None = None
+    """Extract a random sample only. For dry runs; leave unset in production."""
+    import_extraction_cache: str | None = None
+    """Extraction cache namespace of the current response schema to import into
+        the store, once, before extracting. For the migration off the cache."""
 
 
 def import_class(dotted_path: str) -> type[BaseModel]:
@@ -132,7 +194,7 @@ def prompts_for(report: pl.DataFrame) -> pl.DataFrame:
 
 
 def extract(
-    shard: pl.DataFrame, spec: LlmExtractSpec, system_prompt: str, model_cls: type[BaseModel]
+    shard: pl.DataFrame, settings: AactTrialExtractionSettings, system_prompt: str, model_cls: type[BaseModel]
 ) -> tuple[dict[str, BaseModel], dict[str, str]]:
     """Run the LLM over one shard and return the extraction of each trial it extracted, and the errors of the rest.
 
@@ -146,26 +208,26 @@ def extract(
             each trial's error is in ``SYSTEMIC_ERROR_TYPES`` or was not reported.
     """
     try:
-        openai_key = Path(spec.openai_key_path).read_text(encoding='utf-8').strip()
+        openai_key = Path(settings.openai_key_path).read_text(encoding='utf-8').strip()
     except OSError as exc:
-        msg = f'cannot read the OpenAI key at {spec.openai_key_path}: {exc}'
+        msg = f'cannot read the OpenAI key at {settings.openai_key_path}: {exc}'
         raise ComputeAborted(msg) from exc
     if not openai_key:
-        msg = f'the OpenAI key at {spec.openai_key_path} is empty'
+        msg = f'the OpenAI key at {settings.openai_key_path} is empty'
         raise ComputeAborted(msg)
 
     prompts = list(shard.select('id', 'prompt').iter_rows())
 
     async def extract_shard() -> dict[str, Extracted | Failed]:
-        async with _open_client(spec, openai_key) as client:
+        async with _open_client(settings, openai_key) as client:
             return await extract_prompts(
                 client,
                 model_cls,
                 system_prompt,
                 prompts,
-                model=spec.model,
-                service_tier=spec.service_tier,
-                concurrency=spec.concurrency,
+                model=settings.model,
+                service_tier=settings.service_tier,
+                concurrency=settings.concurrency,
             )
 
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix='llm-extraction') as executor:
@@ -190,7 +252,7 @@ def extract(
 
 
 def extraction_compute(
-    prompts: pl.DataFrame, spec: LlmExtractSpec, system_prompt: str
+    prompts: pl.DataFrame, settings: AactTrialExtractionSettings, system_prompt: str
 ) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
     """Return the record store compute that extracts the trials of a list of prompts.
 
@@ -198,13 +260,13 @@ def extraction_compute(
     carrying the error for the trial, ``no extraction`` if it gave none.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
-    model_cls = import_class(spec.model_class)
+    model_cls = import_class(settings.model_class)
 
     def compute(texts: list[str]) -> list[tuple[str | None, str | None]]:
         shard = pl.DataFrame(
             {'id': [ids[t] for t in texts], 'prompt': texts}, schema={'id': pl.String, 'prompt': pl.String}
         )
-        extractions, errors = extract(shard, spec, system_prompt, model_cls)
+        extractions, errors = extract(shard, settings, system_prompt, model_cls)
         return [
             (extractions[i].model_dump_json(), None) if i in extractions else (None, errors.get(i, 'no extraction'))
             for i in shard['id']
@@ -308,9 +370,11 @@ def import_extraction_cache(
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())
 
 
-def _open_client(spec: LlmExtractSpec, openai_key: str) -> AsyncOpenAI:
+def _open_client(settings: AactTrialExtractionSettings, openai_key: str) -> AsyncOpenAI:
     """Return a client for one extraction call, which the caller closes."""
-    return AsyncOpenAI(api_key=openai_key, timeout=client_timeout(spec.service_tier), max_retries=spec.max_retries)
+    return AsyncOpenAI(
+        api_key=openai_key, timeout=client_timeout(settings.service_tier), max_retries=settings.max_retries
+    )
 
 
 def _polars_dtype(annotation: Any) -> pl.DataType:
@@ -331,3 +395,83 @@ def _polars_dtype(annotation: Any) -> pl.DataType:
         return POLARS_SCALARS[annotation]()
     msg = f'no polars dtype for {annotation!r}'
     raise TypeError(msg)
+
+
+def _system_prompt(settings: AactTrialExtractionSettings, config: Config) -> str:
+    """Return the system prompt text, from config if overridden and from the package otherwise."""
+    if settings.system_prompt:
+        text, _ = StorageHandle(settings.system_prompt, config=config).read_text()
+        return text
+    package, filename = DEFAULT_SYSTEM_PROMPT
+    return (resources.files(package) / filename).read_text(encoding='utf-8')
+
+
+def aact_trial_extraction(
+    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
+) -> None:
+    """Extract structured evidence from AACT trials, reusing prior extractions.
+
+    Args:
+        source: Key ``aact``, the AACT dump archive. The tables required are restored inline.
+        destination: Key ``extraction``, the directory holding one snapshot per tag.
+        settings: See :py:class:`AactTrialExtractionSettings`.
+        config: The otter config.
+
+    Raises:
+        TaskRunError: If no trial of a non-empty set was extracted.
+    """
+    s = AactTrialExtractionSettings.model_validate(settings)
+    system_prompt = _system_prompt(s, config)
+    model_cls = import_class(s.model_class)
+    digest = schema_digest(model_cls)
+    polars_schema(model_cls)
+    store_uri = f'{s.store_uri.rstrip("/")}/{EXTRACTION.name}'
+
+    report = trial_report(source['aact'], config.work_path, s.sample_size)
+    prompts = prompts_for(report)
+    logger.info(f'built {prompts.height} prompts from {report.height} trials')
+
+    if s.import_extraction_cache:
+        imported = import_extraction_cache(s.import_extraction_cache, prompts, store_uri, digest, config)
+        logger.info(f'imported {imported} cached extractions into {store_uri}')
+
+    mapped = map_texts(
+        prompts['prompt'],
+        extraction_compute(prompts, s, system_prompt),
+        store_uri,
+        EXTRACTION_MODEL,
+        digest,
+        new_run_id(s.snapshot),
+        config,
+        max_attempts=s.max_attempts,
+        output_dtype=pl.String(),
+        allow_failures=True,
+        shard_size=s.shard_size,
+    )
+    extractions = extractions_from_records(mapped.frame, prompts, model_cls)
+    if prompts.height and extractions.is_empty():
+        msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
+        raise TaskRunError(msg)
+
+    tag = EXTRACTION.tag(digest, s.sample_size)
+    published = publish_snapshot(
+        extractions,
+        f'{destination["extraction"]}/{tag}',
+        EXTRACTION.metadata(digest, s.sample_size),
+        config,
+    )
+    stats = {
+        'trials': report.height,
+        'prompts': prompts.height,
+        'extracted': extractions.height,
+        'computed': mapped.computed,
+        'failed': mapped.failed,
+        'published': published,
+    }
+    if extractions.height < prompts.height:
+        missing = prompts.height - extractions.height
+        logger.warning(
+            f'{missing} of {prompts.height} trials ({missing / prompts.height:.1%}) have no extraction. '
+            f'a negative result is still a row, so these failed all of their attempts'
+        )
+    logger.info(f'extraction complete: {stats}')

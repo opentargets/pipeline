@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import hashlib
 import json
@@ -8,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from threading import Barrier, Event
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Annotated, Any, cast
 
@@ -17,18 +18,18 @@ import pytest
 from loguru import logger
 from openai import AsyncOpenAI
 from otter.config.model import Config
-from otter.scratchpad.model import Scratchpad
-from otter.task.model import TaskContext
 from pydantic import BaseModel, Field, ValidationError
 
-from pts.tasks.llm_extract import DEFAULT_SYSTEM_PROMPT, LlmExtract, LlmExtractSpec
 from pts.transformers.clinical import extract_aact_clinical_report
 from pts.transformers.clinical.llm_workflow import Extracted, Failed
 from pts.transformers.clinical.providers import aact as aact_provider
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_staging import aact_trial_extraction as extraction
 from pts.transformers.clinical_staging.aact_trial_extraction import (
+    DEFAULT_SYSTEM_PROMPT,
     EXTRACTION_MODEL,
+    AactTrialExtractionSettings,
+    aact_trial_extraction,
     import_class,
     import_extraction_cache,
     models_to_frame,
@@ -57,28 +58,19 @@ def test_registering_tasks_does_not_import_heavy_deps() -> None:
 
 
 def test_default_system_prompt_is_packaged() -> None:
-    task = LlmExtract(
-        LlmExtractSpec(
-            name='llm_extract test',
-            source={'aact': 'aact.zip'},
-            destination={},
-            store_uri='store',
-            snapshot='snapshot',
-        ),
-        SimpleNamespace(config=None),
-    )
+    settings = AactTrialExtractionSettings(store_uri='store', snapshot='snapshot')
 
     assert DEFAULT_SYSTEM_PROMPT == ('pts.transformers.clinical.prompts', 'aact_llm.txt')
-    assert task._system_prompt().startswith('You extract drug-indication evidence for Open Targets')
+    assert extraction._system_prompt(settings, cast(Any, None)).startswith(
+        'You extract drug-indication evidence for Open Targets'
+    )
 
 
 def test_default_model_class_is_the_extraction_schema() -> None:
-    spec = LlmExtractSpec(
-        name='llm_extract test', source={'aact': 'aact.zip'}, destination={}, store_uri='store', snapshot='snapshot'
-    )
+    settings = AactTrialExtractionSettings(store_uri='store', snapshot='snapshot')
 
-    assert spec.model_class == 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
-    assert import_class(spec.model_class) is ClinicalReportExtractionSchema
+    assert settings.model_class == 'pts.transformers.clinical.schemas.ClinicalReportExtractionSchema'
+    assert import_class(settings.model_class) is ClinicalReportExtractionSchema
 
 
 def test_prompts_without_publications_match_mira() -> None:
@@ -254,7 +246,7 @@ class FakeLlm:
         self.keys: list[str] = []
         monkeypatch.setattr(extraction, '_open_client', self.open)
 
-    def open(self, spec: LlmExtractSpec, openai_key: str) -> FakeClient:
+    def open(self, settings: AactTrialExtractionSettings, openai_key: str) -> FakeClient:
         client = FakeClient(default=self.answer)
         self.clients.append(client)
         self.keys.append(openai_key)
@@ -272,43 +264,48 @@ class FakeLlm:
         return [sorted(_trial_id(call['input']) for call in client.calls) for client in self.clients]
 
 
+class Attempt:
+    """What a run of the transformer left behind: the error it raised, and the statistics it logged."""
+
+    def __init__(self, failure: str | None, stats: dict[str, Any]) -> None:
+        self.failure = failure
+        self.stats = stats
+
+
 def _attempt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
-) -> LlmExtract:
-    """Run the task and validate it if the run succeeded; the failure reason is left on the manifest."""
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **settings: Any
+) -> Attempt:
+    """Run the transformer; the error it raised is left on the result."""
     monkeypatch.setattr(extraction, 'trial_report', lambda *args: report)
     key = tmp_path / 'openai-key'
     key.write_text('test-key')
-    spec.setdefault('openai_key_path', str(key))
-    context = TaskContext(
-        config=Config(step='test', steps=['test'], work_path=tmp_path / 'work'), scratchpad=Scratchpad()
-    )
-    context.abort = Event()
-    task = LlmExtract(
-        LlmExtractSpec(
-            name='llm_extract test',
-            source={'aact': str(tmp_path / 'aact.zip')},
-            destination={'extraction': str(tmp_path / snapshot / 'extraction')},
-            store_uri=str(tmp_path / 'store'),
-            snapshot=snapshot,
-            **spec,
-        ),
-        context,
-    )
-    asyncio.run(task.run())
-    if task.manifest.failure_reason is None:
-        asyncio.run(task.validate())
-    return task
+    settings.setdefault('openai_key_path', str(key))
+    config = Config(step='test', steps=['test'], work_path=tmp_path / 'work')
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m).strip()), level='INFO', format='{message}')
+    failure = None
+    try:
+        aact_trial_extraction(
+            {'aact': str(tmp_path / 'aact.zip')},
+            {'extraction': str(tmp_path / snapshot / 'extraction')},
+            {'store_uri': str(tmp_path / 'store'), 'snapshot': snapshot, **settings},
+            config,
+        )
+    except Exception as e:
+        failure = str(e)
+    finally:
+        logger.remove(sink)
+    prefix = 'extraction complete: '
+    stats = [ast.literal_eval(m.removeprefix(prefix)) for m in messages if m.startswith(prefix)]
+    return Attempt(failure, stats[-1] if stats else {})
 
 
 def _run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **spec: Any
-) -> LlmExtract:
-    task = _attempt(monkeypatch, tmp_path, report, snapshot, **spec)
-
-    # the `report` decorator swallows exceptions, so surface the failure reason
-    assert task.manifest.failure_reason is None, task.manifest.failure_reason
-    return task
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: pl.DataFrame, snapshot: str = 'v1', **settings: Any
+) -> Attempt:
+    result = _attempt(monkeypatch, tmp_path, report, snapshot, **settings)
+    assert result.failure is None, result.failure
+    return result
 
 
 def _digest() -> str:
@@ -332,7 +329,7 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     llm = FakeLlm(monkeypatch)
     report = _report('nct1', 'nct2')
 
-    task = _run(monkeypatch, tmp_path, report)
+    result = _run(monkeypatch, tmp_path, report)
 
     published = pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')
     prompts = extraction.prompts_for(report)
@@ -342,20 +339,19 @@ def test_extraction_publishes_only_validated_rows(monkeypatch: pytest.MonkeyPatc
     metadata = json.loads((tmp_path / f'v1/extraction/{TAG}/metadata.json').read_text())
     assert metadata == EXTRACTION.metadata(_digest(), None)
     assert metadata['model_revisions'] == {EXTRACTION_MODEL: _digest()}
-    assert task.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'computed': 2, 'failed': 0, 'published': True}
+    assert result.stats == {'trials': 2, 'prompts': 2, 'extracted': 2, 'computed': 2, 'failed': 0, 'published': True}
     assert llm.keys == ['test-key']
     assert all(client.closed for client in llm.clients)
 
 
-def test_llm_extract_writes_under_the_extraction_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_extraction_writes_under_the_extraction_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     FakeLlm(monkeypatch)
 
-    task = _run(monkeypatch, tmp_path, _report('nct1', 'nct2'))
+    _run(monkeypatch, tmp_path, _report('nct1', 'nct2'))
 
     runs = sorted(path.name for path in (tmp_path / 'store/extraction/runs').iterdir())
     assert len(runs) == 1
     assert runs[0].startswith('v1-')
-    assert [artifact.source for artifact in task.artifacts or []] == [str(tmp_path / 'store/extraction')]
     assert not (tmp_path / 'store/runs').exists()
 
 
@@ -374,8 +370,8 @@ def test_a_rerun_publishes_nothing_and_a_new_digest_publishes_beside_the_old(
     assert again.stats['published'] is False
     assert data.stat().st_mtime_ns == written
 
-    monkeypatch.setattr('pts.transformers.clinical_staging.staged_outputs.schema_digest', lambda model_cls: 'f' * 64)
-    monkeypatch.setattr('pts.tasks.llm_extract.new_run_id', lambda snapshot: f'{snapshot}-other-digest')
+    monkeypatch.setattr(extraction, 'schema_digest', lambda model_cls: 'f' * 64)
+    monkeypatch.setattr(extraction, 'new_run_id', lambda snapshot: f'{snapshot}-other-digest')
     other = EXTRACTION.tag('f' * 64, None)
     _run(monkeypatch, tmp_path, report)
 
@@ -524,15 +520,15 @@ def test_an_unsupported_response_model_fails_before_any_llm_call(
 ) -> None:
     llm = FakeLlm(monkeypatch)
 
-    task = _attempt(
+    result = _attempt(
         monkeypatch,
         tmp_path,
         _report('nct1', 'nct2'),
         model_class='tests.clinical_staging.test_aact_trial_extraction.UnsupportedExtraction',
     )
 
-    assert task.manifest.failure_reason is not None
-    assert 'UnsupportedExtraction.payload' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'UnsupportedExtraction.payload' in result.failure
     assert llm.calls == []
     assert not (tmp_path / 'store').exists()
 
@@ -540,10 +536,10 @@ def test_an_unsupported_response_model_fails_before_any_llm_call(
 def test_missing_key_aborts_without_recording_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch)
 
-    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(tmp_path / 'no-key'))
+    result = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(tmp_path / 'no-key'))
 
-    assert task.manifest.failure_reason is not None
-    assert 'no-key' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'no-key' in result.failure
     assert llm.calls == []
     assert not (tmp_path / 'store').exists()
     assert not (tmp_path / 'v1/extraction').exists()
@@ -562,11 +558,11 @@ def test_a_call_with_no_extractions_and_no_errors_aborts(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(extraction, 'extract_prompts', report_nothing)
 
-    task = _attempt(monkeypatch, tmp_path, _report(*ids))
+    result = _attempt(monkeypatch, tmp_path, _report(*ids))
 
-    assert task.manifest.failure_reason is not None
-    assert 'none of 10 trials' in task.manifest.failure_reason
-    assert 'no errors reported' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'none of 10 trials' in result.failure
+    assert 'no errors reported' in result.failure
     assert asked == [ids]
     assert [client.closed for client in llm.clients] == [True]
     assert not (tmp_path / 'store').exists()
@@ -577,11 +573,11 @@ def test_systemic_errors_abort(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     ids = [f'nct{i:02d}' for i in range(10)]
     llm = FakeLlm(monkeypatch, failing=set(ids), error=connection_error())
 
-    task = _attempt(monkeypatch, tmp_path, _report(*ids))
+    result = _attempt(monkeypatch, tmp_path, _report(*ids))
 
-    assert task.manifest.failure_reason is not None
-    assert 'none of 10 trials returned an extraction, all for systemic reasons' in task.manifest.failure_reason
-    assert 'APIConnectionError: Connection error.' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'none of 10 trials returned an extraction, all for systemic reasons' in result.failure
+    assert 'APIConnectionError: Connection error.' in result.failure
     assert llm.calls == [ids]
     assert not (tmp_path / 'store').exists()
     assert not (tmp_path / 'v1/extraction').exists()
@@ -623,10 +619,10 @@ def test_many_validation_failures_are_recorded_not_aborted(monkeypatch: pytest.M
 def test_nothing_extracted_publishes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch, failing={'nct1', 'nct2'})
 
-    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'))
+    result = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'))
 
-    assert task.manifest.failure_reason is not None
-    assert 'no trial' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'no trial' in result.failure
     assert llm.calls == [['nct1', 'nct2'], ['nct1', 'nct2'], ['nct1', 'nct2']]
     assert not (tmp_path / 'v1/extraction').exists()
 
@@ -637,12 +633,12 @@ def test_failed_trial_is_left_out_and_not_retried_on_rerun(
     llm = FakeLlm(monkeypatch, failing={'nct2'})
     report = _report('nct1', 'nct2')
 
-    task = _run(monkeypatch, tmp_path, report)
+    result = _run(monkeypatch, tmp_path, report)
 
     assert llm.calls == [['nct1', 'nct2'], ['nct2'], ['nct2']]
     published = pl.read_parquet(tmp_path / f'v1/extraction/{TAG}/data.parquet')
     assert published['id'].to_list() == ['nct1']
-    assert task.stats['failed'] == 1
+    assert result.stats['failed'] == 1
     assert any(m.startswith('1 of 2 trials (50.0%) have no extraction') for m in logged)
     failed = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String()).filter(
         pl.col('status') == 'failed'
@@ -776,17 +772,14 @@ def _late_populated(trial_id: str) -> ClinicalReportExtractionSchema:
     return ClinicalReportExtractionSchema.model_validate(data)
 
 
-def _spec(tmp_path: Path, **spec: Any) -> LlmExtractSpec:
+def _settings(tmp_path: Path, **settings: Any) -> AactTrialExtractionSettings:
     key = tmp_path / 'openai-key'
     key.write_text('test-key')
-    return LlmExtractSpec(
-        name='llm_extract test',
-        source={'aact': 'aact.zip'},
-        destination={},
+    return AactTrialExtractionSettings(
         store_uri='store',
         snapshot='snapshot',
         openai_key_path=str(key),
-        **spec,
+        **settings,
     )
 
 
@@ -794,11 +787,13 @@ def _shard(*ids: str) -> pl.DataFrame:
     return extraction.prompts_for(_report(*ids)).select('id', 'prompt')
 
 
-def _extract_in_loop(shard: pl.DataFrame, spec: LlmExtractSpec) -> tuple[dict[str, BaseModel], dict[str, str]]:
+def _extract_in_loop(
+    shard: pl.DataFrame, settings: AactTrialExtractionSettings
+) -> tuple[dict[str, BaseModel], dict[str, str]]:
     """Call ``extract`` from a running event loop, as Otter does."""
 
     async def call() -> tuple[dict[str, BaseModel], dict[str, str]]:
-        return extraction.extract(shard, spec, 'system prompt', ClinicalReportExtractionSchema)
+        return extraction.extract(shard, settings, 'system prompt', ClinicalReportExtractionSchema)
 
     return asyncio.run(call())
 
@@ -807,10 +802,10 @@ def test_fewer_than_ten_systemic_failures_do_not_abort(monkeypatch: pytest.Monke
     ids = [f'nct{i:02d}' for i in range(9)]
     llm = FakeLlm(monkeypatch, failing=set(ids), error=connection_error())
 
-    task = _attempt(monkeypatch, tmp_path, _report(*ids))
+    result = _attempt(monkeypatch, tmp_path, _report(*ids))
 
-    assert task.manifest.failure_reason is not None
-    assert 'no trial of 9 was extracted' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'no trial of 9 was extracted' in result.failure
     assert llm.calls == [ids, ids, ids]
     failed = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String())
     assert failed['status'].to_list() == ['failed'] * 27
@@ -823,10 +818,10 @@ def test_a_systemic_retry_round_aborts_and_keeps_the_first_round(
     bad = [f'nct{i:02d}' for i in range(1, 11)]
     llm = FakeLlm(monkeypatch, failing=set(bad), error=connection_error())
 
-    task = _attempt(monkeypatch, tmp_path, _report('nct00', *bad))
+    result = _attempt(monkeypatch, tmp_path, _report('nct00', *bad))
 
-    assert task.manifest.failure_reason is not None
-    assert 'none of 10 trials returned an extraction' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert 'none of 10 trials returned an extraction' in result.failure
     assert llm.calls == [['nct00', *bad], bad]
     records = read_records(str(tmp_path / 'store/extraction'), cast(Any, None), pl.String()).sort('text')
     assert records['status'].to_list() == ['ok'] + ['failed'] * 10
@@ -850,7 +845,7 @@ def test_a_one_trial_shard_makes_one_call(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_extract_returns_models_and_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch, failing={'nct2'})
 
-    extractions, errors = _extract_in_loop(_shard('nct1', 'nct2'), _spec(tmp_path))
+    extractions, errors = _extract_in_loop(_shard('nct1', 'nct2'), _settings(tmp_path))
 
     assert extractions == {'nct1': _model('nct1')}
     assert errors == {'nct2': _validation_error('nct2')}
@@ -860,7 +855,7 @@ def test_extract_returns_models_and_errors(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_client_is_closed_on_its_loop_after_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     llm = FakeLlm(monkeypatch)
 
-    _extract_in_loop(_shard('nct1', 'nct2'), _spec(tmp_path))
+    _extract_in_loop(_shard('nct1', 'nct2'), _settings(tmp_path))
 
     (client,) = llm.clients
     assert client.closed
@@ -873,7 +868,7 @@ def test_client_is_closed_on_its_loop_after_an_abort(monkeypatch: pytest.MonkeyP
     llm = FakeLlm(monkeypatch, failing=set(ids), error=connection_error())
 
     with pytest.raises(ComputeAborted, match='none of 10 trials'):
-        _extract_in_loop(_shard(*ids), _spec(tmp_path))
+        _extract_in_loop(_shard(*ids), _settings(tmp_path))
 
     (client,) = llm.clients
     assert client.closed
@@ -890,7 +885,7 @@ def test_client_is_closed_on_its_loop_when_extraction_raises(monkeypatch: pytest
     monkeypatch.setattr(extraction, 'extract_prompts', fail)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
-        _extract_in_loop(_shard('nct1'), _spec(tmp_path))
+        _extract_in_loop(_shard('nct1'), _settings(tmp_path))
 
     (client,) = llm.clients
     assert client.closed
@@ -903,10 +898,10 @@ def test_an_empty_key_aborts_without_recording_failures(monkeypatch: pytest.Monk
     key = tmp_path / 'empty-key'
     key.write_text(' \n')
 
-    task = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(key))
+    result = _attempt(monkeypatch, tmp_path, _report('nct1', 'nct2'), openai_key_path=str(key))
 
-    assert task.manifest.failure_reason is not None
-    assert f'the OpenAI key at {key} is empty' in task.manifest.failure_reason
+    assert result.failure is not None
+    assert f'the OpenAI key at {key} is empty' in result.failure
     assert llm.clients == []
     assert not (tmp_path / 'store').exists()
     assert not (tmp_path / 'v1/extraction').exists()
@@ -922,10 +917,10 @@ def test_two_extractions_run_at_once(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         return answer(prompt)
 
     monkeypatch.setattr(llm, 'answer', answer_together)
-    spec = _spec(tmp_path)
+    settings = _settings(tmp_path)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(_extract_in_loop, _shard(trial_id), spec) for trial_id in ('nct1', 'nct2')]
+        futures = [executor.submit(_extract_in_loop, _shard(trial_id), settings) for trial_id in ('nct1', 'nct2')]
         results = [future.result() for future in futures]
 
     assert results == [({'nct1': _model('nct1')}, {}), ({'nct2': _model('nct2')}, {})]
@@ -935,7 +930,7 @@ def test_two_extractions_run_at_once(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 def test_open_client_sets_the_timeout_and_retries(tmp_path: Path) -> None:
     for service_tier, timeout in (('flex', 900), ('auto', 600)):
-        client = extraction._open_client(_spec(tmp_path, service_tier=service_tier, max_retries=5), 'k')
+        client = extraction._open_client(_settings(tmp_path, service_tier=service_tier, max_retries=5), 'k')
 
         assert isinstance(client, AsyncOpenAI)
         assert client.api_key == 'k'

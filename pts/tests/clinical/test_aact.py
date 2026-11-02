@@ -1,14 +1,9 @@
-import asyncio
-import inspect
 from typing import Any
 
 import polars as pl
 import pytest
 from otter.config.model import Config
-from otter.scratchpad.model import Scratchpad
-from otter.task.model import TaskContext
 
-from pts.tasks.trial_models import TrialModels, TrialModelsSpec
 from pts.transformers.clinical.providers import aact as aact_provider
 from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.clinical_staging import aact_trial_extraction as extraction
@@ -374,22 +369,17 @@ def test_extraction_restores_todays_aact_tables(monkeypatch: pytest.MonkeyPatch,
 def test_trial_models_restores_only_the_studies_table(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     captured = _record_restore(monkeypatch)
     work_path = tmp_path / 'work'
-    context = TaskContext(config=Config(step='test', steps=['test'], work_path=work_path), scratchpad=Scratchpad())
-    spec = TrialModelsSpec.model_validate({
-        'name': 'trial_models test',
-        'source': {'aact': 'aact.zip', 'extraction': str(tmp_path), 'models': str(tmp_path)},
-        'destination': {'stop_reasons': str(tmp_path / 'stop')},
-        'store_uri': str(tmp_path / 'store'),
-        'snapshot': '2026-10',
-    })
+    config = Config(step='test', steps=['test'], work_path=work_path)
+    source = {'aact': 'aact.zip', 'extraction': str(tmp_path), 'models': str(tmp_path)}
+    destination = {'stop_reasons': str(tmp_path / 'stop')}
+    settings = {'store_uri': str(tmp_path / 'store'), 'snapshot': '2026-10'}
 
     def stop(*args: Any, **kwargs: Any) -> None:
         raise _StopError
 
     monkeypatch.setattr(trial_models, 'read_extraction', stop)
-    task = TrialModels(spec, context)
     with pytest.raises(_StopError):
-        asyncio.run(inspect.unwrap(TrialModels.run)(task))
+        trial_models.aact_trial_models(source, destination, settings, config)
 
     assert list(captured['tables']) == ['studies']
     assert str(captured['scratch_root']) == str(work_path)

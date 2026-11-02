@@ -836,7 +836,6 @@ import sys
 
 import pts.transformers.clinical_staging.aact_trial_models
 import pts.postgres
-import pts.tasks.trial_models
 import pts.transformers.clinical.hf_models
 import pts.transformers.clinical.ner
 import pts.transformers.clinical.providers.aact

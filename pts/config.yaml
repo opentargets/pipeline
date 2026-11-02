@@ -938,40 +938,45 @@ steps:
   # release_uri pointed at gs://clinical_staging/aact/${aact_version}, so every path below
   # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
-    - name: llm_extract aact trials
+    - name: transform aact_trial_extraction
+      transformer: clinical_staging.aact_trial_extraction
       source:
         aact: input/aact.zip
       destination:
         extraction: extraction
-      store_uri: gs://clinical_staging/store
-      # the AACT version, prefixing the store runs this step writes
-      snapshot: '{{snapshot}}'
-      model: gpt-5-nano-2025-08-07
-      service_tier: auto
-      concurrency: 75
-      shard_size: 200
+      settings:
+        store_uri: gs://clinical_staging/store
+        # the AACT version, prefixing the store runs this step writes
+        snapshot: '{{snapshot}}'
+        model: gpt-5-nano-2025-08-07
+        service_tier: auto
+        concurrency: 75
+        shard_size: 200
   ##################################################################################################
 
   #: AACT_TRIAL_MODELS STEP :######################################################################
   # Not part of a release. Runs in the `clinical_staging` DAG, with
   # release_uri pointed at gs://clinical_staging/aact/${aact_version}; the record stores sit outside it
   aact_trial_models:
-    - name: trial_models aact trials
+    - name: transform aact_trial_models
+      transformer: clinical_staging.aact_trial_models
       source:
         aact: input/aact.zip
         extraction: extraction
         models: input/models
       destination:
         stop_reasons: stop_reasons
-      store_uri: gs://clinical_staging/store
-      snapshot: '{{snapshot}}'
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
   ##################################################################################################
 
   #: CLINICAL_MINING_MODELS STEP :#################################################################
   # Not part of a release. Runs with release_uri pointed at
   # gs://clinical_staging/clinical_mining/${clinical_mining_version}; the record stores sit outside it
   clinical_mining_models:
-    - name: mining_models clinical mining
+    - name: transform clinical_mining_models
+      transformer: clinical_staging.clinical_mining_models
       source:
         ttd: input/ttd.txt
         ema: input/ema_medicines.xlsx
@@ -980,8 +985,9 @@ steps:
       destination:
         drug_entities: drug_entities
         disease_entities: disease_entities
-      store_uri: gs://clinical_staging/store
-      snapshot: '{{snapshot}}'
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################

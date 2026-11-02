@@ -1,10 +1,17 @@
-"""Implementation of the :py:mod:`pts.tasks.mining_models` task."""
+"""Transformer that runs disease and drug NER over the TTD, EMA and PMDA texts, once per clinical_mining version.
+
+The models run through the record store of :py:mod:`pts.transformers.clinical_staging.record_store`, so a text
+that already has an answer for the model revision is not computed again, and the
+result is published as a write-once snapshot under the model revision tag.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
 
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.mining import (
@@ -15,10 +22,29 @@ from pts.transformers.clinical.mining import (
     staged_lookup,
 )
 from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
+from pts.transformers.clinical_staging.record_store import new_run_id
 from pts.transformers.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 
 if TYPE_CHECKING:
     from otter.config.model import Config
+
+
+class ClinicalMiningModelsSettings(BaseModel):
+    """Settings for the clinical_mining_models transformer."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    store_uri: str
+    """Root of the record stores, an absolute URI. Shared with the AACT staging, so a
+        label seen there is not computed again."""
+    snapshot: str
+    """The clinical_mining version, which names the records this run writes."""
+    ner_batch_size: int = Field(default=256, gt=0)
+    """Texts per disease and drug NER batch."""
+    ner_model_batch_size: int = Field(default=32, gt=0)
+    """Labels per drug NER forward pass, within a batch. The disease NER runs one text at a time."""
+    max_attempts: int = 3
+    """Failed records after which a text is no longer retried."""
 
 
 def stage_mining_models(
@@ -76,3 +102,33 @@ def stage_mining_models(
         )
 
     return {'disease_entities': disease.stats(), 'drug_entities': ner.stats()}
+
+
+def clinical_mining_models(
+    source: dict[str, str], destination: dict[str, str], settings: dict[str, Any], config: Config
+) -> None:
+    """Stage disease and drug entities for the texts of one clinical_mining version.
+
+    Args:
+        source: Keys ``ttd``, ``ema``, ``pmda`` (the provider files) and ``models`` (the staged Hugging Face models).
+        destination: Where to publish the snapshots. Keys ``drug_entities`` and ``disease_entities``.
+        settings: See :py:class:`ClinicalMiningModelsSettings`.
+        config: The otter config.
+    """
+    s = ClinicalMiningModelsSettings.model_validate(settings)
+    store_uri = s.store_uri.rstrip('/')
+    run_id = new_run_id(s.snapshot)
+    stats = stage_mining_models(
+        source['ttd'],
+        source['ema'],
+        source['pmda'],
+        source['models'],
+        destination,
+        store_uri,
+        run_id,
+        config,
+        ner_batch_size=s.ner_batch_size,
+        ner_model_batch_size=s.ner_model_batch_size,
+        max_attempts=s.max_attempts,
+    )
+    logger.info(f'mining models staged: {stats}')
