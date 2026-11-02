@@ -11,11 +11,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from pts.transformers.variant import prepared as prepared_module
-from pts.transformers.variant.alleles import contig_spans
+from pts.transformers.variant.annotators.gpn_star import GpnStarCutoffs
+from pts.transformers.variant.annotators.sift import MATRICES
 from pts.transformers.variant.chromosome import annotate_chunk, annotate_inputs, split_records
-from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.prepared import ChunkSettings, PreparationSources, PreparedChromosome, in_range
-from pts.transformers.variant.sift import MATRICES
+from pts.transformers.variant.vep.alleles import contig_spans
 from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant import CONTIG_LENGTH, CORE_TABLES, GPN_STAR_CUTOFFS, _write_gpn_star
 from tests.test_variant_colocated import all_vars, cache_line, rows

@@ -12,7 +12,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.fastvep import build_cache, cache_path, prepare_gff3, run_fastvep, write_vcf
+from pts.transformers.variant.vep.fastvep import build_cache, cache_path, prepare_gff3, run_fastvep, write_vcf
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'
 SAMPLE = Path(__file__).parent / 'test_data' / 'fastvep_sample.json'

@@ -9,7 +9,11 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.transformers.variant.gerp import KentBigWig, gerp_max
+from pts.transformers.variant.annotators import gerp as gerp_module
+from pts.transformers.variant.annotators.bigwig import KentBigWig
+from pts.transformers.variant.annotators.gerp import add_gerp, gerp_max
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
+from tests.variant_fixtures import consequence_rows
 
 SCORES = {
     # one-based positions of the bases that carry a score
@@ -133,3 +137,75 @@ def test_windowed_reads_equal_one_read_per_span(tmp_path, seed: int):
     for gap, longest in ((0, 1), (16, 64), (4096, 1 << 22)):
         assert gerp_max(path, '1', frame, gap=gap, longest=longest).equals(expected)
     assert gerp_max(path, 'missing', frame).null_count() == frame.height
+
+
+@pytest.fixture(scope='module')
+def consequence_bigwig(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A bigWig of contig 1 that scores 945517 to 945519 and the two bases around 946175."""
+    path = str(tmp_path_factory.mktemp('gerp') / 'gerp.bw')
+    handle = pyBigWig.open(path, 'w')
+    handle.addHeader([('1', 1_000_000)])
+    scores = {945517: -0.466, 945518: -1.75, 945519: -1.87, 946174: 0.12349, 946175: 0.0625}
+    handle.addEntries(
+        ['1'] * len(scores),
+        [position - 1 for position in scores],
+        ends=list(scores),
+        values=list(scores.values()),
+    )
+    handle.close()
+    return path
+
+
+def test_add_gerp_scores_each_consequence_by_its_variant(consequence_bigwig: str):
+    found = add_gerp(
+        consequence_rows(
+            (0, 945518, 'C', 'A', 'ENST00000327044'),
+            (0, 945518, 'C', 'A', 'ENST00000999999'),
+            (1, 946175, 'G', 'A', 'ENST00000327044'),
+        ),
+        consequence_bigwig,
+        '1',
+    )
+    assert found['conservation'].to_list() == [-1.75, -1.75, 0.062]
+
+
+def test_add_gerp_reads_deletion_and_insertion_spans(consequence_bigwig: str):
+    found = add_gerp(
+        consequence_rows(
+            (0, 945517, 'TCA', 'T', 'ENST00000327044'),
+            (1, 945518, 'C', 'CT', 'ENST00000327044'),
+        ),
+        consequence_bigwig,
+        '1',
+    )
+    # the deletion removes 945518 and 945519; the insertion sits between 945518 and 945519
+    assert found['conservation'].to_list() == [-1.75, -1.75]
+
+
+def test_add_gerp_leaves_uncovered_spans_and_missing_contigs_null(consequence_bigwig: str):
+    uncovered = add_gerp(consequence_rows((0, 500, 'C', 'A', 'ENST00000327044')), consequence_bigwig, '1')
+    missing = add_gerp(consequence_rows((0, 945518, 'C', 'A', 'ENST00000327044')), consequence_bigwig, 'MT')
+    assert uncovered['conservation'].to_list() == missing['conservation'].to_list() == [None]
+
+
+def test_add_gerp_reads_each_variant_once(consequence_bigwig: str, monkeypatch: pytest.MonkeyPatch):
+    spans: list[int] = []
+
+    def spy(path: str, chromosome: str, rows: pl.DataFrame) -> pl.Series:
+        spans.append(rows.height)
+        return gerp_max(path, chromosome, rows)
+
+    monkeypatch.setattr(gerp_module, 'gerp_max', spy)
+    found = add_gerp(
+        consequence_rows((0, 945518, 'C', 'A', 'ENST00000327044'), (0, 945518, 'C', 'A', 'ENST00000999999')),
+        consequence_bigwig,
+        '1',
+    )
+    assert spans == [1]
+    assert found['conservation'].to_list() == [-1.75, -1.75]
+
+
+def test_add_gerp_accepts_an_empty_consequences_frame():
+    found = add_gerp(pl.DataFrame(schema=CONSEQUENCES_SCHEMA), '/no/gerp.bw', '1')
+    assert found.height == 0
+    assert found.schema['conservation'] == pl.Float64

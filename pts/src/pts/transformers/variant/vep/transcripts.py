@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 
 from pts.transformers.utils.ensembl import CoreDump, gene_names, transcripts, translation_uniprot
-from pts.transformers.variant.fastvep import DROPPED_BIOTYPES
+from pts.transformers.variant.vep.fastvep import DROPPED_BIOTYPES
 
 _MATURE_MIRNA = pl.List(pl.Struct({'start': pl.Int64(), 'end': pl.Int64()}))
 

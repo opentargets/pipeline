@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from pts.schemas.variant_annotation import variant_effect_dtype
-from pts.transformers.variant.gpn_star import (
+from pts.transformers.variant.annotators.gpn_star import (
     KEY,
     METHOD,
     GpnStarCutoffs,

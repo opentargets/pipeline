@@ -19,13 +19,11 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.utils.dataset import scan_dataset
-from pts.transformers.variant.alleles import contig_spans, write_fai
-from pts.transformers.variant.alphamissense import partition_alphamissense
+from pts.transformers.variant.annotators.alphamissense import partition_alphamissense
+from pts.transformers.variant.annotators.gpn_star import gpn_star_files
+from pts.transformers.variant.annotators.sift import sift_matrices
 from pts.transformers.variant.chromosome import FastvepReference
-from pts.transformers.variant.colocated import extract_all_vars
-from pts.transformers.variant.fastvep import build_cache, prepare_gff3
-from pts.transformers.variant.gpn_star import gpn_star_files
-from pts.transformers.variant.index import annotation_parts_by_chromosome, require_rows
+from pts.transformers.variant.index.annotations import annotation_parts_by_chromosome, require_rows
 from pts.transformers.variant.prepared import (
     AMINO_ACID_COLUMNS,
     ChunkSettings,
@@ -34,8 +32,10 @@ from pts.transformers.variant.prepared import (
 )
 from pts.transformers.variant.rows import collect_variants
 from pts.transformers.variant.settings import VariantSettings, VariantSource
-from pts.transformers.variant.sift import sift_matrices
-from pts.transformers.variant.transcripts import canonical_transcript_ids
+from pts.transformers.variant.vep.alleles import contig_spans, write_fai
+from pts.transformers.variant.vep.colocated import extract_all_vars
+from pts.transformers.variant.vep.fastvep import build_cache, prepare_gff3
+from pts.transformers.variant.vep.transcripts import canonical_transcript_ids
 
 COPY_BYTES = 64 << 20
 STANDARD = {*(str(number) for number in range(1, 23)), 'X', 'Y'}

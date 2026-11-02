@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.transformers.variant.gpn_star import GpnStarCutoffs
+from pts.transformers.variant.annotators.gpn_star import GpnStarCutoffs
 
 
 class VariantSource(BaseModel):

@@ -12,10 +12,8 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.transformers.variant.alleles import read_chromosome
-from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA
-from pts.transformers.variant.gerp import KentBigWig
-from pts.transformers.variant.loftee import (
+from pts.transformers.variant.annotators.bigwig import KentBigWig
+from pts.transformers.variant.annotators.loftee import (
     GERP_END_TRUNC_CUTOFF,
     MIN_INTRON_SIZE,
     TranscriptModel,
@@ -24,6 +22,8 @@ from pts.transformers.variant.loftee import (
     loftee_models,
 )
 from pts.transformers.variant.prepared import _sequence
+from pts.transformers.variant.vep.alleles import read_chromosome
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
 from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.variant_fixtures import consequences
 

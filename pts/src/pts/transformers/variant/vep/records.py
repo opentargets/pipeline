@@ -10,9 +10,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from pts.transformers.variant.alleles import hgvs_genomic, vep_allele_form
-from pts.transformers.variant.consequences import RANKS, consequence_score
-from pts.transformers.variant.frames import (
+from pts.transformers.variant.vep.alleles import hgvs_genomic, vep_allele_form
+from pts.transformers.variant.vep.consequences import RANKS, consequence_score
+from pts.transformers.variant.vep.frames import (
     CONSEQUENCES_SCHEMA,
     COPIED,
     FIELDS,

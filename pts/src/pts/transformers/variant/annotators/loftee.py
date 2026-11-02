@@ -13,7 +13,7 @@ import polars as pl
 
 from pts.schemas.ensembl_core import EXON, TRANSCRIPT
 from pts.transformers.utils.ensembl import CoreDump, transcripts
-from pts.transformers.variant.gerp import KentBigWig
+from pts.transformers.variant.annotators.bigwig import KentBigWig
 
 LOF_TERMS = ['stop_gained', 'frameshift_variant', 'splice_acceptor_variant', 'splice_donor_variant']
 MIN_INTRON_SIZE = 15

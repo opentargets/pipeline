@@ -26,14 +26,18 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.colocated import add_colocated
-from pts.transformers.variant.fastvep import run_fastvep, write_vcf
-from pts.transformers.variant.gerp import KentBigWig
-from pts.transformers.variant.gpn_star import add_gpn_star
-from pts.transformers.variant.index import add_annotation, amino_acid_keys, annotate_with_amino_acid_consequences
-from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.loftee import add_loftee
-from pts.transformers.variant.predictions import add_gerp_and_alphamissense
+from pts.transformers.variant.annotators.alphamissense import add_alphamissense
+from pts.transformers.variant.annotators.bigwig import KentBigWig
+from pts.transformers.variant.annotators.gerp import add_gerp
+from pts.transformers.variant.annotators.gpn_star import add_gpn_star
+from pts.transformers.variant.annotators.loftee import add_loftee
+from pts.transformers.variant.annotators.sift import add_sift
+from pts.transformers.variant.index.annotations import (
+    add_annotation,
+    amino_acid_keys,
+    annotate_with_amino_acid_consequences,
+)
+from pts.transformers.variant.index.rows import index_rows
 from pts.transformers.variant.prepared import (
     ChunkSettings,
     PreparationSources,
@@ -41,8 +45,9 @@ from pts.transformers.variant.prepared import (
     PreparedChunk,
     write_complete,
 )
-from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
-from pts.transformers.variant.sift import add_sift
+from pts.transformers.variant.vep.colocated import add_colocated
+from pts.transformers.variant.vep.fastvep import run_fastvep, write_vcf
+from pts.transformers.variant.vep.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 
 
 @dataclass(frozen=True)
@@ -195,7 +200,8 @@ def annotate_inputs(inputs: PreparedChunk, settings: ChunkSettings) -> pl.DataFr
         variants, consequences = chunk_frames(records, inputs.rows, inputs.transcripts, inputs.sequence, chromosome)
     del records
     models, ancestor = inputs.models(), inputs.ancestor()
-    consequences = add_gerp_and_alphamissense(consequences, inputs.gerp, inputs.alphamissense, chromosome)
+    consequences = add_gerp(consequences, inputs.gerp, chromosome)
+    consequences = add_alphamissense(consequences, inputs.alphamissense, chromosome)
     with KentBigWig(inputs.gerp) as gerp:
         consequences = add_loftee(consequences, models, inputs.sequence, ancestor, gerp, chromosome)
     del models, ancestor
