@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.variant.alphamissense import alphamissense
-from pts.transformers.variant.gerp import gerp_max
+from pts.transformers.variant.annotators.alphamissense import alphamissense
+from pts.transformers.variant.annotators.gerp import gerp_max
 
 _BASE = r'^[ACGT]$'
 

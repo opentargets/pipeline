@@ -24,8 +24,8 @@ from pts.schemas.variant import variant_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant import variant
+from pts.transformers.variant.annotators.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.chromosome import annotate
-from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.index import (
     add_annotation,
     amino_acid_keys,

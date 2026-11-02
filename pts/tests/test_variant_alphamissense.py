@@ -8,7 +8,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.alphamissense import alphamissense, partition_alphamissense
+from pts.transformers.variant.annotators.alphamissense import alphamissense, partition_alphamissense
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
 
