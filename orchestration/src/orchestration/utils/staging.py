@@ -13,9 +13,12 @@ from orchestration.utils.labels import Labels
 from orchestration.utils.utils import clean_name
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from airflow.sdk import BaseOperator, TaskGroup
 
     from orchestration.dags.config.staging_pipeline import StagingDagConfig
+    from orchestration.models.staging_dag.step import StagingStep
 
 RUN_RESOURCE_SUFFIX_LENGTH = len('-abcde')
 """Length of the suffix of `run_resource_name`, the hash of the DAG run id."""
@@ -58,9 +61,13 @@ def build_staging_dag(config: StagingDagConfig) -> dict[str, TaskGroup]:
     The first tasks of a run upload the rendered config into the `config/` folder of the run,
     and the `setup` files, if any, into the `bin/` folder of the run. Each cluster is
     created before its first steps, once the steps they depend on have ended, and deleted
-    after its last step, as `<cluster>-<hash>`, a name distinct for each DAG run
-    (`run_resource_name`). A cluster whose first step depends on a step of another cluster
-    is therefore created when that step ends. A step without a cluster and
+    after its last steps, as `<cluster>-<hash>`, a name distinct for each DAG run
+    (`run_resource_name`). The first steps of a cluster are its steps with no step of the
+    cluster before them, directly or indirectly, and its last steps those with no step of
+    the cluster after them. A cluster whose first step depends on a step of another cluster
+    is therefore created when that step ends. A cluster with steps before and after a step
+    of another cluster stays up while that step runs, and is deleted by Dataproc when it is
+    idle for longer than its `idle_delete_ttl`. A step without a cluster and
     without dependencies follows the uploads. The order of the steps follows `depends_on`,
     and the tasks of each step are the task group of `definition.build()`. Every resource has
     the labels of `staging_labels`: the labels of a step on the resources of the step, and the
@@ -100,6 +107,8 @@ def build_staging_dag(config: StagingDagConfig) -> dict[str, TaskGroup]:
         if not step.depends_on and not step.definition.clusters:
             setup >> tasks[name]
 
+    before = {name: _steps_before(steps, name) for name in steps}
+
     for cluster_name in config.dag.infrastructure.clusters:
         on_cluster = {name for name, step in steps.items() if cluster_name in step.definition.clusters}
         create = CreateClusterOperator(
@@ -121,10 +130,33 @@ def build_staging_dag(config: StagingDagConfig) -> dict[str, TaskGroup]:
         )
         setup >> create
         for name in on_cluster:
-            if not set(steps[name].depends_on) & on_cluster:
+            if not before[name] & on_cluster:
                 create >> tasks[name]
                 for upstream in steps[name].depends_on:
                     tasks[upstream] >> create
-            if not any(name in steps[other].depends_on for other in on_cluster):
+            if not any(name in before[other] for other in on_cluster):
                 tasks[name] >> delete
     return tasks
+
+
+def _steps_before(steps: Mapping[str, StagingStep], name: str) -> set[str]:
+    """Return the steps that run before the step `name`, directly or indirectly.
+
+    Examples:
+        >>> from types import SimpleNamespace
+        >>> steps = {
+        ...     'first': SimpleNamespace(depends_on=[]),
+        ...     'second': SimpleNamespace(depends_on=['first']),
+        ...     'third': SimpleNamespace(depends_on=['second']),
+        ... }
+        >>> sorted(_steps_before(steps, 'third'))
+        ['first', 'second']
+    """
+    found: set[str] = set()
+    pending = list(steps[name].depends_on)
+    while pending:
+        upstream = pending.pop()
+        if upstream not in found:
+            found.add(upstream)
+            pending.extend(steps[upstream].depends_on)
+    return found

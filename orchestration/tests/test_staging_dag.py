@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from airflow.sdk import DAG, BaseOperator
 from airflow.task.trigger_rule import TriggerRule
+from airflow.utils.dag_cycle_tester import check_cycle
 
 from orchestration.dags.config.staging_pipeline import StagingDagConfig
 from orchestration.models.batch import BatchIndexRow
@@ -116,6 +117,36 @@ def two_cluster_tasks(tmp_path: Path) -> dict[str, BaseOperator]:
     return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
 
 
+BACK_TO_FIRST_CLUSTER = (
+    TWO_CLUSTERS
+    + """  third:
+    depends_on: [second]
+    kind: dataproc
+    definition:
+      cluster: main
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=gentropy_third \\
+          step.input_path={{output}}/output/second \\
+          step.output_path={{output}}/output/third
+"""
+)
+"""`TWO_CLUSTERS` with a third step back on the first cluster, after the step on the second."""
+
+
+@pytest.fixture
+def back_to_first_cluster_tasks(tmp_path: Path) -> dict[str, BaseOperator]:
+    """Return the tasks of the DAG built from `BACK_TO_FIRST_CLUSTER`, by task id."""
+    dag_dir = tmp_path / 'a_dag'
+    dag_dir.mkdir()
+    (dag_dir / 'config.yaml').write_text(BACK_TO_FIRST_CLUSTER)
+    config = StagingDagConfig(dag_dir)
+    with DAG(dag_id=config.dag_id, schedule=None, user_defined_filters=FILTERS) as dag:
+        build_staging_dag(config)
+    check_cycle(dag)
+    return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
+
+
 def rendered(task: Any) -> Any:
     """Render the templated fields of a task for the DAG run `RUN_ID`."""
     task.render_template_fields({'run_id': RUN_ID})
@@ -156,6 +187,20 @@ class TestBuildStagingDag:
         assert two_cluster_tasks['second.run'].upstream_task_ids == {'first.run', 'create_cluster_other'}
         assert two_cluster_tasks['delete_cluster_main'].upstream_task_ids == {'first.run'}
         assert two_cluster_tasks['delete_cluster_other'].upstream_task_ids == {'second.run'}
+
+    def test_order_of_a_cluster_before_and_after_another(
+        self, back_to_first_cluster_tasks: dict[str, BaseOperator]
+    ) -> None:
+        """A cluster with steps before and after a step of another cluster is created before its
+        first step and deleted after its last, with no cycle.
+        """
+        tasks = back_to_first_cluster_tasks
+        uploads = {'upload_config', 'upload_bin_install-dependencies-on-cluster-sh', 'upload_bin_cli-py'}
+        assert tasks['create_cluster_main'].upstream_task_ids == uploads
+        assert tasks['create_cluster_other'].upstream_task_ids == {*uploads, 'first.run'}
+        assert tasks['third.run'].upstream_task_ids == {'second.run'}
+        assert tasks['delete_cluster_main'].upstream_task_ids == {'third.run'}
+        assert tasks['delete_cluster_other'].upstream_task_ids == {'second.run'}
 
     def test_job_is_rendered_for_the_run(self, tasks: dict[str, BaseOperator]) -> None:
         """The job arguments are the gentropy CLI of the run and the paths of the run."""
