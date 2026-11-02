@@ -1,0 +1,129 @@
+---
+description: Open Targets Genetics — FinnGen, UK Biobank and MVP meta-analysis harmonisation and PICS
+env: prod
+
+environments:
+  prod:
+    input:
+      finngen: gs://finngen-public-data-r12
+      gnomad: gs://gnomad_data_2
+    output: gs://finngen_data/meta/three-way/prod/20261102T120831
+    scratchpad:
+      gentropy_version: 4.0.0-dev.11
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-finngen-meta:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers: preempted secondary workers lose
+      # their shuffle data. 320 cores, a first sizing: the inputs are 330 bgzipped TSVs
+      # (1.1 TB), and the harmonisation joins about 3.9 billion rows with the gnomAD
+      # variant index. 512 GB disks for the shuffles of the harmonisation and of locus
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 20
+      worker_machine_type: n2d-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 512
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # the hadoop-bam package of the BGZFEnhancedGzipCodec the harmonisation reads the
+        # inputs with: gentropy adds it to the session config, which is too late for
+        # spark-submit on Dataproc
+        'spark:spark.jars.packages': 'org.seqdoop:hadoop-bam:7.10.0'
+        # broadcast the joins with a side of up to 64 MiB, as the GWAS Catalog summary
+        # statistics PICS DAG: at 512 MiB, a join of pics with the entries of locus was
+        # broadcast, and its collect exceeded spark.driver.maxResultSize
+        'spark:spark.sql.autoBroadcastJoinThreshold': '67108864'
+        # broadcasts are collected on the driver
+        'spark:spark.driver.maxResultSize': '4g'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  # the raw summary statistics are written in append mode, whatever write_mode is: a
+  # rerun of this step into the same run folder duplicates their rows
+  harmonisation:
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=finngen_ukb_mvp_meta_summary_statistics_ingestion \
+          step.source_manifest_path={{input.finngen}}/meta_analysis/mvp_ukbb/FinnGen_R12_MVP_UKBB_manifest.tsv \
+          step.efo_curation_path=https://raw.githubusercontent.com/opentargets/curation/refs/tags/26.09.2/mappings/disease/manual_string.tsv \
+          step.gnomad_variant_index_path={{input.gnomad}}/v4.1/variant_index \
+          step.study_index_output_path={{output}}/output/study \
+          step.raw_summary_statistics_output_path={{output}}/output/raw_summary_statistics \
+          step.harmonised_summary_statistics_output_path={{output}}/output/harmonised_summary_statistics \
+          step.harmonised_summary_statistics_qc_output_path={{output}}/output/harmonised_summary_statistics_qc \
+          step.perform_meta_analysis_filter=true \
+          step.imputation_score_threshold=0.8 \
+          step.perform_imputation_score_filter=true \
+          step.min_allele_count_threshold=20 \
+          step.perform_min_allele_count_filter=true \
+          step.min_allele_frequency_threshold=0.0001 \
+          step.perform_min_allele_frequency_filter=false \
+          step.filter_out_ambiguous_variants=false \
+          step.session.write_mode=overwrite \
+          step.session.use_enhanced_bgzip_codec=true \
+          step.session.spark_uri=yarn
+
+  window_clumping:
+    depends_on: [harmonisation]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=window_based_clumping \
+          step.summary_statistics_input_path={{output}}/output/harmonised_summary_statistics \
+          step.study_locus_output_path={{output}}/output/study_locus \
+          step.collect_locus=true \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=100 \
+          step.session.spark_uri=yarn
+
+  ld_annotation:
+    depends_on: [window_clumping]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=ld_based_clumping \
+          step.ld_index_path={{input.gnomad}}/v2.1.1/ld_index \
+          step.study_locus_input_path={{output}}/output/study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.clumped_study_locus_output_path={{output}}/output/ld_annotated_study_locus \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=100 \
+          step.session.spark_uri=yarn
+
+  pics:
+    depends_on: [ld_annotation]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=pics \
+          step.study_locus_ld_annotated_in={{output}}/output/ld_annotated_study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.picsed_study_locus_out={{output}}/output/credible_set \
+          step.picsed_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=20 \
+          step.session.spark_uri=yarn

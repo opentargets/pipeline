@@ -20,7 +20,7 @@ The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](htt
 
 ## FinnGen, UK Biobank and MVP meta-analysis
 
-The summary statistics of the three-way meta-analysis of [FinnGen R12, the Million Veteran Program and the Pan-UK Biobank](https://mvp-ukbb.finngen.fi/about) are read from `gs://finngen-public-data-r12/meta_analysis/mvp_ukbb/` and processed by the `finngen_ukb_mvp_meta` DAG into harmonised summary statistics, a study index and PICS credible sets. The DAG config is `dags/config/finngen_ukb_mvp_meta.yaml`. The current release is `gs://finngen_data/meta/three-way/prod/20251027T140104/`, see [FinnGen, UK Biobank and MVP meta-analysis](meta/three-way/README.md).
+The summary statistics of the three-way meta-analysis of [FinnGen R12, the Million Veteran Program and the Pan-UK Biobank](https://mvp-ukbb.finngen.fi/about) are read from `gs://finngen-public-data-r12/meta_analysis/mvp_ukbb/` and processed by the `finngen_ukb_mvp_meta` DAG into harmonised summary statistics, a study index and PICS credible sets. The DAG config is `dags/finngen_ukb_mvp_meta/config.yaml`. The current release is `gs://finngen_data/meta/three-way/prod/20251027T140104/`, see [FinnGen, UK Biobank and MVP meta-analysis](meta/three-way/README.md).
 
 ## Changelog
 
