@@ -7,9 +7,9 @@ environments:
     input:
       finngen: gs://finngen-public-data-r12
       gnomad: gs://gnomad_data_2
-    output: gs://finngen_data/meta/three-way/prod/20261102T120831
+    output: gs://finngen_data/meta/three-way/prod/20261102T181409
     scratchpad:
-      gentropy_version: 4.0.0-dev.11
+      gentropy_version: 4.0.0-dev.12
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
@@ -53,8 +53,10 @@ infrastructure:
         - '{{output}}/bin/install_dependencies_on_cluster.sh'
 
 steps:
-  # the raw summary statistics are written in append mode, whatever write_mode is: a
-  # rerun of this step into the same run folder duplicates their rows
+  # reads the summary statistics of the manifest from the FinnGen bucket, one read per
+  # distinct header, and writes the harmonised summary statistics partitioned by studyId
+  # and chromosome. It runs alone: its spark-submit fills the ivy cache of the master with
+  # the hadoop-bam package before the steps that run in parallel resolve it
   harmonisation:
     kind: dataproc
     definition:
@@ -63,12 +65,8 @@ steps:
       args: |
         step=finngen_ukb_mvp_meta_summary_statistics_ingestion \
           step.source_manifest_path={{input.finngen}}/meta_analysis/mvp_ukbb/FinnGen_R12_MVP_UKBB_manifest.tsv \
-          step.efo_curation_path=https://raw.githubusercontent.com/opentargets/curation/refs/tags/26.09.2/mappings/disease/manual_string.tsv \
           step.gnomad_variant_index_path={{input.gnomad}}/v4.1/variant_index \
-          step.study_index_output_path={{output}}/output/study \
-          step.raw_summary_statistics_output_path={{output}}/output/raw_summary_statistics \
           step.harmonised_summary_statistics_output_path={{output}}/output/harmonised_summary_statistics \
-          step.harmonised_summary_statistics_qc_output_path={{output}}/output/harmonised_summary_statistics_qc \
           step.perform_meta_analysis_filter=true \
           step.imputation_score_threshold=0.8 \
           step.perform_imputation_score_filter=true \
@@ -81,6 +79,39 @@ steps:
           step.session.use_enhanced_bgzip_codec=true \
           step.session.spark_uri=yarn
 
+  summary_statistics_qc:
+    depends_on: [harmonisation]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=summary_statistics_qc \
+          step.gwas_path={{output}}/output/harmonised_summary_statistics \
+          step.output_path={{output}}/output/harmonised_summary_statistics_qc \
+          step.pval_threshold=1e-8 \
+          step.session.write_mode=overwrite \
+          step.session.spark_uri=yarn
+
+  # the studies of the manifest, with the ontology terms of the curation and the flags
+  # of the summary statistics QC. A new curation tag needs this step only
+  study_index:
+    depends_on: [summary_statistics_qc]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-meta
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=finngen_ukb_mvp_meta_study_index \
+          step.source_manifest_path={{input.finngen}}/meta_analysis/mvp_ukbb/FinnGen_R12_MVP_UKBB_manifest.tsv \
+          step.efo_curation_path=https://raw.githubusercontent.com/opentargets/curation/refs/tags/26.09.2/mappings/disease/manual_string.tsv \
+          step.sumstats_qc_path={{output}}/output/harmonised_summary_statistics_qc \
+          step.study_index_output_path={{output}}/output/study \
+          step.session.write_mode=overwrite \
+          step.session.spark_uri=yarn
+
+  # the harmonised summary statistics are partitioned by studyId and chromosome: without
+  # recursive file lookup, Spark reads both columns from the directory names
   window_clumping:
     depends_on: [harmonisation]
     kind: dataproc
@@ -91,13 +122,14 @@ steps:
         step=window_based_clumping \
           step.summary_statistics_input_path={{output}}/output/harmonised_summary_statistics \
           step.study_locus_output_path={{output}}/output/study_locus \
+          step.recursive_file_lookup=false \
           step.collect_locus=true \
           step.session.write_mode=overwrite \
           step.session.output_partitions=100 \
           step.session.spark_uri=yarn
 
   ld_annotation:
-    depends_on: [window_clumping]
+    depends_on: [window_clumping, study_index]
     kind: dataproc
     definition:
       cluster: otg-finngen-meta
@@ -113,7 +145,7 @@ steps:
           step.session.spark_uri=yarn
 
   # no broadcast joins in pics: the credible set variants join the members with the
-  # entries of locus (71 million in the run 20261102T120831), which the planner
+  # entries of locus (71 million in the run 20261102T120831, gentropy 4.0.0-dev.11), which the planner
   # estimated under the 64 MiB threshold of the cluster. The broadcast exhausted the
   # 16 GB of the driver, and the job failed with a StackOverflowError
   pics:
