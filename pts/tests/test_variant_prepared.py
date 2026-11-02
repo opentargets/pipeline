@@ -10,8 +10,9 @@ import polars as pl
 import pyarrow.parquet as pq
 import pytest
 
+from pts.transformers.variant import prepared as prepared_module
 from pts.transformers.variant.alleles import contig_spans
-from pts.transformers.variant.chromosome import annotate_inputs, split_records
+from pts.transformers.variant.chromosome import annotate_chunk, annotate_inputs, split_records
 from pts.transformers.variant.gpn_star import GpnStarCutoffs
 from pts.transformers.variant.prepared import ChunkSettings, PreparationSources, PreparedChromosome, in_range
 from pts.transformers.variant.sift import MATRICES
@@ -269,6 +270,47 @@ def test_in_range_pushes_the_position_range_into_the_scan(tmp_path: Path) -> Non
     scan = in_range(path, pl.Series([25, 18, 33]))
     assert 'SELECTION: col("position").is_between([18, 33])' in scan.explain()
     assert scan.collect()['position'].to_list() == list(range(18, 34))
+
+
+def test_chunk_reads_its_position_sorted_files_by_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The colocated, annotation and GPN-Star reads each go through `in_range` over the chunk's positions."""
+    located = all_vars(tmp_path / 'all_vars.gz', cache_line('rs123', 123, 123, 'A/G'))
+    handle = prepared(tmp_path, all_vars=located, annotations=1)
+    _write_gpn_star(tmp_path / 'gpn_star', '1', [(123, 'A', 'G', -3.0)])
+    handle.write(
+        replace(
+            sources(tmp_path),
+            amino_acid_annotations=(),
+            gpn_star={'1': str(tmp_path / 'gpn_star' / 'llr_chr1.parquet')},
+            gpn_star_cutoffs=GpnStarCutoffs(**GPN_STAR_CUTOFFS),
+        )
+    )
+    ranges: list[tuple[str, list[int]]] = []
+
+    def spy(path: Path, positions: pl.Series) -> pl.LazyFrame:
+        ranges.append((path.name, sorted(positions.to_list())))
+        return in_range(path, positions)
+
+    monkeypatch.setattr(prepared_module, 'in_range', spy)
+    inputs = handle.chunk(0, annotated=False)
+    loci = inputs.rows.select('chromosome', 'position').unique()
+    inputs.colocated()
+    inputs.annotations(loci)
+    inputs.gpn_star(loci['position'])
+    assert ranges == [
+        ('colocated.parquet', [123, 200]),
+        ('annotations-000.parquet', [123, 200]),
+        ('gpn_star.parquet', [123, 200]),
+    ]
+
+
+def test_annotate_chunk_deletes_its_records_once_its_part_is_written(tmp_path: Path) -> None:
+    handle = prepared(tmp_path)
+    handle.write(replace(sources(tmp_path), variant_annotations=(), amino_acid_annotations=()))
+    split_records(fastvep_json(tmp_path / 'fastvep.json', [1, 0], [MISSENSE]), 2, handle)
+    part = annotate_chunk(handle, 0, True, tmp_path / 'parts' / 'part-0.parquet')
+    assert pl.read_parquet(part)['variantId'].to_list() == ['1_123_A_G', '1_200_C_T']
+    assert not handle.records(0).exists()
 
 
 @pytest.mark.parametrize('annotated', ['records', 'transcripts'])
