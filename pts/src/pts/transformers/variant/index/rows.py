@@ -13,7 +13,7 @@ import polars as pl
 from pts.schemas.variant import variant_schema
 from pts.transformers.utils.variant import hash_long_variant_ids
 from pts.transformers.variant.annotators.sift import SEVERITY
-from pts.transformers.variant.index import fill_null_arrays, normalise_score
+from pts.transformers.variant.index.annotations import fill_null_arrays, normalise_score
 from pts.transformers.variant.vep.consequences import CONSEQUENCE_SCORES, SEQUENCE_ONTOLOGY, consequence_score
 from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS, VARIANTS_SCHEMA, require
 

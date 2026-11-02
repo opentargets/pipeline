@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.variant.index_rows import index_rows
+from pts.transformers.variant.index.rows import index_rows
 from pts.transformers.variant.vep.alleles import read_chromosome
 from pts.transformers.variant.vep.colocated import add_colocated
 from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA, VARIANTS_SCHEMA, ChunkFrames

@@ -19,7 +19,7 @@ from pts.transformers.variant.annotators.sift import (
     sift_scores,
     unescape,
 )
-from pts.transformers.variant.index import normalise_score
+from pts.transformers.variant.index.annotations import normalise_score
 from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
 from tests.variant_fixtures import consequence_frame, index_of
 

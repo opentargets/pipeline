@@ -30,8 +30,12 @@ from pts.transformers.variant.annotators.gerp import KentBigWig
 from pts.transformers.variant.annotators.gpn_star import add_gpn_star
 from pts.transformers.variant.annotators.loftee import add_loftee
 from pts.transformers.variant.annotators.sift import add_sift
-from pts.transformers.variant.index import add_annotation, amino_acid_keys, annotate_with_amino_acid_consequences
-from pts.transformers.variant.index_rows import index_rows
+from pts.transformers.variant.index.annotations import (
+    add_annotation,
+    amino_acid_keys,
+    annotate_with_amino_acid_consequences,
+)
+from pts.transformers.variant.index.rows import index_rows
 from pts.transformers.variant.predictions import add_gerp_and_alphamissense
 from pts.transformers.variant.prepared import (
     ChunkSettings,

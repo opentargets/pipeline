@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.index_rows import uniprot_accessions
+from pts.transformers.variant.index.rows import uniprot_accessions
 from pts.transformers.variant.vep.transcripts import canonical_transcript_ids, transcript_fields
 from tests.ensembl_fixtures import cells, ddl, write_dump
 

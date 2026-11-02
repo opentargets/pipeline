@@ -21,8 +21,8 @@ from loguru import logger
 from pts.schemas.variant import variant_schema
 from pts.transformers.variant.annotators.gpn_star import GpnStarCutoffs, read_gpn_star
 from pts.transformers.variant.annotators.loftee import TranscriptModel, loftee_models
-from pts.transformers.variant.index import read_variant_annotations
-from pts.transformers.variant.index_rows import uniprot_accessions
+from pts.transformers.variant.index.annotations import read_variant_annotations
+from pts.transformers.variant.index.rows import uniprot_accessions
 from pts.transformers.variant.vep.alleles import read_chromosome, read_contig
 from pts.transformers.variant.vep.colocated import KEY, colocated_variants
 from pts.transformers.variant.vep.transcripts import transcript_fields

@@ -23,7 +23,7 @@ from pts.transformers.variant.annotators.alphamissense import partition_alphamis
 from pts.transformers.variant.annotators.gpn_star import gpn_star_files
 from pts.transformers.variant.annotators.sift import sift_matrices
 from pts.transformers.variant.chromosome import FastvepReference
-from pts.transformers.variant.index import annotation_parts_by_chromosome, require_rows
+from pts.transformers.variant.index.annotations import annotation_parts_by_chromosome, require_rows
 from pts.transformers.variant.prepared import (
     AMINO_ACID_COLUMNS,
     ChunkSettings,

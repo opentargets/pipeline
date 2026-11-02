@@ -11,7 +11,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.index_rows import index_rows
+from pts.transformers.variant.index.rows import index_rows
 from pts.transformers.variant.vep.alleles import shared_prefix_length
 from pts.transformers.variant.vep.colocated import KEY, _keys, add_colocated, colocated_variants, extract_all_vars
 from pts.transformers.variant.vep.frames import ID_LISTS
