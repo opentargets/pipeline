@@ -6,9 +6,10 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
         test lint check local-airflow cloud-airflow tunnel \
 				upload-eqtl-catalogue-readme upload-ukb-ppp-bucket-readme \
 				upload-finngen-gwas-readme upload-finngen-multiome-readme \
+				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-finngen-meta-readme upload-decode-bucket-readme
+				upload-decode-bucket-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -79,7 +80,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/gnomad_data/gnomad_ingestion \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_finemapping \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_harmonisation \
-		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
+		datasources/finngen_data/meta/three-way/finngen_ukb_mvp_meta \
 		datasources/finngen_data/finngen_gwas/finngen_ingestion \
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
@@ -104,6 +105,10 @@ upload-finngen-multiome-readme: ## Upload the finngen multiome readme to a run f
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/finngen_data/finngen_multiome $(BUCKET)/docs
 
+upload-finngen-meta-three-way-readme: ## Upload the finngen three-way meta-analysis readme to a run folder: make upload-finngen-meta-three-way-readme BUCKET=gs://finngen_data/meta/three-way/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-meta-three-way-readme BUCKET=gs://finngen_data/meta/three-way/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/finngen_data/meta/three-way $(BUCKET)/docs
+
 upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_sumstats_susie/docs
@@ -123,9 +128,6 @@ upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 	@gcloud storage rsync docs/datasources/interval_data gs://interval_data/docs
 
-upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
-	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
-
 upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/decode_data gs://decode_data/docs
 	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
@@ -134,4 +136,4 @@ update-bucket-docs: ## Upload all datasource readmes to their buckets
 update-bucket-docs: upload-ukb-ppp-bucket-readme \
 									  upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-										upload-finngen-meta-readme upload-decode-bucket-readme
+										upload-decode-bucket-readme

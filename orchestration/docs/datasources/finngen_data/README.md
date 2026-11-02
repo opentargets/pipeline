@@ -1,12 +1,13 @@
 # Finngen
 
-This document was updated on 2026-10-29.
+This document was updated on 2026-11-01.
 
 Bucket `gs://finngen_data` holds the FinnGen datasets ingested by Open Targets. Each DAG run writes to its own folder, `prod/<YYYYMMDDTHHMMSS>/`, with the DAG config of the run under `config/` and its outputs under `output/`. The docs of a run are under `docs/` of its run folder; the bucket has no top-level `docs/`.
 
 ```sh
-gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/       # FinnGen GWAS, finngen_ingestion DAG
-gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/   # FinnGen multiome, finngen_multiome_ingestion DAG
+gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>/             # FinnGen GWAS, finngen_ingestion DAG
+gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>/         # FinnGen multiome, finngen_multiome_ingestion DAG
+gs://finngen_data/meta/three-way/prod/<YYYYMMDDTHHMMSS>/   # FinnGen, UK Biobank and MVP meta-analysis, finngen_ukb_mvp_meta DAG
 ```
 
 ## FinnGen GWAS
@@ -16,6 +17,10 @@ The SuSiE fine-mapping of [FinnGen Data Freeze 12](https://r12.finngen.fi/) is r
 ## FinnGen multiome
 
 The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](https://www.nature.com/articles/s41586-026-11078-2) is read from `gs://finngen-public-data-multiome/eQTL/` and ingested by the `finngen_multiome_ingestion` DAG into a study index, credible sets and credible set variants. The DAG config is `dags/finngen_multiome_ingestion/config.yaml`. The current release is `gs://finngen_data/multiome/prod/20261029T125742/`, see [FinnGen multiome](finngen_multiome/README.md).
+
+## FinnGen, UK Biobank and MVP meta-analysis
+
+The summary statistics of the three-way meta-analysis of [FinnGen R12, the Million Veteran Program and the Pan-UK Biobank](https://mvp-ukbb.finngen.fi/about) are read from `gs://finngen-public-data-r12/meta_analysis/mvp_ukbb/` and processed by the `finngen_ukb_mvp_meta` DAG into harmonised summary statistics, a study index and PICS credible sets. The DAG config is `dags/config/finngen_ukb_mvp_meta.yaml`. The current release is `gs://finngen_data/meta/three-way/prod/20251027T140104/`, see [FinnGen, UK Biobank and MVP meta-analysis](meta/three-way/README.md).
 
 ## Changelog
 
@@ -42,3 +47,7 @@ The single-cell cis-eQTL fine-mapping of the [FinnGen immune multiome atlas](htt
 - docs: add [FinnGen multiome](finngen_multiome/README.md), uploaded to `docs/` of the run folder `gs://finngen_data/multiome/prod/20261029T125742/`.
 - chore: remove the top-level `gs://finngen_data/docs/`; the docs of each run are under `docs/` of its run folder.
 - chore: remove `gs://finngen_data/100_3mb_carma/`, CARMA fine-mapping outputs that no DAG produces or reads.
+
+### 2026-11-01
+
+- chore: copy the FinnGen, UK Biobank and MVP meta-analysis release (run of 2025-10-27) from `gs://finngen_ukb_mvp_meta_data/` to `gs://finngen_data/meta/three-way/prod/20251027T140104/` (`config/`, `docs/`, `output/`), and move its docs to [FinnGen, UK Biobank and MVP meta-analysis](meta/three-way/README.md).
