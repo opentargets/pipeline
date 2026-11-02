@@ -112,6 +112,10 @@ steps:
           step.session.output_partitions=100 \
           step.session.spark_uri=yarn
 
+  # no broadcast joins in pics: the credible set variants join the members with the
+  # entries of locus (71 million in the run 20261102T120831), which the planner
+  # estimated under the 64 MiB threshold of the cluster. The broadcast exhausted the
+  # 16 GB of the driver, and the job failed with a StackOverflowError
   pics:
     depends_on: [ld_annotation]
     kind: dataproc
@@ -126,4 +130,5 @@ steps:
           step.picsed_credible_set_variant_out={{output}}/output/credible_set_variant \
           step.session.write_mode=overwrite \
           step.session.output_partitions=20 \
+          "+step.session.extended_spark_conf={spark.sql.autoBroadcastJoinThreshold:'-1'}" \
           step.session.spark_uri=yarn
