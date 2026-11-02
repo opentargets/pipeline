@@ -1,4 +1,11 @@
-"""Clinical report datasets, schemas, helpers and provider extractors re-exported from their submodules."""
+"""Clinical report datasets, schemas, helpers and provider extractors re-exported from their submodules.
+
+The package also holds the staging steps that feed the release: ``aact_trial_extraction``, ``aact_trial_models`` and
+``clinical_mining_models``, with the ``staged_outputs`` they publish and the ``record_store`` they compute through.
+Those modules are not re-exported here.
+
+Ported from mira (opentargets/mira, by @ireneisdoomed).
+"""
 
 from pts.transformers.clinical.datasets import (
     CATEGORY_RANKS,

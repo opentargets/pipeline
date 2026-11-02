@@ -25,20 +25,20 @@ from pts.transformers.clinical.ner import (
     DRUGTEMIST_MODEL,
 )
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
+from pts.transformers.clinical.record_store import publish_snapshot, read_records
 from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
-from pts.transformers.clinical.stop_reasons import (
-    STOP_REASONS_MODEL,
-    STOP_REASONS_THRESHOLD,
-    predict_trial_stop_reasons,
-)
-from pts.transformers.clinical_staging.record_store import publish_snapshot, read_records
-from pts.transformers.clinical_staging.staged_outputs import (
+from pts.transformers.clinical.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
     STOP_REASONS,
     StagedOutput,
     schema_digest,
+)
+from pts.transformers.clinical.stop_reasons import (
+    STOP_REASONS_MODEL,
+    STOP_REASONS_THRESHOLD,
+    predict_trial_stop_reasons,
 )
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
@@ -375,7 +375,7 @@ def test_read_checks_the_expected_metadata_of_the_named_sources(tmp_path: Path) 
 
 def test_staged_outputs_loads_no_heavy_library() -> None:
     code = (
-        'import sys; import pts.transformers.clinical_staging.staged_outputs; '
+        'import sys; import pts.transformers.clinical.staged_outputs; '
         "bad = [m for m in ('openai', 'torch', 'transformers') if m in sys.modules]; "
         'sys.exit(repr(bad) if bad else 0)'
     )

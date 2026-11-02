@@ -10,22 +10,22 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
+from pts.transformers.clinical import aact_trial_models as trial_models
 from pts.transformers.clinical import extract_aact_clinical_report
-from pts.transformers.clinical.hf_models import staged_model_revisions
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical.providers.aact import llm_drug_labels
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
-from pts.transformers.clinical_report import attach_stop_reasons
-from pts.transformers.clinical_staging import aact_trial_models as trial_models
-from pts.transformers.clinical_staging.aact_trial_models import (
+from pts.transformers.clinical.aact_trial_models import (
     aact_trial_models,
     read_extraction,
     seed_drug_entities,
     stage_trial_models,
     why_stopped_texts,
 )
-from pts.transformers.clinical_staging.record_store import map_texts, read_records, text_sha256
-from pts.transformers.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical.hf_models import staged_model_revisions
+from pts.transformers.clinical.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
+from pts.transformers.clinical.providers.aact import llm_drug_labels
+from pts.transformers.clinical.record_store import map_texts, read_records, text_sha256
+from pts.transformers.clinical.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
+from pts.transformers.clinical_report import attach_stop_reasons
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 STOP_TAG = STOP_REASONS.tag(REVISIONS)

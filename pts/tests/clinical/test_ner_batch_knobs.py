@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from pts.transformers.clinical_staging.aact_trial_models import AactTrialModelsSettings
-from pts.transformers.clinical_staging.clinical_mining_models import ClinicalMiningModelsSettings
+from pts.transformers.clinical.aact_trial_models import AactTrialModelsSettings
+from pts.transformers.clinical.clinical_mining_models import ClinicalMiningModelsSettings
 
 Settings = AactTrialModelsSettings | ClinicalMiningModelsSettings
 

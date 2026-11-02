@@ -18,12 +18,9 @@ from otter.config.model import Config
 from otter.util.errors import TaskRunError
 from pydantic import BaseModel, Field, ValidationError
 
+from pts.transformers.clinical import aact_trial_extraction as extraction
 from pts.transformers.clinical import extract_aact_clinical_report
-from pts.transformers.clinical.llm_workflow import Extracted, Failed
-from pts.transformers.clinical.providers import aact as aact_provider
-from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
-from pts.transformers.clinical_staging import aact_trial_extraction as extraction
-from pts.transformers.clinical_staging.aact_trial_extraction import (
+from pts.transformers.clinical.aact_trial_extraction import (
     DEFAULT_SYSTEM_PROMPT,
     EXTRACTION_MODEL,
     AactTrialExtractionSettings,
@@ -34,8 +31,11 @@ from pts.transformers.clinical_staging.aact_trial_extraction import (
     polars_schema,
     stage_extraction,
 )
-from pts.transformers.clinical_staging.record_store import ComputeAborted, read_records, text_sha256
-from pts.transformers.clinical_staging.staged_outputs import EXTRACTION
+from pts.transformers.clinical.llm_workflow import Extracted, Failed
+from pts.transformers.clinical.providers import aact as aact_provider
+from pts.transformers.clinical.record_store import ComputeAborted, read_records, text_sha256
+from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical.staged_outputs import EXTRACTION
 from tests.clinical.batch_fixtures import SAMPLE_LINE
 from tests.fake_openai import FakeClient, Outcome, bad_request, connection_error, unprocessable
 
@@ -495,7 +495,7 @@ def test_an_unsupported_response_model_fails_before_any_llm_call(
             monkeypatch,
             tmp_path,
             _report('nct1', 'nct2'),
-            model_class='tests.clinical_staging.test_aact_trial_extraction.UnsupportedExtraction',
+            model_class='tests.clinical.test_aact_trial_extraction.UnsupportedExtraction',
         )
 
     assert 'UnsupportedExtraction.payload' in str(raised.value)

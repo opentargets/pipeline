@@ -1,6 +1,6 @@
 """Transformer that runs the stop reason classifier and drug NER over AACT texts, once per AACT version.
 
-The models run through the record store of :py:mod:`pts.transformers.clinical_staging.record_store`, so a text
+The models run through the record store of :py:mod:`pts.transformers.clinical.record_store`, so a text
 that already has an answer for the model revision is not computed again, and the
 result is published as a write-once snapshot next to the AACT version.
 """
@@ -20,15 +20,15 @@ from pts.transformers.clinical.helpers import sanitise_text
 from pts.transformers.clinical.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical.ner import drug_entities_with_status
 from pts.transformers.clinical.providers.aact import llm_drug_labels, read_aact_tables
-from pts.transformers.clinical.stop_reasons import stop_reasons_with_status
-from pts.transformers.clinical_staging.record_store import (
+from pts.transformers.clinical.record_store import (
     RECORD_SCHEMA,
     import_run,
     new_run_id,
     read_parquet,
     text_sha256,
 )
-from pts.transformers.clinical_staging.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical.stop_reasons import stop_reasons_with_status
 
 if TYPE_CHECKING:
     from otter.config.model import Config

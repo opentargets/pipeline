@@ -939,7 +939,7 @@ steps:
   # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
     - name: transform aact_trial_extraction
-      transformer: clinical_staging.aact_trial_extraction
+      transformer: clinical.aact_trial_extraction
       source:
         aact: input/aact.zip
       destination:
@@ -959,7 +959,7 @@ steps:
   # release_uri pointed at gs://clinical_staging/aact/${aact_version}; the record stores sit outside it
   aact_trial_models:
     - name: transform aact_trial_models
-      transformer: clinical_staging.aact_trial_models
+      transformer: clinical.aact_trial_models
       source:
         aact: input/aact.zip
         extraction: extraction
@@ -976,7 +976,7 @@ steps:
   # gs://clinical_staging/clinical_mining/${clinical_mining_version}; the record stores sit outside it
   clinical_mining_models:
     - name: transform clinical_mining_models
-      transformer: clinical_staging.clinical_mining_models
+      transformer: clinical.clinical_mining_models
       source:
         ttd: input/ttd.txt
         ema: input/ema_medicines.xlsx

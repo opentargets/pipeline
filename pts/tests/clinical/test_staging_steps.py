@@ -9,9 +9,9 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from pts.tasks.transform import Transform
-from pts.transformers.clinical_staging.aact_trial_extraction import AactTrialExtractionSettings, aact_trial_extraction
-from pts.transformers.clinical_staging.aact_trial_models import AactTrialModelsSettings, aact_trial_models
-from pts.transformers.clinical_staging.clinical_mining_models import (
+from pts.transformers.clinical.aact_trial_extraction import AactTrialExtractionSettings, aact_trial_extraction
+from pts.transformers.clinical.aact_trial_models import AactTrialModelsSettings, aact_trial_models
+from pts.transformers.clinical.clinical_mining_models import (
     ClinicalMiningModelsSettings,
     clinical_mining_models,
 )

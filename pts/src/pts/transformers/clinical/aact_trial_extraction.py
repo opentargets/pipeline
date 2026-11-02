@@ -2,7 +2,7 @@
 
 The extraction itself lives in :py:mod:`pts.transformers.clinical`; this transformer is the part that
 makes it repeatable. It builds one prompt per trial, asks the
-:py:mod:`pts.transformers.clinical_staging.record_store` store for the ones not yet extracted under the current
+:py:mod:`pts.transformers.clinical.record_store` store for the ones not yet extracted under the current
 response schema, and publishes the extraction as a write-once snapshot the release reads directly.
 
 Each trial's extraction is a record in the store: the text is the rendered prompt, the model
@@ -41,7 +41,7 @@ from pts.transformers.clinical.llm_workflow import (
 )
 from pts.transformers.clinical.providers.aact import read_aact_tables
 from pts.transformers.clinical.providers.aact_llm import TRIAL_FIELDS
-from pts.transformers.clinical_staging.record_store import (
+from pts.transformers.clinical.record_store import (
     ComputeAborted,
     import_run,
     map_texts,
@@ -50,7 +50,7 @@ from pts.transformers.clinical_staging.record_store import (
     read_parquet,
     text_sha256,
 )
-from pts.transformers.clinical_staging.staged_outputs import EXTRACTION, schema_digest
+from pts.transformers.clinical.staged_outputs import EXTRACTION, schema_digest
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -278,7 +278,7 @@ def extractions_from_records(
 
     Args:
         records: ``text`` and ``output`` per prompt, as
-            :py:func:`pts.transformers.clinical_staging.record_store.map_texts` returns them.
+            :py:func:`pts.transformers.clinical.record_store.map_texts` returns them.
         prompts: Output of :py:func:`prompts_for`.
         model_class: The model each output is validated against. It has an ``id`` field.
 

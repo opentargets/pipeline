@@ -1,6 +1,6 @@
 """Transformer that runs disease and drug NER over the TTD, EMA and PMDA texts, once per clinical_mining version.
 
-The models run through the record store of :py:mod:`pts.transformers.clinical_staging.record_store`, so a text
+The models run through the record store of :py:mod:`pts.transformers.clinical.record_store`, so a text
 that already has an answer for the model revision is not computed again, and the
 result is published as a write-once snapshot under the model revision tag.
 """
@@ -22,8 +22,8 @@ from pts.transformers.clinical.mining import (
     staged_lookup,
 )
 from pts.transformers.clinical.ner import disease_entities_with_status, drug_entities_with_status
-from pts.transformers.clinical_staging.record_store import new_run_id
-from pts.transformers.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
+from pts.transformers.clinical.record_store import new_run_id
+from pts.transformers.clinical.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES
 
 if TYPE_CHECKING:
     from otter.config.model import Config

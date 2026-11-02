@@ -9,8 +9,8 @@ import polars as pl
 import pytest
 from otter.util.errors import NotFoundError
 
-from pts.transformers.clinical_staging import record_store
-from pts.transformers.clinical_staging.record_store import (
+from pts.transformers.clinical import record_store
+from pts.transformers.clinical.record_store import (
     RECORD_SCHEMA,
     ComputeAborted,
     RecordStoreError,

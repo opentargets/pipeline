@@ -13,7 +13,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.transformers.clinical_staging.staged_outputs import EXTRACTION
+from pts.transformers.clinical.staged_outputs import EXTRACTION
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -91,7 +91,7 @@ def process_molecules(
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
         aact_batch: (optional) AACT trial extractions, as published by
-            :py:mod:`pts.transformers.clinical_staging.aact_trial_extraction`.
+            :py:mod:`pts.transformers.clinical.aact_trial_extraction`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.

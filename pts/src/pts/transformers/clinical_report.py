@@ -23,7 +23,7 @@ from pts.transformers.clinical import (
 from pts.transformers.clinical.mapping import require_staged
 from pts.transformers.clinical.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical.providers.aact import read_aact_tables
-from pts.transformers.clinical_staging.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
