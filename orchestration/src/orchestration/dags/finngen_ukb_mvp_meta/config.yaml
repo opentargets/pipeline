@@ -9,7 +9,7 @@ environments:
       gnomad: gs://gnomad_data_2
     output: gs://finngen_data/meta/three-way/prod/20261102T181409
     scratchpad:
-      gentropy_version: 4.0.0-dev.12
+      gentropy_version: 4.0.0-dev.13
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
