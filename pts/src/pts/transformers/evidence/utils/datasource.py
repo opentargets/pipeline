@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import polars as pl
 from loguru import logger
 
+from pts.schemas.dataset import DatasetModel
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.utils.evidence import Evidence
 from pts.transformers.evidence.utils.luts import ValidationLuts
@@ -27,12 +28,14 @@ class EvidenceDatasource:
         unique_fields: the fields that identify an evidence row, used to derive `id`.
         score: expression producing the evidence score.
         excluded_biotypes: target biotypes to flag as invalid.
+        schema: the dataset model valid evidence is validated against before it is written.
     """
 
     datasource_id: str
     unique_fields: list[str]
     score: pl.Expr
     excluded_biotypes: list[str] | None = None
+    schema: type[DatasetModel] | None = None
 
     def check_raw(self, raw: pl.LazyFrame) -> None:
         """Check raw evidence columns; columns outside `evidence_schema` only warn.

@@ -39,7 +39,8 @@ EXPECTED_FIELD_ORDER = (
     'geneInteractionType', 'geneticInteractionPValue', 'geneticInteractionScore',
     'interactingTargetFromSourceId', 'interactingTargetRole', 'phenotypicConsequenceFDR',
     'phenotypicConsequenceLogFoldChange', 'phenotypicConsequencePValue', 'projectDescription', 'releaseVersion',
-    'statisticalMethod', 'targetRole', 'pmcIds', 'publicationYear', 'textMiningSentences', 'alleleOrigins',
+    'statisticalMethod', 'targetRole', 'validationReadouts',
+    'pmcIds', 'publicationYear', 'textMiningSentences', 'alleleOrigins',
     'clinicalSignificances', 'variantFromSourceId', 'variantFunctionalConsequenceId', 'variantHgvsId',
     'variantId', 'variantRsId', 'biosamplesFromSource', 'log2FoldChangePercentileRank', 'ancestry',
     'ancestryId', 'beta', 'betaConfidenceIntervalLower', 'betaConfidenceIntervalUpper', 'cohortId', 'oddsRatio',
@@ -60,7 +61,7 @@ class TestEvidenceSchema:
         assert tuple(evidence_schema) == EXPECTED_FIELD_ORDER
 
     def test_field_count(self) -> None:
-        assert len(evidence_schema) == 109
+        assert len(evidence_schema) == 110
 
     def test_representative_scalar_dtypes(self) -> None:
         assert evidence_schema['datasourceId'] == pl.String
@@ -122,7 +123,7 @@ class TestPolarsSchemaToSpark:
     def test_evidence_schema_converts_wholesale(self) -> None:
         converted = polars_schema_to_spark(evidence_schema)
 
-        assert len(converted.fields) == 109
+        assert len(converted.fields) == 110
         assert tuple(field.name for field in converted) == EXPECTED_FIELD_ORDER
 
     def test_every_field_is_nullable(self) -> None:

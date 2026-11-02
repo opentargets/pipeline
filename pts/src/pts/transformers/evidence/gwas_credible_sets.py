@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.gwas_evidence import GwasCredibleSetEvidence
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -20,6 +21,7 @@ GWAS_CREDIBLE_SETS = EvidenceDatasource(
     datasource_id='gwas_credible_sets',
     unique_fields=['targetId', 'targetFromSourceId', 'diseaseId', 'datasourceId', 'studyLocusId'],
     score=pl.col('resourceScore'),
+    schema=GwasCredibleSetEvidence,
 )
 
 #: Substring match, as in gentropy, so `9999-99-99` passes.

@@ -24,6 +24,7 @@ dependencies = [
   "pixeltable-pgserver>=0.6,<0.7",
   "opentargets-mira>=1.0.5",
   "networkx>=3.6.1",
+  "pandera[polars]>=0.33.1",
   # spark-nlp imports distutils, which Python 3.12 only has through setuptools
   "setuptools>=80",
 ]
