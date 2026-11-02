@@ -13,6 +13,7 @@ from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
 from tests.variant_fixtures import consequence_rows
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
+ISOFORMS_SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_isoforms_sample.tsv'
 
 
 @pytest.fixture(scope='module')
@@ -20,6 +21,14 @@ def tsv(tmp_path_factory: pytest.TempPathFactory) -> str:
     """The sample of real AlphaMissense lines, gzipped as the release is."""
     path = tmp_path_factory.mktemp('alphamissense') / 'AlphaMissense_hg38.tsv.gz'
     path.write_bytes(gzip.compress(SAMPLE.read_bytes()))
+    return str(path)
+
+
+@pytest.fixture(scope='module')
+def isoforms(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """The sample of real lines of the non-canonical isoforms file, gzipped as the release is."""
+    path = tmp_path_factory.mktemp('alphamissense') / 'AlphaMissense_isoforms_hg38.tsv.gz'
+    path.write_bytes(gzip.compress(ISOFORMS_SAMPLE.read_bytes()))
     return str(path)
 
 
@@ -82,20 +91,47 @@ def test_alphamissense_chromosome_without_rows_is_null(tsv: str):
     assert found.height == 1
 
 
-def test_partition_reads_the_same_predictions(tsv: str, tmp_path: Path):
-    parts = partition_alphamissense(tsv, tmp_path, ['1', 'X'])
+def test_partition_reads_the_same_predictions(tsv: str, isoforms: str, tmp_path: Path):
+    parts = partition_alphamissense(tsv, isoforms, tmp_path, ['1', 'X'])
     assert parts == {'1': str(tmp_path / '1.parquet'), 'X': str(tmp_path / 'X.parquet')}
+    assert sorted(path.name for path in tmp_path.iterdir()) == ['1.parquet', 'X.parquet']
     keys = rows((945518, 'C', 'A', 'ENST00000327044'), (3426142, 'G', 'C', 'ENST00000270722'))
     assert alphamissense(parts['1'], '1', keys).equals(alphamissense(tsv, '1', keys))
     assert pl.read_parquet(parts['X']).is_empty()
     assert alphamissense(parts['X'], 'X', keys)['am_class'].to_list() == [None, None]
 
 
-def test_alphamissense_reads_mt_as_chrm(tsv: str, tmp_path: Path):
+def test_partition_adds_the_non_canonical_isoforms(tsv: str, isoforms: str, tmp_path: Path):
+    """ENST00000378391 is not AlphaMissense's canonical PRDM16 transcript: only the isoforms file scores it."""
+    keys = rows(
+        (3426142, 'G', 'C', 'ENST00000270722'),
+        (3426142, 'G', 'C', 'ENST00000378391'),
+        (69094, 'G', 'T', 'ENST00000641515'),
+        (69094, 'G', 'T', 'ENST00000335137'),
+    )
+    assert alphamissense(tsv, '1', keys)['am_class'].to_list() == ['ambiguous', None, None, 'likely_benign']
+    parts = partition_alphamissense(tsv, isoforms, tmp_path, ['1'])
+    assert alphamissense(parts['1'], '1', keys).select('am_class', 'am_pathogenicity').rows() == [
+        ('ambiguous', 0.3495),
+        ('ambiguous', 0.4743),
+        ('likely_benign', 0.3037),
+        ('likely_benign', 0.2937),
+    ]
+    assert pl.read_parquet(parts['1'])['position'].is_sorted()
+
+
+def test_partition_prefers_the_canonical_file_where_both_predict(tsv: str, isoforms: str, tmp_path: Path):
+    """Both files score ENST00000614859 at chr1:12746434 T>A, the isoforms file differently."""
+    keys = rows((12746434, 'T', 'A', 'ENST00000614859'))
+    parts = partition_alphamissense(tsv, isoforms, tmp_path, ['1'])
+    assert alphamissense(parts['1'], '1', keys)['am_pathogenicity'].to_list() == [0.1201]
+
+
+def test_alphamissense_reads_mt_as_chrm(tsv: str, isoforms: str, tmp_path: Path):
     """The file names the mitochondrion `chrM`; MT_12706_T_C is a real prediction."""
     keys = rows((12706, 'T', 'C', 'ENST00000361567'))
     assert alphamissense(tsv, 'MT', keys).select('am_class', 'am_pathogenicity').row(0) == ('likely_pathogenic', 0.9989)
-    parts = partition_alphamissense(tsv, tmp_path, ['MT'])
+    parts = partition_alphamissense(tsv, isoforms, tmp_path, ['MT'])
     assert pl.read_parquet(parts['MT']).height == 1
     assert alphamissense(parts['MT'], 'MT', keys).equals(alphamissense(tsv, 'MT', keys))
 

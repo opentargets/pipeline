@@ -22,6 +22,7 @@ SCHEMA = pl.Schema({
     'am_pathogenicity': pl.Float64,
     'am_class': pl.String,
 })
+ISOFORMS_SCHEMA = pl.Schema({name: dtype for name, dtype in SCHEMA.items() if name != 'uniprot_id'})
 
 
 def _contig(chromosome: str) -> str:
@@ -29,38 +30,51 @@ def _contig(chromosome: str) -> str:
     return 'chrM' if chromosome == 'MT' else f'chr{chromosome}'
 
 
-def _scan(path: str) -> pl.LazyFrame:
-    """The AlphaMissense file, or one chromosome of it written by `partition_alphamissense`."""
+def _scan(path: str, schema: pl.Schema = SCHEMA) -> pl.LazyFrame:
+    """An AlphaMissense file with `schema`, or one chromosome of it written by `partition_alphamissense`."""
     if path.endswith('.parquet'):
         return pl.scan_parquet(path)
-    return pl.scan_csv(path, separator='\t', comment_prefix='#', has_header=False, schema=SCHEMA)
+    return pl.scan_csv(path, separator='\t', comment_prefix='#', has_header=False, schema=schema)
 
 
 def partition_alphamissense(
-    path: str, directory: Path, chromosomes: Iterable[str], row_group_rows: int = ROW_GROUP_ROWS
+    canonical: str,
+    isoforms: str,
+    directory: Path,
+    chromosomes: Iterable[str],
+    row_group_rows: int = ROW_GROUP_ROWS,
 ) -> dict[str, str]:
-    """The AlphaMissense rows of each chromosome, read in one pass, as `directory/<chromosome>.parquet`.
+    """The AlphaMissense rows of each chromosome, from both files, as `directory/<chromosome>.parquet`.
 
-    Every chromosome gets a file, without rows when the source has none for it, sorted by
-    position in row groups of `row_group_rows`, so that a position range reads only its own.
+    `AlphaMissense_hg38.tsv.gz` predicts the canonical isoform of each UniProt protein and
+    `AlphaMissense_isoforms_hg38.tsv.gz` the other GENCODE V32 coding transcripts. Where both
+    predict a key, the canonical file's row comes first, and `alphamissense` keeps the first.
+    Both are read once into `directory/staged.parquet`, which is removed once every chromosome is
+    written. Every chromosome gets a file, without rows when neither source has any for it, sorted
+    by position in row groups of `row_group_rows`, so that a position range reads only its own.
 
     Returns:
-        Chromosome to the path of its file, which `alphamissense` reads in place of the source.
+        Chromosome to the path of its file, which `alphamissense` reads in place of the sources.
     """
     directory.mkdir(parents=True, exist_ok=True)
     names = {chromosome: _contig(chromosome) for chromosome in chromosomes}
-    frame = (
-        _scan(path)
-        .filter(pl.col('chromosome').is_in(list(names.values())))
-        .select('chromosome', *KEY, 'am_pathogenicity', 'am_class')
-        .collect(engine='streaming')
-    )
+    staged = directory / 'staged.parquet'
+    columns = ['chromosome', *KEY, 'am_pathogenicity', 'am_class']
+    pl.concat([_scan(canonical).select(columns), _scan(isoforms, ISOFORMS_SCHEMA).select(columns)]).filter(
+        pl.col('chromosome').is_in(list(names.values()))
+    ).sink_parquet(staged, row_group_size=row_group_rows)
     parts = {}
     for chromosome, name in names.items():
         parts[chromosome] = str(directory / f'{chromosome}.parquet')
-        frame.filter(pl.col('chromosome') == name).sort('position', maintain_order=True).write_parquet(
-            parts[chromosome], row_group_size=row_group_rows
+        (
+            pl
+            .scan_parquet(staged)
+            .filter(pl.col('chromosome') == name)
+            .collect()
+            .sort('position', maintain_order=True)
+            .write_parquet(parts[chromosome], row_group_size=row_group_rows)
         )
+    staged.unlink()
     return parts
 
 
@@ -88,7 +102,7 @@ def alphamissense(path: str, chromosome: str, rows: pl.DataFrame) -> pl.DataFram
     `#CHROM` carries a `chr` prefix (`chrM` for MT), and its rows are single-base substitutions.
 
     Args:
-        path: The `AlphaMissense_hg38.tsv.gz` file, local or remote, or its `partition_alphamissense` part.
+        path: The chromosome's `partition_alphamissense` part, or an `AlphaMissense_hg38.tsv.gz` file.
         chromosome: The chromosome of `rows`, without the `chr` prefix.
         rows: One row per transcript consequence, with `position`, `referenceAllele`,
             `alternateAllele` and the unversioned `transcript_id`.

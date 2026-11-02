@@ -30,6 +30,9 @@ class VariantSource(BaseModel):
     peptides: str
     """The `pep.all.fa.gz` FASTA, whose md5s key the SIFT matrices."""
     alphamissense: str
+    """`AlphaMissense_hg38.tsv.gz`, the canonical isoform of each UniProt protein."""
+    alphamissense_isoforms: str
+    """`AlphaMissense_isoforms_hg38.tsv.gz`, the other GENCODE V32 coding transcripts."""
     ancestor: str
     """The gzip LOFTEE human ancestor FASTA."""
     core: str
