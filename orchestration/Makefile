@@ -80,7 +80,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_finemapping \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_harmonisation \
 		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
-		datasources/finngen_data/finngen_gwas/finngen_ingestion \
+		datasources/finngen_data/finngen_gwas/finngen_gwas_ingestion \
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
