@@ -71,9 +71,9 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
         == config.clinical_mining_version
     )
     (task,) = config.step_config('pts_aact_trial_models')['steps']['aact_trial_models']
-    assert task['snapshot'] == config.aact_version
+    assert task['settings']['snapshot'] == config.aact_version
     (task,) = config.step_config('pts_clinical_mining_models')['steps']['clinical_mining_models']
-    assert task['snapshot'] == config.clinical_mining_version
+    assert task['settings']['snapshot'] == config.clinical_mining_version
 
 
 def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> None:
