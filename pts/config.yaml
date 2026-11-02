@@ -948,8 +948,6 @@ steps:
         service_tier: auto
         concurrency: 75
         shard_size: 200
-        # first run only: adopt the gs://aact_data extraction cache; remove afterwards
-        import_extraction_cache: gs://aact_data/cache/trial_extraction/82af315af6273f063cac40e605abdd11e33bbfa128db92d3f8d2078139626061
   ##################################################################################################
 
   #: AACT_TRIAL_MODELS STEP :######################################################################
@@ -967,8 +965,6 @@ steps:
       settings:
         store_uri: gs://clinical_staging/store
         snapshot: '{{snapshot}}'
-        # first run only: seed the drug entities store with the release NER cache; remove afterwards
-        seed_ner_cache: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/ner_cache.parquet
   ##################################################################################################
 
   #: CLINICAL_MINING_MODELS STEP :#################################################################
