@@ -8,7 +8,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.annotators.alphamissense import alphamissense, partition_alphamissense
+from pts.transformers.variant.annotators.alphamissense import add_alphamissense, alphamissense, partition_alphamissense
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
+from tests.variant_fixtures import consequence_rows
 
 SAMPLE = Path(__file__).parent / 'test_data' / 'alphamissense_sample.tsv'
 
@@ -96,3 +98,47 @@ def test_alphamissense_reads_mt_as_chrm(tsv: str, tmp_path: Path):
     parts = partition_alphamissense(tsv, tmp_path, ['MT'])
     assert pl.read_parquet(parts['MT']).height == 1
     assert alphamissense(parts['MT'], 'MT', keys).equals(alphamissense(tsv, 'MT', keys))
+
+
+def predicted(found: pl.DataFrame) -> list[tuple]:
+    return found.select('am_class', 'am_pathogenicity').rows()
+
+
+def test_add_alphamissense_matches_each_consequence_on_its_transcript(tsv: str):
+    found = add_alphamissense(
+        consequence_rows(
+            (0, 945518, 'C', 'A', 'ENST00000327044'),
+            (0, 945518, 'C', 'A', 'ENST00000999999'),
+            (1, 946175, 'G', 'A', 'ENST00000327044'),
+        ),
+        tsv,
+        '1',
+    )
+    assert predicted(found) == [('likely_benign', 0.1719), (None, None), ('likely_benign', 0.1618)]
+
+
+def test_add_alphamissense_skips_indels(tsv: str):
+    found = add_alphamissense(
+        consequence_rows(
+            (0, 945517, 'TCA', 'T', 'ENST00000327044'),
+            (1, 945518, 'C', 'CT', 'ENST00000327044'),
+        ),
+        tsv,
+        '1',
+    )
+    assert predicted(found) == [(None, None), (None, None)]
+
+
+def test_add_alphamissense_leaves_unpredicted_variants_and_chromosomes_null(tsv: str):
+    unpredicted = add_alphamissense(consequence_rows((0, 500, 'C', 'A', 'ENST00000327044')), tsv, '1')
+    chromosome = add_alphamissense(consequence_rows((0, 945518, 'C', 'A', 'ENST00000327044')), tsv, 'MT')
+    assert predicted(unpredicted) == predicted(chromosome) == [(None, None)]
+
+
+def test_add_alphamissense_accepts_an_empty_consequences_frame():
+    found = add_alphamissense(pl.DataFrame(schema=CONSEQUENCES_SCHEMA), '/no/am.tsv.gz', '1')
+    assert found.height == 0
+    assert found.select('am_class', 'am_pathogenicity').schema == pl.Schema({
+        'am_class': pl.String,
+        'am_pathogenicity': pl.Float64,
+    })

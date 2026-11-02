@@ -62,3 +62,32 @@ def gerp_max(
                 bounds = np.column_stack([low[index], high[index]]).ravel() - window_low
                 scores[index] = np.fmax.reduceat(values, bounds)[::2]
     return pl.Series('gerp', scores, dtype=pl.Float64).fill_nan(None)
+
+
+def _conservation(spans: pl.DataFrame, bigwig: str, chromosome: str) -> pl.Series:
+    """The GERP score of each span to the three decimals VEP's plugin writes."""
+    scores = gerp_max(bigwig, chromosome, spans)
+    rounded = {score: float(f'{score:.3f}') for score in scores.drop_nulls().unique().to_list()}
+    return pl.Series('conservation', [rounded.get(score) for score in scores], dtype=pl.Float64)
+
+
+def add_gerp(consequences: pl.DataFrame, bigwig: str, chromosome: str) -> pl.DataFrame:
+    """Add `conservation` to the consequences: GERP over each variant's span.
+
+    GERP is the numeric maximum over the variant's span, rounded to three decimals, read once per
+    variant. A contig the bigWig lacks leaves it null. Without consequences the bigWig is not read.
+
+    Args:
+        consequences: The consequences frame of one chromosome.
+        bigwig: The GERP bigWig.
+        chromosome: The chromosome of the consequences.
+
+    Returns:
+        The consequences, row for row, with `conservation` added.
+    """
+    if consequences.is_empty():
+        return consequences.with_columns(pl.lit(None, pl.Float64).alias('conservation'))
+    variants = consequences.unique('row', maintain_order=True)
+    conservation = variants.select('row').with_columns(_conservation(variants, bigwig, chromosome))
+    attached = consequences.select('row').join(conservation, on='row', how='left', maintain_order='left')
+    return consequences.with_columns(attached['conservation'])

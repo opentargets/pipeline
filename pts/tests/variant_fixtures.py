@@ -10,6 +10,7 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 
 from pts.transformers.variant.index.rows import index_rows
+from pts.transformers.variant.vep.alleles import vep_allele_form
 from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS
 from pts.transformers.variant.vep.frames import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
 from pts.transformers.variant.vep.records import rank_consequences
@@ -53,6 +54,22 @@ def consequences(**columns: Sequence[object]) -> pl.DataFrame:
         ],
         *[pl.col(name) for name in EFFECTS_SCHEMA if name in columns],
     ).head(height)
+
+
+def consequence_rows(*rows: tuple[int, int, str, str, str]) -> pl.DataFrame:
+    """One consequence per (row, position, reference, alternate, transcript id), in VEP's coordinates."""
+    row, position, reference, alternate, transcript = (list(column) for column in zip(*rows, strict=True))
+    alleles = vep_allele_form(
+        pl.DataFrame({'position': position, 'referenceAllele': reference, 'alternateAllele': alternate}).lazy()
+    ).collect()
+    return consequences(
+        row=row,
+        position=position,
+        referenceAllele=reference,
+        alternateAllele=alternate,
+        transcript_id=transcript,
+        **{name: alleles[name].to_list() for name in ('vepStart', 'vepEnd', 'vepReference', 'vepAlternate')},
+    )
 
 
 def with_effects(frame: pl.DataFrame) -> pl.DataFrame:

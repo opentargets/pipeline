@@ -9,6 +9,7 @@ import polars as pl
 
 KEY = ['position', 'referenceAllele', 'alternateAllele', 'transcript_id']
 ROW_GROUP_ROWS = 50_000
+_BASE = r'^[ACGT]$'
 SCHEMA = pl.Schema({
     'chromosome': pl.String,
     'position': pl.Int64,
@@ -97,3 +98,34 @@ def alphamissense(path: str, chromosome: str, rows: pl.DataFrame) -> pl.DataFram
         no prediction, including when it has no row for the chromosome.
     """
     return rows.join(_predictions(path, chromosome, rows['position']), on=KEY, how='left', maintain_order='left')
+
+
+def add_alphamissense(consequences: pl.DataFrame, path: str, chromosome: str) -> pl.DataFrame:
+    """Add `am_class` and `am_pathogenicity` to the consequences.
+
+    AlphaMissense is matched on the single-base substitution of the original alleles and the
+    transcript id without its version. A chromosome the file has no rows for leaves the columns
+    null. Without consequences the file is not read.
+
+    Args:
+        consequences: The consequences frame of one chromosome.
+        path: The chromosome's `partition_alphamissense` part, or an `AlphaMissense_hg38.tsv.gz` file.
+        chromosome: The chromosome of the consequences.
+
+    Returns:
+        The consequences, row for row, with the two columns added.
+    """
+    if consequences.is_empty():
+        return consequences.with_columns(
+            pl.lit(None, pl.String).alias('am_class'),
+            pl.lit(None, pl.Float64).alias('am_pathogenicity'),
+        )
+    snv = pl.col('referenceAllele').str.contains(_BASE) & pl.col('alternateAllele').str.contains(_BASE)
+    keys = consequences.select(
+        pl.when(snv).then(pl.col('position').cast(pl.Int64)).alias('position'),
+        'referenceAllele',
+        'alternateAllele',
+        'transcript_id',
+    )
+    predictions = alphamissense(path, chromosome, keys)
+    return consequences.with_columns(*predictions.select('am_class', 'am_pathogenicity').get_columns())
