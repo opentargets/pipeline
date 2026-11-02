@@ -792,6 +792,9 @@ def step_inputs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
         '#CHROM\tPOS\tREF\tALT\tgenome\tuniprot_id\ttranscript_id\tprotein_variant\tam_pathogenicity\tam_class\n'
         'chr1\t123\tA\tG\thg38\tP1\tENST_1.1\tA1T\t0.9\tlikely_pathogenic\n'
     )
+    (directory / 'alphamissense_isoforms.tsv').write_text(
+        '# AlphaMissense\n#CHROM\tPOS\tREF\tALT\tgenome\ttranscript_id\tprotein_variant\tam_pathogenicity\tam_class\n'
+    )
     ancestor = write_bgzip_fasta(directory / 'human_ancestor.fa.gz', {'1': (CONTIG_LENGTH, 1, 'a' * CONTIG_LENGTH)})
     core = directory / 'core'
     core.mkdir()
@@ -810,6 +813,7 @@ def step_inputs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
         'sift_attrib': str(SIFT_FIXTURES / 'attrib.txt.gz'),
         'peptides': str(SIFT_FIXTURES / 'Homo_sapiens.GRCh38.pep.all.fa.gz'),
         'alphamissense': str(directory / 'alphamissense.tsv'),
+        'alphamissense_isoforms': str(directory / 'alphamissense_isoforms.tsv'),
         'ancestor': ancestor,
         'core': str(core),
     }

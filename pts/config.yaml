@@ -42,6 +42,7 @@ steps:
         sift_attrib: input/variant/variation/attrib.txt.gz
         peptides: input/variant/reference/Homo_sapiens.GRCh38.pep.all.fa.gz
         alphamissense: input/variant/alphamissense/AlphaMissense_hg38.tsv.gz
+        alphamissense_isoforms: input/variant/alphamissense/AlphaMissense_isoforms_hg38.tsv.gz
         ancestor: input/variant/loftee/human_ancestor.fa.gz
         core: input/ensembl/homo_sapiens
         variant_annotations:

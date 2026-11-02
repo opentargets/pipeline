@@ -154,7 +154,13 @@ def shared_inputs(
     with ThreadPoolExecutor() as pool:
         reference = pool.submit(_reference, sources, options.fastvep_binary, scratch / 'reference')
         all_vars = pool.submit(extract_all_vars, sources.vep_cache, scratch / 'all_vars')
-        alphamissense = pool.submit(partition_alphamissense, sources.alphamissense, scratch / 'alphamissense', rows)
+        alphamissense = pool.submit(
+            partition_alphamissense,
+            sources.alphamissense,
+            sources.alphamissense_isoforms,
+            scratch / 'alphamissense',
+            rows,
+        )
         core = pool.submit(_local_directory, sources.core, scratch / 'core')
         sift = pool.submit(lambda: _sift(sources, core.result(), scratch / 'sift.parquet'))
         gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')

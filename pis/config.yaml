@@ -806,6 +806,10 @@ steps:
       source: gs://dm_alphamissense/AlphaMissense_hg38.tsv.gz
       destination: input/variant/alphamissense/AlphaMissense_hg38.tsv.gz
 
+    - name: copy alphamissense isoforms hg38
+      source: gs://dm_alphamissense/AlphaMissense_isoforms_hg38.tsv.gz
+      destination: input/variant/alphamissense/AlphaMissense_isoforms_hg38.tsv.gz
+
     - name: copy loftee human ancestor
       source: https://personal.broadinstitute.org/konradk/loftee_data/GRCh38/human_ancestor.fa.gz
       destination: input/variant/loftee/human_ancestor.fa.gz
