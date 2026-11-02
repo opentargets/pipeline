@@ -147,6 +147,49 @@ def back_to_first_cluster_tasks(tmp_path: Path) -> dict[str, BaseOperator]:
     return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
 
 
+def _step(name: str, cluster: str, depends_on: list[str]) -> str:
+    """Return the config of a step on `cluster` after the steps `depends_on`."""
+    return f"""  {name}:
+    depends_on: [{', '.join(depends_on)}]
+    kind: dataproc
+    definition:
+      cluster: {cluster}
+      main: '{{{{output}}}}/bin/cli.py'
+      args: step=gentropy_{name}
+"""
+
+
+CROSSED_CLUSTERS = (
+    CONFIG[: CONFIG.index('infrastructure:')]
+    + """infrastructure:
+  clusters:
+    main:
+      num_workers: 2
+    other:
+      num_workers: 2
+steps:
+"""
+    + _step('main_first', 'main', [])
+    + _step('other_first', 'other', [])
+    + _step('main_after_other', 'main', ['other_first'])
+    + _step('other_after_main', 'other', ['main_first'])
+)
+"""Two clusters, each with a first step that depends on the first step of the other."""
+
+
+@pytest.fixture
+def crossed_cluster_tasks(tmp_path: Path) -> dict[str, BaseOperator]:
+    """Return the tasks of the DAG built from `CROSSED_CLUSTERS`, by task id."""
+    dag_dir = tmp_path / 'a_dag'
+    dag_dir.mkdir()
+    (dag_dir / 'config.yaml').write_text(CROSSED_CLUSTERS)
+    config = StagingDagConfig(dag_dir)
+    with DAG(dag_id=config.dag_id, schedule=None, user_defined_filters=FILTERS) as dag:
+        build_staging_dag(config)
+    check_cycle(dag)
+    return {task.task_id: task for task in dag.tasks if isinstance(task, BaseOperator)}
+
+
 def rendered(task: Any) -> Any:
     """Render the templated fields of a task for the DAG run `RUN_ID`."""
     task.render_template_fields({'run_id': RUN_ID})
@@ -201,6 +244,20 @@ class TestBuildStagingDag:
         assert tasks['third.run'].upstream_task_ids == {'second.run'}
         assert tasks['delete_cluster_main'].upstream_task_ids == {'third.run'}
         assert tasks['delete_cluster_other'].upstream_task_ids == {'second.run'}
+
+    def test_order_of_crossed_clusters(self, crossed_cluster_tasks: dict[str, BaseOperator]) -> None:
+        """Clusters whose first steps depend on steps of each other are created after the uploads,
+        with no cycle, and each first step waits for its own dependencies.
+        """
+        tasks = crossed_cluster_tasks
+        uploads = {'upload_config', 'upload_bin_install-dependencies-on-cluster-sh', 'upload_bin_cli-py'}
+        assert tasks['create_cluster_main'].upstream_task_ids == uploads
+        assert tasks['create_cluster_other'].upstream_task_ids == uploads
+        assert tasks['main_first.run'].upstream_task_ids == {'create_cluster_main'}
+        assert tasks['main_after_other.run'].upstream_task_ids == {'create_cluster_main', 'other_first.run'}
+        assert tasks['other_after_main.run'].upstream_task_ids == {'create_cluster_other', 'main_first.run'}
+        assert tasks['delete_cluster_main'].upstream_task_ids == {'main_first.run', 'main_after_other.run'}
+        assert tasks['delete_cluster_other'].upstream_task_ids == {'other_first.run', 'other_after_main.run'}
 
     def test_job_is_rendered_for_the_run(self, tasks: dict[str, BaseOperator]) -> None:
         """The job arguments are the gentropy CLI of the run and the paths of the run."""
