@@ -87,7 +87,6 @@ class UnifiedPipelineConfig:
             template_context={
                 'release_uri': self.release_uri,
                 'gentropy_version': up.get('gentropy_version'),
-                'vep_version': up.get('vep_version'),
             },
         )
         """The internal configuration for GENTROPY steps."""

@@ -769,6 +769,46 @@ steps:
         - name: copy gpn-star llr ${each}
           source: https://huggingface.co/datasets/songlab/gpn-star-scores/resolve/${gpn_star_revision}/data/gpn-star-hg38-m447-200m/llr/${each}
           destination: input/variant/gpn_star/${each}
+
+    - name: copy ensembl grch38 primary assembly
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+      destination: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+
+    - name: copy ensembl grch38 gff3
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/gff3/homo_sapiens/Homo_sapiens.GRCh38.${ensembl_version}.gff3.gz
+      destination: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
+
+    - name: copy ensembl grch38 proteins
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz
+      destination: input/variant/reference/Homo_sapiens.GRCh38.pep.all.fa.gz
+
+    - name: copy ensembl gerp conservation scores
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/compara/conservation_scores/92_mammals.gerp_conservation_score/gerp_conservation_scores.homo_sapiens.GRCh38.bw
+      destination: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw
+
+    - name: copy ensembl vep cache
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/variation/indexed_vep_cache/homo_sapiens_vep_${ensembl_version}_GRCh38.tar.gz
+      destination: input/variant/vep_cache/homo_sapiens_vep_116_GRCh38.tar.gz
+
+    - name: copy ensembl variation protein_function_predictions
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/homo_sapiens_variation_${ensembl_version}_38/protein_function_predictions.txt.gz
+      destination: input/variant/variation/protein_function_predictions.txt.gz
+
+    - name: copy ensembl variation translation_md5
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/homo_sapiens_variation_${ensembl_version}_38/translation_md5.txt.gz
+      destination: input/variant/variation/translation_md5.txt.gz
+
+    - name: copy ensembl variation attrib
+      source: https://ftp.ensembl.org/pub/release-${ensembl_version}/mysql/homo_sapiens_variation_${ensembl_version}_38/attrib.txt.gz
+      destination: input/variant/variation/attrib.txt.gz
+
+    - name: copy alphamissense hg38
+      source: gs://dm_alphamissense/AlphaMissense_hg38.tsv.gz
+      destination: input/variant/alphamissense/AlphaMissense_hg38.tsv.gz
+
+    - name: copy loftee human ancestor
+      source: https://personal.broadinstitute.org/konradk/loftee_data/GRCh38/human_ancestor.fa.gz
+      destination: input/variant/loftee/human_ancestor.fa.gz
   ##################################################################################################
 
   #: ENCODE STEP :##################################################################################

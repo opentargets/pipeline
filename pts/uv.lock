@@ -1998,6 +1998,7 @@ dependencies = [
     { name = "polars", extra = ["connectorx"] },
     { name = "polars-hash" },
     { name = "pyarrow" },
+    { name = "pybigwig" },
     { name = "pydantic" },
     { name = "pyspark" },
 ]
@@ -2054,6 +2055,7 @@ requires-dist = [
     { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
     { name = "polars-hash", specifier = ">=0.5.6" },
     { name = "pyarrow", specifier = ">=22.0.0" },
+    { name = "pybigwig", specifier = ">=0.3.24" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyspark", specifier = ">=4.1,<4.2" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
@@ -2128,6 +2130,16 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
+]
+
+[[package]]
+name = "pybigwig"
+version = "0.3.29"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/a7/2c42ce725840402fccc8f744d9aa885872fb156122a18ef0b132b17daaab/pybigwig-0.3.29.tar.gz", hash = "sha256:031336c0e6e15dd9a506f8176d7086f5327dc30faef88d3e6aac45db8725283a", size = 76052, upload-time = "2026-10-30T09:25:57.621Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/9e/ba2dc70e79af10cb55965227193b7ea3b1f3691b8d1e547cdce68fa8c841/pybigwig-0.3.29-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fb664bcaea45128ddae8f20fabfd59bf01e01db714512ce6bcc7df556d3175d2", size = 189198, upload-time = "2026-10-30T09:26:01.233Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/f9/5adab8f9cc446efef1f8d4a3dc4a9f088ede4c8e338add9656e0673e29e3/pybigwig-0.3.29-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c3806d2dc07a595c1ab75b32021b91467987fb778f671d82ccb02a420646a2d2", size = 189219, upload-time = "2026-10-30T09:26:02.715Z" },
 ]
 
 [[package]]

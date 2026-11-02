@@ -6,6 +6,7 @@ from pts.transformers.utils.ensembl.queries import (
     gene_names,
     genes,
     transcripts,
+    translation_uniprot,
     translation_xrefs,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     'gene_names',
     'genes',
     'transcripts',
+    'translation_uniprot',
     'translation_xrefs',
 ]

@@ -14,9 +14,7 @@ from airflow.task.trigger_rule import TriggerRule
 from airflow.utils.edgemodifier import Label
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
-from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
 from orchestration.models.pts_step import PTSDataprocStep, pts_step_from_config
-from orchestration.operators.batch import BatchCollectOperator, BatchIndexOperator, BatchJobOperator
 from orchestration.operators.dataproc import (
     CreateClusterOperator,
     DeleteClusterOperator,
@@ -189,7 +187,7 @@ with DAG(
                         container_scopes=config.service_account_extra_scopes,
                         container_files={config_uri: '/config.yaml'},
                         container_secret_files=step_definition.get('gce_secret_files'),
-                        work_disk_size_gb=config.pts_disk_size,
+                        work_disk_size_gb=s.disk_size,
                         boot_disk_size_gb=config.pts_boot_disk_size,
                         machine_type=s.machine_type,
                         source_image=config.cos_image,
@@ -294,22 +292,12 @@ with DAG(
     # We can get rid of this once we work on https://github.com/opentargets/issues/issues/3652
     # ==============================================================================================
     def gsp(step_name: str, param_name: str) -> dict[str, Any]:
-        step_config = config.step_specific_config(step_name)
-        if 'google_batch_index_specs' in step_config:
-            batch_index_specs = step_config.get('google_batch_index_specs', {})
-            manifest_generator_specs = batch_index_specs.get('manifest_generator_specs', {})
-            step_params = manifest_generator_specs.get('options', {})
-        else:
-            step_params = step_config.get('params', {})
-        return step_params.get(param_name)
+        return config.step_specific_config(step_name).get('params', {}).get(param_name)
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
             'gentropy_colocalisation': {
                 'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
-            },
-            'gentropy_variant_annotation': {
-                'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
             },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
@@ -321,14 +309,7 @@ with DAG(
             SparkJobDiffer(outputs=gentropy_step_outputs.get(step_name)),
         ]
 
-        gentropy_step_differs: dict[str, list[Differ]] = {
-            'gentropy_variant_annotation': [
-                ConfigDiffer(),
-                # TODO: What else can we check in here?
-            ],
-        }
-
-        return gentropy_step_differs.get(step_name, default_differs)
+        return default_differs
 
     # ==============================================================================================
     # GENTROPY stage of the DAG — two paths
@@ -336,8 +317,8 @@ with DAG(
     # 1.
     #   d. Diff   — the state and decide the step needs to run.
     #   u. Upload — the step's config to GCS.
-    #   c. create — cluster cluster in dataproc, or do nothing if the step does not run on a cluster.
-    #   r.  Run   — the step on the cluster from task `c`, or using custom operators.
+    #   c. create — the step's cluster in dataproc.
+    #   r.  Run   — the step on the cluster from task `c`.
     #   e.  End            — the step (does nothing).
     #
     # 2.
@@ -371,61 +352,34 @@ with DAG(
                     overwrite=True,
                 )
 
-                # find what cluster type the step runs on, if any
+                # find what cluster type the step runs on
                 cluster_definition = config.step_cluster_definition(step_name)
-                if cluster_definition:
-                    cluster_name = cluster_definition.cluster_type
+                if cluster_definition is None:
+                    raise ValueError(f'{step_name} has no cluster: the unified pipeline runs gentropy on Dataproc')
+                cluster_name = cluster_definition.cluster_type
 
-                    c = CreateClusterOperator(
-                        task_id=f'cluster_create_{cluster_name}',
-                        cluster_name=resource_name(cluster_name),
-                        cluster_config=cluster_definition.cluster_config,
-                        labels=labels,
-                    )
-                    # add the run task to the proper cluster list in the gentropy_clusters dict
-                    steps_in_cluster = gentropy_clusters.get(cluster_name, [])
-                    gentropy_clusters[cluster_name] = [*steps_in_cluster, step_name]
+                c = CreateClusterOperator(
+                    task_id=f'cluster_create_{cluster_name}',
+                    cluster_name=resource_name(cluster_name),
+                    cluster_config=cluster_definition.cluster_config,
+                    labels=labels,
+                )
+                # add the run task to the proper cluster list in the gentropy_clusters dict
+                steps_in_cluster = gentropy_clusters.get(cluster_name, [])
+                gentropy_clusters[cluster_name] = [*steps_in_cluster, step_name]
 
-                    r = SubmitJobOperator(
-                        task_id=f'run_{step_name}',
-                        cluster_name=resource_name(cluster_name),
-                        step_name=step_name,
-                        py_spark_job=GentropyJobBuilder(
-                            main_python_file_uri=config.gentropy_main_python_file_uri,
-                            params=config.step_specific_config(step_name).get('params'),
-                            properties=config.step_job_properties(step_name),
-                        ).build(),
-                        labels=labels,
-                    )
-                    gentropy_steps[step_name] = r
-                else:
-                    c = EmptyOperator(task_id='skip_cluster')
-
-                    @task_group(group_id=step_name + '_batch_jobs')
-                    def batch_jobs(step_name: str) -> None:
-                        batch_job_spec = BatchJobOperatorSpec(
-                            **config.step_specific_config(step_name).get('google_batch', {})
-                        )
-                        i = BatchIndexOperator(
-                            task_id=f'generate_manifest_{step_name}',
-                            batch_index_specs=BatchIndexOperatorSpec(
-                                **config.step_specific_config(step_name).get('google_batch_index_specs', {})
-                            ),
-                        )
-                        b = BatchJobOperator.partial(
-                            job_name=resource_name(step_name),
-                            task_id=f'run_{step_name}',
-                            batch_job_spec=batch_job_spec,
-                            project_id=GCP_PROJECT_PLATFORM,
-                            labels=labels,
-                        ).expand(batch_index_row=i.output)
-                        bc = BatchCollectOperator(
-                            task_id=f'collect_{step_name}',
-                            collect_spec=batch_job_spec.collect,
-                        )
-                        chain(i, b, bc)
-
-                    r = batch_jobs(step_name)
+                r = SubmitJobOperator(
+                    task_id=f'run_{step_name}',
+                    cluster_name=resource_name(cluster_name),
+                    step_name=step_name,
+                    py_spark_job=GentropyJobBuilder(
+                        main_python_file_uri=config.gentropy_main_python_file_uri,
+                        params=config.step_specific_config(step_name).get('params'),
+                        properties=config.step_job_properties(step_name),
+                    ).build(),
+                    labels=labels,
+                )
+                gentropy_steps[step_name] = r
 
                 e = EmptyOperator(
                     task_id=f'end_{step_name}',

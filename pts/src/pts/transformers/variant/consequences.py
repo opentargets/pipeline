@@ -1,5 +1,7 @@
 """VEP consequence term lookups shared by the variant index."""
 
+import polars as pl
+
 # Gentropy's table misspells SO_0001626 as `incomplete_labelinal_codon_variant`, so VEP's
 # `incomplete_terminal_codon_variant` gets no SO ID or score there. Both tables use the
 # correct term, so this output intentionally differs from Gentropy for that consequence.
@@ -89,3 +91,13 @@ CONSEQUENCE_SCORES = {
     'intergenic_variant': 0.02,
     'sequence_variant': 0.0,
 }
+
+#: Ensembl VEP's consequence ranks, most severe first: the order of both tables above.
+RANKS = list(SEQUENCE_ONTOLOGY)
+
+
+def consequence_score(terms: pl.Expr) -> pl.Expr:
+    """The highest `CONSEQUENCE_SCORES` among a list of terms, null when none is scored."""
+    return terms.list.eval(
+        pl.element().replace_strict(CONSEQUENCE_SCORES, default=None, return_dtype=pl.Float64)
+    ).list.max()

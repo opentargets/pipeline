@@ -22,6 +22,7 @@ dependencies = [
   "pdfplumber>=0.11.9",
   "pixeltable-pgserver>=0.6,<0.7",
   "networkx>=3.6.1",
+  "pybigwig>=0.3.24",
 ]
 
 [dependency-groups]

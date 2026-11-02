@@ -1,38 +1,9 @@
-"""Prepare partitioned VCF inputs for variant effect prediction."""
+"""Collect the variant rows that the variant step annotates."""
 
 import polars as pl
 from loguru import logger
-from otter.config.model import Config
-from pydantic import BaseModel, ConfigDict, Field
 
-from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
-
-
-class VariantPartitionSource(BaseModel):
-    """Variant evidence paths in their respective source formats."""
-
-    model_config = ConfigDict(extra='forbid')
-
-    uniprot_variants: str
-    eva: str
-    pharmacogenomics: str
-    credible_set: str
-
-
-class VariantPartitionDestination(BaseModel):
-    """Directory of tab-separated VCF parts."""
-
-    model_config = ConfigDict(extra='forbid')
-
-    output: str
-
-
-class VariantPartitionSettings(BaseModel):
-    """Maximum number of variants per VEP input file."""
-
-    model_config = ConfigDict(extra='forbid')
-
-    partition_size: int = Field(default=2000, gt=0)
+from pts.transformers.utils.dataset import scan_dataset
 
 
 def as_vcf_df(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -85,36 +56,28 @@ def as_vcf_df(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def variant_partition(source: dict[str, str], destination: dict[str, str], settings: dict, config: Config) -> None:
-    """Write deduplicated, sorted variants into bounded VEP input files.
+def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, credible_set: str) -> pl.LazyFrame:
+    """Deduplicated variants from the four evidence sources, sorted by coordinate.
 
-    Headers retain CHROM for the orchestration task that prepends the VCF hash.
-    File boundaries have a strict row limit; execution uses the streaming engine.
+    The kept rsID is the smallest real one, with '.' for a variant that has none.
     """
-    sources = VariantPartitionSource.model_validate(source)
-    destinations = VariantPartitionDestination.model_validate(destination)
-    options = VariantPartitionSettings.model_validate(settings)
-    check_destinations_absent([destinations.output])
-    logger.info('Reading variant evidence for partitioning')
+    logger.info('Reading variant evidence')
     frames = [
-        as_vcf_df(scan_dataset(sources.uniprot_variants, format='ndjson', infer_schema_length=None)),
-        as_vcf_df(scan_dataset(sources.eva, format='ndjson', infer_schema_length=None)),
-        as_vcf_df(scan_dataset(sources.pharmacogenomics)),
-        as_vcf_df(scan_dataset(sources.credible_set)),
+        as_vcf_df(scan_dataset(uniprot_variants, format='ndjson', infer_schema_length=None)),
+        as_vcf_df(scan_dataset(eva, format='ndjson', infer_schema_length=None)),
+        as_vcf_df(scan_dataset(pharmacogenomics)),
+        as_vcf_df(scan_dataset(credible_set)),
     ]
-    variants = (
+    return (
         pl
         .concat(frames)
-        # Sorting first makes the kept rsID (ID) the same on every run, preferring a real
-        # rsID over the '.' placeholder and then the smallest one.
         .sort('CHROM', 'POS', 'REF', 'ALT', pl.col('ID') == '.', 'ID')
         .unique(subset=['CHROM', 'POS', 'REF', 'ALT'], keep='first', maintain_order=True)
-    )
-    logger.info('Writing VCF parts to {} (at most {} rows per file)', destinations.output, options.partition_size)
-    variants.sink_csv(
-        pl.PartitionBy(destinations.output, max_rows_per_file=options.partition_size, approximate_bytes_per_file=None),
-        separator='\t',
-        quote_style='never',
-        mkdir=True,
-        engine='streaming',
+        .select(
+            pl.col('CHROM').alias('chromosome'),
+            pl.col('POS').alias('position'),
+            pl.col('ID').alias('rsId'),
+            pl.col('REF').alias('referenceAllele'),
+            pl.col('ALT').alias('alternateAllele'),
+        )
     )

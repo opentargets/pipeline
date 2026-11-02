@@ -1,21 +1,13 @@
-"""Variant extraction and actual partitioned VCF output tests."""
+"""Variant row collection tests."""
 
 import gzip
 import json
 from pathlib import Path
-from unittest.mock import Mock
 
 import polars as pl
 import pytest
-from pydantic import ValidationError
 
-from pts.transformers.variant_partition import (
-    VariantPartitionDestination,
-    VariantPartitionSettings,
-    VariantPartitionSource,
-    as_vcf_df,
-    variant_partition,
-)
+from pts.transformers.variant.rows import as_vcf_df, collect_variants
 
 
 def test_as_vcf_df_expands_locus_and_preserves_rsids():
@@ -61,27 +53,6 @@ def test_as_vcf_df_retains_distinct_rsids_before_combining_sources():
     assert sorted(as_vcf_df(frame.lazy()).collect()['ID'].to_list()) == ['rs1', 'rs2']
 
 
-@pytest.mark.parametrize('value', [0, -1])
-def test_partition_size_must_be_positive(value):
-    with pytest.raises(ValidationError):
-        VariantPartitionSettings(partition_size=value)
-
-
-def test_models_reject_unknown_fields():
-    with pytest.raises(ValidationError):
-        VariantPartitionSettings.model_validate({'extra': 1})
-    with pytest.raises(ValidationError):
-        VariantPartitionDestination.model_validate({'output': 'x', 'extra': 1})
-    with pytest.raises(ValidationError):
-        VariantPartitionSource.model_validate({
-            'uniprot_variants': 'a',
-            'eva': 'b',
-            'pharmacogenomics': 'c',
-            'credible_set': 'd',
-            'extra': 1,
-        })
-
-
 def _inputs(tmp_path: Path) -> dict[str, str]:
     source = {}
     for name, variants in [('uniprot_variants', ['1_3_A_G', '1_1_C_T']), ('eva', ['1_3_A_G', '2_1_T_C'])]:
@@ -98,42 +69,32 @@ def _inputs(tmp_path: Path) -> dict[str, str]:
     return source
 
 
-def test_variant_partition_writes_real_vcf_parts(tmp_path):
-    source = _inputs(tmp_path)
-    output = tmp_path / 'output'
-    variant_partition(source, {'output': str(output)}, {'partition_size': 2}, Mock())
-    files = sorted(output.glob('*.csv'))
-    assert len(files) == 2
-    for path in files:
-        assert path.read_text().splitlines()[0] == 'CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO'
-        assert len(path.read_text().splitlines()) == 3
-    result = pl.concat([pl.read_csv(path, separator='\t') for path in files])
-    assert result.select('CHROM', 'POS').rows() == [(1, 1), (1, 2), (1, 3), (2, 1)]
-    assert result.select('ID', 'QUAL', 'FILTER', 'INFO').rows() == [('.', '.', '.', '.')] * 4
-    with pytest.raises(ValueError, match='already exists'):
-        variant_partition(source, {'output': str(output)}, {'partition_size': 2}, Mock())
+def _collect(source: dict[str, str]) -> pl.DataFrame:
+    return collect_variants(**source).collect()
 
 
-def test_variant_partition_writes_partial_final_partition(tmp_path):
-    source = _inputs(tmp_path)
-    output = tmp_path / 'output'
-    variant_partition(source, {'output': str(output)}, {'partition_size': 3}, Mock())
-    assert sorted(pl.read_csv(path, separator='\t').height for path in output.glob('*.csv')) == [1, 3]
+def test_collect_variants_columns_and_order(tmp_path):
+    result = _collect(_inputs(tmp_path))
+    assert result.columns == ['chromosome', 'position', 'rsId', 'referenceAllele', 'alternateAllele']
+    assert result.schema['position'] == pl.Int32
+    assert result.select('chromosome', 'position').rows() == [('1', 1), ('1', 2), ('1', 3), ('2', 1)]
+    assert result['rsId'].to_list() == ['.'] * 4
 
 
-def test_variant_partition_deduplicates_coordinates_across_source_rsids(tmp_path):
+def test_rows_match_the_partition_count(tmp_path):
+    assert _collect(_inputs(tmp_path)).height == 4
+
+
+def test_collect_variants_deduplicates_coordinates_across_source_rsids(tmp_path):
     source = _inputs(tmp_path)
     pl.DataFrame({'variantId': ['1_3_A_G'], 'variantRsId': ['rs3']}).write_parquet(
         Path(source['pharmacogenomics']) / 'part.parquet'
     )
-    output = tmp_path / 'output'
-    variant_partition(source, {'output': str(output)}, {}, Mock())
-    result = pl.concat([pl.read_csv(path, separator='\t') for path in output.glob('*.csv')])
-    assert result.filter((pl.col('CHROM') == 1) & (pl.col('POS') == 3))['ID'].to_list() == ['rs3']
+    result = _collect(source)
+    assert result.filter((pl.col('chromosome') == '1') & (pl.col('position') == 3))['rsId'].to_list() == ['rs3']
 
 
-def test_variant_partition_keeps_the_same_rsid_whatever_the_input_order(tmp_path):
-    """Conflicting rsIDs for one variant resolve to the smallest, independent of source order."""
+def test_collect_variants_keeps_the_same_rsid_whatever_the_input_order(tmp_path):
     kept = []
     for order, rsids in enumerate([['rs9', 'rs2'], ['rs2', 'rs9']]):
         (tmp_path / str(order)).mkdir()
@@ -141,14 +102,12 @@ def test_variant_partition_keeps_the_same_rsid_whatever_the_input_order(tmp_path
         pl.DataFrame({'variantId': ['1_3_A_G', '1_3_A_G'], 'variantRsId': rsids}).write_parquet(
             Path(source['pharmacogenomics']) / 'part.parquet'
         )
-        output = tmp_path / str(order) / 'output'
-        variant_partition(source, {'output': str(output)}, {}, Mock())
-        result = pl.concat([pl.read_csv(path, separator='\t') for path in output.glob('*.csv')])
-        kept.append(result.filter((pl.col('CHROM') == 1) & (pl.col('POS') == 3))['ID'].to_list())
+        result = _collect(source)
+        kept.append(result.filter((pl.col('chromosome') == '1') & (pl.col('position') == 3))['rsId'].to_list())
     assert kept == [['rs2'], ['rs2']]
 
 
-def test_variant_partition_empty_inputs_write_header(tmp_path):
+def test_collect_variants_empty_inputs(tmp_path):
     source = _inputs(tmp_path)
     for name in ['uniprot_variants', 'eva']:
         with gzip.open(source[name], 'wt') as stream:
@@ -157,8 +116,6 @@ def test_variant_partition_empty_inputs_write_header(tmp_path):
         pl.DataFrame({'variantId': [None]}, schema={'variantId': pl.String}).write_parquet(
             Path(source[name]) / 'part.parquet'
         )
-    output = tmp_path / 'output'
-    variant_partition(source, {'output': str(output)}, {}, Mock())
-    files = list(output.glob('*.csv'))
-    assert len(files) == 1
-    assert files[0].read_text() == 'CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+    result = _collect(source)
+    assert result.is_empty()
+    assert result.columns == ['chromosome', 'position', 'rsId', 'referenceAllele', 'alternateAllele']

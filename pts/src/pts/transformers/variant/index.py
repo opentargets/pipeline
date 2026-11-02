@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import overload
+
 import polars as pl
 
 from pts.schemas.variant import variant_schema
@@ -12,7 +14,11 @@ ANNOTATION_PREFIX = 'annotation_'
 _ARRAYS = [name for name, dtype in variant_schema.items() if isinstance(dtype, pl.List)]
 
 
-def fill_null_arrays(frame: pl.LazyFrame) -> pl.LazyFrame:
+@overload
+def fill_null_arrays(frame: pl.DataFrame) -> pl.DataFrame: ...
+@overload
+def fill_null_arrays(frame: pl.LazyFrame) -> pl.LazyFrame: ...
+def fill_null_arrays(frame: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     """Replace null arrays with empty ones, so array unions never nullify a value."""
     return frame.with_columns(pl.col(name).fill_null([]) for name in _ARRAYS if name in frame.collect_schema())
 
@@ -50,6 +56,19 @@ def normalise_score(method: str, score: pl.Expr, assessment: pl.Expr) -> pl.Expr
                 .then(min_max_scaler(value, -3, 0, 0.0, 0.25))
                 .when(value < -3)
                 .then(0.0)
+            )
+        case 'SIFT':
+            tolerance, rounded = 1 - value, 1 - value.round(2)
+            result = (
+                pl
+                .when((assessment == 'deleterious') & (rounded >= 0.95))
+                .then(min_max_scaler(tolerance, 0.95, 1, 0.5, 1))
+                .when((assessment == 'deleterious_low_confidence') & (rounded >= 0.95))
+                .then(min_max_scaler(tolerance, 0.95, 1, 0.0, 0.5))
+                .when((assessment == 'tolerated_low_confidence') & (rounded <= 0.95))
+                .then(min_max_scaler(tolerance, 0, 0.95, -0.5, 0.0))
+                .when((assessment == 'tolerated') & (rounded <= 0.95))
+                .then(min_max_scaler(tolerance, 0, 0.95, -1.0, -0.5))
             )
         case 'VEP':
             result = value
@@ -171,7 +190,7 @@ def add_annotation(frame: pl.DataFrame, annotations: pl.DataFrame) -> pl.DataFra
     return pl.DataFrame(columns)
 
 
-def amino_acid_keys(frame: pl.LazyFrame) -> pl.LazyFrame:
+def amino_acid_keys(frame: pl.DataFrame) -> pl.DataFrame:
     """Every (accession, amino-acid change) pair any transcript of `frame` carries."""
     return (
         frame

@@ -88,6 +88,16 @@ class PTSStep(UnifiedPipelineStep):
         """
         return self.config.step_definition(self.name).get('machine_type') or self.config.pts_machine_type
 
+    @property
+    def disk_size(self) -> int:
+        """Returns the work disk size in GB for the step's vm.
+
+        A step can set `disk_size` in its `unified_pipeline.yaml` definition when it
+        keeps more local scratch than the shared default holds. Steps that declare
+        nothing get `pts_disk_size`.
+        """
+        return self.config.step_definition(self.name).get('disk_size') or self.config.pts_disk_size
+
 
 class PTSDataprocStep(PTSStep):
     """PTS Dataproc step class.
