@@ -1,0 +1,87 @@
+---
+description: Open Targets Genetics — FinnGen GWAS SuSiE fine-mapping ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      finngen: gs://finngen-public-data-r12
+    output: gs://finngen_data/gwas/prod/20261029T152531
+    scratchpad:
+      gentropy_version: 4.0.0-dev.11
+      curation_tag: 26.09.2
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-finngen-gwas:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers: preempted secondary workers lose
+      # their shuffle data. 128 cores: the inputs are about 150 GB of block gzipped TSVs
+      # (120 GB of SuSiE variant files, 30 GB of annotated variants), against 340 GB on
+      # 256 cores for finngen_multiome_ingestion
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 8
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 128
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # the hadoop-bam package of the BGZFEnhancedGzipCodec the fine-mapping step reads the
+        # inputs with: gentropy adds it to the session config, which is too late for
+        # spark-submit on Dataproc
+        'spark:spark.jars.packages': 'org.seqdoop:hadoop-bam:7.10.0'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  study_index:
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-gwas
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=finngen_studies \
+          step.finngen_phenotype_table_url=https://r12.finngen.fi/api/phenos \
+          step.finngen_release_prefix=FINNGEN_R12 \
+          step.finngen_summary_stats_url_prefix={{input.finngen}}/summary_stats/finngen_R12_ \
+          step.finngen_summary_stats_url_suffix=.gz \
+          step.sample_size=500348 \
+          step.efo_curation_mapping_url=https://raw.githubusercontent.com/opentargets/curation/refs/tags/{{curation_tag}}/mappings/disease/manual_string.tsv \
+          step.finngen_study_index_out={{output}}/output/study \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn
+
+  finemapping:
+    # after study_index: spark-submit resolves the hadoop-bam package into the ivy cache of the
+    # master, and two jobs resolving it at the same time break each other's downloads
+    depends_on: [study_index]
+    kind: dataproc
+    definition:
+      cluster: otg-finngen-gwas
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=finngen_finemapping_ingestion \
+          "step.finngen_susie_finemapping_snp_files={{input.finngen}}/finemap/full/susie/*.snp.bgz" \
+          "step.finngen_susie_finemapping_cs_summary_files={{input.finngen}}/finemap/summary/*SUSIE.cred.summary.tsv" \
+          step.finngen_annotated_variants_path={{input.finngen}}/annotations/finnge_R12_annotated_variants_v1.gz \
+          step.finngen_release_prefix=FINNGEN_R12 \
+          step.finngen_finemapping_lead_pvalue_threshold=1e-5 \
+          step.finngen_finemapping_out={{output}}/output/credible_set \
+          step.finngen_finemapping_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.use_enhanced_bgzip_codec=true \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn

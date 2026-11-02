@@ -1,0 +1,66 @@
+---
+description: Open Targets Genetics — eQTL Catalogue SuSiE fine-mapping ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      # the SuSiE results of eQTL Catalogue r8, copied from the EBI FTP
+      eqtl_catalogue: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626
+    output: gs://eqtl_catalogue_data/r8/prod/20261030T153207
+    scratchpad:
+      # the gentropy dev commit with the pubmedId fix (opentargets/gentropy#1334), not yet in a tag
+      gentropy_ref: 1ef3310751443ffcc1bfa52a9f2a07b3b72dd849
+      metadata_uri: https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/fd99d45d3e433dcdf3c3d0acb4db0b7d5e8a7bd3/data_tables/dataset_metadata_r8.tsv
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-eqtl-catalogue:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers: preempted secondary workers lose
+      # their shuffle data. The inputs are 6.6 GB of credible sets, 1.5 TB of lbf files
+      # and 5.5 TB of full_susie files. The run 20261030T153207 started with 32 workers,
+      # left 830 containers pending, and was grown to 64 during the job
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 64
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 512
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: '{{gentropy_ref}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  ingestion:
+    kind: dataproc
+    definition:
+      cluster: otg-eqtl-catalogue
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=eqtl_catalogue \
+          step.eqtl_catalogue_dataset_metadata_path={{metadata_uri}} \
+          "step.credible_set_input_glob={{input.eqtl_catalogue}}/susie/QTS*/QTD*/QTD*.credible_sets.parquet" \
+          "step.lbf_variable_input_glob={{input.eqtl_catalogue}}/susie/QTS*/QTD*/QTD*.lbf_variable.parquet" \
+          "step.full_susie_input_glob={{input.eqtl_catalogue}}/susie_batches/QTS*/QTD*/QTD*.full_susie.parquet" \
+          step.study_index_output_path={{output}}/output/study_index \
+          step.credible_set_output_path={{output}}/output/credible_set \
+          step.credible_set_variant_output_path={{output}}/output/credible_set_variant \
+          step.lead_pvalue_threshold=1.0e-3 \
+          "step.mqtl_quantification_methods_blacklist=[]" \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=50 \
+          "+step.session.extended_spark_conf={spark.sql.shuffle.partitions: '4000'}" \
+          step.session.spark_uri=yarn
