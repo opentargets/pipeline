@@ -38,8 +38,11 @@ scratchpad:
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
-  cosmic_version: '2025-06-24'
-  cosmic_hallmarks_version: '27-01-2026_v103'
+  # COSMIC is pinned to the 22.02 vintage on purpose, not the latest files in
+  # gs://otar007-cosmic: our licence with COSMIC only allows us to use 22.02.
+  # Do not bump it. See opentargets/issues#4536.
+  cosmic_version: '2022-01-19'
+  cosmic_hallmarks_version: '2022-01-19'
   eva_version: '2026-07-23'
   reactome_version: '2026-01-19-v95'
   clinpgx_version: '2026-07-24'
@@ -396,7 +399,7 @@ steps:
   #: EVIDENCE_COSMIC STEP :#########################################################################
   evidence_cosmic:
     - name: copy cosmic
-      source: gs://otar007-cosmic/CTTV007-${cosmic_version}.json.gz
+      source: gs://otar007-cosmic/archive/CTTV007-${cosmic_version}.json.gz
       destination: input/evidence/cosmic.json.gz
   ##################################################################################################
 
@@ -1157,7 +1160,7 @@ steps:
       destination: input/target/go/ensembl.tsv
 
     - name: copy cosmic
-      source: gs://otar007-cosmic/hallmarks/CTTV007-${cosmic_hallmarks_version}_hallmarks.tsv.gz
+      source: gs://otar007-cosmic/hallmarks/CTTV007-${cosmic_hallmarks_version}-hallmarks-UTF8.tsv.gz
       destination: input/target/hallmarks/cosmic-hallmarks.tsv.gz
 
     - name: explode compara homologies
