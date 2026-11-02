@@ -42,7 +42,7 @@ def _write_json(document: dict[str, Any], path: str) -> None:
     StorageHandle(path).write_text(json.dumps(document, indent=2))
 
 
-SORT_KEY: tuple[str, ...] = ('studyLocusId', 'geneId')
+SORT_KEY: tuple[str, ...] = ('credibleSetId', 'geneId')
 """The natural key the splits are ordered on, which is only an order if it is unique."""
 
 
@@ -119,8 +119,15 @@ def l2g_train(
     require_unique_key(train, 'train')
     require_unique_key(test, 'test')
     logger.info(f'split: {train.height} train rows, {test.height} test rows')
+    if not (train.height and test.height):
+        msg = (
+            f'empty split: {train.height} train rows, {test.height} test rows from '
+            f'{annotated.height} annotated gold-standard rows. Check that the gold standard and the '
+            'feature matrix come from the same credible sets.'
+        )
+        raise ValueError(msg)
 
-    stats = split.split_stats(annotated.height, predefined.height, train, test)
+    stats = split.split_stats(annotated.height, split.count_test_genes(predefined.lazy()), train, test)
     _write_json(stats, destination['split_stats'])
     write_dataset(train, destination['train_split'])
     write_dataset(test, destination['test_split'])

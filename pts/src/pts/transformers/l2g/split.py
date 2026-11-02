@@ -1,9 +1,10 @@
-"""Derive the train and test splits from the pinned, predefined test set.
+"""Derive the train and test splits from the genes of the pinned, predefined test set.
 
-The test set is pinned across releases rather than resampled, so models stay comparable. This
-module implements only that path: gentropy's fresh hierarchical split is not ported, because the
-pipeline always supplies `predefined_test_parquet_path` and a second split would defeat the point
-of pinning the first.
+The test genes are pinned across releases rather than resampled, so models stay comparable. This
+module implements only that path, as gentropy v4 `LocusToGeneTrainTestSplitStep` does with
+`predefined_test_parquet_path`: gentropy's fresh hierarchical split is not ported, because the
+pipeline always supplies the predefined test set and a second split would defeat the point of
+pinning the first.
 """
 
 from typing import Any
@@ -42,36 +43,68 @@ def derive_splits(
     annotated: pl.LazyFrame,
     predefined_test: pl.LazyFrame,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Split the annotated gold-standard matrix against a pinned test set.
+    """Split the annotated gold-standard matrix on the positive genes of a pinned test set.
 
-    The test partition is re-derived from the current annotated matrix using the pinned
-    (study locus, gene) pairs, so its features track the release. The training partition drops
-    every study locus that contains a gene which is positive anywhere in the test set.
+    Mirrors gentropy v4 `LocusToGeneTrainTestSplitStep._split_by_test_genes`. Only the positive
+    genes of the predefined test set are used; its credible sets, negatives and features are
+    rebuilt from the current matrix, so the pinned set does not need this release's ids.
 
-    The row's own label is deliberately NOT consulted when finding contamination: a locus whose
-    gene label flipped from positive to negative between releases is still in the test set via
-    the pair join, and must stay out of training.
+    A credible set goes to the test set when all its positives are test genes, and to the training
+    set when it contains no test gene at all, positive or negative. Credible sets with positives
+    on both sides are dropped, so no positive gene is shared between the sets.
 
     Args:
         annotated: output of `gold_standard.annotate`, string or integer labels.
-        predefined_test: the pinned test set; only `studyLocusId`, `geneId` and the label are used.
+        predefined_test: the pinned test set; only `geneId` and the label are used.
 
     Returns:
         `(train, test)` as eager DataFrames with `Int32` labels.
     """
     encoded = encode_labels(annotated)
-    pinned = encode_labels(predefined_test.select('studyLocusId', 'geneId', LABEL_COLUMN))
-
-    test_positive_genes = pinned.filter(pl.col(LABEL_COLUMN) == 1).select('geneId').unique()
-
-    contaminated = (
-        encoded.join(test_positive_genes, on='geneId', how='inner').select('studyLocusId').unique()
+    test_genes = (
+        encode_labels(predefined_test.select('geneId', LABEL_COLUMN))
+        .filter(pl.col(LABEL_COLUMN) == 1)
+        .select('geneId')
+        .unique()
+        .with_columns(pl.lit(True).alias('_is_test_gene'))
     )
 
-    train = encoded.join(contaminated, on='studyLocusId', how='anti')
-    test = encoded.join(pinned.select('studyLocusId', 'geneId'), on=['studyLocusId', 'geneId'], how='inner')
+    is_positive = pl.col(LABEL_COLUMN) == 1
+    is_test_gene = pl.col('_is_test_gene')
+    loci = (
+        encoded.join(test_genes, on='geneId', how='left')
+        .with_columns(is_test_gene.fill_null(False))
+        .group_by('credibleSetId')
+        .agg(
+            is_test_gene.any().alias('has_test_gene'),
+            (is_positive & is_test_gene).any().alias('has_test_positive'),
+            (is_positive & ~is_test_gene).any().alias('has_train_positive'),
+        )
+    )
+    train_loci = loci.filter(~pl.col('has_test_gene')).select('credibleSetId')
+    test_loci = loci.filter(pl.col('has_test_positive') & ~pl.col('has_train_positive')).select('credibleSetId')
 
+    train = encoded.join(train_loci, on='credibleSetId', how='semi')
+    test = encoded.join(test_loci, on='credibleSetId', how='semi')
     return train.collect(), test.collect()
+
+
+def count_test_genes(predefined_test: pl.LazyFrame) -> int:
+    """Count the distinct positive genes of the predefined test set.
+
+    Args:
+        predefined_test: the pinned test set.
+
+    Returns:
+        The number of genes `derive_splits` splits on.
+    """
+    return (
+        encode_labels(predefined_test.select('geneId', LABEL_COLUMN))
+        .filter(pl.col(LABEL_COLUMN) == 1)
+        .select(pl.col('geneId').n_unique())
+        .collect()
+        .item()
+    )
 
 
 def _set_stats(frame: pl.DataFrame) -> dict[str, int]:
@@ -87,22 +120,22 @@ def _set_stats(frame: pl.DataFrame) -> dict[str, int]:
     return {
         'n_positive': positive.height,
         'n_negative': frame.filter(pl.col(LABEL_COLUMN) == 0).height,
-        'n_unique_loci': frame['studyLocusId'].n_unique(),
+        'n_unique_loci': frame['credibleSetId'].n_unique(),
         'n_unique_positive_genes': positive['geneId'].n_unique(),
     }
 
 
 def split_stats(
     annotated_total: int,
-    predefined_total: int,
+    predefined_test_genes: int,
     train: pl.DataFrame,
     test: pl.DataFrame,
 ) -> dict[str, Any]:
-    """Build the split statistics document, matching gentropy's key set.
+    """Build the split statistics document, matching gentropy v4's key set for a predefined split.
 
     Args:
         annotated_total: rows in the annotated gold-standard matrix.
-        predefined_total: rows in the pinned test set as staged.
+        predefined_test_genes: distinct positive genes in the pinned test set.
         train: the training partition.
         test: the test partition.
 
@@ -111,11 +144,10 @@ def split_stats(
     """
     return {
         'n_original_total': annotated_total,
-        'n_original_test': predefined_total,
-        'n_test_new': test.height,
-        'n_lost_test': predefined_total - test.height,
+        'n_predefined_test_genes': predefined_test_genes,
         'n_train': train.height,
-        'n_lost_total': annotated_total - test.height - train.height,
+        'n_test': test.height,
+        'n_lost_total': annotated_total - train.height - test.height,
         'train': _set_stats(train),
         'test': _set_stats(test),
     }
