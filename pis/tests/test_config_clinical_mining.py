@@ -31,6 +31,7 @@ def test_clinical_mining_fetches_upstream() -> None:
     assert ema['destination'] == 'input/ema_medicines.xlsx'
     assert pmda['page'] == PMDA_PAGE
     assert pmda['destination'] == 'input/pmda.pdf'
+    assert (ttd['expect'], ema['expect'], pmda['expect']) == ('TTD', 'PK', '%PDF')
     for task in (ttd, ema, pmda):
         assert task['as_of'] == '${clinical_mining_version}'
     assert chembl['source'] == CHEMBL_MAPPING

@@ -30,9 +30,15 @@ def warnings() -> Iterator[list[str]]:
     logger.remove(sink)
 
 
-def _respond(monkeypatch: pytest.MonkeyPatch, status: int = 200, body: bytes = BODY, url: str = URL) -> None:
+def _respond(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int = 200,
+    body: bytes = BODY,
+    url: str = URL,
+    headers: dict[str, str] | None = None,
+) -> None:
     def get(requested: str, timeout: int) -> SimpleNamespace:
-        return SimpleNamespace(status_code=status, content=body, url=url, ok=200 <= status < 300)
+        return SimpleNamespace(status_code=status, content=body, url=url, ok=200 <= status < 300, headers=headers or {})
 
     monkeypatch.setattr(fetch.requests, 'get', get)
 
@@ -49,20 +55,83 @@ def _never_called(*args: object, **kwargs: object) -> None:
 def test_fetch_once_downloads_and_writes_sidecar(
     config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _respond(monkeypatch, url='https://example.org/final/data.txt')
+    _respond(
+        monkeypatch,
+        url='https://example.org/final/data.txt',
+        headers={'Content-Type': 'text/plain', 'Last-Modified': 'Mon, 02 Nov 2026 10:00:00 GMT', 'ETag': '"abc"'},
+    )
 
     record = fetch_once(URL, DESTINATION, config, '2026-11-03', extra={'period': 'P'})
 
     expected = {
         'source_url': 'https://example.org/final/data.txt',
+        'requested_url': URL,
         'fetched_at': '2026-11-03T08:00:00Z',
         'size': len(BODY),
         'sha256': hashlib.sha256(BODY).hexdigest(),
+        'content_type': 'text/plain',
+        'last_modified': 'Mon, 02 Nov 2026 10:00:00 GMT',
+        'etag': '"abc"',
         'extra': {'period': 'P'},
     }
     assert (tmp_path / DESTINATION).read_bytes() == BODY
     assert json.loads((tmp_path / (DESTINATION + SIDECAR_SUFFIX)).read_text()) == expected
     assert record == FetchRecord(**expected)
+
+
+def test_sidecar_headers_are_null_when_absent(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _respond(monkeypatch)
+
+    fetch_once(URL, DESTINATION, config, '2026-11-03')
+
+    sidecar = json.loads((tmp_path / (DESTINATION + SIDECAR_SUFFIX)).read_text())
+    assert sidecar['content_type'] is None
+    assert sidecar['last_modified'] is None
+    assert sidecar['etag'] is None
+
+
+@pytest.mark.parametrize('content_type', ['text/html', 'Text/HTML; charset=UTF-8'])
+def test_fetch_once_refuses_html(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content_type: str
+) -> None:
+    _respond(monkeypatch, body=b'<html>error</html>', headers={'Content-Type': content_type})
+
+    with pytest.raises(FetchError, match=f'{URL}.*{content_type}'):
+        fetch_once(URL, DESTINATION, config, '2026-11-03')
+
+    assert not (tmp_path / DESTINATION).exists()
+    assert not (tmp_path / (DESTINATION + SIDECAR_SUFFIX)).exists()
+
+
+def test_fetch_once_refuses_wrong_prefix(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _respond(monkeypatch, body=b'<!DOCTYPE html>' + b'x' * 100)
+
+    with pytest.raises(FetchError) as error:
+        fetch_once(URL, DESTINATION, config, '2026-11-03', expect=b'PK')
+
+    assert URL in str(error.value)
+    assert "b'PK'" in str(error.value)
+    assert repr(b'<!DOCTYPE html>' + b'x' * 17) in str(error.value)
+    assert not (tmp_path / DESTINATION).exists()
+    assert not (tmp_path / (DESTINATION + SIDECAR_SUFFIX)).exists()
+
+
+def test_fetch_once_accepts_expected_prefix(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _respond(monkeypatch, body=b'PK\x03\x04 zip')
+
+    assert fetch_once(URL, DESTINATION, config, '2026-11-03', expect=b'PK') is not None
+
+    assert (tmp_path / DESTINATION).read_bytes() == b'PK\x03\x04 zip'
+
+
+def test_fetch_once_task_passes_expect(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run: Callable[[Task], Task]
+) -> None:
+    _respond(monkeypatch)
+    spec = FetchOnceSpec(name='fetch once', source=URL, destination=DESTINATION, as_of='2026-11-03', expect='PK')
+
+    assert run(FetchOnce(spec, TaskContext(config, Scratchpad()))).manifest.result == Result.FAILURE
+    assert not (tmp_path / DESTINATION).exists()
 
 
 def test_fetch_once_keeps_existing_file(

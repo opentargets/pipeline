@@ -7,10 +7,11 @@ from typing import Self
 from urllib.parse import urljoin, urlparse
 
 import requests
+from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
-from pis.fetch import FetchError, fetch_once, is_fetched, validate_destination
+from pis.fetch import FetchError, fetch_once, is_fetched, keep_existing, validate_destination
 
 HEADING = re.compile(r'h[1-6]')
 SECTION = 'New Drugs'
@@ -119,11 +120,13 @@ class FetchPmdaSpec(Spec):
         - page (str): The URL of the PMDA approved products page.
         - destination (str): The path, relative to `release_uri`, to write to.
         - as_of (str): The staging date, `YYYY-MM-DD`.
+        - expect (str, optional): The prefix the PDF must start with.
     """
 
     page: str
     destination: str
     as_of: str
+    expect: str | None = None
 
 
 class FetchPmda(Task):
@@ -145,19 +148,22 @@ class FetchPmda(Task):
     def run(self) -> Self:
         config = self.context.config
         if is_fetched(self.spec.destination, config):
-            fetch_once(self.spec.page, self.spec.destination, config, self.spec.as_of)
+            keep_existing(self.spec.destination, config)
             return self
 
         response = requests.get(self.spec.page, timeout=300)
         if not response.ok:
             raise FetchError(f'{self.spec.page} returned status {response.status_code}')
-        link = find_new_drugs_pdf(response.text, self.spec.page)
+        link = find_new_drugs_pdf(response.content.decode('utf-8', errors='replace'), self.spec.page)
+        period = SIZE_SUFFIX.sub('', link.text)
+        logger.info(f'{self.spec.page}: New Drugs PDF {link.url}, period {period}')
         fetch_once(
             link.url,
             self.spec.destination,
             config,
             self.spec.as_of,
-            extra={'period': SIZE_SUFFIX.sub('', link.text), 'page': self.spec.page},
+            extra={'period': period, 'page': self.spec.page},
+            expect=self.spec.expect.encode() if self.spec.expect is not None else None,
         )
         return self
 

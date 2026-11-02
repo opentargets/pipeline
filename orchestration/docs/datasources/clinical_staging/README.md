@@ -88,12 +88,19 @@ found.
 - A file already under the date's `input/` is kept, not downloaded again, and
   the step logs that it reused the file. A rerun of a date therefore never
   swaps the inputs of a date already staged.
-- Beside each fetched file, `<file>.fetch.json` records the URL downloaded, the
-  UTC download time, the size in bytes and the sha256, and for PMDA the period
+- Beside each fetched file, `<file>.fetch.json` records the URL requested and the
+  URL downloaded, the UTC download time, the size in bytes, the sha256, the
+  `Content-Type`, `Last-Modified` and `ETag` headers, and for PMDA the period
   text of the link, for example "April 2004 to February 2026". A kept file keeps
   its sidecar unchanged.
 - A `staging_version` in the past is allowed. When the download date differs
   from it, the task logs a warning naming both dates.
+- To re-fetch a source for a date (a bad body, a zero-byte object, or a
+  deliberate refresh), delete both the file and its `.fetch.json` sidecar under
+  `gs://clinical_staging/clinical_mining/<staging_version>/input/`, then rerun
+  `pis_clinical_mining`. Do this only before any NER snapshot of that date is
+  published. After that, stage a new date instead, because the snapshots are
+  write-once and would no longer match the inputs.
 - TTD, EMA and PMDA keep no history upstream, so the staged copy and its
   sidecar are the only record of what a date held.
 

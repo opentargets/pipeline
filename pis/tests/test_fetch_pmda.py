@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 from otter.config.model import Config
 from otter.manifest.model import Result
 from otter.scratchpad.model import Scratchpad
@@ -31,18 +32,21 @@ def _task(config: Config) -> FetchPmda:
     return FetchPmda(spec, TaskContext(config, Scratchpad()))
 
 
-def _respond(monkeypatch: pytest.MonkeyPatch, page: str) -> list[str]:
+def _respond(monkeypatch: pytest.MonkeyPatch, page: str, page_status: int = 200) -> list[str]:
     requested: list[str] = []
 
     def get(url: str, timeout: int) -> SimpleNamespace:
         requested.append(url)
         if url == PAGE_URL:
             body = page.encode()
+            if page_status != 200:
+                return SimpleNamespace(status_code=page_status, content=body, url=url, ok=False, headers={})
         elif url == PDF_URL:
             body = PDF_BODY
         else:
             raise AssertionError(f'unexpected request for {url}')
-        return SimpleNamespace(status_code=200, content=body, text=page, url=url, ok=True)
+        content_type = 'text/html; charset=utf-8' if url == PAGE_URL else 'application/pdf'
+        return SimpleNamespace(status_code=200, content=body, url=url, ok=True, headers={'Content-Type': content_type})
 
     monkeypatch.setattr(fetch.requests, 'get', get)
     return requested
@@ -90,6 +94,57 @@ def test_fetch_pmda_records_period(
     sidecar = json.loads((tmp_path / (DESTINATION + SIDECAR_SUFFIX)).read_text())
     assert sidecar['extra'] == {'period': 'April 2004 to February 2026', 'page': PAGE_URL}
     assert sidecar['source_url'] == PDF_URL
+    assert sidecar['requested_url'] == PDF_URL
+
+
+def test_fetch_pmda_logs_the_edition(
+    config: Config, monkeypatch: pytest.MonkeyPatch, run: Callable[[Task], Task]
+) -> None:
+    _respond(monkeypatch, _page('page_2026-11.html'))
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(m.record['message']), level='INFO')
+
+    run(_task(config))
+
+    logger.remove(sink)
+    assert f'{PAGE_URL}: New Drugs PDF {PDF_URL}, period April 2004 to February 2026' in messages
+
+
+def test_fetch_pmda_page_is_html_pdf_is_checked(
+    config: Config, monkeypatch: pytest.MonkeyPatch, run: Callable[[Task], Task]
+) -> None:
+    requested = _respond(monkeypatch, _page('page_2026-11.html'))
+    spec = FetchPmdaSpec(name='fetch pmda', page=PAGE_URL, destination=DESTINATION, as_of='2026-11-03', expect='%PDF')
+
+    assert run(FetchPmda(spec, TaskContext(config, Scratchpad()))).manifest.result != Result.FAILURE
+    assert requested == [PAGE_URL, PDF_URL]
+
+
+def test_fetch_pmda_refuses_html_pdf(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run: Callable[[Task], Task]
+) -> None:
+    page = _page('page_2026-11.html')
+
+    def get(url: str, timeout: int) -> SimpleNamespace:
+        body = page.encode() if url == PAGE_URL else b'<html>blocked</html>'
+        return SimpleNamespace(status_code=200, content=body, url=url, ok=True, headers={'Content-Type': 'text/html'})
+
+    monkeypatch.setattr(fetch.requests, 'get', get)
+
+    assert run(_task(config)).manifest.result == Result.FAILURE
+    assert not (tmp_path / DESTINATION).exists()
+
+
+def test_fetch_pmda_fails_on_page_error(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run: Callable[[Task], Task]
+) -> None:
+    requested = _respond(monkeypatch, 'gone', page_status=503)
+
+    assert run(_task(config)).manifest.result == Result.FAILURE
+
+    assert requested == [PAGE_URL]
+    assert not (tmp_path / DESTINATION).exists()
+    assert not (tmp_path / (DESTINATION + SIDECAR_SUFFIX)).exists()
 
 
 def test_fetch_pmda_keeps_existing_without_fetching_page(
