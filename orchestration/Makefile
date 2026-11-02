@@ -93,9 +93,9 @@ upload-eqtl-catalogue-readme: ## Upload the eqtl_catalogue_data readme to a run 
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtl-catalogue-readme BUCKET=gs://eqtl_catalogue_data/r8/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data $(BUCKET)/docs
 
-upload-ukb-ppp-readme: ## Upload the ukb_ppp_eur readme to a run folder: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>
+upload-ukb-ppp-readme: ## Upload the ukb_ppp_eur README.md to a run folder: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>))
-	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data $(BUCKET)/docs
+	@gcloud storage cp docs/datasources/ukb_ppp_eur_data/README.md $(BUCKET)/docs/README.md
 
 upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>))

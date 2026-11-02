@@ -57,6 +57,8 @@ Schemas as read from the parquet files of the run. "Empty" marks a column with n
 
 `credible_set` and `credible_set_variant` hold the same credible sets and members as `credible_set_clean/20250129` of the release. Every credible set has a study in `study`, and every variant has a credible set in `credible_set`.
 
+One credible set has a different lead from the release: in `UKB_PPP_EUR_CREG1_O75629_OID21515_v1`, region `12:101068376-102568376`, the members `12_101772435_G_A` (the lead of the release) and `12_101772432_AG_A` have the same posterior probability, 0.13011703321030177, and the tie is broken by `variantId`, which picks `12_101772432_AG_A`.
+
 ### study
 
 One row per protein assay: the rows of the released `study_index`, in the `StudyIndex` schema of gentropy v4. The 11 columns below hold the same values as the released study index.
