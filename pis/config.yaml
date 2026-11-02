@@ -38,6 +38,9 @@ scratchpad:
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
+  # COSMIC is pinned to the 22.02 vintage on purpose, not the latest files in
+  # gs://otar007-cosmic: our licence with COSMIC only allows us to use 22.02.
+  # Do not bump it. See opentargets/issues#4536.
   cosmic_version: '2022-01-19'
   cosmic_hallmarks_version: '2022-01-19'
   eva_version: '2026-07-23'
