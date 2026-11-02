@@ -9,6 +9,7 @@ import polars as pl
 from pts.postgres import read_dump_tables
 from pts.transformers.clinical.datasets import ClinicalReport
 from pts.transformers.clinical.schemas import (
+    CLINICALTRIALS_URL,
     ClinicalProvider,
     ClinicalReportOrigin,
     ClinicalReportType,
@@ -39,6 +40,12 @@ AACT_TABLES = {
 }
 AACT_ORDER_BY = {'study_references': ['nct_id', 'pmid', 'reference_type']}
 
+INTERVENTION_TYPES = ['DRUG', 'COMBINATION_PRODUCT', 'BIOLOGICAL']
+"""Intervention types whose names are taken as drugs."""
+
+STUDY_TYPES = ['INTERVENTIONAL', 'OBSERVATIONAL', 'EXPANDED_ACCESS']
+"""Study types kept in the report."""
+
 
 def read_aact_tables(archive: str, tables: Sequence[str], scratch_root: str | Path) -> dict[str, pl.DataFrame]:
     """Restore the named AACT tables, with the columns and ordering the catalogue gives them."""
@@ -57,11 +64,10 @@ def read_aact_tables(archive: str, tables: Sequence[str], scratch_root: str | Pa
 
 def process_interventions(interventions: pl.DataFrame) -> pl.DataFrame:
     """Extract relevant MeSH terms for interventional studies."""
-    intervention_whitelist = ['DRUG', 'COMBINATION_PRODUCT', 'BIOLOGICAL']
     return (
         interventions
         .with_columns(drugFromSource=pl.col('name').str.to_lowercase())
-        .filter(pl.col('intervention_type').is_in(intervention_whitelist))
+        .filter(pl.col('intervention_type').is_in(INTERVENTION_TYPES))
         .filter(~pl.col('drugFromSource').str.starts_with('placebo'))
         .drop('intervention_type', 'name')
         .unique()
@@ -177,7 +183,6 @@ def extract_clinical_report(
     Returns:
         ClinicalReport with desired extra annotations from other tables.
     """
-    study_types = ['INTERVENTIONAL', 'OBSERVATIONAL', 'EXPANDED_ACCESS']
     interventions = process_interventions(interventions)
     conditions = process_conditions(conditions)
     studies = studies.join(interventions, on='nct_id', how='left').join(conditions, on='nct_id', how='left')
@@ -213,7 +218,7 @@ def extract_clinical_report(
 
     reports = (
         studies
-        .filter(pl.col('study_type').is_in(study_types))
+        .filter(pl.col('study_type').is_in(STUDY_TYPES))
         .filter(pl.col('drugFromSource').is_not_null())
         .rename({col: f'trial_{col}' for col in trial_metadata_cols})
         .rename({'nct_id': 'id'})
@@ -228,7 +233,7 @@ def extract_clinical_report(
             provider=pl.lit(ClinicalProvider.AACT.value),
             type=pl.lit(ClinicalReportType.INDICATION.value),
             url=pl.concat_str(
-                [pl.lit('https://clinicaltrials.gov/study/'), pl.col('id')],
+                [pl.lit(CLINICALTRIALS_URL), pl.col('id')],
                 separator='',
             ),
             origin=pl.lit(ClinicalReportOrigin.CLINICAL_TRIAL),

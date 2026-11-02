@@ -9,6 +9,9 @@ from pts.transformers.clinical.schemas import (
     ClinicalSource,
 )
 
+TTD_DRUG_URL = 'https://ttd.idrblab.cn/data/drug/details/'
+"""Prefix of a TTD drug page; the TTD drug id completes it."""
+
 
 def extract_indication(ttd_input: str | list[str]) -> pl.DataFrame:
     """Extract indications from TTD Indications dataset.
@@ -72,7 +75,7 @@ def extract_clinical_report(
             pl.col('diseaseFromSource').str.to_lowercase(),
         ).chash.sha2_256(),
         origin=pl.lit(ClinicalReportOrigin.CURATED_RESOURCE),
-        url=pl.concat_str([pl.lit('https://ttd.idrblab.cn/data/drug/details/'), pl.col('ttd_id')]),
+        url=pl.concat_str([pl.lit(TTD_DRUG_URL), pl.col('ttd_id')]),
         phaseFromSource=pl.col('clinical_stage').str.to_lowercase(),
         drug=pl.struct(
             pl.col('drugFromSource').str.to_lowercase(),

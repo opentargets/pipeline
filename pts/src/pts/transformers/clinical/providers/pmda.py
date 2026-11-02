@@ -33,6 +33,9 @@ HEADER_KEYWORDS = {
 # Minimum keyword groups that must match to confirm a header row
 MIN_HEADER_MATCHES = 2
 
+# Page every PMDA report links to
+PMDA_URL = 'https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0001.html'
+
 
 # ============================================================================
 # DATA STRUCTURES
@@ -390,7 +393,7 @@ def extract_clinical_report(
                 pl.lit(None, dtype=pl.String).alias('diseaseId'),
                 pl.col('extracted_diseases').alias('diseaseFromSource'),
             ),
-            url=pl.lit('https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0001.html'),
+            url=pl.lit(PMDA_URL),
             type=pl.lit(ClinicalReportType.INDICATION.value),
             source=pl.lit(ClinicalSource.PMDA.value),
             provider=pl.lit(ClinicalProvider.PMDA.value),

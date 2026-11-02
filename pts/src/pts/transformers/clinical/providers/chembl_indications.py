@@ -5,6 +5,7 @@ import polars_hash as plh
 
 from pts.transformers.clinical.datasets import APPROVAL_SOURCES, ClinicalReport
 from pts.transformers.clinical.schemas import (
+    CLINICALTRIALS_URL,
     ClinicalProvider,
     ClinicalReportOrigin,
     ClinicalReportType,
@@ -76,7 +77,7 @@ def extract_clinical_report(
             url=(
                 pl
                 .when(pl.col('ref_type') == 'ClinicalTrials')
-                .then(pl.concat_str(pl.lit('https://clinicaltrials.gov/study/'), pl.col('ref_id')))
+                .then(pl.concat_str(pl.lit(CLINICALTRIALS_URL), pl.col('ref_id')))
                 .otherwise(pl.col('ref_url'))
             ),
             provider=pl.lit(ClinicalProvider.CHEMBL.value),

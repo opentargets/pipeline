@@ -53,6 +53,10 @@ class ClinicalSource(str, Enum):
     PMDA = 'PMDA'
 
 
+CLINICALTRIALS_URL = 'https://clinicaltrials.gov/study/'
+"""Prefix of a ClinicalTrials.gov study page; the NCT id completes it."""
+
+
 class ClinicalStageCategory(str, Enum):
     """Standardised clinical development status categories, ranked by development stage."""
 
