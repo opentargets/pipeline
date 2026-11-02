@@ -31,7 +31,7 @@ steps:
       - pis_aact
     machine_type: 'n1-highmem-8'
     # Fetched from Secret Manager onto the VM and mounted into the container at
-    # this path — which is what LlmExtractSpec.openai_key_path defaults to. The
+    # this path — which is what AactTrialExtractionSettings.openai_key_path defaults to. The
     # key itself never appears in config or in code.
     gce_secret_files:
       openai-token: /var/run/secrets/openai-api-key
