@@ -9,10 +9,10 @@ from pathlib import Path
 import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 
-from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS
-from pts.transformers.variant.frames import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
 from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.records import rank_consequences
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA, EFFECTS_SCHEMA, ID_LISTS
+from pts.transformers.variant.vep.frames import VARIANTS_SCHEMA as BASE_VARIANTS_SCHEMA
+from pts.transformers.variant.vep.records import rank_consequences
 
 VARIANTS_SCHEMA = BASE_VARIANTS_SCHEMA | ID_LISTS
 """The columns of the variants frame, with the colocated id lists `add_colocated` adds."""

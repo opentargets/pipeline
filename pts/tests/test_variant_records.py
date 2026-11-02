@@ -9,11 +9,11 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.variant.alleles import read_chromosome
-from pts.transformers.variant.colocated import add_colocated
-from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA, VARIANTS_SCHEMA, ChunkFrames
 from pts.transformers.variant.index_rows import index_rows
-from pts.transformers.variant.records import FASTVEP_SCHEMA, chunk_frames, iter_records, unannotated_frames
+from pts.transformers.variant.vep.alleles import read_chromosome
+from pts.transformers.variant.vep.colocated import add_colocated
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA, VARIANTS_SCHEMA, ChunkFrames
+from pts.transformers.variant.vep.records import FASTVEP_SCHEMA, chunk_frames, iter_records, unannotated_frames
 from tests.variant_fixtures import with_effects
 
 FIXTURES = Path(__file__).parent / 'test_data' / 'fastvep'

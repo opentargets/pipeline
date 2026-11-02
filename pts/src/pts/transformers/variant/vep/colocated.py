@@ -9,8 +9,8 @@ from pathlib import Path
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.variant.alleles import shared_prefix_length, vep_allele_form
-from pts.transformers.variant.frames import ID_LISTS
+from pts.transformers.variant.vep.alleles import shared_prefix_length, vep_allele_form
+from pts.transformers.variant.vep.frames import ID_LISTS
 
 KEY = ['chromosome', 'position', 'referenceAllele', 'alternateAllele']
 CACHE_COLUMNS = {

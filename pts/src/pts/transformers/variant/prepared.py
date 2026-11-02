@@ -19,13 +19,13 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.alleles import read_chromosome, read_contig
-from pts.transformers.variant.colocated import KEY, colocated_variants
 from pts.transformers.variant.gpn_star import GpnStarCutoffs, read_gpn_star
 from pts.transformers.variant.index import read_variant_annotations
 from pts.transformers.variant.index_rows import uniprot_accessions
 from pts.transformers.variant.loftee import TranscriptModel, loftee_models
-from pts.transformers.variant.transcripts import transcript_fields
+from pts.transformers.variant.vep.alleles import read_chromosome, read_contig
+from pts.transformers.variant.vep.colocated import KEY, colocated_variants
+from pts.transformers.variant.vep.transcripts import transcript_fields
 
 AMINO_ACID_COLUMNS = ('uniprotAccession', 'aminoAcidChange', 'variantEffect')
 

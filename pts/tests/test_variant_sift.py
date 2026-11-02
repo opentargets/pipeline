@@ -11,9 +11,9 @@ import polars as pl
 import pytest
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.frames import CONSEQUENCES_SCHEMA
 from pts.transformers.variant.index import normalise_score
 from pts.transformers.variant.sift import AMINO_ACIDS, MATRICES, add_sift, sift_matrices, sift_scores, unescape
+from pts.transformers.variant.vep.frames import CONSEQUENCES_SCHEMA
 from tests.variant_fixtures import consequence_frame, index_of
 
 #: Ensembl 116 rows for the canonical translations of ENST00000354588, ENST00000524958,

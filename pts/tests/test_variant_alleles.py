@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.variant.alleles import (
+from pts.transformers.variant.vep.alleles import (
     contig_spans,
     hgvs_genomic,
     read_chromosome,

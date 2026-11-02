@@ -26,8 +26,6 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.colocated import add_colocated
-from pts.transformers.variant.fastvep import run_fastvep, write_vcf
 from pts.transformers.variant.gerp import KentBigWig
 from pts.transformers.variant.gpn_star import add_gpn_star
 from pts.transformers.variant.index import add_annotation, amino_acid_keys, annotate_with_amino_acid_consequences
@@ -41,8 +39,10 @@ from pts.transformers.variant.prepared import (
     PreparedChunk,
     write_complete,
 )
-from pts.transformers.variant.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 from pts.transformers.variant.sift import add_sift
+from pts.transformers.variant.vep.colocated import add_colocated
+from pts.transformers.variant.vep.fastvep import run_fastvep, write_vcf
+from pts.transformers.variant.vep.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
 
 
 @dataclass(frozen=True)

@@ -11,7 +11,7 @@ import numpy as np
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.variant.alleles import vep_allele_form
+from pts.transformers.variant.vep.alleles import vep_allele_form
 
 FLAGS = [
     '--pick-allele-gene',
