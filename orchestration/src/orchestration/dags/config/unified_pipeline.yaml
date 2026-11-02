@@ -20,8 +20,8 @@ run_name: "do/platform-2610-2"
 
 # Pipeline package versions
 #
-# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline
-# (and .../vep for vep_version), not git refs. A tag that does not exist there fails at
+# These are Docker tags in europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline,
+# not git refs. A tag that does not exist there fails at
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.12.0rc3"
@@ -29,13 +29,6 @@ pts_version: "26.12.0rc20"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 gentropy_version: "3.4.0-rc.2"
-# Built by opentargets/vep-image; the GitHub release and the registry image are
-# published separately, so the tag existing in one does not mean it exists in the
-# other. https://github.com/opentargets/vep-image/releases/tag/release_116.1
-vep_version: "release_116.1"
-# The Scala 2.13 / Spark 4 fat jar the pts clusters load. Keep it equal to the
-# spark-nlp pin in pts/pyproject.toml: the Python package and the jar must match.
-spark_nlp_version: "7.0.0"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
 # (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
@@ -121,9 +114,15 @@ steps:
     depends_on:
       - pis_variant_ppp
   pts_variant:
+    machine_type: n2d-standard-64
+    disk_size: 500
     depends_on:
       - pis_variant
-      - gentropy_variant_annotation
+      - pis_target
+      - pis_evidence_uniprot_variants
+      - pis_evidence_eva
+      - pts_pharmacogenetics
+      - pts_credible_set
     depends_on_ppp:
       - pts_variant_ppp
   pts_reactome:
@@ -333,6 +332,7 @@ steps:
     depends_on:
       - pis_chembl
       - pis_drug
+      - pis_clinical_report
   pts_drug_mechanism_of_action:
     depends_on:
       - pts_target
@@ -342,6 +342,7 @@ steps:
       - pts_drug_mechanism_of_action
       - pts_clinical_report
   pts_clinical_report:
+    machine_type: n2d-standard-16
     depends_on:
       - pis_clinical_report
       - pts_chembl_molecule
@@ -522,15 +523,6 @@ steps:
     num_partitions: 200
     depends_on:
       - pts_credible_set
-  pts_variant_partition:
-    depends_on:
-      - pts_pharmacogenetics
-      - pts_credible_set
-      - pis_evidence_uniprot_variants
-      - pis_evidence_eva
-  gentropy_variant_annotation:
-    depends_on:
-      - pts_variant_partition
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation

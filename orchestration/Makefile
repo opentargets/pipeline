@@ -4,7 +4,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \
-				upload-eqtl-catalogue-readme upload-ukb-ppp-bucket-readme \
+				upload-eqtl-catalogue-readme upload-ukb-ppp-readme \
 				upload-finngen-gwas-readme upload-finngen-multiome-readme \
 				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
@@ -93,9 +93,9 @@ upload-eqtl-catalogue-readme: ## Upload the eqtl_catalogue_data readme to a run 
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtl-catalogue-readme BUCKET=gs://eqtl_catalogue_data/r8/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data $(BUCKET)/docs
 
-upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
-	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data gs://ukb_ppp_eur_data/docs
-	@gcloud storage rsync docs/credible_set_qc gs://ukb_ppp_eur_data/docs/credible_set_qc
+upload-ukb-ppp-readme: ## Upload the ukb_ppp_eur README.md to a run folder: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/ukb_ppp_eur_data/README.md $(BUCKET)/docs/README.md
 
 upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>))
@@ -133,7 +133,6 @@ upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
 
 update-bucket-docs: ## Upload all datasource readmes to their buckets
-update-bucket-docs: upload-ukb-ppp-bucket-readme \
-									  upload-gwas-catalog-buckets-readme \
+update-bucket-docs: upload-gwas-catalog-buckets-readme \
 										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
 										upload-decode-bucket-readme

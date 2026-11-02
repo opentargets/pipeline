@@ -1,4 +1,4 @@
-"""Tests that the pts clusters, the Spark-NLP jar and pts' own pins agree on Spark 4."""
+"""Tests that the pts clusters and pts' own pins agree on Spark 4."""
 
 import re
 import tomllib
@@ -10,7 +10,6 @@ from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 # orchestration/tests/ -> the repository root, which holds the pts package
 PTS_PYPROJECT = Path(__file__).resolve().parents[2] / 'pts' / 'pyproject.toml'
-PTS_LOCK = PTS_PYPROJECT.with_name('uv.lock')
 
 
 @pytest.fixture(scope='module')
@@ -59,28 +58,12 @@ def test_pts_clusters_keep_ansi_mode_off(pts_clusters: dict[str, dict]) -> None:
         assert cluster['properties'].get('spark:spark.sql.ansi.enabled') == 'false', name
 
 
-def test_staged_spark_nlp_jar_is_the_scala_2_13_build(config: UnifiedPipelineConfig) -> None:
-    """The 2.12 and 2.13 fat jars share a basename upstream; only the folder tells them apart."""
-    nlp = {dst: src for dst, src in config.staged_jars.items() if 'spark-nlp' in dst}
-    assert len(nlp) == 1, nlp
-    [(dst, src)] = nlp.items()
-    assert '/public/jars/scala-2.13/' in src, src
-    assert Path(dst).name.startswith('spark-nlp-assembly_2.13-'), dst
+def test_pts_clusters_load_no_spark_nlp_jar(pts_clusters: dict[str, dict]) -> None:
+    """No pts step uses spark-nlp, so no pts cluster loads its jar."""
+    for name, cluster in pts_clusters.items():
+        assert 'spark-nlp' not in cluster['properties'].get('spark:spark.jars', ''), name
 
 
-def test_only_the_generic_pts_cluster_loads_the_spark_nlp_jar(pts_clusters: dict[str, dict]) -> None:
-    """Literature maps labels with polars; clinical_report on the generic cluster is the one spark-nlp user."""
-    loading = {n for n, c in pts_clusters.items() if 'spark-nlp' in c['properties'].get('spark:spark.jars', '')}
-    assert loading == {'pts'}
-
-
-def test_spark_nlp_jar_matches_the_pts_python_package(config: UnifiedPipelineConfig) -> None:
-    """The jar the clusters load and the spark-nlp the init action installs must be one version.
-
-    The clusters install pts from its lockfile, so the locked version is what they get.
-    """
-    [dst] = [d for d in config.staged_jars if 'spark-nlp' in d]
-    jar_version = Path(dst).stem.rsplit('-', 1)[1]
-    assert _pts_pin('spark-nlp') == f'spark-nlp=={jar_version}'
-    locked = tomllib.loads(PTS_LOCK.read_text())['package']
-    assert [p['version'] for p in locked if p['name'] == 'spark-nlp'] == [jar_version]
+def test_pts_clusters_install_no_extra(config: UnifiedPipelineConfig) -> None:
+    """torch and the NER models are image-only; the clusters install pts' base dependencies alone."""
+    assert '--extra' not in config.pts_init_action_source.read_text()

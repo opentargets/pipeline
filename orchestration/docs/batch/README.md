@@ -4,6 +4,8 @@ This document explains how to configure and wire a Google Batch job into an Airf
 
 ## Architecture overview
 
+Only the standalone DAGs use Google Batch (GWAS Catalog harmonisation, heritability estimation, SuSiE finemapping and UKB-PPP finemapping). The unified pipeline no longer does: variant annotation runs inside the pts `variant` step.
+
 The batch system is built around three Airflow operators that work together:
 
 ```text
@@ -61,7 +63,6 @@ Built-in generators and their registry keys:
 | --- | --- | --- |
 | `finemapping` | `FinemappingManifestGenerator` | SuSiE finemapping DAG |
 | `harmonisation` | `HarmonisationManifestGenerator` | GWAS harmonisation DAG |
-| `vep` | `VepManifestGenerator` | VEP annotation DAG |
 
 To add a new generator:
 
