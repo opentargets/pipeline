@@ -18,13 +18,15 @@ Full description of the process can be found in https://github.com/opentargets/i
 
 Data is produced by two DAGs, **ukb_ppp_eur_harmonisation** and **ukb_ppp_eur_finemapping**. The DAG configurations and topologies are in `config/ukb_ppp_eur_harmonisation.yaml` and `config/ukb_ppp_eur_finemapping.yaml` of the run folder (`gs://ukb_ppp_eur_data/prod/20260526T131650/config/`).
 
+The run folder is named after the data freeze: the move of the release from the top level of `gs://ukb_ppp_eur_data/` into a dated folder.
+
 Inputs of the run:
 
 ```sh
 gs://gentropy-vault/ukb-ppp/
-gs://gentropy-tmp/batch/output/ukb_ppp_eur/study_index.tsv
-gs://gentropy-tmp/batch/output/ukb_ppp_eur/summary_stats.parquet
-gs://gnomad_data_2/gnomad_variant_index
+gs://gentropy-tmp/batch/output/ukb_ppp_eur/study_index.tsv       # deleted, rebuild with ./submit.py ukb_ppp_eur
+gs://gentropy-tmp/batch/output/ukb_ppp_eur/summary_stats.parquet # deleted, rebuild with ./submit.py ukb_ppp_eur
+gs://gnomad_data_2/gnomad_variant_index                          # deleted
 gs://panukbb-ld-matrixes/UKBB.EUR.ldadj
 gs://panukbb-ld-matrixes/ukb-diverse-pops-public-build-38/UKBB.EUR.ldadj.variant.b38
 ```
