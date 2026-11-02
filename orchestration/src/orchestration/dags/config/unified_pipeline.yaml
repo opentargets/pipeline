@@ -29,9 +29,6 @@ pts_version: "26.12.0rc20"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 gentropy_version: "3.4.0-rc.2"
-# The Scala 2.13 / Spark 4 fat jar the pts clusters load. Keep it equal to the
-# spark-nlp pin in pts/pyproject.toml: the Python package and the jar must match.
-spark_nlp_version: "7.0.0"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
 # (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
@@ -335,6 +332,7 @@ steps:
     depends_on:
       - pis_chembl
       - pis_drug
+      - pis_clinical_report
   pts_drug_mechanism_of_action:
     depends_on:
       - pts_target
@@ -344,6 +342,7 @@ steps:
       - pts_drug_mechanism_of_action
       - pts_clinical_report
   pts_clinical_report:
+    machine_type: n2d-standard-16
     depends_on:
       - pis_clinical_report
       - pts_chembl_molecule

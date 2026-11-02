@@ -2,7 +2,7 @@
 environment_specs:
   - name: Prod
     vars:
-      data_bucket: "gs://finngen_ukb_mvp_meta_data"
+      data_bucket: "gs://finngen_data/meta/three-way/prod/20251027T140104/output"
 
 env: Prod
 

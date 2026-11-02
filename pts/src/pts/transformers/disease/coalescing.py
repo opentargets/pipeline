@@ -31,7 +31,7 @@ _SYNONYM_DTYPE = pl.List(
     })
 )
 _ONTOLOGY_WEIGHTS = pl.DataFrame(
-    [('efo', 1), ('mondo', 2), ('oba', 3), ('orphanet', 4), ('hp', 100)],
+    [('mondo', 1), ('efo', 2), ('oba', 3), ('orphanet', 4), ('hp', 100)],
     schema=['prefix', 'prefix_rank'],
     orient='row',
 )
@@ -56,6 +56,9 @@ _OBSOLETION_MARKER = r'(?i)^obsolete([^a-z0-9]\s*|$)'
 # A cross-reference shared by more terms than this is a hub, not an identity.
 _MAX_XREF_FANOUT = 40
 
+# Root of the measurement branch: a term under it never merges with one outside it.
+_MEASUREMENT = 'EFO_0001444'
+
 
 def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
     """Annotate name-collision nodes in the raw ontology node table.
@@ -67,7 +70,7 @@ def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
       - An IAO_0100001 basicPropertyValues entry is added pointing to the
         canonical (higher-priority) node's full URL.
 
-    Ontology priority (ascending, lower rank wins): efo < mondo < oba <
+    Ontology priority (ascending, lower rank wins): mondo < efo < oba <
     orphanet < hp < other.
 
     This allows the standard n_clean filter (~deprecated) and the existing
@@ -658,9 +661,11 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
     Each guardrail exists because dropping it costs precision: publication and
     protein references are not identity; coarse classification codes are
     many-to-one; a cross-reference carried by more than ``_MAX_XREF_FANOUT``
-    terms is a hub rather than an identifier; and a resulting group holding two
-    terms of one ontology is dropped whole, since it bridges those two rather
-    than equating them.
+    terms is a hub rather than an identifier; a pair joining a term under
+    measurement (``_MEASUREMENT``) to one outside it is dropped, since a
+    measurement is never the disease it measures (opentargets/issues#4573); and
+    a resulting group holding two terms of one ontology is dropped whole, since
+    it bridges those two rather than equating them.
 
     The surviving term is the one from the higher-priority ontology
     (``_ONTOLOGY_WEIGHTS``), ties broken by id.  Output matches
@@ -732,15 +737,29 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
         if prefix_of[a] != prefix_of[b]
     })
 
+    named: list[tuple[str, str]] = []
     if shared_pairs:
         names_of = name_bags(active)
         named = [(a, b) for a, b in shared_pairs if names_of.get(a, set()) & names_of.get(b, set())]
-        ancestors_of = _ancestor_lookup(e, {t for pair in named for t in pair})
-        candidates += [
-            (a, b)
-            for a, b in named
-            if b not in ancestors_of.get(a, set()) and a not in ancestors_of.get(b, set())
-        ]
+
+    if not candidates and not named:
+        return n
+
+    ancestors_of = _ancestor_lookup(e, {t for pair in [*candidates, *named] for t in pair})
+    candidates += [
+        (a, b)
+        for a, b in named
+        if b not in ancestors_of.get(a, set()) and a not in ancestors_of.get(b, set())
+    ]
+
+    # --- keep measurements apart from everything else ------------------------
+    measurements = {term for term, ancestors in ancestors_of.items() if _MEASUREMENT in {term, *ancestors}}
+    mixed = {(a, b) for a, b in candidates if (a in measurements) != (b in measurements)}
+    if mixed:
+        logger.info(f'{len(mixed)} candidate pairs join a measurement to a non-measurement and are dropped')
+        for a, b in sorted(mixed):
+            logger.debug(f'measurement pair: {a} <-> {b}')
+        candidates = [pair for pair in candidates if pair not in mixed]
 
     if not candidates:
         return n

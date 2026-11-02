@@ -18,7 +18,7 @@ COPY --from=fastvep /fastvep/target/release/fastvep /usr/local/bin/fastvep
 WORKDIR /app
 COPY . /app
 
-RUN uv sync --frozen --no-dev --extra nlp --extra l2g
+RUN uv sync --frozen --no-dev --extra nlp --extra l2g --extra llm
 
 # pixeltable-pgserver runs postgres under a non-root account when it detects
 # uid 0, and creates that account with useradd from PostgresServer.__init__ --
