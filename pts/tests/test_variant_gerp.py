@@ -9,7 +9,8 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.transformers.variant.annotators.gerp import KentBigWig, gerp_max
+from pts.transformers.variant.annotators.bigwig import KentBigWig
+from pts.transformers.variant.annotators.gerp import gerp_max
 
 SCORES = {
     # one-based positions of the bases that carry a score

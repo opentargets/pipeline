@@ -26,7 +26,7 @@ import polars as pl
 from loguru import logger
 
 from pts.schemas.variant import variant_schema
-from pts.transformers.variant.annotators.gerp import KentBigWig
+from pts.transformers.variant.annotators.bigwig import KentBigWig
 from pts.transformers.variant.annotators.gpn_star import add_gpn_star
 from pts.transformers.variant.annotators.loftee import add_loftee
 from pts.transformers.variant.annotators.sift import add_sift

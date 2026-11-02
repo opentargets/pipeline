@@ -12,7 +12,7 @@ import polars as pl
 import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stubs
 import pytest
 
-from pts.transformers.variant.annotators.gerp import KentBigWig
+from pts.transformers.variant.annotators.bigwig import KentBigWig
 from pts.transformers.variant.annotators.loftee import (
     GERP_END_TRUNC_CUTOFF,
     MIN_INTRON_SIZE,
