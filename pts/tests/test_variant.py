@@ -23,7 +23,7 @@ from pydantic import ValidationError
 from pts.schemas.variant import variant_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
-from pts.transformers.variant import VariantDestination, VariantSettings, VariantSource, variant
+from pts.transformers.variant import variant
 from pts.transformers.variant.alleles import read_chromosome
 from pts.transformers.variant.chromosome import annotate
 from pts.transformers.variant.colocated import add_colocated, colocated_variants
@@ -45,6 +45,7 @@ from pts.transformers.variant.index_rows import (
 )
 from pts.transformers.variant.records import chunk_frames, iter_records
 from pts.transformers.variant.rows import collect_variants
+from pts.transformers.variant.settings import VariantDestination, VariantSettings, VariantSource
 from tests.ensembl_fixtures import cells, ddl, write_dump
 from tests.test_variant_colocated import all_vars, cache_line
 from tests.test_variant_colocated import rows as colocated_rows
