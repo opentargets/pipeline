@@ -49,7 +49,7 @@ def workspace(tmp_path):
         'goldStandardSet': ['positive' if i % 4 == 0 else 'negative' for i in range(40)],
     })
     (tmp_path / 'gs').mkdir()
-    gold.write_ndjson(tmp_path / 'gs' / 'part-0.json')
+    gold.write_parquet(tmp_path / 'gs' / 'part-0.parquet')
 
     pinned = pl.DataFrame({
         'studyLocusId': loci[:8],
@@ -188,13 +188,13 @@ def duplicate_key_workspace(workspace):
     used because it survives the contamination anti-join, so the duplicate lands in the TRAIN
     split rather than being filtered away before the check can see it.
     """
-    gold = pl.read_ndjson(workspace / 'gs' / 'part-0.json')
+    gold = pl.read_parquet(workspace / 'gs' / 'part-0.parquet')
     flipped = gold.filter(pl.col('studyLocusId') == 'sl10').with_columns(
         pl.lit('positive').alias('goldStandardSet')
     )
     assert flipped.height == 1, 'fixture no longer has exactly one sl10 row to flip'
     assert gold.filter(pl.col('studyLocusId') == 'sl10')['goldStandardSet'][0] == 'negative'
-    pl.concat([gold, flipped]).write_ndjson(workspace / 'gs' / 'part-0.json')
+    pl.concat([gold, flipped]).write_parquet(workspace / 'gs' / 'part-0.parquet')
     return workspace
 
 
@@ -276,7 +276,7 @@ def leak_sensitive_workspace(tmp_path):
         'goldStandardSet': labels,
     })
     (tmp_path / 'gs').mkdir()
-    gold.write_ndjson(tmp_path / 'gs' / 'part-0.json')
+    gold.write_parquet(tmp_path / 'gs' / 'part-0.parquet')
 
     pinned = pl.DataFrame({
         'studyLocusId': test_loci,

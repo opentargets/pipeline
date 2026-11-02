@@ -1,8 +1,8 @@
-"""Parse the curated L2G gold standard and annotate it with feature-matrix rows.
+"""Parse the L2G gold standard and annotate it with feature-matrix rows.
 
-gentropy's `_parse_gold_standard` has three branches. On the curated file this pipeline
-actually consumes -- `gs://otar001-core/l2g/goldStandard/<version>` -- only the second fires:
-the file carries one unexpected column, `diseaseIds`, which is dropped. The OTG-curation branch
+The gold standard is the training set gentropy's `training_set` step builds from the effector
+gene list (`intermediate/l2g_training_set`). gentropy's `_parse_gold_standard` has three
+branches; only the curated one, which keeps the mandatory columns, is ported. The OTG-curation branch
 needs `find_overlaps`, the variant index and the PPI dataset, and has never run on this data, so
 it is NOT ported. A file in that format must fail loudly rather than be mis-parsed.
 """

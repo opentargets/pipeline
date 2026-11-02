@@ -107,7 +107,7 @@ def l2g_train(
     annotated = gold_standard.annotate(
         scan_dataset(source['feature_matrix']),
         scan_dataset(source['credible_set']),
-        gold_standard.parse_gold_standard(scan_dataset(source['gold_standard'], format='ndjson')),
+        gold_standard.parse_gold_standard(scan_dataset(source['gold_standard'])),
         features,
     ).collect()
 
