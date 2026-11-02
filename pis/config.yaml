@@ -233,22 +233,27 @@ steps:
 
   #: CLINICAL_MINING STEP :#######################################################################
   # Stages the clinical mining inputs and the models that read them. The staging DAG runs
-  # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version}.
+  # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version},
+  # where it sets clinical_mining_version to the staging date. TTD, EMA and PMDA are fetched
+  # from upstream once per staging date. The ChEMBL mapping is frozen at the 2026-05-27 file.
   clinical_mining:
-    - name: copy ttd
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ttd.txt
+    - name: fetch_once ttd
+      source: https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt
       destination: input/ttd.txt
+      as_of: ${clinical_mining_version}
 
-    - name: copy ema medicines
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ema_medicines.xlsx
+    - name: fetch_once ema medicines
+      source: https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx
       destination: input/ema_medicines.xlsx
+      as_of: ${clinical_mining_version}
 
-    - name: copy pmda
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/pmda.pdf
+    - name: fetch_pmda pmda
+      page: https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html
       destination: input/pmda.pdf
+      as_of: ${clinical_mining_version}
 
     - name: copy chembl mapping
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/chembl_mapping.parquet
+      source: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl_mapping.parquet
       destination: input/chembl_mapping.parquet
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>

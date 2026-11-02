@@ -1,9 +1,7 @@
 ---
-# The AACT monthly archive this pipeline extracts
-aact_version: '2026-11-01'
-
-# The clinical mining inputs (TTD, EMA, PMDA) this pipeline stages
-clinical_mining_version: '2026-05-27'
+# The date of the run. It names the AACT monthly archive and dates the TTD, EMA and
+# PMDA downloads, and every source is staged under it.
+staging_version: '2026-11-01'
 
 # Where every snapshot and record store lives
 bucket: 'gs://clinical_staging'
