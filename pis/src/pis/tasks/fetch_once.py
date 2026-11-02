@@ -2,13 +2,10 @@
 
 from typing import Self
 
-from loguru import logger
-from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import TaskValidationError
 
-from pis.fetch import fetch_once
+from pis.fetch import fetch_once, validate_destination
 
 
 class FetchOnceSpec(Spec):
@@ -49,11 +46,5 @@ class FetchOnce(Task):
     @report
     def validate(self) -> Self:
         """Check that the destination exists and is not empty."""
-        try:
-            size = StorageHandle(self.spec.destination, config=self.context.config).stat().size
-        except Exception as e:
-            raise TaskValidationError(f'{self.spec.destination} does not exist') from e
-        if not size:
-            logger.error(f'{self.spec.destination} is empty')
-            raise TaskValidationError(f'{self.spec.destination} is empty')
+        validate_destination(self.spec.destination, self.context.config)
         return self

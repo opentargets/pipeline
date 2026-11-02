@@ -9,7 +9,7 @@ import requests
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
-from otter.util.errors import NotFoundError, OtterError
+from otter.util.errors import NotFoundError, OtterError, TaskValidationError
 
 SIDECAR_SUFFIX = '.fetch.json'
 
@@ -39,6 +39,11 @@ def _exists(handle: StorageHandle) -> bool:
     except NotFoundError:
         return False
     return True
+
+
+def is_fetched(destination: str, config: Config) -> bool:
+    """Whether `destination` already exists."""
+    return _exists(StorageHandle(destination, config=config))
 
 
 def fetch_once(
@@ -97,3 +102,22 @@ def fetch_once(
     if record.fetched_at[:10] != as_of:
         logger.warning(f'{destination} was fetched on {record.fetched_at[:10]}, not on the staging date {as_of}')
     return record
+
+
+def validate_destination(destination: str, config: Config) -> None:
+    """Check that a fetched file exists and is not empty.
+
+    Args:
+        destination: The path, relative to the release root, that was fetched to.
+        config: The otter configuration used to resolve locations.
+
+    Raises:
+        TaskValidationError: If the destination does not exist or is empty.
+    """
+    try:
+        size = StorageHandle(destination, config=config).stat().size
+    except Exception as e:
+        raise TaskValidationError(f'{destination} does not exist') from e
+    if not size:
+        logger.error(f'{destination} is empty')
+        raise TaskValidationError(f'{destination} is empty')

@@ -1,11 +1,8 @@
 """`fetch_once` downloads a file once per date and records what it fetched."""
 
-import asyncio
 import hashlib
 import json
-import threading
-from collections.abc import Iterator
-from datetime import UTC, datetime
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +11,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.manifest.model import Result
 from otter.scratchpad.model import Scratchpad
-from otter.task.model import TaskContext
+from otter.task.model import Task, TaskContext
 
 from pis import fetch
 from pis.fetch import SIDECAR_SUFFIX, FetchError, FetchRecord, fetch_once
@@ -23,16 +20,6 @@ from pis.tasks.fetch_once import FetchOnce, FetchOnceSpec
 URL = 'https://example.org/files/data.txt'
 BODY = b'some bytes\n'
 DESTINATION = 'input/data.txt'
-
-
-@pytest.fixture
-def config(tmp_path: Path) -> Config:
-    return Config(step='fetch', steps=['fetch'], release_uri=None, work_path=tmp_path)
-
-
-@pytest.fixture(autouse=True)
-def clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fetch, '_now', lambda: datetime(2026, 11, 3, 8, 0, 0, tzinfo=UTC))
 
 
 @pytest.fixture
@@ -50,18 +37,9 @@ def _respond(monkeypatch: pytest.MonkeyPatch, status: int = 200, body: bytes = B
     monkeypatch.setattr(fetch.requests, 'get', get)
 
 
-async def _validate_task(task: FetchOnce) -> None:
-    await task.validate()
-
-
-def _validate(config: Config) -> FetchOnce:
+def _task(config: Config) -> FetchOnce:
     spec = FetchOnceSpec(name='fetch once', source=URL, destination=DESTINATION, as_of='2026-11-03')
-    task = FetchOnce(spec, TaskContext(config, Scratchpad()))
-    task.context.abort = threading.Event()
-    task.start_run()
-    task.finish_run()
-    asyncio.run(_validate_task(task))
-    return task
+    return FetchOnce(spec, TaskContext(config, Scratchpad()))
 
 
 def _never_called(*args: object, **kwargs: object) -> None:
@@ -87,7 +65,9 @@ def test_fetch_once_downloads_and_writes_sidecar(
     assert record == FetchRecord(**expected)
 
 
-def test_fetch_once_keeps_existing_file(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_once_keeps_existing_file(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validate: Callable[[Task], Task]
+) -> None:
     destination = tmp_path / DESTINATION
     sidecar = tmp_path / (DESTINATION + SIDECAR_SUFFIX)
     destination.parent.mkdir(parents=True)
@@ -99,15 +79,17 @@ def test_fetch_once_keeps_existing_file(config: Config, tmp_path: Path, monkeypa
 
     assert destination.read_bytes() == b'kept'
     assert sidecar.read_text() == '{"kept": true}'
-    assert _validate(config).manifest.result == Result.SUCCESS
+    assert validate(_task(config)).manifest.result == Result.SUCCESS
 
 
-def test_validate_fails_on_missing_or_empty_destination(config: Config, tmp_path: Path) -> None:
-    assert _validate(config).manifest.result == Result.FAILURE
+def test_validate_fails_on_missing_or_empty_destination(
+    config: Config, tmp_path: Path, validate: Callable[[Task], Task]
+) -> None:
+    assert validate(_task(config)).manifest.result == Result.FAILURE
 
     (tmp_path / DESTINATION).parent.mkdir(parents=True)
     (tmp_path / DESTINATION).write_bytes(b'')
-    assert _validate(config).manifest.result == Result.FAILURE
+    assert validate(_task(config)).manifest.result == Result.FAILURE
 
 
 def test_kept_file_without_sidecar_warns(
