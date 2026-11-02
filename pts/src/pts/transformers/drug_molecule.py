@@ -14,7 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
-from pts.transformers.clinical import (
+from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
     ClinicalStageCategory,

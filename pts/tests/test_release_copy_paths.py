@@ -4,9 +4,9 @@ from pathlib import Path
 
 import yaml
 
-from pts.transformers.clinical.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
-from pts.transformers.clinical.stop_reasons import STOP_REASONS_MODEL
+from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
+from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
 
 PIS_CONFIG = Path(__file__).resolve().parents[2] / 'pis' / 'config.yaml'
 

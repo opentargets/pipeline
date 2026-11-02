@@ -7,7 +7,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.clinical import ClinicalIndication
+from pts.transformers.clinical_mira import ClinicalIndication
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 

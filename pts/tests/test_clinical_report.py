@@ -11,19 +11,19 @@ import pytest
 from otter.config.model import Config
 
 from pts.transformers import clinical_report as clinical_report_module
-from pts.transformers.clinical import (
+from pts.transformers.clinical_mira import (
     ClinicalProvider,
     ClinicalReport,
     ClinicalReportType,
     ClinicalSource,
 )
-from pts.transformers.clinical.mining import read_ema_sheet
-from pts.transformers.clinical.providers import aact as aact_provider
-from pts.transformers.clinical.providers.aact import replace_with_llm_indications
-from pts.transformers.clinical.providers.ema import extract_clinical_report as extract_ema_clinical_report
-from pts.transformers.clinical.record_store import publish_snapshot
-from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
-from pts.transformers.clinical.staged_outputs import (
+from pts.transformers.clinical_mira.mining import read_ema_sheet
+from pts.transformers.clinical_mira.providers import aact as aact_provider
+from pts.transformers.clinical_mira.providers.aact import replace_with_llm_indications
+from pts.transformers.clinical_mira.providers.ema import extract_clinical_report as extract_ema_clinical_report
+from pts.transformers.clinical_mira.record_store import publish_snapshot
+from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
+from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
@@ -40,7 +40,7 @@ from pts.transformers.clinical_report import (
     require_staged,
     validate_disease,
 )
-from tests.clinical.mapping_fixtures import DISEASE, DRUG
+from tests.clinical_mira.mapping_fixtures import DISEASE, DRUG
 
 
 def _build_reports(entries) -> ClinicalReport:
@@ -817,10 +817,10 @@ import sys
 
 import polars as pl
 
-from pts.transformers.clinical.mining import staged_lookup
-import pts.transformers.clinical.staged_outputs
+from pts.transformers.clinical_mira.mining import staged_lookup
+import pts.transformers.clinical_mira.staged_outputs
 from pts.transformers.clinical_report import map_report_entities
-from tests.clinical.mapping_fixtures import DISEASE, DRUG
+from tests.clinical_mira.mapping_fixtures import DISEASE, DRUG
 from tests.test_clinical_report import _drug_reports, _staged_drug_entities
 
 drugs = _staged_drug_entities(('mystery pill', ['kalydeco']))
@@ -834,11 +834,11 @@ print(sorted({module.split('.')[0] for module in sys.modules} & {'openai', 'torc
 TRIAL_MODELS_STEP = """
 import sys
 
-import pts.transformers.clinical.aact_trial_models
+import pts.transformers.clinical_mira.aact_trial_models
 import pts.postgres
-import pts.transformers.clinical.hf_models
-import pts.transformers.clinical.ner
-import pts.transformers.clinical.providers.aact
+import pts.transformers.clinical_mira.hf_models
+import pts.transformers.clinical_mira.ner
+import pts.transformers.clinical_mira.providers.aact
 
 print(sorted({module.split('.')[0] for module in sys.modules} & {'openai'}))
 """

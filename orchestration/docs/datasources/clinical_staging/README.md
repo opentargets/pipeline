@@ -86,7 +86,7 @@ the records for its texts as a snapshot: a `data.parquet` plus a
 
 The hub revisions come in the order of the kind's models. The digest is the
 first 8 hex digits of the sha256 of the kind's parameters and its
-`logic_version`, both in `pts/src/pts/transformers/clinical/staged_outputs.py`. The tag is the store's
+`logic_version`, both in `pts/src/pts/transformers/clinical_mira/staged_outputs.py`. The tag is the store's
 revision and the snapshot directory name, so one tag means one output.
 
 | Snapshot | Hub revisions in the tag |
@@ -186,7 +186,7 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    step computes it; from `pts/`:
 
    ```bash
-   uv run python -c "from pts.transformers.clinical.staged_outputs import schema_digest; from pts.transformers.clinical.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
+   uv run python -c "from pts.transformers.clinical_mira.staged_outputs import schema_digest; from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
    ```
 
    Remove both afterwards: once the schema changes, an `import_extraction_cache`
@@ -242,7 +242,7 @@ Only AACT trials with an extraction row are included in the clinical report.
 
 ### 2026-10-19
 
-- The extraction code now lives in `pts.transformers.clinical`.
+- The extraction code now lives in `pts.transformers.clinical_mira`.
 
 ### 2026-08-06
 

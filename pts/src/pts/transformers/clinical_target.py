@@ -8,7 +8,7 @@ import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.clinical import (
+from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,

@@ -5,7 +5,7 @@ them to ChEMBL molecules. :mod:`pts.transformers.chembl_molecule` is the only co
 reaches it through three functions: :func:`parse_aact_entries`,
 :func:`mine_aact_synonyms` and :func:`merge_aact_synonyms`.
 
-Pipeline: trial extractions (as published by ``pts.transformers.clinical.aact_trial_extraction``) ->
+Pipeline: trial extractions (as published by ``pts.transformers.clinical_mira.aact_trial_extraction``) ->
 normalized drug member sets -> anchor against a ChEMBL name index (with an ambiguity cap)
 -> eleven cleanup rules -> keep candidates seen in ``MIN_TRIALS`` distinct trials -> merge
 into the molecule synonyms.
@@ -13,7 +13,7 @@ into the molecule synonyms.
 
 import polars as pl
 
-from pts.transformers.clinical import ClinicalProvider
+from pts.transformers.clinical_mira import ClinicalProvider
 
 AACT_SOURCE = ClinicalProvider.AACT.value
 
@@ -139,7 +139,7 @@ def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
 
     Args:
         batch: DataFrame as published by
-            :py:mod:`pts.transformers.clinical.aact_trial_extraction`
+            :py:mod:`pts.transformers.clinical_mira.aact_trial_extraction`
             (or, for tests, anything carrying the same ``id``,
             ``investigated_drugs``/``comparator_drugs``/``supportive_drugs`` columns).
 
