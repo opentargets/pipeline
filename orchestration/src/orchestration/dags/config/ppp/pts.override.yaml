@@ -117,6 +117,7 @@ steps:
           transformer: credible_set.set_qc
           source:
             credible_set: input/${each}/credible_set
+            study: output/study
           destination: intermediate/qc/${each}/credible_set
           settings:
             allowed_fm_methods:

@@ -13,12 +13,14 @@ from pts.transformers.credible_set.set_qc import (
     flag_invalid_finemapping_method,
     flag_lead_chromosome_mismatch,
     flag_sets,
+    flag_study,
 )
+from pts.transformers.study import QualityFlag as StudyQualityFlag
 
 CS_ID = '0' * 32
 
 
-def _set(**values: str) -> pl.LazyFrame:
+def _set(**values: str | list[str]) -> pl.LazyFrame:
     """One credible set row; unset columns are null, flags empty."""
     row = {
         'id': CS_ID,
@@ -106,3 +108,80 @@ def test_set_qc_adds_every_row_flag() -> None:
         CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH,
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
     }
+
+
+STUDY_FLAGGED = 'Some study quality flag'
+
+
+def _studies(*rows: tuple[str, str, list[str]]) -> pl.LazyFrame:
+    return pl.LazyFrame(
+        [
+            {'studyId': study_id, 'studyType': study_type, 'qualityControls': flags}
+            for study_id, study_type, flags in rows
+        ],
+        schema={'studyId': pl.String, 'studyType': pl.String, 'qualityControls': pl.List(pl.String)},
+    )
+
+
+def _with_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.DataFrame:
+    return flag_study(frame, studies).collect()
+
+
+def test_a_set_of_an_unknown_study_is_missing_with_a_null_study_type() -> None:
+    result = _with_study(_set(studyId='unknown', studyType='gwas'), _studies(('known', 'gwas', [])))
+    assert CredibleSetFlag.MISSING_STUDY in result['qualityControls'].item()
+    assert result['studyType'].item() is None
+
+
+def test_the_study_type_is_replaced_by_the_study_index_value_after_the_source_type_is_checked() -> None:
+    result = _with_study(_set(studyId='s', studyType='eQTL'), _studies(('s', 'eqtl', [])))
+    assert CredibleSetFlag.INVALID_STUDY_TYPE in result['qualityControls'].item()
+    assert CredibleSetFlag.MISSING_STUDY not in result['qualityControls'].item()
+    assert result['studyType'].item() == 'eqtl'
+
+
+@pytest.mark.parametrize(
+    ('source_type', 'invalid'), [('gwas', False), ('sctuqtl', False), ('eQTL', True), ('pQTL', True)]
+)
+def test_invalid_study_type(source_type: str, invalid: bool) -> None:
+    result = _with_study(_set(studyId='s', studyType=source_type), _studies(('s', 'gwas', [])))
+    assert (CredibleSetFlag.INVALID_STUDY_TYPE in result['qualityControls'].item()) is invalid
+
+
+def test_a_missing_source_study_type_is_replaced_without_flag() -> None:
+    result = _with_study(_set(studyId='s'), _studies(('s', 'gwas', [])))
+    assert result['qualityControls'].item().to_list() == []
+    assert result['studyType'].item() == 'gwas'
+
+
+def test_a_set_of_a_flagged_study_is_flagged() -> None:
+    flagged = _with_study(_set(studyId='s', studyType='gwas'), _studies(('s', 'gwas', [STUDY_FLAGGED])))
+    clean = _with_study(_set(studyId='s', studyType='gwas'), _studies(('s', 'gwas', [])))
+    assert CredibleSetFlag.FLAGGED_STUDY in flagged['qualityControls'].item()
+    assert CredibleSetFlag.FLAGGED_STUDY not in clean['qualityControls'].item()
+
+
+@pytest.mark.parametrize(
+    ('set_flags', 'study_flags', 'flagged'),
+    [
+        ([CredibleSetFlag.TOP_HIT.value], [], True),
+        ([CredibleSetFlag.TOP_HIT.value], [StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value], False),
+        ([], [], False),
+    ],
+    ids=['top hit, sumstats available', 'top hit, no sumstats', 'not a top hit'],
+)
+def test_top_hit_and_summary_stats(set_flags: list[str], study_flags: list[str], flagged: bool) -> None:
+    result = _with_study(
+        _set(studyId='s', studyType='gwas', qualityControls=set_flags), _studies(('s', 'gwas', study_flags))
+    )
+    assert (CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS in result['qualityControls'].item()) is flagged
+
+
+def test_study_flags_keep_rows_and_columns() -> None:
+    sets = pl.concat([
+        _set(id='a' * 32, studyId='s', studyType='gwas'),
+        _set(id='b' * 32, studyId='t', studyType='gwas'),
+    ])
+    result = _with_study(sets, _studies(('s', 'gwas', []), ('s2', 'eqtl', [])))
+    assert result.height == 2
+    assert result.columns == list(credible_set_schema)

@@ -8,19 +8,21 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.credible_set import credible_set_schema
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
+from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion, StudyType
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
+from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
 
 
 class SetQcSource(BaseModel):
-    """The credible sets of one source."""
+    """The credible sets of one source, and the validated study index."""
 
     model_config = ConfigDict(extra='forbid')
 
     credible_set: str
+    study: str
 
 
 class SetQcSettings(BaseModel):
@@ -112,6 +114,50 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, in_mhc, CredibleSetFlag.IN_MHC)
 
 
+def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag credible sets against the study index, then take `studyType` from it.
+
+    - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing source type is
+      not flagged, as it is replaced below.
+    - FLAGGED_STUDY: the study carries at least one quality control flag.
+    - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
+      SUMSTATS_NOT_AVAILABLE, so its summary statistics should give the set instead.
+    - MISSING_STUDY: the study is not in the study index.
+
+    `studyType` is then replaced by the study index value, null for a missing study.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'studyId': ['s', 'unknown'],
+        ...     'studyType': ['eQTL', 'gwas'],
+        ...     'qualityControls': [[], []],
+        ... })
+        >>> studies = pl.LazyFrame({'studyId': ['s'], 'studyType': ['eqtl'], 'qualityControls': [[]]})
+        >>> for row in flag_study(sets, studies).collect().iter_rows(named=True):
+        ...     print(row['studyType'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
+        eqtl ['INVALID_STUDY_TYPE']
+        None ['MISSING_STUDY']
+    """
+    lookup = studies.select(
+        'studyId',
+        pl.col('studyType').alias('_study_type'),
+        pl.col('qualityControls').alias('_study_qc'),
+        pl.lit(True).alias('_study_found'),
+    )
+    top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
+    no_sumstats = pl.col('_study_qc').list.contains(StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value)
+    return (
+        frame
+        .join(lookup, on='studyId', how='left')
+        .pipe(flag_rows, ~pl.col('studyType').is_in([t.value for t in StudyType]), CredibleSetFlag.INVALID_STUDY_TYPE)
+        .pipe(flag_rows, pl.col('_study_qc').list.len() > 0, CredibleSetFlag.FLAGGED_STUDY)
+        .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
+        .pipe(flag_rows, pl.col('_study_found').is_null(), CredibleSetFlag.MISSING_STUDY)
+        .with_columns(pl.col('_study_type').alias('studyType'))
+        .drop('_study_type', '_study_qc', '_study_found')
+    )
+
+
 def flag_sets(frame: pl.LazyFrame, allowed_fm_methods: list[FinemappingMethod]) -> pl.LazyFrame:
     """Add every set QC flag that depends only on the credible set row."""
     return (
@@ -133,7 +179,8 @@ def set_qc(
     """Add quality flags to the credible sets of one source.
 
     Args:
-        source: The source's CredibleSet path under `credible_set`.
+        source: The source's CredibleSet path under `credible_set`, and the validated study index
+            under `study`.
         destination: Path of the flagged credible sets.
         settings: The accepted fine-mapping methods under `allowed_fm_methods`.
         config: Pipeline configuration.
@@ -144,6 +191,7 @@ def set_qc(
         scan_dataset(sources.credible_set)
         .match_to_schema(credible_set_schema)
         .pipe(flag_sets, options.allowed_fm_methods)
+        .pipe(flag_study, scan_dataset(sources.study))
     )
     logger.info('Writing flagged credible sets to {}', destination)
     sink_dataset(flagged, destination).collect()

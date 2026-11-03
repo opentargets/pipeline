@@ -71,7 +71,7 @@ def test_each_source_is_checked_against_its_own_input_and_mirrors_it() -> None:
         set_qc = tasks[f'transform qc credible sets {folder}']
         variant_qc = tasks[f'transform qc credible set variants {folder}']
         assert set_qc['transformer'] == 'credible_set.set_qc'
-        assert set_qc['source'] == {'credible_set': f'input/{folder}/credible_set'}
+        assert set_qc['source'] == {'credible_set': f'input/{folder}/credible_set', 'study': 'output/study'}
         assert set_qc['destination'] == f'intermediate/qc/{folder}/credible_set'
         assert variant_qc['transformer'] == 'credible_set.variant_qc'
         assert variant_qc['source'] == {'credible_set_variant': f'input/{folder}/credible_set_variant'}

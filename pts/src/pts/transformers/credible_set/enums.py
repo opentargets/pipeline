@@ -1,4 +1,4 @@
-"""Fine-mapping methods, chromosomes and known genomic regions of credible sets."""
+"""Fine-mapping methods, study types, chromosomes and known genomic regions of credible sets."""
 
 from enum import Enum, StrEnum
 from typing import NamedTuple
@@ -15,6 +15,20 @@ class FinemappingMethod(StrEnum):
     def susie(cls) -> tuple['FinemappingMethod', ...]:
         """The methods of the SuSiE family."""
         return (cls.SUSIE, cls.SUSIE_INF)
+
+
+class StudyType(StrEnum):
+    """Study types, as gentropy `StudyType`."""
+
+    GWAS = 'gwas'
+    EQTL = 'eqtl'
+    PQTL = 'pqtl'
+    SQTL = 'sqtl'
+    TUQTL = 'tuqtl'
+    SCEQTL = 'sceqtl'
+    SCPQTL = 'scpqtl'
+    SCSQTL = 'scsqtl'
+    SCTUQTL = 'sctuqtl'
 
 
 class Chromosome(StrEnum):
