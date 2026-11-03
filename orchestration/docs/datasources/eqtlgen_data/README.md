@@ -71,6 +71,8 @@ The credible sets follow the gentropy `StudyLocus` schema of the time (`finemapp
 ## Known issues
 
 * The `coeqtl` study index has 24,504 rows for 16,428 study ids: the same study is listed once per input file row, with conflicting `nSamples` ([opentargets/issues#4594](https://github.com/opentargets/issues/issues/4594)).
+* The `single_cell_eqtl` effects are of the reference allele, while `variantId` puts the alternative allele last: `beta` and `zScore` have the wrong sign for the effect allele of `variantId`. eQTLGen's `assessed_allele` is the reference allele of `snp_id` (all 9,393 variants of the B cell chromosome 22 file match the GRCh38 reference in gnomAD), and the `260326` leads have the sign of the source `beta` (58 of 58 in that file). The `coeqtl` z-scores were flipped and are correct.
+* `SusieRss_CS` numbers the credible sets of a feature, not the SuSiE effects `lbf_cs_1` to `lbf_cs_5` (the credible set 1 can be the effect 3). The notebook took the credible set `k` from `lbf_cs_k` for the `coeqtl`.
 * The CD4 T cells are `CL_0000084` (T cell) in `single_cell_eqtl` and `CL_0000624` (CD4-positive, alpha-beta T cell) in `coeqtl`.
 
 ## Changelog
