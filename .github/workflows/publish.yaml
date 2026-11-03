@@ -70,6 +70,17 @@ jobs:
           target: ${{ inputs.package == 'pts' && 'lean' || '' }}
           cache-from: type=registry,ref=europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/buildcache:${{ inputs.package }}-${{ inputs.package == 'pts' && 'lean' || 'default' }}
 
+      - id: build-nlp
+        name: Build pts-nlp
+        if: ${{ inputs.package == 'pts' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./pts
+          platforms: linux/amd64,linux/arm64
+          push: false
+          target: nlp
+          cache-from: type=registry,ref=europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/buildcache:pts-nlp
+
       - id: auth-google
         name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -117,6 +128,26 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ inputs.package }}:latest
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:${{ inputs.version }}
             europe-west1-docker.pkg.dev/open-targets-eu-dev/${{ github.event.repository.name }}/${{ inputs.package }}:latest
+
+      - id: auth-google-nlp
+        if: ${{ inputs.package == 'pts' }}
+        name: Authenticate to Google Cloud (pts-nlp push)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          token_format: access_token
+          project_id: 'open-targets-eu-dev'
+          workload_identity_provider: projects/426265110888/locations/global/workloadIdentityPools/github-actions/providers/opentargets
+          service_account: github-actions@open-targets-eu-dev.iam.gserviceaccount.com
+          access_token_lifetime: 600s
+
+      - id: auth-gar-nlp
+        if: ${{ inputs.package == 'pts' }}
+        name: Log in to Google Artifact Registry (pts-nlp push)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: europe-west1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth-google-nlp.outputs.access_token }}
 
       - id: push-dev-nlp
         if: ${{ !inputs.final && inputs.package == 'pts' }}
