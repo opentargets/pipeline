@@ -9,7 +9,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-decode-readme
+				upload-decode-readme upload-eqtlgen-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -127,6 +127,10 @@ upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 
 upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 	@gcloud storage rsync docs/datasources/interval_data gs://interval_data/docs
+
+upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/eqtlgen_data/README.md $(BUCKET)/docs/README.md
 
 upload-decode-readme: ## Upload the decode_data readme to a run folder: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>))
