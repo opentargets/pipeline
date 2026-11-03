@@ -62,8 +62,57 @@ The run manifest: 10,075 credible sets before the quality controls, 9,768 accept
 
 16 cell types: peripheral blood mononuclear cells (`CL_2000001`, all cells, 2,556 studies) and 15 cell types of `config/SLEmap_ontology_mapping.tsv`. Every credible set is `sceqtl`, in-sample LD, not trans, with no quality control flag, and with posterior probabilities summing to 0.95–1.0.
 
+## v4 conversion
+
+The release was converted to the `CredibleSet` and `CredibleSetVariant` datasets of gentropy v4, without fine-mapping again, into a second run folder:
+
+```sh
+gs://sle_map_data/prod/20261103T145657/
+├── config/   sle_map_credible_set_migration.py (the one-off conversion), RUN.txt
+├── docs/     README.md
+└── output/{study, credible_set, credible_set_variant}
+```
+
+The conversion read `output/credible_set`, `output/study` and `output/audit/effect_sizes` of `prod/20260923T222644/`, with gentropy `v4.0.0-dev.13` and a local Spark session (see `config/RUN.txt`). `pis` keeps reading `prod/20260923T222644/` until PTS reads `CredibleSet` and `CredibleSetVariant`.
+
+| v4 | From the v3 release |
+|---|---|
+| `CredibleSet.studyId`, `chromosome`, `locusStart`, `locusEnd`, `studyType` | the credible set |
+| `CredibleSet.fineMappingMethod` | `SuSiE` (`SuSie` in v3) |
+| `CredibleSet.confidence` | 4, SuSiE with in-sample LD, as in v3 |
+| `CredibleSet.logBayesFactor` | `credibleSetlog10BF` × ln 10 |
+| `CredibleSet.qualityControls` | `Trans QTL` when `isTransQtl`; the v3 flags are all empty |
+| `CredibleSet.purityMeanR2`, `purityMinR2` | empty, as in v3 |
+| `CredibleSetVariant.posteriorProbability`, `logBayesFactor` | `locus.posteriorProbability`, `locus.logBF` |
+| `CredibleSetVariant.pValueMantissa`, `pValueExponent`, `reportedBeta`, `reportedStandardError` | `locus.pValueMantissa`, `pValueExponent`, `beta`, `standardError` |
+| `CredibleSetVariant.effectAlleleFrequency` | `effectAlleleFrequencyFromSource` of `audit/effect_sizes`, flagged `Allele frequency reported by the study` |
+| `CredibleSetVariant.sampleSize` | the credible set's `sampleSize` |
+| `study` | copied unchanged: the study index schema did not change |
+
+The lead is recomputed by gentropy (the highest posterior probability, ties by variant id) and `id` hashes the new key.
+
+> [!NOTE]
+> `logBayesFactor` of a v4 credible set is defined over the whole fine-mapped region (`gentropy.common.stats.region_log_bayes_factors`). `slemap_ingest.py` computed `credibleSetlog10BF` over the members of the credible set only, so the converted values are not on the same footing as those of other SuSiE sources. The region-wide value could be computed from `raw_data/all_credible_sets.tsv`; it was not, as for the UKB PPP conversion.
+
+Checks of the conversion, all passed:
+
+| Check | Result |
+|---|---|
+| credible sets | 9,768, as in v3 |
+| credible set variants | 119,442, as the v3 members |
+| studies | 10,104, as in v3 |
+| unique `id` and `(credibleSetId, variantId)` | yes |
+| lead of each credible set | the v3 lead, for all 9,768 |
+| credible sets without a study | 0 |
+| posterior probabilities of a credible set summing outside 0.95–1 | 0 |
+| members without an allele frequency, or whose audit beta differs | 0 |
+
 ## Changelog
 
 ### 2026-11-03
 
 * Copied the release from `gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/` into the run folder `gs://sle_map_data/prod/20260923T222644/`, and the SuSiE-RSS results into `gs://sle_map_data/raw_data/`. `pis` reads the run folder. The personal bucket is not changed.
+
+### 2026-11-03 (v4 conversion)
+
+* Converted the release to `CredibleSet` and `CredibleSetVariant` into `gs://sle_map_data/prod/20261103T145657/`, see [v4 conversion](#v4-conversion).
