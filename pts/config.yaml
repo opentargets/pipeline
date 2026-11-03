@@ -99,6 +99,7 @@ steps:
           - input/gwas/finngen_gwas/study
           - input/molqtl/eqtl_catalogue/study
           - input/molqtl/ukb_ppp_eur/study
+          - input/molqtl/finngen_multiome/study
         target: output/target
         disease: output/disease
         biosample: output/biosample
@@ -131,43 +132,93 @@ steps:
       destination: output/go
   ##################################################################################################
 
-  #: CREDIBLE_SET MIGRATION
+  #: CREDIBLE_SET STEP :###########################################################################
+  # Set QC and variant QC run per source: the explode iterates over the source folders below
+  # input/ (<kind>/<source>), which the QC output mirrors under intermediate/qc/. Validation runs
+  # the cross-set QC over every source, then validates each source's sets against its own variants.
+  # The per-source paths are listed explicitly, in the order of the explode.
   credible_set:
-    - name: transform validate credible set
+    - name: explode qc credible sets
+      foreach:
+        - gwas/gcca
+        - gwas/gcss_pics
+        - gwas/gcss_susie
+        - gwas/finngen_gwas
+        - molqtl/eqtl_catalogue
+        - molqtl/ukb_ppp_eur
+        - molqtl/finngen_multiome
+      do:
+        - name: transform qc credible sets ${each}
+          transformer: credible_set.set_qc
+          source:
+            credible_set: input/${each}/credible_set
+          destination: intermediate/qc/${each}/credible_set
+
+        - name: transform qc credible set variants ${each}
+          transformer: credible_set.variant_qc
+          source:
+            credible_set_variant: input/${each}/credible_set_variant
+          destination: intermediate/qc/${each}/credible_set_variant
+
+    - name: transform validate credible sets
+      requires:
+        - explode qc credible sets
+      transformer: credible_set.validation
       source:
         credible_set:
-          - input/gwas/gcca/credible_set
-          - input/gwas/gcss_pics/credible_set
-          - input/gwas/gcss_susie/credible_set
-          - input/gwas/finngen_gwas/credible_set
-          - input/molqtl/eqtl_catalogue/credible_set
-          - input/molqtl/ukb_ppp_eur/credible_set
-        study: output/study
-        target: output/target
-        disease: output/disease
+          - intermediate/qc/gwas/gcca/credible_set
+          - intermediate/qc/gwas/gcss_pics/credible_set
+          - intermediate/qc/gwas/gcss_susie/credible_set
+          - intermediate/qc/gwas/finngen_gwas/credible_set
+          - intermediate/qc/molqtl/eqtl_catalogue/credible_set
+          - intermediate/qc/molqtl/ukb_ppp_eur/credible_set
+          - intermediate/qc/molqtl/finngen_multiome/credible_set
+        credible_set_variant:
+          - intermediate/qc/gwas/gcca/credible_set_variant
+          - intermediate/qc/gwas/gcss_pics/credible_set_variant
+          - intermediate/qc/gwas/gcss_susie/credible_set_variant
+          - intermediate/qc/gwas/finngen_gwas/credible_set_variant
+          - intermediate/qc/molqtl/eqtl_catalogue/credible_set_variant
+          - intermediate/qc/molqtl/ukb_ppp_eur/credible_set_variant
+          - intermediate/qc/molqtl/finngen_multiome/credible_set_variant
       destination:
-        output: output/credible_set
-        excluded: excluded/credible_set
-      transformer: credible_set
+        valid_set: intermediate/validated/credible_set
+        valid_variant: intermediate/validated/credible_set_variant
+        excluded_set: excluded/credible_set
+        excluded_variant: excluded/credible_set_variant
       settings:
-        trans_qtl_threshold: 5000000
-        invalid_qc_reasons:
-          - DUPLICATED_STUDYLOCUS_ID
-          - AMBIGUOUS_STUDY
+        cs_invalid_qc_reasons:
+          - INVALID_CS_ID
+          - IN_MHC
+          - INVALID_CHROMOSOME
+          - LEAD_CHROMOSOME_MISMATCH
+          - TOP_HIT_AND_SUMMARY_STATS
           - MISSING_STUDY
-          - NO_GENOMIC_LOCATION_FLAG
+          - REDUNDANT_PICS_TOP_HIT
+          - DUPLICATED_STUDYLOCUS_ID
+          - INVALID_FINEMAPPING_METHOD
+          - EXPLAINED_BY_SUSIE
           - COMPOSITE_FLAG
           - INCONSISTENCY_FLAG
           - SUBSIGNIFICANT_FLAG
           - LD_CLUMPED
-          - IN_MHC
-          - REDUNDANT_PICS_TOP_HIT
-          - EXPLAINED_BY_SUSIE
           - WINDOW_CLUMPED
-          - NON_MAPPED_VARIANT_FLAG
-          - INVALID_VARIANT_IDENTIFIER
-          - INVALID_CHROMOSOME
-          - TOP_HIT_AND_SUMMARY_STATS
+        # ABNORMAL_PIP is not listed: sets with abnormal PIP sums are flagged and kept.
+        csv_set_invalid_qc_reasons:
+          - INVALID_CS_ID
+          - INVALID_VARIANT_ID
+
+    - name: transform annotate credible sets
+      requires:
+        - transform validate credible sets
+      transformer: credible_set.annotation
+      source:
+        credible_set: intermediate/validated/credible_set
+        credible_set_variant: intermediate/validated/credible_set_variant
+      destination:
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+  ##################################################################################################
 
   #: OTAR STEP :####################################################################################
   otar:
