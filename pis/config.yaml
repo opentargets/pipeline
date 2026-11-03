@@ -252,7 +252,7 @@ steps:
       destination: input/pmda.pdf
 
     - name: copy chembl mapping
-      source: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl_mapping.parquet
+      source: gs://clinical_staging/frozen/2026-05-27/chembl_mapping.parquet
       destination: input/chembl_mapping.parquet
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>

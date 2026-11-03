@@ -14,7 +14,7 @@ PostgreSQL archives by CTTI, fetched from
 `https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/<version>`.
 The clinical mining inputs TTD, EMA and PMDA are copied from their upstream
 sites when the date is staged (see "Upstream sources"). The ChEMBL mapping is a frozen
-file, copied from `gs://ot-team/irene/clinical_mining/2026-05-27/`.
+file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 
 | Pinned in | Names |
 | --- | --- |
@@ -28,6 +28,7 @@ file, copied from `gs://ot-team/irene/clinical_mining/2026-05-27/`.
 
 ```{bash}
 gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction}/  # record stores, shared across versions
+gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
 gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
 gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
 gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/drug_entities/<tag>/
@@ -97,7 +98,7 @@ All three are plain `copy` steps, like other sources with no versioned URL.
 
 The ChEMBL mapping is an export of ChEMBL's private curation tables and cannot
 be fetched. It stays frozen: `pis/config.yaml` copies it from the literal path
-`gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl_mapping.parquet`
+`gs://clinical_staging/frozen/2026-05-27/chembl_mapping.parquet`
 into each date's `input/`.
 
 ChEMBL is not staged. The release fails on any drug label with no id that no
@@ -216,7 +217,7 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    the `settings` of the `aact_trial_extraction` step to
    `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
    under the `settings` of the `aact_trial_models` step to
-   `gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/ner_cache.parquet`.
+   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`.
    The schema digest is the full 64 hex digest of the response schema, as the
    step computes it; from `pts/`:
 
@@ -259,8 +260,11 @@ Only AACT trials with an extraction row are included in the clinical report.
   in `clinical_staging.yaml` and in `pis/config.yaml`, and dates both trees.
   The release reads 2026-11-03.
 - `pis_clinical_mining` copies TTD, EMA and PMDA from upstream, PMDA by the
-  pinned `pmda_file`. The ChEMBL mapping is copied from its frozen 2026-05-27
-  path. The release block of `pis/config.yaml` is unchanged.
+  pinned `pmda_file`. The release block of `pis/config.yaml` is unchanged.
+- The ChEMBL mapping and the one-off NER seed moved from
+  `gs://ot-team/irene/clinical_mining/2026-05-27/` to
+  `gs://clinical_staging/frozen/2026-05-27/`, byte for byte. Nothing in the
+  DAG or the release reads `gs://ot-team` any more.
 
 ### 2026-10-31
 

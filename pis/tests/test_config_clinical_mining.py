@@ -10,11 +10,11 @@ CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 TTD_URL = 'https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt'
 EMA_URL = 'https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx'
 PMDA_URL = 'https://www.pmda.go.jp/files/${pmda_file}.pdf'
-CHEMBL_MAPPING = 'gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl_mapping.parquet'
+CHEMBL_MAPPING = 'gs://clinical_staging/frozen/2026-05-27/chembl_mapping.parquet'
 
 
 def test_clinical_mining_copies_upstream() -> None:
-    """TTD, EMA and PMDA come from upstream, PMDA by its pinned file; only the ChEMBL mapping is frozen."""
+    """TTD, EMA and PMDA come from upstream, PMDA by its pinned file; the ChEMBL mapping from clinical_staging."""
     config = yaml.safe_load(CONFIG_PATH.read_text())
     assert config['scratchpad']['pmda_file'].isdigit()
 
@@ -27,4 +27,4 @@ def test_clinical_mining_copies_upstream() -> None:
     assert (pmda['source'], pmda['destination']) == (PMDA_URL, 'input/pmda.pdf')
     assert (chembl['source'], chembl['destination']) == (CHEMBL_MAPPING, 'input/chembl_mapping.parquet')
 
-    assert [t['name'] for t in tasks if 'gs://ot-team' in str(t)] == ['copy chembl mapping']
+    assert 'gs://ot-team' not in str(tasks)
