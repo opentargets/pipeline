@@ -1,6 +1,6 @@
 # deCODE proteomics
 
-This document was updated on 2026-09-17.
+This document was updated on 2026-11-03.
 
 Data source comes from the [deCODE Genetics summary data](https://www.decode.com/summarydata/). The data source is linked to 2 publications:
 
@@ -23,17 +23,28 @@ Files `gs://decode_inputs/somascan_raw_index.txt` and `gs://decode_inputs/somasc
 
 The raw summary statistics are stored under `gs://decode_inputs/raw_summary_statistics/raw/` and `gs://decode_inputs/raw_summary_statistics/smp/` buckets. The `smp` dataset contains the median-signal-normalised summary statistics, while `raw` contains the non-normalised summary statistics. See the [Design choices](#dual-branch-smp-and-raw) section for the difference between the two.
 
-The harmonized data is stored under the `gs://decode_data` bucket with the following structure:
+The harmonised data of the release is stored in a dated run folder of the `gs://decode_data` bucket, `gs://decode_data/prod/20260916T175627/`:
 
 ```{bash}
-gs://decode_data/decode_2023_aptamer_mapping.tsv
-gs://decode_data/study_tables.xlsx
-gs://decode_data/2021-pub-aligned/
-gs://decode_data/complex_portal/
-gs://decode_data/molecular_complex/
-gs://decode_data/raw/
-gs://decode_data/smp/
-gs://decode_data/target/
+gs://decode_data/prod/20260916T175627/
+├── config/   decode_ingestion.yaml (the DAG config of the run)
+├── docs/     README.md + DAG svg; 20260917/ holds the README of the run as it was
+└── output/   the datasets below
+```
+
+The timestamp is the time of the first object written by the run (`molecular_complex/`, 2026-09-16T17:56:27Z). The release was copied from the top level of the bucket into the run folder on 2026-11-03, before deCODE moves to the new credible set schema. Nothing in it was changed.
+
+The `output/` folder has the following structure:
+
+```{bash}
+gs://decode_data/prod/20260916T175627/output/decode_2023_aptamer_mapping.tsv
+gs://decode_data/prod/20260916T175627/output/study_tables.xlsx
+gs://decode_data/prod/20260916T175627/output/2021-pub-aligned/
+gs://decode_data/prod/20260916T175627/output/complex_portal/
+gs://decode_data/prod/20260916T175627/output/molecular_complex/
+gs://decode_data/prod/20260916T175627/output/raw/
+gs://decode_data/prod/20260916T175627/output/smp/
+gs://decode_data/prod/20260916T175627/output/target/
 ```
 
 * The `2021-pub-aligned` folder contains the conditionally analyzed credible sets from the 2021 publication supplementary tables.
@@ -45,28 +56,28 @@ gs://decode_data/target/
 * The `target` folder contains the [Target dataset](https://opentargets.org/gentropy/python_api/datasets/target_index/) used from 26.06 Open-targets release. This dataset is used only in the `pqtl_to_study` step that maps the protein ids and protein complex ids to the up-to-date target gene ids. This step shall be migrated to the Unified Pipeline.
 
 ```{bash}
-gs://decode_data/{raw,smp}/credible_set/
-gs://decode_data/{raw,smp}/harmonised_summary_statistics/
-gs://decode_data/{raw,smp}/harmonised_summary_statistics_qc/
-gs://decode_data/{raw,smp}/manifest/
-gs://decode_data/{raw,smp}/pqtl_study/
-gs://decode_data/{raw,smp}/pqtl_study_qc_annotated/
-gs://decode_data/{raw,smp}/study/
-gs://decode_data/{raw,smp}/study_locus_ld_clumped/
-gs://decode_data/{raw,smp}/study_locus_window_based_clumped/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/credible_set/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/harmonised_summary_statistics/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/harmonised_summary_statistics_qc/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/manifest/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/pqtl_study/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/pqtl_study_qc_annotated/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/study/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/study_locus_ld_clumped/
+gs://decode_data/prod/20260916T175627/output/{raw,smp}/study_locus_window_based_clumped/
 ```
 
 The output datasets are:
 
-* [x] [`CredibleSets`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) stored under `gs://decode_data/{raw,smp}/credible_set/`
-* [x] [`SummaryStatistics`](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics/) stored under `gs://decode_data/{raw,smp}/harmonised_summary_statistics/`
-* [x] [`SummaryStatisticsQC`](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics_qc/) stored under `gs://decode_data/{raw,smp}/harmonised_summary_statistics_qc/`
-* [x] [`pQTLStudyIndex`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/dataset/study_index.py#L898) stored under `gs://decode_data/{raw,smp}/pqtl_study/`
-* [x] [`deCODEManifest`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/datasource/decode/manifest.py#L20) stored under `gs://decode_data/{raw,smp}/manifest/`, includes the information about the raw summary statistics files.
-* [x] [`pQTLStudyIndexQCAnnotated`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/dataset/study_index.py#L898) stored under `gs://decode_data/{raw,smp}/pqtl_study_qc_annotated/`. This dataset is the same as `pqtl_study` but with additional QC annotations.
-* [x] [`StudyIndex`](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) stored under `gs://decode_data/{raw,smp}/study/`
-* [x] [`LD clumped loci`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus_ld_clumped/) stored under `gs://decode_data/{raw,smp}/study_locus_ld_clumped/`. This dataset is the result of LD clumping of the Window Based Clumped Summary Statistics.
-* [x] [`Window based clumped loci`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus_window_based_clumped/) stored under `gs://decode_data/{raw,smp}/study_locus_window_based_clumped/`. This dataset is the result of window based clumping of the Summary Statistics.
+* [x] [`CredibleSets`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/credible_set/`
+* [x] [`SummaryStatistics`](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/harmonised_summary_statistics/`
+* [x] [`SummaryStatisticsQC`](https://opentargets.github.io/gentropy/python_api/datasets/summary_statistics_qc/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/harmonised_summary_statistics_qc/`
+* [x] [`pQTLStudyIndex`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/dataset/study_index.py#L898) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/pqtl_study/`
+* [x] [`deCODEManifest`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/datasource/decode/manifest.py#L20) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/manifest/`, includes the information about the raw summary statistics files.
+* [x] [`pQTLStudyIndexQCAnnotated`](https://github.com/opentargets/gentropy/blob/98d1f8a41515eb67a17ed2f86df345910aa2d54b/src/gentropy/dataset/study_index.py#L898) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/pqtl_study_qc_annotated/`. This dataset is the same as `pqtl_study` but with additional QC annotations.
+* [x] [`StudyIndex`](https://opentargets.github.io/gentropy/python_api/datasets/study_index/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/study/`
+* [x] [`LD clumped loci`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus_ld_clumped/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/study_locus_ld_clumped/`. This dataset is the result of LD clumping of the Window Based Clumped Summary Statistics.
+* [x] [`Window based clumped loci`](https://opentargets.github.io/gentropy/python_api/datasets/study_locus_window_based_clumped/) stored under `gs://decode_data/prod/20260916T175627/output/{raw,smp}/study_locus_window_based_clumped/`. This dataset is the result of window based clumping of the Summary Statistics.
 
 ## Processing description
 
@@ -240,3 +251,11 @@ Test keeps 16-vCPU workers because the gnomAD `variant_direction` dataset stays 
   | `smp/pqtl_study` | 4,961 | 4,961 studyId | 0 |
   | `smp/study` | 4,993 | 4,934 studyId | 0 duplicated `(studyId, geneId)`, 0 null `geneId` |
   | `smp/credible_set` | 46,336 | 46,336 studyLocusId | 0 |
+
+### 2026-11-03
+
+* Copied the release from the top level of `gs://decode_data` into the run folder `gs://decode_data/prod/20260916T175627/`, so it is kept as it is before deCODE moves to the new credible set schema ([opentargets/issues#4613](https://github.com/opentargets/issues/issues/4613)). The DAG config and `pis` read the run folder.
+* `decode_ingestion.yaml` writes into the run folder. Running the DAG again would overwrite the release.
+* Known issues of the release:
+  * Multi-gene aptamers give one study row per gene with the same `studyId`: 4,993 rows for 4,934 studies in `smp/study`, 50 studies repeated ([opentargets/issues#4595](https://github.com/opentargets/issues/issues/4595)).
+  * The summary statistics of 322 `smp` aptamers missing from the SomaScan study table keep the study id derived from the file name (for example `deCODE-proteomics-smp_Proteomics_SMP_PC0_10021_1_SUSD2_SUSD2_10032022`). They have no row in the study index, and 290 of them have credible sets.

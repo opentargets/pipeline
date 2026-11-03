@@ -999,11 +999,11 @@ steps:
           destination: input/molqtl/credible_set/eQTLGen/${each}
 
     - name: copy_many molqtl deCODE proteomics study
-      sources: gs://decode_data/smp/study/*.parquet
+      sources: gs://decode_data/prod/20260916T175627/output/smp/study/*.parquet
       destination: input/molqtl/study/deCODE_proteomics
 
     - name: copy_many molqtl deCODE proteomics credible sets
-      sources: gs://decode_data/smp/credible_set/*.parquet
+      sources: gs://decode_data/prod/20260916T175627/output/smp/credible_set/*.parquet
       destination: input/molqtl/credible_set/deCODE_proteomics
 
     # SLE-map credible set and study table:
