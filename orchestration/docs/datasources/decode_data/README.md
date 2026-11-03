@@ -259,3 +259,7 @@ Test keeps 16-vCPU workers because the gnomAD `variant_direction` dataset stays 
 * Known issues of the release:
   * Multi-gene aptamers give one study row per gene with the same `studyId`: 4,993 rows for 4,934 studies in `smp/study`, 50 studies repeated ([opentargets/issues#4595](https://github.com/opentargets/issues/issues/4595)).
   * The summary statistics of 322 `smp` aptamers missing from the SomaScan study table keep the study id derived from the file name (for example `deCODE-proteomics-smp_Proteomics_SMP_PC0_10021_1_SUSD2_SUSD2_10032022`). They have no row in the study index, and 290 of them have credible sets.
+
+### 2026-11-03 (v4 fine-mapping)
+
+* New DAG `decode_smp_finemapping`: PICS fine-mapping of the frozen `smp` summary statistics on gentropy `v4.0.0-dev.13`, with the new credible set schema. Run `gs://decode_data/prod/20261103T122701/`, see [its README](decode_smp_finemapping/README.md). `pis` keeps reading this frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.
