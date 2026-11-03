@@ -8,7 +8,8 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.credible_set import credible_set_schema
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion, StudyType
+from pts.schemas.study import StudyType
+from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
 from pts.transformers.study import QualityFlag as StudyQualityFlag
@@ -133,7 +134,7 @@ def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
         ...     'qualityControls': [[], []],
         ... })
         >>> studies = pl.LazyFrame({'studyId': ['s'], 'studyType': ['eqtl'], 'qualityControls': [[]]})
-        >>> for row in flag_study(sets, studies).collect().iter_rows(named=True):
+        >>> for row in flag_study(sets, studies).sort('studyId').collect().iter_rows(named=True):
         ...     print(row['studyType'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
         eqtl ['INVALID_STUDY_TYPE']
         None ['MISSING_STUDY']

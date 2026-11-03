@@ -8,7 +8,7 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pts.schemas.study import study_schema
+from pts.schemas.study import StudyType, study_schema
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -161,9 +161,9 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag study types other than GWAS or types ending in qtl."""
+    """Flag study types that are not one of `StudyType`, the gentropy study types."""
     logger.info('Validating study types')
-    supported = (pl.col('studyType') == 'gwas') | pl.col('studyType').str.ends_with('qtl')
+    supported = pl.col('studyType').is_in([study_type.value for study_type in StudyType])
     return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 

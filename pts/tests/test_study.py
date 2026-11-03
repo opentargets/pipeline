@@ -91,10 +91,20 @@ def studies_frame(rows, schema=source_schema):
 
 @pytest.mark.parametrize(
     ('study_type', 'flagged'),
-    [('gwas', False), ('eqtl', False), ('customqtl', False), ('GWAS', True), ('other', True), (None, True)],
+    [
+        ('gwas', False),
+        ('eqtl', False),
+        ('sctuqtl', False),
+        ('customqtl', True),
+        ('ccqtl', True),
+        ('pQTL', True),
+        ('GWAS', True),
+        ('other', True),
+        (None, True),
+    ],
 )
 def test_validate_study_type(study_type, flagged):
-    """Only gwas and types ending in qtl are supported, including null rejection."""
+    """Only the StudyType values, as in gentropy, are supported, including null rejection."""
     result = validate_study_type(studies_frame([{'studyId': 's', 'studyType': study_type}]))
     assert isinstance(result, pl.LazyFrame)
     assert result.collect()['qualityControls'].to_list() == [[QualityFlag.UNKNOWN_STUDY_TYPE] if flagged else []]

@@ -1,6 +1,7 @@
 """The vocabularies of the credible set stages match gentropy and the PRDs."""
 
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion, StudyType
+from pts.schemas.study import StudyType
+from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 
 
 def test_finemapping_methods_match_gentropy() -> None:
