@@ -5,7 +5,7 @@ so all three datasets of a source must come from one run folder.
 """
 
 from pathlib import Path
-from typing import Any
+from string import Template
 
 from otter.config.yaml import parse_yaml
 
@@ -39,13 +39,20 @@ def _expected(step: str) -> dict[str, str]:
     return expected
 
 
-def _copies(tasks: list[dict[str, Any]]) -> dict[str, str]:
-    return {task['destination']: task['sources'] for task in tasks if task['name'].startswith('copy_many ')}
+def _copies(step: str) -> dict[str, str]:
+    """The copies of a step, with the scratchpad run timestamps filled in."""
+    config = parse_yaml(CONFIG_PATH)
+    scratchpad = config['scratchpad']
+    return {
+        task['destination']: Template(task['sources']).substitute(scratchpad)
+        for task in config['steps'][step]
+        if task['name'].startswith('copy_many ')
+    }
 
 
 def test_gwas_sources_stage_new_schema_credible_sets() -> None:
-    assert _copies(parse_yaml(CONFIG_PATH)['steps']['gwas']) == _expected('gwas')
+    assert _copies('gwas') == _expected('gwas')
 
 
 def test_molqtl_sources_stage_new_schema_credible_sets() -> None:
-    assert _copies(parse_yaml(CONFIG_PATH)['steps']['molqtl']) == _expected('molqtl')
+    assert _copies('molqtl') == _expected('molqtl')
