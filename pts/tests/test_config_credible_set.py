@@ -8,6 +8,7 @@ from otter.config.yaml import parse_yaml
 
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
+from pts.transformers.credible_set.variant_qc import VariantQcSettings
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""
@@ -156,3 +157,12 @@ def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() 
     assert excluded_set.collect()['id'].to_list() == ['clumped']
     assert valid_variant.collect()['credibleSetId'].to_list() == ['abnormal']
     assert excluded_variant.collect()['credibleSetId'].to_list() == ['clumped']
+
+
+def test_variant_qc_of_every_source_cuts_at_95_percent_coverage() -> None:
+    tasks = _tasks()
+    for source, kind in SOURCES.items():
+        settings = VariantQcSettings.model_validate(
+            tasks[f'transform qc credible set variants {kind}/{source}']['settings']
+        )
+        assert (settings.coverage, settings.pip_tolerance) == (0.95, 1e-4), source
