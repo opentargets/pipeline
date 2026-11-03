@@ -1,0 +1,61 @@
+---
+name: Stage fastVEP
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Huang-lab/fastVEP commit to build (full SHA).'
+        required: true
+        type: string
+
+jobs:
+  stage:
+    name: Build & push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the commit is a full SHA
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit must be a full 40-character SHA, got '$COMMIT'"
+            exit 1
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./.github/fastvep
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            FASTVEP_COMMIT=${{ inputs.commit }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.commit }}
+            org.opencontainers.image.description=fastVEP built from Huang-lab/fastVEP@${{ inputs.commit }}
+          tags: |
+            ghcr.io/${{ github.repository }}/fastvep:${{ inputs.commit }}
+
+      - name: Report the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}/fastvep:${{ inputs.commit }}
+        run: echo "### Staged \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
