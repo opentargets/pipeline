@@ -517,3 +517,22 @@ def test_collection_ordering_preserves_nulls_and_sample_multiplicity():
     assert result['discoverySamples'] == [samples[1], samples[2], samples[0]]
     assert result['replicationSamples'] is None
     assert result['diseaseIds'] == ['a', 'z']
+
+
+def test_validators_accept_inputs_without_derived_columns():
+    """Source studies carry no diseaseIds, backgroundDiseaseIds or biosampleId; the validators derive them."""
+    studies = studies_frame([
+        {
+            'studyId': 's',
+            'studyType': 'gwas',
+            'traitFromSourceMappedIds': ['old'],
+            'backgroundTraitFromSourceMappedIds': ['background'],
+            'biosampleFromSourceId': 'known',
+        }
+    ]).drop('diseaseIds', 'backgroundDiseaseIds', 'biosampleId')
+    lookup = pl.DataFrame({'efo': ['old', 'background'], 'diseaseId': ['a', 'c']}).lazy()
+
+    result = validate_biosample(validate_disease(studies, lookup), pl.DataFrame({'biosampleId': ['known']}).lazy())
+
+    row = result.collect().row(0, named=True)
+    assert (row['diseaseIds'], row['backgroundDiseaseIds'], row['biosampleId']) == (['a'], ['c'], 'known')
