@@ -635,7 +635,7 @@ steps:
   #: EVIDENCE_ORPHANET STEP :#######################################################################
   evidence_orphanet:
     - name: copy orphanet
-      source: http://www.orphadata.org/data/xml/en_product6.xml
+      source: https://www.orphadata.com/data/xml/en_product6.xml
       destination: input/evidence/orphanet.xml
   ##################################################################################################
 
