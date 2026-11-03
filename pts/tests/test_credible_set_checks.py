@@ -1,7 +1,10 @@
 """The single check of each credible set stage, on the worked examples of the PRDs."""
 
+from unittest.mock import Mock
+
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.transformers.credible_set.annotation import assign_confidence
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
@@ -10,6 +13,7 @@ from pts.transformers.credible_set.validation import (
     ValidationSettings,
     ValidationSource,
     cross_set_flags_schema,
+    pair_sources,
     type_valid_sets,
     validate,
 )
@@ -120,24 +124,47 @@ def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed() -> None:
     assert excluded_variant.collect()['credibleSetId'].to_list() == ['top_hit']
 
 
+def _config(release_uri: str | None = None) -> Config:
+    return Mock(spec=Config, work_path='/work', release_uri=release_uri)
+
+
 def test_validation_pairs_the_sets_and_variants_of_each_source() -> None:
     sources = ValidationSource(
-        credible_set=['qc/gwas/a/credible_set', 'qc/gwas/b/credible_set'],
-        credible_set_variant=['qc/gwas/a/credible_set_variant', 'qc/gwas/b/credible_set_variant'],
+        credible_set=['/work/qc/gwas/a/credible_set', '/work/qc/gwas/b/credible_set'],
+        credible_set_variant=['/work/qc/gwas/a/credible_set_variant', '/work/qc/gwas/b/credible_set_variant'],
     )
-    assert sources.pairs() == [
-        ('a', 'qc/gwas/a/credible_set', 'qc/gwas/a/credible_set_variant'),
-        ('b', 'qc/gwas/b/credible_set', 'qc/gwas/b/credible_set_variant'),
+    assert pair_sources(sources, _config()) == [
+        ('qc/gwas/a', '/work/qc/gwas/a/credible_set', '/work/qc/gwas/a/credible_set_variant'),
+        ('qc/gwas/b', '/work/qc/gwas/b/credible_set', '/work/qc/gwas/b/credible_set_variant'),
+    ]
+
+
+def test_validation_pairs_gcs_paths_by_their_folder_in_the_release() -> None:
+    root = 'gs://bucket/26.12'
+    sources = ValidationSource(
+        credible_set=[f'{root}/qc/gwas/gcca/credible_set', f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set/'],
+        credible_set_variant=[
+            f'{root}/qc/gwas/gcca/credible_set_variant',
+            f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set_variant',
+        ],
+    )
+    assert [source for source, _, _ in pair_sources(sources, _config(root))] == [
+        'qc/gwas/gcca',
+        'qc/molqtl/eQTLGen/coeqtl',
     ]
 
 
 @pytest.mark.parametrize(
     'variants',
-    [['qc/gwas/a/credible_set_variant'], ['qc/gwas/b/credible_set_variant', 'qc/gwas/a/credible_set_variant']],
+    [
+        ['/work/qc/gwas/a/credible_set_variant'],
+        ['/work/qc/gwas/b/credible_set_variant', '/work/qc/gwas/a/credible_set_variant'],
+    ],
     ids=['missing source', 'different order'],
 )
 def test_validation_rejects_set_and_variant_lists_that_do_not_pair_up(variants: list[str]) -> None:
-    with pytest.raises(ValueError, match='pair'):
-        ValidationSource(
-            credible_set=['qc/gwas/a/credible_set', 'qc/gwas/b/credible_set'], credible_set_variant=variants
-        )
+    sources = ValidationSource(
+        credible_set=['/work/qc/gwas/a/credible_set', '/work/qc/gwas/b/credible_set'], credible_set_variant=variants
+    )
+    with pytest.raises(ValueError, match='qc/gwas/a'):
+        pair_sources(sources, _config())

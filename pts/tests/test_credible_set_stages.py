@@ -45,7 +45,7 @@ def _read(path: Path) -> pl.DataFrame:
 
 def _run_stages(root: Path) -> None:
     """Run the stages as `pts/config.yaml` chains them: QC per source, validation and annotation over all."""
-    config = Mock(spec=Config)
+    config = Mock(spec=Config, work_path=str(root), release_uri=None)
 
     def path(name: str) -> str:
         return str(root / name)

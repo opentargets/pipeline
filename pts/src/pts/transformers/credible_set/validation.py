@@ -11,7 +11,8 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from otter.storage.synchronous.handle import StorageHandle
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
@@ -26,32 +27,36 @@ cross_set_flags_schema = pl.Schema({
 
 
 class ValidationSource(BaseModel):
-    """The QC'd sets and variants of every source, as two lists in the same source order.
-
-    A source is the folder that holds its datasets (`intermediate/qc/<kind>/<source>/<dataset>`),
-    as PIS and the QC explode lay it out.
-    """
+    """The QC'd sets and variants of every source, as two lists in the same source order."""
 
     model_config = ConfigDict(extra='forbid')
 
     credible_set: list[str]
     credible_set_variant: list[str]
 
-    @model_validator(mode='after')
-    def sets_and_variants_pair_up(self) -> 'ValidationSource':
-        """Require the two lists to name the same sources in the same order."""
-        sets = [str(PurePosixPath(path).parent) for path in self.credible_set]
-        variants = [str(PurePosixPath(path).parent) for path in self.credible_set_variant]
-        if sets != variants:
-            raise ValueError(f'credible sets and variants must pair up by source, in order: {sets} != {variants}')
-        return self
 
-    def pairs(self) -> list[tuple[str, str, str]]:
-        """The source name, set path and variant path of every source."""
-        return [
-            (PurePosixPath(sets).parent.name, sets, variants)
-            for sets, variants in zip(self.credible_set, self.credible_set_variant, strict=True)
-        ]
+def pair_sources(sources: ValidationSource, config: Config) -> list[tuple[str, str, str]]:
+    """Pair each source's sets with its variants, and name the source.
+
+    A source is the folder that holds its datasets (`intermediate/qc/<kind>/<source>/<dataset>`),
+    as PIS and the QC explode lay it out. The folders are compared relative to the release root,
+    through `StorageHandle`, so local and `gs://` paths are handled alike.
+
+    Returns:
+        The release-relative source folder, the set path and the variant path of every source.
+
+    Raises:
+        ValueError: if the two lists do not name the same sources in the same order.
+    """
+
+    def folder(path: str) -> str:
+        return str(PurePosixPath(StorageHandle(path, config).relative).parent)
+
+    sets = [folder(path) for path in sources.credible_set]
+    variants = [folder(path) for path in sources.credible_set_variant]
+    if sets != variants:
+        raise ValueError(f'credible sets and variants must pair up by source, in order: {sets} != {variants}')
+    return list(zip(sets, sources.credible_set, sources.credible_set_variant, strict=True))
 
 
 class ValidationDestination(BaseModel):
@@ -250,16 +255,17 @@ def validation(
     sources = ValidationSource.model_validate(source)
     destinations = ValidationDestination.model_validate(destination)
     options = ValidationSettings.model_validate(settings)
+    pairs = pair_sources(sources, config)
     cross_set_flags = flag_across_sets(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flags.height)
     splits = [
         validate(scan_dataset(sets), scan_dataset(variants), cross_set_flags.lazy(), options)
-        for _, sets, variants in sources.pairs()
+        for _, sets, variants in pairs
     ]
     valid_set, valid_variant, excluded_set, excluded_variant = (pl.concat(parts) for parts in zip(*splits, strict=True))
-    logger.info('Validated the credible sets of {}', ', '.join(name for name, _, _ in sources.pairs()))
+    logger.info('Validated the credible sets of {}', ', '.join(source for source, _, _ in pairs))
     pl.collect_all([
         sink_dataset(type_valid_sets(valid_set), destinations.valid_set),
         sink_dataset(valid_variant, destinations.valid_variant),
