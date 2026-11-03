@@ -1,7 +1,7 @@
 ---
 # The date of the run. It names the AACT monthly archive and dates the TTD, EMA and
 # PMDA downloads, and every source is staged under it.
-staging_version: '2026-11-01'
+staging_version: '2026-11-03'
 
 # Where every snapshot and record store lives
 bucket: 'gs://clinical_staging'
