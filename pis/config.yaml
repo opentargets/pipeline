@@ -850,48 +850,70 @@ steps:
   #: GWAS STEP :######################################################################################
   gwas:
     - name: copy_many GCCA study
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/study_index/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/20261028T234317/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcca
 
     - name: copy_many GCCA credible sets
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/20261028T234317/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcca
 
+    - name: copy_many GCCA credible set variants
+      sources: gs://gwas_catalog_top_hits/prod/20261028T234317/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/credible_set_variant/gcca
+
     - name: copy_many GCSS pics study
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_pics
 
     - name: copy_many GCSS pics credible sets
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_pics
 
+    - name: copy_many GCSS pics credible set variants
+      sources: gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/credible_set_variant/gcss_pics
+
     - name: copy_many GCSS susie study
-      sources: gs://gwas_catalog_sumstats_susie/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/20261101T152321/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/study/gcss_susie
 
     - name: copy_many GCSS susie credible sets
-      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260901/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/20261101T152321/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set/gcss_susie
 
+    - name: copy_many GCSS susie credible set variants
+      sources: gs://gwas_catalog_sumstats_susie/prod/20261101T152321/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/credible_set_variant/gcss_susie
+
     - name: copy_many finngen study
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/study_index/*.parquet
+      sources: gs://finngen_data/gwas/prod/20261029T152531/output/study/*.parquet
       destination: input/gwas/study/finngen
 
     - name: copy_many finngen credible sets
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/*.parquet
+      sources: gs://finngen_data/gwas/prod/20261029T152531/output/credible_set/*.parquet
       destination: input/gwas/credible_set/finngen
+
+    - name: copy_many finngen credible set variants
+      sources: gs://finngen_data/gwas/prod/20261029T152531/output/credible_set_variant/*.parquet
+      destination: input/gwas/credible_set_variant/finngen
   ##################################################################################################
 
   #: GWAS_PPP STEP :################################################################################
@@ -953,25 +975,47 @@ steps:
   #: MOLQTL STEP: ##################################################################################
   molqtl:
     - name: copy_many eQTL Catalogue r8 study
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/study_index/*.parquet
+      sources: gs://eqtl_catalogue_data/r8/prod/20261030T164426/output/study_index/*.parquet
       destination: input/molqtl/study/eqtl_catalogue/r8
 
     - name: copy_many eQTL Catalogue r8 credible sets
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/credible_set/*.parquet
+      sources: gs://eqtl_catalogue_data/r8/prod/20261030T164426/output/credible_set/*.parquet
       destination: input/molqtl/credible_set/eqtl_catalogue/r8
+
+    - name: copy_many eQTL Catalogue r8 credible set variants
+      sources: gs://eqtl_catalogue_data/r8/prod/20261030T164426/output/credible_set_variant/*.parquet
+      destination: input/molqtl/credible_set_variant/eqtl_catalogue/r8
       max_concurrency: 4
 
     - name: copy_many UKBB PPP EUR study
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/20261026T161010/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/study/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible sets
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/20261026T161010/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set/ukb_ppp_eur
+
+    - name: copy_many UKBB PPP EUR credible set variants
+      sources: gs://ukb_ppp_eur_data/prod/20261026T161010/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/molqtl/credible_set_variant/ukb_ppp_eur
+
+    - name: copy_many finngen multiome study
+      sources: gs://finngen_data/multiome/prod/20261029T125742/output/study/*.parquet
+      destination: input/molqtl/study/finngen_multiome
+
+    - name: copy_many finngen multiome credible sets
+      sources: gs://finngen_data/multiome/prod/20261029T125742/output/credible_set/*.parquet
+      destination: input/molqtl/credible_set/finngen_multiome
+
+    - name: copy_many finngen multiome credible set variants
+      sources: gs://finngen_data/multiome/prod/20261029T125742/output/credible_set_variant/*.parquet
+      destination: input/molqtl/credible_set_variant/finngen_multiome
   ##################################################################################################
 
   #: MOLQTL_PPP STEP: ##############################################################################
