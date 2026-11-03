@@ -40,8 +40,10 @@ def resolve(ref: str) -> str | None:
         text=True,
         check=False,
     )
-    digest = result.stdout.strip()
-    return digest if result.returncode == 0 and digest else None
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        return None
+    return result.stdout.strip() or None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     (config_path,) = sys.argv[1:] if argv is None else argv
     config = yaml.safe_load(Path(config_path).read_text())
     versions = {package: str(config[f'{package}_version']) for package in IMAGES if f'{package}_version' in config}
+    if not versions:
+        sys.stdout.write(f'{config_path}: no pis_version or pts_version to resolve\n')
+        return 1
     missing = []
     for ref in image_refs(versions, REGISTRY):
         digest = resolve(ref)
