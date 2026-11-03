@@ -1362,7 +1362,7 @@ steps:
       destination: input/target/tractability/tractability.tsv
 
     - name: copy uniprot
-      source: https://rest.uniprot.org/uniprotkb/stream?compressed=true&format=txt&query=%28%28reviewed%3Atrue%29%29%20AND%20%28model_organism%3A9606%29
+      source: https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/taxonomic_divisions/uniprot_sprot_human.dat.gz
       destination: input/target/uniprot/uniprot.txt.gz
 
     - name: copy uniprot-ssl
