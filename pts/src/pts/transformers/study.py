@@ -189,7 +189,7 @@ def validate_target(studies: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame
 def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve foreground and background diseases and flag unresolved GWAS studies."""
     logger.info('Normalizing and validating study diseases')
-    result = studies.drop('diseaseIds', 'backgroundDiseaseIds', strict=False)
+    result = studies
     for source, destination in [
         ('traitFromSourceMappedIds', 'diseaseIds'),
         ('backgroundTraitFromSourceMappedIds', 'backgroundDiseaseIds'),
@@ -220,7 +220,7 @@ def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.Laz
         pl.lit(True).alias('_biosample_found'),
     )
     return flag_rows(
-        studies.drop('biosampleId', strict=False).join(lookup, on='biosampleFromSourceId', how='left'),
+        studies.join(lookup, on='biosampleFromSourceId', how='left'),
         (pl.col('studyType') != 'gwas') & pl.col('_biosample_found').is_null(),
         QualityFlag.UNKNOWN_BIOSAMPLE,
     ).drop('_biosample_found')

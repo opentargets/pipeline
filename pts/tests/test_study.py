@@ -64,8 +64,13 @@ def test_validate_disease_keeps_every_disease_sharing_an_obsolete_id(tmp_path):
     assert validate_disease(studies, lookup).collect()['diseaseIds'].to_list() == [['EFO_001', 'EFO_002']]
 
 
-def studies_frame(rows):
-    """Build typed study inputs with absent optional fields filled with nulls."""
+# Columns the validators derive; no study input carries them.
+DERIVED_COLUMNS = {'diseaseIds', 'backgroundDiseaseIds', 'biosampleId'}
+source_schema = pl.Schema({name: dtype for name, dtype in study_schema.items() if name not in DERIVED_COLUMNS})
+
+
+def studies_frame(rows, schema=source_schema):
+    """Build typed studies, by default as the sources provide them, with absent optional fields filled with nulls."""
     rows = [
         {
             name: [str(item) if isinstance(item, QualityFlag) else item for item in value]
@@ -78,9 +83,9 @@ def studies_frame(rows):
     fields = {name for row in rows for name in row}
     return (
         pl
-        .DataFrame(rows, schema={name: dtype for name, dtype in study_schema.items() if name in fields})
+        .DataFrame(rows, schema={name: dtype for name, dtype in schema.items() if name in fields})
         .lazy()
-        .match_to_schema(study_schema, missing_columns='insert')
+        .match_to_schema(schema, missing_columns='insert')
     )
 
 
@@ -126,7 +131,7 @@ def test_validate_target(study_type, gene, flagged):
         studies_frame([{'studyType': study_type, 'geneId': gene}]), pl.DataFrame({'id': ['known']}).lazy()
     ).collect()
     assert result['qualityControls'].to_list() == [[QualityFlag.UNRESOLVED_TARGET] if flagged else []]
-    assert result.schema == study_schema
+    assert result.schema == source_schema
 
 
 @pytest.mark.parametrize(
@@ -140,9 +145,9 @@ def test_validate_target(study_type, gene, flagged):
     ],
 )
 def test_validate_biosample(study_type, biosample, flagged):
-    """Validated biosample IDs replace previous annotations and flag unresolved QTLs."""
+    """Source biosample IDs resolve against the biosample index and unresolved QTLs are flagged."""
     result = validate_biosample(
-        studies_frame([{'studyType': study_type, 'biosampleFromSourceId': biosample, 'biosampleId': 'stale'}]),
+        studies_frame([{'studyType': study_type, 'biosampleFromSourceId': biosample}]),
         pl.DataFrame({'biosampleId': ['known']}).lazy(),
     ).collect()
     assert result['biosampleId'].to_list() == ['known' if biosample == 'known' else None]
@@ -192,8 +197,6 @@ def test_validate_disease_normalizes_foreground_and_background_and_replaces_old_
             'studyType': 'gwas',
             'traitFromSourceMappedIds': ['old', 'old', 'unknown'],
             'backgroundTraitFromSourceMappedIds': ['background'],
-            'diseaseIds': ['stale'],
-            'backgroundDiseaseIds': ['stale'],
         }
     ])
     lookup = pl.DataFrame({'efo': ['old', 'old', 'background'], 'diseaseId': ['a', 'b', 'c']}).lazy()
@@ -346,7 +349,7 @@ def test_collect_heritability_appends_six_ordered_float32_estimates(existing):
     """Successful LDSC results append all six named estimates to the existing QC list."""
     estimates = {'h2': 0.5, 'h2_se': 0.25, 'intercept': 1.0, 'intercept_se': 0.125, 'mean_chisq': 2.0, 'lambda_gc': 1.5}
     result = collect_heritability(
-        studies_frame([{'studyId': 's', 'sumstatQCValues': existing}]),
+        studies_frame([{'studyId': 's', 'sumstatQCValues': existing}], study_schema),
         heritability_frame([{'studyId': 's', 'runStatus': 'success', **estimates}]),
     )
     assert isinstance(result, pl.LazyFrame)
@@ -510,9 +513,10 @@ def test_collection_ordering_preserves_nulls_and_sample_multiplicity():
         {'sampleSize': 10, 'ancestry': 'A'},
         {'sampleSize': 10, 'ancestry': 'A'},
     ]
-    frame = studies_frame([
-        {'studyId': 's', 'discoverySamples': samples, 'replicationSamples': None, 'diseaseIds': ['z', 'a']}
-    ])
+    frame = studies_frame(
+        [{'studyId': 's', 'discoverySamples': samples, 'replicationSamples': None, 'diseaseIds': ['z', 'a']}],
+        study_schema,
+    )
     result = frame.pipe(sort_study_collections).collect().row(0, named=True)
     assert result['discoverySamples'] == [samples[1], samples[2], samples[0]]
     assert result['replicationSamples'] is None
@@ -529,7 +533,7 @@ def test_validators_accept_inputs_without_derived_columns():
             'backgroundTraitFromSourceMappedIds': ['background'],
             'biosampleFromSourceId': 'known',
         }
-    ]).drop('diseaseIds', 'backgroundDiseaseIds', 'biosampleId')
+    ])
     lookup = pl.DataFrame({'efo': ['old', 'background'], 'diseaseId': ['a', 'c']}).lazy()
 
     result = validate_biosample(validate_disease(studies, lookup), pl.DataFrame({'biosampleId': ['known']}).lazy())
