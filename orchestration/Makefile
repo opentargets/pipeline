@@ -9,7 +9,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-decode-readme upload-eqtlgen-readme
+				upload-decode-readme upload-decode-smp-finemapping-readme upload-eqtlgen-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -85,6 +85,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
+		datasources/decode_data/decode_smp_finemapping/decode_smp_finemapping \
 		credible_set_qc/credible_set_qc \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
@@ -131,6 +132,10 @@ upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage cp docs/datasources/eqtlgen_data/README.md $(BUCKET)/docs/README.md
+
+upload-decode-smp-finemapping-readme: ## Upload the decode smp fine-mapping readme to a run folder: make upload-decode-smp-finemapping-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-decode-smp-finemapping-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/decode_data/decode_smp_finemapping $(BUCKET)/docs
 
 upload-decode-readme: ## Upload the decode_data readme to a run folder: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>))
