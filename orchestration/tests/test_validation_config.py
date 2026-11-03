@@ -10,24 +10,54 @@ PPP_ONLY = ['sle_map', 'otar2077/microglia', 'eQTLGen/coeqtl', 'deCODE_proteomic
 BOTH = ['eqtl_catalogue', 'ukb_ppp_eur']
 
 
-@pytest.mark.parametrize(
-    ('ppp', 'step', 'kind'),
-    [(False, 'study', 'study'), (True, 'study', 'study'), (True, 'credible_set', 'credible_set')],
-    ids=['study-platform', 'study-ppp', 'credible_set-ppp'],
-)
-def test_validation_inputs_follow_the_run(monkeypatch, ppp, step, kind):
-    """PPP replaces the platform molQTL sources; both read released targets."""
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_study_inputs_follow_the_run(monkeypatch, ppp):
+    """PPP adds its molQTL sources to the platform ones; both read released targets."""
     monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
     config = UnifiedPipelineConfig()
-    [task] = config.pts.config['steps'][step]
-    sources = task['source'][kind]
+    [task] = config.pts.config['steps']['study']
+    sources = task['source']['study']
     for name in PPP_ONLY:
-        assert (f'input/molqtl/{name}/{kind}' in sources) is ppp
+        assert (f'input/molqtl/{name}/study' in sources) is ppp
     for name in BOTH:
-        assert f'input/molqtl/{name}/{kind}' in sources
+        assert f'input/molqtl/{name}/study' in sources
     assert task['source']['target'] == 'output/target'
-    if step == 'credible_set':
-        assert task['source']['disease'] == 'output/disease'
+
+
+def _credible_set_step(ppp: bool, monkeypatch) -> list[dict[str, Any]]:
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    return UnifiedPipelineConfig().pts.config['steps']['credible_set']
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_credible_set_sources_follow_the_run(monkeypatch, ppp):
+    """PPP adds its sources to the explode and to validation; the platform reads only its own."""
+    explode, validation, _ = _credible_set_step(ppp, monkeypatch)
+    for name in PPP_ONLY:
+        assert (f'molqtl/{name}' in explode['foreach']) is ppp
+    for name in BOTH:
+        assert f'molqtl/{name}' in explode['foreach']
+    assert validation['source']['credible_set'] == [f'intermediate/qc/{f}/credible_set' for f in explode['foreach']]
+    assert validation['source']['credible_set_variant'] == [
+        f'intermediate/qc/{f}/credible_set_variant' for f in explode['foreach']
+    ]
+
+
+def test_ppp_credible_sets_are_processed_like_the_platform_ones(monkeypatch):
+    """The PPP step differs from the platform step only in its sources."""
+
+    def without_sources(step: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        explode, validation, annotation = step
+        return [
+            {**explode, 'foreach': None},
+            {**validation, 'source': None},
+            annotation,
+        ]
+
+    platform = _credible_set_step(False, monkeypatch)
+    ppp = _credible_set_step(True, monkeypatch)
+    assert set(platform[0]['foreach']) < set(ppp[0]['foreach'])
+    assert without_sources(ppp) == without_sources(platform)
 
 
 PIS_PPP_STEPS = ('gwas_ppp', 'molqtl_ppp')
