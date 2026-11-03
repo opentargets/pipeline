@@ -1,6 +1,0 @@
-study_id	dataset_id	study_label	sample_group	tissue_id	tissue_label	condition_label	sample_size	quant_method	pmid	study_type
-OTAR2065	QTD000759	OTAR2065_neuroinflammation	microglia_IFN_nonProlif	CL_0000129	microglial cell	IFN	211	ge		single-cell
-OTAR2065	QTD000760	OTAR2065_neuroinflammation	microglia_LPS_Prolif	CL_0000129	microglial cell	LPS	131	ge		single-cell
-OTAR2065	QTD000761	OTAR2065_neuroinflammation	microglia_LPS_nonProlif	CL_0000129	microglial cell	LPS	207	ge		single-cell
-OTAR2065	QTD000762	OTAR2065_neuroinflammation	microglia_untreated_Prolif	CL_0000129	microglial cell	untreated	149	ge		single-cell
-OTAR2065	QTD000763	OTAR2065_neuroinflammation	microglia_untreated_nonProlif	CL_0000129	microglial cell	untreated	208	ge		single-cell

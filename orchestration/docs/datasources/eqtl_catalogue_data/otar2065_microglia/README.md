@@ -23,14 +23,28 @@ The timestamp is the time of the last write of the release (`study_locus`, 2025-
 
 ## Inputs
 
-The qtlmap output stays in the eQTL Catalogue processing bucket:
+The qtlmap output was synced on 2026-11-03 from `gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/` (all of it but `gentropy/`, the release frozen above) to `gs://eqtl_catalogue_data/otar2065_microglia/source/`, with the dataset metadata of the v4 ingestion:
 
 ```sh
-gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/susie/QTD*_credible_sets.parquet
-gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/susie/QTD*_lbf_variable_merged.parquet
-gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/susie_batches/QTD*/{cs,lbf,full}/
-gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/sumstats/QTD*/all/
+gs://eqtl_catalogue_data/otar2065_microglia/source/susie/QTD*_credible_sets.parquet
+gs://eqtl_catalogue_data/otar2065_microglia/source/susie/QTD*_lbf_variable_merged.parquet
+gs://eqtl_catalogue_data/otar2065_microglia/source/susie_batches/QTD*/{cs,lbf,full}/
+gs://eqtl_catalogue_data/otar2065_microglia/source/sumstats/QTD*/all/
+gs://eqtl_catalogue_data/otar2065_microglia/source/{lead_cc_signal,PCA,varinfo,Documentation,pipeline_info}/
+gs://eqtl_catalogue_data/otar2065_microglia/source/dataset_metadata.tsv
 ```
+
+The datasets are not in the eQTL Catalogue metadata, so `dataset_metadata.tsv` describes them in its format, with the values of the frozen study index and `study_id` `OTAR2065`:
+
+| dataset_id | sample_group | tissue_id | condition_label | sample_size |
+|---|---|---|---|---:|
+| QTD000759 | microglia_IFN_nonProlif | CL_0000129 | IFN | 211 |
+| QTD000760 | microglia_LPS_Prolif | CL_0000129 | LPS | 131 |
+| QTD000761 | microglia_LPS_nonProlif | CL_0000129 | LPS | 207 |
+| QTD000762 | microglia_untreated_Prolif | CL_0000129 | untreated | 149 |
+| QTD000763 | microglia_untreated_nonProlif | CL_0000129 | untreated | 208 |
+
+The other columns are the same for every dataset: `study_label` `OTAR2065_neuroinflammation`, `tissue_label` `microglial cell`, `quant_method` `ge`, `study_type` `single-cell`, no `pmid`.
 
 The SuSiE files have the same schemas as those of the eQTL Catalogue r8 release.
 
@@ -58,7 +72,7 @@ The SuSiE files have the same schemas as those of the eQTL Catalogue r8 release.
 The DAG `otar2065_microglia_ingestion` runs the gentropy `eqtl_catalogue` step on the qtlmap output, as for the eQTL Catalogue r8 release, into `CredibleSet` and `CredibleSetVariant`:
 
 ```sh
-gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/
+gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/
 ├── bin/      gentropy CLI and cluster init script of the run
 ├── config/   otar2065_microglia_ingestion.yaml (the DAG config of the run)
 ├── docs/     README.md + DAG svg
@@ -68,7 +82,7 @@ gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/
 ![otar2065_microglia_ingestion](otar2065_microglia_ingestion.svg)
 
 - gentropy commit `b8d49acab42b8357ce999e3ab9995dca235f9e7a` ([opentargets/gentropy#1343](https://github.com/opentargets/gentropy/pull/1343)), one cluster of 8 `n2d-highmem-16` workers; the run took 7 minutes.
-- Inputs: `susie/QTD*_credible_sets.parquet`, `susie/QTD*_lbf_variable_merged.parquet` and `susie_batches/QTD*/full/QTD*.full_susie.parquet` of the qtlmap output, and `gs://eqtl_catalogue_data/otar2065_microglia/inputs/dataset_metadata.tsv`, a copy of `dataset_metadata.tsv` of the DAG folder. The datasets are not in the eQTL Catalogue metadata, so this table describes them, with the values of the frozen study index and `study_id` `OTAR2065`.
+- Inputs: `susie/QTD*_credible_sets.parquet`, `susie/QTD*_lbf_variable_merged.parquet`, `susie_batches/QTD*/full/QTD*.full_susie.parquet` and `dataset_metadata.tsv` of `source/` (see [Inputs](#inputs)).
 - `lead_pvalue_threshold` 1e-3, as for r8. `summary_statistics_location` is null: the summary statistics are not public, so the studies have no `summarystatsLocation` and `hasSumstats` is false.
 - `reportedBeta` and `reportedStandardError` are the marginal effects of the qtlmap credible sets; `conditionalBeta` and `conditionalStandardError` come from the full SuSiE output, for every member. `effectAlleleFrequency` is empty, as in r8.
 - Study identifiers follow the eQTL Catalogue ingestion and are lower case: `otar2065_<QTD>_otar2065_neuroinflammation_ge_<sample group>_<ENSG>`. They differ from the frozen release.
@@ -97,4 +111,4 @@ gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/
 
 ### 2026-11-03 (v4 ingestion)
 
-* New DAG `otar2065_microglia_ingestion`: the gentropy `eqtl_catalogue` step on the qtlmap output, into `gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/`, see [v4 ingestion](#v4-ingestion). `pis` keeps reading the frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.
+* New DAG `otar2065_microglia_ingestion`: the gentropy `eqtl_catalogue` step on the qtlmap output, into `gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/`, see [v4 ingestion](#v4-ingestion). `pis` keeps reading the frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.

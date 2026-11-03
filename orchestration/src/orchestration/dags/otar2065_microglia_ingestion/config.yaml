@@ -5,11 +5,11 @@ env: prod
 environments:
   prod:
     input:
-      # the eQTL Catalogue qtlmap output of the 5 microglia datasets (QTD000759 to QTD000763)
-      microglia: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia
-      # dataset_metadata.tsv of this folder: the datasets are not in the eQTL Catalogue tables
-      metadata: gs://eqtl_catalogue_data/otar2065_microglia/inputs/dataset_metadata.tsv
-    output: gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734
+      # the eQTL Catalogue qtlmap output of the 5 microglia datasets (QTD000759 to QTD000763),
+      # synced from gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia, with
+      # dataset_metadata.tsv: the datasets are not in the eQTL Catalogue tables
+      microglia: gs://eqtl_catalogue_data/otar2065_microglia/source
+    output: gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322
     scratchpad:
       # a gentropy git ref: the commit of opentargets/gentropy#1343 until it is released
       gentropy_ref: b8d49acab42b8357ce999e3ab9995dca235f9e7a
@@ -52,7 +52,7 @@ steps:
       # The summary statistics are not public: no location, and hasSumstats is false.
       args: |
         step=eqtl_catalogue \
-          step.eqtl_catalogue_dataset_metadata_path={{input.metadata}} \
+          step.eqtl_catalogue_dataset_metadata_path={{input.microglia}}/dataset_metadata.tsv \
           "step.credible_set_input_glob={{input.microglia}}/susie/QTD*_credible_sets.parquet" \
           "step.lbf_variable_input_glob={{input.microglia}}/susie/QTD*_lbf_variable_merged.parquet" \
           "step.full_susie_input_glob={{input.microglia}}/susie_batches/QTD*/full/QTD*.full_susie.parquet" \
