@@ -1,4 +1,4 @@
-FROM python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+FROM python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS base
 COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /uvx /bin/
 
 ARG TARGETARCH
@@ -11,11 +11,6 @@ RUN apt-get update && \
 
 COPY --from=ghcr.io/opentargets/pipeline/fastvep:9d84be0c14952243b4c34ffc6f3c179ae77d66ee@sha256:f47e0f1d3f734e4478471d84e40a111ffb859c9a00938852c1dcd1db03bde801 /fastvep /usr/local/bin/fastvep
 
-WORKDIR /app
-COPY . /app
-
-RUN uv sync --frozen --no-dev --extra nlp --extra l2g --extra llm
-
 # pixeltable-pgserver runs postgres under a non-root account when it detects
 # uid 0, and creates that account with useradd from PostgresServer.__init__ --
 # which runs BEFORE start() takes the interprocess lock. Two concurrent tasks
@@ -23,4 +18,25 @@ RUN uv sync --frozen --no-dev --extra nlp --extra l2g --extra llm
 # race for good. This cannot be caught in CI, which does not run as root.
 RUN useradd -m -s /bin/bash pgserver
 
+WORKDIR /app
+ENV UV_LINK_MODE=copy
+
+# Clinical staging steps: NER, stop-reason and LLM extraction.
+FROM base AS nlp
+COPY pyproject.toml uv.lock /app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-dev --no-install-project --extra l2g --extra nlp --extra llm
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-dev --extra l2g --extra nlp --extra llm
+ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pts"]
+
+# Unified pipeline steps. Last stage, so it is the default build target.
+FROM base AS lean
+COPY pyproject.toml uv.lock /app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-dev --no-install-project --extra l2g
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-dev --extra l2g
 ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pts"]
