@@ -17,9 +17,9 @@ def test_validation_inputs_follow_the_run(monkeypatch, ppp, step, kind):
     [task] = config.pts.config['steps'][step]
     sources = task['source'][kind]
     for name in PPP_ONLY:
-        assert (f'input/molqtl/{kind}/{name}' in sources) is ppp
+        assert (f'input/molqtl/{name}/{kind}' in sources) is ppp
     for name in BOTH:
-        assert f'input/molqtl/{kind}/{name}' in sources
+        assert f'input/molqtl/{name}/{kind}' in sources
     assert task['source']['target'] == 'output/target'
     if step == 'credible_set':
         assert task['source']['disease'] == 'output/disease'
