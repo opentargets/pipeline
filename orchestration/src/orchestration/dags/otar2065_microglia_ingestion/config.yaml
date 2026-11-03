@@ -1,0 +1,66 @@
+---
+description: Open Targets Genetics — OTAR2065 microglia sc-eQTL SuSiE fine-mapping ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      # the eQTL Catalogue qtlmap output of the 5 microglia datasets (QTD000759 to QTD000763)
+      microglia: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia
+      # dataset_metadata.tsv of this folder: the datasets are not in the eQTL Catalogue tables
+      metadata: gs://eqtl_catalogue_data/otar2065_microglia/inputs/dataset_metadata.tsv
+    output: gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734
+    scratchpad:
+      # a gentropy git ref: the commit of opentargets/gentropy#1343 until it is released
+      gentropy_ref: b8d49acab42b8357ce999e3ab9995dca235f9e7a
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-otar2065-microglia:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers. The inputs are about 21 GB of parquet:
+      # 3 GB of credible sets and log Bayes factors, 18 GB of SuSiE batches with the full
+      # posterior. The eQTL Catalogue r8 run read about 50 times more on 64 workers.
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 8
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 256
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: '{{gentropy_ref}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  ingestion:
+    kind: dataproc
+    definition:
+      cluster: otg-otar2065-microglia
+      main: '{{output}}/bin/cli.py'
+      # The summary statistics are not public: no location, and hasSumstats is false.
+      args: |
+        step=eqtl_catalogue \
+          step.eqtl_catalogue_dataset_metadata_path={{input.metadata}} \
+          "step.credible_set_input_glob={{input.microglia}}/susie/QTD*_credible_sets.parquet" \
+          "step.lbf_variable_input_glob={{input.microglia}}/susie/QTD*_lbf_variable_merged.parquet" \
+          "step.full_susie_input_glob={{input.microglia}}/susie_batches/QTD*/full/QTD*.full_susie.parquet" \
+          step.study_index_output_path={{output}}/output/study_index \
+          step.credible_set_output_path={{output}}/output/credible_set \
+          step.credible_set_variant_output_path={{output}}/output/credible_set_variant \
+          step.lead_pvalue_threshold=1.0e-3 \
+          step.summary_statistics_location=null \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=10 \
+          step.session.spark_uri=yarn

@@ -84,6 +84,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/finngen_data/finngen_gwas/finngen_gwas_ingestion \
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
+		datasources/eqtl_catalogue_data/otar2065_microglia/otar2065_microglia_ingestion \
 		datasources/decode_data/decode_ingestion \
 		datasources/decode_data/decode_smp_finemapping/decode_smp_finemapping \
 		credible_set_qc/credible_set_qc \
@@ -135,7 +136,7 @@ upload-sle-map-readme: ## Upload the sle_map_data readme to a run folder: make u
 
 upload-otar2065-microglia-readme: ## Upload the OTAR2065 microglia readme to a run folder: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>))
-	@gcloud storage cp docs/datasources/eqtl_catalogue_data/otar2065_microglia/README.md $(BUCKET)/docs/README.md
+	@gcloud storage rsync docs/datasources/eqtl_catalogue_data/otar2065_microglia $(BUCKET)/docs
 
 upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))

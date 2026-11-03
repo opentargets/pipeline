@@ -53,8 +53,48 @@ The SuSiE files have the same schemas as those of the eQTL Catalogue r8 release.
 - 3,293 credible sets carry the quality control `Subsignificant p-value` and are still in the release; the threshold used is not recorded.
 - `study_index` once held every study twice, under the projects `microglia` and `OTAR2065_neuroinflammation` ([opentargets/issues#3924](https://github.com/opentargets/issues/issues/3924)). The frozen copy has only `OTAR2065_neuroinflammation`, with unique study ids.
 
+## v4 ingestion
+
+The DAG `otar2065_microglia_ingestion` runs the gentropy `eqtl_catalogue` step on the qtlmap output, as for the eQTL Catalogue r8 release, into `CredibleSet` and `CredibleSetVariant`:
+
+```sh
+gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/
+├── bin/      gentropy CLI and cluster init script of the run
+├── config/   otar2065_microglia_ingestion.yaml (the DAG config of the run)
+├── docs/     README.md + DAG svg
+└── output/{study_index, credible_set, credible_set_variant}
+```
+
+![otar2065_microglia_ingestion](otar2065_microglia_ingestion.svg)
+
+- gentropy commit `b8d49acab42b8357ce999e3ab9995dca235f9e7a` ([opentargets/gentropy#1343](https://github.com/opentargets/gentropy/pull/1343)), one cluster of 8 `n2d-highmem-16` workers; the run took 7 minutes.
+- Inputs: `susie/QTD*_credible_sets.parquet`, `susie/QTD*_lbf_variable_merged.parquet` and `susie_batches/QTD*/full/QTD*.full_susie.parquet` of the qtlmap output, and `gs://eqtl_catalogue_data/otar2065_microglia/inputs/dataset_metadata.tsv`, a copy of `dataset_metadata.tsv` of the DAG folder. The datasets are not in the eQTL Catalogue metadata, so this table describes them, with the values of the frozen study index and `study_id` `OTAR2065`.
+- `lead_pvalue_threshold` 1e-3, as for r8. `summary_statistics_location` is null: the summary statistics are not public, so the studies have no `summarystatsLocation` and `hasSumstats` is false.
+- `reportedBeta` and `reportedStandardError` are the marginal effects of the qtlmap credible sets; `conditionalBeta` and `conditionalStandardError` come from the full SuSiE output, for every member. `effectAlleleFrequency` is empty, as in r8.
+- Study identifiers follow the eQTL Catalogue ingestion and are lower case: `otar2065_<QTD>_otar2065_neuroinflammation_ge_<sample group>_<ENSG>`. They differ from the frozen release.
+
+| | v4 | frozen release | frozen, without `Subsignificant p-value` |
+|---|---:|---:|---:|
+| `QTD000759` | 3,055 | 3,599 | 3,058 |
+| `QTD000760` | 351 | 1,227 | 351 |
+| `QTD000761` | 3,154 | 3,714 | 3,163 |
+| `QTD000762` | 519 | 1,119 | 520 |
+| `QTD000763` | 4,011 | 4,741 | 4,015 |
+| credible sets | 11,090 | 14,400 | 11,107 |
+| credible set variants | 328,270 | 394,699 | |
+| studies | 8,775 | 8,775 | |
+
+- 11,087 credible sets have the same dataset, gene and lead in both. The 3,293 credible sets flagged `Subsignificant p-value` in the frozen release are not in v4.
+- 17 credible sets of the frozen release are not in v4: their lead p-value is 1.001e-3 to 1.049e-3 in the qtlmap output, stored rounded to 1.0e-3 in the frozen release, so it passed the 1e-3 filter there.
+- 3 credible sets have another lead in v4; the frozen lead is a member of the v4 credible set.
+- Every credible set has variants and a study, ids are unique, the lead is a member of its credible set, and the posterior probabilities of each credible set sum to 0.95–1.0. One study, of `QTD000763`, has no credible set left after the lead p-value filter.
+
 ## Changelog
 
 ### 2026-11-03
 
 * Copied the release from `gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia/gentropy/` into the run folder `gs://eqtl_catalogue_data/otar2065_microglia/prod/20250624T124201/`. `pis` reads the run folder. The source folder is not changed.
+
+### 2026-11-03 (v4 ingestion)
+
+* New DAG `otar2065_microglia_ingestion`: the gentropy `eqtl_catalogue` step on the qtlmap output, into `gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T153734/`, see [v4 ingestion](#v4-ingestion). `pis` keeps reading the frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.
