@@ -9,7 +9,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-decode-readme upload-decode-smp-finemapping-readme upload-eqtlgen-readme upload-sle-map-readme
+				upload-decode-readme upload-decode-smp-finemapping-readme upload-eqtlgen-readme upload-sle-map-readme upload-otar2065-microglia-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -132,6 +132,10 @@ upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 upload-sle-map-readme: ## Upload the sle_map_data readme to a run folder: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage cp docs/datasources/sle_map_data/README.md $(BUCKET)/docs/README.md
+
+upload-otar2065-microglia-readme: ## Upload the OTAR2065 microglia readme to a run folder: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/eqtl_catalogue_data/otar2065_microglia/README.md $(BUCKET)/docs/README.md
 
 upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))

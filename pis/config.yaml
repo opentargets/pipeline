@@ -976,18 +976,14 @@ steps:
 
   #: MOLQTL_PPP STEP: ##############################################################################
   molqtl_ppp:
-    - name: explode otar2077 molqtl
-      foreach:
-        - microglia
+    # OTAR2065 neuroinflammation microglia sc-eQTLs (processed by the eQTL Catalogue, OTAR2077):
+    - name: copy_many molqtl microglia study
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/20250624T124201/output/study_index/*/*.parquet
+      destination: input/molqtl/study/otar2077/microglia
 
-      do:
-        - name: copy_many molqtl ${each} study
-          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
-          destination: input/molqtl/study/otar2077/${each}
-
-        - name: copy_many molqtl ${each} credible sets
-          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_locus/*/*.parquet
-          destination: input/molqtl/credible_set/otar2077/${each}
+    - name: copy_many molqtl microglia credible sets
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/20250624T124201/output/study_locus/*/*.parquet
+      destination: input/molqtl/credible_set/otar2077/microglia
 
     - name: explode eQTLGen molqtl
       foreach:
