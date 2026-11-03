@@ -52,8 +52,8 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
 
 def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
     """Each step writes under its source's version directory and is pinned to that version."""
-    aact = f'gs://clinical_staging/aact/{config.aact_version}'
-    mining = f'gs://clinical_staging/clinical_mining/{config.clinical_mining_version}'
+    aact = f'gs://clinical_staging/aact/{config.staging_version}'
+    mining = f'gs://clinical_staging/clinical_mining/{config.staging_version}'
     for step_name, uri in [
         ('pis_aact', aact),
         ('pts_aact_trial_extraction', aact),
@@ -65,15 +65,17 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
         assert config.step_config(step_name)['release_uri'] == uri
         assert config.config_uri(step_name) == f'{uri}/etc/config/{step_name}.yaml'
 
-    assert config.step_config('pis_aact')['scratchpad']['aact_version'] == config.aact_version
-    assert (
-        config.step_config('pis_clinical_mining')['scratchpad']['clinical_mining_version']
-        == config.clinical_mining_version
-    )
+
+def test_staging_version_feeds_both_sources(config: ClinicalStagingConfig) -> None:
+    """One date names both trees, the pis scratchpad variables and the pts snapshots."""
+    assert config.release_uri('pis_aact').endswith(f'/{config.staging_version}')
+    assert config.release_uri('pis_clinical_mining').endswith(f'/{config.staging_version}')
+    assert config.step_config('pis_aact')['scratchpad']['staging_version'] == config.staging_version
+    assert config.step_config('pis_clinical_mining')['scratchpad']['staging_version'] == config.staging_version
     (task,) = config.step_config('pts_aact_trial_models')['steps']['aact_trial_models']
-    assert task['settings']['snapshot'] == config.aact_version
+    assert task['settings']['snapshot'] == config.staging_version
     (task,) = config.step_config('pts_clinical_mining_models')['steps']['clinical_mining_models']
-    assert task['settings']['snapshot'] == config.clinical_mining_version
+    assert task['settings']['snapshot'] == config.staging_version
 
 
 def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> None:
@@ -90,17 +92,17 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 
     orchestration does not depend on pts; pts tests that the pins equal the tags staging writes.
     """
-    text = _release_step_text({'aact_version': 'A', 'clinical_mining_version': 'M', **FAKE_TAGS})
+    text = _release_step_text({'staging_version': 'S', **FAKE_TAGS})
     stop = FAKE_TAGS['stop_reasons_tag']
     drug = FAKE_TAGS['drug_entities_tag']
     disease = FAKE_TAGS['disease_entities_tag']
     extraction = FAKE_TAGS['extraction_tag']
     for base in (
-        f'gs://clinical_staging/aact/A/stop_reasons/{stop}',
-        f'gs://clinical_staging/aact/A/extraction/{extraction}',
-        f'gs://clinical_staging/aact/A/extraction/{extraction}/drug_entities/{drug}',
-        f'gs://clinical_staging/clinical_mining/M/drug_entities/{drug}',
-        f'gs://clinical_staging/clinical_mining/M/disease_entities/{disease}',
+        f'gs://clinical_staging/aact/S/stop_reasons/{stop}',
+        f'gs://clinical_staging/aact/S/extraction/{extraction}',
+        f'gs://clinical_staging/aact/S/extraction/{extraction}/drug_entities/{drug}',
+        f'gs://clinical_staging/clinical_mining/S/drug_entities/{drug}',
+        f'gs://clinical_staging/clinical_mining/S/disease_entities/{disease}',
     ):
         for name in ('data.parquet', 'metadata.json'):
             assert f'{base}/{name}' in text
