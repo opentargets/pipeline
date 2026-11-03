@@ -9,7 +9,7 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-decode-bucket-readme upload-eqtlgen-readme
+				upload-decode-bucket-readme upload-eqtlgen-readme upload-eqtlgen-ingestion-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -85,6 +85,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
 		datasources/decode_data/decode_ingestion \
+		datasources/eqtlgen_data/eqtlgen_ingestion/eqtlgen_ingestion \
 		credible_set_qc/credible_set_qc \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
@@ -127,6 +128,10 @@ upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 
 upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 	@gcloud storage rsync docs/datasources/interval_data gs://interval_data/docs
+
+upload-eqtlgen-ingestion-readme: ## Upload the eqtlgen ingestion readme to a run folder: make upload-eqtlgen-ingestion-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-ingestion-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/eqtlgen_data/eqtlgen_ingestion $(BUCKET)/docs
 
 upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))

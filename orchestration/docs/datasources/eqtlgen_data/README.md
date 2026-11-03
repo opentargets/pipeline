@@ -80,3 +80,7 @@ The credible sets follow the gentropy `StudyLocus` schema of the time (`finemapp
 ### 2026-11-03
 
 * Copied the release from the top level of `gs://eqtlgen_data` into the run folder `gs://eqtlgen_data/prod/20260326T115635/`. `pis` reads the run folder. `raw_data/` stays at the top level, as the input of the next ingestion.
+
+### 2026-11-03 (v4 ingestion)
+
+* New DAG `eqtlgen_ingestion` with the gentropy step `eqtlgen_ingestion`: the `single_cell_eqtl` and `coeqtl` credible sets in the new credible set schema, from `raw_data/`. Run `gs://eqtlgen_data/prod/20261103T135048/`, see [its README](eqtlgen_ingestion/README.md). It fixes the effect direction of `single_cell_eqtl`, the effects of the credible sets and the duplicate `coeqtl` studies. `pis` keeps reading this frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.
