@@ -1,4 +1,4 @@
-"""The `gwas` and `molqtl` steps stage each source's study, credible sets and credible set variants.
+"""The `gwas`, `gwas_ppp` and `molqtl` steps stage each source's study, credible sets and credible set variants.
 
 The credible set variants of a source are only valid next to the credible sets of the same run,
 so all three datasets of a source must come from one run folder.
@@ -19,10 +19,13 @@ EXPECTED_RUNS = {
         'gwas/{dataset}/gcca': 'gs://gwas_catalog_top_hits/prod/20261028T234317/output',
         'gwas/{dataset}/gcss_pics': 'gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output',
         'gwas/{dataset}/gcss_susie': 'gs://gwas_catalog_sumstats_susie/prod/20261101T152321/output',
-        'gwas/{dataset}/finngen': 'gs://finngen_data/gwas/prod/20261029T152531/output',
+        'gwas/{dataset}/finngen_gwas': 'gs://finngen_data/gwas/prod/20261029T152531/output',
+    },
+    'gwas_ppp': {
+        'gwas/{dataset}/finngen_meta': 'gs://finngen_data/meta/three-way/prod/20261102T181409/output',
     },
     'molqtl': {
-        'molqtl/{dataset}/eqtl_catalogue/r8': 'gs://eqtl_catalogue_data/r8/prod/20261030T164426/output',
+        'molqtl/{dataset}/eqtl_catalogue': 'gs://eqtl_catalogue_data/r8/prod/20261030T164426/output',
         'molqtl/{dataset}/ukb_ppp_eur': 'gs://ukb_ppp_eur_data/prod/20261026T161010/output',
         'molqtl/{dataset}/finngen_multiome': 'gs://finngen_data/multiome/prod/20261029T125742/output',
     },
@@ -56,3 +59,7 @@ def test_gwas_sources_stage_new_schema_credible_sets() -> None:
 
 def test_molqtl_sources_stage_new_schema_credible_sets() -> None:
     assert _copies('molqtl') == _expected('molqtl')
+
+
+def test_gwas_ppp_sources_stage_new_schema_credible_sets() -> None:
+    assert _copies('gwas_ppp') == _expected('gwas_ppp')

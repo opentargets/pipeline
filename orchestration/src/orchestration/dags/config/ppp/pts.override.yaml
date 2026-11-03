@@ -58,13 +58,13 @@ steps:
           - input/gwas/study/gcca
           - input/gwas/study/gcss_pics
           - input/gwas/study/gcss_susie
-          - input/gwas/study/finngen
+          - input/gwas/study/finngen_gwas
           - input/molqtl/study/ukb_ppp_eur
           - input/molqtl/study/sle_map
           # GWAS PPP
-          - input/gwas/study/finngen_ukb_mvp
+          - input/gwas/study/finngen_meta
           # molQTL PPP
-          - input/molqtl/study/eqtl_catalogue/r8
+          - input/molqtl/study/eqtl_catalogue
           - input/molqtl/study/otar2077/microglia
           - input/molqtl/study/eQTLGen/single_cell_eqtl
           - input/molqtl/study/eQTLGen/coeqtl
@@ -100,13 +100,13 @@ steps:
           - input/gwas/credible_set/gcca
           - input/gwas/credible_set/gcss_pics
           - input/gwas/credible_set/gcss_susie
-          - input/gwas/credible_set/finngen
+          - input/gwas/credible_set/finngen_gwas
           - input/molqtl/credible_set/ukb_ppp_eur
           - input/molqtl/credible_set/sle_map
           # GWAS PPP
-          - input/gwas/credible_set/finngen_ukb_mvp
+          - input/gwas/credible_set/finngen_meta
           # molQTL PPP
-          - input/molqtl/credible_set/eqtl_catalogue/r8
+          - input/molqtl/credible_set/eqtl_catalogue
           - input/molqtl/credible_set/otar2077/microglia
           - input/molqtl/credible_set/eQTLGen/single_cell_eqtl
           - input/molqtl/credible_set/eQTLGen/coeqtl

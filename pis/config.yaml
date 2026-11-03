@@ -63,9 +63,9 @@ scratchpad:
   staging_gcss_pics_ts: '20261030T072623'
   staging_gcss_susie_ts: '20261101T152321'
   staging_finngen_gwas_ts: '20261029T152531'
-  staging_finngen_meta_ts: '20251027T140104'
+  staging_finngen_meta_ts: '20261102T181409'
   staging_eqtl_catalogue_ts: '20261030T164426'
-  staging_ukb_ppp_ts: '20261026T161010'
+  staging_ukb_ppp_eur_ts: '20261026T161010'
   staging_finngen_multiome_ts: '20261029T125742'
 
 steps:
@@ -912,28 +912,32 @@ steps:
         billing_project: open-targets-eu-dev
       destination: input/gwas/credible_set_variant/gcss_susie
 
-    - name: copy_many finngen study
+    - name: copy_many finngen gwas study
       sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/study/*.parquet
-      destination: input/gwas/study/finngen
+      destination: input/gwas/study/finngen_gwas
 
-    - name: copy_many finngen credible sets
+    - name: copy_many finngen gwas credible sets
       sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set/*.parquet
-      destination: input/gwas/credible_set/finngen
+      destination: input/gwas/credible_set/finngen_gwas
 
-    - name: copy_many finngen credible set variants
+    - name: copy_many finngen gwas credible set variants
       sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set_variant/*.parquet
-      destination: input/gwas/credible_set_variant/finngen
+      destination: input/gwas/credible_set_variant/finngen_gwas
   ##################################################################################################
 
   #: GWAS_PPP STEP :################################################################################
   gwas_ppp:
-    - name: copy_many finngen-UKBB-MVP study
-      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/study_index/*.parquet
-      destination: input/gwas/study/finngen_ukb_mvp
+    - name: copy_many finngen meta study
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/study/*.parquet
+      destination: input/gwas/study/finngen_meta
 
-    - name: copy_many finngen-UKBB-MVP credible sets
-      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_sets/*.parquet
-      destination: input/gwas/credible_set/finngen_ukb_mvp
+    - name: copy_many finngen meta credible sets
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set/*.parquet
+      destination: input/gwas/credible_set/finngen_meta
+
+    - name: copy_many finngen meta credible set variants
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/credible_set_variant/finngen_meta
   ##################################################################################################
 
   #: HERITABILITY STEP :############################################################################
@@ -985,31 +989,31 @@ steps:
   molqtl:
     - name: copy_many eQTL Catalogue r8 study
       sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/study_index/*.parquet
-      destination: input/molqtl/study/eqtl_catalogue/r8
+      destination: input/molqtl/study/eqtl_catalogue
 
     - name: copy_many eQTL Catalogue r8 credible sets
       sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set/*.parquet
-      destination: input/molqtl/credible_set/eqtl_catalogue/r8
+      destination: input/molqtl/credible_set/eqtl_catalogue
 
     - name: copy_many eQTL Catalogue r8 credible set variants
       sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set_variant/*.parquet
-      destination: input/molqtl/credible_set_variant/eqtl_catalogue/r8
+      destination: input/molqtl/credible_set_variant/eqtl_catalogue
       max_concurrency: 4
 
     - name: copy_many UKBB PPP EUR study
-      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_ts}/output/study/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/study/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible sets
-      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_ts}/output/credible_set/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set/ukb_ppp_eur
 
     - name: copy_many UKBB PPP EUR credible set variants
-      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_ts}/output/credible_set_variant/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set_variant/*.parquet
       settings:
         billing_project: open-targets-eu-dev
       destination: input/molqtl/credible_set_variant/ukb_ppp_eur

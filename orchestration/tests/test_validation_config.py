@@ -5,7 +5,7 @@ import pytest
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 PPP_ONLY = ['sle_map', 'otar2077/microglia', 'eQTLGen/coeqtl', 'deCODE_proteomics']
-BOTH = ['eqtl_catalogue/r8', 'ukb_ppp_eur']
+BOTH = ['eqtl_catalogue', 'ukb_ppp_eur']
 
 
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
