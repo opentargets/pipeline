@@ -6,7 +6,9 @@ from typing import Any
 import polars as pl
 from otter.config.yaml import parse_yaml
 
+from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.set_qc import SetQcSettings
 from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
 
@@ -166,3 +168,10 @@ def test_variant_qc_of_every_source_cuts_at_95_percent_coverage() -> None:
             tasks[f'transform qc credible set variants {kind}/{source}']['settings']
         )
         assert (settings.coverage, settings.pip_tolerance) == (0.95, 1e-4), source
+
+
+def test_set_qc_of_every_source_allows_every_finemapping_method() -> None:
+    tasks = _tasks()
+    for source, kind in SOURCES.items():
+        settings = SetQcSettings.model_validate(tasks[f'transform qc credible sets {kind}/{source}']['settings'])
+        assert settings.allowed_fm_methods == list(FinemappingMethod), source

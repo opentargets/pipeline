@@ -153,6 +153,11 @@ steps:
           source:
             credible_set: input/${each}/credible_set
           destination: intermediate/qc/${each}/credible_set
+          settings:
+            allowed_fm_methods:
+              - PICS
+              - SuSiE
+              - SuSiE-inf
 
         - name: transform qc credible set variants ${each}
           transformer: credible_set.variant_qc
