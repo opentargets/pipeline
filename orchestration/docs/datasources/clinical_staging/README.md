@@ -12,8 +12,8 @@ the release by `pis/config.yaml`.
 AACT (Aggregate Analysis of ClinicalTrials.gov) is published as dated
 PostgreSQL archives by CTTI, fetched from
 `https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/<version>`.
-The clinical mining inputs TTD, EMA and PMDA are fetched from their upstream
-sites on the same date (see "Upstream sources"). The ChEMBL mapping is a frozen
+The clinical mining inputs TTD, EMA and PMDA are copied from their upstream
+sites when the date is staged (see "Upstream sources"). The ChEMBL mapping is a frozen
 file, copied from `gs://ot-team/irene/clinical_mining/2026-05-27/`.
 
 | Pinned in | Names |
@@ -33,7 +33,7 @@ gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # dat
 gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/drug_entities/<tag>/
 gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
-gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda (+ .fetch.json sidecars), chembl mapping, models
+gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<staging_version>/{drug_entities,disease_entities}/<tag>/
 ```
 
@@ -57,9 +57,8 @@ and its version. Each step runs on its own short-lived GCE VM.
    model on 32 labels per forward pass (`ner_model_batch_size`). It reads the
    extraction of the tag its own code computes, and fails naming the expected
    path if there is none.
-4. `pis_clinical_mining` — fetches the TTD, EMA and PMDA inputs from upstream
-   (once per date), copies the frozen ChEMBL mapping, and copies the chemical,
-   drugtemist and disease models.
+4. `pis_clinical_mining` — copies the TTD, EMA and PMDA inputs from upstream,
+   the frozen ChEMBL mapping, and the chemical, drugtemist and disease models.
 5. `pts_clinical_mining_models` (n2d-standard-16) — runs the drug and disease
    NER over the TTD, EMA and PMDA texts and publishes `drug_entities/<tag>` and
    `disease_entities/<tag>`. The drug NER runs the model on 32 labels per
@@ -77,32 +76,24 @@ which the other sources are filed.
 | --- | --- | --- |
 | TTD | `https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt` | `input/ttd.txt` |
 | EMA | `https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx` | `input/ema_medicines.xlsx` |
-| PMDA | the "New Drugs" PDF linked from `https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html` | `input/pmda.pdf` |
+| PMDA | `https://www.pmda.go.jp/files/<pmda_file>.pdf` | `input/pmda.pdf` |
 
-The `fetch_once` task downloads TTD and EMA, and `fetch_pmda` finds the PDF
-link on the PMDA page and downloads it. The PDF link is the one under the "New
-Drugs" heading whose text starts with "April 2004 to" or "All". If none or
-more than one matches, the task fails, naming the page and every PDF link it
-found.
+All three are plain `copy` steps, like other sources with no versioned URL.
 
-- A file already under the date's `input/` is kept, not downloaded again, and
-  the step logs that it reused the file. A rerun of a date therefore never
-  swaps the inputs of a date already staged.
-- Beside each fetched file, `<file>.fetch.json` records the URL requested and the
-  URL downloaded, the UTC download time, the size in bytes, the sha256, the
-  `Content-Type`, `Last-Modified` and `ETag` headers, and for PMDA the period
-  text of the link, for example "April 2004 to February 2026". A kept file keeps
-  its sidecar unchanged.
-- A `staging_version` in the past is allowed. When the download date differs
-  from it, the task logs a warning naming both dates.
-- To re-fetch a source for a date (a bad body, a zero-byte object, or a
-  deliberate refresh), delete both the file and its `.fetch.json` sidecar under
-  `gs://clinical_staging/clinical_mining/<staging_version>/input/`, then rerun
-  `pis_clinical_mining`. Do this only before any NER snapshot of that date is
-  published. After that, stage a new date instead, because the snapshots are
-  write-once and would no longer match the inputs.
-- TTD, EMA and PMDA keep no history upstream, so the staged copy and its
-  sidecar are the only record of what a date held.
+- TTD and EMA have no version in their URL, so a date holds what upstream
+  served when `pis_clinical_mining` last ran. EMA changes daily. Rerunning
+  `pis_clinical_mining` replaces them with what upstream serves that day. Do
+  that only before any NER snapshot of the date is published; after that,
+  stage a new date instead, because the snapshots are write-once and would no
+  longer match the inputs.
+- `pmda_file` in `pis/config.yaml` pins the PMDA edition: the number of the
+  "New Drugs" PDF linked from
+  `https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html`,
+  today the "April 2004 to February 2026" edition. PMDA removes the previous
+  file when it publishes a new edition, so the copy fails with a 404 until
+  `pmda_file` is bumped to the new number.
+- TTD, EMA and PMDA keep no history upstream, so the staged copy is the only
+  record of what a date held.
 
 The ChEMBL mapping is an export of ChEMBL's private curation tables and cannot
 be fetched. It stays frozen: `pis/config.yaml` copies it from the literal path
@@ -243,11 +234,9 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    sources exists.
 4. Only then move the unified pipeline onto the new pts and pis.
 
-The pis step fetching TTD, EMA and PMDA runs from the published `pis_version`
-image, so staging a date with it needs a release of pis. The release block of
-`pis/config.yaml` still names `aact_version` and `clinical_mining_version`.
-Replacing them with one `staging_version` in the release is a second change
-(PR B), made with the first staging run of the new date.
+The release block of `pis/config.yaml` still names `aact_version` and
+`clinical_mining_version`. Replacing them with one `staging_version` in the
+release is a second change, made with the first staging run of the new date.
 
 `gs://aact_data` is kept as history and is no longer read or written, apart
 from the one-off import.
@@ -268,10 +257,9 @@ Only AACT trials with an extraction row are included in the clinical report.
 
 - One `staging_version` in `clinical_staging.yaml` replaces `aact_version` and
   `clinical_mining_version`, and dates both trees.
-- `pis_clinical_mining` fetches TTD, EMA and PMDA from upstream once per
-  staging date, with a `<file>.fetch.json` sidecar beside each. The ChEMBL
-  mapping is copied from its frozen 2026-05-27 path. The release block of
-  `pis/config.yaml` is unchanged.
+- `pis_clinical_mining` copies TTD, EMA and PMDA from upstream, PMDA by the
+  pinned `pmda_file`. The ChEMBL mapping is copied from its frozen 2026-05-27
+  path. The release block of `pis/config.yaml` is unchanged.
 
 ### 2026-10-31
 

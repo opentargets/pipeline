@@ -31,6 +31,7 @@ scratchpad:
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
   clinical_mining_version: '2026-05-27'
+  pmda_file: '000281190'
   stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
   biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
@@ -234,26 +235,22 @@ steps:
   #: CLINICAL_MINING STEP :#######################################################################
   # Stages the clinical mining inputs and the models that read them. The staging DAG runs
   # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version},
-  # where it sets clinical_mining_version to the staging date. TTD, EMA and PMDA are fetched
-  # from upstream once per staging date. The ChEMBL mapping is frozen at the 2026-05-27 file.
+  # where it sets clinical_mining_version to the staging date. TTD, EMA and PMDA are copied
+  # from upstream. pmda_file is the "New Drugs" PDF linked from
+  # https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html
+  # The ChEMBL mapping is frozen at the 2026-05-27 file.
   clinical_mining:
-    - name: fetch_once ttd
+    - name: copy ttd
       source: https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt
       destination: input/ttd.txt
-      as_of: ${clinical_mining_version}
-      expect: TTD
 
-    - name: fetch_once ema medicines
+    - name: copy ema medicines
       source: https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx
       destination: input/ema_medicines.xlsx
-      as_of: ${clinical_mining_version}
-      expect: PK
 
-    - name: fetch_pmda pmda
-      page: https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html
+    - name: copy pmda
+      source: https://www.pmda.go.jp/files/${pmda_file}.pdf
       destination: input/pmda.pdf
-      as_of: ${clinical_mining_version}
-      expect: '%PDF'
 
     - name: copy chembl mapping
       source: gs://ot-team/irene/clinical_mining/2026-05-27/input/clinical_report/chembl_mapping.parquet
