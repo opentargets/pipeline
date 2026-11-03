@@ -19,7 +19,7 @@ file, copied from `gs://ot-team/irene/clinical_mining/2026-05-27/`.
 | Pinned in | Names |
 | --- | --- |
 | `staging_version` in `clinical_staging.yaml` | the one date the DAG stages, for every source |
-| `aact_version`, `clinical_mining_version` in the release block of `pis/config.yaml` | the versions the release copies |
+| `staging_version` in `pis/config.yaml` | the date the release copies, for every source |
 | `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
 | `*_tag` in `pis/config.yaml` | the snapshots the release copies |
 | `extraction_tag` in `pis/config.yaml` | the extraction the release copies, and the AACT drug snapshot under it |
@@ -234,9 +234,9 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    sources exists.
 4. Only then move the unified pipeline onto the new pts and pis.
 
-The release block of `pis/config.yaml` still names `aact_version` and
-`clinical_mining_version`. Replacing them with one `staging_version` in the
-release is a second change, made with the first staging run of the new date.
+To move the release onto a new date, set `staging_version` in `pis/config.yaml`
+to the date in `clinical_staging.yaml` once that date is staged, in the same
+change.
 
 `gs://aact_data` is kept as history and is no longer read or written, apart
 from the one-off import.
@@ -255,8 +255,9 @@ Only AACT trials with an extraction row are included in the clinical report.
 
 ### 2026-11-03
 
-- One `staging_version` in `clinical_staging.yaml` replaces `aact_version` and
-  `clinical_mining_version`, and dates both trees.
+- One `staging_version` replaces `aact_version` and `clinical_mining_version`,
+  in `clinical_staging.yaml` and in `pis/config.yaml`, and dates both trees.
+  The release reads 2026-11-03.
 - `pis_clinical_mining` copies TTD, EMA and PMDA from upstream, PMDA by the
   pinned `pmda_file`. The ChEMBL mapping is copied from its frozen 2026-05-27
   path. The release block of `pis/config.yaml` is unchanged.

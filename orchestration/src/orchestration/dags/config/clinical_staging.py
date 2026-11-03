@@ -59,7 +59,7 @@ class ClinicalStagingConfig:
         """The internal configuration for PTS steps, per source."""
         for source, version in self.versions.items():
             pis = AppConfig.from_file(file_path=pis_path)
-            pis.config['scratchpad'][f'{source}_version'] = version
+            pis.config['scratchpad']['staging_version'] = version
             pis.config['release_uri'] = self.source_uri(source)
             pis.config['work_path'] = '/mnt/disks/work'
             pis.config['log_level'] = 'INFO'

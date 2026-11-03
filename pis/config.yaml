@@ -4,7 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-11-01'
+  staging_version: '2026-11-03'
   chembl_version: '37'
   efo_version: '3.93.0'
   ensembl_version: '116'
@@ -30,7 +30,6 @@ scratchpad:
   gtex_version: '11'
   cell_ontology_version: '2026-06-08'
   uberon_version: '2026-06-23'
-  clinical_mining_version: '2026-05-27'
   pmda_file: '000281190'
   stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
@@ -188,7 +187,7 @@ steps:
   # The staging DAG downloads this archive and the models, and stages the extraction and snapshots.
   aact:
     - name: copy aact dump
-      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${staging_version}
       destination: input/aact.zip
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
@@ -234,8 +233,8 @@ steps:
 
   #: CLINICAL_MINING STEP :#######################################################################
   # Stages the clinical mining inputs and the models that read them. The staging DAG runs
-  # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version},
-  # where it sets clinical_mining_version to the staging date. TTD, EMA and PMDA are copied
+  # this with release_uri at gs://clinical_staging/clinical_mining/${staging_version},
+  # where it sets staging_version to the date of the run. TTD, EMA and PMDA are copied
   # from upstream. pmda_file is the "New Drugs" PDF linked from
   # https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html
   # The ChEMBL mapping is frozen at the 2026-05-27 file.
@@ -301,53 +300,53 @@ steps:
   # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
   clinical_report:
     - name: copy aact dump
-      source: gs://clinical_staging/aact/${aact_version}/input/aact.zip
+      source: gs://clinical_staging/aact/${staging_version}/input/aact.zip
       destination: input/clinical_report/aact.zip
 
     - name: copy_many aact trial extraction
       sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/metadata.json
       destination: input/clinical_report/aact_trial_extraction
 
     - name: copy ttd
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ttd.txt
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/ttd.txt
       destination: input/clinical_report/ttd.txt
 
     - name: copy ema medicines
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ema_medicines.xlsx
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/ema_medicines.xlsx
       destination: input/clinical_report/ema_medicines.xlsx
 
     - name: copy pmda
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/pmda.pdf
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/pmda.pdf
       destination: input/clinical_report/pmda.pdf
 
     - name: copy chembl mapping
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/chembl_mapping.parquet
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/chembl_mapping.parquet
       destination: input/clinical_report/chembl_mapping.parquet
 
     - name: copy_many aact stop reasons
       sources:
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/stop_reasons/${stop_reasons_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/stop_reasons/${stop_reasons_tag}/metadata.json
       destination: input/clinical_report/aact_stop_reasons
 
     - name: copy_many aact drug entities
       sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/aact_drug_entities
 
     - name: copy_many mining drug entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/metadata.json
+        - gs://clinical_staging/clinical_mining/${staging_version}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${staging_version}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/mining_drug_entities
 
     - name: copy_many mining disease entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/metadata.json
+        - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/metadata.json
       destination: input/clinical_report/mining_disease_entities
   ##################################################################################################
 

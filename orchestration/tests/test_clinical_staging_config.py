@@ -70,8 +70,8 @@ def test_staging_version_feeds_both_sources(config: ClinicalStagingConfig) -> No
     """One date names both trees, the pis scratchpad variables and the pts snapshots."""
     assert config.release_uri('pis_aact').endswith(f'/{config.staging_version}')
     assert config.release_uri('pis_clinical_mining').endswith(f'/{config.staging_version}')
-    assert config.step_config('pis_aact')['scratchpad']['aact_version'] == config.staging_version
-    assert config.step_config('pis_clinical_mining')['scratchpad']['clinical_mining_version'] == config.staging_version
+    assert config.step_config('pis_aact')['scratchpad']['staging_version'] == config.staging_version
+    assert config.step_config('pis_clinical_mining')['scratchpad']['staging_version'] == config.staging_version
     (task,) = config.step_config('pts_aact_trial_models')['steps']['aact_trial_models']
     assert task['settings']['snapshot'] == config.staging_version
     (task,) = config.step_config('pts_clinical_mining_models')['steps']['clinical_mining_models']
@@ -92,17 +92,17 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 
     orchestration does not depend on pts; pts tests that the pins equal the tags staging writes.
     """
-    text = _release_step_text({'aact_version': 'A', 'clinical_mining_version': 'M', **FAKE_TAGS})
+    text = _release_step_text({'staging_version': 'S', **FAKE_TAGS})
     stop = FAKE_TAGS['stop_reasons_tag']
     drug = FAKE_TAGS['drug_entities_tag']
     disease = FAKE_TAGS['disease_entities_tag']
     extraction = FAKE_TAGS['extraction_tag']
     for base in (
-        f'gs://clinical_staging/aact/A/stop_reasons/{stop}',
-        f'gs://clinical_staging/aact/A/extraction/{extraction}',
-        f'gs://clinical_staging/aact/A/extraction/{extraction}/drug_entities/{drug}',
-        f'gs://clinical_staging/clinical_mining/M/drug_entities/{drug}',
-        f'gs://clinical_staging/clinical_mining/M/disease_entities/{disease}',
+        f'gs://clinical_staging/aact/S/stop_reasons/{stop}',
+        f'gs://clinical_staging/aact/S/extraction/{extraction}',
+        f'gs://clinical_staging/aact/S/extraction/{extraction}/drug_entities/{drug}',
+        f'gs://clinical_staging/clinical_mining/S/drug_entities/{drug}',
+        f'gs://clinical_staging/clinical_mining/S/disease_entities/{disease}',
     ):
         for name in ('data.parquet', 'metadata.json'):
             assert f'{base}/{name}' in text

@@ -56,19 +56,19 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     sources = _copy_sources()
     expected = {
         'input/clinical_report/aact_stop_reasons': (
-            'gs://clinical_staging/aact/{aact_version}/stop_reasons',
+            'gs://clinical_staging/aact/{staging_version}/stop_reasons',
             STOP_REASONS,
         ),
         'input/clinical_report/aact_drug_entities': (
-            'gs://clinical_staging/aact/{aact_version}/extraction/{extraction_tag}/drug_entities',
+            'gs://clinical_staging/aact/{staging_version}/extraction/{extraction_tag}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_drug_entities': (
-            'gs://clinical_staging/clinical_mining/{clinical_mining_version}/drug_entities',
+            'gs://clinical_staging/clinical_mining/{staging_version}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_disease_entities': (
-            'gs://clinical_staging/clinical_mining/{clinical_mining_version}/disease_entities',
+            'gs://clinical_staging/clinical_mining/{staging_version}/disease_entities',
             DISEASE_ENTITIES,
         ),
     }
@@ -80,6 +80,6 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 def test_release_copies_the_extraction_of_the_pinned_tag() -> None:
     """The extraction the release copies is the one directory named by the pinned extraction tag."""
     scratchpad = _scratchpad()
-    directory = f'gs://clinical_staging/aact/{scratchpad["aact_version"]}/extraction/{scratchpad["extraction_tag"]}'
+    directory = f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
     sources = _copy_sources()['input/clinical_report/aact_trial_extraction']
     assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
