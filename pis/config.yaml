@@ -6,7 +6,7 @@ pool_size: 4
 scratchpad:
   staging_version: '2026-11-03'
   chembl_version: '37'
-  efo_version: '3.93.0'
+  efo_version: '3.95.0'
   ensembl_version: '116'
   ensembl_core_caenorhabditis_elegans: caenorhabditis_elegans_core_63_116_282
   ensembl_core_canis_lupus_familiaris: canis_lupus_familiaris_core_116_1
@@ -22,14 +22,14 @@ scratchpad:
   ensembl_core_xenopus_tropicalis: xenopus_tropicalis_core_116_10
   ensembl_core_homo_sapiens: homo_sapiens_core_116_38
   depmap_version: '2026Q1'
-  hpo_version: '2026-06-23'
-  mondo_version: '2026-08-04'
+  hpo_version: '2026-09-01'
+  mondo_version: '2026-10-06'
   ot_curation: '26.09.2'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.1'
   gtex_version: '11'
   cell_ontology_version: '2026-06-08'
-  uberon_version: '2026-06-23'
+  uberon_version: '2026-10-01'
   pmda_file: '000281190'
   stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
