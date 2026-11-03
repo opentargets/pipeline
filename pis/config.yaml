@@ -21,7 +21,7 @@ scratchpad:
   ensembl_core_sus_scrofa: sus_scrofa_core_116_111
   ensembl_core_xenopus_tropicalis: xenopus_tropicalis_core_116_10
   ensembl_core_homo_sapiens: homo_sapiens_core_116_38
-  depmap_version: '2026Q1'
+  depmap_version: '2026Q3'
   hpo_version: '2026-09-01'
   mondo_version: '2026-10-06'
   ot_curation: '26.09.2'
