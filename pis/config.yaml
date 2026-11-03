@@ -1012,11 +1012,11 @@ steps:
 
     # SLE-map credible set and study table:
     - name: copy_many sle_map credible sets
-      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/credible_set/*.parquet
+      sources: gs://sle_map_data/prod/20260923T222644/output/credible_set/*.parquet
       destination: input/molqtl/credible_set/sle_map
 
     - name: copy_many sle_map study
-      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/study/*.parquet
+      sources: gs://sle_map_data/prod/20260923T222644/output/study/*.parquet
       destination: input/molqtl/study/sle_map
   ##################################################################################################
 
