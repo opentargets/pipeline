@@ -73,7 +73,6 @@ Every credible set has variants and a study, the ids are unique, the lead is a m
 
 - 18 `coeqtl` studies of `eGene` FAM153B have no `geneId`: the symbol is not in the target index of `do/platform-2610-2`.
 - eQTLGen gives no effect allele frequency, conditional effects or purity, so these are empty.
-- `gs://eqtlgen_data/prod/20261103T133828/` is an earlier run, without the 0.95 filter of the credible sets.
 
 ## Outputs
 
