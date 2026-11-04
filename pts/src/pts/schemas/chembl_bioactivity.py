@@ -29,6 +29,7 @@ chembl_bioactivity_schema = pl.Schema({
     'standardValue': pl.Float64(),
     'standardUnits': pl.String(),
     'measurementClass': pl.String(),
+    'activityOutcome': pl.String(),
     'assayActionType': pl.String(),
     'actionTypes': pl.List(pl.String()),
     'le': pl.Float64(),

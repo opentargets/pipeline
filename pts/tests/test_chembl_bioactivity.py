@@ -45,15 +45,34 @@ ACTIVITIES = [
         standard_units='nM',
         pchembl_value=7.39,
         action_type='BINDING AGENT',
+        activity_comment='Antagonist',
     ),
-    _activity(102, 1, 'Ki', standard_value=10, standard_units='nM', pchembl_value=8, molregno=2),
+    _activity(
+        102,
+        1,
+        'Ki',
+        standard_value=10,
+        standard_units='nM',
+        pchembl_value=8,
+        molregno=2,
+        activity_comment=' Not Active',
+    ),
     _activity(103, 2, 'IC50', standard_value=1000, standard_units='nM', pchembl_value=6),  # rat target
     _activity(104, 1, 'IC50', standard_value=100, pchembl_value=7, potential_duplicate=1),
     _activity(105, 3, 'IC50', standard_value=100, pchembl_value=7),  # cell-line target
     _activity(106, 4, 'IC50', standard_value=100, pchembl_value=7),  # ADMET assay
     _activity(107, 5, 'IC50', standard_value=100, pchembl_value=7),  # target with no gene
     _activity(108, 1, 'Inhibition', standard_value=50, standard_units='%'),  # no pChEMBL
-    _activity(109, 6, 'EC50', standard_value=300, standard_units='nM', pchembl_value=6.5, molregno=3),  # complex
+    _activity(
+        109,
+        6,
+        'EC50',
+        standard_value=300,
+        standard_units='nM',
+        pchembl_value=6.5,
+        molregno=3,
+        activity_comment='Inconclusive',
+    ),  # complex
     # passes every bioactivity prefilter, but is a degradation activity
     _activity(209, 1, 'IC50', standard_value=100, standard_units='nM', pchembl_value=7, modality=TPD),
 ]
@@ -214,6 +233,11 @@ class TestBioactivity:
             'affinity',
             'functional_potency',
         ]
+
+    def test_activity_outcome_from_pubchem_comments_only(self, output):
+        rows = _by_id(output)
+        # free text from a publication gives no outcome; PubChem's words are normalised
+        assert [rows[i]['activityOutcome'] for i in (101, 102, 109)] == [None, 'inactive', 'inconclusive']
 
     def test_unknown_pchembl_type_fails(self, tables, gene_df, drug_df, moa_df):
         tables['activities'] = pl.DataFrame(

@@ -9,6 +9,10 @@
     "isPrimaryKey": true
   },
   {
+    "id": "activityOutcome",
+    "description": "Outcome the screening centre recorded for a PubChem BioAssay measurement: active, inactive or inconclusive. A potency fitted to a curve judged inactive or inconclusive still has a pChEMBL value. Empty for other sources"
+  },
+  {
     "id": "assayActionType",
     "description": "Effect of the molecule on its target in this measurement (e.g., INHIBITOR), as ChEMBL records it on the activity"
   },

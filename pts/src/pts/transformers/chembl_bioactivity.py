@@ -13,6 +13,10 @@ Every activity carries the ChEMBL id of its molecule (``drugFromSourceId``) and,
 molecule or its parent is in the drug molecule dataset, the parent's ``drugId``. The action type
 ChEMBL records on the activity is ``assayActionType``; ``actionTypes`` are those of the curated
 mechanisms of action of the same drug on any of the activity's target genes.
+
+``activityOutcome`` is the screening centre's verdict on PubChem BioAssay rows: a fitted
+potency, and so a pChEMBL value, can come from a curve the depositor judged inactive or
+inconclusive.
 """
 
 from collections.abc import Mapping
@@ -93,6 +97,15 @@ MEASUREMENT_CLASSES = {
     'ED50': 'functional_potency',
 }
 """Every ``standard_type`` ChEMBL gives a pChEMBL value; a new one fails the step."""
+
+ACTIVITY_OUTCOMES = {
+    'active': 'active',
+    'not active': 'inactive',
+    'inactive': 'inactive',
+    'inconclusive': 'inconclusive',
+}
+"""The outcomes PubChem BioAssay depositions record in ``activity_comment``, lowercased.
+Any other comment (free text from publications, PubChem's ``Unspecified``) gives no outcome."""
 
 
 def chembl_bioactivity(
@@ -373,7 +386,7 @@ def _bioactivity(activities: pl.DataFrame, mapped_tids: pl.Series) -> pl.DataFra
         mapped_tids: The targets with at least one component mapped to a gene.
 
     Returns:
-        The activities passing every prefilter, with `measurementClass`.
+        The activities passing every prefilter, with `measurementClass` and `activityOutcome`.
 
     Raises:
         ValueError: If a row with a pChEMBL value has a type missing from `MEASUREMENT_CLASSES`.
@@ -410,7 +423,14 @@ def _bioactivity(activities: pl.DataFrame, mapped_tids: pl.Series) -> pl.DataFra
     if unknown:
         raise ValueError(f'pChEMBL types missing from MEASUREMENT_CLASSES: {unknown}')
 
-    return rows.with_columns(measurementClass=pl.col('standard_type').replace_strict(MEASUREMENT_CLASSES))
+    return rows.with_columns(
+        measurementClass=pl.col('standard_type').replace_strict(MEASUREMENT_CLASSES),
+        activityOutcome=pl
+        .col('activity_comment')
+        .str.strip_chars()
+        .str.to_lowercase()
+        .replace_strict(ACTIVITY_OUTCOMES, default=None),
+    )
 
 
 def _shape(rows: pl.DataFrame, component_lists: pl.DataFrame, complex_flags: pl.DataFrame) -> pl.DataFrame:
