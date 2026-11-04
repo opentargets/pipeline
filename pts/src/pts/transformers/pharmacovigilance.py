@@ -1,13 +1,17 @@
 """Pharmacovigilance signal detection from FAERS adverse event reports."""
 
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import numpy as np
 import polars as pl
+from loguru import logger
+from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 
 _ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
 _EMPTY_LIST = pl.lit([], dtype=pl.List(pl.String()))
@@ -43,8 +47,10 @@ def drug_names(drug_molecule: pl.DataFrame) -> pl.DataFrame:
 
 def read_blacklist(text: str) -> pl.DataFrame:
     """Normalise the blacklisted event terms, one per line."""
-    return pl.DataFrame({'event': text.splitlines()}, schema={'event': pl.String()}).select(
-        normalise_event(pl.col('event'))
+    return (
+        pl.DataFrame({'event': text.splitlines()}, schema={'event': pl.String()})
+        .select(normalise_event(pl.col('event')))
+        .filter(pl.col('event') != '')
     )
 
 
@@ -111,9 +117,8 @@ def read_archive(path: str, drugs: pl.DataFrame, blacklist: pl.DataFrame) -> pl.
     with StorageHandle(path).open('rb') as handle, zipfile.ZipFile(handle) as archive:
         with archive.open(archive.namelist()[0]) as entry:
             content = entry.read()
-    parsed = pl.read_json(content, schema=faers_schema)
+    reports = pl.read_json(content, schema=faers_schema).explode('results').unnest('results')
     del content
-    reports = parsed.explode('results').unnest('results')
     return report_rows(reports, drugs, blacklist)
 
 
@@ -224,3 +229,61 @@ def significant_events(table: pl.DataFrame, critical: pl.DataFrame) -> pl.DataFr
         .cast(pharmacovigilance_schema)
         .sort('chembl_id', 'event')
     )
+
+
+
+def pharmacovigilance(
+    source: dict[str, str],
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Detect drug-event safety signals in FAERS reports with a Monte Carlo likelihood ratio test.
+
+    Args:
+        source: ``drug_molecule`` dataset, ``fda_events`` directory of FAERS zip archives, and the
+            ``blacklisted_events`` text file.
+        destination: output dataset directory.
+        settings: ``montecarlo_permutations``, ``montecarlo_percentile`` and ``archive_workers``.
+        config: Otter config.
+
+    Raises:
+        ValueError: if no archive is found or the destination already exists.
+    """
+    permutations = int(settings['montecarlo_permutations'])
+    percentile = float(settings['montecarlo_percentile'])
+    workers = int(settings['archive_workers'])
+
+    check_destinations_absent([destination])
+    archives = sorted(StorageHandle(source['fda_events']).glob('**/*.zip'))
+    if not archives:
+        raise ValueError(f'no FAERS archives found in {source["fda_events"]}')
+
+    molecules = scan_dataset(source['drug_molecule']).select('id', 'name', 'tradeNames', 'synonyms').collect()
+    drugs = drug_names(molecules)
+    blacklist = read_blacklist(StorageHandle(source['blacklisted_events']).read_text()[0])
+    logger.info(f'{len(archives)} FAERS archives, {drugs.height} drug names, {blacklist.height} blacklisted events')
+
+    frames: list[pl.DataFrame | None] = [None] * len(archives)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(read_archive, path, drugs, blacklist): i for i, path in enumerate(archives)}
+        done = 0
+        try:
+            for future in as_completed(futures):
+                index = futures[future]
+                frame = future.result()
+                frames[index] = frame
+                done += 1
+                logger.info(f'read archive {done}/{len(archives)}: {archives[index]} ({frame.height} rows)')
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+
+    rows = pl.concat([f for f in frames if f is not None]).unique().sort(_ROW_COLUMNS)
+    logger.info(f'{rows.height} distinct report rows from {rows["safetyreportid"].n_unique()} reports')
+
+    table = contingency_table(rows)
+    critical = critical_values(table, permutations, percentile)
+    result = significant_events(table, critical)
+    logger.info(f'{result.height} significant drug-event pairs from {table.height} scored')
+    write_dataset(result, destination)

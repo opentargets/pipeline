@@ -1,6 +1,7 @@
 """Tests for the pharmacovigilance transformer."""
 
 import json
+import sys
 import zipfile
 from math import log
 from pathlib import Path
@@ -16,11 +17,13 @@ from pts.transformers.pharmacovigilance import (
     critical_values,
     drug_names,
     normalise_event,
+    pharmacovigilance,
     read_archive,
     read_blacklist,
     report_rows,
     significant_events,
 )
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
 
@@ -113,6 +116,11 @@ def test_read_blacklist_normalises_lines():
     assert read_blacklist('  DEATH \nDrug Ineffective\n')['event'].to_list() == ['death', 'drug ineffective']
 
 
+def test_read_blacklist_drops_blank_lines():
+    assert read_blacklist('death\n\nnausea\n')['event'].to_list() == ['death', 'nausea']
+    assert read_blacklist('death\n   \n')['event'].to_list() == ['death']
+
+
 def test_rows_cross_product_of_reactions_and_drugs():
     patient = _patient(['HEADACHE', 'NAUSEA'], [_drug('ASPIRIN'), _drug('IBUPROFEN')])
     drugs = _lookup(('CHEMBL1', 'aspirin'), ('CHEMBL2', 'ibuprofen'))
@@ -203,6 +211,13 @@ def test_null_or_empty_drug_and_reaction_lists_give_no_rows():
     assert _rows(reports) == []
 
 
+def test_drugs_and_events_join_within_a_report_not_across_reports_sharing_an_id():
+    first = _report(patient=_patient(['X'], [_drug('A')]))
+    second = _report(patient=_patient(['Y'], [_drug('B')]))
+    drugs = _lookup(('CHEMBL_A', 'a'), ('CHEMBL_B', 'b'))
+    assert _rows(_reports(first, second), drugs) == [('R1', 'CHEMBL_A', 'x'), ('R1', 'CHEMBL_B', 'y')]
+
+
 def test_empty_results_gives_empty_frame_with_the_output_columns():
     result = report_rows(_reports(), ASPIRIN, NO_BLACKLIST)
     assert result.columns == ROW_COLUMNS
@@ -222,6 +237,22 @@ def test_read_archive_ignores_reportduplicate_in_either_shape(tmp_path):
     second = _write_zip(tmp_path / 'second.zip', [as_struct])
     assert sorted(read_archive(first, ASPIRIN, NO_BLACKLIST).rows()) == [('LIST', 'CHEMBL1', 'headache')]
     assert sorted(read_archive(second, ASPIRIN, NO_BLACKLIST).rows()) == [('STRUCT', 'CHEMBL1', 'headache')]
+
+
+def test_read_archive_holds_only_the_reports_frame_while_reducing(tmp_path, monkeypatch):
+    path = _write_zip(tmp_path / 'a.zip', [_report()])
+    held: list = []
+
+    def spy(reports, drugs, blacklist):
+        caller = sys._getframe(1).f_locals
+        arguments = (reports, drugs, blacklist)
+        frames = [v for v in caller.values() if isinstance(v, (bytes, pl.DataFrame))]
+        held.extend(v for v in frames if all(v is not arg for arg in arguments))
+        return report_rows(reports, drugs, blacklist)
+
+    monkeypatch.setattr('pts.transformers.pharmacovigilance.report_rows', spy)
+    assert read_archive(path, ASPIRIN, NO_BLACKLIST).rows() == [('R1', 'CHEMBL1', 'headache')]
+    assert held == []
 
 
 GOLDEN_1 = 11.000861078625661
@@ -367,3 +398,158 @@ def test_significant_events_filter_and_schema():
     result = significant_events(table, critical)
     assert result.schema == pharmacovigilance_schema
     assert result.rows() == [('A', 'e2', 3, 5.0, 3.0, ''), ('B', 'e1', 4, 5.0, 1.0, '')]
+
+
+# ---- entry point ----
+
+PERMUTATIONS = 1000
+PERCENTILE = 0.95
+SETTINGS = {'montecarlo_permutations': PERMUTATIONS, 'montecarlo_percentile': PERCENTILE, 'archive_workers': 2}
+
+
+def _single(report_id: str, drug: str, event: str, **overrides) -> dict:
+    return _report(
+        safetyreportid=report_id,
+        patient=_patient([event], [_drug(drug)]),
+        **overrides,
+    )
+
+
+def _fixture_reports() -> list[dict]:
+    """ASPIRIN: 10 HEADACHE + 1 RASH; Advil (ibuprofen): 18 NAUSEA, 19 RASH, 2 HEADACHE; plus excluded reports."""
+    valid = (
+        [_single(f'A{i:02d}', 'ASPIRIN', 'HEADACHE') for i in range(10)]
+        + [_single('A10', 'ASPIRIN', 'RASH')]
+        + [_single(f'IN{i:02d}', 'Advil', 'NAUSEA') for i in range(18)]
+        + [_single(f'IR{i:02d}', 'Advil', 'RASH') for i in range(19)]
+        + [_single(f'IH{i:02d}', 'Advil', 'HEADACHE') for i in range(2)]
+    )
+    excluded = [
+        _single('DEAD', 'ASPIRIN', 'HEADACHE', seriousnessdeath='1'),
+        _single('LAY', 'ASPIRIN', 'HEADACHE', primarysource={'qualification': '4'}),
+        _single('BLACK', 'ASPIRIN', 'DRUG INEFFECTIVE'),
+        _single('UNKNOWN', 'MYSTERY', 'HEADACHE'),
+    ]
+    return valid + excluded
+
+
+def _setup(root: Path, split: int | None = None, order: tuple[str, str] = ('2024q1', '2024q2')) -> dict[str, str]:
+    reports = _fixture_reports()
+    half = len(reports) // 2 if split is None else split
+    first, second = order
+    for quarter, chunk in ((first, reports[:half]), (second, reports[half:])):
+        (root / 'input' / 'openfda' / quarter).mkdir(parents=True, exist_ok=True)
+        _write_zip(root / 'input' / 'openfda' / quarter / 'events.zip', chunk)
+    (root / 'input' / 'openfda' / 'blacklisted_events.txt').write_text(' Drug Ineffective \n\n')
+    label = {'label': 'Advil', 'source': 'x'}
+    labels = pl.List(pl.Struct({'label': pl.String(), 'source': pl.String()}))
+    molecules = pl.DataFrame(
+        {
+            'id': ['CHEMBL1', 'CHEMBL2', 'CHEMBL3'],
+            'name': ['Aspirin', 'Ibuprofen', 'Idle'],
+            'tradeNames': [[], [label], None],
+            'synonyms': [[], [], []],
+            'unused': ['a', 'b', 'c'],
+        },
+        schema={
+            'id': pl.String(),
+            'name': pl.String(),
+            'tradeNames': labels,
+            'synonyms': labels,
+            'unused': pl.String(),
+        },
+    )
+    write_dataset(molecules, str(root / 'input' / 'drug_molecule'))
+    return {
+        'drug_molecule': str(root / 'input' / 'drug_molecule'),
+        'fda_events': str(root / 'input' / 'openfda'),
+        'blacklisted_events': str(root / 'input' / 'openfda' / 'blacklisted_events.txt'),
+    }
+
+
+def _files(root: Path) -> set[str]:
+    return {str(p) for p in root.rglob('*')}
+
+
+def _run(root: Path, source: dict[str, str], **settings) -> pl.DataFrame:
+    destination = str(root / 'output' / 'pharmacovigilance')
+    pharmacovigilance(source, destination, {**SETTINGS, **settings}, None)
+    return scan_dataset(destination).collect().sort('chembl_id', 'event')
+
+
+def test_end_to_end_writes_only_the_expected_output(tmp_path):
+    source = _setup(tmp_path)
+    before = _files(tmp_path)
+    result = _run(tmp_path, source)
+
+    # 50 valid reports; events: headache 12, rash 20, nausea 18.
+    # ASPIRIN n_j=11: headache A=10 B=2 C=1 D=37; rash A=1 B=19 C=10 D=20.
+    # Advil n_j=39: nausea A=18 B=0 C=21 D=11; rash A=19 B=1 C=20 D=10; headache A=2 B=10 C=37 D=1.
+    def llr(a: int, b: int, c: int, d: int) -> float:
+        return a * (log(a) - log(a + b)) + c * (log(c) - log(c + d)) - (a + c) * (log(a + c) - log(a + b + c + d))
+
+    aspirin_critval = critical_value(PERMUTATIONS, 11, np.array([12.0, 20.0]), 50, PERCENTILE)
+    advil_critval = critical_value(PERMUTATIONS, 39, np.array([12.0, 18.0, 20.0]), 50, PERCENTILE)
+    significant = {('CHEMBL1', 'headache'): (10, llr(10, 2, 1, 37), aspirin_critval)}
+    significant[('CHEMBL2', 'headache')] = (2, llr(2, 10, 37, 1), advil_critval)
+    # the pairs left out score below their drug's critical value
+    assert llr(10, 2, 1, 37) > aspirin_critval > llr(1, 19, 10, 20)
+    assert llr(2, 10, 37, 1) > advil_critval > max(llr(18, 0, 21, 11), llr(19, 1, 20, 10))
+
+    assert result.schema == pharmacovigilance_schema
+    assert result.select('chembl_id', 'event').rows() == sorted(significant)
+    for chembl_id, event, count, score, critval, meddra in result.rows():
+        want = significant[(chembl_id, event)]
+        assert count == want[0]
+        assert score == pytest.approx(want[1], abs=1e-12)
+        assert critval == pytest.approx(want[2], abs=1e-12)
+        assert meddra == ''
+
+    new = _files(tmp_path) - before
+    assert all(p.startswith(str(tmp_path / 'output')) for p in new)
+
+
+def test_report_in_two_archives_counts_once(tmp_path):
+    expected = _run(tmp_path / 'single', _setup(_made(tmp_path / 'single')))
+    root = _made(tmp_path / 'dup')
+    source = _setup(root)
+    _write_zip(root / 'input' / 'openfda' / '2024q2' / 'again.zip', _fixture_reports()[:12])
+    assert _run(root, source).equals(expected)
+
+
+def _made(path: Path) -> Path:
+    path.mkdir(parents=True)
+    return path
+
+
+def test_output_is_identical_across_archive_order_and_worker_count(tmp_path):
+    runs = []
+    for name, split, order, workers in [
+        ('a', None, ('2024q1', '2024q2'), 1),
+        ('b', None, ('2024q2', '2024q1'), 4),
+        ('c', 7, ('2024q1', '2024q2'), 3),
+    ]:
+        root = _made(tmp_path / name)
+        runs.append(_run(root, _setup(root, split, order), archive_workers=workers))
+    assert runs[0].height == 2
+    assert runs[1].equals(runs[0])
+    assert runs[2].equals(runs[0])
+
+
+def test_no_archives_raises_and_writes_nothing(tmp_path):
+    source = _setup(tmp_path)
+    for archive in (tmp_path / 'input' / 'openfda').rglob('*.zip'):
+        archive.unlink()
+    destination = tmp_path / 'output' / 'pharmacovigilance'
+    with pytest.raises(ValueError, match='no FAERS archives'):
+        pharmacovigilance(source, str(destination), SETTINGS, None)
+    assert not destination.exists()
+
+
+def test_corrupt_zip_raises_and_writes_nothing(tmp_path):
+    source = _setup(tmp_path)
+    (tmp_path / 'input' / 'openfda' / '2024q2' / 'events.zip').write_bytes(b'not a zip')
+    destination = tmp_path / 'output' / 'pharmacovigilance'
+    with pytest.raises(zipfile.BadZipFile):
+        pharmacovigilance(source, str(destination), SETTINGS, None)
+    assert not destination.exists()
