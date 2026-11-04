@@ -48,6 +48,8 @@ class CredibleSetVariantFlag(StrEnum):
 
     EAF_FROM_SOURCE = 'Allele frequency reported by the study'
     EAF_FROM_GNOMAD = 'Allele frequency taken from gnomAD'
+    MISSING_EAF = 'Allele frequency is missing from the study and from gnomAD'
+    INVALID_EAF = 'Allele frequency reported by the study is not in [0, 1]'
     RESCALED_FROM_CONDITIONAL = 'Rescaled effect derived from the conditional effect'
     RESCALED_FROM_MARGINAL = 'Rescaled effect derived from the marginal effect'
     NOT_IN_LOCUS = 'Variant in LD with the lead has no statistics in the locus'

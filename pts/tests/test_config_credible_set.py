@@ -99,12 +99,19 @@ def test_validation_reads_every_source_in_explode_order_and_writes_single_datase
     }
 
 
-def test_annotation_publishes_the_validated_datasets() -> None:
-    annotation = _tasks()['transform annotate credible sets']
-    assert annotation['requires'] == ['transform validate credible sets']
+def test_annotation_runs_in_its_own_step_after_the_variant_index() -> None:
+    """Annotation reads `output/variant`, whose index reads the validated variants, so it is a separate step."""
+    steps = parse_yaml(CONFIG_PATH)['steps']
+    assert 'transform annotate credible sets' not in _tasks()
+    [annotation] = steps['credible_set_annotation']
+    assert annotation['name'] == 'transform annotate credible sets'
+    assert annotation['transformer'] == 'credible_set.annotation'
+    assert 'requires' not in annotation
     assert annotation['source'] == {
         'credible_set': 'intermediate/validated/credible_set',
         'credible_set_variant': 'intermediate/validated/credible_set_variant',
+        'study': 'output/study',
+        'variant': 'output/variant',
     }
     assert annotation['destination'] == {
         'credible_set': 'output/credible_set',

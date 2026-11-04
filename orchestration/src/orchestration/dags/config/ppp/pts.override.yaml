@@ -198,14 +198,3 @@ steps:
         csv_row_invalid_qc_reasons:
           - EXCEEDS_COVERAGE_95
           - ORPHAN_VARIANT
-
-    - name: transform annotate credible sets
-      requires:
-        - transform validate credible sets
-      transformer: credible_set.annotation
-      source:
-        credible_set: intermediate/validated/credible_set
-        credible_set_variant: intermediate/validated/credible_set_variant
-      destination:
-        credible_set: output/credible_set
-        credible_set_variant: output/credible_set_variant
