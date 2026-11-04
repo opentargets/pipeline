@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+import pytest
 from otter.config.yaml import parse_yaml
 
 from pts.transformers.credible_set.enums import FinemappingMethod
@@ -213,3 +214,12 @@ def test_the_variant_index_reads_the_validated_variants() -> None:
     [index] = [task for task in parse_yaml(CONFIG_PATH)['steps']['variant'] if task['transformer'] == 'variant']
     assert index['source']['credible_set_variant'] == 'intermediate/validated/credible_set_variant'
     assert 'credible_set' not in index['source']
+
+
+@pytest.mark.parametrize(
+    ('step', 'task'), [('vep_view', 'transform vep view'), ('coding_variant', 'transform coding_variant view')]
+)
+def test_the_variant_views_read_the_published_credible_sets_and_their_variants(step: str, task: str) -> None:
+    [view] = [spec for spec in parse_yaml(CONFIG_PATH)['steps'][step] if spec['name'] == task]
+    assert view['source']['credible_set'] == 'output/credible_set'
+    assert view['source']['credible_set_variant'] == 'output/credible_set_variant'
