@@ -84,12 +84,78 @@ def _labels_by_gene(index: pl.DataFrame) -> dict[str, set[str]]:
     return labels
 
 
+GENERIC_WORDS = frozenset({
+    'a',
+    'activated',
+    'activity',
+    'agent',
+    'alpha',
+    'and',
+    'antagonist',
+    'agonist',
+    'antibody',
+    'antigen',
+    'associated',
+    'b',
+    'beta',
+    'binding',
+    'blocker',
+    'c',
+    'cell',
+    'cells',
+    'channel',
+    'chain',
+    'complex',
+    'containing',
+    'delta',
+    'dependent',
+    'dna',
+    'domain',
+    'enzyme',
+    'factor',
+    'family',
+    'gamma',
+    'gene',
+    'growth',
+    'human',
+    'i',
+    'ii',
+    'iii',
+    'inhibitor',
+    'iv',
+    'kinase',
+    'kinases',
+    'like',
+    'member',
+    'modulator',
+    'of',
+    'protein',
+    'proteins',
+    'receptor',
+    'receptors',
+    'related',
+    'rna',
+    'serine',
+    'site',
+    'subunit',
+    'the',
+    'threonine',
+    'to',
+    'type',
+    'tyrosine',
+    'v',
+})
+"""Words too common in gene labels to tie a target name to one gene."""
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.sub(r'[^a-z0-9]+', ' ', text.lower()).split() if not w.isdigit()}
+
+
 def _named_in(name: str, labels: set[str]) -> bool:
-    """Whether any of a gene's labels occurs as whole words in the (normalised) name."""
-    lowered = name.lower()
-    spellings = [f' {re.sub(r"[^a-z0-9]+", " ", text).strip()} ' for text in (lowered, lowered.replace('-', ''))]
-    words = [f' {re.sub(r"[^a-z0-9]+", " ", label).strip()} ' for label in labels]
-    return any(word in spelling for word in words for spelling in spellings)
+    """Whether the name shares a specific (non-generic) word with any of a gene's labels."""
+    name_words = (_words(name) | _words(name.replace('-', ''))) - GENERIC_WORDS
+    return any(name_words & _words(label) for label in labels)
 
 
 def resolve(label: str, index: pl.DataFrame) -> list[str]:

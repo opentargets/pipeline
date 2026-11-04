@@ -21,7 +21,15 @@ def index() -> pl.DataFrame:
             _labels('programmed cell death protein 1'),
         ),
         ('ENSG_A', 'GENE_A', 'gene a', _labels('XYZ'), []),
-        ('ENSG_EGFR', 'EGFR', 'epidermal growth factor receptor', _labels('ERBB1'), []),
+        (
+            'ENSG_EGFR',
+            'EGFR',
+            'epidermal growth factor receptor',
+            _labels('ERBB1'),
+            _labels('receptor tyrosine-protein kinase erbB-1'),
+        ),
+        ('ENSG_TOP1', 'TOP1', 'DNA topoisomerase I', [], []),
+        ('ENSG_DRD2', 'DRD2', 'dopamine receptor D2', [], []),
         ('ENSG_KRAS', 'KRAS', 'KRAS proto-oncogene', [], []),
         ('ENSG_MS4A1', 'MS4A1', 'membrane spanning 4-domains A1', _labels('CD20'), []),
         (
@@ -149,4 +157,23 @@ def test_suggestion_for_an_unknown_name_must_share_a_label_with_it(index):
         {'targetIds': [], 'grounding': 'suggestion_unsupported'},
         {'targetIds': ['ENSG_MS4A1'], 'grounding': 'suggestion'},
         {'targetIds': ['ENSG_BCMA'], 'grounding': 'suggestion'},
+    ]
+
+
+def test_suggestion_sharing_a_specific_word_with_the_name_is_kept(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'Topoisomerase I', 'targetSymbolSuggestion': ['TOP1']},
+            {'targetFromSource': 'D2 dopamine receptor', 'targetSymbolSuggestion': ['DRD2']},
+            {'targetFromSource': 'tyrosine kinase', 'targetSymbolSuggestion': ['EGFR']},
+            {'targetFromSource': 'receptor kinase', 'targetSymbolSuggestion': ['EGFR']},
+        ),
+        index,
+    )
+
+    assert rows['grounding'].to_list() == [
+        'suggestion',
+        'suggestion',
+        'suggestion_unsupported',
+        'suggestion_unsupported',
     ]
