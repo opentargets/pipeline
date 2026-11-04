@@ -237,3 +237,9 @@ def test_family_shorthand_is_the_stem_of_its_members(index):
         {'targetIds': [], 'grounding': 'conflict'},
         {'targetIds': [], 'grounding': 'suggestion_unsupported'},
     ]
+
+
+def test_grounded_genes_carry_their_symbols(index):
+    rows = ground_mechanisms(_mechanisms({'targetFromSource': 'EGFR'}, {'targetFromSource': 'nothing'}), index)
+
+    assert rows['targetSymbols'].to_list() == [['EGFR'], []]

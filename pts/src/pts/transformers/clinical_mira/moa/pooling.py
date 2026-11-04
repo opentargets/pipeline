@@ -50,9 +50,12 @@ def match_texts(texts: pl.DataFrame, extraction: pl.DataFrame) -> tuple[pl.DataF
     counts = {
         'matched': matched.height,
         'hash_mismatch': joined.filter(
-            pl.col('prompt_sha256').is_not_null() & (pl.col('prompt_sha256') != pl.col('expected'))
+            pl.col('expected').is_not_null()
+            & pl.col('prompt_sha256').is_not_null()
+            & (pl.col('prompt_sha256') != pl.col('expected'))
         ).height,
-        'missing_text': joined.filter(pl.col('prompt_sha256').is_null()).height,
+        'missing_text': joined.filter(pl.col('expected').is_not_null() & pl.col('prompt_sha256').is_null()).height,
+        'missing_hash': joined.filter(pl.col('expected').is_null()).height,
     }
     return matched.select(texts.columns), counts
 

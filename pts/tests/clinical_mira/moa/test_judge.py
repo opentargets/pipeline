@@ -198,3 +198,16 @@ def test_judge_input_is_blind_when_chembl_is_not_given():
     }
 
     assert 'CHEMBL' not in judge_input(row, 'x', None)
+
+
+def test_judge_input_shows_grounded_genes():
+    row = {
+        'targetFromSource': 'PD-1',
+        'targetSymbols': ['PDCD1'],
+        'targetType': 'single protein',
+        'actionType': 'INHIBITOR',
+        'mechanismOfAction': 'PD-1 inhibitor',
+        'evidence': [],
+    }
+
+    assert 'Genes: PDCD1' in judge_input(row, 'x', None)

@@ -239,7 +239,11 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
             grounding.append('suggestion_unsupported')
         else:
             grounding.append('unresolved')
+    symbol_of = dict(index.filter(pl.col('field') == 'approvedSymbol').select('targetId', 'label').iter_rows())
     return mechanisms.with_columns(
         targetIds=pl.Series(target_ids, dtype=pl.List(pl.String)),
+        targetSymbols=pl.Series(
+            [[symbol_of.get(g, g).upper() for g in genes] for genes in target_ids], dtype=pl.List(pl.String)
+        ),
         grounding=pl.Series(grounding, dtype=pl.String),
     ).with_columns(class_level=pl.col('targetIds').list.len() > CLASS_LEVEL_GENES)

@@ -53,8 +53,10 @@ def judge_input(row: dict[str, Any], pool_text: str, chembl_rows: list[dict[str,
         if chembl_rows
         else 'none recorded'
     )
+    genes = ', '.join(row.get('targetSymbols') or []) or 'none'
     mechanism = (
         f'Target: {row["targetFromSource"]}\n'
+        f'Genes: {genes}\n'
         f'Target type: {row["targetType"]}\n'
         f'Action type: {row["actionType"]}\n'
         f'Mechanism: {row["mechanismOfAction"]}\n'

@@ -113,13 +113,13 @@ def check_mechanisms(extractions: dict[str, MoaExtraction], pools: pl.DataFrame,
 def pool_status(pools: pl.DataFrame, extractions: dict[str, MoaExtraction], mechanisms: pl.DataFrame) -> pl.DataFrame:
     """Whether each pool was extracted and, if so, whether its texts state no mechanism.
 
-    A pool states no mechanism when none of its mechanisms survived the quote check,
+    A pool states no mechanism when none of its human-target mechanisms survived the quote check,
     whatever the model's own ``notStated`` flag says.
 
     Returns:
         pl.DataFrame: ``pool_id``, ``extracted``, ``not_stated`` (null when not extracted).
     """
-    with_kept = set(mechanisms.filter(pl.col('kept'))['pool_id'].to_list())
+    with_kept = set(mechanisms.filter(pl.col('kept') & pl.col('isHumanTarget'))['pool_id'].to_list())
     return (
         pools
         .select('pool_id')

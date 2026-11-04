@@ -124,3 +124,12 @@ def test_acts_on_receptor_is_carried_to_the_mechanism():
     mechanism = _mechanism('KRAS G12C', ('nct1', 'a selective KRAS G12C inhibitor')) | {'actsOnReceptor': True}
 
     assert _check(mechanism)['actsOnReceptor'].to_list() == [True]
+
+
+def test_pool_with_only_non_human_targets_is_not_stated():
+    pools = pl.DataFrame({'pool_id': ['p1']})
+    mechanism = _mechanism('KRAS G12C', ('nct1', 'a selective KRAS G12C inhibitor')) | {'isHumanTarget': False}
+    mechanisms = _check(mechanism)
+    extractions = {'p1': MoaExtraction(drug_name='x', not_stated=False, mechanisms=[])}
+
+    assert pool_status(pools, extractions, mechanisms)['not_stated'].to_list() == [True]

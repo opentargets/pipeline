@@ -249,7 +249,7 @@ def summarise(
     )
     drugs = (
         pools
-        .filter(pl.col('benchmarked'))
+        .filter(pl.col('benchmarked') & pl.col('extracted'))
         .group_by([*by, 'drugId'])
         .agg(
             has_headline=pl.col('has_headline').any(),

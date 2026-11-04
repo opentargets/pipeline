@@ -236,3 +236,20 @@ def test_same_drug_and_genes_are_scored_once():
     assert (row['scored'], row['correct']) == (2, 2)
     assert (row['drugs_scored'], row['benchmarked_drugs']) == (1, 1)
     assert row['recall'] == pytest.approx(1.0)
+
+
+def test_recall_counts_only_extracted_pools():
+    links = LINKS.with_columns(pl.lit('linked').alias('link'), pl.Series('drugId', ['CHEMBL1', 'CHEMBL3']))
+    moa = pl.DataFrame({
+        'chemblIds': [['CHEMBL1'], ['CHEMBL3']],
+        'actionType': ['INHIBITOR'] * 2,
+        'targets': [['G1'], ['G3']],
+    })
+    mechanisms = _mechanisms([{'pool_id': 'p1', 'mechanism_idx': 0, 'targetIds': ['G1']}])
+    statuses = pl.DataFrame({'pool_id': ['p1', 'p2'], 'extracted': [True, False], 'not_stated': [False, None]})
+    bench = benchmark_targets(moa)
+
+    row = summarise(score(mechanisms, links, bench), links, statuses, bench, by=['phase_group']).row(0, named=True)
+
+    assert row['benchmarked_drugs'] == 1
+    assert row['recall'] == pytest.approx(1.0)

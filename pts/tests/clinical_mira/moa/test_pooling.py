@@ -20,7 +20,7 @@ def test_match_texts_excludes_hash_mismatches():
     kept, counts = match_texts(texts, extraction)
 
     assert kept['id'].to_list() == ['nct1']
-    assert counts == {'matched': 1, 'hash_mismatch': 1, 'missing_text': 1}
+    assert counts == {'matched': 1, 'hash_mismatch': 1, 'missing_text': 1, 'missing_hash': 0}
 
 
 def test_single_drug_trials_keeps_only_one_investigated_drug():
@@ -84,3 +84,12 @@ def test_punctuation_variants_of_a_name_share_a_pool():
     )
 
     assert single_drug_trials(extraction)['drug_name'].to_list() == ['mk3475', 'mk3475']
+
+
+def test_rows_without_a_hash_are_counted():
+    texts = pl.DataFrame({'id': ['nct1'], 'prompt': ['a'], 'prompt_sha256': ['h1']})
+    extraction = pl.DataFrame({'id': ['nct1', 'nct2'], 'prompt_sha256': ['h1', None]})
+
+    _, counts = match_texts(texts, extraction)
+
+    assert counts == {'matched': 1, 'hash_mismatch': 0, 'missing_text': 0, 'missing_hash': 1}
