@@ -194,9 +194,12 @@ def summarise(
 ) -> pl.DataFrame:
     """Return one row of metrics per stratum of ``by`` (columns of ``links``).
 
-    With ``adjusted``, ``adjusted_correct`` (from the judge) replaces ``correct``.
+    With ``adjusted``, ``adjusted_correct`` (from the judge) replaces ``correct``, and the
+    judged mechanisms the benchmark cannot score are counted too.
     """
     verdict = 'adjusted_correct' if adjusted else 'correct'
+    counted = (pl.col('in_headline') | pl.col('judge_correct').is_not_null()) if adjusted else pl.col('in_headline')
+    scored = scored.with_columns(counted=counted)
     strata = links.select('pool_id', 'drugId', 'link', *by)
     benchmarked_drugs = bench['drugId'].to_list()
 
@@ -207,14 +210,14 @@ def summarise(
         non_human=(pl.col('kept') & ~pl.col('isHumanTarget')).sum(),
         unresolved=(pl.col('grounding') == 'unresolved').sum(),
         class_level=pl.col('class_level').sum(),
-        scored=pl.col('in_headline').sum(),
-        correct=pl.col(verdict).filter(pl.col('in_headline')).sum(),
-        action_matches=pl.col('action_match').filter(pl.col(verdict) & pl.col('in_headline')).sum(),
+        scored=pl.col('counted').sum(),
+        correct=pl.col(verdict).filter(pl.col('counted')).sum(),
+        action_matches=pl.col('action_match').filter(pl.col(verdict) & pl.col('counted')).sum(),
     )
 
     per_pool = (
         scored
-        .filter(pl.col('in_headline'))
+        .filter(pl.col('counted'))
         .group_by('pool_id')
         .agg(all_correct=pl.col(verdict).all(), any_correct=pl.col(verdict).any())
     )
