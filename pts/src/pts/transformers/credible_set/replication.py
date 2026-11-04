@@ -35,7 +35,10 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     """The traits a GWAS study replicates on, from the kind of its `diseaseIds` terms.
 
     - A study with at least one disease term has one trait: its sorted disease terms. Its
-      measurement terms, if any, are set aside.
+      measurement terms, if any, are set aside: next to a disease, a measurement mostly describes
+      the context of the association (an interaction partner, a covariate, the population or a
+      treatment, as in a BMI-adjusted study of IBD), not a second trait, so the study must not
+      replicate the plain GWAS of that measurement.
     - A study with only measurement terms has one trait per measurement, so one shared measurement
       is enough.
 
