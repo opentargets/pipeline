@@ -9,7 +9,10 @@ that resolve to no gene are left out of ``targetComponents``. Each component car
 gene id: symbols and names come from the target dataset. ChEMBL's own target name and type are
 not published; a target is described by its components.
 
-Every activity carries the ChEMBL id of its molecule (``drugFromSourceId``).
+Every activity carries the ChEMBL id of its molecule (``drugFromSourceId``) and, where the
+molecule or its parent is in the drug molecule dataset, the parent's ``drugId``. The action type
+ChEMBL records on the activity is ``assayActionType``; ``actionTypes`` are those of the curated
+mechanisms of action of the same drug on any of the activity's target genes.
 """
 
 from collections.abc import Mapping
@@ -108,6 +111,8 @@ def chembl_bioactivity(
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
             - target: Path to the target dataset.
+            - drug_molecule: Path to the drug molecule dataset.
+            - mechanism_of_action: Path to the drug mechanism of action dataset.
         destination: Dictionary with paths to:
             - bioactivity: Path to write the bioactivity dataset.
         _settings: Custom settings (not used).
@@ -124,19 +129,29 @@ def chembl_bioactivity(
 
     logger.info(f'Reading target data from {source["target"]}')
     gene_df = scan_dataset(str(source['target'])).select('id', 'proteinIds').collect()
+    logger.info(f'Reading drugs from {source["drug_molecule"]} and {source["mechanism_of_action"]}')
+    drug_df = scan_dataset(str(source['drug_molecule'])).select('id', 'parentId', 'childChemblIds').collect()
+    moa_df = scan_dataset(str(source['mechanism_of_action'])).select('actionType', 'chemblIds', 'targets').collect()
 
-    bioactivity = process_bioactivity(tables, gene_df)
+    bioactivity = process_bioactivity(tables, gene_df, drug_df, moa_df)
 
     logger.info(f'Writing {bioactivity.height} bioactivity rows to {destination["bioactivity"]}')
     write_dataset(bioactivity, str(destination['bioactivity']))
 
 
-def process_bioactivity(tables: Mapping[str, pl.DataFrame], gene_df: pl.DataFrame) -> pl.DataFrame:
+def process_bioactivity(
+    tables: Mapping[str, pl.DataFrame],
+    gene_df: pl.DataFrame,
+    drug_df: pl.DataFrame,
+    moa_df: pl.DataFrame,
+) -> pl.DataFrame:
     """Build the bioactivity dataset from the ChEMBL activities.
 
     Args:
         tables: The raw ChEMBL tables named in `TABLES`.
         gene_df: The target dataset's `id` and `proteinIds`.
+        drug_df: The drug molecule dataset's `id`, `parentId` and `childChemblIds`.
+        moa_df: The mechanism of action dataset's `actionType`, `chemblIds` and `targets`.
 
     Returns:
         The bioactivity rows, sorted by `activityId`.
@@ -153,10 +168,20 @@ def process_bioactivity(tables: Mapping[str, pl.DataFrame], gene_df: pl.DataFram
     logger.info(f'{activities.height:,} activities; {activities.filter(is_degradation).height:,} degradation left out')
 
     bioactivity = _bioactivity(activities.filter(~is_degradation), components)
-    return _shape(_annotate(bioactivity, tables, components), _component_list(components), chembl_bioactivity_schema)
+    return _shape(
+        _annotate(bioactivity, tables, components, _drug_ids(drug_df), _mechanism_pairs(moa_df)),
+        _component_list(components),
+        chembl_bioactivity_schema,
+    )
 
 
-def _annotate(rows: pl.DataFrame, tables: Mapping[str, pl.DataFrame], components: pl.DataFrame) -> pl.DataFrame:
+def _annotate(
+    rows: pl.DataFrame,
+    tables: Mapping[str, pl.DataFrame],
+    components: pl.DataFrame,
+    drugs: pl.DataFrame,
+    mechanisms: pl.DataFrame,
+) -> pl.DataFrame:
     """Join the per-activity annotations."""
     documents = tables['docs'].select(
         'doc_id',
@@ -174,6 +199,8 @@ def _annotate(rows: pl.DataFrame, tables: Mapping[str, pl.DataFrame], components
             how='left',
             validate='m:1',
         )
+        .join(drugs, on='drugFromSourceId', how='left', validate='m:1')
+        .pipe(_with_action_types, components, mechanisms)
         .join(documents, on='doc_id', how='left', validate='m:1')
         .join(
             tables['variant_sequences'].select('variant_id', pl.col('mutation').alias('assayVariantMutation')),
@@ -275,6 +302,73 @@ def _component_list(components: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def _drug_ids(drug_df: pl.DataFrame) -> pl.DataFrame:
+    """Map each ChEMBL molecule id in the drug molecule dataset, or listed as a child of one, to its parent drug.
+
+    The parent is used only where it is itself in the drug molecule dataset, so every `drugId`
+    resolves there; otherwise the molecule maps to its own drug.
+
+    Returns:
+        DataFrame with drugFromSourceId and drugId, one row per drugFromSourceId.
+
+    Raises:
+        ValueError: If a molecule id resolves to more than one drug.
+    """
+    drug_id = (
+        pl
+        .when(pl.col('parentId').is_in(drug_df['id'].implode()))
+        .then(pl.col('parentId'))
+        .otherwise(pl.col('id'))
+        .alias('drugId')
+    )
+    pairs = pl.concat([
+        drug_df.select(pl.col('id').alias('drugFromSourceId'), drug_id),
+        drug_df
+        .select(pl.col('childChemblIds').alias('drugFromSourceId'), drug_id)
+        .explode('drugFromSourceId')
+        .drop_nulls('drugFromSourceId'),
+    ]).unique()
+    ambiguous = pairs.filter(pl.col('drugFromSourceId').is_duplicated())
+    if ambiguous.height:
+        raise ValueError(f'molecules resolving to several drugs: {ambiguous.sort(pl.all()).head(10).rows()}')
+    return pairs
+
+
+def _mechanism_pairs(moa_df: pl.DataFrame) -> pl.DataFrame:
+    """One row per distinct (molecule id, target gene, action type) in the mechanisms of action."""
+    return (
+        moa_df
+        .select(pl.col('chemblIds').alias('drug'), pl.col('targets').alias('targetId'), 'actionType')
+        .explode('drug')
+        .explode('targetId')
+        .drop_nulls()
+        .unique()
+    )
+
+
+def _with_action_types(rows: pl.DataFrame, components: pl.DataFrame, mechanisms: pl.DataFrame) -> pl.DataFrame:
+    """Attach `actionTypes`: those of the mechanisms of the same drug on any of the activity's target genes.
+
+    The drug matches on the molecule's own id or its parent `drugId`, as mechanisms list both.
+    The list is sorted, and empty where no mechanism matches.
+    """
+    genes = components.select('tid', 'targetId').drop_nulls().unique()
+    keys = pl.concat([
+        rows.select('activity_id', 'tid', pl.col('drugFromSourceId').alias('drug')),
+        rows.select('activity_id', 'tid', pl.col('drugId').alias('drug')),
+    ]).drop_nulls('drug')
+    action_types = (
+        keys
+        .join(genes, on='tid')
+        .join(mechanisms, on=['drug', 'targetId'])
+        .group_by('activity_id')
+        .agg(pl.col('actionType').unique().sort().alias('actionTypes'))
+    )
+    return rows.join(action_types, on='activity_id', how='left', validate='1:1').with_columns(
+        pl.col('actionTypes').fill_null([])
+    )
+
+
 def _filter(frame: pl.DataFrame, label: str, condition: pl.Expr) -> pl.DataFrame:
     """Apply one prefilter and log what it removed."""
     kept = frame.filter(condition.fill_null(False))
@@ -344,7 +438,7 @@ def _shape(rows: pl.DataFrame, component_lists: pl.DataFrame, schema: pl.Schema)
             'pchembl_value': 'pchemblValue',
             'data_validity_comment': 'dataValidityComment',
             'activity_comment': 'activityComment',
-            'action_type': 'actionType',
+            'action_type': 'assayActionType',
             'assay_type': 'assayType',
             'relationship_type': 'relationshipType',
             'confidence_score': 'confidenceScore',

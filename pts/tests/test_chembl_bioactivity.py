@@ -169,9 +169,32 @@ def gene_df() -> pl.DataFrame:
     )
 
 
+DRUG_SCHEMA = {'id': pl.String, 'parentId': pl.String, 'childChemblIds': pl.List(pl.String)}
+
+
 @pytest.fixture
-def output(tables, gene_df) -> pl.DataFrame:
-    return process_bioactivity(tables, gene_df)
+def drug_df() -> pl.DataFrame:
+    # CHEMBL_M1 is a salt of CHEMBL_D1, which lists it as a child; CHEMBL_M3 is not a drug
+    return _frame([('CHEMBL_D1', None, ['CHEMBL_M1']), ('CHEMBL_M2', None, None)], DRUG_SCHEMA)
+
+
+@pytest.fixture
+def moa_df() -> pl.DataFrame:
+    return _frame(
+        [
+            ('INHIBITOR', ['CHEMBL_D1', 'CHEMBL_M1'], ['ENSG_EGFR']),
+            ('INHIBITOR', ['CHEMBL_D1'], ['ENSG_EGFR', 'ENSG_A']),  # a second mechanism, same action type
+            ('ANTAGONIST', ['CHEMBL_M3'], ['ENSG_B']),
+            ('DEGRADER', ['CHEMBL_M3'], ['ENSG_B']),
+            ('AGONIST', ['CHEMBL_M2'], ['ENSG_XIAP']),  # a gene the activity's target does not have
+        ],
+        {'actionType': pl.String, 'chemblIds': pl.List(pl.String), 'targets': pl.List(pl.String)},
+    )
+
+
+@pytest.fixture
+def output(tables, gene_df, drug_df, moa_df) -> pl.DataFrame:
+    return process_bioactivity(tables, gene_df, drug_df, moa_df)
 
 
 def _by_id(frame: pl.DataFrame) -> dict[int, dict]:
@@ -201,12 +224,12 @@ class TestBioactivity:
             'functional_potency',
         ]
 
-    def test_unknown_pchembl_type_fails(self, tables, gene_df):
+    def test_unknown_pchembl_type_fails(self, tables, gene_df, drug_df, moa_df):
         tables['activities'] = pl.DataFrame(
             [*ACTIVITIES, _activity(110, 1, 'Kb', standard_value=1, pchembl_value=9)], schema=ACTIVITY_SCHEMA
         )
         with pytest.raises(ValueError, match="'Kb'"):
-            process_bioactivity(tables, gene_df)
+            process_bioactivity(tables, gene_df, drug_df, moa_df)
 
     def test_target_components_resolve_genes_and_binding_sites(self, output):
         rows = _by_id(output)
@@ -244,7 +267,35 @@ class TestBioactivity:
         assert (row['standardValue'], row['pchemblValue'], row['standardUnits']) == (41.0, 7.39, 'nM')
         assert (row['assayDescription'], row['assayOrganism']) == ('Assay 1', 'Homo sapiens')
 
-    def test_unmapped_components_are_left_out(self, tables, gene_df):
+    def test_drug_ids_resolve_salts_to_the_parent(self, output):
+        rows = _by_id(output)
+        assert [(rows[i]['drugFromSourceId'], rows[i]['drugId']) for i in (101, 102, 109)] == [
+            ('CHEMBL_M1', 'CHEMBL_D1'),
+            ('CHEMBL_M2', 'CHEMBL_M2'),
+            ('CHEMBL_M3', None),
+        ]
+
+    def test_parent_missing_from_drug_molecule_falls_back_to_the_molecule(self, tables, gene_df, moa_df):
+        # CHEMBL_M2's parent is not in the drug molecule dataset, so drugId must not point to it
+        drugs = _frame([('CHEMBL_D1', None, ['CHEMBL_M1']), ('CHEMBL_M2', 'CHEMBL_GONE', None)], DRUG_SCHEMA)
+        row = _by_id(process_bioactivity(tables, gene_df, drugs, moa_df))[102]
+        assert (row['drugFromSourceId'], row['drugId']) == ('CHEMBL_M2', 'CHEMBL_M2')
+
+    def test_molecule_resolving_to_two_drugs_fails(self, tables, gene_df, moa_df):
+        drugs = _frame([('CHEMBL_D1', None, ['CHEMBL_M1']), ('CHEMBL_D2', None, ['CHEMBL_M1'])], DRUG_SCHEMA)
+        with pytest.raises(ValueError, match='CHEMBL_M1'):
+            process_bioactivity(tables, gene_df, drugs, moa_df)
+
+    def test_action_types_from_mechanisms_on_the_same_drug_and_gene(self, output):
+        rows = _by_id(output)
+        # 101: two mechanisms of the parent on EGFR, one action type; the assay's own is kept apart
+        assert (rows[101]['assayActionType'], rows[101]['actionTypes']) == ('BINDING AGENT', ['INHIBITOR'])
+        # 102: the drug's only mechanism is on a gene its target does not have
+        assert (rows[102]['assayActionType'], rows[102]['actionTypes']) == (None, [])
+        # 109: a complex matches through one of its genes, which carries two action types
+        assert rows[109]['actionTypes'] == ['ANTAGONIST', 'DEGRADER']
+
+    def test_unmapped_components_are_left_out(self, tables, gene_df, drug_df, moa_df):
         # an extra component on the EGFR target whose accession maps to no gene
         tables['target_components'] = pl.concat([
             tables['target_components'],
@@ -254,7 +305,7 @@ class TestBioactivity:
             tables['component_sequences'],
             _frame([(13, 'PNONE')], {'component_id': pl.Int64, 'accession': pl.String}),
         ])
-        row = _by_id(process_bioactivity(tables, gene_df))[101]
+        row = _by_id(process_bioactivity(tables, gene_df, drug_df, moa_df))[101]
         assert [c['uniprotId'] for c in row['targetComponents']] == ['P00533']
         # the binding site names P00533, so the target is still not flagged as a complex
         assert row['complexFlag'] is False

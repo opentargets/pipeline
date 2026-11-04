@@ -910,6 +910,8 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         target: output/target
+        drug_molecule: output/drug_molecule
+        mechanism_of_action: output/drug_mechanism_of_action
       destination:
         bioactivity: output/chembl_bioactivity
   ##################################################################################################

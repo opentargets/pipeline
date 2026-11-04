@@ -8,6 +8,11 @@ target_component_fields = {
     'inBindingSite': pl.Boolean(),
 }
 
+drug_fields = {
+    'drugFromSourceId': pl.String(),
+    'drugId': pl.String(),
+}
+
 document_fields = {
     'documentId': pl.String(),
     'docType': pl.String(),
@@ -18,13 +23,14 @@ document_fields = {
 
 chembl_bioactivity_schema = pl.Schema({
     'activityId': pl.Int64(),
-    'drugFromSourceId': pl.String(),
+    **drug_fields,
     'pchemblValue': pl.Float64(),
     'standardType': pl.String(),
     'standardValue': pl.Float64(),
     'standardUnits': pl.String(),
     'measurementClass': pl.String(),
-    'actionType': pl.String(),
+    'assayActionType': pl.String(),
+    'actionTypes': pl.List(pl.String()),
     'le': pl.Float64(),
     'lle': pl.Float64(),
     'assayId': pl.String(),

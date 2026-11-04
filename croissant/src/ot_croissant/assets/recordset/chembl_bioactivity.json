@@ -1,12 +1,16 @@
 [
   {
-    "id": "actionType",
-    "description": "Effect of the molecule on its target in this measurement (e.g., INHIBITOR)"
+    "id": "actionTypes",
+    "description": "Action types (e.g., INHIBITOR) of the curated mechanisms of action of the drug on any target of the measurement, from the drug mechanism of action dataset. Empty where the drug has no mechanism of action on these targets"
   },
   {
     "id": "activityId",
     "description": "ChEMBL activity identifier, unique to each measurement",
     "isPrimaryKey": true
+  },
+  {
+    "id": "assayActionType",
+    "description": "Effect of the molecule on its target in this measurement (e.g., INHIBITOR), as ChEMBL records it on the activity"
   },
   {
     "id": "assayDescription",
@@ -50,7 +54,12 @@
   },
   {
     "id": "drugFromSourceId",
-    "description": "ChEMBL identifier of the tested molecule. Most tested molecules are not drugs or clinical candidates, so most are absent from the drug/clinical candidates dataset"
+    "description": "ChEMBL identifier of the tested molecule"
+  },
+  {
+    "id": "drugId",
+    "description": "Open Targets drug identifier of the tested molecule or its parent. Most tested molecules are not drugs or clinical candidates, so most rows have none",
+    "foreign_key": "drug_molecule/id"
   },
   {
     "id": "le",
