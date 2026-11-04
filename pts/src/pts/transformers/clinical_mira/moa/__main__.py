@@ -20,6 +20,7 @@ from pts.transformers.clinical_mira.moa.llm import run_cached
 from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict, MoaExtraction, load_prompt
 
 STRATA = ('phase_group', 'maximumClinicalStage', 'drugType')
+LABELS = ('relation', 'statementType', 'effect_wording', 'action_other')
 
 
 def _read(path: str | Path, columns: list[str] | None = None) -> pl.DataFrame:
@@ -204,6 +205,9 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
         )
     judge.calibration(adjusted).write_parquet(run / 'calibration.parquet')
     benchmark.precision_by_grounding(adjusted).write_parquet(run / 'precision_by_grounding.parquet')
+    labelled = adjusted.with_columns(action_other=pl.col('actionType') == 'OTHER')
+    for label in LABELS:
+        benchmark.precision_by(labelled, label).write_parquet(run / f'precision_by_label_{label}.parquet')
     judge.handcheck(adjusted, pl.read_parquet(run / 'pools.parquet'), seed=args.seed).write_csv(run / 'handcheck.csv')
     (run / 'report.md').write_text(report.render_report(run), encoding='utf-8')
     logger.info(f'evaluate: report at {run / "report.md"}')

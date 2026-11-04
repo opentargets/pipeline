@@ -20,6 +20,8 @@ def _scored(rows: list[dict]) -> pl.DataFrame:
         'class_level': False,
         'benchmarked': True,
         'in_headline': True,
+        'eligible': True,
+        'duplicate': False,
         'correct': True,
         'targetFromSource': 'T',
         'evidence': [{'nctId': 'n1', 'quote': 'q T'}],
@@ -35,6 +37,8 @@ def _scored(rows: list[dict]) -> pl.DataFrame:
             'class_level': pl.Boolean,
             'benchmarked': pl.Boolean,
             'in_headline': pl.Boolean,
+            'eligible': pl.Boolean,
+            'duplicate': pl.Boolean,
             'correct': pl.Boolean,
             'targetFromSource': pl.String,
             'evidence': pl.List(pl.Struct({'nctId': pl.String, 'quote': pl.String})),
@@ -211,3 +215,27 @@ def test_judge_input_shows_grounded_genes():
     }
 
     assert 'Genes: PDCD1' in judge_input(row, 'x', None)
+
+
+def test_ineligible_or_duplicate_unbenchmarked_mechanisms_are_not_judged():
+    scored = _scored([
+        {'pool_id': 'free', 'mechanism_idx': 0, 'benchmarked': False, 'in_headline': False, 'correct': None},
+        {
+            'pool_id': 'hypo',
+            'mechanism_idx': 0,
+            'benchmarked': False,
+            'in_headline': False,
+            'eligible': False,
+            'correct': None,
+        },
+        {
+            'pool_id': 'dup',
+            'mechanism_idx': 0,
+            'benchmarked': False,
+            'in_headline': False,
+            'duplicate': True,
+            'correct': None,
+        },
+    ])
+
+    assert _keys(select_for_judging(scored, n_matches=0)) == [('free', 0)]

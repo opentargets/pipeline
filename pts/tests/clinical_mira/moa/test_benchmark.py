@@ -4,6 +4,7 @@ import pytest
 from pts.transformers.clinical_mira.moa.benchmark import (
     benchmark_targets,
     link_pools,
+    precision_by,
     precision_by_grounding,
     score,
     summarise,
@@ -106,7 +107,15 @@ LINKS = pl.DataFrame({
 
 
 def _mechanisms(rows: list[dict]) -> pl.DataFrame:
-    base = {'kept': True, 'isHumanTarget': True, 'grounding': 'source', 'class_level': False, 'actionType': 'INHIBITOR'}
+    base = {
+        'kept': True,
+        'isHumanTarget': True,
+        'grounding': 'source',
+        'class_level': False,
+        'actionType': 'INHIBITOR',
+        'relation': 'direct',
+        'statementType': 'drug_description',
+    }
     return pl.DataFrame(
         [base | r for r in rows],
         schema={
@@ -118,6 +127,8 @@ def _mechanisms(rows: list[dict]) -> pl.DataFrame:
             'grounding': pl.String,
             'class_level': pl.Boolean,
             'actionType': pl.String,
+            'relation': pl.String,
+            'statementType': pl.String,
         },
     )
 
@@ -253,3 +264,52 @@ def test_recall_counts_only_extracted_pools():
 
     assert row['benchmarked_drugs'] == 1
     assert row['recall'] == pytest.approx(1.0)
+
+
+def test_only_direct_stated_actions_reach_the_headline():
+    scored = score(
+        _mechanisms([
+            {'pool_id': 'p1', 'mechanism_idx': 0, 'targetIds': ['G1']},
+            {'pool_id': 'p1', 'mechanism_idx': 1, 'targetIds': ['G2'], 'relation': 'changes_amount'},
+            {'pool_id': 'p1', 'mechanism_idx': 2, 'targetIds': ['G5'], 'statementType': 'hypothesis'},
+            {'pool_id': 'p1', 'mechanism_idx': 3, 'targetIds': ['G9'], 'actionType': 'OTHER'},
+            {'pool_id': 'p1', 'mechanism_idx': 4, 'targetIds': ['G9'], 'statementType': 'experimental_finding'},
+        ]),
+        LINKS,
+        benchmark_targets(_moa()),
+    ).sort('mechanism_idx')
+
+    assert scored['in_headline'].to_list() == [True, False, False, False, True]
+    assert scored['scorable'].to_list() == [True, True, True, False, True]
+    assert scored['duplicate'].to_list() == [False, False, False, True, False]
+    assert scored['correct'].to_list() == [True, True, True, None, False]
+
+
+def test_precision_by_a_label_covers_every_scorable_mechanism():
+    scored = score(
+        _mechanisms([
+            {'pool_id': 'p1', 'mechanism_idx': 0, 'targetIds': ['G1']},
+            {'pool_id': 'p1', 'mechanism_idx': 1, 'targetIds': ['G9'], 'relation': 'changes_amount'},
+            {'pool_id': 'p1', 'mechanism_idx': 2, 'targetIds': ['G8'], 'relation': 'changes_amount'},
+        ]),
+        LINKS,
+        benchmark_targets(_moa()),
+    )
+
+    table = precision_by(scored, 'relation')
+
+    assert table.select('relation', 'scored', 'correct').rows() == [('changes_amount', 2, 0), ('direct', 1, 1)]
+
+
+def test_unbenchmarked_duplicates_are_marked():
+    links = LINKS.with_columns(pl.Series('drugId', ['CHEMBL9', 'CHEMBL9']), pl.lit('linked').alias('link'))
+    scored = score(
+        _mechanisms([
+            {'pool_id': 'p1', 'mechanism_idx': 0, 'targetIds': ['G1']},
+            {'pool_id': 'p2', 'mechanism_idx': 0, 'targetIds': ['G1']},
+        ]),
+        links,
+        benchmark_targets(_moa()),
+    ).sort('pool_id')
+
+    assert scored['duplicate'].to_list() == [False, True]

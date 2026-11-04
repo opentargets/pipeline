@@ -130,36 +130,56 @@ def _overlaps(predicted: list[str], truth: list[str]) -> bool:
     return bool(set(predicted) & set(truth))
 
 
+HEADLINE_STATEMENTS = frozenset({'drug_description', 'experimental_finding'})
+"""Statement types that can count in the headline; hypotheses never do."""
+
+
 def score(mechanisms: pl.DataFrame, links: pl.DataFrame, bench: pl.DataFrame) -> pl.DataFrame:
     """Score each grounded mechanism against its drug's MoA rows.
 
-    Adds ``benchmarked``, ``duplicate``, ``in_headline``, ``correct`` and ``action_match``.
-    A prediction of the same genes for the same drug (from a second name of the drug, or a
-    second mention in one pool) is a ``duplicate`` and only its first occurrence is in the
-    headline. ``correct`` is null outside the headline; ``action_match`` is null unless the
-    mechanism is correct.
+    Adds ``benchmarked``, ``eligible``, ``duplicate``, ``scorable``, ``in_headline``,
+    ``correct`` and ``action_match``.
+
+    * ``eligible``: the model says the drug acts directly on the target (``relation`` direct),
+      in a statement that is not a hypothesis, with a stated action (not ``OTHER``).
+    * ``duplicate``: the same genes for the same drug (a second name of the drug, or a second
+      mention in one pool) after a first, preferably eligible, occurrence.
+    * ``scorable``: benchmarked, grounded, not class-level and not a duplicate; ``correct``
+      is computed for every scorable mechanism, so each filter's effect can be measured.
+    * ``in_headline``: scorable and eligible.
     """
     joined = (
         mechanisms
         .join(links.select('pool_id', 'drugId', 'link'), on='pool_id', how='left')
         .join(bench.rename({'targetIds': 'benchTargetIds', 'rows': 'benchRows'}), on='drugId', how='left')
-        .with_columns(benchmarked=(pl.col('link') == 'linked') & pl.col('benchTargetIds').is_not_null())
-        .with_columns(in_headline=pl.col('benchmarked') & pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level'))
-        .sort('pool_id', 'mechanism_idx')
         .with_columns(
-            dup_key=pl.when(pl.col('in_headline')).then(
-                pl.concat_str(pl.col('drugId'), pl.col('targetIds').list.sort().list.join(','), separator='|')
+            benchmarked=(pl.col('link') == 'linked') & pl.col('benchTargetIds').is_not_null(),
+            grounded=pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level'),
+            eligible=(pl.col('relation') == 'direct')
+            & pl.col('statementType').is_in(sorted(HEADLINE_STATEMENTS))
+            & (pl.col('actionType') != 'OTHER'),
+        )
+        .sort(['eligible', 'pool_id', 'mechanism_idx'], descending=[True, False, False])
+        .with_columns(
+            dup_key=pl.when(pl.col('grounded')).then(
+                pl.concat_str(
+                    pl.coalesce(pl.col('drugId'), pl.col('pool_id')),
+                    pl.col('targetIds').list.sort().list.join(','),
+                    separator='|',
+                )
             )
         )
         .with_columns(duplicate=pl.col('dup_key').is_not_null() & (pl.col('dup_key').cum_count().over('dup_key') > 1))
-        .with_columns(in_headline=pl.col('in_headline') & ~pl.col('duplicate'))
-        .drop('dup_key')
+        .with_columns(scorable=pl.col('benchmarked') & pl.col('grounded') & ~pl.col('duplicate'))
+        .with_columns(in_headline=pl.col('scorable') & pl.col('eligible'))
+        .sort('pool_id', 'mechanism_idx')
+        .drop('dup_key', 'grounded')
     )
     correct, action_match = [], []
-    for row in joined.select('in_headline', 'targetIds', 'benchTargetIds', 'benchRows', 'actionType').iter_rows(
+    for row in joined.select('scorable', 'targetIds', 'benchTargetIds', 'benchRows', 'actionType').iter_rows(
         named=True
     ):
-        if not row['in_headline']:
+        if not row['scorable']:
             correct.append(None)
             action_match.append(None)
             continue
@@ -285,6 +305,22 @@ def summarise(
         precision_lo=pl.Series([lo for lo, _ in intervals], dtype=pl.Float64),
         precision_hi=pl.Series([hi for _, hi in intervals], dtype=pl.Float64),
     ).sort(by)
+
+
+def precision_by(scored: pl.DataFrame, column: str, within: str = 'scorable') -> pl.DataFrame:
+    """Return precision for each value of ``column`` over the ``within`` mechanisms."""
+    table = (
+        scored
+        .filter(pl.col(within))
+        .group_by(column)
+        .agg(scored=pl.len(), correct=pl.col('correct').sum())
+        .with_columns(precision=pl.col('correct') / pl.col('scored'))
+    )
+    intervals = [wilson(k, n) for k, n in table.select('correct', 'scored').iter_rows()]
+    return table.with_columns(
+        precision_lo=pl.Series([lo for lo, _ in intervals], dtype=pl.Float64),
+        precision_hi=pl.Series([hi for _, hi in intervals], dtype=pl.Float64),
+    ).sort(column)
 
 
 def precision_by_grounding(scored: pl.DataFrame) -> pl.DataFrame:

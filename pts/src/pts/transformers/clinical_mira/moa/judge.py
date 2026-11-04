@@ -34,6 +34,8 @@ def select_for_judging(scored: pl.DataFrame, seed: int = 0, n_matches: int = 100
         & pl.col('isHumanTarget')
         & pl.col('grounding').is_in(JUDGEABLE_GROUNDING)
         & ~pl.col('class_level')
+        & pl.col('eligible')
+        & ~pl.col('duplicate')
     )
     misses = scored.filter(pl.col('in_headline') & (pl.col('correct') == False))  # noqa: E712
     matches = scored.filter(pl.col('in_headline') & pl.col('correct')).sort(keys)
