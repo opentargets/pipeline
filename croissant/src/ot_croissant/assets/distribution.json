@@ -420,14 +420,6 @@
     "description": "Phenotypes of mouse models mapped to human targets"
   },
   {
-    "id": "openfda_significant_adverse_drug_reactions",
-    "nice_name": "Pharmacovigilance (by drug)",
-    "tags": [
-      "Drug"
-    ],
-    "description": "Significant adverse drug reactions (ADRs) associated with drugs. This dataset is based on the FDA's Adverse Event Reporting System (FAERS) reporting post-marketing surveillance data and it's filtered to include only reports submitted by health professionals. The significance of a given drug-ADR is estimated using a Likelihood Ratio Test (LRT) using all reports associated with the given drug"
-  },
-  {
     "id": "otar",
     "nice_name": "Open Targets Projects",
     "tags": [],
@@ -441,6 +433,14 @@
       "Genetics"
     ],
     "description": "Genetic variants influencing individual drug responses. Pharmacogenetics data is integrated from sources including ClinPGx"
+  },
+  {
+    "id": "pharmacovigilance",
+    "nice_name": "Pharmacovigilance (by drug)",
+    "tags": [
+      "Drug"
+    ],
+    "description": "Significant adverse drug reactions (ADRs) associated with drugs. This dataset is based on the FDA's Adverse Event Reporting System (FAERS) reporting post-marketing surveillance data and it's filtered to include only reports submitted by health professionals. The significance of a given drug-ADR is estimated using a Likelihood Ratio Test (LRT) using all reports associated with the given drug"
   },
   {
     "id": "so",
