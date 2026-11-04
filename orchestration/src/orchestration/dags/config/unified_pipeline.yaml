@@ -158,7 +158,6 @@ steps:
       - pts_association
       - pts_pharmacogenetics
   pts_pharmacovigilance:
-    machine_type: n2d-highmem-32
     depends_on:
       - pis_openfda
       - pts_drug_molecule
