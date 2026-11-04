@@ -11,6 +11,7 @@ from pts.schemas.credible_set import credible_set_schema
 from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.credible_set.variant_id import variant_chromosome, variant_position
 from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -73,7 +74,7 @@ def flag_lead_chromosome_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
         >>> flag_lead_chromosome_mismatch(sets).collect()['qualityControls'].list.len().to_list()
         [1, 0, 1]
     """
-    mismatch = pl.col('leadVariantId').str.split('_').list.first() != pl.col('chromosome')
+    mismatch = variant_chromosome(pl.col('leadVariantId')) != pl.col('chromosome')
     return flag_rows(frame, mismatch, CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH)
 
 
@@ -88,11 +89,6 @@ def flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[Finemappi
     """
     invalid = ~pl.col('fineMappingMethod').is_in([method.value for method in allowed])
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
-
-
-def lead_position() -> pl.Expr:
-    """The position of the lead variant, the second field of `leadVariantId`."""
-    return pl.col('leadVariantId').str.split('_').list.get(1).cast(pl.Int64, strict=False)
 
 
 def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -111,7 +107,8 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
         [1, 1, 0, 0]
     """
     mhc = KnownGenomicRegion.MHC.value
-    in_mhc = (pl.col('chromosome') == mhc.chromosome.value) & lead_position().is_between(mhc.start, mhc.end)
+    lead_position = variant_position(pl.col('leadVariantId'))
+    in_mhc = (pl.col('chromosome') == mhc.chromosome.value) & lead_position.is_between(mhc.start, mhc.end)
     return flag_rows(frame, in_mhc, CredibleSetFlag.IN_MHC)
 
 

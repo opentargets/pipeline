@@ -17,8 +17,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pts.schemas.credible_set import validated_credible_set_schema
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.variant_id import (
+    variant_alternate_allele,
+    variant_chromosome,
+    variant_position,
+    variant_reference_allele,
+)
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
-from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
+from pts.transformers.utils.quality_flags import (
+    flag_matching_ids,
+    flag_rows,
+    has_excluded_flag,
+    resolve_flag_names,
+    valid_rows,
+)
 
 cross_set_flags_schema = pl.Schema({
     'id': pl.String(),
@@ -108,14 +120,6 @@ class ValidationSettings(BaseModel):
         return self
 
 
-def _flag_matching_ids(
-    frame: pl.LazyFrame, key: str, ids: pl.LazyFrame, flag: CredibleSetFlag | CredibleSetVariantFlag
-) -> pl.LazyFrame:
-    """Flag the rows of `frame` whose `key` is among the `id` values of `ids`."""
-    marked = ids.select(pl.col('id').alias(key), pl.lit(True).alias('_matched')).unique()
-    return frame.join(marked, on=key, how='left').pipe(flag_rows, pl.col('_matched'), flag).drop('_matched')
-
-
 def redundant_pics_top_hits(sets: pl.LazyFrame) -> pl.LazyFrame:
     """The ids of curated top hits made redundant by PICS sets from summary statistics.
 
@@ -182,7 +186,7 @@ def explained_by_susie(sets: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFra
         .filter(~pl.col('qualityControls').list.contains(CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value))
         .select(
             pl.col('credibleSetId').alias('id'),
-            pl.col('variantId').str.split('_').list.get(1).cast(pl.Int64, strict=False).alias('position'),
+            variant_position(pl.col('variantId')).alias('position'),
         )
         .drop_nulls('position')
         .join(other_sets, on='id', how='inner')
@@ -331,7 +335,7 @@ def flag_variant_chromosome_mismatch(frame: pl.LazyFrame, sets: pl.LazyFrame) ->
     chromosomes = sets.select(
         pl.col('id').alias('credibleSetId'), pl.col('chromosome').alias('_set_chromosome')
     ).unique()
-    mismatch = pl.col('variantId').str.split('_').list.first() != pl.col('_set_chromosome')
+    mismatch = variant_chromosome(pl.col('variantId')) != pl.col('_set_chromosome')
     return (
         frame
         .join(chromosomes, on='credibleSetId', how='left')
@@ -454,10 +458,10 @@ def validate(
     sets_with_invalid_variant = variants.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
         pl.col('credibleSetId').alias('id')
     )
-    flagged_sets = _flag_matching_ids(sets, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET)
+    flagged_sets = flag_matching_ids(sets, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET)
     flagged_sets = flag_lead_variant_missing(flagged_sets, row_split.valid)
     set_split = valid_rows(flagged_sets, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
-    kept_variants = _flag_matching_ids(
+    kept_variants = flag_matching_ids(
         row_split.valid, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
     )
     variant_split = valid_rows(kept_variants, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
@@ -563,12 +567,12 @@ def sort_variants(frame: pl.LazyFrame) -> pl.LazyFrame:
         >>> sort_variants(variants).collect()['variantId'].to_list()
         ['1_20_G_A', '1_100_A_C', '1_100_A_T', '1_100_A_T', '10_1_A_T']
     """
-    parts = pl.col('variantId').str.split('_')
+    variant_id = pl.col('variantId')
     return frame.sort(
-        _chromosome_rank(parts.list.first()),
-        parts.list.get(1, null_on_oob=True).cast(pl.Int64, strict=False),
-        parts.list.get(2, null_on_oob=True),
-        parts.list.get(3, null_on_oob=True),
+        _chromosome_rank(variant_chromosome(variant_id)),
+        variant_position(variant_id),
+        variant_reference_allele(variant_id),
+        variant_alternate_allele(variant_id),
         'credibleSetId',
         nulls_last=True,
     )

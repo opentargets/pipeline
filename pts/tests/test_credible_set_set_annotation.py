@@ -5,8 +5,9 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts.transformers.credible_set.annotation import MEASUREMENT_THERAPEUTIC_AREA, flag_replicated, flag_trans_qtl
+from pts.transformers.credible_set.annotation import flag_replicated, flag_trans_qtl
 from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.disease.coalescing import MEASUREMENT
 
 TSS = 10_000_000
 """The TSS of gene `g`, on chromosome 1."""
@@ -95,7 +96,7 @@ def test_trans_flagging_keeps_rows_order_and_columns() -> None:
 
 DISEASES = pl.LazyFrame({
     'id': ['EFO_disease', 'EFO_other', 'EFO_bmi', 'EFO_height'],
-    'therapeuticAreas': [['EFO_area'], ['EFO_area'], [MEASUREMENT_THERAPEUTIC_AREA], [MEASUREMENT_THERAPEUTIC_AREA]],
+    'therapeuticAreas': [['EFO_area'], ['EFO_area'], [MEASUREMENT], [MEASUREMENT]],
 })
 LEAD = '1_100_A_T'
 

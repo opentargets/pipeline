@@ -1,6 +1,5 @@
 """Annotate the validated credible sets and variants, and publish them."""
 
-from enum import StrEnum
 from typing import Any
 
 import polars as pl
@@ -9,14 +8,14 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 from scipy.stats import chi2
 
+from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.variant_id import variant_chromosome, variant_position
+from pts.transformers.disease.coalescing import MEASUREMENT
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
-from pts.transformers.utils.quality_flags import flag_rows
-
-MEASUREMENT_THERAPEUTIC_AREA = 'EFO_0001444'
-"""The disease index therapeutic area that marks a term as a measurement rather than a disease."""
+from pts.transformers.utils.quality_flags import flag_matching_ids, flag_rows
 
 
 class AnnotationSource(BaseModel):
@@ -54,15 +53,15 @@ class AnnotationSettings(BaseModel):
     """The distance from the gene TSS beyond which a QTL variant is trans."""
 
 
-def _flag_ids(frame: pl.LazyFrame, ids: pl.LazyFrame, flag: StrEnum) -> pl.LazyFrame:
-    """Flag the rows of `frame` whose `id` is among `ids`, keeping the rows and their order."""
-    hits = ids.select('id').unique().with_columns(pl.lit(True).alias('_hit'))
-    return (
-        frame
-        .join(hits, on='id', how='left', maintain_order='left')
-        .pipe(flag_rows, pl.col('_hit').is_not_null(), flag)
-        .drop('_hit')
-    )
+def _study_of_set(sets: pl.LazyFrame) -> pl.LazyFrame:
+    """The `studyId` of each credible set, keyed by `credibleSetId` for a join to its variants."""
+    return sets.select(pl.col('id').alias('credibleSetId'), 'studyId')
+
+
+def _qtl_genes(studies: pl.LazyFrame) -> pl.LazyFrame:
+    """The `geneId` of each QTL study that has one."""
+    qtl = (pl.col('studyType') != StudyType.GWAS.value) & pl.col('geneId').is_not_null()
+    return studies.filter(qtl).select('studyId', 'geneId')
 
 
 def flag_trans_qtl(
@@ -84,25 +83,22 @@ def flag_trans_qtl(
         >>> flagged['qualityControls'].list.len().to_list()
         [1, 0]
     """
-    qtl_genes = studies.filter((pl.col('studyType') != 'gwas') & pl.col('geneId').is_not_null()).select(
-        'studyId', 'geneId'
-    )
     gene_locations = targets.select(
         pl.col('id').alias('geneId'),
         pl.col('tss').alias('_gene_tss'),
         pl.col('genomicLocation').struct.field('chromosome').alias('_gene_chromosome'),
     )
-    variant_fields = pl.col('variantId').str.split('_')
+    variant_id = pl.col('variantId')
     # One row per variant of a QTL set, next to the location of its study's gene.
     variants_and_genes = (
         variants
         .select(
             pl.col('credibleSetId').alias('id'),
-            variant_fields.list.get(0, null_on_oob=True).alias('_variant_chromosome'),
-            variant_fields.list.get(1, null_on_oob=True).cast(pl.Int64, strict=False).alias('_variant_position'),
+            variant_chromosome(variant_id).alias('_variant_chromosome'),
+            variant_position(variant_id).alias('_variant_position'),
         )
         .join(sets.select('id', 'studyId'), on='id')
-        .join(qtl_genes, on='studyId')
+        .join(_qtl_genes(studies), on='studyId')
         .join(gene_locations, on='geneId', how='left')
     )
     variant_is_trans = (
@@ -116,7 +112,7 @@ def flag_trans_qtl(
         .agg(variant_is_trans.all().alias('_all_variants_trans'))
         .filter('_all_variants_trans')
     )
-    return _flag_ids(sets, trans_sets, CredibleSetFlag.TRANS_QTL)
+    return flag_matching_ids(sets, 'id', trans_sets, CredibleSetFlag.TRANS_QTL)
 
 
 def replication_keys(gwas_studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
@@ -134,14 +130,14 @@ def replication_keys(gwas_studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.L
         ...     'studyId': ['m', 'md', 'd'],
         ...     'diseaseIds': [['bmi', 'height'], ['bmi', 'ibd'], ['ra', 'ibd']],
         ... })
-        >>> diseases = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT_THERAPEUTIC_AREA]] * 2})
+        >>> diseases = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT]] * 2})
         >>> keys = replication_keys(studies, diseases).sort('studyId', '_disease_set').collect()
         >>> keys.rows()
         [('d', ['ibd', 'ra']), ('m', ['bmi']), ('m', ['height']), ('md', ['ibd'])]
     """
     measurements = (
         diseases
-        .filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT_THERAPEUTIC_AREA))
+        .filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT))
         .select(pl.col('id').alias('_term'), pl.lit(True).alias('_is_measurement'))
         .unique()
     )
@@ -195,9 +191,9 @@ def flag_replicated(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.Lazy
         [1, 1, 0]
     """
     loci = sets.select('id', 'studyId', 'leadVariantId')
-    gwas_studies = studies.filter((pl.col('studyType') == 'gwas') & (pl.col('diseaseIds').list.len() > 0)).select(
-        'studyId', 'diseaseIds', 'cohorts', 'pubmedId', 'ldPopulationStructure'
-    )
+    gwas_studies = studies.filter(
+        (pl.col('studyType') == StudyType.GWAS.value) & (pl.col('diseaseIds').list.len() > 0)
+    ).select('studyId', 'diseaseIds', 'cohorts', 'pubmedId', 'ldPopulationStructure')
     keyed_studies = gwas_studies.drop('diseaseIds').join(replication_keys(gwas_studies, diseases), on='studyId')
     gwas = loci.join(keyed_studies, on='studyId')
     independent = gwas.select('leadVariantId', '_disease_set', 'cohorts', 'pubmedId', 'ldPopulationStructure').unique()
@@ -209,15 +205,12 @@ def flag_replicated(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.Lazy
         .select('leadVariantId', '_disease_set')
     )
     gwas_ids = gwas.join(replicated_gwas, on=['leadVariantId', '_disease_set']).select('id')
-    qtl_studies = studies.filter((pl.col('studyType') != 'gwas') & pl.col('geneId').is_not_null()).select(
-        'studyId', 'geneId'
-    )
-    qtl = loci.join(qtl_studies, on='studyId')
+    qtl = loci.join(_qtl_genes(studies), on='studyId')
     replicated_qtl = (
         qtl.group_by('leadVariantId', 'geneId').len().filter(pl.col('len') >= 2).select('leadVariantId', 'geneId')
     )
     qtl_ids = qtl.join(replicated_qtl, on=['leadVariantId', 'geneId']).select('id')
-    return _flag_ids(sets, pl.concat([gwas_ids, qtl_ids]), CredibleSetFlag.REPLICATED)
+    return flag_matching_ids(sets, 'id', pl.concat([gwas_ids, qtl_ids]), CredibleSetFlag.REPLICATED)
 
 
 def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -297,7 +290,7 @@ def gnomad_frequencies(
     pairs = (
         variants
         .select('credibleSetId', 'variantId')
-        .join(sets.select(pl.col('id').alias('credibleSetId'), 'studyId'), on='credibleSetId')
+        .join(_study_of_set(sets), on='credibleSetId')
         .select('studyId', 'variantId')
         .unique()
     )
@@ -378,7 +371,7 @@ def effect_allele_frequency(
     return (
         variants
         .join(
-            sets.select(pl.col('id').alias('credibleSetId'), 'studyId'),
+            _study_of_set(sets),
             on='credibleSetId',
             how='left',
             maintain_order='left',
@@ -476,7 +469,7 @@ def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl
     return (
         variants
         .join(
-            sets.select(pl.col('id').alias('credibleSetId'), 'studyId'),
+            _study_of_set(sets),
             on='credibleSetId',
             how='left',
             maintain_order='left',
