@@ -30,10 +30,6 @@
     "description": "Method used to estimate biosample enrichment"
   },
   {
-    "id": "ldAncestry",
-    "description": "Ancestry of the linkage disequilibrium reference population used for enrichment"
-  },
-  {
     "id": "pValue",
     "description": "P-value for the biosample enrichment"
   },
