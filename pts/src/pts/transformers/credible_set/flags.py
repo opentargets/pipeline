@@ -36,6 +36,7 @@ class CredibleSetFlag(StrEnum):
     LEAD_CHROMOSOME_MISMATCH = 'Chromosome of the lead variant differs from the credible set chromosome'
     INVALID_FINEMAPPING_METHOD = 'Fine-mapping method is not supported'
     INVALID_STUDY_TYPE = 'Study type of the source is not a supported study type'
+    STUDY_TYPE_MISMATCH = 'Study type of the credible set differs from the study index'
 
 
 class CredibleSetVariantFlag(StrEnum):

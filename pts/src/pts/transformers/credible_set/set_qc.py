@@ -116,28 +116,33 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets against the study index, then take `studyType` from it.
+    """Flag credible sets against the study index; the credible set keeps its own `studyType`.
 
-    - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing source type is
-      not flagged, as it is replaced below.
+    - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
+    - STUDY_TYPE_MISMATCH: the study is in the index, and the `studyType` of the set is missing or
+      differs from the study's.
     - FLAGGED_STUDY: the study carries at least one quality control flag.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
       SUMSTATS_NOT_AVAILABLE, so its summary statistics should give the set instead.
     - MISSING_STUDY: the study is not in the study index.
 
-    `studyType` is then replaced by the study index value, null for a missing study.
-
     Examples:
         >>> sets = pl.LazyFrame({
-        ...     'studyId': ['s', 'unknown'],
-        ...     'studyType': ['eQTL', 'gwas'],
+        ...     'studyId': ['s', 't', 'unknown'],
+        ...     'studyType': ['eQTL', 'gwas', 'gwas'],
+        ...     'qualityControls': [[], [], []],
+        ... })
+        >>> studies = pl.LazyFrame({
+        ...     'studyId': ['s', 't'],
+        ...     'studyType': ['eqtl', 'gwas'],
         ...     'qualityControls': [[], []],
         ... })
-        >>> studies = pl.LazyFrame({'studyId': ['s'], 'studyType': ['eqtl'], 'qualityControls': [[]]})
         >>> for row in flag_study(sets, studies).sort('studyId').collect().iter_rows(named=True):
-        ...     print(row['studyType'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
-        eqtl ['INVALID_STUDY_TYPE']
-        None ['MISSING_STUDY']
+        ...     flags = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
+        ...     print(row['studyId'], row['studyType'], flags)
+        s eQTL ['INVALID_STUDY_TYPE', 'STUDY_TYPE_MISMATCH']
+        t gwas []
+        unknown gwas ['MISSING_STUDY']
     """
     lookup = studies.select(
         'studyId',
@@ -145,29 +150,19 @@ def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
         pl.col('qualityControls').alias('_study_qc'),
         pl.lit(True).alias('_study_found'),
     )
+    found = pl.col('_study_found').is_not_null()
+    mismatch = found & (pl.col('studyType').is_null() | (pl.col('studyType') != pl.col('_study_type')))
     top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
     no_sumstats = pl.col('_study_qc').list.contains(StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value)
     return (
         frame
         .join(lookup, on='studyId', how='left')
         .pipe(flag_rows, ~pl.col('studyType').is_in([t.value for t in StudyType]), CredibleSetFlag.INVALID_STUDY_TYPE)
+        .pipe(flag_rows, mismatch, CredibleSetFlag.STUDY_TYPE_MISMATCH)
         .pipe(flag_rows, pl.col('_study_qc').list.len() > 0, CredibleSetFlag.FLAGGED_STUDY)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
-        .pipe(flag_rows, pl.col('_study_found').is_null(), CredibleSetFlag.MISSING_STUDY)
-        .with_columns(pl.col('_study_type').alias('studyType'))
+        .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)
         .drop('_study_type', '_study_qc', '_study_found')
-    )
-
-
-def flag_sets(frame: pl.LazyFrame, allowed_fm_methods: list[FinemappingMethod]) -> pl.LazyFrame:
-    """Add every set QC flag that depends only on the credible set row."""
-    return (
-        frame
-        .pipe(flag_invalid_cs_id)
-        .pipe(flag_invalid_chromosome)
-        .pipe(flag_lead_chromosome_mismatch)
-        .pipe(flag_in_mhc)
-        .pipe(flag_invalid_finemapping_method, allowed_fm_methods)
     )
 
 
@@ -191,7 +186,11 @@ def set_qc(
     flagged = (
         scan_dataset(sources.credible_set)
         .match_to_schema(credible_set_schema)
-        .pipe(flag_sets, options.allowed_fm_methods)
+        .pipe(flag_invalid_cs_id)
+        .pipe(flag_invalid_chromosome)
+        .pipe(flag_lead_chromosome_mismatch)
+        .pipe(flag_in_mhc)
+        .pipe(flag_invalid_finemapping_method, options.allowed_fm_methods)
         .pipe(flag_study, scan_dataset(sources.study))
     )
     logger.info('Writing flagged credible sets to {}', destination)

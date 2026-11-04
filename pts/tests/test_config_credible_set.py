@@ -132,6 +132,7 @@ def test_validation_excludes_the_agreed_flags() -> None:
         CredibleSetFlag.SUBSIGNIFICANT_FLAG,
         CredibleSetFlag.LD_CLUMPED,
         CredibleSetFlag.WINDOW_CLUMPED,
+        CredibleSetFlag.STUDY_TYPE_MISMATCH,
     }
     assert set(settings.csv_set_invalid_qc_reasons) == {
         CredibleSetVariantFlag.INVALID_CS_ID,

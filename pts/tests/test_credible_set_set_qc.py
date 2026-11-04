@@ -1,7 +1,11 @@
 """Set QC: the flags that depend only on the credible set row, on the worked examples of the PRD."""
 
+from pathlib import Path
+from unittest.mock import Mock
+
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.schemas.credible_set import credible_set_schema
 from pts.transformers.credible_set.enums import FinemappingMethod
@@ -12,15 +16,15 @@ from pts.transformers.credible_set.set_qc import (
     flag_invalid_cs_id,
     flag_invalid_finemapping_method,
     flag_lead_chromosome_mismatch,
-    flag_sets,
     flag_study,
+    set_qc,
 )
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 
 CS_ID = '0' * 32
 
 
-def _set(**values: str | list[str]) -> pl.LazyFrame:
+def _set(**values: str | list[str] | None) -> pl.LazyFrame:
     """One credible set row; unset columns are null, flags empty."""
     row = {
         'id': CS_ID,
@@ -97,17 +101,29 @@ def test_the_allowed_methods_default_to_every_method_and_reject_unknown_ones() -
         SetQcSettings.model_validate({'allowed_fm_methods': ['SuSie']})
 
 
-def test_set_qc_adds_every_row_flag() -> None:
-    frame = flag_sets(
-        _set(id='X', chromosome='6', leadVariantId='7_30000000_A_T', fineMappingMethod='SuSie'),
-        SetQcSettings().allowed_fm_methods,
-    ).collect()
-    assert set(frame['qualityControls'].item()) == {
+def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
+    sets = _set(
+        id='X', chromosome='6', leadVariantId='7_30000000_A_T', fineMappingMethod='SuSie', studyId='s', studyType='eqtl'
+    )
+    studies = _studies(('s', 'gwas', [STUDY_FLAGGED]))
+    sets.collect().write_parquet(tmp_path / 'sets.parquet')
+    studies.collect().write_parquet(tmp_path / 'study.parquet')
+    set_qc(
+        source={'credible_set': str(tmp_path / 'sets.parquet'), 'study': str(tmp_path / 'study.parquet')},
+        destination=str(tmp_path / 'qc'),
+        settings={},
+        config=Mock(spec=Config),
+    )
+    result = pl.read_parquet(tmp_path / 'qc')
+    assert set(result['qualityControls'].item()) == {
         CredibleSetFlag.INVALID_CS_ID,
         CredibleSetFlag.IN_MHC,
         CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH,
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
+        CredibleSetFlag.FLAGGED_STUDY,
+        CredibleSetFlag.STUDY_TYPE_MISMATCH,
     }
+    assert result['studyType'].item() == 'eqtl'
 
 
 STUDY_FLAGGED = 'Some study quality flag'
@@ -127,17 +143,29 @@ def _with_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.DataFrame:
     return flag_study(frame, studies).collect()
 
 
-def test_a_set_of_an_unknown_study_is_missing_with_a_null_study_type() -> None:
+def test_a_set_of_an_unknown_study_is_missing_and_keeps_its_study_type() -> None:
     result = _with_study(_set(studyId='unknown', studyType='gwas'), _studies(('known', 'gwas', [])))
     assert CredibleSetFlag.MISSING_STUDY in result['qualityControls'].item()
-    assert result['studyType'].item() is None
+    assert CredibleSetFlag.STUDY_TYPE_MISMATCH not in result['qualityControls'].item()
+    assert result['studyType'].item() == 'gwas'
 
 
-def test_the_study_type_is_replaced_by_the_study_index_value_after_the_source_type_is_checked() -> None:
-    result = _with_study(_set(studyId='s', studyType='eQTL'), _studies(('s', 'eqtl', [])))
-    assert CredibleSetFlag.INVALID_STUDY_TYPE in result['qualityControls'].item()
-    assert CredibleSetFlag.MISSING_STUDY not in result['qualityControls'].item()
-    assert result['studyType'].item() == 'eqtl'
+@pytest.mark.parametrize(
+    ('source_type', 'index_type', 'mismatch'),
+    [
+        ('gwas', 'gwas', False),
+        ('eqtl', 'eqtl', False),
+        ('eqtl', 'gwas', True),
+        ('eQTL', 'eqtl', True),
+        (None, 'gwas', True),
+    ],
+)
+def test_a_study_type_different_from_the_study_index_is_a_mismatch_and_is_kept(
+    source_type: str | None, index_type: str, mismatch: bool
+) -> None:
+    result = _with_study(_set(studyId='s', studyType=source_type), _studies(('s', index_type, [])))
+    assert (CredibleSetFlag.STUDY_TYPE_MISMATCH in result['qualityControls'].item()) is mismatch
+    assert result['studyType'].item() == source_type
 
 
 @pytest.mark.parametrize(
@@ -146,12 +174,6 @@ def test_the_study_type_is_replaced_by_the_study_index_value_after_the_source_ty
 def test_invalid_study_type(source_type: str, invalid: bool) -> None:
     result = _with_study(_set(studyId='s', studyType=source_type), _studies(('s', 'gwas', [])))
     assert (CredibleSetFlag.INVALID_STUDY_TYPE in result['qualityControls'].item()) is invalid
-
-
-def test_a_missing_source_study_type_is_replaced_without_flag() -> None:
-    result = _with_study(_set(studyId='s'), _studies(('s', 'gwas', [])))
-    assert result['qualityControls'].item().to_list() == []
-    assert result['studyType'].item() == 'gwas'
 
 
 def test_a_set_of_a_flagged_study_is_flagged() -> None:
