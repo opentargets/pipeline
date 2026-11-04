@@ -4,7 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  string_version: '12.0'
+  string_version: '12.5'
 
 steps:
   #: VARIANT PPP STEP :############################################################################
@@ -931,7 +931,7 @@ steps:
 
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
   # Not part of a release. The `clinical_staging` DAG runs this step with
-  # release_uri pointed at gs://clinical_staging/aact/${aact_version}, so every path below
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below
   # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
     - name: transform aact_trial_extraction
@@ -952,7 +952,7 @@ steps:
 
   #: AACT_TRIAL_MODELS STEP :######################################################################
   # Not part of a release. Runs in the `clinical_staging` DAG, with
-  # release_uri pointed at gs://clinical_staging/aact/${aact_version}; the record stores sit outside it
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}; the record stores sit outside it
   aact_trial_models:
     - name: transform aact_trial_models
       transformer: clinical_mira.aact_trial_models
@@ -969,7 +969,7 @@ steps:
 
   #: CLINICAL_MINING_MODELS STEP :#################################################################
   # Not part of a release. Runs with release_uri pointed at
-  # gs://clinical_staging/clinical_mining/${clinical_mining_version}; the record stores sit outside it
+  # gs://clinical_staging/clinical_mining/${staging_version}; the record stores sit outside it
   clinical_mining_models:
     - name: transform clinical_mining_models
       transformer: clinical_mira.clinical_mining_models
@@ -1484,7 +1484,8 @@ steps:
         humanmapping: input/interaction/HUMAN_9606_idmapping.dat.gz
         ensproteins: input/interaction/Homo_sapiens.GRCh38.chr.gtf.gz
         intact: input/interaction/intact-interactors.json
-        strings: input/interaction/string-interactions.txt.gz
+        string_detailed: input/interaction/string-links-detailed.txt.gz
+        string_full: input/interaction/string-links-full.txt.gz
       destination:
         interactions: output/interaction
         interactions_evidence: output/interaction_evidence

@@ -28,7 +28,8 @@ def pts_clusters(config: UnifiedPipelineConfig) -> dict[str, dict]:
 
 def _pts_pin(package: str) -> str:
     assert PTS_PYPROJECT.is_file(), f'{PTS_PYPROJECT} not found'
-    dependencies = tomllib.loads(PTS_PYPROJECT.read_text())['project']['dependencies']
+    pyproject = tomllib.loads(PTS_PYPROJECT.read_text())
+    dependencies = [*pyproject['project']['dependencies'], *pyproject['dependency-groups']['spark']]
     pins = [d for d in dependencies if re.match(rf'{package}\b', d)]
     assert len(pins) == 1, f'expected one {package} requirement in pts, found {pins}'
     return pins[0]

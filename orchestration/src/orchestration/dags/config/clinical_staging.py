@@ -38,10 +38,8 @@ class ClinicalStagingConfig:
 
         self.bucket: str = conf.get('bucket')
         """Bucket the snapshots and the record stores live in."""
-        self.aact_version: str = conf.get('aact_version')
-        """The AACT monthly archive this run stages."""
-        self.clinical_mining_version: str = conf.get('clinical_mining_version')
-        """The clinical mining inputs this run stages."""
+        self.staging_version: str = conf.get('staging_version')
+        """The date of the run: the AACT archive it extracts and the day TTD, EMA and PMDA are fetched."""
         self.machine_type: str = conf.get('machine_type')
         """Default machine type. The extraction is IO bound, not CPU bound; a step may override it."""
         self.disk_size: int = conf.get('disk_size')
@@ -49,7 +47,7 @@ class ClinicalStagingConfig:
         self.boot_disk_size: int = conf.get('boot_disk_size')
         """Boot disk size in GB. Sized for the PIS and PTS container images."""
 
-        self.versions = {'aact': self.aact_version, 'clinical_mining': self.clinical_mining_version}
+        self.versions = {'aact': self.staging_version, 'clinical_mining': self.staging_version}
         """The version of each source."""
 
         pis_path = config_path.parents[4] / 'pis' / 'config.yaml'
@@ -61,7 +59,7 @@ class ClinicalStagingConfig:
         """The internal configuration for PTS steps, per source."""
         for source, version in self.versions.items():
             pis = AppConfig.from_file(file_path=pis_path)
-            pis.config['scratchpad'][f'{source}_version'] = version
+            pis.config['scratchpad']['staging_version'] = version
             pis.config['release_uri'] = self.source_uri(source)
             pis.config['work_path'] = '/mnt/disks/work'
             pis.config['log_level'] = 'INFO'
@@ -70,7 +68,7 @@ class ClinicalStagingConfig:
 
             pts = AppConfig.from_file(
                 file_path=pts_path,
-                template_context={'release_name': version, 'snapshot': version},
+                template_context={'release_name': self.staging_version, 'snapshot': self.staging_version},
             )
             pts.config['release_uri'] = self.source_uri(source)
             pts.config['work_path'] = '/mnt/disks/work'

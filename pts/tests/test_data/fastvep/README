@@ -15,8 +15,8 @@ through pts prepare_gff3 (3 readthrough transcripts dropped).
 chr22_slice.fa.gz: contig 22, full length (50,818,468), all N except the Ensembl REST
 release 116 bases of 22:19700000-20080000 and 22:18521330-18521530.
 
-../fastvep_sample.json: fastVEP main at 9d84be0c14952243b4c34ffc6f3c179ae77d66ee, built by
-the builder stage of pts/Dockerfile (linux/arm64), on the uncompressed GFF3 and FASTA,
+../fastvep_sample.json: fastVEP main at 9d84be0c14952243b4c34ffc6f3c179ae77d66ee, built as
+.github/fastvep/Dockerfile builds it (linux/arm64), on the uncompressed GFF3 and FASTA,
 through pts build_cache then run_fastvep with 2 threads, i.e.
 
   fastvep cache --gff3 chr22_slice.gff3 --no-progress -o CACHE
