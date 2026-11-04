@@ -95,3 +95,32 @@ def test_finished_chunks_survive_an_interruption(tmp_path):
         _run(client, tmp_path / 'c.jsonl', chunk_size=1)
 
     assert len((tmp_path / 'c.jsonl').read_text().splitlines()) == 1
+
+
+def test_torn_last_line_does_not_block_a_rerun(tmp_path):
+    client = FakeClient()
+    _run(client, tmp_path / 'c.jsonl')
+    with (tmp_path / 'c.jsonl').open('a') as cache:
+        cache.write('{"key": "abc", "resp')
+
+    results, _ = _run(client, tmp_path / 'c.jsonl')
+
+    assert set(results) == {'a', 'b'}
+    assert client.total == 2
+
+
+def test_default_chunk_is_the_concurrency(tmp_path):
+    client = FakeClient(lambda text, n: KeyboardInterrupt() if n == 2 else None)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_cached(
+            [('a', 'x'), ('b', 'y')],
+            system_prompt='i',
+            response_model=Echo,
+            model='m',
+            cache_path=tmp_path / 'c.jsonl',
+            concurrency=1,
+            client=client,
+        )
+
+    assert len((tmp_path / 'c.jsonl').read_text().splitlines()) == 1

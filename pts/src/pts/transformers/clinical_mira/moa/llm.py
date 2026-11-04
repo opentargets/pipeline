@@ -40,11 +40,26 @@ def _read_cache(cache_path: Path) -> dict[str, dict]:
     if not cache_path.exists():
         return {}
     cached = {}
-    for line in cache_path.read_text(encoding='utf-8').splitlines():
-        if line.strip():
+    for number, line in enumerate(cache_path.read_text(encoding='utf-8').splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
             row = json.loads(line)
-            cached[row['key']] = row['response']
+        except json.JSONDecodeError:
+            logger.warning(f'skipping unreadable line {number} of {cache_path}')
+            continue
+        cached[row['key']] = row['response']
     return cached
+
+
+def _start_on_a_new_line(cache_path: Path) -> None:
+    if cache_path.exists() and cache_path.stat().st_size:
+        with cache_path.open('rb') as cache:
+            cache.seek(-1, 2)
+            torn = cache.read(1) != b'\n'
+        if torn:
+            with cache_path.open('a', encoding='utf-8') as cache:
+                cache.write('\n')
 
 
 def run_cached(
@@ -56,10 +71,13 @@ def run_cached(
     cache_path: Path,
     service_tier: str = 'flex',
     concurrency: int = 20,
-    chunk_size: int = 100,
+    chunk_size: int | None = None,
     client: AsyncOpenAI | None = None,
 ) -> tuple[dict[str, BaseModel], dict[str, str]]:
     """Run each ``(request_id, input_text)`` through the model, reusing cached results.
+
+    Results are written after every chunk of ``chunk_size`` requests (by default the
+    concurrency), so an interruption loses at most one chunk of finished calls.
 
     Returns:
         The validated response per request id that succeeded, and the error type per
@@ -74,7 +92,7 @@ def run_cached(
             cache_path=cache_path,
             service_tier=service_tier,
             concurrency=concurrency,
-            chunk_size=chunk_size,
+            chunk_size=chunk_size or concurrency,
             client=client,
         )
     )
@@ -107,6 +125,7 @@ async def _run(
     owned = client is None
     active = client or AsyncOpenAI(timeout=client_timeout(service_tier))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    _start_on_a_new_line(cache_path)
     try:
         for start in range(0, len(pending), chunk_size):
             chunk = pending[start : start + chunk_size]
