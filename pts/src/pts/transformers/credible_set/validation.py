@@ -15,7 +15,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
-from pts.transformers.credible_set.enums import FinemappingMethod
+from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import flag_lead_variant_missing
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
@@ -387,6 +387,129 @@ def validate(
     return set_split.valid, variant_split.valid, set_split.invalid, excluded_variants
 
 
+def integrity_checks(
+    source: str,
+    sets: pl.LazyFrame,
+    variants: pl.LazyFrame,
+    valid_set: pl.LazyFrame,
+    valid_variant: pl.LazyFrame,
+    excluded_set: pl.LazyFrame,
+    excluded_variant: pl.LazyFrame,
+) -> pl.LazyFrame:
+    """The counts the integrity of one source's validation is checked on, as one row.
+
+    `integrity_errors` turns them into errors. The counts are aggregates, so the checks of every
+    source are computed together, in one pass, before anything is written.
+    """
+    count = pl.len()
+    valid_ids = valid_set.select('id').unique()
+    lead_rows = valid_set.select('id', 'leadVariantId').join(
+        valid_variant.select(
+            pl.col('credibleSetId').alias('id'), pl.col('variantId').alias('leadVariantId'), pl.lit(1).alias('_lead')
+        ),
+        on=['id', 'leadVariantId'],
+        how='left',
+    )
+    return pl.concat(
+        [
+            sets.select(count.alias('sets_in')),
+            valid_set.select(count.alias('valid_sets'), pl.col('studyType').is_null().sum().alias('null_study_type')),
+            excluded_set.select(count.alias('excluded_sets')),
+            variants.select(count.alias('variants_in')),
+            valid_variant.select(count.alias('valid_variants')),
+            excluded_variant.select(count.alias('excluded_variants')),
+            valid_variant.join(valid_ids, left_on='credibleSetId', right_on='id', how='anti').select(
+                count.alias('variants_without_valid_set')
+            ),
+            lead_rows
+            .group_by('id')
+            .agg(pl.col('_lead').sum().alias('_leads'))
+            .select((pl.col('_leads') != 1).sum().alias('sets_without_one_lead')),
+        ],
+        how='horizontal',
+    ).select(pl.lit(source).alias('source'), pl.all())
+
+
+def integrity_errors(checks: pl.DataFrame) -> list[str]:
+    """The integrity errors in the counts of `integrity_checks`, one per failed check and source."""
+    errors = []
+    for row in checks.iter_rows(named=True):
+        source = row['source']
+        if row['sets_in'] != row['valid_sets'] + row['excluded_sets']:
+            errors.append(
+                f'{source}: {row["sets_in"]} input sets != '
+                f'{row["valid_sets"]} valid + {row["excluded_sets"]} excluded sets'
+            )
+        if row['variants_in'] != row['valid_variants'] + row['excluded_variants']:
+            errors.append(
+                f'{source}: {row["variants_in"]} input variants != '
+                f'{row["valid_variants"]} valid + {row["excluded_variants"]} excluded variants'
+            )
+        if row['variants_without_valid_set']:
+            errors.append(f'{source}: {row["variants_without_valid_set"]} valid variants without a valid set')
+        if row['sets_without_one_lead']:
+            errors.append(f'{source}: {row["sets_without_one_lead"]} valid sets without exactly one lead row')
+        if row['null_study_type']:
+            errors.append(f'{source}: {row["null_study_type"]} valid sets without a studyType')
+    return errors
+
+
+def exclusion_counts(
+    source: str, excluded_set: pl.LazyFrame, excluded_variant: pl.LazyFrame, settings: ValidationSettings
+) -> pl.LazyFrame:
+    """The number of excluded sets and variants per exclusion reason, for one source.
+
+    A reason is a flag of the exclusion lists or a structural flag; a row excluded for several
+    reasons counts once for each.
+    """
+    set_reasons = {
+        flag.value: flag.name for flag in [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET]
+    }
+    variant_reasons = {
+        flag.value: flag.name
+        for flag in [
+            *settings.csv_set_invalid_qc_reasons,
+            *settings.csv_row_invalid_qc_reasons,
+            CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED,
+        ]
+    }
+
+    def per_reason(frame: pl.LazyFrame, dataset: str, reasons: dict[str, str]) -> pl.LazyFrame:
+        return (
+            frame
+            .select(pl.col('qualityControls').explode().alias('flag'))
+            .filter(pl.col('flag').is_in(list(reasons)))
+            .group_by('flag')
+            .len('count')
+            .select(
+                pl.lit(source).alias('source'),
+                pl.lit(dataset).alias('dataset'),
+                pl.col('flag').replace_strict(reasons),
+                pl.col('count').cast(pl.Int64),
+            )
+        )
+
+    return pl.concat([
+        per_reason(excluded_set, 'credible_set', set_reasons),
+        per_reason(excluded_variant, 'credible_set_variant', variant_reasons),
+    ])
+
+
+def sort_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Sort credible sets by chromosome in genome order, then `locusStart`, `locusEnd` and `leadVariantId`.
+
+    A chromosome outside `Chromosome` sorts last.
+    """
+    order = {chromosome.value: rank for rank, chromosome in enumerate(Chromosome)}
+    rank = pl.col('chromosome').cast(pl.String).replace_strict(order, default=len(order), return_dtype=pl.Int32)
+    return frame.sort(rank, 'locusStart', 'locusEnd', 'leadVariantId', nulls_last=True)
+
+
+def sort_variants(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Sort credible set variants by `credibleSetId`, then `variantId`."""
+    return frame.sort('credibleSetId', 'variantId')
+
+
 def validation(
     source: dict[str, str | list[str]],
     destination: dict[str, str],
@@ -399,8 +522,12 @@ def validation(
         source: The QC'd sets of every source under `credible_set` and their variants under
             `credible_set_variant`, in the same source order.
         destination: Paths under `valid_set`, `valid_variant`, `excluded_set` and `excluded_variant`.
-        settings: Flag names under `cs_invalid_qc_reasons` and `csv_set_invalid_qc_reasons`.
+        settings: Flag names under `cs_invalid_qc_reasons`, `csv_set_invalid_qc_reasons` and
+            `csv_row_invalid_qc_reasons`.
         config: Pipeline configuration.
+
+    Raises:
+        ValueError: if a source fails an integrity check; nothing is written then.
     """
     sources = ValidationSource.model_validate(source)
     destinations = ValidationDestination.model_validate(destination)
@@ -410,15 +537,32 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flags.height)
-    splits = [
-        validate(scan_dataset(sets), scan_dataset(variants), cross_set_flags.lazy(), options)
-        for _, sets, variants in pairs
-    ]
-    valid_set, valid_variant, excluded_set, excluded_variant = (pl.concat(parts) for parts in zip(*splits, strict=True))
-    logger.info('Validated the credible sets of {}', ', '.join(source for source, _, _ in pairs))
+    splits = {
+        source: (
+            scan_dataset(sets),
+            scan_dataset(variants),
+            *validate(scan_dataset(sets), scan_dataset(variants), cross_set_flags.lazy(), options),
+        )
+        for source, sets, variants in pairs
+    }
+    checks, counts = pl.collect_all([
+        pl.concat([integrity_checks(source, *split) for source, split in splits.items()]),
+        pl.concat([
+            exclusion_counts(source, excluded_set, excluded_variant, options)
+            for source, (_, _, _, _, excluded_set, excluded_variant) in splits.items()
+        ]),
+    ])
+    for name, dataset, flag, count in counts.sort('source', 'dataset', 'flag').iter_rows():
+        logger.info('{}: {} excluded {} with {}', name, count, dataset, flag)
+    if errors := integrity_errors(checks):
+        raise ValueError('credible set validation failed its integrity checks:\n' + '\n'.join(errors))
+    valid_set, valid_variant, excluded_set, excluded_variant = (
+        pl.concat(parts) for parts in zip(*(split[2:] for split in splits.values()), strict=True)
+    )
+    logger.info('Validated the credible sets of {}', ', '.join(splits))
     pl.collect_all([
-        sink_dataset(type_valid_sets(valid_set), destinations.valid_set),
-        sink_dataset(valid_variant, destinations.valid_variant),
-        sink_dataset(excluded_set, destinations.excluded_set),
-        sink_dataset(excluded_variant, destinations.excluded_variant),
+        sink_dataset(sort_sets(type_valid_sets(valid_set)), destinations.valid_set),
+        sink_dataset(sort_variants(valid_variant), destinations.valid_variant),
+        sink_dataset(sort_sets(excluded_set), destinations.excluded_set),
+        sink_dataset(sort_variants(excluded_variant), destinations.excluded_variant),
     ])
