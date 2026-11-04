@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pts.schemas.credible_set import validated_credible_set_schema
 from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-from pts.transformers.credible_set.set_qc import flag_lead_variant_missing
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
@@ -295,6 +294,76 @@ def type_valid_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
     return frame.cast(enums, strict=True)
 
 
+def flag_orphan_variants(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose credible set is not among the credible sets of their source.
+
+    Examples:
+        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'gone'], 'qualityControls': [[], []]})
+        >>> sets = pl.LazyFrame({'id': ['a']})
+        >>> flag_orphan_variants(variants, sets).sort('credibleSetId').collect()['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    known = sets.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_known')).unique()
+    return (
+        frame
+        .join(known, on='credibleSetId', how='left')
+        .pipe(flag_rows, pl.col('_known').is_null(), CredibleSetVariantFlag.ORPHAN_VARIANT)
+        .drop('_known')
+    )
+
+
+def flag_variant_chromosome_mismatch(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose chromosome, the first field of `variantId`, differs from their set's.
+
+    An orphan variant has no set to compare with, and is not flagged.
+
+    Examples:
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['a', 'a'],
+        ...     'variantId': ['1_1_A_T', '2_5_A_T'],
+        ...     'qualityControls': [[], []],
+        ... })
+        >>> sets = pl.LazyFrame({'id': ['a'], 'chromosome': ['1']})
+        >>> flagged = flag_variant_chromosome_mismatch(variants, sets).sort('variantId').collect()
+        >>> flagged['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    chromosomes = sets.select(
+        pl.col('id').alias('credibleSetId'), pl.col('chromosome').alias('_set_chromosome')
+    ).unique()
+    mismatch = pl.col('variantId').str.split('_').list.first() != pl.col('_set_chromosome')
+    return (
+        frame
+        .join(chromosomes, on='credibleSetId', how='left')
+        .pipe(flag_rows, mismatch, CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH)
+        .drop('_set_chromosome')
+    )
+
+
+def flag_lead_variant_missing(frame: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag credible sets whose lead variant has no row among the variants of their source.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['a', 'b'],
+        ...     'leadVariantId': ['1_1_A_T', '1_9_A_T'],
+        ...     'qualityControls': [[], []],
+        ... })
+        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'b'], 'variantId': ['1_1_A_T', '1_2_A_T']})
+        >>> flag_lead_variant_missing(sets, variants).sort('id').collect()['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    leads = variants.select(
+        pl.col('credibleSetId').alias('id'), pl.col('variantId').alias('leadVariantId'), pl.lit(True).alias('_lead')
+    ).unique()
+    return (
+        frame
+        .join(leads, on=['id', 'leadVariantId'], how='left')
+        .pipe(flag_rows, pl.col('_lead').is_null(), CredibleSetFlag.LEAD_VARIANT_MISSING)
+        .drop('_lead')
+    )
+
+
 def validate(
     sets: pl.LazyFrame,
     variants: pl.LazyFrame,
@@ -305,13 +374,16 @@ def validate(
 
     A credible set is excluded together with all of its variants. The steps are:
 
-    0. The flags that cross-set QC computed over every source are added to the sets they belong to.
+    0. The flags that cross-set QC computed over every source are added to the sets they belong to,
+       and the variants are checked against the sets of their own source: `ORPHAN_VARIANT` for a
+       variant whose set is not among them, `VARIANT_CHROMOSOME_MISMATCH` for a variant on another
+       chromosome than its set.
     1. The variants carrying a flag of `csv_row_invalid_qc_reasons` (by default EXCEEDS_COVERAGE_95
        and ORPHAN_VARIANT) are excluded on their own; the other variants are kept.
     2. The sets with at least one variant carrying a flag of `csv_set_invalid_qc_reasons` get
        `INVALID_VARIANT_IN_SET`: one invalid member invalidates its set.
-    3. The sets whose lead has no row among the kept variants get `LEAD_VARIANT_MISSING`, so a lead
-       removed in step 1 removes its set.
+    3. The sets whose lead has no row among the kept variants get `LEAD_VARIANT_MISSING`: a lead
+       missing from the source, or removed in step 1, removes its set.
     4. The sets carrying a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`, are
        excluded. `INVALID_VARIANT_IN_SET` is structural, so it is not configurable.
     5. Every kept variant of an excluded set gets `CREDIBLE_SET_EXCLUDED` and is excluded with it, so
@@ -334,6 +406,7 @@ def validate(
         >>> from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
         >>> sets = pl.LazyFrame({
         ...     'id': ['a', 'b', 'c'],
+        ...     'chromosome': ['1', '6', '2'],
         ...     'leadVariantId': ['1_10_A_T', '6_30000000_A_T', '2_10_A_T'],
         ...     'qualityControls': [[], [CredibleSetFlag.IN_MHC.value], []],
         ... })
@@ -372,6 +445,7 @@ def validate(
         6_30000000_A_T ['CREDIBLE_SET_EXCLUDED']
     """
     sets = add_cross_set_flags(sets, cross_set_flags)
+    variants = flag_orphan_variants(variants, sets).pipe(flag_variant_chromosome_mismatch, sets)
     row_split = valid_rows(variants, settings.csv_row_invalid_qc_reasons)
     sets_with_invalid_variant = variants.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
         pl.col('credibleSetId').alias('id')

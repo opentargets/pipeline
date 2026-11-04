@@ -6,9 +6,14 @@ from pydantic import ValidationError
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-from pts.transformers.credible_set.set_qc import flag_lead_variant_missing
-from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
-from pts.transformers.credible_set.variant_qc import flag_orphan_variants, flag_variant_chromosome_mismatch
+from pts.transformers.credible_set.validation import (
+    ValidationSettings,
+    cross_set_flags_schema,
+    flag_lead_variant_missing,
+    flag_orphan_variants,
+    flag_variant_chromosome_mismatch,
+    validate,
+)
 
 EXCEEDS = CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value
 SETTINGS = ValidationSettings(
@@ -62,7 +67,7 @@ def _validate(sets: pl.LazyFrame, variants: pl.LazyFrame) -> tuple[dict, dict, d
     )
 
 
-# Quality control of one source: orphans, chromosome mismatch, missing lead.
+# The checks that pair the sets of one source with its variants: orphans, chromosome mismatch, missing lead.
 
 
 def test_a_variant_of_a_set_absent_from_its_source_is_an_orphan() -> None:
@@ -118,8 +123,7 @@ def test_a_set_whose_lead_row_is_excluded_loses_its_lead_and_is_excluded() -> No
 
 def test_an_orphan_variant_is_excluded_without_excluding_any_set() -> None:
     valid_sets, valid_variants, _, excluded_variants = _validate(
-        _sets(('a', '1', '1_1_A_T', [])),
-        _variants(('a', '1_1_A_T', []), ('gone', '1_9_A_T', [CredibleSetVariantFlag.ORPHAN_VARIANT.value])),
+        _sets(('a', '1', '1_1_A_T', [])), _variants(('a', '1_1_A_T', []), ('gone', '1_9_A_T', []))
     )
     assert valid_sets.keys() == {'a'}
     assert valid_variants.keys() == {'1_1_A_T'}
@@ -127,17 +131,17 @@ def test_an_orphan_variant_is_excluded_without_excluding_any_set() -> None:
 
 
 def test_a_set_missing_its_lead_at_input_is_excluded_with_its_variants() -> None:
-    sets = _sets(('a', '1', '1_9_A_T', [CredibleSetFlag.LEAD_VARIANT_MISSING.value]))
+    sets = _sets(('a', '1', '1_9_A_T', []))
     valid_sets, _, excluded_sets, excluded_variants = _validate(sets, _variants(('a', '1_1_A_T', [])))
     assert valid_sets == {}
     assert excluded_sets == {'a': {CredibleSetFlag.LEAD_VARIANT_MISSING}}
     assert excluded_variants == {'1_1_A_T': {CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED}}
 
 
-def test_a_variant_on_another_chromosome_stays_valid() -> None:
+def test_a_variant_on_another_chromosome_is_flagged_and_stays_valid() -> None:
     mismatch = CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH.value
     valid_sets, valid_variants, _, _ = _validate(
-        _sets(('a', '1', '1_1_A_T', [])), _variants(('a', '1_1_A_T', []), ('a', '2_5_A_T', [mismatch]))
+        _sets(('a', '1', '1_1_A_T', [])), _variants(('a', '1_1_A_T', []), ('a', '2_5_A_T', []))
     )
     assert valid_sets.keys() == {'a'}
     assert valid_variants == {'1_1_A_T': set(), '2_5_A_T': {mismatch}}
@@ -157,7 +161,7 @@ def test_every_excluded_row_carries_the_flag_that_explains_it() -> None:
         ('lead_cut', '1_5_A_T', [EXCEEDS]),
         ('fine', '1_7_A_T', []),
         ('fine', '1_8_A_T', [EXCEEDS]),
-        ('orphan', '1_9_A_T', [CredibleSetVariantFlag.ORPHAN_VARIANT.value]),
+        ('orphan', '1_9_A_T', []),
     )
     valid_set, _, excluded_set, excluded_variant = validate(
         sets, variants, pl.LazyFrame(schema=cross_set_flags_schema), SETTINGS
@@ -197,3 +201,15 @@ def test_the_lead_and_orphan_flags_are_ordinary_flags() -> None:
     })
     assert settings.cs_invalid_qc_reasons == [CredibleSetFlag.LEAD_VARIANT_MISSING]
     assert settings.csv_row_invalid_qc_reasons == [CredibleSetVariantFlag.ORPHAN_VARIANT]
+
+
+@pytest.mark.parametrize(
+    ('transformer', 'other'),
+    [('set_qc', 'credible_set_variant'), ('variant_qc', 'credible_set')],
+)
+def test_qc_reads_only_its_own_dataset(transformer: str, other: str) -> None:
+    """The checks that need both datasets of a source run in validation, so QC rejects the other dataset."""
+    from pts.transformers.credible_set import set_qc, variant_qc
+
+    model = {'set_qc': set_qc.SetQcSource, 'variant_qc': variant_qc.VariantQcSource}[transformer]
+    assert other not in model.model_fields

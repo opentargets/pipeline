@@ -64,7 +64,8 @@ def test_the_qc_explode_covers_every_platform_source_once() -> None:
     assert len(_explode()) == len(SOURCES)
 
 
-def test_each_source_is_checked_against_its_own_input_and_mirrors_it() -> None:
+def test_each_source_is_checked_against_its_own_dataset_and_mirrors_it() -> None:
+    """QC reads one dataset of one source; the checks that pair sets with variants run in validation."""
     tasks = _tasks()
     for source, kind in SOURCES.items():
         folder = f'{kind}/{source}'
@@ -73,14 +74,12 @@ def test_each_source_is_checked_against_its_own_input_and_mirrors_it() -> None:
         assert set_qc['transformer'] == 'credible_set.set_qc'
         assert set_qc['source'] == {
             'credible_set': f'input/{folder}/credible_set',
-            'credible_set_variant': f'input/{folder}/credible_set_variant',
             'study': 'output/study',
         }
         assert set_qc['destination'] == f'intermediate/qc/{folder}/credible_set'
         assert variant_qc['transformer'] == 'credible_set.variant_qc'
         assert variant_qc['source'] == {
             'credible_set_variant': f'input/{folder}/credible_set_variant',
-            'credible_set': f'input/{folder}/credible_set',
         }
         assert variant_qc['destination'] == f'intermediate/qc/{folder}/credible_set_variant'
 
@@ -157,10 +156,16 @@ def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() 
     sets = pl.LazyFrame(
         {
             'id': ['clumped', 'abnormal'],
+            'chromosome': ['1', '1'],
             'leadVariantId': ['1_100_A_T', '1_200_A_T'],
             'qualityControls': [[CredibleSetFlag.WINDOW_CLUMPED.value], []],
         },
-        schema={'id': pl.String, 'leadVariantId': pl.String, 'qualityControls': pl.List(pl.String)},
+        schema={
+            'id': pl.String,
+            'chromosome': pl.String,
+            'leadVariantId': pl.String,
+            'qualityControls': pl.List(pl.String),
+        },
     )
     variants = pl.LazyFrame(
         {

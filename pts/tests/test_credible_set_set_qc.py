@@ -113,7 +113,6 @@ def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
     set_qc(
         source={
             'credible_set': str(tmp_path / 'sets.parquet'),
-            'credible_set_variant': str(tmp_path / 'variants.parquet'),
             'study': str(tmp_path / 'study.parquet'),
         },
         destination=str(tmp_path / 'qc'),
@@ -128,7 +127,6 @@ def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
         CredibleSetFlag.FLAGGED_STUDY,
         CredibleSetFlag.STUDY_TYPE_MISMATCH,
-        CredibleSetFlag.LEAD_VARIANT_MISSING,
     }
     assert result['studyType'].item() == 'eqtl'
 

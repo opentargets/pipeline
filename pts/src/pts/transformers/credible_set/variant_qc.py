@@ -21,12 +21,11 @@ VARIANT_ID_PATTERN = rf'^(?:{"|".join(chromosome.value for chromosome in Chromos
 
 
 class VariantQcSource(BaseModel):
-    """The credible set variants of one source, and the credible sets of the same source."""
+    """The credible set variants of one source."""
 
     model_config = ConfigDict(extra='forbid')
 
     credible_set_variant: str
-    credible_set: str
 
 
 class VariantQcSettings(BaseModel):
@@ -187,52 +186,6 @@ def flag_missing_sample_size(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, pl.col('sampleSize').is_null(), CredibleSetVariantFlag.MISSING_SAMPLE_SIZE)
 
 
-def flag_orphan_variants(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants whose credible set is not among the credible sets of their source.
-
-    Examples:
-        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'gone'], 'qualityControls': [[], []]})
-        >>> sets = pl.LazyFrame({'id': ['a']})
-        >>> flag_orphan_variants(variants, sets).sort('credibleSetId').collect()['qualityControls'].list.len().to_list()
-        [0, 1]
-    """
-    known = sets.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_known')).unique()
-    return (
-        frame
-        .join(known, on='credibleSetId', how='left')
-        .pipe(flag_rows, pl.col('_known').is_null(), CredibleSetVariantFlag.ORPHAN_VARIANT)
-        .drop('_known')
-    )
-
-
-def flag_variant_chromosome_mismatch(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants whose chromosome, the first field of `variantId`, differs from their set's.
-
-    An orphan variant has no set to compare with, and is not flagged.
-
-    Examples:
-        >>> variants = pl.LazyFrame({
-        ...     'credibleSetId': ['a', 'a'],
-        ...     'variantId': ['1_1_A_T', '2_5_A_T'],
-        ...     'qualityControls': [[], []],
-        ... })
-        >>> sets = pl.LazyFrame({'id': ['a'], 'chromosome': ['1']})
-        >>> flagged = flag_variant_chromosome_mismatch(variants, sets).sort('variantId').collect()
-        >>> flagged['qualityControls'].list.len().to_list()
-        [0, 1]
-    """
-    chromosomes = sets.select(
-        pl.col('id').alias('credibleSetId'), pl.col('chromosome').alias('_set_chromosome')
-    ).unique()
-    mismatch = pl.col('variantId').str.split('_').list.first() != pl.col('_set_chromosome')
-    return (
-        frame
-        .join(chromosomes, on='credibleSetId', how='left')
-        .pipe(flag_rows, mismatch, CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH)
-        .drop('_set_chromosome')
-    )
-
-
 def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) -> pl.LazyFrame:
     """Add every variant QC flag; the coverage cut runs before the PIP check, which uses it."""
     return (
@@ -257,8 +210,7 @@ def variant_qc(
     """Add quality flags to the credible set variants of one source.
 
     Args:
-        source: The source's CredibleSetVariant path under `credible_set_variant`, and its
-            CredibleSet path under `credible_set`.
+        source: The source's CredibleSetVariant path under `credible_set_variant`.
         destination: Path of the flagged variants.
         settings: `coverage` and `pip_tolerance` of the coverage and PIP checks.
         config: Pipeline configuration.
@@ -269,8 +221,6 @@ def variant_qc(
         scan_dataset(sources.credible_set_variant)
         .match_to_schema(credible_set_variant_schema)
         .pipe(flag_variants, options.coverage, options.pip_tolerance)
-        .pipe(flag_orphan_variants, scan_dataset(sources.credible_set))
-        .pipe(flag_variant_chromosome_mismatch, scan_dataset(sources.credible_set))
     )
     logger.info('Writing flagged credible set variants to {}', destination)
     sink_dataset(flagged, destination).collect()

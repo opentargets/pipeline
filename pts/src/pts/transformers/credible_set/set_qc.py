@@ -18,12 +18,11 @@ from pts.transformers.utils.quality_flags import flag_rows
 
 
 class SetQcSource(BaseModel):
-    """The credible sets and variants of one source, and the validated study index."""
+    """The credible sets of one source, and the validated study index."""
 
     model_config = ConfigDict(extra='forbid')
 
     credible_set: str
-    credible_set_variant: str
     study: str
 
 
@@ -167,30 +166,6 @@ def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def flag_lead_variant_missing(frame: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets whose lead variant has no row among the variants of their source.
-
-    Examples:
-        >>> sets = pl.LazyFrame({
-        ...     'id': ['a', 'b'],
-        ...     'leadVariantId': ['1_1_A_T', '1_9_A_T'],
-        ...     'qualityControls': [[], []],
-        ... })
-        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'b'], 'variantId': ['1_1_A_T', '1_2_A_T']})
-        >>> flag_lead_variant_missing(sets, variants).sort('id').collect()['qualityControls'].list.len().to_list()
-        [0, 1]
-    """
-    leads = variants.select(
-        pl.col('credibleSetId').alias('id'), pl.col('variantId').alias('leadVariantId'), pl.lit(True).alias('_lead')
-    ).unique()
-    return (
-        frame
-        .join(leads, on=['id', 'leadVariantId'], how='left')
-        .pipe(flag_rows, pl.col('_lead').is_null(), CredibleSetFlag.LEAD_VARIANT_MISSING)
-        .drop('_lead')
-    )
-
-
 def set_qc(
     source: dict[str, str | list[str]],
     destination: str,
@@ -200,8 +175,8 @@ def set_qc(
     """Add quality flags to the credible sets of one source.
 
     Args:
-        source: The source's CredibleSet path under `credible_set`, its CredibleSetVariant path
-            under `credible_set_variant`, and the validated study index under `study`.
+        source: The source's CredibleSet path under `credible_set`, and the validated study index
+            under `study`.
         destination: Path of the flagged credible sets.
         settings: The accepted fine-mapping methods under `allowed_fm_methods`.
         config: Pipeline configuration.
@@ -216,7 +191,6 @@ def set_qc(
         .pipe(flag_lead_chromosome_mismatch)
         .pipe(flag_in_mhc)
         .pipe(flag_invalid_finemapping_method, options.allowed_fm_methods)
-        .pipe(flag_lead_variant_missing, scan_dataset(sources.credible_set_variant))
         .pipe(flag_study, scan_dataset(sources.study))
     )
     logger.info('Writing flagged credible sets to {}', destination)

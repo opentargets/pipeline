@@ -61,7 +61,6 @@ def _run_stages(root: Path) -> None:
         variant_qc(
             source={
                 'credible_set_variant': path(f'input/gwas/{source}/credible_set_variant'),
-                'credible_set': path(f'input/gwas/{source}/credible_set'),
             },
             destination=path(f'intermediate/qc/gwas/{source}/credible_set_variant'),
             settings={},
@@ -70,7 +69,6 @@ def _run_stages(root: Path) -> None:
         set_qc(
             source={
                 'credible_set': path(f'input/gwas/{source}/credible_set'),
-                'credible_set_variant': path(f'input/gwas/{source}/credible_set_variant'),
                 'study': path('output/study'),
             },
             destination=path(f'intermediate/qc/gwas/{source}/credible_set'),

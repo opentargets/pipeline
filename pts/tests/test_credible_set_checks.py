@@ -108,10 +108,16 @@ def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed() -> None:
     sets = pl.LazyFrame(
         {
             'id': ['top_hit', 'clean'],
+            'chromosome': ['1', '1'],
             'leadVariantId': ['1_1_A_T', '1_2_A_T'],
             'qualityControls': [[CredibleSetFlag.TOP_HIT.value], []],
         },
-        schema={'id': pl.String, 'leadVariantId': pl.String, 'qualityControls': pl.List(pl.String)},
+        schema={
+            'id': pl.String,
+            'chromosome': pl.String,
+            'leadVariantId': pl.String,
+            'qualityControls': pl.List(pl.String),
+        },
     )
     variants = pl.LazyFrame(
         {'credibleSetId': ['top_hit', 'clean'], 'variantId': ['1_1_A_T', '1_2_A_T'], 'qualityControls': [[], []]},

@@ -152,7 +152,6 @@ steps:
           transformer: credible_set.set_qc
           source:
             credible_set: input/${each}/credible_set
-            credible_set_variant: input/${each}/credible_set_variant
             study: output/study
           destination: intermediate/qc/${each}/credible_set
           settings:
@@ -165,7 +164,6 @@ steps:
           transformer: credible_set.variant_qc
           source:
             credible_set_variant: input/${each}/credible_set_variant
-            credible_set: input/${each}/credible_set
           destination: intermediate/qc/${each}/credible_set_variant
           settings:
             coverage: 0.95
