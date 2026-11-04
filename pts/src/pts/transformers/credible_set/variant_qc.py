@@ -51,8 +51,11 @@ def flag_invalid_cs_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible set identifiers that are not a 32-character lowercase hexadecimal md5.
 
     Examples:
-        >>> variants = pl.LazyFrame({'credibleSetId': ['0' * 32, 'A' * 32, '0' * 31], 'qualityControls': [[]] * 3})
-        >>> flag_invalid_cs_id(variants).collect()['qualityControls'].list.len().to_list()
+        >>> credible_set_variant = pl.LazyFrame({
+        ...     'credibleSetId': ['0' * 32, 'A' * 32, '0' * 31],
+        ...     'qualityControls': [[]] * 3,
+        ... })
+        >>> flag_invalid_cs_id(credible_set_variant).collect()['qualityControls'].list.len().to_list()
         [0, 1, 1]
     """
     invalid = ~pl.col('credibleSetId').str.contains(CREDIBLE_SET_ID_PATTERN)
@@ -66,19 +69,19 @@ def flag_invalid_variant_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     alternative alleles of the nucleotides A, C, G and T that differ.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'variantId': [
         ...         '1_100_A_T', '22_100_A_T', 'XY_5_ACGT_A', '1_100_A_A', '23_100_A_T', '14_KI270846v1_alt_497149_C_T'
         ...     ],
         ...     'qualityControls': [[]] * 6,
         ... })
-        >>> flagged = flag_invalid_variant_id(variants).collect()
+        >>> flagged = flag_invalid_variant_id(credible_set_variant).collect()
         >>> flagged.filter(pl.col('qualityControls').list.len() > 0)['variantId'].to_list()
         ['1_100_A_A', '23_100_A_T', '14_KI270846v1_alt_497149_C_T']
     """
     variant_id = pl.col('variantId')
-    same_alleles = variant_reference_allele(variant_id) == variant_alternate_allele(variant_id)
-    invalid = ~variant_id.str.contains(VARIANT_ID_PATTERN) | same_alleles
+    same_allele = variant_reference_allele(variant_id) == variant_alternate_allele(variant_id)
+    invalid = ~variant_id.str.contains(VARIANT_ID_PATTERN) | same_allele
     return flag_rows(frame, invalid, CredibleSetVariantFlag.INVALID_VARIANT_ID)
 
 
@@ -90,13 +93,13 @@ def flag_exceeds_coverage(frame: pl.LazyFrame, coverage: float) -> pl.LazyFrame:
     variants before it has reached `coverage`; the variant that brings the sum to `coverage` is kept.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'credibleSetId': ['a'] * 4,
         ...     'variantId': ['1_1_A_T', '1_2_A_T', '1_3_A_T', '1_4_A_T'],
         ...     'posteriorProbability': [0.60, 0.30, 0.09, 0.01],
         ...     'qualityControls': [[]] * 4,
         ... })
-        >>> flag_exceeds_coverage(variants, 0.95).collect()['qualityControls'].list.len().to_list()
+        >>> flag_exceeds_coverage(credible_set_variant, 0.95).collect()['qualityControls'].list.len().to_list()
         [0, 0, 0, 1]
     """
     pip = _pip()
@@ -112,13 +115,14 @@ def flag_abnormal_pip(frame: pl.LazyFrame, coverage: float, pip_tolerance: float
     at most 0 or above 1. It runs after `flag_exceeds_coverage`.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'credibleSetId': ['a', 'a', 'b', 'b'],
         ...     'variantId': ['1_1_A_T', '1_2_A_T', '1_3_A_T', '1_4_A_T'],
         ...     'posteriorProbability': [0.50, 0.30, 0.97, 0.02],
         ...     'qualityControls': [[]] * 4,
         ... })
-        >>> flagged = variants.pipe(flag_exceeds_coverage, 0.95).pipe(flag_abnormal_pip, 0.95, 1e-4).collect()
+        >>> flagged = credible_set_variant.pipe(flag_exceeds_coverage, 0.95).pipe(flag_abnormal_pip, 0.95, 1e-4)
+        >>> flagged = flagged.collect()
         >>> flagged['qualityControls'].list.contains(CredibleSetVariantFlag.ABNORMAL_PIP.value).to_list()
         [True, True, False, False]
     """
@@ -136,12 +140,12 @@ def flag_effect_direction_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
     A zero effect has no sign, so it never mismatches.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'reportedBeta': [0.2, 0.2, 0.2, 0.0],
         ...     'conditionalBeta': [-0.1, 0.1, None, -0.1],
         ...     'qualityControls': [[]] * 4,
         ... })
-        >>> flag_effect_direction_mismatch(variants).collect()['qualityControls'].list.len().to_list()
+        >>> flag_effect_direction_mismatch(credible_set_variant).collect()['qualityControls'].list.len().to_list()
         [1, 0, 0, 0]
     """
     opposite = pl.col('reportedBeta').sign() * pl.col('conditionalBeta').sign() == -1
@@ -154,14 +158,14 @@ def flag_incomplete_stats(frame: pl.LazyFrame) -> pl.LazyFrame:
     Both missing is not incomplete: the effect is simply not reported.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'reportedBeta': [0.2, None, 0.2, None],
         ...     'reportedStandardError': [None, 0.01, 0.01, None],
         ...     'conditionalBeta': [None] * 4,
         ...     'conditionalStandardError': [None] * 4,
         ...     'qualityControls': [[]] * 4,
         ... }, schema_overrides={'conditionalBeta': pl.Float32, 'conditionalStandardError': pl.Float32})
-        >>> flag_incomplete_stats(variants).collect()['qualityControls'].list.len().to_list()
+        >>> flag_incomplete_stats(credible_set_variant).collect()['qualityControls'].list.len().to_list()
         [1, 1, 0, 0]
     """
 

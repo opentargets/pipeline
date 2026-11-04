@@ -35,13 +35,15 @@ def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
     approximation = neglog * CHI2_APPROXIMATION_SLOPE + CHI2_APPROXIMATION_INTERCEPT
     p_value = mantissa.cast(pl.Float64) * pl.lit(10.0).pow(exponent)
     exact = p_value.map_batches(
-        lambda values: pl.Series(chi2.isf(values.to_numpy(), df=1)), return_dtype=pl.Float64, is_elementwise=True
+        lambda batch: pl.Series(chi2.isf(batch.to_numpy(), df=1)), return_dtype=pl.Float64, is_elementwise=True
     )
     statistic = pl.when(exponent < CHI2_EXACT_MIN_EXPONENT).then(approximation).otherwise(exact).fill_nan(None)
     return pl.when(statistic.is_finite()).then(statistic).alias('chi2')
 
 
-def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
+def rescaled_effect_size(
+    credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame
+) -> pl.LazyFrame:
     """Set the rescaled effect size of every variant from its p-value, frequency and study design.
 
     `|z|` is the square root of `chi2_from_pvalue`, `varG = 2 * AF * (1 - AF)` and N is the study
@@ -58,7 +60,7 @@ def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl
     a supported design or a sample size. The rows and their order are unchanged.
 
     Examples:
-        >>> variants = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({
         ...     'credibleSetId': ['cs', 'cs'], 'pValueMantissa': [1.0, 1.0], 'pValueExponent': [-10, -10],
         ...     'effectAlleleFrequency': [0.2, None], 'reportedBeta': [0.2, 0.2], 'conditionalBeta': [None, None],
         ...     'rescaledAbsBeta': [None, None],
@@ -66,23 +68,23 @@ def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl
         ...     'rescaledDirection': [None, None],
         ...     'qualityControls': [[], []],
         ... })
-        >>> sets = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
-        >>> studies = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
+        >>> study = pl.LazyFrame({
         ...     'studyId': ['s'], 'nSamples': [100_000], 'nCases': [None],
         ...     'qualityControls': [[StudyQualityFlag.MEASUREMENT_STUDY_DESIGN.value]],
         ... })
-        >>> rescaled = rescaled_effect_size(variants, sets, studies).collect()
+        >>> rescaled = rescaled_effect_size(credible_set_variant, credible_set, study).collect()
         >>> rounded = pl.col('rescaledAbsBeta', 'rescaledStandardError').cast(pl.Float64).round(5)
         >>> rescaled.select(rounded, 'rescaledDirection').rows()
         [(0.03615, 0.00559, 1), (None, None, None)]
     """
-    study_flags = pl.col('qualityControls')
-    designs = studies.select(
+    study_flag = pl.col('qualityControls')
+    study_design = study.select(
         'studyId',
         pl.col('nSamples').cast(pl.Float64).alias('_n'),
         (pl.col('nCases').cast(pl.Float64) / pl.col('nSamples').cast(pl.Float64)).alias('_prevalence'),
-        study_flags.list.contains(StudyQualityFlag.MEASUREMENT_STUDY_DESIGN.value).alias('_quantitative'),
-        study_flags.list.contains(StudyQualityFlag.CASE_CONTROL_STUDY_DESIGN.value).alias('_binary'),
+        study_flag.list.contains(StudyQualityFlag.MEASUREMENT_STUDY_DESIGN.value).alias('_quantitative'),
+        study_flag.list.contains(StudyQualityFlag.CASE_CONTROL_STUDY_DESIGN.value).alias('_binary'),
     )
     af = pl.col('effectAlleleFrequency').cast(pl.Float64)
     var_g = 2 * af * (1 - af)
@@ -101,14 +103,14 @@ def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl
     ).fill_null(False)
     conditional = pl.col('conditionalBeta').is_not_null()
     return (
-        variants
+        credible_set_variant
         .join(
-            study_of_set(sets),
+            study_of_set(credible_set),
             on='credibleSetId',
             how='left',
             maintain_order='left',
         )
-        .join(designs, on='studyId', how='left', maintain_order='left')
+        .join(study_design, on='studyId', how='left', maintain_order='left')
         .with_columns(
             pl.when(rescalable).then(z * standard_error).cast(pl.Float32).alias('rescaledAbsBeta'),
             pl.when(rescalable).then(standard_error).cast(pl.Float32).alias('rescaledStandardError'),
@@ -117,5 +119,5 @@ def rescaled_effect_size(variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl
         )
         .pipe(flag_rows, pl.col('_rescaled') & conditional, CredibleSetVariantFlag.RESCALED_FROM_CONDITIONAL)
         .pipe(flag_rows, pl.col('_rescaled') & ~conditional, CredibleSetVariantFlag.RESCALED_FROM_MARGINAL)
-        .select(variants.collect_schema().names())
+        .select(credible_set_variant.collect_schema().names())
     )

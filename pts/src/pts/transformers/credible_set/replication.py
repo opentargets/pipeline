@@ -18,16 +18,16 @@ EVIDENCE = pl.Struct({
 publication and populations, or a QTL credible set."""
 
 
-def _evidence(**columns: str) -> pl.Expr:
+def _evidence(**column_of_field: str) -> pl.Expr:
     """An `EVIDENCE` struct of the given fields, read from the given columns, with the other fields null."""
-    fields = (
-        (pl.col(columns[name]) if name in columns else pl.lit(None)).cast(dtype).alias(name)
+    struct_field = (
+        (pl.col(column_of_field[name]) if name in column_of_field else pl.lit(None)).cast(dtype).alias(name)
         for name, dtype in EVIDENCE.to_schema().items()
     )
-    return pl.struct(*fields).alias('_evidence')
+    return pl.struct(*struct_field).alias('_evidence')
 
 
-def gwas_traits(studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     """The traits a GWAS study replicates on, by the kind of its `diseaseIds` terms, as on the `main` branch.
 
     - only measurements: one trait per measurement, so one shared measurement is enough;
@@ -38,43 +38,40 @@ def gwas_traits(studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
     a term absent from the disease index is a disease.
 
     Examples:
-        >>> studies = pl.LazyFrame({
+        >>> study = pl.LazyFrame({
         ...     'studyId': ['m', 'md', 'd', 'q'],
         ...     'studyType': ['gwas', 'gwas', 'gwas', 'eqtl'],
         ...     'diseaseIds': [['bmi', 'height'], ['bmi', 'ibd'], ['ra', 'ibd'], []],
         ... })
-        >>> diseases = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT]] * 2})
-        >>> gwas_traits(studies, diseases).sort('studyId', '_trait').collect().rows()
+        >>> disease = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT]] * 2})
+        >>> gwas_traits(study, disease).sort('studyId', '_trait').collect().rows()
         [('d', ['ibd', 'ra']), ('m', ['bmi']), ('m', ['height']), ('md', ['ibd'])]
     """
-    measurements = (
-        diseases
+    measurement = (
+        disease
         .filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT))
         .select(pl.col('id').alias('_term'), pl.lit(True).alias('_is_measurement'))
         .unique()
     )
-    terms = (
-        studies
+    term = (
+        study
         .filter(pl.col('studyType') == StudyType.GWAS.value)
         .select('studyId', pl.col('diseaseIds').alias('_term'))
         .explode('_term')
         .drop_nulls('_term')
         .unique()
-        .join(measurements, on='_term', how='left')
+        .join(measurement, on='_term', how='left')
     )
-    disease_traits = (
-        terms
-        .filter(pl.col('_is_measurement').is_null())
-        .group_by('studyId')
-        .agg(pl.col('_term').sort().alias('_trait'))
+    disease_trait = (
+        term.filter(pl.col('_is_measurement').is_null()).group_by('studyId').agg(pl.col('_term').sort().alias('_trait'))
     )
-    measurement_traits = terms.join(disease_traits, on='studyId', how='anti').select(
+    measurement_trait = term.join(disease_trait, on='studyId', how='anti').select(
         'studyId', pl.concat_list('_term').alias('_trait')
     )
-    return pl.concat([disease_traits, measurement_traits])
+    return pl.concat([disease_trait, measurement_trait])
 
 
-def replication_reports(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+def replication_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     """One row per credible set and trait it reports its lead on, with what makes the report independent.
 
     The columns are `id`, `leadVariantId`, `_trait` and `_evidence`.
@@ -85,8 +82,8 @@ def replication_reports(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.
       so two sets of one study are two reports.
 
     Examples:
-        >>> sets = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g', 'q'], 'leadVariantId': ['1_1_A_T'] * 2})
-        >>> studies = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g', 'q'], 'leadVariantId': ['1_1_A_T'] * 2})
+        >>> study = pl.LazyFrame({
         ...     'studyId': ['g', 'q'],
         ...     'studyType': ['gwas', 'eqtl'],
         ...     'diseaseIds': [['ra'], []],
@@ -95,41 +92,41 @@ def replication_reports(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.
         ...     'cohorts': [None, None],
         ...     'ldPopulationStructure': [None, None],
         ... })
-        >>> diseases = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
-        >>> reports = replication_reports(sets, studies, diseases).sort('id').collect()
+        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
+        >>> report = replication_reports(credible_set, study, disease).sort('id').collect()
         >>> evidence = pl.col('_evidence').struct.field('pubmedId', 'credibleSetId')
-        >>> reports.select('id', '_trait', evidence).rows()
+        >>> report.select('id', '_trait', evidence).rows()
         [('a', ['ra'], 'p', None), ('b', ['ENSG1'], None, 'b')]
     """
-    leads = sets.select('id', 'studyId', 'leadVariantId')
-    study_evidence = studies.select(
+    lead = credible_set.select('id', 'studyId', 'leadVariantId')
+    study_evidence = study.select(
         'studyId', _evidence(cohorts='cohorts', pubmedId='pubmedId', ldPopulationStructure='ldPopulationStructure')
     )
     gwas = (
-        leads
-        .join(gwas_traits(studies, diseases), on='studyId')
+        lead
+        .join(gwas_traits(study, disease), on='studyId')
         .join(study_evidence, on='studyId')
         .select('id', 'leadVariantId', '_trait', '_evidence')
     )
-    qtl = leads.join(qtl_genes(studies), on='studyId').select(
+    qtl = lead.join(qtl_genes(study), on='studyId').select(
         'id', 'leadVariantId', pl.concat_list('geneId').alias('_trait'), _evidence(credibleSetId='id')
     )
     return pl.concat([gwas, qtl])
 
 
-def replicated_sets(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+def replicated_sets(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     """The ids of the sets whose lead is reported on one of their traits by at least two independent reports.
 
     The reports and what makes them independent are those of `replication_reports`. This is the
     REPLICATED rule of the `main` branch.
 
     Examples:
-        >>> sets = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({
         ...     'id': ['a', 'b', 'c'],
         ...     'studyId': ['s1', 's2', 's3'],
         ...     'leadVariantId': ['1_1_A_T'] * 3,
         ... })
-        >>> studies = pl.LazyFrame({
+        >>> study = pl.LazyFrame({
         ...     'studyId': ['s1', 's2', 's3'],
         ...     'studyType': ['gwas'] * 3,
         ...     'diseaseIds': [['ra'], ['ra'], ['ibd']],
@@ -138,10 +135,10 @@ def replicated_sets(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.Lazy
         ...     'cohorts': [None] * 3,
         ...     'ldPopulationStructure': [None] * 3,
         ... })
-        >>> diseases = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
-        >>> replicated_sets(sets, studies, diseases).sort('id').collect()['id'].to_list()
+        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
+        >>> replicated_sets(credible_set, study, disease).sort('id').collect()['id'].to_list()
         ['a', 'b']
     """
-    reports = replication_reports(sets, studies, diseases)
-    independent_reports = pl.col('_evidence').n_unique().over('leadVariantId', '_trait')
-    return reports.filter(independent_reports >= 2).select('id').unique()
+    report = replication_reports(credible_set, study, disease)
+    independent_report_count = pl.col('_evidence').n_unique().over('leadVariantId', '_trait')
+    return report.filter(independent_report_count >= 2).select('id').unique()

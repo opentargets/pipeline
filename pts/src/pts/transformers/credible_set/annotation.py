@@ -67,36 +67,35 @@ def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
 
     Examples:
         >>> out_of_sample, top_hit = CredibleSetFlag.OUT_OF_SAMPLE_LD.value, CredibleSetFlag.TOP_HIT.value
-        >>> sets = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({
         ...     'fineMappingMethod': ['SuSiE', 'SuSiE-inf', 'PICS', 'PICS', 'SuSie'],
         ...     'qualityControls': [[], [out_of_sample], [], [top_hit], []],
         ... })
-        >>> assign_confidence(sets).collect()['confidence'].to_list()
+        >>> assign_confidence(credible_set).collect()['confidence'].to_list()
         [4, 3, 2, 1, 0]
     """
-    flags = pl.col('qualityControls')
+    quality_control = pl.col('qualityControls')
     susie = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
     pics = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
-    classes = CredibleSetConfidenceClasses
     confidence = (
         pl
-        .when(susie & ~flags.list.contains(CredibleSetFlag.OUT_OF_SAMPLE_LD.value))
-        .then(classes.FINEMAPPED_IN_SAMPLE_LD.value)
+        .when(susie & ~quality_control.list.contains(CredibleSetFlag.OUT_OF_SAMPLE_LD.value))
+        .then(CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD.value)
         .when(susie)
-        .then(classes.FINEMAPPED_OUT_OF_SAMPLE_LD.value)
-        .when(pics & ~flags.list.contains(CredibleSetFlag.TOP_HIT.value))
-        .then(classes.PICSED_SUMMARY_STATS.value)
+        .then(CredibleSetConfidenceClasses.FINEMAPPED_OUT_OF_SAMPLE_LD.value)
+        .when(pics & ~quality_control.list.contains(CredibleSetFlag.TOP_HIT.value))
+        .then(CredibleSetConfidenceClasses.PICSED_SUMMARY_STATS.value)
         .when(pics)
-        .then(classes.PICSED_TOP_HIT.value)
-        .otherwise(classes.UNKNOWN.value)
+        .then(CredibleSetConfidenceClasses.PICSED_TOP_HIT.value)
+        .otherwise(CredibleSetConfidenceClasses.UNKNOWN.value)
     )
     return frame.with_columns(confidence.cast(pl.Int8).alias('confidence'))
 
 
 def gnomad_frequencies(
-    variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl.LazyFrame, variant_index: pl.LazyFrame
+    credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame, variant_index: pl.LazyFrame
 ) -> pl.LazyFrame:
-    """The sample-weighted gnomAD frequency of each (studyId, variantId) of `variants`.
+    """The sample-weighted gnomAD frequency of each (studyId, variantId) of `credible_set_variant`.
 
     The frequency over the study populations p of `ldPopulationStructure` is
     `sum(w_p * AF_p) / sum(w_p)`, where `w_p` is `relativeSampleSize` and `AF_p` the `{p}_adj`
@@ -105,9 +104,9 @@ def gnomad_frequencies(
     population has no gnomAD frequency or, among several, no weight.
 
     Examples:
-        >>> variants = pl.LazyFrame({'credibleSetId': ['cs', 'cs'], 'variantId': ['v', 'w']})
-        >>> sets = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
-        >>> studies = pl.LazyFrame({
+        >>> credible_set_variant = pl.LazyFrame({'credibleSetId': ['cs', 'cs'], 'variantId': ['v', 'w']})
+        >>> credible_set = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
+        >>> study = pl.LazyFrame({
         ...     'studyId': ['s'],
         ...     'ldPopulationStructure': [[
         ...         {'ldPopulation': 'nfe', 'relativeSampleSize': 0.8},
@@ -124,19 +123,19 @@ def gnomad_frequencies(
         ...         [{'populationName': 'nfe_adj', 'alleleFrequency': 0.3}],
         ...     ],
         ... })
-        >>> frequencies = gnomad_frequencies(variants, sets, studies, index)
-        >>> frequencies.with_columns(pl.col('_gnomad').round(4)).sort('variantId').collect().rows()
+        >>> frequency = gnomad_frequencies(credible_set_variant, credible_set, study, index)
+        >>> frequency.with_columns(pl.col('_gnomad').round(4)).sort('variantId').collect().rows()
         [('s', 'v', 0.25), ('s', 'w', None)]
     """
-    pairs = (
-        variants
+    study_variant = (
+        credible_set_variant
         .select('credibleSetId', 'variantId')
-        .join(study_of_set(sets), on='credibleSetId')
+        .join(study_of_set(credible_set), on='credibleSetId')
         .select('studyId', 'variantId')
         .unique()
     )
-    populations = (
-        studies
+    population = (
+        study
         .select('studyId', pl.col('ldPopulationStructure').alias('_population'))
         .explode('_population', empty_as_null=True)
         .select(
@@ -145,10 +144,10 @@ def gnomad_frequencies(
             pl.col('_population').struct.field('relativeSampleSize').alias('_weight'),
         )
     )
-    frequencies = (
+    frequency = (
         variant_index
         .select('variantId', 'alleleFrequencies')
-        .join(pairs.select('variantId').unique(), on='variantId', how='semi')
+        .join(study_variant.select('variantId').unique(), on='variantId', how='semi')
         .explode('alleleFrequencies')
         .select('variantId', pl.col('alleleFrequencies').struct.unnest())
     )
@@ -157,16 +156,16 @@ def gnomad_frequencies(
     missing = af.is_null().any() | (~single & weight.is_null().any())
     weighted = ((weight * af).sum() / weight.sum()).fill_nan(None)
     return (
-        pairs
-        .join(populations, on='studyId', how='left')
-        .join(frequencies, on=['variantId', 'populationName'], how='left')
+        study_variant
+        .join(population, on='studyId', how='left')
+        .join(frequency, on=['variantId', 'populationName'], how='left')
         .group_by('studyId', 'variantId')
         .agg(pl.when(missing).then(None).when(single).then(af.first()).otherwise(weighted).alias('_gnomad'))
     )
 
 
 def effect_allele_frequency(
-    variants: pl.LazyFrame, sets: pl.LazyFrame, studies: pl.LazyFrame, variant_index: pl.LazyFrame
+    credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame, variant_index: pl.LazyFrame
 ) -> pl.LazyFrame:
     """Set `effectAlleleFrequency` from the source, otherwise from gnomAD, and flag its origin.
 
@@ -179,40 +178,39 @@ def effect_allele_frequency(
     An invalid source frequency also gets `INVALID_EAF`. The rows and their order are unchanged.
 
     Examples:
-        >>> variants = pl.LazyFrame(
+        >>> credible_set_variant = pl.LazyFrame(
         ...     {'credibleSetId': ['cs'] * 3, 'variantId': ['v'] * 3, 'effectAlleleFrequency': [0.3, 1.4, None]},
         ...     schema_overrides={'effectAlleleFrequency': pl.Float32},
         ... ).with_columns(pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'))
-        >>> sets = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
+        >>> credible_set = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
         >>> nfe = {'ldPopulation': 'nfe', 'relativeSampleSize': 1.0}
-        >>> studies = pl.LazyFrame({'studyId': ['s'], 'ldPopulationStructure': [[nfe]]})
+        >>> study = pl.LazyFrame({'studyId': ['s'], 'ldPopulationStructure': [[nfe]]})
         >>> nfe_adj = {'populationName': 'nfe_adj', 'alleleFrequency': 0.2}
         >>> index = pl.LazyFrame({'variantId': ['v'], 'alleleFrequencies': [[nfe_adj]]})
-        >>> result = effect_allele_frequency(variants, sets, studies, index).collect()
+        >>> result = effect_allele_frequency(credible_set_variant, credible_set, study, index).collect()
         >>> eafs = pl.col('effectAlleleFrequency').cast(pl.Float64).round(2)
-        >>> for eaf, flags in result.select(eafs, 'qualityControls').rows():
-        ...     print(eaf, [CredibleSetVariantFlag(flag).name for flag in flags])
+        >>> for eaf, quality_control in result.select(eafs, 'qualityControls').rows():
+        ...     print(eaf, [CredibleSetVariantFlag(flag).name for flag in quality_control])
         0.3 ['EAF_FROM_SOURCE']
         0.2 ['INVALID_EAF', 'EAF_FROM_GNOMAD']
         0.2 ['EAF_FROM_GNOMAD']
     """
-    flags = CredibleSetVariantFlag
     eaf = pl.col('effectAlleleFrequency')
     valid = (eaf.is_between(0, 1) & eaf.is_not_nan()).fill_null(False)
-    gnomad = gnomad_frequencies(variants.filter(~valid), sets, studies, variant_index)
+    gnomad = gnomad_frequencies(credible_set_variant.filter(~valid), credible_set, study, variant_index)
     origin = (
         pl
         .when(valid)
-        .then(pl.lit(flags.EAF_FROM_SOURCE.value))
+        .then(pl.lit(CredibleSetVariantFlag.EAF_FROM_SOURCE.value))
         .when(pl.col('_gnomad').is_not_null())
-        .then(pl.lit(flags.EAF_FROM_GNOMAD.value))
-        .otherwise(pl.lit(flags.MISSING_EAF.value))
+        .then(pl.lit(CredibleSetVariantFlag.EAF_FROM_GNOMAD.value))
+        .otherwise(pl.lit(CredibleSetVariantFlag.MISSING_EAF.value))
     )
-    invalid = pl.when(eaf.is_not_null() & ~valid).then(pl.lit(flags.INVALID_EAF.value))
+    invalid = pl.when(eaf.is_not_null() & ~valid).then(pl.lit(CredibleSetVariantFlag.INVALID_EAF.value))
     return (
-        variants
+        credible_set_variant
         .join(
-            study_of_set(sets),
+            study_of_set(credible_set),
             on='credibleSetId',
             how='left',
             maintain_order='left',
@@ -222,7 +220,7 @@ def effect_allele_frequency(
             pl.when(valid).then(eaf).otherwise(pl.col('_gnomad')).cast(pl.Float32).alias('effectAlleleFrequency'),
             pl.concat_list('qualityControls', invalid, origin).list.drop_nulls().alias('qualityControls'),
         )
-        .select(variants.collect_schema().names())
+        .select(credible_set_variant.collect_schema().names())
     )
 
 
@@ -246,26 +244,26 @@ def annotation(
     sources = AnnotationSource.model_validate(source)
     destinations = AnnotationDestination.model_validate(destination)
     options = AnnotationSettings.model_validate(settings)
-    validated_sets = scan_dataset(sources.credible_set)
-    validated_variants = scan_dataset(sources.credible_set_variant)
-    studies = scan_dataset(sources.study)
-    targets = scan_dataset(sources.target)
-    diseases = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
-    trans = trans_qtls(validated_sets, validated_variants, studies, targets, options.trans_qtl_threshold)
-    replicated = replicated_sets(validated_sets, studies, diseases)
-    sets = (
-        validated_sets
+    validated_set = scan_dataset(sources.credible_set)
+    validated_variant = scan_dataset(sources.credible_set_variant)
+    study = scan_dataset(sources.study)
+    target = scan_dataset(sources.target)
+    disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
+    trans_set = trans_qtls(validated_set, validated_variant, study, target, options.trans_qtl_threshold)
+    replicated = replicated_sets(validated_set, study, disease)
+    credible_set = (
+        validated_set
         .pipe(assign_confidence)
-        .pipe(flag_matching_ids, 'id', trans, CredibleSetFlag.TRANS_QTL)
+        .pipe(flag_matching_ids, 'id', trans_set, CredibleSetFlag.TRANS_QTL)
         .pipe(flag_matching_ids, 'id', replicated, CredibleSetFlag.REPLICATED)
     )
-    variants = validated_variants.pipe(
-        effect_allele_frequency, validated_sets, studies, scan_dataset(sources.variant)
-    ).pipe(rescaled_effect_size, validated_sets, studies)
+    credible_set_variant = validated_variant.pipe(
+        effect_allele_frequency, validated_set, study, scan_dataset(sources.variant)
+    ).pipe(rescaled_effect_size, validated_set, study)
     logger.info(
         'Writing credible sets to {} and variants to {}', destinations.credible_set, destinations.credible_set_variant
     )
     pl.collect_all([
-        sink_dataset(sets, destinations.credible_set),
-        sink_dataset(variants, destinations.credible_set_variant),
+        sink_dataset(credible_set, destinations.credible_set),
+        sink_dataset(credible_set_variant, destinations.credible_set_variant),
     ])
