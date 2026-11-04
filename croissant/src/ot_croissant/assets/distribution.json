@@ -111,7 +111,15 @@
     "tags": [
       "Genetics"
     ],
-    "description": "95% credible sets for GWAS and molQTL studies. Credible sets include all variants in the credible set as well as the fine-mapping method and statistics used to estimate the credible set"
+    "description": "95% credible sets for GWAS and molQTL studies: one row per credible set, with its study, lead variant, fine-mapping method, confidence and quality control flags. The variants of each credible set are in the credible set variant dataset"
+  },
+  {
+    "id": "credible_set_variant",
+    "nice_name": "Credible set variant",
+    "tags": [
+      "Genetics"
+    ],
+    "description": "The variants of the 95% credible sets for GWAS and molQTL studies: one row per credible set and variant, with its association statistics, posterior probability, effect allele frequency and rescaled effect size"
   },
   {
     "id": "disease",
