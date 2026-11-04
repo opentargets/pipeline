@@ -1,11 +1,13 @@
 """Pharmacovigilance signal detection from FAERS adverse event reports."""
 
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.pharmacovigilance import faers_schema
+from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
 
 _ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
 _EMPTY_LIST = pl.lit([], dtype=pl.List(pl.String()))
@@ -113,3 +115,112 @@ def read_archive(path: str, drugs: pl.DataFrame, blacklist: pl.DataFrame) -> pl.
     del content
     reports = parsed.explode('results').unnest('results')
     return report_rows(reports, drugs, blacklist)
+
+
+def likelihood_ratio() -> pl.Expr:
+    """Log-likelihood ratio from the contingency columns ``A``, ``B``, ``C`` and ``D``."""
+    a, b, c, d = (pl.col(name).cast(pl.Float64) for name in 'ABCD')
+    return (
+        a * (a.log() - (a + b).log())
+        + c * (c.log() - (c + d).log())
+        - (a + c) * ((a + c).log() - (a + b + c + d).log())
+    )
+
+
+def contingency_table(rows: pl.DataFrame) -> pl.DataFrame:
+    """Count distinct reports per drug, event and pair, and score each pair with its LLR."""
+    total = rows['safetyreportid'].n_unique()
+    return (
+        rows
+        .select('safetyreportid', 'chembl_id', 'event')
+        .unique()
+        .with_columns(
+            pl.col('safetyreportid').n_unique().over('chembl_id').alias('drug_reports'),
+            pl.col('safetyreportid').n_unique().over('event').alias('event_reports'),
+            pl.col('safetyreportid').n_unique().over('chembl_id', 'event').alias('A'),
+        )
+        .select('chembl_id', 'event', 'A', 'drug_reports', 'event_reports')
+        .unique()
+        .with_columns(pl.col('A', 'drug_reports', 'event_reports').cast(pl.Int64))
+        .with_columns(
+            (pl.col('event_reports') - pl.col('A')).alias('B'),
+            (pl.col('drug_reports') - pl.col('A')).alias('C'),
+            (pl.lit(total, dtype=pl.Int64) - pl.col('drug_reports') - pl.col('event_reports') + pl.col('A')).alias('D'),
+        )
+        .with_columns(likelihood_ratio().alias('llr'))
+        .filter(pl.col('llr').is_not_null() & pl.col('llr').is_not_nan())
+        .select('chembl_id', 'event', 'A', 'B', 'C', 'D', 'drug_reports', 'event_reports', 'llr')
+    )
+
+
+def critical_value(permutations: int, n_j: int, n_i: np.ndarray, total: int, percentile: float) -> float:
+    """Monte Carlo percentile of the maximum LLR over simulated events for one drug."""
+    if n_j is None or total is None or n_i is None or len(n_i) == 0 or n_j <= 0 or total <= 0:
+        return 0.0
+
+    rng = np.random.default_rng(0)
+    total_n = float(total)
+    z = float(n_j)
+    yi = np.array(n_i, dtype=np.float64)
+
+    p = yi / total_n
+    p_sum = p.sum()
+    if p_sum <= 0:
+        return 0.0
+    p /= p_sum
+
+    xi = rng.multinomial(int(n_j), p, size=permutations).astype(np.float64)
+
+    t1_valid = (xi > 0) & (yi > 0)
+    t2_valid = ((z - xi) > 0) & ((total_n - yi) > 0)
+    term1 = np.where(t1_valid, xi * (np.log(np.where(t1_valid, xi, 1.0)) - np.log(yi)), 0.0)
+    term2 = np.where(t2_valid, (z - xi) * (np.log(np.where(t2_valid, z - xi, 1.0)) - np.log(total_n - yi)), 0.0)
+
+    max_llrs = (term1 + term2).max(axis=1)
+    max_llrs += -z * np.log(z) + z * np.log(total_n)
+    max_llrs = np.where(np.isfinite(max_llrs), max_llrs, 0.0)
+
+    index = min(int(percentile * permutations), permutations - 1)
+    return float(np.sort(max_llrs)[index])
+
+
+def critical_values(table: pl.DataFrame, permutations: int, percentile: float) -> pl.DataFrame:
+    """Compute one critical value per drug from the surviving rows of the contingency table."""
+    drugs = (
+        table
+        .group_by('chembl_id')
+        .agg(
+            pl.col('drug_reports').first(),
+            (pl.col('A') + pl.col('B') + pl.col('C') + pl.col('D')).first().alias('total'),
+            pl.col('event_reports').sort().alias('n_i'),
+        )
+        .sort('chembl_id')
+    )
+    jobs = [
+        (permutations, int(row['drug_reports']), np.array(row['n_i'], dtype=np.float64), int(row['total']), percentile)
+        for row in drugs.iter_rows(named=True)
+    ]
+    with ThreadPoolExecutor() as pool:
+        values = list(pool.map(lambda job: critical_value(*job), jobs))
+    return pl.DataFrame(
+        {'chembl_id': drugs['chembl_id'], 'critval': values}, schema={'chembl_id': pl.String(), 'critval': pl.Float64()}
+    )
+
+
+def significant_events(table: pl.DataFrame, critical: pl.DataFrame) -> pl.DataFrame:
+    """Keep pairs whose LLR exceeds a positive critical value."""
+    return (
+        table
+        .join(critical, on='chembl_id', how='inner')
+        .filter((pl.col('llr') > pl.col('critval')) & (pl.col('critval') > 0))
+        .select(
+            'chembl_id',
+            'event',
+            pl.col('A').alias('count'),
+            'llr',
+            'critval',
+            pl.lit('').alias('meddraCode'),
+        )
+        .cast(pharmacovigilance_schema)
+        .sort('chembl_id', 'event')
+    )
