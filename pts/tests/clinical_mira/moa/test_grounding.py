@@ -29,6 +29,8 @@ def index() -> pl.DataFrame:
             _labels('receptor tyrosine-protein kinase erbB-1'),
         ),
         ('ENSG_TOP1', 'TOP1', 'DNA topoisomerase I', [], []),
+        ('ENSG_HDAC1', 'HDAC1', 'histone deacetylase 1', [], []),
+        ('ENSG_HDAC9', 'HDAC9', 'histone deacetylase 9', _labels('HDAC'), []),
         ('ENSG_GNRH1', 'GNRH1', 'gonadotropin releasing hormone 1', _labels('GnRH'), []),
         ('ENSG_GNRHR', 'GNRHR', 'gonadotropin releasing hormone receptor', _labels('LHRHR'), []),
         ('ENSG_FGFR1', 'FGFR1', 'fibroblast growth factor receptor 1', [], []),
@@ -243,3 +245,14 @@ def test_grounded_genes_carry_their_symbols(index):
     rows = ground_mechanisms(_mechanisms({'targetFromSource': 'EGFR'}, {'targetFromSource': 'nothing'}), index)
 
     assert rows['targetSymbols'].to_list() == [['EGFR'], []]
+
+
+def test_family_name_uses_the_members_not_a_single_synonym(index):
+    rows = ground_mechanisms(
+        _mechanisms({'targetFromSource': 'HDAC', 'targetSymbolSuggestion': ['HDAC1', 'HDAC9']}),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_HDAC1', 'ENSG_HDAC9'], 'grounding': 'suggestion'}
+    ]

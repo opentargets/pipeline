@@ -200,7 +200,8 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
 
     A name that matches one gene only through a synonym, while the model's suggestions
     resolve to other genes, is a ``conflict`` and is left ungrounded: short aliases (``MEK``,
-    ``TORC1``, ``A2A``) are often synonyms of an unrelated gene.
+    ``TORC1``, ``A2A``) are often synonyms of an unrelated gene. A synonym match that is one of
+    several suggested genes names a family (``HDAC``), and grounds to all of them.
     """
     lookup = _to_lookup(index)
     labels = _labels_by_gene(index)
@@ -220,7 +221,10 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
         source = _resolve(row['targetFromSource'], lookup)
         if source:
             trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
-            if trusted or not resolved or set(source) <= resolved:
+            if not trusted and len(resolved) > 1 and set(source) <= resolved:
+                target_ids.append(sorted(resolved))
+                grounding.append('suggestion')
+            elif trusted or not resolved or set(source) <= resolved:
                 target_ids.append(source)
                 grounding.append('source')
             else:
