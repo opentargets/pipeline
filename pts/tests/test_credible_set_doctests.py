@@ -8,11 +8,22 @@ from types import ModuleType
 
 import pytest
 
-from pts.transformers.credible_set import annotation, set_qc, validation, variant_id, variant_qc
+from pts.transformers.credible_set import (
+    annotation,
+    replication,
+    rescaling,
+    set_qc,
+    trans_qtl,
+    validation,
+    variant_id,
+    variant_qc,
+)
 
 
 @pytest.mark.parametrize(
-    'module', [variant_id, variant_qc, set_qc, validation, annotation], ids=lambda module: module.__name__
+    'module',
+    [variant_id, variant_qc, set_qc, validation, trans_qtl, replication, rescaling, annotation],
+    ids=lambda module: module.__name__,
 )
 def test_docstring_examples(module: ModuleType) -> None:
     flags = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS | doctest.IGNORE_EXCEPTION_DETAIL

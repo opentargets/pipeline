@@ -7,8 +7,8 @@ import polars as pl
 import pytest
 
 from pts.schemas.credible_set import credible_set_variant_schema
-from pts.transformers.credible_set.annotation import rescaled_effect_size
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
+from pts.transformers.credible_set.rescaling import rescaled_effect_size
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 
 MEASUREMENT = StudyQualityFlag.MEASUREMENT_STUDY_DESIGN.value
