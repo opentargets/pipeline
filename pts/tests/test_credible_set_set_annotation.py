@@ -5,7 +5,7 @@ from typing import Any
 import polars as pl
 import pytest
 
-from pts.transformers.credible_set.annotation import flag_replicated, flag_trans_qtl
+from pts.transformers.credible_set.annotation import replicated_sets, trans_qtls
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.disease.coalescing import MEASUREMENT
 
@@ -31,9 +31,10 @@ def _sets(*rows: dict[str, Any]) -> pl.LazyFrame:
     )
 
 
-def _flags(frame: pl.LazyFrame) -> dict[str, set[str]]:
-    rows = frame.collect().iter_rows(named=True)
-    return {row['id']: set(row['qualityControls']) - {CredibleSetFlag.TOP_HIT} for row in rows}
+def _ids(frame: pl.LazyFrame) -> set[str]:
+    ids = frame.collect()
+    assert ids.columns == ['id']
+    return set(ids['id'])
 
 
 # TRANS_QTL
@@ -52,8 +53,7 @@ def _trans(
 ) -> bool:
     sets = _sets({'id': 'cs', 'studyId': 's', 'leadVariantId': variant_ids[0]})
     variants = pl.LazyFrame({'credibleSetId': ['cs'] * len(variant_ids), 'variantId': variant_ids})
-    flagged = flag_trans_qtl(sets, variants, _qtl_studies(s=(study_type, gene)), TARGETS, threshold)
-    return CredibleSetFlag.TRANS_QTL in _flags(flagged)['cs']
+    return _ids(trans_qtls(sets, variants, _qtl_studies(s=(study_type, gene)), TARGETS, threshold)) == {'cs'}
 
 
 FAR = [f'1_{TSS + 5_000_001}_A_T', f'1_{TSS - 6_000_000}_C_G']
@@ -82,14 +82,6 @@ def test_a_gwas_or_a_qtl_without_a_located_gene_is_never_trans(study_type: str, 
 
 def test_the_trans_threshold_is_a_setting() -> None:
     assert _trans([f'1_{TSS + 1_001}_A_T'], threshold=1_000)
-
-
-def test_trans_flagging_keeps_rows_order_and_columns() -> None:
-    sets = _sets(*({'id': f'cs{i}', 'studyId': 's', 'leadVariantId': f'2_{i + 1}_A_T'} for i in range(3)))
-    variants = pl.LazyFrame({'credibleSetId': ['cs0', 'cs1', 'cs2'], 'variantId': ['2_1_A_T', '2_2_A_T', '2_3_A_T']})
-    flagged = flag_trans_qtl(sets, variants, _qtl_studies(s=('pqtl', 'g')), TARGETS, 5_000_000).collect()
-    assert flagged.columns == sets.collect_schema().names()
-    assert flagged['id'].to_list() == ['cs0', 'cs1', 'cs2']
 
 
 # REPLICATED
@@ -130,8 +122,7 @@ def _replicated(studies: list[dict[str, Any]], sets: list[tuple[str, str, str]] 
             'geneId': pl.String,
         },
     )
-    flags = _flags(flag_replicated(frame, study_frame, DISEASES))
-    return {set_id for set_id, flagged in flags.items() if CredibleSetFlag.REPLICATED in flagged}
+    return _ids(replicated_sets(frame, study_frame, DISEASES))
 
 
 def test_independent_gwas_studies_of_one_disease_and_lead_replicate() -> None:

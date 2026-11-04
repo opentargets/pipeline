@@ -64,75 +64,117 @@ def _qtl_genes(studies: pl.LazyFrame) -> pl.LazyFrame:
     return studies.filter(qtl).select('studyId', 'geneId')
 
 
-def flag_trans_qtl(
-    sets: pl.LazyFrame, variants: pl.LazyFrame, studies: pl.LazyFrame, targets: pl.LazyFrame, threshold: int
-) -> pl.LazyFrame:
-    """Flag TRANS_QTL on the QTL sets whose every variant is trans to the gene of their study.
-
-    A variant is trans when its chromosome differs from the gene chromosome, or when it lies more
-    than `threshold` from the gene TSS. A comparison with a missing value counts as not trans, so a
-    gene absent from the target index makes no set trans. GWAS sets and sets of a study without a
-    `geneId` are not flagged. This is the `isTransQtl` rule of the `main` branch.
+def qtl_gene_locations(studies: pl.LazyFrame, targets: pl.LazyFrame) -> pl.LazyFrame:
+    """The chromosome and TSS of the gene of each QTL study, null for a gene absent from the target index.
 
     Examples:
-        >>> sets = pl.LazyFrame({'id': ['far', 'near'], 'studyId': ['s', 's'], 'qualityControls': [[], []]})
-        >>> variants = pl.LazyFrame({'credibleSetId': ['far', 'near'], 'variantId': ['2_10_A_T', '1_9_A_T']})
+        >>> studies = pl.LazyFrame({'studyId': ['q', 'g'], 'studyType': ['eqtl', 'gwas'], 'geneId': ['ENSG1', None]})
+        >>> targets = pl.LazyFrame({'id': ['ENSG1'], 'tss': [100], 'genomicLocation': [{'chromosome': '1'}]})
+        >>> qtl_gene_locations(studies, targets).collect().rows()
+        [('q', '1', 100)]
+    """
+    genes = targets.select(
+        pl.col('id').alias('geneId'),
+        pl.col('genomicLocation').struct.field('chromosome').alias('_gene_chromosome'),
+        pl.col('tss').alias('_gene_tss'),
+    )
+    return _qtl_genes(studies).join(genes, on='geneId', how='left').select('studyId', '_gene_chromosome', '_gene_tss')
+
+
+def is_trans(threshold: int) -> pl.Expr:
+    """Whether a variant is trans to its gene: on another chromosome, or more than `threshold` from the TSS.
+
+    It reads `_variant_chromosome`, `_variant_position`, `_gene_chromosome` and `_gene_tss`. A
+    comparison with a missing value counts as not trans.
+
+    Examples:
+        >>> variants = pl.DataFrame({
+        ...     '_variant_chromosome': ['2', '1', '1', '1'],
+        ...     '_variant_position': [100, 6_000_101, 5_000_100, 100],
+        ...     '_gene_chromosome': ['1', '1', '1', None],
+        ...     '_gene_tss': [100, 100, 100, None],
+        ... })
+        >>> variants.select(is_trans(5_000_000))['_trans'].to_list()
+        [True, True, False, False]
+    """
+    other_chromosome = pl.col('_variant_chromosome') != pl.col('_gene_chromosome')
+    far_from_tss = (pl.col('_variant_position') - pl.col('_gene_tss')).abs() > threshold
+    return (other_chromosome | far_from_tss).fill_null(False).alias('_trans')
+
+
+def trans_qtls(
+    sets: pl.LazyFrame, variants: pl.LazyFrame, studies: pl.LazyFrame, targets: pl.LazyFrame, threshold: int
+) -> pl.LazyFrame:
+    """The ids of the QTL sets whose every variant `is_trans` to the gene of their study.
+
+    GWAS sets and sets of a study without a `geneId` are never trans. This is the `isTransQtl`
+    rule of the `main` branch.
+
+    Examples:
+        >>> sets = pl.LazyFrame({'id': ['far', 'near'], 'studyId': ['s', 's']})
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['far', 'near', 'near'],
+        ...     'variantId': ['2_10_A_T', '2_10_A_T', '1_9_A_T'],
+        ... })
         >>> studies = pl.LazyFrame({'studyId': ['s'], 'studyType': ['eqtl'], 'geneId': ['g']})
         >>> targets = pl.LazyFrame({'id': ['g'], 'tss': [10], 'genomicLocation': [{'chromosome': '1'}]})
-        >>> flagged = flag_trans_qtl(sets, variants, studies, targets, 5_000_000).collect()
-        >>> flagged['qualityControls'].list.len().to_list()
-        [1, 0]
+        >>> trans_qtls(sets, variants, studies, targets, 5_000_000).collect()['id'].to_list()
+        ['far']
     """
-    gene_locations = targets.select(
-        pl.col('id').alias('geneId'),
-        pl.col('tss').alias('_gene_tss'),
-        pl.col('genomicLocation').struct.field('chromosome').alias('_gene_chromosome'),
-    )
     variant_id = pl.col('variantId')
-    # One row per variant of a QTL set, next to the location of its study's gene.
-    variants_and_genes = (
-        variants
-        .select(
-            pl.col('credibleSetId').alias('id'),
-            variant_chromosome(variant_id).alias('_variant_chromosome'),
-            variant_position(variant_id).alias('_variant_position'),
-        )
+    variant_locations = variants.select(
+        pl.col('credibleSetId').alias('id'),
+        variant_chromosome(variant_id).alias('_variant_chromosome'),
+        variant_position(variant_id).alias('_variant_position'),
+    )
+    return (
+        variant_locations
         .join(sets.select('id', 'studyId'), on='id')
-        .join(_qtl_genes(studies), on='studyId')
-        .join(gene_locations, on='geneId', how='left')
-    )
-    variant_is_trans = (
-        (pl.col('_variant_chromosome') != pl.col('_gene_chromosome'))
-        | ((pl.col('_gene_tss') - pl.col('_variant_position')).abs() > threshold)
-    ).fill_null(False)
-    # A set is trans only when every one of its variants is: collapse the variant rows to one per set.
-    trans_sets = (
-        variants_and_genes
+        .join(qtl_gene_locations(studies, targets), on='studyId')
         .group_by('id')
-        .agg(variant_is_trans.all().alias('_all_variants_trans'))
-        .filter('_all_variants_trans')
+        .agg(is_trans(threshold).all())
+        .filter('_trans')
+        .select('id')
     )
-    return flag_matching_ids(sets, 'id', trans_sets, CredibleSetFlag.TRANS_QTL)
 
 
-def replication_keys(gwas_studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
-    """The keys a GWAS study replicates on, by the kind of its `diseaseIds` terms, as on the `main` branch.
+EVIDENCE = pl.Struct({
+    'cohorts': pl.List(pl.String),
+    'pubmedId': pl.String,
+    'ldPopulationStructure': pl.List(pl.Struct({'ldPopulation': pl.String, 'relativeSampleSize': pl.Float64})),
+    'credibleSetId': pl.String,
+})
+"""What counts as one independent report of a lead on a trait: a GWAS study by its cohorts,
+publication and populations, or a QTL credible set."""
 
-    - only measurements: one key per measurement, so one shared measurement is enough;
-    - measurements and diseases: one key, the sorted diseases, the measurements set aside;
-    - only diseases: one key, the sorted diseases.
+
+def _evidence(**columns: str) -> pl.Expr:
+    """An `EVIDENCE` struct of the given fields, read from the given columns, with the other fields null."""
+    fields = (
+        (pl.col(columns[name]) if name in columns else pl.lit(None)).cast(dtype).alias(name)
+        for name, dtype in EVIDENCE.to_schema().items()
+    )
+    return pl.struct(*fields).alias('_evidence')
+
+
+def gwas_traits(studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+    """The traits a GWAS study replicates on, by the kind of its `diseaseIds` terms, as on the `main` branch.
+
+    - only measurements: one trait per measurement, so one shared measurement is enough;
+    - measurements and diseases: one trait, the sorted diseases, the measurements set aside;
+    - only diseases: one trait, the sorted diseases.
 
     A term is a measurement when the disease index files it under the measurement therapeutic area;
     a term absent from the disease index is a disease.
 
     Examples:
         >>> studies = pl.LazyFrame({
-        ...     'studyId': ['m', 'md', 'd'],
-        ...     'diseaseIds': [['bmi', 'height'], ['bmi', 'ibd'], ['ra', 'ibd']],
+        ...     'studyId': ['m', 'md', 'd', 'q'],
+        ...     'studyType': ['gwas', 'gwas', 'gwas', 'eqtl'],
+        ...     'diseaseIds': [['bmi', 'height'], ['bmi', 'ibd'], ['ra', 'ibd'], []],
         ... })
         >>> diseases = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT]] * 2})
-        >>> keys = replication_keys(studies, diseases).sort('studyId', '_disease_set').collect()
-        >>> keys.rows()
+        >>> gwas_traits(studies, diseases).sort('studyId', '_trait').collect().rows()
         [('d', ['ibd', 'ra']), ('m', ['bmi']), ('m', ['height']), ('md', ['ibd'])]
     """
     measurements = (
@@ -142,75 +184,97 @@ def replication_keys(gwas_studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.L
         .unique()
     )
     terms = (
-        gwas_studies
+        studies
+        .filter(pl.col('studyType') == StudyType.GWAS.value)
         .select('studyId', pl.col('diseaseIds').alias('_term'))
         .explode('_term')
         .drop_nulls('_term')
         .unique()
         .join(measurements, on='_term', how='left')
     )
-    with_diseases = (
+    disease_traits = (
         terms
         .filter(pl.col('_is_measurement').is_null())
         .group_by('studyId')
-        .agg(pl.col('_term').sort().alias('_disease_set'))
+        .agg(pl.col('_term').sort().alias('_trait'))
     )
-    measurements_only = terms.join(with_diseases, on='studyId', how='anti').select(
-        'studyId', pl.concat_list('_term').alias('_disease_set')
+    measurement_traits = terms.join(disease_traits, on='studyId', how='anti').select(
+        'studyId', pl.concat_list('_term').alias('_trait')
     )
-    return pl.concat([with_diseases, measurements_only])
+    return pl.concat([disease_traits, measurement_traits])
 
 
-def flag_replicated(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag REPLICATED on the sets whose lead is replicated, with the rule of the `main` branch.
+def replication_reports(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+    """One row per credible set and trait it reports its lead on, with what makes the report independent.
 
-    A GWAS set is replicated when its `leadVariantId` and one of its `replication_keys` occur in at
-    least two independent GWAS studies; studies with the same `cohorts`, `pubmedId` and
-    `ldPopulationStructure` count once. A QTL set of a study with a `geneId` is replicated when at
-    least two credible sets have its `leadVariantId` and `geneId`: credible sets are counted, not
-    studies, so two sets of one study replicate, as in gentropy.
+    The columns are `id`, `leadVariantId`, `_trait` and `_evidence`.
+
+    - A GWAS set reports on every trait of `gwas_traits`; its evidence is its study's cohorts,
+      publication and populations, so studies sharing all three are one report.
+    - A QTL set of a study with a `geneId` reports on that gene; its evidence is the credible set,
+      so two sets of one study are two reports, as in gentropy.
+
+    Examples:
+        >>> sets = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g', 'q'], 'leadVariantId': ['1_1_A_T'] * 2})
+        >>> studies = pl.LazyFrame({
+        ...     'studyId': ['g', 'q'],
+        ...     'studyType': ['gwas', 'eqtl'],
+        ...     'diseaseIds': [['ra'], []],
+        ...     'geneId': [None, 'ENSG1'],
+        ...     'pubmedId': ['p', None],
+        ...     'cohorts': [None, None],
+        ...     'ldPopulationStructure': [None, None],
+        ... })
+        >>> diseases = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
+        >>> reports = replication_reports(sets, studies, diseases).sort('id').collect()
+        >>> evidence = pl.col('_evidence').struct.field('pubmedId', 'credibleSetId')
+        >>> reports.select('id', '_trait', evidence).rows()
+        [('a', ['ra'], 'p', None), ('b', ['ENSG1'], None, 'b')]
+    """
+    leads = sets.select('id', 'studyId', 'leadVariantId')
+    study_evidence = studies.select(
+        'studyId', _evidence(cohorts='cohorts', pubmedId='pubmedId', ldPopulationStructure='ldPopulationStructure')
+    )
+    gwas = (
+        leads
+        .join(gwas_traits(studies, diseases), on='studyId')
+        .join(study_evidence, on='studyId')
+        .select('id', 'leadVariantId', '_trait', '_evidence')
+    )
+    qtl = leads.join(_qtl_genes(studies), on='studyId').select(
+        'id', 'leadVariantId', pl.concat_list('geneId').alias('_trait'), _evidence(credibleSetId='id')
+    )
+    return pl.concat([gwas, qtl])
+
+
+def replicated_sets(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids of the sets whose lead is reported on one of their traits by at least two independent reports.
+
+    The reports and what makes them independent are those of `replication_reports`. This is the
+    REPLICATED rule of the `main` branch.
 
     Examples:
         >>> sets = pl.LazyFrame({
         ...     'id': ['a', 'b', 'c'],
         ...     'studyId': ['s1', 's2', 's3'],
         ...     'leadVariantId': ['1_1_A_T'] * 3,
-        ...     'qualityControls': [[]] * 3,
         ... })
         >>> studies = pl.LazyFrame({
         ...     'studyId': ['s1', 's2', 's3'],
         ...     'studyType': ['gwas'] * 3,
         ...     'diseaseIds': [['ra'], ['ra'], ['ibd']],
+        ...     'geneId': [None] * 3,
         ...     'pubmedId': ['p1', 'p2', 'p3'],
         ...     'cohorts': [None] * 3,
         ...     'ldPopulationStructure': [None] * 3,
-        ...     'geneId': [None] * 3,
         ... })
         >>> diseases = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
-        >>> flag_replicated(sets, studies, diseases).collect()['qualityControls'].list.len().to_list()
-        [1, 1, 0]
+        >>> replicated_sets(sets, studies, diseases).sort('id').collect()['id'].to_list()
+        ['a', 'b']
     """
-    loci = sets.select('id', 'studyId', 'leadVariantId')
-    gwas_studies = studies.filter(
-        (pl.col('studyType') == StudyType.GWAS.value) & (pl.col('diseaseIds').list.len() > 0)
-    ).select('studyId', 'diseaseIds', 'cohorts', 'pubmedId', 'ldPopulationStructure')
-    keyed_studies = gwas_studies.drop('diseaseIds').join(replication_keys(gwas_studies, diseases), on='studyId')
-    gwas = loci.join(keyed_studies, on='studyId')
-    independent = gwas.select('leadVariantId', '_disease_set', 'cohorts', 'pubmedId', 'ldPopulationStructure').unique()
-    replicated_gwas = (
-        independent
-        .group_by('leadVariantId', '_disease_set')
-        .len()
-        .filter(pl.col('len') >= 2)
-        .select('leadVariantId', '_disease_set')
-    )
-    gwas_ids = gwas.join(replicated_gwas, on=['leadVariantId', '_disease_set']).select('id')
-    qtl = loci.join(_qtl_genes(studies), on='studyId')
-    replicated_qtl = (
-        qtl.group_by('leadVariantId', 'geneId').len().filter(pl.col('len') >= 2).select('leadVariantId', 'geneId')
-    )
-    qtl_ids = qtl.join(replicated_qtl, on=['leadVariantId', 'geneId']).select('id')
-    return flag_matching_ids(sets, 'id', pl.concat([gwas_ids, qtl_ids]), CredibleSetFlag.REPLICATED)
+    reports = replication_reports(sets, studies, diseases)
+    independent_reports = pl.col('_evidence').n_unique().over('leadVariantId', '_trait')
+    return reports.filter(independent_reports >= 2).select('id').unique()
 
 
 def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -510,15 +574,19 @@ def annotation(
     validated_sets = scan_dataset(sources.credible_set)
     validated_variants = scan_dataset(sources.credible_set_variant)
     studies = scan_dataset(sources.study)
+    targets = scan_dataset(sources.target)
+    diseases = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
+    trans = trans_qtls(validated_sets, validated_variants, studies, targets, options.trans_qtl_threshold)
+    replicated = replicated_sets(validated_sets, studies, diseases)
     sets = (
         validated_sets
         .pipe(assign_confidence)
-        .pipe(flag_trans_qtl, validated_variants, studies, scan_dataset(sources.target), options.trans_qtl_threshold)
-        .pipe(flag_replicated, studies, scan_dataset(sources.disease).select('id', 'therapeuticAreas'))
+        .pipe(flag_matching_ids, 'id', trans, CredibleSetFlag.TRANS_QTL)
+        .pipe(flag_matching_ids, 'id', replicated, CredibleSetFlag.REPLICATED)
     )
-    variants = effect_allele_frequency(validated_variants, validated_sets, studies, scan_dataset(sources.variant)).pipe(
-        rescaled_effect_size, validated_sets, studies
-    )
+    variants = validated_variants.pipe(
+        effect_allele_frequency, validated_sets, studies, scan_dataset(sources.variant)
+    ).pipe(rescaled_effect_size, validated_sets, studies)
     logger.info(
         'Writing credible sets to {} and variants to {}', destinations.credible_set, destinations.credible_set_variant
     )
