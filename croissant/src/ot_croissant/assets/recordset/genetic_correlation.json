@@ -1,0 +1,75 @@
+[
+  {
+    "id": "geneticCovariance",
+    "description": "Genetic covariance of the two studies' traits, the slope of their z-score product on LD score"
+  },
+  {
+    "id": "geneticCovarianceStandardError",
+    "description": "Block jackknife standard error of the genetic covariance"
+  },
+  {
+    "id": "intercept",
+    "description": "Intercept of the genetic covariance regression; departs from zero with sample overlap between the studies"
+  },
+  {
+    "id": "interceptStandardError",
+    "description": "Block jackknife standard error of the intercept"
+  },
+  {
+    "id": "ldAncestry",
+    "description": "LD population whose score panel both studies were regressed on (afr, amr, eas, fin or nfe)",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "leftH2",
+    "description": "SNP heritability of the left study's trait, estimated on the SNPs the pair shares"
+  },
+  {
+    "id": "leftH2StandardError",
+    "description": "Block jackknife standard error of the left study's heritability"
+  },
+  {
+    "id": "leftStudyId",
+    "description": "Identifier of the first study of the pair, the lower of the two identifiers",
+    "foreign_key": "study/studyId",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "mSnps",
+    "description": "Number of panel SNPs the LD scores stand for, which the heritabilities and covariance are totals over"
+  },
+  {
+    "id": "nSnps",
+    "description": "Number of SNPs the two studies share with the panel, which the regressions were fitted on"
+  },
+  {
+    "id": "rg",
+    "description": "Genetic correlation: the genetic covariance over the geometric mean of the two heritabilities; null when either heritability is not positive"
+  },
+  {
+    "id": "rgStandardError",
+    "description": "Block jackknife standard error of the genetic correlation"
+  },
+  {
+    "id": "rightH2",
+    "description": "SNP heritability of the right study's trait, estimated on the SNPs the pair shares"
+  },
+  {
+    "id": "rightH2StandardError",
+    "description": "Block jackknife standard error of the right study's heritability"
+  },
+  {
+    "id": "rightStudyId",
+    "description": "Identifier of the second study of the pair",
+    "foreign_key": "study/studyId",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "runStatus",
+    "description": "Whether the pair was estimated (success), skipped for too few shared SNPs (skipped) or failed (error)"
+  },
+  {
+    "id": "skipReason",
+    "description": "Why the pair was skipped or failed; null on success"
+  }
+]

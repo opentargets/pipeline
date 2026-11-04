@@ -1634,3 +1634,47 @@ steps:
         'spark.sql.adaptive.skewJoin.skewedPartitionFactor': '2'
         'spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes': '64MB'
   ##################################################################################################
+
+  #: GENETIC CORRELATION STEP :#####################################################################
+  # Runs ahead of a release, from a staging DAG: it reads every representative study's summary
+  # statistics. The release copies its output in through pis.
+  genetic_correlation:
+    - name: transform genetic correlation representatives
+      source:
+        study: input/genetic_correlation/study
+        heritability: input/genetic_correlation/heritability_estimate
+      destination: intermediate/genetic_correlation/representatives
+      transformer: genetic_correlation.representatives
+      settings:
+        ancestries:
+          - nfe
+
+    - name: transform genetic correlation munge
+      requires:
+        - transform genetic correlation representatives
+      source:
+        representatives: intermediate/genetic_correlation/representatives
+        ldscore: input/genetic_correlation/ldscore
+        sumstats: gs://gwas_catalog_inputs/harmonised_summary_statistics
+      destination:
+        munged: intermediate/genetic_correlation/munged
+        panels: intermediate/genetic_correlation/panels
+      transformer: genetic_correlation.munge
+      settings:
+        billing_project: open-targets-genetics-dev
+        parallel_studies: 16
+
+    - name: transform genetic correlation pairs
+      requires:
+        - transform genetic correlation munge
+      source:
+        representatives: intermediate/genetic_correlation/representatives
+        munged: intermediate/genetic_correlation/munged
+        panels: intermediate/genetic_correlation/panels
+      destination: output/genetic_correlation
+      transformer: genetic_correlation.pairs
+      settings:
+        # about a second per pair per core; sized for an n2d-standard-64
+        parallel_pairs: 60
+        worker_threads: 1
+  ##################################################################################################

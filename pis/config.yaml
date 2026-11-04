@@ -914,6 +914,28 @@ steps:
       destination: input/heritability_estimate
   ##################################################################################################
 
+  #: GENETIC CORRELATION STEP :#####################################################################
+  # The inputs of the genetic correlation staging run, not of a release: the latest release's
+  # study index, the heritability estimates, and the gnomAD r2.1.1 LD score panels. The panels
+  # still live in an analysis bucket and should move to a staged input location.
+  genetic_correlation:
+    - name: copy_many study index
+      sources: gs://open-targets-data-releases/26.09/output/study/**/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/genetic_correlation/study
+
+    - name: copy_many gwas ldsc h2 estimates
+      sources: gs://gwas_catalog_sumstats_susie/heritability_estimates/**/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/genetic_correlation/heritability_estimate
+
+    - name: copy_many ld score panels
+      sources: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel/**/*.csv.gz
+      destination: input/genetic_correlation/ldscore
+  ##################################################################################################
+
   #: VARIANT PPP STEP :############################################################################
   variant_ppp:
     - name: copy LoF curation raw data

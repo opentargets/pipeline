@@ -364,6 +364,15 @@
     "description": "Baseline RNA and protein expression data across tissues. This data does not contain raw expression values, instead shows how targets are selectively expressed across different tissues. This dataset combines expression values from multiple sources including Expression Atlas and Human Protein Atlas"
   },
   {
+    "id": "genetic_correlation",
+    "nice_name": "Genetic correlation between GWAS studies",
+    "tags": [
+      "Genetics",
+      "Disease"
+    ],
+    "description": "LD score regression genetic correlation (rg) between pairs of GWAS studies, one representative study per disease and LD ancestry, with the genetic covariance and heritabilities it is computed from and their block jackknife standard errors"
+  },
+  {
     "id": "go",
     "nice_name": "Target - gene ontology",
     "tags": [
