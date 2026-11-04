@@ -36,12 +36,33 @@ def _ws(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip()
 
 
+SHORT_SYMBOL = 6
+"""Single-token targets up to this length are treated as gene symbols."""
+
+
+def names_target(quote: str, target: str) -> bool:
+    """Whether the quote contains the target as a whole word, ignoring case and whitespace.
+
+    A short symbol written with capitals (``MET``, ``AR``, ``KIT``) does not match an
+    all-lowercase word, which is an ordinary English word rather than the gene.
+    """
+    target = _ws(target)
+    pattern = r'(?<![A-Za-z0-9])' + re.escape(target) + r'(?![A-Za-z0-9])'
+    symbol = ' ' not in target and len(target) <= SHORT_SYMBOL and target != target.lower()
+    for match in re.finditer(pattern, _ws(quote), flags=re.IGNORECASE):
+        if not (symbol and match.group(0) == match.group(0).lower()):
+            return True
+    return False
+
+
 def _quote_problem(nct_id: str, quote: str, target: str, pool_trials: set[str], texts: dict[str, str]) -> str | None:
+    if not _ws(target):
+        return 'empty_target'
     if nct_id not in pool_trials:
         return 'nct_not_in_pool'
     if _ws(quote) not in _ws(texts.get(nct_id, '')):
         return 'quote_not_in_text'
-    if target.lower() not in quote.lower():
+    if not names_target(quote, target):
         return 'target_not_in_quote'
     return None
 

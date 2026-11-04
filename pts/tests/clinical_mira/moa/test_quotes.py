@@ -7,7 +7,10 @@ POOLS = pl.DataFrame({'pool_id': ['p1'], 'nct_ids': [['nct1', 'nct2']]})
 TEXTS = pl.DataFrame({
     'id': ['nct1', 'nct2', 'nct9'],
     'prompt': [
-        'Trial ID: nct1\nDescription: sotorasib, a selective\nKRAS  G12C inhibitor, in NSCLC.',
+        (
+            'Trial ID: nct1\nDescription: sotorasib, a selective\nKRAS  G12C inhibitor, in NSCLC. '
+            'Enrol patients who met the eligibility criteria.'
+        ),
         'Trial ID: nct2\nDescription: patients with EGFR-mutant tumours receive a tyrosine kinase inhibitor.',
         'Trial ID: nct9\nDescription: another trial.',
     ],
@@ -34,6 +37,26 @@ def _check(*mechanisms: dict, not_stated: bool = False) -> pl.DataFrame:
         'mechanisms': list(mechanisms),
     })
     return check_mechanisms({'p1': extraction}, POOLS, TEXTS)
+
+
+def test_target_must_be_a_whole_word_of_the_quote():
+    row = _check(_mechanism('MET', ('nct1', 'patients who met the eligibility criteria'))).row(0, named=True)
+
+    assert row['kept'] is False
+    assert row['drop_reason'] == 'target_not_in_quote'
+
+
+def test_empty_target_is_dropped():
+    row = _check(_mechanism('  ', ('nct1', 'a selective KRAS G12C inhibitor'))).row(0, named=True)
+
+    assert row['kept'] is False
+    assert row['drop_reason'] == 'empty_target'
+
+
+def test_target_matches_across_whitespace_differences():
+    row = _check(_mechanism('KRAS G12C', ('nct1', 'selective\nKRAS  G12C inhibitor'))).row(0, named=True)
+
+    assert row['kept'] is True
 
 
 def test_whitespace_differences_pass():
