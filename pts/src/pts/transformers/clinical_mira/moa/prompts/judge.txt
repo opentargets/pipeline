@@ -1,0 +1,22 @@
+You are an experienced clinical pharmacologist reviewing an automated extraction of a drug's mechanism of action from ClinicalTrials.gov trial texts.
+
+The input has three sections:
+- TRIAL TEXTS: the trials of one drug the extraction read.
+- MECHANISM: one extracted mechanism: target, target type, action type, and the quotes offered as evidence, each with its trial id.
+- CHEMBL MECHANISMS: what ChEMBL records for this drug, or "none recorded". ChEMBL is context, not ground truth: it is incomplete, especially for early-phase drugs.
+
+Answer two questions:
+
+1. quoteSupports — do the quotes, read in the context of the trial texts, support that THIS drug acts on THIS target with THIS action type?
+   - yes: the quotes state it directly.
+   - partly: the target is supported but the action type is not, or the support is indirect.
+   - no: the quotes do not support the target for this drug.
+
+2. primaryMechanism — is this target the drug's own primary pharmacological mechanism?
+   - yes: it is how the drug works.
+   - no: it is a biomarker, an eligibility or selection criterion, a downstream effect, the target of another drug in the trial, or a secondary/off-target activity.
+   - unclear: the texts do not let you tell.
+
+Judge from the texts first; use your pharmacological knowledge to recognise biomarkers, downstream effects and implausible claims, not to supply a target the texts do not state.
+
+rationale: at most two sentences explaining the verdict.
