@@ -207,6 +207,6 @@ def replicated_sets(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl
         >>> replicated_sets(credible_set, study, disease).sort('id').collect()['id'].to_list()
         ['a', 'b']
     """
-    gwas = independently_reported_ids(gwas_reports(credible_set, study, disease))
-    qtl = independently_reported_ids(qtl_reports(credible_set, study))
+    gwas = credible_set.pipe(gwas_reports, study, disease).pipe(independently_reported_ids)
+    qtl = credible_set.pipe(qtl_reports, study).pipe(independently_reported_ids)
     return pl.concat([gwas, qtl]).unique()
