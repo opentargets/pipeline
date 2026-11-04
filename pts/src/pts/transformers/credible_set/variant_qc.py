@@ -14,7 +14,7 @@ from pts.transformers.credible_set.variant_id import variant_alternate_allele, v
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
 
-#: A credible set identifier: the md5 hex digest gentropy computes.
+#: A credible set identifier: a 32-character lowercase md5 hex digest.
 CREDIBLE_SET_ID_PATTERN = r'^[0-9a-f]{32}$'
 
 #: A variant identifier on a canonical chromosome, with a positive position and nucleotide alleles.

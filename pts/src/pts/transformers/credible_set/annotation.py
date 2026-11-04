@@ -212,7 +212,7 @@ def replication_reports(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.
     - A GWAS set reports on every trait of `gwas_traits`; its evidence is its study's cohorts,
       publication and populations, so studies sharing all three are one report.
     - A QTL set of a study with a `geneId` reports on that gene; its evidence is the credible set,
-      so two sets of one study are two reports, as in gentropy.
+      so two sets of one study are two reports.
 
     Examples:
         >>> sets = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g', 'q'], 'leadVariantId': ['1_1_A_T'] * 2})
@@ -278,7 +278,7 @@ def replicated_sets(sets: pl.LazyFrame, studies: pl.LazyFrame, diseases: pl.Lazy
 
 
 def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Set `confidence` from the fine-mapping method and the LD and top hit flags, as in gentropy.
+    """Set `confidence` from the fine-mapping method and the LD and top hit flags.
 
     The conditions are tested in order:
 
@@ -449,12 +449,21 @@ def effect_allele_frequency(
     )
 
 
+CHI2_EXACT_MIN_EXPONENT = -300
+"""The smallest p-value exponent with an exact chi-squared statistic; below it the p-value underflows."""
+CHI2_APPROXIMATION_SLOPE = 4.596
+"""The slope of the linear approximation of the chi-squared statistic from -log10(p), a constant."""
+CHI2_APPROXIMATION_INTERCEPT = -5.367
+"""The intercept of the linear approximation of the chi-squared statistic from -log10(p), a constant."""
+
+
 def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
     """The chi-squared statistic (1 degree of freedom) of a p-value given as mantissa and exponent.
 
-    A port of gentropy `chi2_from_pvalue`: the inverse survival function of the chi-squared
-    distribution, and below an exponent of -300, where the p-value underflows, the linear
-    approximation `4.596 * -log10(p) - 5.367`. It is null when the p-value is missing or invalid.
+    From `CHI2_EXACT_MIN_EXPONENT` up it is the inverse survival function of the chi-squared
+    distribution. Below it, where the p-value underflows, it is the linear approximation
+    `CHI2_APPROXIMATION_SLOPE * -log10(p) + CHI2_APPROXIMATION_INTERCEPT`, whose slope 4.596 and
+    intercept -5.367 are constants. It is null when the p-value is missing or invalid.
 
     Examples:
         >>> frame = pl.DataFrame({'mantissa': [5.0, 9.0, 9.0, None], 'exponent': [-8, -300, -301, -8]})
@@ -462,12 +471,12 @@ def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
         [29.72, 1369.48, 1373.64, None]
     """
     neglog = -(mantissa.cast(pl.Float64).log10() + exponent)
-    approximation = neglog * 4.596 - 5.367
+    approximation = neglog * CHI2_APPROXIMATION_SLOPE + CHI2_APPROXIMATION_INTERCEPT
     p_value = mantissa.cast(pl.Float64) * pl.lit(10.0).pow(exponent)
     exact = p_value.map_batches(
         lambda values: pl.Series(chi2.isf(values.to_numpy(), df=1)), return_dtype=pl.Float64, is_elementwise=True
     )
-    statistic = pl.when(exponent < -300).then(approximation).otherwise(exact).fill_nan(None)
+    statistic = pl.when(exponent < CHI2_EXACT_MIN_EXPONENT).then(approximation).otherwise(exact).fill_nan(None)
     return pl.when(statistic.is_finite()).then(statistic).alias('chi2')
 
 

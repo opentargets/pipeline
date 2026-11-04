@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 
 class FinemappingMethod(StrEnum):
-    """Fine-mapping methods, as gentropy `FinemappingMethod`."""
+    """Fine-mapping methods."""
 
     PICS = 'PICS'
     SUSIE = 'SuSiE'
@@ -61,6 +61,6 @@ class GenomicRegion(NamedTuple):
 
 
 class KnownGenomicRegion(Enum):
-    """Known genomic regions, as gentropy `KnownGenomicRegions`."""
+    """Known genomic regions."""
 
     MHC = GenomicRegion(Chromosome.CHR_6, 25726063, 33400556)

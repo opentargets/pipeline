@@ -1,7 +1,4 @@
-"""Schemas for the CredibleSet and CredibleSetVariant datasets.
-
-They match gentropy `credible_set.json` and `credible_set_variant.json`.
-"""
+"""Schemas for the CredibleSet and CredibleSetVariant datasets."""
 
 import polars as pl
 
@@ -32,7 +29,7 @@ validated_credible_set_schema = pl.Schema({
 })
 """The CredibleSet schema of the validated and published sets, with the columns of a fixed vocabulary as enums.
 
-Spark reads the enum columns as strings, so the published dataset still matches gentropy.
+Spark reads the enum columns as strings, so the published dataset keeps the CredibleSet schema.
 """
 
 credible_set_variant_schema = pl.Schema({
