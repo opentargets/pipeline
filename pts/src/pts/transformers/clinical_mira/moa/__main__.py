@@ -96,6 +96,7 @@ def cmd_extract(run: Path, args: argparse.Namespace) -> None:
         model=args.model,
         cache_path=run / 'extract_cache.jsonl',
         concurrency=args.concurrency,
+        cached_only=args.cached_only,
     )
     extractions = {k: v for k, v in results.items() if isinstance(v, MoaExtraction)}
     texts = pl.read_parquet(run / 'texts.parquet')
@@ -239,6 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument('--concurrency', type=int, default=20)
     extract.add_argument('--limit', type=int, default=None)
     extract.add_argument('--all', action='store_true', help='every pool, not only the pilot')
+    extract.add_argument('--cached-only', action='store_true', help='use cached results only; call no model')
 
     command('ground', cmd_ground).add_argument('--target-view', required=True)
 

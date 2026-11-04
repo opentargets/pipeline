@@ -73,11 +73,13 @@ def run_cached(
     concurrency: int = 20,
     chunk_size: int | None = None,
     client: AsyncOpenAI | None = None,
+    cached_only: bool = False,
 ) -> tuple[dict[str, BaseModel], dict[str, str]]:
     """Run each ``(request_id, input_text)`` through the model, reusing cached results.
 
     Results are written after every chunk of ``chunk_size`` requests (by default the
-    concurrency), so an interruption loses at most one chunk of finished calls.
+    concurrency), so an interruption loses at most one chunk of finished calls. With
+    ``cached_only`` nothing is sent and only cached results are returned.
 
     Returns:
         The validated response per request id that succeeded, and the error type per
@@ -94,6 +96,7 @@ def run_cached(
             concurrency=concurrency,
             chunk_size=chunk_size or concurrency,
             client=client,
+            cached_only=cached_only,
         )
     )
 
@@ -109,6 +112,7 @@ async def _run(
     concurrency: int,
     chunk_size: int,
     client: AsyncOpenAI | None,
+    cached_only: bool,
 ) -> tuple[dict[str, BaseModel], dict[str, str]]:
     cached = _read_cache(cache_path)
     keys = {request_id: result_key(text, system_prompt, response_model, model) for request_id, text in requests}
@@ -119,7 +123,7 @@ async def _run(
     logger.info(f'{len(results)} of {len(requests)} requests cached, {len(pending)} to run with {model}')
 
     errors: dict[str, str] = {}
-    if not pending:
+    if not pending or cached_only:
         return results, errors
 
     owned = client is None

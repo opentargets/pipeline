@@ -124,3 +124,22 @@ def test_default_chunk_is_the_concurrency(tmp_path):
         )
 
     assert len((tmp_path / 'c.jsonl').read_text().splitlines()) == 1
+
+
+def test_cached_only_never_calls_the_model(tmp_path):
+    client = FakeClient()
+    _run(client, tmp_path / 'c.jsonl')
+
+    results, errors = run_cached(
+        [('a', 'x'), ('c', 'new')],
+        system_prompt='i',
+        response_model=Echo,
+        model='m',
+        cache_path=tmp_path / 'c.jsonl',
+        client=client,
+        cached_only=True,
+    )
+
+    assert set(results) == {'a'}
+    assert errors == {}
+    assert client.total == 2
