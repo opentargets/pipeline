@@ -15,6 +15,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
+from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
@@ -104,10 +105,77 @@ def _flag_matching_ids(
 def flag_across_sets(sets: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
     """The cross-set flags of the credible sets of every source, one row per flagged set.
 
-    REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE and DUPLICATED_STUDYLOCUS_ID compare sets across
-    sources. Their rules come with the set QC slice for cross-set flags; until then no set is flagged.
+    The flags compare credible sets across sources, so they are computed on the QC'd sets and
+    variants of every source, before any exclusion:
+
+    - REDUNDANT_PICS_TOP_HIT: a curated top hit of a study that also has a PICS set without
+      TOP_HIT, from its summary statistics.
+    - DUPLICATED_STUDYLOCUS_ID: the identifier occurs more than once; every copy is flagged.
+    - EXPLAINED_BY_SUSIE: a set that is not SuSiE or SuSiE-inf has a member, without
+      EXCEEDS_COVERAGE_95, inside the locus bounds of a SuSiE or SuSiE-inf set of the same study
+      and chromosome. A member position is the second field of its `variantId`; a member on an
+      alternate contig has none and never counts.
+
+    Examples:
+        >>> from pts.transformers.credible_set.flags import CredibleSetFlag
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['top', 'pics', 'susie', 'dup', 'dup'],
+        ...     'studyId': ['s', 's', 's', 't', 'u'],
+        ...     'chromosome': ['1'] * 5,
+        ...     'locusStart': [None, None, 1000, None, None],
+        ...     'locusEnd': [None, None, 2000, None, None],
+        ...     'fineMappingMethod': ['PICS', 'PICS', 'SuSiE', 'PICS', 'PICS'],
+        ...     'qualityControls': [[CredibleSetFlag.TOP_HIT.value], [], [], [], []],
+        ... }, schema_overrides={'locusStart': pl.Int32, 'locusEnd': pl.Int32})
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['top', 'pics', 'susie'],
+        ...     'variantId': ['1_100_A_T', '1_1500_A_T', '1_1500_A_T'],
+        ...     'qualityControls': [[], [], []],
+        ... })
+        >>> for row in flag_across_sets(sets, variants).sort('id').collect().iter_rows(named=True):
+        ...     print(row['id'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
+        dup ['DUPLICATED_STUDYLOCUS_ID']
+        pics ['EXPLAINED_BY_SUSIE']
+        top ['REDUNDANT_PICS_TOP_HIT']
     """
-    return pl.LazyFrame(schema=cross_set_flags_schema)
+    top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
+    pics = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
+    susie = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
+
+    studies_with_summary_statistics_pics = sets.filter(pics & ~top_hit).select('studyId').unique()
+    redundant_top_hits = sets.filter(top_hit).join(studies_with_summary_statistics_pics, on='studyId', how='semi')
+
+    duplicated = sets.group_by('id').len().filter(pl.col('len') > 1)
+
+    susie_regions = sets.filter(susie).select('studyId', 'chromosome', 'locusStart', 'locusEnd').unique()
+    members = (
+        variants
+        .filter(~pl.col('qualityControls').list.contains(CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value))
+        .select(
+            pl.col('credibleSetId').alias('id'),
+            pl.col('variantId').str.split('_').list.get(1).cast(pl.Int64, strict=False).alias('_position'),
+        )
+        .drop_nulls('_position')
+        .join(sets.filter(~susie).select('id', 'studyId', 'chromosome').unique(), on='id', how='inner')
+    )
+    explained = members.join(susie_regions, on=['studyId', 'chromosome'], how='inner').filter(
+        pl.col('_position').is_between(pl.col('locusStart'), pl.col('locusEnd'))
+    )
+
+    def flagged(frame: pl.LazyFrame, flag: CredibleSetFlag) -> pl.LazyFrame:
+        return frame.select('id').unique().with_columns(pl.lit(flag.value).alias('flag'))
+
+    return (
+        pl
+        .concat([
+            flagged(redundant_top_hits, CredibleSetFlag.REDUNDANT_PICS_TOP_HIT),
+            flagged(duplicated, CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID),
+            flagged(explained, CredibleSetFlag.EXPLAINED_BY_SUSIE),
+        ])
+        .group_by('id')
+        .agg(pl.col('flag').unique().sort().alias('qualityControls'))
+        .match_to_schema(cross_set_flags_schema)
+    )
 
 
 def add_cross_set_flags(sets: pl.LazyFrame, cross_set_flags: pl.LazyFrame) -> pl.LazyFrame:
