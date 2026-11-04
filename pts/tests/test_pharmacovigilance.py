@@ -297,8 +297,10 @@ def test_total_counts_distinct_reports_across_drugs():
 
 
 def test_critical_value_matches_the_spark_implementation():
-    assert critical_value(200, 60, np.array([40.0, 90.0, 150.0, 400.0]), 1000, 0.95) == GOLDEN_1
-    assert critical_value(500, 5, np.array([1.0, 2.0]), 10, 0.95) == GOLDEN_2
+    assert critical_value(200, 60, np.array([40.0, 90.0, 150.0, 400.0]), 1000, 0.95) == pytest.approx(
+        GOLDEN_1, rel=1e-12
+    )
+    assert critical_value(500, 5, np.array([1.0, 2.0]), 10, 0.95) == pytest.approx(GOLDEN_2, rel=1e-12)
 
 
 def test_critical_value_guards_return_zero():
@@ -308,38 +310,45 @@ def test_critical_value_guards_return_zero():
     assert critical_value(100, 5, np.array([]), 10, 0.95) == 0.0
 
 
-def _critical_input() -> list[tuple[str, str, str]]:
-    rows = []
-    for i in range(30):
-        rows.append((f'r{i}', 'D1', f'e{i % 3}'))
-        rows.append((f'r{i}', 'D1', f'e{(i + 1) % 4}'))
-    rows.extend((f'r{i}', 'D2', f'e{i % 5}') for i in range(30, 60))
-    return rows
+def _hand_table(event_reports: list[int], drug_reports: int, total: int) -> pl.DataFrame:
+    count = len(event_reports)
+    return pl.DataFrame({
+        'chembl_id': ['D1'] * count,
+        'event': [f'e{i}' for i in range(count)],
+        'A': [1] * count,
+        'B': [er - 1 for er in event_reports],
+        'C': [drug_reports - 1] * count,
+        'D': [total - er - drug_reports + 1 for er in event_reports],
+        'drug_reports': [drug_reports] * count,
+        'event_reports': event_reports,
+        'llr': [1.0] * count,
+    })
 
 
 def test_critical_values_do_not_depend_on_row_order():
-    rows = _critical_input()
-    first = critical_values(contingency_table(_pairs(*rows)), 200, 0.95).sort('chembl_id')
-    second = critical_values(contingency_table(_pairs(*rows[::-1])), 200, 0.95).sort('chembl_id')
-    assert first.columns == ['chembl_id', 'critval']
-    assert first.height == 2
-    assert first.equals(second)
+    expected = critical_value(500, 900, np.array([40.0, 90.0, 150.0, 400.0]), 1000, 0.95)
+    reversed_n_i = critical_value(500, 900, np.array([400.0, 150.0, 90.0, 40.0]), 1000, 0.95)
+    assert expected != reversed_n_i
+    for event_reports in ([400, 150, 90, 40], [40, 90, 150, 400], [150, 400, 40, 90]):
+        result = critical_values(_hand_table(event_reports, 900, 1000), 500, 0.95)
+        assert result.columns == ['chembl_id', 'critval']
+        assert result['critval'].to_list() == [expected]
 
 
 def test_n_i_uses_only_rows_that_survived_the_llr_filter():
-    rows = [('r1', 'D1', 'e1'), ('r2', 'D1', 'e2'), ('r3', 'D1', 'e2'), ('r4', 'D2', 'e1'), ('r5', 'D3', 'e3')]
-    rows += [('r1', 'D1', 'e9'), ('r2', 'D1', 'e9'), ('r3', 'D1', 'e9')]
+    rows = [(f'r{i}', 'D1', 'all') for i in range(6)]
+    rows += [(f'r{i}', 'D1', 'e1') for i in range(2)]
+    rows += [(f'r{i}', 'D2', 'e1') for i in range(6, 11)]
+    rows += [(f'r{i}', 'D1', 'e2') for i in (2, 3, 4)]
+    rows += [('r11', 'D2', 'e2')]
+    rows += [(f'r{i}', 'D2', 'all') for i in range(12, 32)]
     table = contingency_table(_pairs(*rows))
-    assert table.filter(pl.col('event') == 'e9').is_empty()
-    expected = critical_value(
-        50,
-        int(table['drug_reports'][0]),
-        np.sort(table.filter(pl.col('chembl_id') == 'D1')['event_reports'].to_numpy().astype(np.float64)),
-        int(table.select((pl.col('A') + pl.col('B') + pl.col('C') + pl.col('D')).first())[0, 0]),
-        0.95,
-    )
-    got = critical_values(table, 50, 0.95).filter(pl.col('chembl_id') == 'D1')['critval'][0]
-    assert got == expected
+    d1 = table.filter(pl.col('chembl_id') == 'D1')
+    assert d1['event'].sort().to_list() == ['e1', 'e2']
+    assert d1['event_reports'].sort().to_list() == [4, 7]
+    got = critical_values(table, 200, 0.95).filter(pl.col('chembl_id') == 'D1')['critval'][0]
+    assert got == critical_value(200, 6, np.array([4.0, 7.0]), 32, 0.95)
+    assert got != critical_value(200, 6, np.array([4.0, 7.0, 26.0]), 32, 0.95)
 
 
 def test_significant_events_filter_and_schema():
