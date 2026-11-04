@@ -45,14 +45,48 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     A term absent from the disease index is a disease. A study without `diseaseIds` has no trait.
 
     Examples:
-        >>> study = pl.LazyFrame({
-        ...     'studyId': ['m', 'md', 'd', 'q'],
-        ...     'studyType': ['gwas', 'gwas', 'gwas', 'eqtl'],
-        ...     'diseaseIds': [['bmi', 'height'], ['bmi', 'ibd'], ['ra', 'ibd'], []],
+        `bmi` and `height` are measurements, `ibd` and `ra` diseases. Each study is named after its
+        case, and lists the traits it replicates on:
+
+        >>> disease = pl.LazyFrame({
+        ...     'id': ['bmi', 'height', 'ibd', 'ra'],
+        ...     'therapeuticAreas': [[MEASUREMENT], [MEASUREMENT], ['EFO_area'], ['EFO_area']],
         ... })
-        >>> disease = pl.LazyFrame({'id': ['bmi', 'height'], 'therapeuticAreas': [[MEASUREMENT]] * 2})
-        >>> gwas_traits(study, disease).sort('studyId', 'trait').collect().rows()
-        [('d', ['ibd', 'ra']), ('m', ['bmi']), ('m', ['height']), ('md', ['ibd'])]
+        >>> study = pl.LazyFrame({
+        ...     'studyId': [
+        ...         'one measurement, one disease',
+        ...         'one disease',
+        ...         'many diseases',
+        ...         'many measurements',
+        ...         'one disease, many measurements',
+        ...         'many diseases, one measurement',
+        ...         'many diseases, many measurements',
+        ...         'empty list',
+        ...     ],
+        ...     'studyType': ['gwas'] * 8,
+        ...     'diseaseIds': [
+        ...         ['bmi', 'ibd'],
+        ...         ['ibd'],
+        ...         ['ra', 'ibd'],
+        ...         ['height', 'bmi'],
+        ...         ['ibd', 'bmi', 'height'],
+        ...         ['ra', 'ibd', 'bmi'],
+        ...         ['ra', 'bmi', 'ibd', 'height'],
+        ...         [],
+        ...     ],
+        ... })
+        >>> trait = gwas_traits(study, disease).group_by('studyId').agg(pl.col('trait').sort())
+        >>> by_study = study.select('studyId').join(trait, on='studyId', how='left', maintain_order='left')
+        >>> for study_id, study_trait in by_study.collect().rows():
+        ...     print(f'{study_id}: {study_trait or []}')
+        one measurement, one disease: [['ibd']]
+        one disease: [['ibd']]
+        many diseases: [['ibd', 'ra']]
+        many measurements: [['bmi'], ['height']]
+        one disease, many measurements: [['ibd']]
+        many diseases, one measurement: [['ibd', 'ra']]
+        many diseases, many measurements: [['ibd', 'ra']]
+        empty list: []
     """
     is_measurement = measurement_term(disease).select(pl.col('id').alias('term'), pl.lit(True).alias('is_measurement'))
     term_by_study = (
