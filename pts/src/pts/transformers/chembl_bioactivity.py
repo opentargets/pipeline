@@ -37,13 +37,10 @@ TABLES = {
         'molregno',
         'doc_id',
         'standard_type',
-        'standard_relation',
         'standard_value',
         'standard_units',
-        'standard_upper_value',
         'standard_text_value',
         'pchembl_value',
-        'data_validity_comment',
         'activity_comment',
         'action_type',
         'modality',
@@ -55,7 +52,6 @@ TABLES = {
         'assay_type',
         'description',
         'assay_organism',
-        'relationship_type',
         'confidence_score',
         'tid',
         'variant_id',
@@ -70,10 +66,10 @@ TABLES = {
     'docs': ['doc_id', 'chembl_id', 'pubmed_id', 'doi', 'year', 'doc_type'],
     'variant_sequences': ['variant_id', 'mutation'],
 }
-"""Outputs are sorted by ``activityId`` and every list at its aggregation site, so read order never matters."""
+"""The ChEMBL tables and columns the step reads."""
 
 FLOAT_COLUMNS = {
-    'activities': ['standard_value', 'standard_upper_value', 'pchembl_value'],
+    'activities': ['standard_value', 'pchembl_value'],
     'ligand_eff': ['le', 'lle'],
 }
 """Unconstrained postgres ``numeric`` columns, whose scale varies row to row: read as floats."""
@@ -154,7 +150,8 @@ def process_bioactivity(
         moa_df: The mechanism of action dataset's `actionType`, `chemblIds` and `targets`.
 
     Returns:
-        The bioactivity rows, sorted by `activityId`.
+        The bioactivity rows, sorted by `activityId`. Every list is sorted where it is
+        aggregated, so the order tables are read in never reaches the output.
     """
     components = _components(
         tables['target_components'],
@@ -167,12 +164,10 @@ def process_bioactivity(
     is_degradation = (pl.col('modality') == DEGRADATION_MODALITY).fill_null(False)
     logger.info(f'{activities.height:,} activities; {activities.filter(is_degradation).height:,} degradation left out')
 
-    bioactivity = _bioactivity(activities.filter(~is_degradation), components)
-    return _shape(
-        _annotate(bioactivity, tables, components, _drug_ids(drug_df), _mechanism_pairs(moa_df)),
-        _component_list(components),
-        chembl_bioactivity_schema,
-    )
+    component_lists = _component_list(components)
+    bioactivity = _bioactivity(activities.filter(~is_degradation), component_lists['tid'])
+    annotated = _annotate(bioactivity, tables, components, _drug_ids(drug_df), _mechanism_pairs(moa_df))
+    return _shape(annotated, component_lists, _complex_flags(components))
 
 
 def _annotate(
@@ -220,33 +215,27 @@ def _annotate(
             validate='m:1',
         )
         .join(tables['ligand_eff'].select('activity_id', 'le', 'lle'), on='activity_id', how='left', validate='1:1')
-        .join(_complex_flags(components), on='tid', how='left', validate='m:1')
     )
 
 
 def _activities(activities: pl.DataFrame, assays: pl.DataFrame, target_dictionary: pl.DataFrame) -> pl.DataFrame:
     """Every activity with the assay and target fields the prefilters need."""
-    return (
-        activities
-        .with_columns(dup=(pl.col('potential_duplicate') == 1).fill_null(False))
-        .join(
-            assays.drop('description', 'assay_organism').rename({'chembl_id': 'assayId'}),
-            on='assay_id',
-            how='inner',
-            validate='m:1',
-        )
-        .join(
-            target_dictionary.select(
-                'tid',
-                'tax_id',
-                pl.col('chembl_id').alias('targetFromSourceId'),
-                pl.col('target_type').alias('targetType'),
-                pl.col('pref_name').alias('targetName'),
-            ),
-            on='tid',
-            how='left',
-            validate='m:1',
-        )
+    return activities.join(
+        assays.drop('description', 'assay_organism').rename({'chembl_id': 'assayId'}),
+        on='assay_id',
+        how='inner',
+        validate='m:1',
+    ).join(
+        target_dictionary.select(
+            'tid',
+            'tax_id',
+            pl.col('chembl_id').alias('targetFromSourceId'),
+            pl.col('target_type').alias('targetType'),
+            pl.col('pref_name').alias('targetName'),
+        ),
+        on='tid',
+        how='left',
+        validate='m:1',
     )
 
 
@@ -376,12 +365,12 @@ def _filter(frame: pl.DataFrame, label: str, condition: pl.Expr) -> pl.DataFrame
     return kept
 
 
-def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataFrame:
+def _bioactivity(activities: pl.DataFrame, mapped_tids: pl.Series) -> pl.DataFrame:
     """Apply the bioactivity prefilters and classify the measurements.
 
     Args:
         activities: Non-degradation activities from `_activities`.
-        components: Target components from `_components`.
+        mapped_tids: The targets with at least one component mapped to a gene.
 
     Returns:
         The activities passing every prefilter, with `measurementClass`.
@@ -389,10 +378,12 @@ def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataF
     Raises:
         ValueError: If a row with a pChEMBL value has a type missing from `MEASUREMENT_CLASSES`.
     """
-    mapped_tids = components.filter(pl.col('targetId').is_not_null()).select('tid').unique()
+    is_mapped = pl.col('tid').is_in(mapped_tids.implode())
     rows = _filter(activities, '1 human target', pl.col('tax_id') == HUMAN_TAX_ID)
-    rows = _filter(rows, '2 not a potential duplicate', ~pl.col('dup'))
+    rows = _filter(rows, '2 not a potential duplicate', pl.col('potential_duplicate').ne_missing(1))
     rows = _filter(rows, '3 protein target type', pl.col('targetType').str.contains('PROTEIN'))
+    # implied by filter 7 (pchembl_value is one of the outcomes); kept so the logged funnel
+    # matches the confirmed prefilter list
     rows = _filter(
         rows,
         '4 has an outcome',
@@ -402,7 +393,7 @@ def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataF
     )
     rows = _filter(rows, '5 target-engagement assay', ~pl.col('assay_type').is_in(EXCLUDED_ASSAY_TYPES))
 
-    unmapped = rows.join(mapped_tids, on='tid', how='anti')
+    unmapped = rows.filter(~is_mapped)
     by_type = unmapped.group_by('targetType').len().sort('len', descending=True)
     logger.info(f'unmapped before filter 6, by target type: {by_type.rows()}')
     top_unmapped = (
@@ -412,7 +403,7 @@ def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataF
         .sort('len', 'targetFromSourceId', descending=[True, False])
     )
     logger.info(f'top unmapped targets: {top_unmapped.head(20).rows()}')
-    rows = _filter(rows, '6 mapped to an Ensembl gene', pl.col('tid').is_in(mapped_tids['tid'].implode()))
+    rows = _filter(rows, '6 mapped to an Ensembl gene', is_mapped)
     rows = _filter(rows, '7 has a pChEMBL value', pl.col('pchembl_value').is_not_null())
 
     unknown = sorted(set(rows['standard_type'].unique().to_list()) - set(MEASUREMENT_CLASSES))
@@ -422,28 +413,23 @@ def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataF
     return rows.with_columns(measurementClass=pl.col('standard_type').replace_strict(MEASUREMENT_CLASSES))
 
 
-def _shape(rows: pl.DataFrame, component_lists: pl.DataFrame, schema: pl.Schema) -> pl.DataFrame:
-    """Attach `targetComponents`, rename the raw columns, and keep and cast those in `schema`."""
+def _shape(rows: pl.DataFrame, component_lists: pl.DataFrame, complex_flags: pl.DataFrame) -> pl.DataFrame:
+    """Attach the target's components and complex flag, rename the raw columns, and keep and cast the schema's."""
     return (
         rows
         .join(component_lists, on='tid', how='left', validate='m:1')
+        .join(complex_flags, on='tid', how='left', validate='m:1')
         .rename({
             'activity_id': 'activityId',
             'standard_type': 'standardType',
-            'standard_relation': 'standardRelation',
             'standard_value': 'standardValue',
-            'standard_upper_value': 'standardUpperValue',
             'standard_units': 'standardUnits',
-            'standard_text_value': 'standardTextValue',
             'pchembl_value': 'pchemblValue',
-            'data_validity_comment': 'dataValidityComment',
-            'activity_comment': 'activityComment',
             'action_type': 'assayActionType',
             'assay_type': 'assayType',
-            'relationship_type': 'relationshipType',
             'confidence_score': 'confidenceScore',
         })
-        .select(schema.keys())
-        .cast(schema)
+        .select(chembl_bioactivity_schema.keys())
+        .cast(chembl_bioactivity_schema)
         .sort('activityId')
     )

@@ -15,13 +15,10 @@ ACTIVITY_SCHEMA = {
     'molregno': pl.Int64,
     'doc_id': pl.Int64,
     'standard_type': pl.String,
-    'standard_relation': pl.String,
     'standard_value': pl.Float64,
     'standard_units': pl.String,
-    'standard_upper_value': pl.Float64,
     'standard_text_value': pl.String,
     'pchembl_value': pl.Float64,
-    'data_validity_comment': pl.String,
     'activity_comment': pl.String,
     'action_type': pl.String,
     'modality': pl.String,
@@ -44,13 +41,12 @@ ACTIVITIES = [
         101,
         1,
         'IC50',
-        standard_relation='=',
         standard_value=41,
         standard_units='nM',
         pchembl_value=7.39,
         action_type='BINDING AGENT',
     ),
-    _activity(102, 1, 'Ki', standard_relation='=', standard_value=10, standard_units='nM', pchembl_value=8, molregno=2),
+    _activity(102, 1, 'Ki', standard_value=10, standard_units='nM', pchembl_value=8, molregno=2),
     _activity(103, 2, 'IC50', standard_value=1000, standard_units='nM', pchembl_value=6),  # rat target
     _activity(104, 1, 'IC50', standard_value=100, pchembl_value=7, potential_duplicate=1),
     _activity(105, 3, 'IC50', standard_value=100, pchembl_value=7),  # cell-line target
@@ -63,14 +59,13 @@ ACTIVITIES = [
 ]
 
 ASSAYS = [
-    # assay_id, chembl_id, assay_type, description, assay_organism, relationship_type, confidence_score, tid,
-    # variant_id
-    (1, 'CHEMBL_A1', 'B', 'Assay 1', 'Homo sapiens', 'D', 9, 1, 1),
-    (2, 'CHEMBL_A2', 'B', 'Assay 2', None, 'D', 9, 2, None),
-    (3, 'CHEMBL_A3', 'F', 'Assay 3', None, 'N', 1, 3, None),
-    (4, 'CHEMBL_A4', 'A', 'Assay 4', None, 'D', 9, 1, None),
-    (5, 'CHEMBL_A5', 'B', 'Assay 5', None, 'D', 9, 5, None),
-    (6, 'CHEMBL_A6', 'F', 'Assay 6', None, 'D', 7, 4, None),
+    # assay_id, chembl_id, assay_type, description, assay_organism, confidence_score, tid, variant_id
+    (1, 'CHEMBL_A1', 'B', 'Assay 1', 'Homo sapiens', 9, 1, 1),
+    (2, 'CHEMBL_A2', 'B', 'Assay 2', None, 9, 2, None),
+    (3, 'CHEMBL_A3', 'F', 'Assay 3', None, 1, 3, None),
+    (4, 'CHEMBL_A4', 'A', 'Assay 4', None, 9, 1, None),
+    (5, 'CHEMBL_A5', 'B', 'Assay 5', None, 9, 5, None),
+    (6, 'CHEMBL_A6', 'F', 'Assay 6', None, 7, 4, None),
 ]
 
 TARGETS = [
@@ -120,7 +115,6 @@ def tables() -> dict[str, pl.DataFrame]:
                 'assay_type': pl.String,
                 'description': pl.String,
                 'assay_organism': pl.String,
-                'relationship_type': pl.String,
                 'confidence_score': pl.Int16,
                 'tid': pl.Int64,
                 'variant_id': pl.Int64,
@@ -210,11 +204,8 @@ class TestBioactivity:
         assert output.schema == chembl_bioactivity_schema
 
     def test_prefilters_keep_only_human_mapped_protein_rows_with_pchembl(self, output):
-        # 103 rat, 104 duplicate, 105 cell line, 106 ADMET, 107 unmapped, 108 no pChEMBL
+        # 103 rat, 104 duplicate, 105 cell line, 106 ADMET, 107 unmapped, 108 no pChEMBL, 209 degradation
         assert output['activityId'].to_list() == [101, 102, 109]
-
-    def test_degradation_activities_are_left_out(self, output):
-        assert 209 not in output['activityId'].to_list()
 
     def test_measurement_class(self, output):
         rows = _by_id(output)
