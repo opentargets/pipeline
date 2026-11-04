@@ -3,9 +3,10 @@
 from typing import Any
 
 import polars as pl
+import pytest
 
 from pts.transformers.credible_set.flags import CredibleSetFlag
-from pts.transformers.credible_set.replication import replicated_sets
+from pts.transformers.credible_set.replication import gwas_traits, replicated_sets
 from pts.transformers.disease.coalescing import MEASUREMENT
 
 
@@ -105,3 +106,43 @@ def test_two_qtl_sets_with_one_lead_and_gene_replicate_even_in_one_study() -> No
     assert _replicated(studies, across) == {'x', 'y'}
     within = [('x', 'q1', LEAD), ('y', 'q1', LEAD)]
     assert _replicated(studies, within) == {'x', 'y'}
+
+
+TRAIT_TERMS = pl.LazyFrame({
+    'id': ['bmi', 'height', 'ibd', 'ra'],
+    'therapeuticAreas': [[MEASUREMENT], [MEASUREMENT], ['EFO_area'], ['EFO_area']],
+})
+"""Two measurements, `bmi` and `height`, and two diseases, `ibd` and `ra`."""
+
+
+@pytest.mark.parametrize(
+    ('disease_ids', 'traits'),
+    [
+        (['bmi', 'ibd'], [['ibd']]),
+        (['ibd'], [['ibd']]),
+        (['ra', 'ibd'], [['ibd', 'ra']]),
+        (['height', 'bmi'], [['bmi'], ['height']]),
+        (['ibd', 'bmi', 'height'], [['ibd']]),
+        (['ra', 'ibd', 'bmi'], [['ibd', 'ra']]),
+        (['ra', 'bmi', 'ibd', 'height'], [['ibd', 'ra']]),
+        ([], []),
+    ],
+    ids=[
+        'one measurement, one disease',
+        'one disease',
+        'many diseases',
+        'many measurements',
+        'one disease, many measurements',
+        'many diseases, one measurement',
+        'many diseases, many measurements',
+        'empty list',
+    ],
+)
+def test_the_traits_of_a_gwas_study_depend_on_the_kind_of_its_terms(
+    disease_ids: list[str], traits: list[list[str]]
+) -> None:
+    study = pl.LazyFrame(
+        {'studyId': ['s'], 'studyType': ['gwas'], 'diseaseIds': [disease_ids]},
+        schema={'studyId': pl.String, 'studyType': pl.String, 'diseaseIds': pl.List(pl.String)},
+    )
+    assert sorted(gwas_traits(study, TRAIT_TERMS).collect()['trait'].to_list()) == traits
