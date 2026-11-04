@@ -93,3 +93,21 @@ def test_rows_without_a_hash_are_counted():
     _, counts = match_texts(texts, extraction)
 
     assert counts == {'matched': 1, 'hash_mismatch': 0, 'missing_text': 0, 'missing_hash': 1}
+
+
+def test_class_names_are_not_pools():
+    extraction = pl.DataFrame(
+        {
+            'id': ['n1', 'n2', 'n3', 'n4', 'n5'],
+            'investigated_drugs': [
+                _drugs('Oral anticoagulants'),
+                _drugs('Selective serotonin reuptake inhibitors'),
+                _drugs('chemotherapy'),
+                _drugs('Beta-blockers'),
+                _drugs('pembrolizumab'),
+            ],
+        },
+        schema={'id': pl.String, 'investigated_drugs': pl.List(DRUG)},
+    )
+
+    assert single_drug_trials(extraction)['drug_name'].to_list() == ['pembrolizumab']

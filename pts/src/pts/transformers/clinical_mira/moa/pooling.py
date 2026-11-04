@@ -22,6 +22,17 @@ MOA_VOCAB = (
 
 TRIAL_SEPARATOR = '\n\n---\n\n'
 
+CLASS_NAME = (
+    r'(?:inhibitors|agonists|antagonists|antibodies|analogues|analogs|statins|steroids|corticosteroids|nsaids'
+    r'|opioids|benzodiazepines|diuretics|analgesics|anticoagulants|antibiotics|antivirals|antifungals'
+    r'|antiplatelets|antihypertensives|antidepressants|antipsychotics|antiepileptics|anticonvulsants'
+    r'|bisphosphonates|blockers|vaccines|drugs|agents|medications|medicines|supplements|probiotics|vitamins'
+    r'|anesthetics|anaesthetics|sedatives|taxanes|anthracyclines|fluoroquinolones|macrolides|sulfonylureas'
+    r'|cephalosporins|penicillins|carbapenems|triptans|gliptins|glucocorticoids|immunosuppressants'
+    r'|chemotherapy|immunotherapy|radiotherapy|hormone therapy|standard of care|placebo)$'
+)
+"""A name ending in a plural drug-class noun, or a treatment category, names a class, not a drug."""
+
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -81,7 +92,7 @@ def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
             .str.replace_all(r'\s+', ' ')
             .str.strip_chars()
         )
-        .filter(pl.col('drug_name').str.len_chars() > 0)
+        .filter((pl.col('drug_name').str.len_chars() > 0) & ~pl.col('drug_name').str.contains(CLASS_NAME))
         .select('nct_id', 'drug_name')
     )
 
