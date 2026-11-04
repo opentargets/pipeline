@@ -372,22 +372,26 @@ def validate(
 ) -> tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]:
     """Split the credible sets and variants of one source into valid and excluded rows.
 
-    A credible set is excluded together with all of its variants. The steps are:
+    Variant rows first:
 
-    0. The flags that cross-set QC computed over every source are added to the sets they belong to,
-       and the variants are checked against the sets of their own source: `ORPHAN_VARIANT` for a
-       variant whose set is not among them, `VARIANT_CHROMOSOME_MISMATCH` for a variant on another
-       chromosome than its set.
-    1. The variants carrying a flag of `csv_row_invalid_qc_reasons` (by default EXCEEDS_COVERAGE_95
-       and ORPHAN_VARIANT) are excluded on their own; the other variants are kept.
-    2. The sets with at least one variant carrying a flag of `csv_set_invalid_qc_reasons` get
-       `INVALID_VARIANT_IN_SET`: one invalid member invalidates its set.
-    3. The sets whose lead has no row among the kept variants get `LEAD_VARIANT_MISSING`: a lead
-       missing from the source, or removed in step 1, removes its set.
-    4. The sets carrying a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`, are
-       excluded. `INVALID_VARIANT_IN_SET` is structural, so it is not configurable.
-    5. Every kept variant of an excluded set gets `CREDIBLE_SET_EXCLUDED` and is excluded with it, so
-       every excluded row carries the reason it left.
+    1. Flag `ORPHAN_VARIANT` on a variant whose set is not among this source's sets, and
+       `VARIANT_CHROMOSOME_MISMATCH` on a variant on another chromosome than its set.
+    2. Exclude the variants with a flag of `csv_row_invalid_qc_reasons` (by default
+       EXCEEDS_COVERAGE_95 and ORPHAN_VARIANT). Only the row leaves; its set stays.
+
+    Then whole sets:
+
+    3. Add the cross-set flags (REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE,
+       DUPLICATED_STUDYLOCUS_ID).
+    4. Flag `INVALID_VARIANT_IN_SET` on a set with any variant flagged in
+       `csv_set_invalid_qc_reasons`.
+    5. Flag `LEAD_VARIANT_MISSING` on a set whose lead variant is not among its remaining
+       variants, either because it was never staged or because step 2 removed it.
+    6. Exclude the sets with a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`,
+       together with their remaining variants, which get `CREDIBLE_SET_EXCLUDED`.
+
+    Every excluded row carries the flag that explains why it left. `INVALID_VARIANT_IN_SET` and
+    `CREDIBLE_SET_EXCLUDED` are structural, so they are not configurable.
 
     Flags are appended to `qualityControls`; a set with several invalid variants is flagged once.
 
