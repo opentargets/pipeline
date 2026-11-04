@@ -137,6 +137,7 @@ def test_cli_end_to_end_with_fake_client(tmp_path, inputs, monkeypatch):
 
     report = (run / 'report.md').read_text()
     assert report.startswith('# AACT MoA extraction')
+    assert '## Headline precision by how the target was grounded' in report
     scored = pl.read_parquet(run / 'scored.parquet').sort('pool_id')
     assert scored['correct'].to_list().count(True) == 1
     assert scored['correct'].to_list().count(False) == 1

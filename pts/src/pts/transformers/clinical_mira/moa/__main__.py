@@ -193,6 +193,7 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
             run / f'summary_{by}_adjusted.parquet'
         )
     judge.calibration(adjusted).write_parquet(run / 'calibration.parquet')
+    benchmark.precision_by_grounding(adjusted).write_parquet(run / 'precision_by_grounding.parquet')
     judge.handcheck(adjusted, pl.read_parquet(run / 'pools.parquet'), seed=args.seed).write_csv(run / 'handcheck.csv')
     (run / 'report.md').write_text(report.render_report(run), encoding='utf-8')
     logger.info(f'evaluate: report at {run / "report.md"}')

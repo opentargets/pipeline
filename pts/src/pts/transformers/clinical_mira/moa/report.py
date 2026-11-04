@@ -122,6 +122,10 @@ def render_report(run_dir: Path) -> str:
             if frame is not None:
                 sections += [f'## By {by}, {kind}\n', markdown_table(frame, [by, *SUMMARY_COLUMNS])]
 
+    by_grounding = _read(run_dir, 'precision_by_grounding.parquet')
+    if by_grounding is not None:
+        sections += ['## Headline precision by how the target was grounded\n', markdown_table(by_grounding)]
+
     calibration = _read(run_dir, 'calibration.parquet')
     if calibration is not None:
         sections += ['## Judge calibration against the benchmark\n', markdown_table(calibration)]

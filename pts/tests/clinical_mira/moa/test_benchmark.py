@@ -4,6 +4,7 @@ import pytest
 from pts.transformers.clinical_mira.moa.benchmark import (
     benchmark_targets,
     link_pools,
+    precision_by_grounding,
     score,
     summarise,
     wilson,
@@ -194,3 +195,16 @@ def test_summary_precision_by_phase_group():
     assert row['recall'] == pytest.approx(9 / 12)
     assert row['not_stated_rate'] == pytest.approx(2 / 12)
     assert row['action_agreement'] == pytest.approx(1.0)
+
+
+def test_precision_by_grounding_separates_source_and_suggestion():
+    scored = pl.DataFrame({
+        'grounding': ['source', 'source', 'suggestion', 'suggestion', 'unresolved'],
+        'in_headline': [True, True, True, True, False],
+        'correct': [True, True, True, False, None],
+    })
+
+    table = precision_by_grounding(scored).sort('grounding')
+
+    assert table.select('grounding', 'scored', 'correct').rows() == [('source', 2, 2), ('suggestion', 2, 1)]
+    assert table['precision'].to_list() == [1.0, 0.5]

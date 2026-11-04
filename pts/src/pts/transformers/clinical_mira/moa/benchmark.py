@@ -258,3 +258,19 @@ def summarise(
         precision_lo=pl.Series([lo for lo, _ in intervals], dtype=pl.Float64),
         precision_hi=pl.Series([hi for _, hi in intervals], dtype=pl.Float64),
     ).sort(by)
+
+
+def precision_by_grounding(scored: pl.DataFrame) -> pl.DataFrame:
+    """Return headline precision separately for targets named by the text and by the model's suggestion."""
+    table = (
+        scored
+        .filter(pl.col('in_headline'))
+        .group_by('grounding')
+        .agg(scored=pl.len(), correct=pl.col('correct').sum())
+        .with_columns(precision=pl.col('correct') / pl.col('scored'))
+    )
+    intervals = [wilson(k, n) for k, n in table.select('correct', 'scored').iter_rows()]
+    return table.with_columns(
+        precision_lo=pl.Series([lo for lo, _ in intervals], dtype=pl.Float64),
+        precision_hi=pl.Series([hi for _, hi in intervals], dtype=pl.Float64),
+    ).sort('grounding')
