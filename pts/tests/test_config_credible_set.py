@@ -197,3 +197,9 @@ def test_set_qc_of_every_source_allows_every_finemapping_method() -> None:
     for source, kind in SOURCES.items():
         settings = SetQcSettings.model_validate(tasks[f'transform qc credible sets {kind}/{source}']['settings'])
         assert settings.allowed_fm_methods == list(FinemappingMethod), source
+
+
+def test_the_variant_index_reads_the_validated_variants() -> None:
+    [index] = [task for task in parse_yaml(CONFIG_PATH)['steps']['variant'] if task['transformer'] == 'variant']
+    assert index['source']['credible_set_variant'] == 'intermediate/validated/credible_set_variant'
+    assert 'credible_set' not in index['source']
