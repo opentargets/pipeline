@@ -4,7 +4,12 @@
 targets that map to an Ensembl gene. Activities ChEMBL flags as targeted protein degradation
 are left out.
 
-Target components resolve to Ensembl genes as in ``drug_mechanism_of_action``.
+Target components resolve to Ensembl genes as in ``drug_mechanism_of_action``; components
+that resolve to no gene are left out of ``targetComponents``. Each component carries only its
+gene id: symbols and names come from the target dataset. ChEMBL's own target name and type are
+not published; a target is described by its components.
+
+Every activity carries the ChEMBL id of its molecule (``drugFromSourceId``).
 """
 
 from collections.abc import Mapping
@@ -118,7 +123,7 @@ def chembl_bioactivity(
     )
 
     logger.info(f'Reading target data from {source["target"]}')
-    gene_df = scan_dataset(str(source['target'])).select('id', 'approvedSymbol', 'proteinIds').collect()
+    gene_df = scan_dataset(str(source['target'])).select('id', 'proteinIds').collect()
 
     bioactivity = process_bioactivity(tables, gene_df)
 
@@ -131,7 +136,7 @@ def process_bioactivity(tables: Mapping[str, pl.DataFrame], gene_df: pl.DataFram
 
     Args:
         tables: The raw ChEMBL tables named in `TABLES`.
-        gene_df: The target dataset's `id`, `approvedSymbol` and `proteinIds`.
+        gene_df: The target dataset's `id` and `proteinIds`.
 
     Returns:
         The bioactivity rows, sorted by `activityId`.
@@ -164,7 +169,7 @@ def _annotate(rows: pl.DataFrame, tables: Mapping[str, pl.DataFrame], components
     return (
         rows
         .join(
-            tables['molecule_dictionary'].select('molregno', pl.col('chembl_id').alias('moleculeId')),
+            tables['molecule_dictionary'].select('molregno', pl.col('chembl_id').alias('drugFromSourceId')),
             on='molregno',
             how='left',
             validate='m:1',
@@ -207,7 +212,7 @@ def _activities(activities: pl.DataFrame, assays: pl.DataFrame, target_dictionar
             target_dictionary.select(
                 'tid',
                 'tax_id',
-                pl.col('chembl_id').alias('targetChemblId'),
+                pl.col('chembl_id').alias('targetFromSourceId'),
                 pl.col('target_type').alias('targetType'),
                 pl.col('pref_name').alias('targetName'),
             ),
@@ -227,14 +232,13 @@ def _components(
 ) -> pl.DataFrame:
     """One row per target component and Ensembl gene, or one row with no gene when unmapped.
 
+    Unmapped components stay here, because `complexFlag` counts every component;
+    `_component_list` leaves them out of the published lists.
+
     Returns:
-        DataFrame with tid, component_id, uniprotId, targetId, approvedSymbol and inBindingSite.
+        DataFrame with tid, component_id, uniprotId, targetId and inBindingSite.
     """
-    lookup = (
-        chembl_accession_lookup(gene_df)
-        .rename({'uniprot_id': 'uniprotId', 'geneId': 'targetId'})
-        .join(gene_df.select(pl.col('id').alias('targetId'), 'approvedSymbol'), on='targetId', how='left')
-    )
+    lookup = chembl_accession_lookup(gene_df).rename({'uniprot_id': 'uniprotId', 'geneId': 'targetId'})
     in_site = (
         binding_sites
         .join(site_components, on='site_id')
@@ -261,9 +265,14 @@ def _complex_flags(components: pl.DataFrame) -> pl.DataFrame:
 
 
 def _component_list(components: pl.DataFrame) -> pl.DataFrame:
-    """Collect each target's components into `targetComponents`, sorted by accession then gene."""
-    fields = ['uniprotId', 'targetId', 'approvedSymbol', 'inBindingSite']
-    return components.group_by('tid').agg(pl.struct(fields).sort_by('uniprotId', 'targetId').alias('targetComponents'))
+    """Collect each target's mapped components into `targetComponents`, sorted by accession then gene."""
+    fields = ['uniprotId', 'targetId', 'inBindingSite']
+    return (
+        components
+        .filter(pl.col('targetId').is_not_null())
+        .group_by('tid')
+        .agg(pl.struct(fields).sort_by('uniprotId', 'targetId').alias('targetComponents'))
+    )
 
 
 def _filter(frame: pl.DataFrame, label: str, condition: pl.Expr) -> pl.DataFrame:
@@ -303,7 +312,10 @@ def _bioactivity(activities: pl.DataFrame, components: pl.DataFrame) -> pl.DataF
     by_type = unmapped.group_by('targetType').len().sort('len', descending=True)
     logger.info(f'unmapped before filter 6, by target type: {by_type.rows()}')
     top_unmapped = (
-        unmapped.group_by('targetChemblId', 'targetName').len().sort('len', 'targetChemblId', descending=[True, False])
+        unmapped
+        .group_by('targetFromSourceId', 'targetName')
+        .len()
+        .sort('len', 'targetFromSourceId', descending=[True, False])
     )
     logger.info(f'top unmapped targets: {top_unmapped.head(20).rows()}')
     rows = _filter(rows, '6 mapped to an Ensembl gene', pl.col('tid').is_in(mapped_tids['tid'].implode()))

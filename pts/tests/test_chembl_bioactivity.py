@@ -40,15 +40,24 @@ def _activity(activity_id: int, assay_id: int, standard_type: str, **fields) -> 
 
 ACTIVITIES = [
     # bioactivity
-    _activity(101, 1, 'IC50', standard_relation='=', standard_value=41, standard_units='nM', pchembl_value=7.39),
-    _activity(102, 1, 'Ki', standard_relation='=', standard_value=10, standard_units='nM', pchembl_value=8),
+    _activity(
+        101,
+        1,
+        'IC50',
+        standard_relation='=',
+        standard_value=41,
+        standard_units='nM',
+        pchembl_value=7.39,
+        action_type='BINDING AGENT',
+    ),
+    _activity(102, 1, 'Ki', standard_relation='=', standard_value=10, standard_units='nM', pchembl_value=8, molregno=2),
     _activity(103, 2, 'IC50', standard_value=1000, standard_units='nM', pchembl_value=6),  # rat target
     _activity(104, 1, 'IC50', standard_value=100, pchembl_value=7, potential_duplicate=1),
     _activity(105, 3, 'IC50', standard_value=100, pchembl_value=7),  # cell-line target
     _activity(106, 4, 'IC50', standard_value=100, pchembl_value=7),  # ADMET assay
     _activity(107, 5, 'IC50', standard_value=100, pchembl_value=7),  # target with no gene
     _activity(108, 1, 'Inhibition', standard_value=50, standard_units='%'),  # no pChEMBL
-    _activity(109, 6, 'EC50', standard_value=300, standard_units='nM', pchembl_value=6.5),  # complex
+    _activity(109, 6, 'EC50', standard_value=300, standard_units='nM', pchembl_value=6.5, molregno=3),  # complex
     # passes every bioactivity prefilter, but is a degradation activity
     _activity(209, 1, 'IC50', standard_value=100, standard_units='nM', pchembl_value=7, modality=TPD),
 ]
@@ -87,11 +96,11 @@ COMPONENT_SEQUENCES = [
 ]
 
 GENES = [
-    # id, approvedSymbol, proteinIds
-    ('ENSG_EGFR', 'EGFR', [('P00533', 'uniprot_swissprot')]),
-    ('ENSG_A', 'GENEA', [('PSHARED', 'uniprot_trembl')]),
-    ('ENSG_B', 'GENEB', [('PSHARED', 'uniprot_trembl')]),
-    ('ENSG_OBS', 'OBS', [('POBS01', 'uniprot_obsolete')]),
+    # id, proteinIds
+    ('ENSG_EGFR', [('P00533', 'uniprot_swissprot')]),
+    ('ENSG_A', [('PSHARED', 'uniprot_trembl')]),
+    ('ENSG_B', [('PSHARED', 'uniprot_trembl')]),
+    ('ENSG_OBS', [('POBS01', 'uniprot_obsolete')]),
 ]
 
 
@@ -133,7 +142,9 @@ def tables() -> dict[str, pl.DataFrame]:
         'component_sequences': _frame(COMPONENT_SEQUENCES, {'component_id': pl.Int64, 'accession': pl.String}),
         'binding_sites': _frame([(1, 1)], {'site_id': pl.Int64, 'tid': pl.Int64}),
         'site_components': _frame([(1, 1)], {'site_id': pl.Int64, 'component_id': pl.Int64}),
-        'molecule_dictionary': _frame([(1, 'CHEMBL_M1')], {'molregno': pl.Int64, 'chembl_id': pl.String}),
+        'molecule_dictionary': _frame(
+            [(1, 'CHEMBL_M1'), (2, 'CHEMBL_M2'), (3, 'CHEMBL_M3')], {'molregno': pl.Int64, 'chembl_id': pl.String}
+        ),
         'docs': _frame(
             [(1, 'CHEMBL_D1', 12127526, '10.1/x', 2002, 'PUBLICATION')],
             {
@@ -152,8 +163,8 @@ def tables() -> dict[str, pl.DataFrame]:
 @pytest.fixture
 def gene_df() -> pl.DataFrame:
     return pl.DataFrame(
-        [(gene, symbol, [{'id': i, 'source': s} for i, s in proteins]) for gene, symbol, proteins in GENES],
-        schema={'id': pl.String, 'approvedSymbol': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
+        [(gene, [{'id': i, 'source': s} for i, s in proteins]) for gene, proteins in GENES],
+        schema={'id': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
         orient='row',
     )
 
@@ -203,7 +214,6 @@ class TestBioactivity:
             {
                 'uniprotId': 'P00533',
                 'targetId': 'ENSG_EGFR',
-                'approvedSymbol': 'EGFR',
                 'inBindingSite': True,
             }
         ]
@@ -220,7 +230,11 @@ class TestBioactivity:
 
     def test_shared_annotations(self, output):
         row = _by_id(output)[101]
-        assert (row['moleculeId'], row['assayId'], row['assayVariantMutation']) == ('CHEMBL_M1', 'CHEMBL_A1', 'T790M')
+        assert (row['targetFromSourceId'], row['assayId'], row['assayVariantMutation']) == (
+            'CHEMBL_T1',
+            'CHEMBL_A1',
+            'T790M',
+        )
         assert (row['documentId'], row['pubmedId'], row['year'], row['docType']) == (
             'CHEMBL_D1',
             12127526,
@@ -229,6 +243,21 @@ class TestBioactivity:
         )
         assert (row['standardValue'], row['pchemblValue'], row['standardUnits']) == (41.0, 7.39, 'nM')
         assert (row['assayDescription'], row['assayOrganism']) == ('Assay 1', 'Homo sapiens')
+
+    def test_unmapped_components_are_left_out(self, tables, gene_df):
+        # an extra component on the EGFR target whose accession maps to no gene
+        tables['target_components'] = pl.concat([
+            tables['target_components'],
+            _frame([(1, 13)], {'tid': pl.Int64, 'component_id': pl.Int64}),
+        ])
+        tables['component_sequences'] = pl.concat([
+            tables['component_sequences'],
+            _frame([(13, 'PNONE')], {'component_id': pl.Int64, 'accession': pl.String}),
+        ])
+        row = _by_id(process_bioactivity(tables, gene_df))[101]
+        assert [c['uniprotId'] for c in row['targetComponents']] == ['P00533']
+        # the binding site names P00533, so the target is still not flagged as a complex
+        assert row['complexFlag'] is False
 
     def test_ligand_efficiency_is_null_without_a_ligand_eff_row(self, output):
         rows = _by_id(output)

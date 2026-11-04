@@ -49,6 +49,10 @@
     "description": "DOI of the source document"
   },
   {
+    "id": "drugFromSourceId",
+    "description": "ChEMBL identifier of the tested molecule. Most tested molecules are not drugs or clinical candidates, so most are absent from the drug/clinical candidates dataset"
+  },
+  {
     "id": "le",
     "description": "Ligand efficiency: binding energy per heavy atom (kcal/mol per heavy atom), from ChEMBL. Empty where ChEMBL computes none"
   },
@@ -59,10 +63,6 @@
   {
     "id": "measurementClass",
     "description": "What the measurement quantifies: affinity (Ki, Kd), inhibition (IC50) or functional_potency (EC50, AC50, XC50, Potency, ED50)"
-  },
-  {
-    "id": "moleculeId",
-    "description": "ChEMBL identifier of the tested molecule. Most tested molecules are not drugs or clinical candidates, so most are absent from the drug/clinical candidates dataset"
   },
   {
     "id": "pchemblValue",
@@ -85,16 +85,8 @@
     "description": "Standardised value of the measurement"
   },
   {
-    "id": "targetChemblId",
-    "description": "ChEMBL target identifier"
-  },
-  {
     "id": "targetComponents",
-    "description": "Protein components of the ChEMBL target: one entry per component and Open Targets target it maps to, or one entry with no target identifier when the component does not map"
-  },
-  {
-    "id": "targetComponents/approvedSymbol",
-    "description": "Approved gene symbol of the component"
+    "description": "Protein components of the ChEMBL target that map to an Open Targets target: one entry per component and target it maps to"
   },
   {
     "id": "targetComponents/inBindingSite",
@@ -102,7 +94,7 @@
   },
   {
     "id": "targetComponents/targetId",
-    "description": "Open Targets target identifier of the component; empty when the component does not map to an Ensembl gene",
+    "description": "Open Targets target identifier of the component",
     "foreign_key": "target/id"
   },
   {
@@ -110,12 +102,8 @@
     "description": "UniProt accession of the component"
   },
   {
-    "id": "targetName",
-    "description": "ChEMBL preferred name of the target"
-  },
-  {
-    "id": "targetType",
-    "description": "Classification of the ChEMBL target (e.g., SINGLE PROTEIN, PROTEIN COMPLEX)"
+    "id": "targetFromSourceId",
+    "description": "ChEMBL target identifier"
   },
   {
     "id": "year",

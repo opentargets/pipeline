@@ -5,14 +5,7 @@ import polars as pl
 target_component_fields = {
     'uniprotId': pl.String(),
     'targetId': pl.String(),
-    'approvedSymbol': pl.String(),
     'inBindingSite': pl.Boolean(),
-}
-
-target_fields = {
-    'targetChemblId': pl.String(),
-    'targetType': pl.String(),
-    'targetName': pl.String(),
 }
 
 document_fields = {
@@ -25,7 +18,7 @@ document_fields = {
 
 chembl_bioactivity_schema = pl.Schema({
     'activityId': pl.Int64(),
-    'moleculeId': pl.String(),
+    'drugFromSourceId': pl.String(),
     'pchemblValue': pl.Float64(),
     'standardType': pl.String(),
     'standardValue': pl.Float64(),
@@ -40,7 +33,7 @@ chembl_bioactivity_schema = pl.Schema({
     'assayOrganism': pl.String(),
     'confidenceScore': pl.Int16(),
     'assayVariantMutation': pl.String(),
-    **target_fields,
+    'targetFromSourceId': pl.String(),
     'targetComponents': pl.List(pl.Struct(target_component_fields)),
     'complexFlag': pl.Boolean(),
     **document_fields,
