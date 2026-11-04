@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
-from pts.transformers.credible_set.annotation import assign_confidence
+from pts.transformers.credible_set.confidence import assign_confidence
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import flag_in_mhc
 from pts.transformers.credible_set.validation import (

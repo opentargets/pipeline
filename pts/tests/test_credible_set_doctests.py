@@ -9,7 +9,8 @@ from types import ModuleType
 import pytest
 
 from pts.transformers.credible_set import (
-    annotation,
+    allele_frequency,
+    confidence,
     replication,
     rescaling,
     set_qc,
@@ -22,7 +23,17 @@ from pts.transformers.credible_set import (
 
 @pytest.mark.parametrize(
     'module',
-    [variant_id, variant_qc, set_qc, validation, trans_qtl, replication, rescaling, annotation],
+    [
+        variant_id,
+        variant_qc,
+        set_qc,
+        validation,
+        confidence,
+        trans_qtl,
+        replication,
+        allele_frequency,
+        rescaling,
+    ],
     ids=lambda module: module.__name__,
 )
 def test_docstring_examples(module: ModuleType) -> None:

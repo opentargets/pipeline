@@ -8,7 +8,7 @@ import pytest
 from pts.schemas.credible_set import credible_set_variant_schema
 from pts.schemas.study import study_schema
 from pts.schemas.variant import variant_schema
-from pts.transformers.credible_set.annotation import effect_allele_frequency
+from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 
 EAF_FLAGS = {
