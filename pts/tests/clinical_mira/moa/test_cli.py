@@ -24,6 +24,9 @@ TRIALS = {
 }
 
 
+JUDGE_INPUTS: list[str] = []
+
+
 class FakeClient:
     """Extracts KRAS from every pool; the judge agrees with every mechanism."""
 
@@ -32,6 +35,7 @@ class FakeClient:
 
     async def _create(self, *, instructions: str, input: str, **_: object) -> SimpleNamespace:
         if 'pharmacologist' in instructions:
+            JUDGE_INPUTS.append(input)
             body = {'quoteSupports': 'yes', 'primaryMechanism': 'yes', 'rationale': 'stated'}
         else:
             nct = input.split('Trial ID: ')[1].split('\n', maxsplit=1)[0]
@@ -138,6 +142,8 @@ def test_cli_end_to_end_with_fake_client(tmp_path, inputs, monkeypatch):
     report = (run / 'report.md').read_text()
     assert report.startswith('# AACT MoA extraction')
     assert '## Headline precision by how the target was grounded' in report
+    assert JUDGE_INPUTS
+    assert not any('CHEMBL' in text for text in JUDGE_INPUTS)
     scored = pl.read_parquet(run / 'scored.parquet').sort('pool_id')
     assert scored['correct'].to_list().count(True) == 1
     assert scored['correct'].to_list().count(False) == 1

@@ -39,8 +39,12 @@ def select_for_judging(scored: pl.DataFrame, seed: int = 0, n_matches: int = 100
     return pl.concat([unbenchmarked.select(keys), misses.select(keys), sampled.select(keys)]).unique().sort(keys)
 
 
-def judge_input(row: dict[str, Any], pool_text: str, chembl_rows: list[dict[str, Any]]) -> str:
-    """Render the judge's input for one mechanism."""
+def judge_input(row: dict[str, Any], pool_text: str, chembl_rows: list[dict[str, Any]] | None) -> str:
+    """Render the judge's input for one mechanism.
+
+    With ``chembl_rows`` None the judge is blind to ChEMBL, so its agreement with the
+    benchmark measures what it would do on drugs ChEMBL has no mechanism for.
+    """
     quotes = '\n'.join(f'- [{e["nctId"]}] "{e["quote"]}"' for e in row['evidence']) or '- none'
     chembl = (
         '\n'.join(f'- {r["mechanismOfAction"]} ({r["actionType"]})' for r in chembl_rows)
@@ -54,7 +58,8 @@ def judge_input(row: dict[str, Any], pool_text: str, chembl_rows: list[dict[str,
         f'Mechanism: {row["mechanismOfAction"]}\n'
         f'Quotes:\n{quotes}'
     )
-    return f'TRIAL TEXTS\n{pool_text}\n\nMECHANISM\n{mechanism}\n\nCHEMBL MECHANISMS\n{chembl}\n'
+    text = f'TRIAL TEXTS\n{pool_text}\n\nMECHANISM\n{mechanism}\n'
+    return text if chembl_rows is None else f'{text}\nCHEMBL MECHANISMS\n{chembl}\n'
 
 
 def adjust(scored: pl.DataFrame, verdicts: pl.DataFrame) -> pl.DataFrame:

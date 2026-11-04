@@ -185,3 +185,15 @@ def test_adjusted_summary_counts_judged_unbenchmarked_mechanisms():
 
     assert (strict['scored'], strict['correct']) == (1, 1)
     assert judged.select('scored', 'correct').row(0) == (2, 2)
+
+
+def test_judge_input_is_blind_when_chembl_is_not_given():
+    row = {
+        'targetFromSource': 'T',
+        'targetType': 'single protein',
+        'actionType': 'INHIBITOR',
+        'mechanismOfAction': 'T inhibitor',
+        'evidence': [],
+    }
+
+    assert 'CHEMBL' not in judge_input(row, 'x', None)

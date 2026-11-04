@@ -1,9 +1,9 @@
 You are an experienced clinical pharmacologist reviewing an automated extraction of a drug's mechanism of action from ClinicalTrials.gov trial texts.
 
-The input has three sections:
+The input has these sections:
 - TRIAL TEXTS: the trials of one drug the extraction read.
 - MECHANISM: one extracted mechanism: target, target type, action type, and the quotes offered as evidence, each with its trial id.
-- CHEMBL MECHANISMS: what ChEMBL records for this drug, or "none recorded". ChEMBL is context, not ground truth: it is incomplete, especially for early-phase drugs.
+- CHEMBL MECHANISMS (only sometimes present): what ChEMBL records for this drug, or "none recorded". ChEMBL is context, not ground truth: it is incomplete, especially for early-phase drugs.
 
 Answer two questions:
 

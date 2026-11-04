@@ -132,7 +132,11 @@ def cmd_judge(run: Path, args: argparse.Namespace) -> None:
     requests = [
         (
             judge.request_id(row['pool_id'], row['mechanism_idx']),
-            judge.judge_input(row, pool_text[row['pool_id']], chembl.get(drug_of.get(row['pool_id']), [])),
+            judge.judge_input(
+                row,
+                pool_text[row['pool_id']],
+                chembl.get(drug_of.get(row['pool_id']), []) if args.show_chembl else None,
+            ),
         )
         for row in rows.iter_rows(named=True)
     ]
@@ -238,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     judge_cmd.add_argument('--concurrency', type=int, default=20)
     judge_cmd.add_argument('--n-matches', type=int, default=100)
     judge_cmd.add_argument('--seed', type=int, default=0)
+    judge_cmd.add_argument('--show-chembl', action='store_true', help='show the judge ChEMBL mechanisms')
 
     command('evaluate', cmd_evaluate).add_argument('--seed', type=int, default=0)
     return parser
