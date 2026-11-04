@@ -23,6 +23,8 @@ MECHANISM_SCHEMA = {
     'targetSymbolSuggestion': pl.List(pl.String),
     'isHumanTarget': pl.Boolean,
     'actsOnReceptor': pl.Boolean,
+    'relation': pl.String,
+    'statementType': pl.String,
     'targetType': pl.String,
     'actionType': pl.String,
     'mechanismOfAction': pl.String,
@@ -30,6 +32,7 @@ MECHANISM_SCHEMA = {
     'evidence': EVIDENCE,
     'kept': pl.Boolean,
     'drop_reason': pl.String,
+    'effect_wording': pl.Boolean,
 }
 
 
@@ -39,6 +42,27 @@ def _ws(text: str) -> str:
 
 SHORT_SYMBOL = 6
 """Single-token targets up to this length are treated as gene symbols."""
+
+
+EFFECT_NOUNS = (
+    r'(?:levels?|expression|synthesis|secretion|transcription|production|release|response|phosphorylation'
+    r'|concentrations?|amounts?|expansion)'
+)
+"""Nouns that describe a change in how much of something there is, not the drug acting on it."""
+
+
+def effect_wording(quote: str, target: str) -> bool:
+    """Whether the quote talks about the amount or response of the target rather than acting on it.
+
+    ``increase the level of serum IGFBP-3``, ``inhibit the expression of uPAR`` and ``an
+    inhibitor of TNF-a synthesis`` are flagged; ``a selective KRAS G12C inhibitor`` is not.
+    """
+    text, name = _ws(quote), re.escape(_ws(target))
+    before = rf'\b{EFFECT_NOUNS}\s+of\s+(?:[\w-]+\s+){{0,2}}{name}(?![A-Za-z0-9])'
+    after = rf'(?<![A-Za-z0-9]){name}\s*-?\s*{EFFECT_NOUNS}\b'
+    return re.search(before, text, flags=re.IGNORECASE) is not None or (
+        re.search(after, text, flags=re.IGNORECASE) is not None
+    )
 
 
 def names_target(quote: str, target: str) -> bool:
@@ -99,6 +123,8 @@ def check_mechanisms(extractions: dict[str, MoaExtraction], pools: pl.DataFrame,
                 'targetSymbolSuggestion': mechanism.target_symbol_suggestion,
                 'isHumanTarget': mechanism.is_human_target,
                 'actsOnReceptor': mechanism.acts_on_receptor,
+                'relation': mechanism.relation,
+                'statementType': mechanism.statement_type,
                 'targetType': mechanism.target_type.value,
                 'actionType': mechanism.action_type.value,
                 'mechanismOfAction': mechanism.mechanism_of_action,
@@ -106,6 +132,8 @@ def check_mechanisms(extractions: dict[str, MoaExtraction], pools: pl.DataFrame,
                 'evidence': valid,
                 'kept': bool(valid),
                 'drop_reason': None if valid else (problems[0] if problems else 'no_evidence'),
+                'effect_wording': bool(valid)
+                and all(effect_wording(e['quote'], mechanism.target_from_source) for e in valid),
             })
     return pl.DataFrame(rows, schema=MECHANISM_SCHEMA)
 

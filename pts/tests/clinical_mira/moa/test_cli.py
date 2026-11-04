@@ -53,6 +53,8 @@ class FakeClient:
                         'targetSymbolSuggestion': ['KRAS'],
                         'isHumanTarget': True,
                         'actsOnReceptor': False,
+                        'relation': 'direct',
+                        'statementType': 'drug_description',
                         'targetType': 'single protein',
                         'actionType': 'INHIBITOR',
                         'mechanismOfAction': 'KRAS inhibitor',

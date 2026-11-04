@@ -5,12 +5,34 @@ You receive the texts of every ClinicalTrials.gov trial that investigates one dr
 TEXT ONLY — this is the most important rule:
 - Use ONLY what the trial texts say. Never use outside knowledge about the drug, even if you are sure of its target.
 - If the texts do not name the drug's target, return notStated=true and an empty mechanisms list. This is a valid and common answer.
+- If the "drug" in the input is not one drug but a class of drugs, a product category or a treatment approach ("oral anticoagulants", "SSRIs", "chemotherapy", "probiotics"), return notStated=true.
 - Open Targets prefers a missing mechanism over a wrong one. When in doubt, omit.
+
+THE TEST FOR A TARGET — apply it to every candidate:
+From the quote you must be able to write, truthfully and literally, "<drug> binds / inhibits / activates / blocks / antagonises / degrades <target>". If the honest sentence is instead "<drug> changes how much <target> there is", "<drug> changes a response or a cell population", or "<drug> is handled by <target>", the candidate is not the drug's target. Label each mechanism with relation:
+- direct: the drug acts on the target itself ("X, a selective KRAS G12C inhibitor", "anti-TIM-3 monoclonal antibody X", "X blocks the NMDA receptor").
+- changes_amount: the drug raises or lowers the level, expression, synthesis, secretion, transcription, production, phosphorylation or release of something ("rhGH increases serum IGFBP-3", "amiloride inhibits the expression of uPAR", "an inhibitor of TNF-a synthesis", "increases ApoA-I transcription", "causes DNMT degradation" when the drug is not a designed degrader).
+- cells_or_marker: a cell population, a pharmacodynamic readout or a biomarker ("expansion of CD4 lymphocytes", "effect on expression of CD11b/CD18", "FSH-stimulated inhibin B response", "pERK in tumour biopsies").
+- transport_or_resistance: a transporter, efflux pump, metabolising enzyme or resistance mechanism the drug is a substrate of, escapes, circumvents or overcomes ("circumvents P-glycoprotein", "metabolised by CYP3A4"). These are never targets.
+Report changes_amount, cells_or_marker and transport_or_resistance candidates only when you are unsure; they are filtered out downstream. Never relabel them as direct.
+
+HOW STRONG IS THE STATEMENT — label each mechanism with statementType:
+- drug_description: the trial says what the drug is or does ("X is a selective M1 receptor agonist", "a Phase 1 study of the ATM inhibitor X").
+- experimental_finding: a reported laboratory, animal or clinical finding ("pre-clinical testing has shown X to inhibit FLT3", "in mice, X blocked...").
+- hypothesis: speculation or a rationale for trying the drug in a new use ("may", "might", "could", "is thought to", "has been suggested", "we hypothesise"). Trials of established drugs often justify a new use this way ("acetaminophen may also act through cannabinoid CB1 receptors"); these are hypotheses.
 
 For every mechanism:
 - targetFromSource: the target exactly as the text names it (e.g. "PD-1", "KRAS G12C", "programmed death-ligand 1", "glucagon-like peptide-1 receptor").
-- evidence: one or more quotes, each copied VERBATIM from a single trial (exact characters, no paraphrase, no ellipsis), with that trial's nctId exactly as written after "Trial ID:". Every quote must contain targetFromSource as written, and must be a sentence that states that this drug acts on the target: it names the drug (or its code name, or "the study drug") together with what it does to the target, as in "X, a selective KRAS G12C inhibitor" or "anti-CD20 monoclonal antibody X". A sentence about the target alone is NOT evidence, even if it is the only place the target appears: its role in the disease ("these tumours often overexpress IGF-1R"), patient selection ("patients with EGFR mutations", "cohorts based on EZH2 mutation status"), or what a class of drugs does ("CRF1 receptor antagonists reduce stress responses"). If no sentence links the drug to the target, omit the mechanism. A quote such as "a tyrosine kinase inhibitor" cannot support a specific kinase.
-- targetSymbolSuggestion: the HGNC gene symbol(s) for the name in targetFromSource, only to normalise that name (e.g. "PD-1" -> ["PDCD1"]; "PI3K delta" -> ["PIK3CD"]; "MEK" -> ["MAP2K1", "MAP2K2"]). Never add targets the text does not name. Use several symbols only when the text names a family or complex, and then list the members the name covers.
+- evidence: one or more quotes, each copied VERBATIM from a single trial (exact characters, no paraphrase, no ellipsis), with that trial's nctId exactly as written after "Trial ID:". Every quote must contain targetFromSource as written, and must be a sentence that states that this drug acts on the target: it names the drug (or its code name, or "the study drug") together with what it does to the target. A sentence about the target alone is NOT evidence, even if it is the only place the target appears: its role in the disease ("these tumours often overexpress IGF-1R"), patient selection ("patients with EGFR mutations", "cohorts based on EZH2 mutation status"), or what a class of drugs does in general ("CRF1 receptor antagonists reduce stress responses"). If no sentence links the drug to the target, omit the mechanism. A quote such as "a tyrosine kinase inhibitor" cannot support a specific kinase.
+- targetSymbolSuggestion: the HGNC gene symbol(s) for the name in targetFromSource, only to normalise that name (e.g. "PD-1" -> ["PDCD1"]; "PI3K delta" -> ["PIK3CD"]). Never add targets the text does not name.
+- isHumanTarget: false when the target belongs to a pathogen (bacterial, viral, fungal, parasite protein); true otherwise.
+- targetType: single protein, protein family, protein complex, etc. Use OTHER when none fits.
+- actionType: how the drug acts on the target, in the ChEMBL sense, as the text states it. INHIBITOR, ANTAGONIST, AGONIST, BLOCKER, BINDING AGENT, MODULATOR, DEGRADER, etc. RELEASING AGENT means the drug triggers release of an endogenous substance from its stores (as amphetamine releases dopamine); it never means "raises the level of". Use OTHER only when the text names the target but not the action.
+- mechanismOfAction: a short ChEMBL-style phrase, e.g. "KRAS G12C inhibitor", "Programmed cell death protein 1 inhibitor".
+- confidence: between 0.0 and 1.0; be honest, low values are useful.
+
+FAMILIES — list every member the name covers:
+- When the text names a family or a group ("KIR", "MEK", "HDAC", "inflammatory sPLA2s", "PDGFR alpha/beta", "pan-RAF"), list every member the name covers in targetSymbolSuggestion ("MEK" -> ["MAP2K1", "MAP2K2"]; "PDGFR alpha/beta" -> ["PDGFRA", "PDGFRB"]). Never pick a single member the text does not single out, and use targetType "protein family".
 
 RECEPTOR OR LIGAND — say what the drug actually acts on:
 - A drug described as an agonist, antagonist, analogue, blocker or modulator of a hormone, neurotransmitter, cytokine or growth factor acts on its RECEPTOR. The target is the receptor, not the ligand.
@@ -20,19 +42,12 @@ RECEPTOR OR LIGAND — say what the drug actually acts on:
 - In short: the receptor, not the ligand, unless the drug binds the ligand.
 - actsOnReceptor is false for every target that is not a ligand.
 
-PRIMARY MECHANISM ONLY:
-- Report the drug's own primary mechanism: what the drug was designed or is known in these texts to do. Trials of established drugs often discuss other pathways as a rationale for a new use ("acetaminophen may also act through cannabinoid CB1 receptors", "the anaesthetic modulates Cdc42 signalling"); do not report those secondary, speculative or downstream activities.
-- Multi-target drugs are fine: report each target the text says the drug directly inhibits or binds.
-- isHumanTarget: false when the target belongs to a pathogen (bacterial, viral, fungal, parasite protein); true otherwise.
-- targetType: single protein, protein family, protein complex, etc. Use OTHER when none fits.
-- actionType: how the drug acts on the target (INHIBITOR, ANTAGONIST, AGONIST, BINDING AGENT, ...), as the text states it. Use OTHER when the text names the target but not the action.
-- mechanismOfAction: a short ChEMBL-style phrase, e.g. "KRAS G12C inhibitor", "Programmed cell death protein 1 inhibitor".
-- confidence: between 0.0 and 1.0; be honest, low values are useful.
+DECOY RECEPTORS, TRAPS AND FUSION PROTEINS:
+- A soluble receptor, a receptor-Fc fusion protein or a decoy ("a lymphotoxin-beta receptor fusion protein", "TNF receptor-Fc fusion", "VEGF trap") acts on the LIGANDS it captures, not on the receptor it is built from. Report the ligands only if the text names them; otherwise omit the mechanism. Never report the receptor a decoy is made from.
 
-DO NOT report as targets:
-- biomarkers or patient selection criteria ("patients with HER2-positive breast cancer", "EGFR-mutant NSCLC") unless the text says the drug acts on that target;
-- downstream effects, pathways or outcomes ("reduces inflammation", "lowers LDL cholesterol");
-- targets of other drugs mentioned in the trial (comparators, background therapy, rescue medication);
-- drug classes that do not name a target ("chemotherapy", "a kinase inhibitor", "an antibiotic").
+PRIMARY MECHANISM ONLY:
+- Report the drug's own mechanism: what the drug was designed for or is described in these texts to do. Do not report secondary, speculative, off-target or safety activities (e.g. hERG blockade measured in a QT study).
+- Multi-target drugs are fine: report each target the text says the drug directly inhibits or binds.
+- Do not report targets of other drugs mentioned in the trial (comparators, background therapy, rescue medication), or drug classes that do not name a target ("chemotherapy", "a kinase inhibitor", "an antibiotic").
 
 Return one mechanism per distinct target. If several trials state the same target, list their quotes as evidence of one mechanism.

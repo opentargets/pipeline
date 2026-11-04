@@ -1,6 +1,6 @@
 import polars as pl
 
-from pts.transformers.clinical_mira.moa.quotes import check_mechanisms, pool_status
+from pts.transformers.clinical_mira.moa.quotes import check_mechanisms, effect_wording, pool_status
 from pts.transformers.clinical_mira.moa.schemas import MoaExtraction
 
 POOLS = pl.DataFrame({'pool_id': ['p1'], 'nct_ids': [['nct1', 'nct2']]})
@@ -23,6 +23,8 @@ def _mechanism(target: str, *quotes: tuple[str, str]) -> dict:
         'targetSymbolSuggestion': [],
         'isHumanTarget': True,
         'actsOnReceptor': False,
+        'relation': 'direct',
+        'statementType': 'drug_description',
         'targetType': 'single protein',
         'actionType': 'INHIBITOR',
         'mechanismOfAction': f'{target} inhibitor',
@@ -133,3 +135,22 @@ def test_pool_with_only_non_human_targets_is_not_stated():
     extractions = {'p1': MoaExtraction(drug_name='x', not_stated=False, mechanisms=[])}
 
     assert pool_status(pools, extractions, mechanisms)['not_stated'].to_list() == [True]
+
+
+def test_labels_are_carried_to_the_mechanism():
+    mechanism = _mechanism('KRAS G12C', ('nct1', 'a selective KRAS G12C inhibitor')) | {
+        'relation': 'changes_amount',
+        'statementType': 'hypothesis',
+    }
+
+    row = _check(mechanism).row(0, named=True)
+
+    assert (row['relation'], row['statementType']) == ('changes_amount', 'hypothesis')
+
+
+def test_effect_wording_without_binding_verb_is_flagged():
+    assert effect_wording('increase the level of serum IGFBP-3', 'IGFBP-3') is True
+    assert effect_wording('can inhibit the expression of uPAR in podocytes', 'uPAR') is True
+    assert effect_wording('an inhibitor of TNF-a synthesis', 'TNF-a') is True
+    assert effect_wording('a selective KRAS G12C inhibitor', 'KRAS G12C') is False
+    assert effect_wording('a monoclonal antibody against CD20', 'CD20') is False

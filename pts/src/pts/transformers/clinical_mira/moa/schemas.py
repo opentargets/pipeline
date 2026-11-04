@@ -82,6 +82,8 @@ class Mechanism(_Strict):
     target_symbol_suggestion: list[str]
     is_human_target: bool
     acts_on_receptor: bool
+    relation: Literal['direct', 'changes_amount', 'cells_or_marker', 'transport_or_resistance']
+    statement_type: Literal['drug_description', 'experimental_finding', 'hypothesis']
     target_type: TargetType
     action_type: ActionType
     mechanism_of_action: str

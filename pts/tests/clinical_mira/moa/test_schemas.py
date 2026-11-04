@@ -17,6 +17,8 @@ MECHANISM = {
     'targetSymbolSuggestion': ['KRAS'],
     'isHumanTarget': True,
     'actsOnReceptor': False,
+    'relation': 'direct',
+    'statementType': 'drug_description',
     'targetType': 'single protein',
     'actionType': 'INHIBITOR',
     'mechanismOfAction': 'KRAS G12C inhibitor',
@@ -78,3 +80,27 @@ def test_ruleset_changes_with_prompt_text(monkeypatch):
     monkeypatch.setattr(schemas, 'load_prompt', lambda name: 'something else')
 
     assert ruleset_sha256('extract') != before
+
+
+def test_relation_and_statement_type_are_closed():
+    extraction = MoaExtraction.model_validate({'drugName': 'x', 'notStated': False, 'mechanisms': [MECHANISM]})
+
+    assert extraction.mechanisms[0].relation == 'direct'
+    assert extraction.mechanisms[0].statement_type == 'drug_description'
+    with pytest.raises(ValidationError):
+        MoaExtraction.model_validate({
+            'drugName': 'x',
+            'notStated': False,
+            'mechanisms': [MECHANISM | {'relation': 'indirect'}],
+        })
+
+
+def test_extract_prompt_states_the_full_run_lessons():
+    prompt = load_prompt('extract').lower()
+
+    assert 'changes_amount' in prompt
+    assert 'hypothesis' in prompt
+    assert 'decoy' in prompt
+    assert 'releasing agent' in prompt
+    assert 'list every member' in prompt
+    assert 'class of drugs' in prompt
