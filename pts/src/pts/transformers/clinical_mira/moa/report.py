@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from pts.transformers.clinical_mira.moa.grounding import GROUNDED
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -108,7 +110,7 @@ def render_report(run_dir: Path) -> str:
         'pools_extracted': int(pl.read_parquet(run_dir / 'statuses.parquet')['extracted'].sum()),
         'mechanisms': adjusted.height,
         'kept_after_quote_check': int(adjusted['kept'].sum()),
-        'grounded': int(adjusted['grounding'].is_in(['source', 'suggestion']).sum()),
+        'grounded': int(adjusted['grounding'].is_in(GROUNDED).sum()),
         'headline': int(adjusted['in_headline'].sum()),
     }
 
@@ -132,7 +134,15 @@ def render_report(run_dir: Path) -> str:
     if calibration is not None:
         sections += ['## Judge calibration against the benchmark\n', markdown_table(calibration)]
 
-    example_columns = ['drug_name', 'targetFromSource', 'actionType', 'quotes', 'quoteSupports', 'rationale']
+    example_columns = [
+        'drug_name',
+        'targetFromSource',
+        'actionType',
+        'quotes',
+        'targetSupported',
+        'actionSupported',
+        'rationale',
+    ]
     sections += [
         '## Example hits\n',
         markdown_table(_examples(adjusted, pools, pl.col('correct') == True), example_columns),  # noqa: E712

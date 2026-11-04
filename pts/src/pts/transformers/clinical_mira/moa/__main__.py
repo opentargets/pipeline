@@ -154,7 +154,8 @@ def cmd_judge(run: Path, args: argparse.Namespace) -> None:
         {
             'pool_id': key.rsplit(':', 1)[0],
             'mechanism_idx': int(key.rsplit(':', 1)[1]),
-            'quoteSupports': v.quote_supports,
+            'targetSupported': v.target_supported,
+            'actionSupported': v.action_supported,
             'primaryMechanism': v.primary_mechanism,
             'rationale': v.rationale,
         }
@@ -166,7 +167,8 @@ def cmd_judge(run: Path, args: argparse.Namespace) -> None:
         schema={
             'pool_id': pl.String,
             'mechanism_idx': pl.UInt32,
-            'quoteSupports': pl.String,
+            'targetSupported': pl.String,
+            'actionSupported': pl.String,
             'primaryMechanism': pl.String,
             'rationale': pl.String,
         },
@@ -182,7 +184,8 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
         adjusted = judge.adjust(scored, pl.read_parquet(verdicts_path))
     else:
         adjusted = scored.with_columns(
-            quoteSupports=pl.lit(None, dtype=pl.String),
+            targetSupported=pl.lit(None, dtype=pl.String),
+            actionSupported=pl.lit(None, dtype=pl.String),
             primaryMechanism=pl.lit(None, dtype=pl.String),
             rationale=pl.lit(None, dtype=pl.String),
             judge_correct=pl.lit(None, dtype=pl.Boolean),

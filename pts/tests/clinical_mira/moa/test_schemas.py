@@ -16,6 +16,7 @@ MECHANISM = {
     'targetFromSource': 'KRAS G12C',
     'targetSymbolSuggestion': ['KRAS'],
     'isHumanTarget': True,
+    'actsOnReceptor': False,
     'targetType': 'single protein',
     'actionType': 'INHIBITOR',
     'mechanismOfAction': 'KRAS G12C inhibitor',
@@ -30,6 +31,7 @@ def test_moa_extraction_round_trips():
     assert extraction.mechanisms[0].evidence[0].nct_id == 'nct1'
     assert extraction.mechanisms[0].action_type is ActionType.INHIBITOR
     assert extraction.mechanisms[0].target_type is TargetType.SINGLE_PROTEIN
+    assert extraction.mechanisms[0].acts_on_receptor is False
 
 
 def test_response_schema_uses_camel_case_names():
@@ -50,12 +52,25 @@ def test_action_types_cover_benchmark_values():
 
 def test_judge_verdict_values_are_closed():
     with pytest.raises(ValidationError):
-        JudgeVerdict.model_validate({'quoteSupports': 'maybe', 'primaryMechanism': 'yes', 'rationale': ''})
+        JudgeVerdict.model_validate({
+            'targetSupported': 'partly',
+            'actionSupported': 'yes',
+            'primaryMechanism': 'yes',
+            'rationale': '',
+        })
 
 
 def test_prompts_load_and_state_text_only_rule():
     assert 'outside knowledge' in load_prompt('extract').lower()
     assert 'pharmacologist' in load_prompt('judge').lower()
+
+
+def test_extract_prompt_states_the_pilot_lessons():
+    prompt = load_prompt('extract').lower()
+
+    assert 'the receptor, not the ligand' in prompt
+    assert 'primary mechanism' in prompt
+    assert 'states that this drug acts on the target' in prompt
 
 
 def test_ruleset_changes_with_prompt_text(monkeypatch):

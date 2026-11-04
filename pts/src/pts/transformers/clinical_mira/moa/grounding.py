@@ -15,6 +15,9 @@ import polars as pl
 FIELDS = ('approvedSymbol', 'symbolSynonyms', 'obsoleteSymbols', 'approvedName', 'nameSynonyms')
 """Label fields of the target view, most specific first."""
 
+GROUNDED = ('source', 'suggestion', 'receptor')
+"""Grounding outcomes that give a mechanism its genes."""
+
 CLASS_LEVEL_GENES = 20
 """A prediction grounding to more genes than this names a class, not a target."""
 
@@ -161,10 +164,20 @@ def _words(text: str) -> set[str]:
     return {w for w in re.sub(r'[^a-z0-9]+', ' ', text.lower()).split() if not w.isdigit()}
 
 
+STEM_MIN = 3
+STEM_SUFFIX_MAX = 2
+
+
+def _stem_of(word: str, label_word: str) -> bool:
+    """Whether ``word`` is a family stem of ``label_word`` (``fgfr`` of ``fgfr1``, ``gnrh`` of ``gnrhr``)."""
+    return len(word) >= STEM_MIN and label_word.startswith(word) and 0 < len(label_word) - len(word) <= STEM_SUFFIX_MAX
+
+
 def _named_in(name: str, labels: set[str]) -> bool:
-    """Whether the name shares a specific (non-generic) word with any of a gene's labels."""
+    """Whether the name shares a specific word, or a family stem, with any of a gene's labels."""
     name_words = (_words(name) | _words(name.replace('-', ''))) - GENERIC_WORDS
-    return any(name_words & _words(label) for label in labels)
+    label_words = {w for label in labels for w in _words(label)}
+    return bool(name_words & label_words) or any(_stem_of(w, lw) for w in name_words for lw in label_words)
 
 
 def resolve(label: str, index: pl.DataFrame) -> list[str]:
@@ -176,7 +189,9 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
     """Add ``targetIds``, ``grounding`` and ``class_level`` to the mechanisms.
 
     ``grounding`` is ``source`` when the name the text uses resolves, ``suggestion`` when only
-    the model's symbol suggestions do, ``unresolved`` when there is nothing to resolve, and
+    the model's symbol suggestions do, ``receptor`` when the text names a ligand and the drug
+    acts on its receptor (the receptor's symbols must share a word or family stem with the
+    ligand's name), ``unresolved`` when there is nothing to resolve, and
     ``skipped`` for mechanisms that failed the quote check or name a non-human target.
 
     A suggestion may only normalise the name the text uses: when that name is ambiguous it
@@ -190,15 +205,19 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
     lookup = _to_lookup(index)
     labels = _labels_by_gene(index)
     target_ids, grounding = [], []
-    for row in mechanisms.select('targetFromSource', 'targetSymbolSuggestion', 'kept', 'isHumanTarget').iter_rows(
-        named=True
-    ):
+    columns = ['targetFromSource', 'targetSymbolSuggestion', 'kept', 'isHumanTarget', 'actsOnReceptor']
+    for row in mechanisms.select(columns).iter_rows(named=True):
         if not (row['kept'] and row['isHumanTarget']):
             target_ids.append([])
             grounding.append('skipped')
             continue
-        source = _resolve(row['targetFromSource'], lookup)
         resolved = {g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)}
+        if row['actsOnReceptor']:
+            receptors = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
+            target_ids.append(sorted(receptors))
+            grounding.append('receptor' if receptors else 'suggestion_unsupported' if resolved else 'unresolved')
+            continue
+        source = _resolve(row['targetFromSource'], lookup)
         if source:
             trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
             if trusted or not resolved or set(source) <= resolved:

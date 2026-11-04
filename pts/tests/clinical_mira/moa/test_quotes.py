@@ -22,6 +22,7 @@ def _mechanism(target: str, *quotes: tuple[str, str]) -> dict:
         'targetFromSource': target,
         'targetSymbolSuggestion': [],
         'isHumanTarget': True,
+        'actsOnReceptor': False,
         'targetType': 'single protein',
         'actionType': 'INHIBITOR',
         'mechanismOfAction': f'{target} inhibitor',
@@ -117,3 +118,9 @@ def test_not_stated_derived_from_kept():
         {'pool_id': 'p1', 'extracted': True, 'not_stated': True},
         {'pool_id': 'p2', 'extracted': False, 'not_stated': None},
     ]
+
+
+def test_acts_on_receptor_is_carried_to_the_mechanism():
+    mechanism = _mechanism('KRAS G12C', ('nct1', 'a selective KRAS G12C inhibitor')) | {'actsOnReceptor': True}
+
+    assert _check(mechanism)['actsOnReceptor'].to_list() == [True]

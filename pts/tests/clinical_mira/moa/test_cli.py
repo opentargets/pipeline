@@ -36,7 +36,12 @@ class FakeClient:
     async def _create(self, *, instructions: str, input: str, **_: object) -> SimpleNamespace:
         if 'pharmacologist' in instructions:
             JUDGE_INPUTS.append(input)
-            body = {'quoteSupports': 'yes', 'primaryMechanism': 'yes', 'rationale': 'stated'}
+            body = {
+                'targetSupported': 'yes',
+                'actionSupported': 'yes',
+                'primaryMechanism': 'yes',
+                'rationale': 'stated',
+            }
         else:
             nct = input.split('Trial ID: ')[1].split('\n', maxsplit=1)[0]
             body = {
@@ -47,6 +52,7 @@ class FakeClient:
                         'targetFromSource': 'KRAS',
                         'targetSymbolSuggestion': ['KRAS'],
                         'isHumanTarget': True,
+                        'actsOnReceptor': False,
                         'targetType': 'single protein',
                         'actionType': 'INHIBITOR',
                         'mechanismOfAction': 'KRAS inhibitor',

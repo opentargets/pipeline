@@ -81,7 +81,8 @@ def _verdicts(rows: list[tuple[str, str, str]]) -> pl.DataFrame:
         {
             'pool_id': [r[0] for r in rows],
             'mechanism_idx': [0] * len(rows),
-            'quoteSupports': [r[1] for r in rows],
+            'targetSupported': [r[1] for r in rows],
+            'actionSupported': ['yes'] * len(rows),
             'primaryMechanism': [r[2] for r in rows],
             'rationale': ['because'] * len(rows),
         },
@@ -161,7 +162,7 @@ def test_handcheck_is_seeded_sample_of_judged_rows():
     sample = handcheck(adjust(scored, verdicts), pools, n=2, seed=0)
 
     assert sample.height == 2
-    assert {'drug_name', 'targetFromSource', 'quotes', 'correct', 'quoteSupports', 'rationale'} <= set(sample.columns)
+    assert {'drug_name', 'targetFromSource', 'quotes', 'correct', 'targetSupported', 'rationale'} <= set(sample.columns)
     assert set(sample['drug_name']) <= {'d0', 'd1', 'd2'}
 
 

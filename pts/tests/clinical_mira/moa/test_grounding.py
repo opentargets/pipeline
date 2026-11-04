@@ -29,6 +29,10 @@ def index() -> pl.DataFrame:
             _labels('receptor tyrosine-protein kinase erbB-1'),
         ),
         ('ENSG_TOP1', 'TOP1', 'DNA topoisomerase I', [], []),
+        ('ENSG_GNRH1', 'GNRH1', 'gonadotropin releasing hormone 1', _labels('GnRH'), []),
+        ('ENSG_GNRHR', 'GNRHR', 'gonadotropin releasing hormone receptor', _labels('LHRHR'), []),
+        ('ENSG_FGFR1', 'FGFR1', 'fibroblast growth factor receptor 1', [], []),
+        ('ENSG_FGFR2', 'FGFR2', 'fibroblast growth factor receptor 2', [], []),
         ('ENSG_M7', 'MAP2K7', 'mitogen-activated protein kinase kinase 7', _labels('MEK'), []),
         ('ENSG_M1', 'MAP2K1', 'mitogen-activated protein kinase kinase 1', _labels('MEK1'), []),
         ('ENSG_DRD2', 'DRD2', 'dopamine receptor D2', [], []),
@@ -80,7 +84,7 @@ def test_shared_synonym_is_unresolved(index):
 
 
 def _mechanisms(*rows: dict) -> pl.DataFrame:
-    base = {'kept': True, 'isHumanTarget': True, 'targetSymbolSuggestion': []}
+    base = {'kept': True, 'isHumanTarget': True, 'actsOnReceptor': False, 'targetSymbolSuggestion': []}
     return pl.DataFrame(
         [base | r for r in rows],
         schema={
@@ -88,6 +92,7 @@ def _mechanisms(*rows: dict) -> pl.DataFrame:
             'targetSymbolSuggestion': pl.List(pl.String),
             'kept': pl.Boolean,
             'isHumanTarget': pl.Boolean,
+            'actsOnReceptor': pl.Boolean,
         },
     )
 
@@ -197,4 +202,38 @@ def test_synonym_that_disagrees_with_the_suggestion_is_a_conflict(index):
         {'targetIds': ['ENSG_M7'], 'grounding': 'source'},
         {'targetIds': ['ENSG_M7'], 'grounding': 'source'},
         {'targetIds': ['ENSG_EGFR'], 'grounding': 'source'},
+    ]
+
+
+def test_receptor_of_a_named_ligand_grounds_to_the_receptor(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'GnRH', 'targetSymbolSuggestion': ['GNRHR'], 'actsOnReceptor': True},
+            {'targetFromSource': 'GnRH', 'targetSymbolSuggestion': ['GNRHR'], 'actsOnReceptor': False},
+            {'targetFromSource': 'GnRH', 'targetSymbolSuggestion': ['EGFR'], 'actsOnReceptor': True},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_GNRHR'], 'grounding': 'receptor'},
+        {'targetIds': [], 'grounding': 'conflict'},
+        {'targetIds': [], 'grounding': 'suggestion_unsupported'},
+    ]
+
+
+def test_family_shorthand_is_the_stem_of_its_members(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'FGFR', 'targetSymbolSuggestion': ['FGFR1', 'FGFR2']},
+            {'targetFromSource': 'MEK', 'targetSymbolSuggestion': ['MAP2K1']},
+            {'targetFromSource': 'mu', 'targetSymbolSuggestion': ['MAP2K1']},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_FGFR1', 'ENSG_FGFR2'], 'grounding': 'suggestion'},
+        {'targetIds': [], 'grounding': 'conflict'},
+        {'targetIds': [], 'grounding': 'suggestion_unsupported'},
     ]

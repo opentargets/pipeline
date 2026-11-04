@@ -81,6 +81,7 @@ class Mechanism(_Strict):
     target_from_source: str
     target_symbol_suggestion: list[str]
     is_human_target: bool
+    acts_on_receptor: bool
     target_type: TargetType
     action_type: ActionType
     mechanism_of_action: str
@@ -99,7 +100,8 @@ class MoaExtraction(_Strict):
 class JudgeVerdict(_Strict):
     """A pharmacologist's verdict on one extracted mechanism."""
 
-    quote_supports: Literal['yes', 'partly', 'no']
+    target_supported: Literal['yes', 'no', 'unclear']
+    action_supported: Literal['yes', 'no', 'unclear']
     primary_mechanism: Literal['yes', 'no', 'unclear']
     rationale: str
 

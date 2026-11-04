@@ -11,6 +11,8 @@ import math
 
 import polars as pl
 
+from pts.transformers.clinical_mira.moa.grounding import GROUNDED
+
 LINK_SHARE = 0.8
 
 STAGE_RANK = {
@@ -142,11 +144,7 @@ def score(mechanisms: pl.DataFrame, links: pl.DataFrame, bench: pl.DataFrame) ->
         .join(links.select('pool_id', 'drugId', 'link'), on='pool_id', how='left')
         .join(bench.rename({'targetIds': 'benchTargetIds', 'rows': 'benchRows'}), on='drugId', how='left')
         .with_columns(benchmarked=(pl.col('link') == 'linked') & pl.col('benchTargetIds').is_not_null())
-        .with_columns(
-            in_headline=pl.col('benchmarked')
-            & pl.col('grounding').is_in(['source', 'suggestion'])
-            & ~pl.col('class_level')
-        )
+        .with_columns(in_headline=pl.col('benchmarked') & pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level'))
         .sort('pool_id', 'mechanism_idx')
         .with_columns(
             dup_key=pl.when(pl.col('in_headline')).then(

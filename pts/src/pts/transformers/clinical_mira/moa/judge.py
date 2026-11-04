@@ -11,7 +11,9 @@ from typing import Any
 
 import polars as pl
 
-JUDGEABLE_GROUNDING = ('source', 'suggestion')
+from pts.transformers.clinical_mira.moa.grounding import GROUNDED
+
+JUDGEABLE_GROUNDING = GROUNDED
 
 
 def request_id(pool_id: str, mechanism_idx: int) -> str:
@@ -65,17 +67,20 @@ def judge_input(row: dict[str, Any], pool_text: str, chembl_rows: list[dict[str,
 def adjust(scored: pl.DataFrame, verdicts: pl.DataFrame) -> pl.DataFrame:
     """Add ``judge_correct`` and ``adjusted_correct`` from the judge's verdicts.
 
-    A mechanism is judge-correct when the judge says its quotes support it and it is the
-    drug's primary mechanism. The adjusted verdict keeps every benchmark hit and lets the
-    judge rule on everything else it saw.
+    A mechanism is judge-correct when the judge says the text supports this drug acting on
+    this target and it is the drug's primary mechanism; the action type is reported but not
+    required. The adjusted verdict keeps every benchmark hit and lets the judge rule on
+    everything else it saw.
     """
-    judged = verdicts.select('pool_id', 'mechanism_idx', 'quoteSupports', 'primaryMechanism', 'rationale')
+    judged = verdicts.select(
+        'pool_id', 'mechanism_idx', 'targetSupported', 'actionSupported', 'primaryMechanism', 'rationale'
+    )
     return (
         scored
         .join(judged, on=['pool_id', 'mechanism_idx'], how='left')
         .with_columns(
-            judge_correct=pl.when(pl.col('quoteSupports').is_not_null()).then(
-                (pl.col('quoteSupports') == 'yes') & (pl.col('primaryMechanism') == 'yes')
+            judge_correct=pl.when(pl.col('targetSupported').is_not_null()).then(
+                (pl.col('targetSupported') == 'yes') & (pl.col('primaryMechanism') == 'yes')
             )
         )
         .with_columns(
@@ -120,7 +125,8 @@ def handcheck(adjusted: pl.DataFrame, pools: pl.DataFrame, n: int = 50, seed: in
         pl.col('evidence').list.eval(pl.element().struct.field('quote')).list.join(' | ').alias('quotes'),
         'benchmarked',
         'correct',
-        'quoteSupports',
+        'targetSupported',
+        'actionSupported',
         'primaryMechanism',
         'rationale',
     )
