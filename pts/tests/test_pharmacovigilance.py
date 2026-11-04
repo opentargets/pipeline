@@ -2,6 +2,7 @@
 
 import json
 import sys
+import threading
 import zipfile
 from math import log
 from pathlib import Path
@@ -20,6 +21,7 @@ from pts.transformers.pharmacovigilance import (
     normalise_event,
     pharmacovigilance,
     read_archive,
+    read_archives,
     read_blacklist,
     report_rows,
     significant_events,
@@ -308,9 +310,10 @@ def test_llr_matches_the_formula():
 
 
 def test_c_zero_row_is_dropped():
-    rows = _pairs(('R1', 'D1', 'e1'), ('R2', 'D1', 'e1'), ('R3', 'D2', 'e2'))
+    rows = _pairs(('R1', 'D1', 'e1'), ('R2', 'D1', 'e2'), ('R3', 'D2', 'e3'))
     table = contingency_table(rows)
-    assert table.filter(pl.col('chembl_id') == 'D1').is_empty()
+    assert sorted(zip(table['chembl_id'], table['event'], strict=True)) == [('D1', 'e1'), ('D1', 'e2')]
+    assert table.filter(pl.col('chembl_id') == 'D2').is_empty()
     assert table['llr'].is_nan().sum() == 0
     assert table['llr'].null_count() == 0
 
@@ -583,3 +586,24 @@ def test_step_is_a_single_non_pyspark_task_writing_to_the_output():
     assert tasks[0]['transformer'] == 'pharmacovigilance'
     assert tasks[0]['destination'] == 'output/pharmacovigilance'
     assert tasks[0]['source']['fda_events'] == 'input/openfda'
+
+
+def test_read_archives_raises_without_waiting_for_in_flight_archives(monkeypatch):
+    release = threading.Event()
+    blocked = threading.Event()
+
+    def fake_read_archive(path, drugs, blacklist):
+        if path == 'bad.zip':
+            blocked.wait(timeout=5)
+            raise ValueError('corrupt archive')
+        blocked.set()
+        release.wait(timeout=30)
+        return _pairs(('R1', 'D1', 'e1'))
+
+    monkeypatch.setattr('pts.transformers.pharmacovigilance.read_archive', fake_read_archive)
+    try:
+        with pytest.raises(ValueError, match='corrupt archive'):
+            read_archives(['slow.zip', 'bad.zip'], pl.DataFrame(), pl.DataFrame(), 2)
+        assert not release.is_set()
+    finally:
+        release.set()

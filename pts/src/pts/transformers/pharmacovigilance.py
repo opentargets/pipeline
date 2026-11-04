@@ -235,19 +235,20 @@ def significant_events(table: pl.DataFrame, critical: pl.DataFrame) -> pl.DataFr
 def read_archives(archives: list[str], drugs: pl.DataFrame, blacklist: pl.DataFrame, workers: int) -> pl.DataFrame:
     """Reduce every archive concurrently and combine them into distinct report rows."""
     frames: list[pl.DataFrame | None] = [None] * len(archives)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(read_archive, path, drugs, blacklist): i for i, path in enumerate(archives)}
-        done = 0
-        try:
-            for future in as_completed(futures):
-                index = futures[future]
-                frame = future.result()
-                frames[index] = frame
-                done += 1
-                logger.info(f'read archive {done}/{len(archives)}: {archives[index]} ({frame.height} rows)')
-        except BaseException:
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futures = {pool.submit(read_archive, path, drugs, blacklist): i for i, path in enumerate(archives)}
+    done = 0
+    try:
+        for future in as_completed(futures):
+            index = futures[future]
+            frame = future.result()
+            frames[index] = frame
+            done += 1
+            logger.info(f'read archive {done}/{len(archives)}: {archives[index]} ({frame.height} rows)')
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
     return pl.concat([f for f in frames if f is not None]).unique()
 
 
