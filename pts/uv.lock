@@ -1992,7 +1992,6 @@ dependencies = [
     { name = "obonet" },
     { name = "openpyxl" },
     { name = "opentargets-otter" },
-    { name = "pandas" },
     { name = "pdfplumber" },
     { name = "pixeltable-pgserver" },
     { name = "polars", extra = ["connectorx"] },
@@ -2006,6 +2005,7 @@ dependencies = [
 baseline-expression = [
     { name = "cellex" },
     { name = "gcsfs" },
+    { name = "pandas" },
     { name = "scanpy" },
 ]
 l2g = [
@@ -2034,6 +2034,7 @@ spark = [
     { name = "pyspark" },
 ]
 test = [
+    { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "pytest-split" },
@@ -2051,7 +2052,7 @@ requires-dist = [
     { name = "openai", marker = "extra == 'llm'", specifier = ">=3.26.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
-    { name = "pandas", specifier = ">=3.0.6" },
+    { name = "pandas", marker = "extra == 'baseline-expression'", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
     { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
@@ -2077,6 +2078,7 @@ dev = [
 ]
 spark = [{ name = "pyspark", specifier = ">=4.1,<4.2" }]
 test = [
+    { name = "pandas", specifier = ">=3.0.6" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-mock", specifier = ">=3.15.1" },
     { name = "pytest-split", specifier = ">=0.11.0" },

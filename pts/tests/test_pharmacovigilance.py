@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+import yaml
 
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
 from pts.transformers.pharmacovigilance import (
@@ -24,6 +25,8 @@ from pts.transformers.pharmacovigilance import (
     significant_events,
 )
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+
+CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 
 ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
 
@@ -571,3 +574,12 @@ def test_populated_destination_raises_before_any_archive_is_read(tmp_path):
     destination.mkdir(parents=True)
     with pytest.raises(ValueError, match='already exists'):
         pharmacovigilance(source, str(destination), SETTINGS, None)
+
+
+def test_step_is_a_single_non_pyspark_task_writing_to_the_output():
+    tasks = yaml.safe_load(CONFIG_PATH.read_text())['steps']['pharmacovigilance']
+    assert len(tasks) == 1
+    assert not tasks[0]['name'].startswith('pyspark')
+    assert tasks[0]['transformer'] == 'pharmacovigilance'
+    assert tasks[0]['destination'] == 'output/pharmacovigilance'
+    assert tasks[0]['source']['fda_events'] == 'input/openfda'

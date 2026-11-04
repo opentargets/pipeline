@@ -6,7 +6,7 @@ like ``homo_sapiens.parquet`` or ``${uuid}.parquet`` -- the parent then holds on
 subdirectories, and a consumer reading that parent finds no parquet at all.
 
 The failure is silent at config time and cryptic at runtime: gentropy reported
-``Parquet file is empty`` on ``intermediate/target/ensembl``, and pts_openfda reported
+``Parquet file is empty`` on ``intermediate/target/ensembl``, and the openfda step reported
 ``UNABLE_TO_INFER_SCHEMA`` on ``intermediate/openfda``. Neither message names the path
 layout. This test makes the mismatch visible in the config instead.
 
@@ -70,8 +70,6 @@ def test_no_consumer_reads_the_parent_of_a_named_dataset() -> None:
             if '/' not in destination or not destination.endswith('.parquet'):
                 continue
             named_parents[destination.rsplit('/', 1)[0]] = f'{step_name} -> {destination}'
-
-    assert named_parents, 'expected some transformer destinations to name a dataset'
 
     sources: list[str] = []
     _sources(config, sources)

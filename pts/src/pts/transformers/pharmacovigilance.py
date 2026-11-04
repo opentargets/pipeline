@@ -48,7 +48,8 @@ def drug_names(drug_molecule: pl.DataFrame) -> pl.DataFrame:
 def read_blacklist(text: str) -> pl.DataFrame:
     """Normalise the blacklisted event terms, one per line."""
     return (
-        pl.DataFrame({'event': text.splitlines()}, schema={'event': pl.String()})
+        pl
+        .DataFrame({'event': text.splitlines()}, schema={'event': pl.String()})
         .select(normalise_event(pl.col('event')))
         .filter(pl.col('event') != '')
     )
@@ -229,7 +230,6 @@ def significant_events(table: pl.DataFrame, critical: pl.DataFrame) -> pl.DataFr
         .cast(pharmacovigilance_schema)
         .sort('chembl_id', 'event')
     )
-
 
 
 def read_archives(archives: list[str], drugs: pl.DataFrame, blacklist: pl.DataFrame, workers: int) -> pl.DataFrame:
