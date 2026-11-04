@@ -225,7 +225,8 @@ steps:
 
   #: CREDIBLE SET ANNOTATION STEP :#################################################################
   # Runs after the variant index: the effect allele frequency comes from its gnomAD frequencies, and
-  # the variant index reads the validated variants of the credible_set step.
+  # the variant index reads the validated variants of the credible_set step. The target and disease
+  # indexes, for the trans-QTL and replication flags, are upstream of the study step.
   credible_set_annotation:
     - name: transform annotate credible sets
       transformer: credible_set.annotation
@@ -234,9 +235,13 @@ steps:
         credible_set_variant: intermediate/validated/credible_set_variant
         study: output/study
         variant: output/variant
+        target: output/target
+        disease: output/disease
       destination:
         credible_set: output/credible_set
         credible_set_variant: output/credible_set_variant
+      settings:
+        trans_qtl_threshold: 5000000
   ##################################################################################################
 
   #: OTAR STEP :####################################################################################

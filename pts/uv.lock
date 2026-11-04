@@ -2000,6 +2000,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pybigwig" },
     { name = "pydantic" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -2061,6 +2062,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
     { name = "scikit-learn", marker = "extra == 'l2g'", specifier = ">=1.7.0" },
+    { name = "scipy", specifier = ">=1.18.1" },
     { name = "shap", marker = "extra == 'l2g'", specifier = ">=0.51.0" },
     { name = "skops", marker = "extra == 'l2g'", specifier = ">=0.11.0" },
     { name = "torch", marker = "extra == 'nlp'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu" },

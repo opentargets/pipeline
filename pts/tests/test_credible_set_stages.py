@@ -14,12 +14,14 @@ from pts.schemas.credible_set import (
     validated_credible_set_schema,
 )
 from pts.schemas.study import study_schema
+from pts.schemas.target import GENOMIC_LOCATION
 from pts.schemas.variant import variant_schema
 from pts.transformers.credible_set.annotation import annotation
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import set_qc
 from pts.transformers.credible_set.validation import validation
 from pts.transformers.credible_set.variant_qc import variant_qc
+from pts.transformers.study import QualityFlag as StudyQualityFlag
 from tests.credible_set_fixtures import (
     ALT_CONTIG_SET,
     ALT_CONTIG_VARIANTS,
@@ -43,13 +45,19 @@ SOURCES = {
 
 
 def _write_indexes(root: Path) -> None:
-    """The study index, every study a Finnish GWAS, and the variant index, with the unreported variant's frequency."""
+    """The indexes annotation reads.
+
+    Every study is a Finnish case-control GWAS of 500,000 samples and 20,000 cases. The variant index
+    has the unreported variant's frequency, and the target and disease indexes one entry each.
+    """
     studies = [
         {
             name: {
                 'studyId': sets[0]['studyId'],
                 'studyType': 'gwas',
-                'qualityControls': [],
+                'qualityControls': [StudyQualityFlag.CASE_CONTROL_STUDY_DESIGN.value],
+                'nSamples': 500_000,
+                'nCases': 20_000,
                 'ldPopulationStructure': [{'ldPopulation': 'fin', 'relativeSampleSize': 1.0}],
             }.get(name)
             for name in study_schema
@@ -60,6 +68,13 @@ def _write_indexes(root: Path) -> None:
     frequencies = [{'populationName': 'fin_adj', 'alleleFrequency': FIN_ADJ}]
     variant = {'variantId': UNREPORTED['variantId'], 'alleleFrequencies': frequencies}
     _write([{name: variant.get(name) for name in variant_schema}], variant_schema, root / 'output/variant')
+    location = {'chromosome': '1', 'start': 1, 'end': 2, 'strand': 1}
+    _write([{'id': 'ENSG0', 'tss': 1, 'genomicLocation': location}], pl.Schema(TARGETS), root / 'output/target')
+    _write([{'id': 'EFO_0', 'therapeuticAreas': []}], pl.Schema(DISEASES), root / 'output/disease')
+
+
+TARGETS = {'id': pl.String, 'tss': pl.Int64, 'genomicLocation': GENOMIC_LOCATION}
+DISEASES = {'id': pl.String, 'therapeuticAreas': pl.List(pl.String)}
 
 
 def _write(rows: list[dict[str, Any]], schema: pl.Schema, path: Path) -> None:
@@ -119,6 +134,8 @@ def _run_stages(root: Path) -> None:
             'credible_set_variant': path('intermediate/validated/credible_set_variant'),
             'study': path('output/study'),
             'variant': path('output/variant'),
+            'target': path('output/target'),
+            'disease': path('output/disease'),
         },
         destination={
             'credible_set': path('output/credible_set'),
@@ -166,6 +183,15 @@ def test_published_variants_take_the_source_frequency_or_else_the_gnomad_one(tmp
     row = published[UNREPORTED['variantId']]
     assert row['effectAlleleFrequency'] == pytest.approx(FIN_ADJ)
     assert CredibleSetVariantFlag.EAF_FROM_GNOMAD in row['qualityControls']
+
+
+def test_published_variants_are_rescaled_on_the_log_odds_with_their_conditional_direction(tmp_path: Path) -> None:
+    _run_stages(tmp_path)
+    published = _read(tmp_path / 'output/credible_set_variant')
+
+    assert published['rescaledDirection'].to_list() == [1] * len(CLEAN_VARIANTS)
+    assert (published['rescaledAbsBeta'] > 0).all()
+    assert published['qualityControls'].list.contains(CredibleSetVariantFlag.RESCALED_FROM_CONDITIONAL).all()
 
 
 def test_every_stage_writes_the_new_schemas(tmp_path: Path) -> None:
