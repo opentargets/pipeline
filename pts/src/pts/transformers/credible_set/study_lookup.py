@@ -1,5 +1,7 @@
 """Study lookups shared by the credible set annotations."""
 
+from __future__ import annotations
+
 import polars as pl
 
 from pts.schemas.study import StudyType

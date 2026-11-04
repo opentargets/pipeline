@@ -1,5 +1,7 @@
 """Schemas for the CredibleSet and CredibleSetVariant datasets."""
 
+from __future__ import annotations
+
 import polars as pl
 
 from pts.schemas.study import StudyType

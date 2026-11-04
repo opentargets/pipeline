@@ -1,5 +1,7 @@
 """The TRANS_QTL rule: QTL credible sets whose every variant is far from the gene of their study."""
 
+from __future__ import annotations
+
 import polars as pl
 
 from pts.transformers.credible_set.study_lookup import qtl_genes

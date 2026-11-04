@@ -1,5 +1,7 @@
 """Quality flags and confidence classes of the CredibleSet and CredibleSetVariant datasets."""
 
+from __future__ import annotations
+
 from enum import IntEnum, StrEnum
 
 

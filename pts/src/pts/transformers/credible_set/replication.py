@@ -1,5 +1,7 @@
 """The REPLICATED rule: credible sets whose lead is reported on one of their traits by two independent reports."""
 
+from __future__ import annotations
+
 import polars as pl
 
 from pts.schemas.study import StudyType

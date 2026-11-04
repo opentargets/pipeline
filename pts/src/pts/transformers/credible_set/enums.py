@@ -1,5 +1,7 @@
 """Fine-mapping methods, chromosomes and known genomic regions of credible sets."""
 
+from __future__ import annotations
+
 from enum import Enum, StrEnum
 from typing import NamedTuple
 
@@ -12,7 +14,7 @@ class FinemappingMethod(StrEnum):
     SUSIE_INF = 'SuSiE-inf'
 
     @classmethod
-    def susie(cls) -> tuple['FinemappingMethod', ...]:
+    def susie(cls) -> tuple[FinemappingMethod, ...]:
         """The methods of the SuSiE family."""
         return (cls.SUSIE, cls.SUSIE_INF)
 

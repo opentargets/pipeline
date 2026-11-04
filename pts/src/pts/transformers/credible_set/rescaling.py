@@ -1,5 +1,7 @@
 """The rescaled effect size of credible set variants, from their p-value, frequency and study design."""
 
+from __future__ import annotations
+
 import polars as pl
 from scipy.stats import chi2
 

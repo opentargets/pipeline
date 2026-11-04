@@ -5,8 +5,10 @@ of its variants. It first runs the cross-set QC, the flags that compare sets acr
 every source; it then validates each source's sets against that source's variants only.
 """
 
+from __future__ import annotations
+
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Self
 
 import polars as pl
 from loguru import logger
@@ -112,7 +114,7 @@ class ValidationSettings(BaseModel):
         return resolve_flag_names(CredibleSetVariantFlag, value)
 
     @model_validator(mode='after')
-    def no_structural_flags(self) -> 'ValidationSettings':
+    def no_structural_flags(self) -> Self:
         """Reject the structural flags, which validation raises and always applies."""
         listed = {*self.cs_invalid_qc_reasons, *self.csv_set_invalid_qc_reasons, *self.csv_row_invalid_qc_reasons}
         if structural := sorted(flag.name for flag in listed & STRUCTURAL_FLAGS):

@@ -1,5 +1,7 @@
 """The fields of a `chromosome_position_reference_alternate` variant identifier."""
 
+from __future__ import annotations
+
 import polars as pl
 
 

@@ -1,5 +1,7 @@
 """Annotate the validated credible sets and variants, and publish them."""
 
+from __future__ import annotations
+
 from typing import Any
 
 import polars as pl

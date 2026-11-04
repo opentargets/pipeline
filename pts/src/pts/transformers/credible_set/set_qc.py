@@ -1,5 +1,7 @@
 """Quality checks of credible sets; the second credible set stage, which only adds flags."""
 
+from __future__ import annotations
+
 from typing import Any
 
 import polars as pl
