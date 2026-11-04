@@ -71,10 +71,17 @@ def test_each_source_is_checked_against_its_own_input_and_mirrors_it() -> None:
         set_qc = tasks[f'transform qc credible sets {folder}']
         variant_qc = tasks[f'transform qc credible set variants {folder}']
         assert set_qc['transformer'] == 'credible_set.set_qc'
-        assert set_qc['source'] == {'credible_set': f'input/{folder}/credible_set', 'study': 'output/study'}
+        assert set_qc['source'] == {
+            'credible_set': f'input/{folder}/credible_set',
+            'credible_set_variant': f'input/{folder}/credible_set_variant',
+            'study': 'output/study',
+        }
         assert set_qc['destination'] == f'intermediate/qc/{folder}/credible_set'
         assert variant_qc['transformer'] == 'credible_set.variant_qc'
-        assert variant_qc['source'] == {'credible_set_variant': f'input/{folder}/credible_set_variant'}
+        assert variant_qc['source'] == {
+            'credible_set_variant': f'input/{folder}/credible_set_variant',
+            'credible_set': f'input/{folder}/credible_set',
+        }
         assert variant_qc['destination'] == f'intermediate/qc/{folder}/credible_set_variant'
 
 
@@ -133,18 +140,27 @@ def test_validation_excludes_the_agreed_flags() -> None:
         CredibleSetFlag.LD_CLUMPED,
         CredibleSetFlag.WINDOW_CLUMPED,
         CredibleSetFlag.STUDY_TYPE_MISMATCH,
+        CredibleSetFlag.LEAD_VARIANT_MISSING,
     }
     assert set(settings.csv_set_invalid_qc_reasons) == {
         CredibleSetVariantFlag.INVALID_CS_ID,
         CredibleSetVariantFlag.INVALID_VARIANT_ID,
+    }
+    assert set(settings.csv_row_invalid_qc_reasons) == {
+        CredibleSetVariantFlag.EXCEEDS_COVERAGE_95,
+        CredibleSetVariantFlag.ORPHAN_VARIANT,
     }
 
 
 def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() -> None:
     settings = _validation_settings()
     sets = pl.LazyFrame(
-        {'id': ['clumped', 'abnormal'], 'qualityControls': [[CredibleSetFlag.WINDOW_CLUMPED.value], []]},
-        schema={'id': pl.String, 'qualityControls': pl.List(pl.String)},
+        {
+            'id': ['clumped', 'abnormal'],
+            'leadVariantId': ['1_100_A_T', '1_200_A_T'],
+            'qualityControls': [[CredibleSetFlag.WINDOW_CLUMPED.value], []],
+        },
+        schema={'id': pl.String, 'leadVariantId': pl.String, 'qualityControls': pl.List(pl.String)},
     )
     variants = pl.LazyFrame(
         {

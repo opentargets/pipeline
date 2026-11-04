@@ -12,11 +12,12 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
 from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.set_qc import flag_lead_variant_missing
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
 
@@ -71,6 +72,10 @@ class ValidationDestination(BaseModel):
     excluded_variant: str
 
 
+STRUCTURAL_FLAGS = {CredibleSetFlag.INVALID_VARIANT_IN_SET, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED}
+"""Flags that validation raises itself and always applies; they cannot be listed in the settings."""
+
+
 class ValidationSettings(BaseModel):
     """Which quality flags exclude a credible set."""
 
@@ -80,6 +85,8 @@ class ValidationSettings(BaseModel):
     """Credible set flags that exclude the set."""
     csv_set_invalid_qc_reasons: list[CredibleSetVariantFlag] = Field(default_factory=list)
     """Variant flags that exclude the whole set."""
+    csv_row_invalid_qc_reasons: list[CredibleSetVariantFlag] = Field(default_factory=list)
+    """Variant flags that exclude only the variant row."""
 
     @field_validator('cs_invalid_qc_reasons', mode='before')
     @classmethod
@@ -87,11 +94,19 @@ class ValidationSettings(BaseModel):
         """Resolve configured enum names before validating the credible set flags."""
         return resolve_flag_names(CredibleSetFlag, value)
 
-    @field_validator('csv_set_invalid_qc_reasons', mode='before')
+    @field_validator('csv_set_invalid_qc_reasons', 'csv_row_invalid_qc_reasons', mode='before')
     @classmethod
     def resolve_csv_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the variant flags."""
         return resolve_flag_names(CredibleSetVariantFlag, value)
+
+    @model_validator(mode='after')
+    def no_structural_flags(self) -> 'ValidationSettings':
+        """Reject the structural flags, which validation raises and always applies."""
+        listed = {*self.cs_invalid_qc_reasons, *self.csv_set_invalid_qc_reasons, *self.csv_row_invalid_qc_reasons}
+        if structural := sorted(flag.name for flag in listed & STRUCTURAL_FLAGS):
+            raise ValueError(f'structural flags are always applied and cannot be configured: {structural}')
+        return self
 
 
 def _flag_matching_ids(
@@ -291,15 +306,18 @@ def validate(
     A credible set is excluded together with all of its variants. The steps are:
 
     0. The flags that cross-set QC computed over every source are added to the sets they belong to.
-    1. The sets with at least one variant carrying a flag of `csv_set_invalid_qc_reasons` get
+    1. The variants carrying a flag of `csv_row_invalid_qc_reasons` (by default EXCEEDS_COVERAGE_95
+       and ORPHAN_VARIANT) are excluded on their own; the other variants are kept.
+    2. The sets with at least one variant carrying a flag of `csv_set_invalid_qc_reasons` get
        `INVALID_VARIANT_IN_SET`: one invalid member invalidates its set.
-    2. The sets carrying a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`, are
+    3. The sets whose lead has no row among the kept variants get `LEAD_VARIANT_MISSING`, so a lead
+       removed in step 1 removes its set.
+    4. The sets carrying a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`, are
        excluded. `INVALID_VARIANT_IN_SET` is structural, so it is not configurable.
-    3. Every variant of an excluded set gets `CREDIBLE_SET_EXCLUDED` and is excluded with it, so
+    5. Every kept variant of an excluded set gets `CREDIBLE_SET_EXCLUDED` and is excluded with it, so
        every excluded row carries the reason it left.
 
     Flags are appended to `qualityControls`; a set with several invalid variants is flagged once.
-    Orphan variants, row exclusion and the lead variant check come with later slices.
 
     Args:
         sets: The source's credible sets after set QC.
@@ -314,7 +332,11 @@ def validate(
         Set `a` is clean, set `b` is in the MHC, and set `c` has a member on an alternate contig:
 
         >>> from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-        >>> sets = pl.LazyFrame({'id': ['a', 'b', 'c'], 'qualityControls': [[], [CredibleSetFlag.IN_MHC.value], []]})
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['a', 'b', 'c'],
+        ...     'leadVariantId': ['1_10_A_T', '6_30000000_A_T', '2_10_A_T'],
+        ...     'qualityControls': [[], [CredibleSetFlag.IN_MHC.value], []],
+        ... })
         >>> variants = pl.LazyFrame({
         ...     'credibleSetId': ['a', 'b', 'c', 'c'],
         ...     'variantId': ['1_10_A_T', '6_30000000_A_T', '2_10_A_T', '2_KI270846v1_alt_10_A_T'],
@@ -350,16 +372,19 @@ def validate(
         6_30000000_A_T ['CREDIBLE_SET_EXCLUDED']
     """
     sets = add_cross_set_flags(sets, cross_set_flags)
+    row_split = valid_rows(variants, settings.csv_row_invalid_qc_reasons)
     sets_with_invalid_variant = variants.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
         pl.col('credibleSetId').alias('id')
     )
     flagged_sets = _flag_matching_ids(sets, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET)
+    flagged_sets = flag_lead_variant_missing(flagged_sets, row_split.valid)
     set_split = valid_rows(flagged_sets, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
-    flagged_variants = _flag_matching_ids(
-        variants, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
+    kept_variants = _flag_matching_ids(
+        row_split.valid, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
     )
-    variant_split = valid_rows(flagged_variants, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
-    return set_split.valid, variant_split.valid, set_split.invalid, variant_split.invalid
+    variant_split = valid_rows(kept_variants, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
+    excluded_variants = pl.concat([row_split.invalid, variant_split.invalid])
+    return set_split.valid, variant_split.valid, set_split.invalid, excluded_variants
 
 
 def validation(

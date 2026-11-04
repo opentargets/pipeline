@@ -117,6 +117,7 @@ steps:
           transformer: credible_set.set_qc
           source:
             credible_set: input/${each}/credible_set
+            credible_set_variant: input/${each}/credible_set_variant
             study: output/study
           destination: intermediate/qc/${each}/credible_set
           settings:
@@ -129,6 +130,7 @@ steps:
           transformer: credible_set.variant_qc
           source:
             credible_set_variant: input/${each}/credible_set_variant
+            credible_set: input/${each}/credible_set
           destination: intermediate/qc/${each}/credible_set_variant
           settings:
             coverage: 0.95
@@ -190,10 +192,14 @@ steps:
           - LD_CLUMPED
           - WINDOW_CLUMPED
           - STUDY_TYPE_MISMATCH
+          - LEAD_VARIANT_MISSING
         # ABNORMAL_PIP is not listed: sets with abnormal PIP sums are flagged and kept.
         csv_set_invalid_qc_reasons:
           - INVALID_CS_ID
           - INVALID_VARIANT_ID
+        csv_row_invalid_qc_reasons:
+          - EXCEEDS_COVERAGE_95
+          - ORPHAN_VARIANT
 
     - name: transform annotate credible sets
       requires:
