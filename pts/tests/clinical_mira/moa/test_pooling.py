@@ -72,3 +72,15 @@ def test_build_pools_one_pool_per_drug_with_stable_ids():
     assert first['drug_name'].to_list() == ['d1', 'd2']
     assert first['pool_id'].to_list() == second['pool_id'].to_list()
     assert first['pool_sha256'].to_list() == second['pool_sha256'].to_list()
+
+
+def test_punctuation_variants_of_a_name_share_a_pool():
+    extraction = pl.DataFrame(
+        {
+            'id': ['nct1', 'nct2', 'nct3'],
+            'investigated_drugs': [_drugs('MK-3475'), _drugs('mk3475'), _drugs('Anti-IL-20')],
+        },
+        schema={'id': pl.String, 'investigated_drugs': pl.List(DRUG)},
+    )
+
+    assert single_drug_trials(extraction)['drug_name'].to_list() == ['mk3475', 'mk3475']

@@ -68,13 +68,18 @@ def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
         .filter(pl.col('investigated_drugs').list.len() == 1)
         .select(
             pl.col('id').alias('nct_id'),
-            _normalize_name(pl.col('investigated_drugs').list.first().struct.field('drug')).alias('drug_name'),
+            _normalize_name(pl.col('investigated_drugs').list.first().struct.field('drug')).alias('normalised'),
         )
-        .filter(
-            pl.col('drug_name').is_not_null()
-            & (pl.col('drug_name').str.len_chars() > 0)
-            & ~pl.col('drug_name').is_in(sorted(EXACT_MATCH_BLOCKLIST))
+        .filter(pl.col('normalised').is_not_null() & ~pl.col('normalised').is_in(sorted(EXACT_MATCH_BLOCKLIST)))
+        .with_columns(
+            drug_name=pl
+            .col('normalised')
+            .str.replace_all(r'[^\w\s]', '')
+            .str.replace_all(r'\s+', ' ')
+            .str.strip_chars()
         )
+        .filter(pl.col('drug_name').str.len_chars() > 0)
+        .select('nct_id', 'drug_name')
     )
 
 

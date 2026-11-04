@@ -131,8 +131,11 @@ def _overlaps(predicted: list[str], truth: list[str]) -> bool:
 def score(mechanisms: pl.DataFrame, links: pl.DataFrame, bench: pl.DataFrame) -> pl.DataFrame:
     """Score each grounded mechanism against its drug's MoA rows.
 
-    Adds ``benchmarked``, ``in_headline``, ``correct`` and ``action_match``. ``correct`` is
-    null outside the headline; ``action_match`` is null unless the mechanism is correct.
+    Adds ``benchmarked``, ``duplicate``, ``in_headline``, ``correct`` and ``action_match``.
+    A prediction of the same genes for the same drug (from a second name of the drug, or a
+    second mention in one pool) is a ``duplicate`` and only its first occurrence is in the
+    headline. ``correct`` is null outside the headline; ``action_match`` is null unless the
+    mechanism is correct.
     """
     joined = (
         mechanisms
@@ -144,6 +147,15 @@ def score(mechanisms: pl.DataFrame, links: pl.DataFrame, bench: pl.DataFrame) ->
             & pl.col('grounding').is_in(['source', 'suggestion'])
             & ~pl.col('class_level')
         )
+        .sort('pool_id', 'mechanism_idx')
+        .with_columns(
+            dup_key=pl.when(pl.col('in_headline')).then(
+                pl.concat_str(pl.col('drugId'), pl.col('targetIds').list.sort().list.join(','), separator='|')
+            )
+        )
+        .with_columns(duplicate=pl.col('dup_key').is_not_null() & (pl.col('dup_key').cum_count().over('dup_key') > 1))
+        .with_columns(in_headline=pl.col('in_headline') & ~pl.col('duplicate'))
+        .drop('dup_key')
     )
     correct, action_match = [], []
     for row in joined.select('in_headline', 'targetIds', 'benchTargetIds', 'benchRows', 'actionType').iter_rows(
@@ -236,9 +248,26 @@ def summarise(
         pools_with_kept_mechanism=(pl.col('not_stated') == False).sum(),  # noqa: E712
         not_stated=pl.col('not_stated').sum(),
         benchmarked_pools=pl.col('benchmarked').sum(),
-        drugs_scored=(pl.col('benchmarked') & pl.col('has_headline')).sum(),
-        drugs_all_correct=(pl.col('benchmarked') & pl.col('all_correct').fill_null(False)).sum(),
-        drugs_any_correct=(pl.col('benchmarked') & pl.col('any_correct').fill_null(False)).sum(),
+    )
+    drugs = (
+        pools
+        .filter(pl.col('benchmarked'))
+        .group_by([*by, 'drugId'])
+        .agg(
+            has_headline=pl.col('has_headline').any(),
+            all_correct=pl.col('all_correct').drop_nulls().all(),
+            any_correct=pl.col('any_correct').fill_null(False).any(),
+        )
+        .group_by(by)
+        .agg(
+            benchmarked_drugs=pl.len(),
+            drugs_scored=pl.col('has_headline').sum(),
+            drugs_all_correct=(pl.col('has_headline') & pl.col('all_correct')).sum(),
+            drugs_any_correct=pl.col('any_correct').sum(),
+        )
+    )
+    pool_metrics = pool_metrics.join(drugs, on=by, how='left', nulls_equal=True).with_columns(
+        pl.col(c).fill_null(0) for c in drugs.columns if c not in by
     )
 
     summary = (
@@ -249,7 +278,7 @@ def summarise(
             not_stated_rate=_ratio('not_stated', 'extracted'),
             precision=_ratio('correct', 'scored'),
             drug_precision=_ratio('drugs_all_correct', 'drugs_scored'),
-            recall=_ratio('drugs_any_correct', 'benchmarked_pools'),
+            recall=_ratio('drugs_any_correct', 'benchmarked_drugs'),
             action_agreement=_ratio('action_matches', 'correct'),
         )
     )

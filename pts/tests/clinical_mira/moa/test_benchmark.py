@@ -208,3 +208,31 @@ def test_precision_by_grounding_separates_source_and_suggestion():
 
     assert table.select('grounding', 'scored', 'correct').rows() == [('source', 2, 2), ('suggestion', 2, 1)]
     assert table['precision'].to_list() == [1.0, 0.5]
+
+
+def test_same_drug_and_genes_are_scored_once():
+    links = pl.DataFrame({
+        'pool_id': ['p1', 'p1b'],
+        'drugId': ['CHEMBL1', 'CHEMBL1'],
+        'link': ['linked', 'linked'],
+        'maximumClinicalStage': ['PHASE_1', 'PHASE_1'],
+        'drugType': ['Small molecule', 'Small molecule'],
+        'phase_group': ['early', 'early'],
+    })
+    mechanisms = _mechanisms([
+        {'pool_id': 'p1', 'mechanism_idx': 0, 'targetIds': ['G2']},
+        {'pool_id': 'p1', 'mechanism_idx': 1, 'targetIds': ['G2']},
+        {'pool_id': 'p1b', 'mechanism_idx': 0, 'targetIds': ['G2']},
+        {'pool_id': 'p1b', 'mechanism_idx': 1, 'targetIds': ['G5']},
+    ])
+    statuses = pl.DataFrame({'pool_id': ['p1', 'p1b'], 'extracted': [True, True], 'not_stated': [False, False]})
+    bench = benchmark_targets(_moa())
+
+    scored = score(mechanisms, links, bench).sort('pool_id', 'mechanism_idx')
+    row = summarise(scored, links, statuses, bench, by=['phase_group']).row(0, named=True)
+
+    assert scored['in_headline'].to_list() == [True, False, False, True]
+    assert scored['duplicate'].to_list() == [False, True, True, False]
+    assert (row['scored'], row['correct']) == (2, 2)
+    assert (row['drugs_scored'], row['benchmarked_drugs']) == (1, 1)
+    assert row['recall'] == pytest.approx(1.0)

@@ -30,6 +30,8 @@ SUMMARY_COLUMNS = [
     'precision',
     'precision_lo',
     'precision_hi',
+    'benchmarked_drugs',
+    'drugs_scored',
     'drug_precision',
     'recall',
     'action_agreement',
