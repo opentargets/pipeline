@@ -29,6 +29,8 @@ def index() -> pl.DataFrame:
             _labels('receptor tyrosine-protein kinase erbB-1'),
         ),
         ('ENSG_TOP1', 'TOP1', 'DNA topoisomerase I', [], []),
+        ('ENSG_M7', 'MAP2K7', 'mitogen-activated protein kinase kinase 7', _labels('MEK'), []),
+        ('ENSG_M1', 'MAP2K1', 'mitogen-activated protein kinase kinase 1', _labels('MEK1'), []),
         ('ENSG_DRD2', 'DRD2', 'dopamine receptor D2', [], []),
         ('ENSG_KRAS', 'KRAS', 'KRAS proto-oncogene', [], []),
         ('ENSG_MS4A1', 'MS4A1', 'membrane spanning 4-domains A1', _labels('CD20'), []),
@@ -90,8 +92,8 @@ def _mechanisms(*rows: dict) -> pl.DataFrame:
     )
 
 
-def test_source_name_wins(index):
-    row = ground_mechanisms(_mechanisms({'targetFromSource': 'PD-1', 'targetSymbolSuggestion': ['EGFR']}), index)
+def test_source_synonym_agreeing_with_suggestion_grounds_by_source(index):
+    row = ground_mechanisms(_mechanisms({'targetFromSource': 'PD-1', 'targetSymbolSuggestion': ['PDCD1']}), index)
 
     assert row.select('targetIds', 'grounding').to_dicts() == [{'targetIds': ['ENSG_PDCD1'], 'grounding': 'source'}]
 
@@ -176,4 +178,23 @@ def test_suggestion_sharing_a_specific_word_with_the_name_is_kept(index):
         'suggestion',
         'suggestion_unsupported',
         'suggestion_unsupported',
+    ]
+
+
+def test_synonym_that_disagrees_with_the_suggestion_is_a_conflict(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'MEK', 'targetSymbolSuggestion': ['MAP2K1']},
+            {'targetFromSource': 'MEK', 'targetSymbolSuggestion': ['MAP2K7']},
+            {'targetFromSource': 'MEK', 'targetSymbolSuggestion': []},
+            {'targetFromSource': 'EGFR', 'targetSymbolSuggestion': ['KRAS']},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': [], 'grounding': 'conflict'},
+        {'targetIds': ['ENSG_M7'], 'grounding': 'source'},
+        {'targetIds': ['ENSG_M7'], 'grounding': 'source'},
+        {'targetIds': ['ENSG_EGFR'], 'grounding': 'source'},
     ]

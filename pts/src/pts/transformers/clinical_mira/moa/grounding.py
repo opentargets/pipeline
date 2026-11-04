@@ -72,6 +72,15 @@ def _candidates(label: str, lookup: Lookup) -> list[str]:
     return sorted({t for p, t in hits if p == best})
 
 
+def _best_field(label: str, lookup: Lookup) -> str | None:
+    hits = lookup.get(normalise_label(label), [])
+    return FIELDS[min(p for p, _ in hits)] if hits else None
+
+
+APPROVED_FIELDS = frozenset({'approvedSymbol', 'approvedName'})
+"""Fields whose match is trusted over the model's own suggestion."""
+
+
 def _resolve(label: str, lookup: Lookup) -> list[str]:
     genes = _candidates(label, lookup)
     return genes if len(genes) == 1 else []
@@ -173,6 +182,10 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
     A suggestion may only normalise the name the text uses: when that name is ambiguous it
     must be one of the name's genes, and when the name is unknown one of its labels must
     occur in the name. Suggestions that resolve but fail this are ``suggestion_unsupported``.
+
+    A name that matches one gene only through a synonym, while the model's suggestions
+    resolve to other genes, is a ``conflict`` and is left ungrounded: short aliases (``MEK``,
+    ``TORC1``, ``A2A``) are often synonyms of an unrelated gene.
     """
     lookup = _to_lookup(index)
     labels = _labels_by_gene(index)
@@ -185,11 +198,16 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
             grounding.append('skipped')
             continue
         source = _resolve(row['targetFromSource'], lookup)
-        if source:
-            target_ids.append(source)
-            grounding.append('source')
-            continue
         resolved = {g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)}
+        if source:
+            trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
+            if trusted or not resolved or set(source) <= resolved:
+                target_ids.append(source)
+                grounding.append('source')
+            else:
+                target_ids.append([])
+                grounding.append('conflict')
+            continue
         candidates = _candidates(row['targetFromSource'], lookup)
         if candidates:
             supported = resolved & set(candidates)
