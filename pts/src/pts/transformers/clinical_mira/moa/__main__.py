@@ -34,7 +34,9 @@ def _write_json(path: Path, data: object) -> None:
 
 def cmd_texts(run: Path, args: argparse.Namespace) -> None:
     extraction = _read(args.extraction, ['id', 'prompt_sha256'])
-    texts = pooling.trial_texts(str(args.archive), str(args.scratch or run / 'scratch'))
+    scratch = Path(args.scratch or run / 'scratch')
+    scratch.mkdir(parents=True, exist_ok=True)
+    texts = pooling.trial_texts(str(args.archive), str(scratch))
     matched, counts = pooling.match_texts(texts, extraction)
     matched.write_parquet(run / 'texts.parquet')
     _write_json(run / 'text_counts.json', {'trials_in_extraction': extraction.height, **counts})

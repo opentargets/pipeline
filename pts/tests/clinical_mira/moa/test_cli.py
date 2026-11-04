@@ -169,3 +169,28 @@ def test_extract_limit_runs_only_that_many_pools(tmp_path, inputs, monkeypatch):
     cli.main(['extract', '--run-dir', str(run), '--all', '--limit', '2'])
 
     assert pl.read_parquet(run / 'statuses.parquet').height == 2
+
+
+def test_texts_creates_its_scratch_directory(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_trial_texts(archive: str, scratch_root: str) -> pl.DataFrame:
+        seen['exists'] = Path(scratch_root).is_dir()
+        return pl.DataFrame({'id': ['n1'], 'prompt': ['p'], 'prompt_sha256': ['h']})
+
+    monkeypatch.setattr(cli.pooling, 'trial_texts', fake_trial_texts)
+    pl.DataFrame({'id': ['n1'], 'prompt_sha256': ['h']}).write_parquet(tmp_path / 'e.parquet')
+
+    cli.main([
+        'texts',
+        '--run-dir',
+        str(tmp_path / 'run'),
+        '--archive',
+        'a.zip',
+        '--extraction',
+        str(tmp_path / 'e.parquet'),
+        '--scratch',
+        str(tmp_path / 'new' / 'scratch'),
+    ])
+
+    assert seen == {'exists': True}
