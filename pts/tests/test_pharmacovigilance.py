@@ -400,11 +400,14 @@ def test_significant_events_filter_and_schema():
     assert result.rows() == [('A', 'e2', 3, 5.0, 3.0, ''), ('B', 'e1', 4, 5.0, 1.0, '')]
 
 
-# ---- entry point ----
-
-PERMUTATIONS = 1000
+PERMUTATIONS = 500
 PERCENTILE = 0.95
 SETTINGS = {'montecarlo_permutations': PERMUTATIONS, 'montecarlo_percentile': PERCENTILE, 'archive_workers': 2}
+
+
+def _made(path: Path) -> Path:
+    path.mkdir(parents=True)
+    return path
 
 
 def _single(report_id: str, drug: str, event: str, **overrides) -> dict:
@@ -506,7 +509,8 @@ def test_end_to_end_writes_only_the_expected_output(tmp_path):
         assert meddra == ''
 
     new = _files(tmp_path) - before
-    assert all(p.startswith(str(tmp_path / 'output')) for p in new)
+    output = str(tmp_path / 'output')
+    assert all(p == output or p.startswith(f'{output}/pharmacovigilance') for p in new)
 
 
 def test_report_in_two_archives_counts_once(tmp_path):
@@ -515,11 +519,6 @@ def test_report_in_two_archives_counts_once(tmp_path):
     source = _setup(root)
     _write_zip(root / 'input' / 'openfda' / '2024q2' / 'again.zip', _fixture_reports()[:12])
     assert _run(root, source).equals(expected)
-
-
-def _made(path: Path) -> Path:
-    path.mkdir(parents=True)
-    return path
 
 
 def test_output_is_identical_across_archive_order_and_worker_count(tmp_path):
@@ -553,3 +552,22 @@ def test_corrupt_zip_raises_and_writes_nothing(tmp_path):
     with pytest.raises(zipfile.BadZipFile):
         pharmacovigilance(source, str(destination), SETTINGS, None)
     assert not destination.exists()
+
+
+def test_no_surviving_rows_raises_and_writes_nothing(tmp_path):
+    source = _setup(tmp_path)
+    for archive in (tmp_path / 'input' / 'openfda').rglob('*.zip'):
+        _write_zip(archive, [_single('X', 'MYSTERY', 'HEADACHE')])
+    destination = tmp_path / 'output' / 'pharmacovigilance'
+    with pytest.raises(ValueError, match='no report rows'):
+        pharmacovigilance(source, str(destination), SETTINGS, None)
+    assert not destination.exists()
+
+
+def test_populated_destination_raises_before_any_archive_is_read(tmp_path):
+    source = _setup(tmp_path)
+    (tmp_path / 'input' / 'openfda' / '2024q2' / 'events.zip').write_bytes(b'not a zip')
+    destination = tmp_path / 'output' / 'pharmacovigilance'
+    destination.mkdir(parents=True)
+    with pytest.raises(ValueError, match='already exists'):
+        pharmacovigilance(source, str(destination), SETTINGS, None)

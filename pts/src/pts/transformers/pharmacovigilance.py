@@ -232,6 +232,25 @@ def significant_events(table: pl.DataFrame, critical: pl.DataFrame) -> pl.DataFr
 
 
 
+def read_archives(archives: list[str], drugs: pl.DataFrame, blacklist: pl.DataFrame, workers: int) -> pl.DataFrame:
+    """Reduce every archive concurrently and combine them into distinct report rows."""
+    frames: list[pl.DataFrame | None] = [None] * len(archives)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(read_archive, path, drugs, blacklist): i for i, path in enumerate(archives)}
+        done = 0
+        try:
+            for future in as_completed(futures):
+                index = futures[future]
+                frame = future.result()
+                frames[index] = frame
+                done += 1
+                logger.info(f'read archive {done}/{len(archives)}: {archives[index]} ({frame.height} rows)')
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+    return pl.concat([f for f in frames if f is not None]).unique()
+
+
 def pharmacovigilance(
     source: dict[str, str],
     destination: str,
@@ -264,22 +283,9 @@ def pharmacovigilance(
     blacklist = read_blacklist(StorageHandle(source['blacklisted_events']).read_text()[0])
     logger.info(f'{len(archives)} FAERS archives, {drugs.height} drug names, {blacklist.height} blacklisted events')
 
-    frames: list[pl.DataFrame | None] = [None] * len(archives)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(read_archive, path, drugs, blacklist): i for i, path in enumerate(archives)}
-        done = 0
-        try:
-            for future in as_completed(futures):
-                index = futures[future]
-                frame = future.result()
-                frames[index] = frame
-                done += 1
-                logger.info(f'read archive {done}/{len(archives)}: {archives[index]} ({frame.height} rows)')
-        except BaseException:
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise
-
-    rows = pl.concat([f for f in frames if f is not None]).unique().sort(_ROW_COLUMNS)
+    rows = read_archives(archives, drugs, blacklist, workers)
+    if rows.height == 0:
+        raise ValueError(f'no report rows found in {len(archives)} FAERS archives')
     logger.info(f'{rows.height} distinct report rows from {rows["safetyreportid"].n_unique()} reports')
 
     table = contingency_table(rows)
