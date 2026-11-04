@@ -58,7 +58,7 @@ The DAG has 6 steps on one Dataproc cluster. The harmonisation runs first and al
 
 ## harmonisation
 
-In this step ([`finngen_ukb_mvp_meta.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/finngen_ukb_mvp_meta.py)), the summary statistics listed in the manifest are read ([`summary_statistics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/datasource/finngen_meta/summary_statistics.py)). The header of each file is read first, and the files with the same header are read together, so the 330 files are read in 6 reads. Only the columns used by the harmonisation are kept; `NA` is read as null, and the columns of a cohort missing from a file are null.
+In this step ([`finngen_ukb_mvp_meta.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/finngen_ukb_mvp_meta.py)), the summary statistics listed in the manifest are read ([`summary_statistics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/datasource/finngen_meta/summary_statistics.py)). The header of each file is read first, and the files with the same header are read together, in one read per distinct header. Only the columns used by the harmonisation are kept; `NA` is read as null, and the columns of a cohort missing from a file are null.
 
 The harmonised summary statistics are built from the source summary statistics:
 
@@ -77,19 +77,19 @@ The step ([`sumstat_qc_step.py`](https://github.com/opentargets/gentropy/blob/v4
 
 ## study_index
 
-The step ([`finngen_ukb_mvp_meta.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/finngen_ukb_mvp_meta.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/datasource/finngen_meta/study_index.py)) builds one study per manifest row. The study identifier is the FinnGen phenotype code prefixed with `FINNGEN_R12_UKB_MVP_META_`. The ontology terms of a study come from the curation rows of FinnGen R12 whose phenotype name matches the study. The studies are annotated with the QC metrics of `harmonised_summary_statistics_qc` in `sumstatQCValues`, and with a QC flag in `qualityControls` for each metric outside its threshold. The `qualityControls` of every study are empty. The output is `output/study/`: 330 studies.
+The step ([`finngen_ukb_mvp_meta.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/finngen_ukb_mvp_meta.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/datasource/finngen_meta/study_index.py)) builds one study per manifest row. The study identifier is the FinnGen phenotype code prefixed with `FINNGEN_R12_UKB_MVP_META_`. The ontology terms of a study come from the curation rows of FinnGen R12 whose phenotype name matches the study. The studies are annotated with the QC metrics of `harmonised_summary_statistics_qc` in `sumstatQCValues`, and with a QC flag in `qualityControls` for each metric outside its threshold. The `qualityControls` of every study are empty. The output is `output/study/`: one study per manifest row.
 
 ## window_clumping
 
-The step ([`window_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/window_based_clumping.py), [`window.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/clumping/window.py)) selects the lead variants of the harmonised summary statistics: per study and chromosome, the variants with a p-value of at most 1e-8, ranked by p-value, with every lead at least 500 kb from a more significant lead. Each lead gets a locus from 500 kb before to 500 kb after it, and `locus` holds the harmonised summary statistics of the study inside the locus. The output is `output/study_locus/`: 15,944 loci from 269 studies, with 71,285,885 variants in `locus` (from 17 to 19,544 per locus, 4,086 at the median).
+The step ([`window_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/window_based_clumping.py), [`window.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/clumping/window.py)) selects the lead variants of the harmonised summary statistics: per study and chromosome, the variants with a p-value of at most 1e-8, ranked by p-value, with every lead at least 500 kb from a more significant lead. Each lead gets a locus from 500 kb before to 500 kb after it, and `locus` holds the harmonised summary statistics of the study inside the locus. The output is `output/study_locus/`: one locus per lead.
 
 ## ld_annotation
 
-The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/ld_based_clumping.py), [`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/annotation.py), [`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/clumping/ld.py)) annotates each locus with the variants in LD with its lead from the gnomAD v2.1.1 LD index, in `ldSet`. A variant is kept when its r² with the lead is at least 0.5 in the major population of the study, the population with the largest `relativeSampleSize` in `ldPopulationStructure` (`nfe` for 317 studies and `fin` for 13 studies). A lead without such a variant is flagged `Variant not found in LD reference` (736 loci), and its `ldSet` holds the lead only. A lead in LD with a more significant lead of the same study is flagged `Explained by a more significant variant in high LD` (366 loci), and its `ldSet` is emptied. The output is `output/ld_annotated_study_locus/`: 15,944 loci.
+The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/ld_based_clumping.py), [`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/annotation.py), [`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/clumping/ld.py)) annotates each locus with the variants in LD with its lead from the gnomAD v2.1.1 LD index, in `ldSet`. A variant is kept when its r² with the lead is at least 0.5 in the major population of the study, the population with the largest `relativeSampleSize` in `ldPopulationStructure`. A lead without such a variant is flagged `Variant not found in LD reference`, and its `ldSet` holds the lead only. A lead in LD with a more significant lead of the same study is flagged `Explained by a more significant variant in high LD`, and its `ldSet` is emptied. The output is `output/ld_annotated_study_locus/`: the loci of `study_locus`, each with its `ldSet`.
 
 ## pics
 
-The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/pics.py), [`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/fine_mapping/pics.py)) fine-maps each LD-annotated locus with [PICS](https://opentargets.github.io/gentropy/python_api/methods/pics/), from the p-value of its lead and its `ldSet`. The 366 loci explained by a more significant lead, whose `ldSet` is empty, are not fine-mapped. The members of a credible set are the variants of `ldSet`, sorted by posterior probability, up to the variant that brings the sum of the posterior probabilities to 0.95; the posterior probabilities are not rescaled after the cut. The outputs are `output/credible_set/`, 15,578 credible sets from 269 studies, and `output/credible_set_variant/`, 615,261 members (from 1 to 3,091 per credible set, 15 at the median). Every study of the credible sets is in `study`.
+The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/pics.py), [`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.13/src/gentropy/method/fine_mapping/pics.py)) fine-maps each LD-annotated locus with [PICS](https://opentargets.github.io/gentropy/python_api/methods/pics/), from the p-value of its lead and its `ldSet`. The loci explained by a more significant lead, whose `ldSet` is empty, are not fine-mapped. The members of a credible set are the variants of `ldSet`, sorted by posterior probability, up to the variant that brings the sum of the posterior probabilities to 0.95; the posterior probabilities are not rescaled after the cut. The outputs are `output/credible_set/`, one credible set per fine-mapped locus, and `output/credible_set_variant/`, one row per member of a credible set. Every study of the credible sets is in `study`.
 
 ## Output schemas
 
@@ -169,7 +169,7 @@ One row per locus, with the columns of `study_locus` and:
 
 | Column | Type | Description |
 |---|---|---|
-| `ldSet` | `array<struct<tagVariantId: string, r2Overall: float>>` | Variants in LD with the lead, with their r² in the major population of the study; the lead only for the 736 loci flagged `Variant not found in LD reference`, empty for the 366 loci flagged `Explained by a more significant variant in high LD`. |
+| `ldSet` | `array<struct<tagVariantId: string, r2Overall: float>>` | Variants in LD with the lead, with their r² in the major population of the study; the lead only for the loci flagged `Variant not found in LD reference`, empty for the loci flagged `Explained by a more significant variant in high LD`. |
 | `qualityControls` | `array<string>` | `Variant not found in LD reference` or `Explained by a more significant variant in high LD`, otherwise empty. |
 
 ### credible_set
@@ -190,7 +190,7 @@ One row per credible set.
 | `confidence` | `tinyint` | Empty. |
 | `purityMeanR2` | `double` | Empty: PICS computes no purity. |
 | `purityMinR2` | `double` | Empty: PICS computes no purity. |
-| `qualityControls` | `array<string>` | `Study locus finemapped without in-sample LD reference` for every credible set, and `Variant not found in LD reference` for 736. |
+| `qualityControls` | `array<string>` | `Study locus finemapped without in-sample LD reference` for every credible set, and `Variant not found in LD reference` for the credible sets of the loci with that flag. |
 
 ### credible_set_variant
 
@@ -200,7 +200,7 @@ One row per member of a credible set.
 |---|---|---|
 | `credibleSetId` | `string` | Credible set of the variant, as `id` in `credible_set`. |
 | `variantId` | `string` | Variant, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
-| `pValueMantissa` | `float` | Mantissa of the meta-analysis p-value of the variant (p = mantissa × 10^exponent), from `locus`. Null for the 57,247 members without summary statistics in the locus. |
+| `pValueMantissa` | `float` | Mantissa of the meta-analysis p-value of the variant (p = mantissa × 10^exponent), from `locus`. Null for the members without summary statistics in the locus. |
 | `pValueExponent` | `integer` | Exponent of the meta-analysis p-value of the variant. |
 | `effectAlleleFrequency` | `float` | Effect allele frequency of the variant, from `locus`. |
 | `sampleSize` | `integer` | Number of samples of the study, from `locus`. |
@@ -214,7 +214,7 @@ One row per member of a credible set.
 | `rescaledAbsBeta` | `float` | Empty. |
 | `rescaledStandardError` | `float` | Empty. |
 | `rescaledDirection` | `tinyint` | Empty. |
-| `qualityControls` | `array<string>` | `Allele frequency reported by the study` for the 558,014 members with summary statistics in the locus, `Variant in LD with the lead has no statistics in the locus` for the other 57,247. |
+| `qualityControls` | `array<string>` | `Allele frequency reported by the study` for the members with summary statistics in the locus, otherwise `Variant in LD with the lead has no statistics in the locus`. |
 
 ## Changelog
 
