@@ -50,7 +50,7 @@ scratchpad:
   eva_version: '2026-07-23'
   reactome_version: '2026-01-19-v95'
   clinpgx_version: '2026-07-24'
-  string_version: '12.0'
+  string_version: '12.5'
   aopwiki_version: '2023-01-20'
   toxcast_version: '2021-08-17'
   hpa_subcellular_version: '2021-08-19'
@@ -728,9 +728,13 @@ steps:
       source: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/current_release/id_mapping/database_mappings/ensembl.tsv
       destination: input/interaction/rna_central_ensembl.tsv
 
-    - name: copy string interactions
-      source: gs://otar001-core/stringInteractions/9606.protein.links.full_w_homology.v${string_version}.txt.gz
-      destination: input/interaction/string-interactions.txt.gz
+    - name: copy string detailed links
+      source: https://stringdb-downloads.org/download/protein.links.detailed.v${string_version}/9606.protein.links.detailed.v${string_version}.txt.gz
+      destination: input/interaction/string-links-detailed.txt.gz
+
+    - name: copy string full links
+      source: https://stringdb-downloads.org/download/protein.links.full.v${string_version}/9606.protein.links.full.v${string_version}.txt.gz
+      destination: input/interaction/string-links-full.txt.gz
   ##################################################################################################
 
   #: VARIANT STEP :################################################################################

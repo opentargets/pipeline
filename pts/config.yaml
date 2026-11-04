@@ -4,7 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  string_version: '12.0'
+  string_version: '12.5'
 
 steps:
   #: VARIANT PPP STEP :############################################################################
@@ -1484,7 +1484,8 @@ steps:
         humanmapping: input/interaction/HUMAN_9606_idmapping.dat.gz
         ensproteins: input/interaction/Homo_sapiens.GRCh38.chr.gtf.gz
         intact: input/interaction/intact-interactors.json
-        strings: input/interaction/string-interactions.txt.gz
+        string_detailed: input/interaction/string-links-detailed.txt.gz
+        string_full: input/interaction/string-links-full.txt.gz
       destination:
         interactions: output/interaction
         interactions_evidence: output/interaction_evidence
