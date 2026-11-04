@@ -64,13 +64,32 @@ def _to_lookup(index: pl.DataFrame) -> Lookup:
     return lookup
 
 
-def _resolve(label: str, lookup: Lookup) -> list[str]:
+def _candidates(label: str, lookup: Lookup) -> list[str]:
     hits = lookup.get(normalise_label(label), [])
     if not hits:
         return []
     best = min(p for p, _ in hits)
-    genes = sorted({t for p, t in hits if p == best})
+    return sorted({t for p, t in hits if p == best})
+
+
+def _resolve(label: str, lookup: Lookup) -> list[str]:
+    genes = _candidates(label, lookup)
     return genes if len(genes) == 1 else []
+
+
+def _labels_by_gene(index: pl.DataFrame) -> dict[str, set[str]]:
+    labels: dict[str, set[str]] = defaultdict(set)
+    for label, _, target_id in index.iter_rows():
+        labels[target_id].add(label)
+    return labels
+
+
+def _named_in(name: str, labels: set[str]) -> bool:
+    """Whether any of a gene's labels occurs as whole words in the (normalised) name."""
+    lowered = name.lower()
+    spellings = [f' {re.sub(r"[^a-z0-9]+", " ", text).strip()} ' for text in (lowered, lowered.replace('-', ''))]
+    words = [f' {re.sub(r"[^a-z0-9]+", " ", label).strip()} ' for label in labels]
+    return any(word in spelling for word in words for spelling in spellings)
 
 
 def resolve(label: str, index: pl.DataFrame) -> list[str]:
@@ -82,10 +101,15 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
     """Add ``targetIds``, ``grounding`` and ``class_level`` to the mechanisms.
 
     ``grounding`` is ``source`` when the name the text uses resolves, ``suggestion`` when only
-    the model's symbol suggestions do, ``unresolved`` when neither does, and ``skipped`` for
-    mechanisms that failed the quote check or name a non-human target.
+    the model's symbol suggestions do, ``unresolved`` when there is nothing to resolve, and
+    ``skipped`` for mechanisms that failed the quote check or name a non-human target.
+
+    A suggestion may only normalise the name the text uses: when that name is ambiguous it
+    must be one of the name's genes, and when the name is unknown one of its labels must
+    occur in the name. Suggestions that resolve but fail this are ``suggestion_unsupported``.
     """
     lookup = _to_lookup(index)
+    labels = _labels_by_gene(index)
     target_ids, grounding = [], []
     for row in mechanisms.select('targetFromSource', 'targetSymbolSuggestion', 'kept', 'isHumanTarget').iter_rows(
         named=True
@@ -99,9 +123,19 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
             target_ids.append(source)
             grounding.append('source')
             continue
-        suggested = sorted({g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)})
-        target_ids.append(suggested)
-        grounding.append('suggestion' if suggested else 'unresolved')
+        resolved = {g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)}
+        candidates = _candidates(row['targetFromSource'], lookup)
+        if candidates:
+            supported = resolved & set(candidates)
+        else:
+            supported = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
+        target_ids.append(sorted(supported))
+        if supported:
+            grounding.append('suggestion')
+        elif resolved:
+            grounding.append('suggestion_unsupported')
+        else:
+            grounding.append('unresolved')
     return mechanisms.with_columns(
         targetIds=pl.Series(target_ids, dtype=pl.List(pl.String)),
         grounding=pl.Series(grounding, dtype=pl.String),

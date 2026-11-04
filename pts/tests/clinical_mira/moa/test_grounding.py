@@ -22,7 +22,16 @@ def index() -> pl.DataFrame:
         ),
         ('ENSG_A', 'GENE_A', 'gene a', _labels('XYZ'), []),
         ('ENSG_EGFR', 'EGFR', 'epidermal growth factor receptor', _labels('ERBB1'), []),
-    ] + [(f'ENSG_K{i}', f'K{i}', f'kinase {i}', [], []) for i in range(21)]
+        ('ENSG_KRAS', 'KRAS', 'KRAS proto-oncogene', [], []),
+        ('ENSG_MS4A1', 'MS4A1', 'membrane spanning 4-domains A1', _labels('CD20'), []),
+        (
+            'ENSG_BCMA',
+            'TNFRSF17',
+            'TNF receptor superfamily member 17',
+            _labels('BCMA'),
+            _labels('B-cell maturation antigen'),
+        ),
+    ] + [(f'ENSG_K{i}', f'K{i}', f'kinase {i}', [], _labels('kinase family')) for i in range(21)]
     target_view = pl.DataFrame(
         {
             'id': [g[0] for g in genes],
@@ -106,11 +115,38 @@ def test_non_human_and_dropped_rows_skipped(index):
 
 def test_class_level_flag(index):
     family = ground_mechanisms(
-        _mechanisms({'targetFromSource': 'kinases', 'targetSymbolSuggestion': [f'K{i}' for i in range(21)]}), index
+        _mechanisms({'targetFromSource': 'kinase family', 'targetSymbolSuggestion': [f'K{i}' for i in range(21)]}),
+        index,
     )
     small = ground_mechanisms(
-        _mechanisms({'targetFromSource': 'kinases', 'targetSymbolSuggestion': [f'K{i}' for i in range(20)]}), index
+        _mechanisms({'targetFromSource': 'kinase family', 'targetSymbolSuggestion': [f'K{i}' for i in range(20)]}),
+        index,
     )
 
     assert family['class_level'].to_list() == [True]
     assert small['class_level'].to_list() == [False]
+
+
+def test_suggestion_must_be_a_candidate_of_an_ambiguous_name(index):
+    row = ground_mechanisms(_mechanisms({'targetFromSource': 'XYZ', 'targetSymbolSuggestion': ['EGFR']}), index)
+
+    assert row.select('targetIds', 'grounding').to_dicts() == [{'targetIds': [], 'grounding': 'suggestion_unsupported'}]
+
+
+def test_suggestion_for_an_unknown_name_must_share_a_label_with_it(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'KRAS G12C', 'targetSymbolSuggestion': ['KRAS']},
+            {'targetFromSource': 'kinase', 'targetSymbolSuggestion': ['EGFR']},
+            {'targetFromSource': 'anti-CD20', 'targetSymbolSuggestion': ['MS4A1']},
+            {'targetFromSource': 'B-cell maturation antigen protein', 'targetSymbolSuggestion': ['TNFRSF17']},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_KRAS'], 'grounding': 'suggestion'},
+        {'targetIds': [], 'grounding': 'suggestion_unsupported'},
+        {'targetIds': ['ENSG_MS4A1'], 'grounding': 'suggestion'},
+        {'targetIds': ['ENSG_BCMA'], 'grounding': 'suggestion'},
+    ]
