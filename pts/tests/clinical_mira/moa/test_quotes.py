@@ -154,3 +154,15 @@ def test_effect_wording_without_binding_verb_is_flagged():
     assert effect_wording('an inhibitor of TNF-a synthesis', 'TNF-a') is True
     assert effect_wording('a selective KRAS G12C inhibitor', 'KRAS G12C') is False
     assert effect_wording('a monoclonal antibody against CD20', 'CD20') is False
+
+
+def test_trailing_trial_id_and_full_stop_are_ignored():
+    row = _check(_mechanism('KRAS G12C', ('nct1', 'a selective KRAS G12C inhibitor (nct1).'))).row(0, named=True)
+
+    assert row['kept'] is True
+
+
+def test_garbled_characters_still_fail():
+    row = _check(_mechanism('KRAS G12C', ('nct1', 'a selective KRAS G 12C inhibitor'))).row(0, named=True)
+
+    assert row['drop_reason'] == 'quote_not_in_text'

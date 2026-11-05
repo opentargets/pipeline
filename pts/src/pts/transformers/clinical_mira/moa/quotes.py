@@ -80,7 +80,13 @@ def names_target(quote: str, target: str) -> bool:
     return False
 
 
+def clean_quote(quote: str) -> str:
+    """Drop a trial id the model appended to a quote (``... (nct01018992).``), and a final full stop."""
+    return re.sub(r'\s*\(?\bnct\d+\)?\s*\.?$|\.$', '', _ws(quote), flags=re.IGNORECASE).strip()
+
+
 def _quote_problem(nct_id: str, quote: str, target: str, pool_trials: set[str], texts: dict[str, str]) -> str | None:
+    quote = clean_quote(quote)
     if not _ws(target):
         return 'empty_target'
     if nct_id not in pool_trials:
@@ -112,7 +118,7 @@ def check_mechanisms(extractions: dict[str, MoaExtraction], pools: pl.DataFrame,
                 for e in mechanism.evidence
             ]
             valid = [
-                {'nctId': e.nct_id, 'quote': e.quote}
+                {'nctId': e.nct_id, 'quote': clean_quote(e.quote)}
                 for e, problem in zip(mechanism.evidence, problems, strict=True)
                 if problem is None
             ]
