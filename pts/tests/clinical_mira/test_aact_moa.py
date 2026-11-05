@@ -5,10 +5,11 @@ from typing import Any
 
 import polars as pl
 import pytest
+import yaml
 from otter.config.model import Config
 
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
-from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, aact_moa, stage_moa
+from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, SeedTooSmall, aact_moa, stage_moa
 from pts.transformers.clinical_mira.record_store import ComputeAborted
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA, schema_digest
@@ -285,6 +286,7 @@ def test_cache_of_an_earlier_run_seeds_the_store_once(monkeypatch: pytest.Monkey
         batches,
         work='other_work',
         import_experiment_cache=str(cache),
+        import_for_tag=MOA.tag(),
     )
 
     assert batches.created == []
@@ -320,3 +322,90 @@ def test_entry_point_reads_source_and_writes_destination(monkeypatch: pytest.Mon
     assert called['extraction_dir'] == 'e'
     assert called['destination'] == 'm'
     assert called['settings'] == AactMoaSettings(store_uri='s', snapshot='v1')
+
+
+def test_config_imports_the_seed_for_the_current_tag_only() -> None:
+    config = yaml.safe_load((Path(__file__).parents[2] / 'config.yaml').read_text())
+    settings = AactMoaSettings.model_validate(config['steps']['aact_moa'][0]['settings'])
+
+    assert settings.import_for_tag == MOA.tag()
+    assert settings.min_seeded_share == 0.5
+
+
+def _seed_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, world: dict[str, tuple[str, str, str]]) -> Path:
+    """Compute ``world`` in a separate store and return the result cache it leaves."""
+    _stage(monkeypatch, tmp_path / 'seed', FakeBatches(), world=world, work='seed_work')
+    return tmp_path / 'seed' / 'seed_work' / 'moa_cache.jsonl'
+
+
+def test_a_seed_covering_too_few_pools_aborts_before_any_compute(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache = _seed_cache(monkeypatch, tmp_path, {k: v for k, v in WORLD.items() if k != 'nct3'})
+    batches = FakeBatches()
+
+    with pytest.raises(SeedTooSmall, match='1 of 2'):
+        _stage(
+            monkeypatch,
+            tmp_path,
+            batches,
+            import_experiment_cache=str(cache),
+            import_for_tag=MOA.tag(),
+            min_seeded_share=0.6,
+        )
+
+    assert batches.created == []
+
+
+def test_an_existing_import_covering_too_few_pools_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = _seed_cache(monkeypatch, tmp_path, {k: v for k, v in WORLD.items() if k != 'nct3'})
+    seed = {'import_experiment_cache': str(cache), 'import_for_tag': MOA.tag()}
+    _stage(monkeypatch, tmp_path, FakeBatches(), min_seeded_share=0.0, **seed)
+    batches = FakeBatches()
+
+    with pytest.raises(SeedTooSmall, match='1 of 2'):
+        _stage(monkeypatch, tmp_path, batches, snapshot='v2', min_seeded_share=0.6, **seed)
+
+    assert batches.created == []
+
+
+def test_a_rerun_after_a_full_import_does_not_abort(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = _seed_cache(monkeypatch, tmp_path, WORLD)
+    seed = {'import_experiment_cache': str(cache), 'import_for_tag': MOA.tag()}
+    _stage(monkeypatch, tmp_path, FakeBatches(), **seed)
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **seed)
+
+    assert batches.created == []
+    assert (stats['seeded'], stats['computed']) == (0, 0)
+
+
+def test_a_seed_for_another_tag_is_not_imported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = _seed_cache(monkeypatch, tmp_path, WORLD)
+    batches = FakeBatches()
+
+    stats = _stage(
+        monkeypatch, tmp_path, batches, import_experiment_cache=str(cache), import_for_tag='claude-opus-5-5-pold'
+    )
+
+    assert stats['seeded'] == 0
+    assert stats['computed'] == 2
+    assert sorted(batches.drugs) == ['aspirinx', 'sotorasib']
+    assert not list((tmp_path / 'store' / MOA.name / 'runs').glob('import-*'))
+
+
+def test_batch_state_is_named_by_snapshot_and_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, FakeBatches())
+
+    assert (tmp_path / 'store' / MOA.name / 'batches' / f'v1-{MOA.tag()}.json').exists()
+
+
+def test_a_missing_pool_table_is_written_again(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, FakeBatches())
+    (_snapshot(tmp_path) / 'pools.parquet').unlink()
+
+    stats = _stage(monkeypatch, tmp_path, FakeBatches())
+
+    assert stats['published'] is False
+    assert pl.read_parquet(_snapshot(tmp_path) / 'pools.parquet').height == 2

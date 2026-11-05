@@ -143,6 +143,11 @@ def _read_cache_rows(cache_uri: str, config: Config) -> dict[str, dict]:
     return rows
 
 
+def import_run_id() -> str:
+    """The id of the run the experiment's cache is imported as."""
+    return f'import-moa-experiment-{MOA.digest}'
+
+
 def import_experiment_cache(
     cache_uri: str,
     pools: pl.DataFrame,
@@ -168,7 +173,7 @@ def import_experiment_cache(
     Returns:
         int: The number of records written, 0 if the import run already exists.
     """
-    run_id = f'import-moa-experiment-{MOA.digest}'
+    run_id = import_run_id()
 
     def records() -> pl.DataFrame:
         cached = _read_cache_rows(cache_uri, config)

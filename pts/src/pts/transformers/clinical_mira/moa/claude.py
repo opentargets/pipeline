@@ -141,10 +141,14 @@ def run_batch_cached(
         while (batch := client.messages.batches.retrieve(batch_id)).processing_status != 'ended':
             logger.info(f'{batch_id}: {batch.processing_status}, {batch.request_counts.processing} processing')
             sleep(poll_seconds)
+        unrequested = 0
         with cache_path.open('a', encoding='utf-8') as cache:
             for item in client.messages.batches.results(batch_id):
                 request_id = by_custom_id.get(item.custom_id)
-                if request_id is None or request_id in results:
+                if request_id is None:
+                    unrequested += 1
+                    continue
+                if request_id in results:
                     continue
                 if item.result.type != 'succeeded':
                     errors[request_id] = getattr(getattr(item.result, 'error', None), 'type', item.result.type)
@@ -167,6 +171,8 @@ def run_batch_cached(
                 if usage is not None:
                     row['usage'] = {field: getattr(usage, field, None) or 0 for field in USAGE_FIELDS}
                 cache.write(json.dumps(row) + '\n')
+        if unrequested:
+            logger.warning(f'{batch_id}: {unrequested} results dropped, their custom_id is not among the requests')
 
     state = _read_state(state_uri)
     for batch_id in list(state['pending']):

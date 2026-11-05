@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ConfigDict
 
 from pts.transformers.clinical_mira.moa import pooling, quotes, schemas, staging
@@ -53,6 +54,10 @@ SNAPSHOT_COLUMNS = [
 """Columns of the published mechanisms."""
 
 
+class SeedTooSmall(Exception):  # noqa: N818
+    """Raised when the imported experiment cache covers too few of the current pools."""
+
+
 class AactMoaSettings(BaseModel):
     """Settings for the aact_moa transformer."""
 
@@ -69,6 +74,10 @@ class AactMoaSettings(BaseModel):
     """Attempts per pool, within a run and across runs, before it is left out."""
     import_experiment_cache: str | None = None
     """The experiment's jsonl result cache to import into the store, once, before computing."""
+    import_for_tag: str | None = None
+    """The MOA tag the cache was computed for. The cache is imported only while it is the current tag."""
+    min_seeded_share: float = 0.5
+    """The lowest share of the current pools the imported cache must cover, or the run aborts before computing."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
     """Name of the environment variable holding the Claude workspace id."""
 
@@ -91,6 +100,14 @@ def _write_parquet(df: pl.DataFrame, uri: str, config: Config) -> None:
     buffer = io.BytesIO()
     df.write_parquet(buffer, compression='zstd')
     StorageHandle(uri, config=config).write(buffer.getvalue())
+
+
+def _exists(uri: str, config: Config) -> bool:
+    try:
+        StorageHandle(uri, config=config).stat()
+    except NotFoundError:
+        return False
+    return True
 
 
 def _mechanism_rows(mechanisms: pl.DataFrame, pools: pl.DataFrame, listed: pl.DataFrame) -> pl.DataFrame:
@@ -152,6 +169,8 @@ def stage_moa(
         kept and dropped by the quote check, and whether a snapshot was published.
 
     Raises:
+        SeedTooSmall: If the experiment cache is imported for the current tag and its import run covers less
+            than ``min_seeded_share`` of the pools.
         ComputeAborted: If there are pools to compute, no client is given and the workspace id variable is unset.
     """
     system_prompt = schemas.load_prompt('extract')
@@ -169,22 +188,46 @@ def stage_moa(
     run_id = new_run_id(settings.snapshot)
 
     seeded = 0
-    if settings.import_experiment_cache:
+    importing = settings.import_experiment_cache is not None and settings.import_for_tag == tag
+    if settings.import_experiment_cache is not None and not importing:
+        logger.info(
+            f'not importing {settings.import_experiment_cache}: computed for {settings.import_for_tag}, not {tag}'
+        )
+    if importing:
         seeded = staging.import_experiment_cache(
             settings.import_experiment_cache, pools, listed, system_prompt, store_uri, config
         )
         logger.info(f'imported {seeded} cached pools into {store_uri}')
 
+    records = read_records(store_uri, config, pl.String())
+    if importing:
+        covered = (
+            records
+            .filter(pl.col('run_id') == staging.import_run_id())
+            .filter(pl.col('text').is_in(pools['content_key'].implode()))['text']
+            .n_unique()
+        )
+        if covered < settings.min_seeded_share * pools.height:
+            msg = (
+                f'{staging.import_run_id()} covers {covered} of {pools.height} pools, '
+                f'below the minimum share {settings.min_seeded_share}'
+            )
+            raise SeedTooSmall(msg)
+
     carried = 0
     if MOA.params['carry_forward']:
-        records = read_records(store_uri, config, pl.String())
         carried_records = staging.carry_forward(listed, texts, records, tag, f'{run_id}-carry')
         if carried_records.height:
             write_run(carried_records, store_uri, f'{run_id}-carry', config, pl.String())
         carried = carried_records.height
 
     compute = staging.moa_compute(
-        pools, listed, system_prompt, f'{store_uri}/batches/{settings.snapshot}.json', config.work_path, client=client
+        pools,
+        listed,
+        system_prompt,
+        f'{store_uri}/batches/{settings.snapshot}-{tag}.json',
+        config.work_path,
+        client=client,
     )
     mapped = map_texts(
         pools['content_key'],
@@ -215,7 +258,7 @@ def stage_moa(
 
     uri = f'{destination.rstrip("/")}/{extraction_tag}/moa/{tag}'
     published = publish_snapshot(rows, uri, MOA.metadata(extraction_tag), config)
-    if published:
+    if published or not _exists(f'{uri}/pools.parquet', config):
         _write_parquet(_pool_table(pools, status, carried_pools), f'{uri}/pools.parquet', config)
 
     return {

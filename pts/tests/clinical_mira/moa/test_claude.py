@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from pts.transformers.clinical_mira.moa.claude import custom_id, run_batch_cached
@@ -141,6 +142,27 @@ def test_a_submitted_batch_is_resumed_not_resubmitted(tmp_path):
     assert len(batches.created) == 1
     assert results['a'] == Echo(value='x')
     assert json.loads((tmp_path / 'batches.json').read_text())['pending'] == []
+
+
+def test_resumed_results_for_requests_not_asked_for_are_counted_in_a_warning(tmp_path):
+    batches = FakeBatches()
+    batches.create(
+        requests=[
+            {'custom_id': custom_id('a'), 'params': {'messages': [{'content': 'x'}]}},
+            {'custom_id': custom_id('gone'), 'params': {'messages': [{'content': 'z'}]}},
+            {'custom_id': custom_id('gone too'), 'params': {'messages': [{'content': 'w'}]}},
+        ]
+    )
+    (tmp_path / 'batches.json').write_text(json.dumps({'pending': ['batch_1']}))
+    warnings: list[str] = []
+    handler = logger.add(lambda message: warnings.append(message.record['message']), level='WARNING')
+    try:
+        results, _ = _run(batches, tmp_path, requests=[('a', 'x')])
+    finally:
+        logger.remove(handler)
+
+    assert results['a'] == Echo(value='x')
+    assert any('2 results' in w and 'batch_1' in w for w in warnings), warnings
 
 
 def test_token_usage_is_recorded_per_request(tmp_path):
