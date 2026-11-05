@@ -37,6 +37,7 @@ class CredibleSetFlag(StrEnum):
     INVALID_FINEMAPPING_METHOD = 'Fine-mapping method is not supported'
     INVALID_STUDY_TYPE = 'Study type of the source is not a supported study type'
     STUDY_TYPE_MISMATCH = 'Study type of the credible set differs from the study index'
+    LEAD_VARIANT_MISSING = 'Lead variant of the credible set has no row among its variants'
 
 
 class CredibleSetVariantFlag(StrEnum):
@@ -60,6 +61,8 @@ class CredibleSetVariantFlag(StrEnum):
     INCOMPLETE_CONDITIONAL_STATS = 'Only one of the conditional beta and standard error is present'
     MISSING_PVALUE = 'P-value mantissa or exponent is missing'
     MISSING_SAMPLE_SIZE = 'Sample size is missing'
+    ORPHAN_VARIANT = 'Credible set of the variant is not among the credible sets of its source'
+    VARIANT_CHROMOSOME_MISMATCH = 'Chromosome of the variant differs from the credible set chromosome'
 
 
 class CredibleSetConfidenceClasses(IntEnum):

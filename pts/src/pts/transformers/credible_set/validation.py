@@ -12,7 +12,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
 from pts.transformers.credible_set.enums import FinemappingMethod
@@ -71,6 +71,10 @@ class ValidationDestination(BaseModel):
     excluded_variant: str
 
 
+STRUCTURAL_FLAGS = {CredibleSetFlag.INVALID_VARIANT_IN_SET, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED}
+"""Flags that validation raises itself and always applies; they cannot be listed in the settings."""
+
+
 class ValidationSettings(BaseModel):
     """Which quality flags exclude a credible set."""
 
@@ -80,6 +84,8 @@ class ValidationSettings(BaseModel):
     """Credible set flags that exclude the set."""
     csv_set_invalid_qc_reasons: list[CredibleSetVariantFlag] = Field(default_factory=list)
     """Variant flags that exclude the whole set."""
+    csv_row_invalid_qc_reasons: list[CredibleSetVariantFlag] = Field(default_factory=list)
+    """Variant flags that exclude only the variant row."""
 
     @field_validator('cs_invalid_qc_reasons', mode='before')
     @classmethod
@@ -87,11 +93,19 @@ class ValidationSettings(BaseModel):
         """Resolve configured enum names before validating the credible set flags."""
         return resolve_flag_names(CredibleSetFlag, value)
 
-    @field_validator('csv_set_invalid_qc_reasons', mode='before')
+    @field_validator('csv_set_invalid_qc_reasons', 'csv_row_invalid_qc_reasons', mode='before')
     @classmethod
     def resolve_csv_names(cls, value: Any) -> Any:
         """Resolve configured enum names before validating the variant flags."""
         return resolve_flag_names(CredibleSetVariantFlag, value)
+
+    @model_validator(mode='after')
+    def no_structural_flags(self) -> 'ValidationSettings':
+        """Reject the structural flags, which validation raises and always applies."""
+        listed = {*self.cs_invalid_qc_reasons, *self.csv_set_invalid_qc_reasons, *self.csv_row_invalid_qc_reasons}
+        if structural := sorted(flag.name for flag in listed & STRUCTURAL_FLAGS):
+            raise ValueError(f'structural flags are always applied and cannot be configured: {structural}')
+        return self
 
 
 def _flag_matching_ids(
@@ -280,6 +294,76 @@ def type_valid_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
     return frame.cast(enums, strict=True)
 
 
+def flag_orphan_variants(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose credible set is not among the credible sets of their source.
+
+    Examples:
+        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'gone'], 'qualityControls': [[], []]})
+        >>> sets = pl.LazyFrame({'id': ['a']})
+        >>> flag_orphan_variants(variants, sets).sort('credibleSetId').collect()['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    known = sets.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_known')).unique()
+    return (
+        frame
+        .join(known, on='credibleSetId', how='left')
+        .pipe(flag_rows, pl.col('_known').is_null(), CredibleSetVariantFlag.ORPHAN_VARIANT)
+        .drop('_known')
+    )
+
+
+def flag_variant_chromosome_mismatch(frame: pl.LazyFrame, sets: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose chromosome, the first field of `variantId`, differs from their set's.
+
+    An orphan variant has no set to compare with, and is not flagged.
+
+    Examples:
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['a', 'a'],
+        ...     'variantId': ['1_1_A_T', '2_5_A_T'],
+        ...     'qualityControls': [[], []],
+        ... })
+        >>> sets = pl.LazyFrame({'id': ['a'], 'chromosome': ['1']})
+        >>> flagged = flag_variant_chromosome_mismatch(variants, sets).sort('variantId').collect()
+        >>> flagged['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    chromosomes = sets.select(
+        pl.col('id').alias('credibleSetId'), pl.col('chromosome').alias('_set_chromosome')
+    ).unique()
+    mismatch = pl.col('variantId').str.split('_').list.first() != pl.col('_set_chromosome')
+    return (
+        frame
+        .join(chromosomes, on='credibleSetId', how='left')
+        .pipe(flag_rows, mismatch, CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH)
+        .drop('_set_chromosome')
+    )
+
+
+def flag_lead_variant_missing(frame: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag credible sets whose lead variant has no row among the variants of their source.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['a', 'b'],
+        ...     'leadVariantId': ['1_1_A_T', '1_9_A_T'],
+        ...     'qualityControls': [[], []],
+        ... })
+        >>> variants = pl.LazyFrame({'credibleSetId': ['a', 'b'], 'variantId': ['1_1_A_T', '1_2_A_T']})
+        >>> flag_lead_variant_missing(sets, variants).sort('id').collect()['qualityControls'].list.len().to_list()
+        [0, 1]
+    """
+    leads = variants.select(
+        pl.col('credibleSetId').alias('id'), pl.col('variantId').alias('leadVariantId'), pl.lit(True).alias('_lead')
+    ).unique()
+    return (
+        frame
+        .join(leads, on=['id', 'leadVariantId'], how='left')
+        .pipe(flag_rows, pl.col('_lead').is_null(), CredibleSetFlag.LEAD_VARIANT_MISSING)
+        .drop('_lead')
+    )
+
+
 def validate(
     sets: pl.LazyFrame,
     variants: pl.LazyFrame,
@@ -288,18 +372,28 @@ def validate(
 ) -> tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]:
     """Split the credible sets and variants of one source into valid and excluded rows.
 
-    A credible set is excluded together with all of its variants. The steps are:
+    Variant rows first:
 
-    0. The flags that cross-set QC computed over every source are added to the sets they belong to.
-    1. The sets with at least one variant carrying a flag of `csv_set_invalid_qc_reasons` get
-       `INVALID_VARIANT_IN_SET`: one invalid member invalidates its set.
-    2. The sets carrying a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`, are
-       excluded. `INVALID_VARIANT_IN_SET` is structural, so it is not configurable.
-    3. Every variant of an excluded set gets `CREDIBLE_SET_EXCLUDED` and is excluded with it, so
-       every excluded row carries the reason it left.
+    1. Flag `ORPHAN_VARIANT` on a variant whose set is not among this source's sets, and
+       `VARIANT_CHROMOSOME_MISMATCH` on a variant on another chromosome than its set.
+    2. Exclude the variants with a flag of `csv_row_invalid_qc_reasons` (by default
+       EXCEEDS_COVERAGE_95 and ORPHAN_VARIANT). Only the row leaves; its set stays.
+
+    Then whole sets:
+
+    3. Add the cross-set flags (REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE,
+       DUPLICATED_STUDYLOCUS_ID).
+    4. Flag `INVALID_VARIANT_IN_SET` on a set with any variant flagged in
+       `csv_set_invalid_qc_reasons`.
+    5. Flag `LEAD_VARIANT_MISSING` on a set whose lead variant is not among its remaining
+       variants, either because it was never staged or because step 2 removed it.
+    6. Exclude the sets with a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`,
+       together with their remaining variants, which get `CREDIBLE_SET_EXCLUDED`.
+
+    Every excluded row carries the flag that explains why it left. `INVALID_VARIANT_IN_SET` and
+    `CREDIBLE_SET_EXCLUDED` are structural, so they are not configurable.
 
     Flags are appended to `qualityControls`; a set with several invalid variants is flagged once.
-    Orphan variants, row exclusion and the lead variant check come with later slices.
 
     Args:
         sets: The source's credible sets after set QC.
@@ -314,7 +408,12 @@ def validate(
         Set `a` is clean, set `b` is in the MHC, and set `c` has a member on an alternate contig:
 
         >>> from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-        >>> sets = pl.LazyFrame({'id': ['a', 'b', 'c'], 'qualityControls': [[], [CredibleSetFlag.IN_MHC.value], []]})
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['a', 'b', 'c'],
+        ...     'chromosome': ['1', '6', '2'],
+        ...     'leadVariantId': ['1_10_A_T', '6_30000000_A_T', '2_10_A_T'],
+        ...     'qualityControls': [[], [CredibleSetFlag.IN_MHC.value], []],
+        ... })
         >>> variants = pl.LazyFrame({
         ...     'credibleSetId': ['a', 'b', 'c', 'c'],
         ...     'variantId': ['1_10_A_T', '6_30000000_A_T', '2_10_A_T', '2_KI270846v1_alt_10_A_T'],
@@ -350,16 +449,20 @@ def validate(
         6_30000000_A_T ['CREDIBLE_SET_EXCLUDED']
     """
     sets = add_cross_set_flags(sets, cross_set_flags)
+    variants = flag_orphan_variants(variants, sets).pipe(flag_variant_chromosome_mismatch, sets)
+    row_split = valid_rows(variants, settings.csv_row_invalid_qc_reasons)
     sets_with_invalid_variant = variants.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
         pl.col('credibleSetId').alias('id')
     )
     flagged_sets = _flag_matching_ids(sets, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET)
+    flagged_sets = flag_lead_variant_missing(flagged_sets, row_split.valid)
     set_split = valid_rows(flagged_sets, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
-    flagged_variants = _flag_matching_ids(
-        variants, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
+    kept_variants = _flag_matching_ids(
+        row_split.valid, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
     )
-    variant_split = valid_rows(flagged_variants, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
-    return set_split.valid, variant_split.valid, set_split.invalid, variant_split.invalid
+    variant_split = valid_rows(kept_variants, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
+    excluded_variants = pl.concat([row_split.invalid, variant_split.invalid])
+    return set_split.valid, variant_split.valid, set_split.invalid, excluded_variants
 
 
 def validation(

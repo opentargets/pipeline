@@ -107,9 +107,14 @@ def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
     )
     studies = _studies(('s', 'gwas', [STUDY_FLAGGED]))
     sets.collect().write_parquet(tmp_path / 'sets.parquet')
+    variants = pl.DataFrame({'credibleSetId': ['X'], 'variantId': ['7_1_A_T']})
+    variants.write_parquet(tmp_path / 'variants.parquet')
     studies.collect().write_parquet(tmp_path / 'study.parquet')
     set_qc(
-        source={'credible_set': str(tmp_path / 'sets.parquet'), 'study': str(tmp_path / 'study.parquet')},
+        source={
+            'credible_set': str(tmp_path / 'sets.parquet'),
+            'study': str(tmp_path / 'study.parquet'),
+        },
         destination=str(tmp_path / 'qc'),
         settings={},
         config=Mock(spec=Config),
