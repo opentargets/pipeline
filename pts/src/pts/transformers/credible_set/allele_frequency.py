@@ -6,6 +6,7 @@ import polars as pl
 
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 from pts.transformers.credible_set.study_lookup import study_of_set
+from pts.transformers.utils.quality_flags import flag_rows
 
 
 def gnomad_frequencies(
@@ -114,27 +115,19 @@ def effect_allele_frequency(
     eaf = pl.col('effectAlleleFrequency')
     valid = (eaf.is_between(0, 1) & eaf.is_not_nan()).fill_null(False)
     gnomad = gnomad_frequencies(credible_set_variant.filter(~valid), credible_set, study, variant_index)
-    origin = (
-        pl
-        .when(valid)
-        .then(pl.lit(CredibleSetVariantFlag.EAF_FROM_SOURCE.value))
-        .when(pl.col('_gnomad').is_not_null())
-        .then(pl.lit(CredibleSetVariantFlag.EAF_FROM_GNOMAD.value))
-        .otherwise(pl.lit(CredibleSetVariantFlag.MISSING_EAF.value))
-    )
-    invalid = pl.when(eaf.is_not_null() & ~valid).then(pl.lit(CredibleSetVariantFlag.INVALID_EAF.value))
+    # the source frequency is replaced below, so its validity is kept for the flags
+    source_valid, source_invalid, from_gnomad = pl.col('_source_valid'), pl.col('_source_invalid'), pl.col('_gnomad')
     return (
         credible_set_variant
-        .join(
-            study_of_set(credible_set),
-            on='credibleSetId',
-            how='left',
-            maintain_order='left',
-        )
+        .with_columns(valid.alias('_source_valid'), (eaf.is_not_null() & ~valid).alias('_source_invalid'))
+        .join(study_of_set(credible_set), on='credibleSetId', how='left', maintain_order='left')
         .join(gnomad, on=['studyId', 'variantId'], how='left', maintain_order='left')
+        .pipe(flag_rows, source_invalid, CredibleSetVariantFlag.INVALID_EAF)
+        .pipe(flag_rows, source_valid, CredibleSetVariantFlag.EAF_FROM_SOURCE)
+        .pipe(flag_rows, ~source_valid & from_gnomad.is_not_null(), CredibleSetVariantFlag.EAF_FROM_GNOMAD)
+        .pipe(flag_rows, ~source_valid & from_gnomad.is_null(), CredibleSetVariantFlag.MISSING_EAF)
         .with_columns(
-            pl.when(valid).then(eaf).otherwise(pl.col('_gnomad')).cast(pl.Float32).alias('effectAlleleFrequency'),
-            pl.concat_list('qualityControls', invalid, origin).list.drop_nulls().alias('qualityControls'),
+            pl.when(source_valid).then(eaf).otherwise(from_gnomad).cast(pl.Float32).alias('effectAlleleFrequency')
         )
         .select(credible_set_variant.collect_schema().names())
     )
