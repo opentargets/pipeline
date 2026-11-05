@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import polars as pl
 
-#: The `proteinIds` sources ChEMBL accessions are resolved through.
-UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
+#: The `proteinIds` sources ChEMBL accessions are resolved through. `uniprot_obsolete` labels
+#: every accession of a UniProt entry (`target/uniprot.py`), current ones included.
+UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl', 'uniprot_obsolete']
 
 
 def ensg_lookup(target: pl.LazyFrame) -> pl.LazyFrame:

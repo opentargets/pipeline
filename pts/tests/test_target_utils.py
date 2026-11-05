@@ -58,7 +58,7 @@ def test_empty_tss_lookup_schema():
 
 
 def test_chembl_accession_lookup():
-    """Swiss-Prot and TrEMBL accessions and the gene id itself resolve; obsolete accessions do not."""
+    """UniProt accessions, including those labelled obsolete, and the gene id itself resolve; others do not."""
     protein = pl.Struct({'id': pl.String, 'source': pl.String})
     genes = pl.DataFrame(
         {
@@ -66,7 +66,7 @@ def test_chembl_accession_lookup():
             'proteinIds': [
                 [{'id': 'P1', 'source': 'uniprot_swissprot'}, {'id': 'Q1', 'source': 'uniprot_trembl'}],
                 [{'id': 'P2', 'source': 'uniprot_obsolete'}],
-                [],
+                [{'id': 'X3', 'source': 'ensembl_PRO'}],
             ],
         },
         schema={'id': pl.String, 'proteinIds': pl.List(protein)},
@@ -77,5 +77,6 @@ def test_chembl_accession_lookup():
         ('ENSG2', 'ENSG2'),
         ('ENSG3', 'ENSG3'),
         ('ENSG1', 'P1'),
+        ('ENSG2', 'P2'),
         ('ENSG1', 'Q1'),
     ]
