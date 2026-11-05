@@ -24,19 +24,19 @@
     "description": "Posterior probability that both traits are associated and share a causal variant (H4)"
   },
   {
-    "id": "leftStudyLocusId",
-    "description": "Study-locus identifier for left-side overlapping signal",
-    "foreign_key": "credible_set/studyLocusId",
+    "id": "leftLocusId",
+    "description": "Identifier of the credible set of the left-side overlapping signal",
+    "foreign_key": "credible_set/id",
     "isPrimaryKey": true
   },
   {
     "id": "numberColocalisingVariants",
-    "description": "Number of variants intersecting between two overlapping study-loci"
+    "description": "Number of variants shared by the two colocalising credible sets"
   },
   {
-    "id": "rightStudyLocusId",
-    "description": "Study-locus identifier for right-side overlapping signal",
-    "foreign_key": "credible_set/studyLocusId",
+    "id": "rightLocusId",
+    "description": "Identifier of the credible set of the right-side overlapping signal",
+    "foreign_key": "credible_set/id",
     "isPrimaryKey": true
   },
   {
