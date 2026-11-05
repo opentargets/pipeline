@@ -11,6 +11,7 @@ steps:
         {spark.executor.memory: '22g', spark.executor.memoryOverhead: '4g', spark.executor.cores: '4', spark.memory.fraction: '0.8', spark.memory.storageFraction: '0.2'}
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.credible_set_variant_path: '{{release_uri}}/output/credible_set_variant'
       # OUTPUTS
       step.coloc_path: '{{release_uri}}/output/colocalisation'
 
@@ -21,6 +22,7 @@ steps:
       +step.session.extended_spark_conf: '{spark.sql.autoBroadcastJoinThreshold:''-1''}'
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.credible_set_variant_path: '{{release_uri}}/output/credible_set_variant'
       step.variant_index_path: '{{release_uri}}/output/variant'
       step.colocalisation_path: '{{release_uri}}/output/colocalisation'
       step.study_index_path: '{{release_uri}}/output/study'
