@@ -36,8 +36,11 @@ CANDIDATE_COLUMNS = [
     'confidence',
     'statementType',
     'nctIds',
+    'pmids',
     'quote',
     'quoteNctId',
+    'quotePmid',
+    'evidenceSource',
 ]
 
 
@@ -69,6 +72,57 @@ def _linking_molecules(chembl_molecule: pl.DataFrame, clinical_report: pl.DataFr
             maximumClinicalStage=pl.coalesce('parentStage', 'ownStage'),
             drugType=pl.coalesce('parentType', 'drugType'),
         )
+    )
+
+
+def _evidence_summary(rows: pl.DataFrame) -> pl.DataFrame:
+    """The trials, papers and kind of evidence quoted by each row.
+
+    Args:
+        rows: Mechanisms with ``_row``, ``evidence`` and ``papers``.
+
+    Returns:
+        pl.DataFrame: ``_row``, ``_nct_ids``, ``_pmids`` and ``_source``.
+    """
+    quotes = (
+        rows
+        .select('_row', 'evidence')
+        .explode('evidence')
+        .select('_row', nct_id=pl.col('evidence').struct.field('nctId'), pmid=pl.col('evidence').struct.field('pmid'))
+    )
+    paper_trials = (
+        rows
+        .select('_row', 'papers')
+        .explode('papers')
+        .select('_row', pmid=pl.col('papers').struct.field('pmid'), paper_nct_id=pl.col('papers').struct.field('nctId'))
+        .drop_nulls('pmid')
+        .unique(['_row', 'pmid'], keep='first', maintain_order=True)
+    )
+    return (
+        quotes
+        .join(paper_trials, on=['_row', 'pmid'], how='left', maintain_order='left')
+        .group_by('_row', maintain_order=True)
+        .agg(
+            _nct_ids=pl
+            .concat_list(pl.col('nct_id'), pl.col('paper_nct_id'))
+            .explode()
+            .drop_nulls()
+            .str.to_uppercase()
+            .unique()
+            .sort(),
+            _pmids=pl.col('pmid').drop_nulls().cast(pl.Int64).unique().sort().cast(pl.String),
+            _has_trial=pl.col('nct_id').is_not_null().any(),
+            _has_paper=pl.col('pmid').is_not_null().any(),
+        )
+        .with_columns(
+            _source=pl
+            .when(pl.col('_has_trial') & pl.col('_has_paper'))
+            .then(pl.lit('both'))
+            .when(pl.col('_has_paper'))
+            .then(pl.lit('publication'))
+            .otherwise(pl.lit('trial'))
+        )
+        .drop('_has_trial', '_has_paper')
     )
 
 
@@ -140,11 +194,15 @@ def build_candidates(
     grounded = ground_mechanisms(kept.with_columns(kept=pl.lit(True)), index, class_level_genes).filter(
         pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level')
     )
-    cited = pl.col('evidence').list.eval(pl.element().struct.field('nctId').str.to_uppercase())
-    return (
+    rows = (
         grounded
         .join(links, on='drugName', how='inner', maintain_order='left')
         .join(family, on='parentChemblId', how='left', maintain_order='left')
+        .with_row_index('_row')
+    )
+    return (
+        rows
+        .join(_evidence_summary(rows), on='_row', how='left', maintain_order='left')
         .select(
             'parentChemblId',
             pl.coalesce('chemblIds', pl.concat_list('parentChemblId')).alias('chemblIds'),
@@ -158,9 +216,12 @@ def build_candidates(
             mechanismOfAction='mechanismOfAction',
             confidence='confidence',
             statementType='statementType',
-            nctIds=cited.list.unique().list.sort(),
+            nctIds=pl.col('_nct_ids').fill_null([]),
+            pmids=pl.col('_pmids').fill_null([]),
             quote=pl.col('evidence').list.first().struct.field('quote'),
-            quoteNctId=cited.list.first(),
+            quoteNctId=pl.col('evidence').list.first().struct.field('nctId').str.to_uppercase(),
+            quotePmid=pl.col('evidence').list.first().struct.field('pmid'),
+            evidenceSource=pl.col('_source').fill_null('trial'),
         )
         .select(CANDIDATE_COLUMNS)
     )

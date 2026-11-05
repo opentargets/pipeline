@@ -550,8 +550,11 @@ CANDIDATE_SCHEMA = {
     'confidence': pl.Float64,
     'statementType': pl.String,
     'nctIds': pl.List(pl.String),
+    'pmids': pl.List(pl.String),
     'quote': pl.String,
     'quoteNctId': pl.String,
+    'quotePmid': pl.String,
+    'evidenceSource': pl.String,
 }
 
 
@@ -570,8 +573,11 @@ def candidate(**overrides: object) -> dict:
         'confidence': 0.9,
         'statementType': 'explicit',
         'nctIds': ['NCT01', 'NCT02'],
+        'pmids': [],
         'quote': 'inhibits K',
         'quoteNctId': 'NCT01',
+        'quotePmid': None,
+        'evidenceSource': 'trial',
     }
     return row | overrides
 
@@ -646,6 +652,37 @@ class TestMergeAact:
         assert merged.schema == chembl.schema
         assert merged.height == chembl.height + 1
         assert merged.head(chembl.height).equals(chembl)
+
+    def test_merge_adds_pubmed_reference_after_clinical_trials(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(pmids=['9', '100'], quote='paper says', quoteNctId=None, quotePmid='9', evidenceSource='both'),
+        )
+        assert merged.tail(1).to_dicts()[0]['references'] == [
+            {
+                'source': 'ClinicalTrials',
+                'ids': ['NCT01', 'NCT02'],
+                'urls': ['https://clinicaltrials.gov/study/NCT01', 'https://clinicaltrials.gov/study/NCT02'],
+            },
+            {
+                'source': 'PubMed',
+                'ids': ['9', '100'],
+                'urls': ['http://europepmc.org/abstract/MED/9', 'http://europepmc.org/abstract/MED/100'],
+            },
+        ]
+        assert merged.schema == chembl.schema
+
+    def test_merge_trial_only_rows_have_one_reference(self, chembl: pl.DataFrame) -> None:
+        legacy = candidates_frame(candidate()).drop('pmids', 'quotePmid', 'evidenceSource')
+        for frame in (candidates_frame(candidate()), legacy):
+            merged, _ = merge_aact(chembl, frame, 0.8, ['APPROVAL'])
+            references = merged.tail(1).to_dicts()[0]['references']
+            assert [r['source'] for r in references] == ['ClinicalTrials']
+
+    def test_side_file_has_paper_columns(self, chembl: pl.DataFrame) -> None:
+        _, report = self.merge(chembl, candidate(pmids=['9'], quotePmid='9', quoteNctId=None, evidenceSource='both'))
+        assert {'pmids', 'quotePmid', 'evidenceSource'} <= set(report.columns)
+        assert report.row(0, named=True)['pmids'] == ['9']
 
     def test_duplicate_gene_set_keeps_the_most_confident(self, chembl: pl.DataFrame) -> None:
         merged, report = self.merge(
