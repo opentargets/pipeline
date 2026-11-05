@@ -124,7 +124,6 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
     - STUDY_TYPE_MISMATCH: the study is in the index, and the source `studyType` differs from the
       study's.
-    - FLAGGED_STUDY: the study carries at least one quality control flag.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
       SUMSTATS_NOT_AVAILABLE, so its summary statistics should give the set instead.
     - MISSING_STUDY: the study is not in the study index.
@@ -163,7 +162,6 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
         .join(lookup, on='studyId', how='left')
         .pipe(flag_rows, ~pl.col('studyType').is_in([t.value for t in StudyType]), CredibleSetFlag.INVALID_STUDY_TYPE)
         .pipe(flag_rows, mismatch, CredibleSetFlag.STUDY_TYPE_MISMATCH)
-        .pipe(flag_rows, pl.col('_study_qc').list.len() > 0, CredibleSetFlag.FLAGGED_STUDY)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
         .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)
         .with_columns(pl.coalesce('studyType', '_study_type').alias('studyType'))

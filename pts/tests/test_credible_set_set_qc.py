@@ -126,7 +126,6 @@ def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
         CredibleSetFlag.IN_MHC,
         CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH,
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
-        CredibleSetFlag.FLAGGED_STUDY,
         CredibleSetFlag.STUDY_TYPE_MISMATCH,
     }
     assert result['studyType'].item() == 'eqtl'
@@ -193,11 +192,10 @@ def test_invalid_study_type(source_type: str, invalid: bool) -> None:
     assert (CredibleSetFlag.INVALID_STUDY_TYPE in result['qualityControls'].item()) is invalid
 
 
-def test_a_set_of_a_flagged_study_is_flagged() -> None:
-    flagged = _with_study(_set(studyId='s', studyType='gwas'), _studies(('s', 'gwas', [STUDY_FLAGGED])))
-    clean = _with_study(_set(studyId='s', studyType='gwas'), _studies(('s', 'gwas', [])))
-    assert CredibleSetFlag.FLAGGED_STUDY in flagged['qualityControls'].item()
-    assert CredibleSetFlag.FLAGGED_STUDY not in clean['qualityControls'].item()
+def test_the_flags_of_a_study_leave_its_sets_unflagged() -> None:
+    """The study's own flags are shown with the study; its sets do not repeat them."""
+    result = _with_study(_set(studyId='s', studyType='gwas'), _studies(('s', 'gwas', [STUDY_FLAGGED])))
+    assert result['qualityControls'].to_list() == [[]]
 
 
 @pytest.mark.parametrize(
