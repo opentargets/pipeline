@@ -191,7 +191,7 @@ def flag_missing_pvalue(frame: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def flag_missing_sample_size(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants without a sample size; the rescaling falls back to the study sample size."""
+    """Flag variants without a sample size; metadata only, as the rescaled effect size uses the study `nSamples`."""
     return flag_rows(frame, pl.col('sampleSize').is_null(), CredibleSetVariantFlag.MISSING_SAMPLE_SIZE)
 
 
