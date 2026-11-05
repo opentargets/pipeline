@@ -87,13 +87,19 @@ def test_confidence(method: str, flags: list[str], confidence: int) -> None:
 
 
 def test_typing_valid_sets_rejects_a_chromosome_outside_the_enum() -> None:
-    sets = pl.LazyFrame({'chromosome': ['23'], 'fineMappingMethod': ['PICS']})
+    sets = pl.LazyFrame({'chromosome': ['23'], 'studyType': ['gwas'], 'fineMappingMethod': ['PICS']})
+    with pytest.raises(pl.exceptions.InvalidOperationError):
+        type_valid_sets(sets).collect()
+
+
+def test_typing_valid_sets_rejects_a_study_type_outside_the_enum() -> None:
+    sets = pl.LazyFrame({'chromosome': ['1'], 'studyType': ['customqtl'], 'fineMappingMethod': ['PICS']})
     with pytest.raises(pl.exceptions.InvalidOperationError):
         type_valid_sets(sets).collect()
 
 
 def test_typing_valid_sets_rejects_a_finemapping_method_outside_the_enum() -> None:
-    sets = pl.LazyFrame({'chromosome': ['1'], 'fineMappingMethod': ['SuSie']})
+    sets = pl.LazyFrame({'chromosome': ['1'], 'studyType': ['gwas'], 'fineMappingMethod': ['SuSie']})
     with pytest.raises(pl.exceptions.InvalidOperationError):
         type_valid_sets(sets).collect()
 

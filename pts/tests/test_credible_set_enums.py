@@ -1,5 +1,6 @@
 """The vocabularies of the credible set stages match gentropy and the PRDs."""
 
+from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 
 
@@ -21,3 +22,17 @@ def test_chromosomes_are_listed_in_genome_order() -> None:
 def test_mhc_matches_gentropy() -> None:
     mhc = KnownGenomicRegion.MHC.value
     assert (mhc.chromosome, mhc.start, mhc.end) == (Chromosome.CHR_6, 25726063, 33400556)
+
+
+def test_study_types_match_gentropy() -> None:
+    assert [study_type.value for study_type in StudyType] == [
+        'gwas',
+        'eqtl',
+        'pqtl',
+        'sqtl',
+        'tuqtl',
+        'sceqtl',
+        'scpqtl',
+        'scsqtl',
+        'sctuqtl',
+    ]

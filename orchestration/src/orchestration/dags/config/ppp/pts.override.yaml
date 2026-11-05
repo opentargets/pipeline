@@ -117,7 +117,13 @@ steps:
           transformer: credible_set.set_qc
           source:
             credible_set: input/${each}/credible_set
+            study: output/study
           destination: intermediate/qc/${each}/credible_set
+          settings:
+            allowed_fm_methods:
+              - PICS
+              - SuSiE
+              - SuSiE-inf
 
         - name: transform qc credible set variants ${each}
           transformer: credible_set.variant_qc
@@ -183,6 +189,7 @@ steps:
           - SUBSIGNIFICANT_FLAG
           - LD_CLUMPED
           - WINDOW_CLUMPED
+          - STUDY_TYPE_MISMATCH
         # ABNORMAL_PIP is not listed: sets with abnormal PIP sums are flagged and kept.
         csv_set_invalid_qc_reasons:
           - INVALID_CS_ID

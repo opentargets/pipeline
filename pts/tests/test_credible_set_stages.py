@@ -50,6 +50,11 @@ def _run_stages(root: Path) -> None:
     def path(name: str) -> str:
         return str(root / name)
 
+    studies = [
+        {'studyId': rows[0]['studyId'], 'studyType': 'gwas', 'qualityControls': []} for rows, _ in SOURCES.values()
+    ]
+    study_schema = {'studyId': pl.String, 'studyType': pl.String, 'qualityControls': pl.List(pl.String)}
+    _write(studies, pl.Schema(study_schema), root / 'output/study')
     for source, (sets, variants) in SOURCES.items():
         _write(sets, credible_set_schema, root / f'input/gwas/{source}/credible_set')
         _write(variants, credible_set_variant_schema, root / f'input/gwas/{source}/credible_set_variant')
@@ -60,7 +65,7 @@ def _run_stages(root: Path) -> None:
             config=config,
         )
         set_qc(
-            source={'credible_set': path(f'input/gwas/{source}/credible_set')},
+            source={'credible_set': path(f'input/gwas/{source}/credible_set'), 'study': path('output/study')},
             destination=path(f'intermediate/qc/gwas/{source}/credible_set'),
             settings={},
             config=config,
