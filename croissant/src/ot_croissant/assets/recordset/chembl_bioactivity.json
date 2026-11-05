@@ -1,16 +1,16 @@
 [
   {
     "id": "actionTypes",
-    "description": "Action types (e.g., INHIBITOR) of the curated mechanisms of action of the drug on any target of the measurement, from the drug mechanism of action dataset. Empty where the drug has no mechanism of action on these targets"
+    "description": "Action types (e.g., INHIBITOR) of the curated mechanisms of action of the drug on this target, from the drug mechanism of action dataset. Empty where the drug has no mechanism of action on it"
   },
   {
     "id": "activityId",
-    "description": "ChEMBL activity identifier, unique to each measurement",
+    "description": "ChEMBL activity identifier of the measurement. With targetId, identifies the row: a measurement on a protein complex has one row per target it is credited to",
     "isPrimaryKey": true
   },
   {
     "id": "activityOutcome",
-    "description": "Outcome the screening centre recorded for a PubChem BioAssay measurement: active, inactive or inconclusive. A potency fitted to a curve judged inactive or inconclusive still has a pChEMBL value. Empty for other sources"
+    "description": "Outcome the depositor recorded for the measurement: active, inactive or inconclusive. Recorded mostly for PubChem BioAssay screens, and for a few other datasets (e.g., a proteomics study). A potency fitted to a curve judged inactive or inconclusive still has a pChEMBL value. Empty where no outcome is recorded"
   },
   {
     "id": "assayActionType",
@@ -30,19 +30,15 @@
   },
   {
     "id": "assayType",
-    "description": "ChEMBL assay type: B (binding) or F (functional)"
-  },
-  {
-    "id": "assayVariantMutation",
-    "description": "Mutation of the target protein used in the assay"
+    "description": "ChEMBL assay type: B (binding), F (functional) or U (unclassified)"
   },
   {
     "id": "complexFlag",
-    "description": "Whether the target has several components and no binding site, so the measurement cannot be assigned to a single one"
+    "description": "Whether the measurement is credited to more than one target, because the ChEMBL target is a complex or family with no single binding-site gene, or its protein maps to several genes"
   },
   {
     "id": "confidenceScore",
-    "description": "ChEMBL confidence (0-9) that the assay target is correctly assigned: 9, 7 and 5 for the target itself, 8, 6 and 4 for a homologue"
+    "description": "ChEMBL confidence (0-9) in the assignment of the assay to its target: 9, 7 and 5 when the assay used the human protein itself; 8, 6 and 4 when ChEMBL could not confirm that, usually because the assay names no organism, sometimes because it used another species (see assayOrganism). Lower scores (e.g., 2, a subcellular fraction) are rare"
   },
   {
     "id": "docType",
@@ -51,10 +47,6 @@
   {
     "id": "documentId",
     "description": "ChEMBL identifier of the source document"
-  },
-  {
-    "id": "doi",
-    "description": "DOI of the source document"
   },
   {
     "id": "drugFromSourceId",
@@ -86,37 +78,26 @@
     "description": "PubMed identifier of the source document"
   },
   {
-    "id": "standardType",
+    "id": "standardMeasurementType",
     "description": "Standardised type of the measurement (e.g., IC50)"
   },
   {
-    "id": "standardUnits",
-    "description": "Units of the standardised value (e.g., nM)"
-  },
-  {
-    "id": "standardValue",
-    "description": "Standardised value of the measurement"
-  },
-  {
-    "id": "targetComponents",
-    "description": "Protein components of the ChEMBL target that map to an Open Targets target: one entry per component and target it maps to"
-  },
-  {
-    "id": "targetComponents/inBindingSite",
-    "description": "Whether ChEMBL records the component in the binding site of the target"
-  },
-  {
-    "id": "targetComponents/targetId",
-    "description": "Open Targets target identifier of the component",
-    "foreign_key": "target/id"
-  },
-  {
-    "id": "targetComponents/uniprotId",
-    "description": "UniProt accession of the component"
+    "id": "standardMeasurementValue",
+    "description": "Standardised value of the measurement, in nM"
   },
   {
     "id": "targetFromSourceId",
     "description": "ChEMBL target identifier"
+  },
+  {
+    "id": "targetId",
+    "description": "Open Targets target credited with the measurement: the gene of a binding-site component where ChEMBL records one, otherwise every gene of the ChEMBL target",
+    "isPrimaryKey": true,
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "variantFromSource",
+    "description": "Mutation of the target protein used in the assay, as ChEMBL records it (e.g., V600E). Empty for the wild type or where ChEMBL names no mutation"
   },
   {
     "id": "year",

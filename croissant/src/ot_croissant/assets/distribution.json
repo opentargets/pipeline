@@ -77,7 +77,7 @@
       "Drug",
       "Target"
     ],
-    "description": "Bioactivity measurements from ChEMBL 37 with a pChEMBL value: affinity, inhibition and functional potency of molecules against human protein targets, mapped to Ensembl gene identifiers. Targeted protein degradation measurements are not included"
+    "description": "Bioactivity measurements from ChEMBL 37 with a pChEMBL value: affinity, inhibition and functional potency of molecules against human protein targets, mapped to Ensembl gene identifiers, one row per measurement and target. Measurements from homologue assays are included, flagged by confidenceScore. Targeted protein degradation measurements are not included"
   },
   {
     "id": "clinical_indication",

@@ -2,12 +2,6 @@
 
 import polars as pl
 
-target_component_fields = {
-    'uniprotId': pl.String(),
-    'targetId': pl.String(),
-    'inBindingSite': pl.Boolean(),
-}
-
 drug_fields = {
     'drugFromSourceId': pl.String(),
     'drugId': pl.String(),
@@ -17,17 +11,16 @@ document_fields = {
     'documentId': pl.String(),
     'docType': pl.String(),
     'pubmedId': pl.Int64(),
-    'doi': pl.String(),
     'year': pl.Int32(),
 }
 
 chembl_bioactivity_schema = pl.Schema({
     'activityId': pl.Int64(),
+    'targetId': pl.String(),
     **drug_fields,
     'pchemblValue': pl.Float64(),
-    'standardType': pl.String(),
-    'standardValue': pl.Float64(),
-    'standardUnits': pl.String(),
+    'standardMeasurementType': pl.String(),
+    'standardMeasurementValue': pl.Float64(),
     'measurementClass': pl.String(),
     'activityOutcome': pl.String(),
     'assayActionType': pl.String(),
@@ -39,10 +32,10 @@ chembl_bioactivity_schema = pl.Schema({
     'assayDescription': pl.String(),
     'assayOrganism': pl.String(),
     'confidenceScore': pl.Int16(),
-    'assayVariantMutation': pl.String(),
+    'variantFromSource': pl.String(),
     'targetFromSourceId': pl.String(),
-    'targetComponents': pl.List(pl.Struct(target_component_fields)),
     'complexFlag': pl.Boolean(),
     **document_fields,
 })
-"""output/chembl_bioactivity: one row per non-degradation ChEMBL activity with a pChEMBL value."""
+"""output/chembl_bioactivity: one row per non-degradation ChEMBL activity with a pChEMBL value and
+Open Targets target it credits, keyed by (activityId, targetId)."""
