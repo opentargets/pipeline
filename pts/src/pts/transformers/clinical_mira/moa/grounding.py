@@ -185,7 +185,9 @@ def resolve(label: str, index: pl.DataFrame) -> list[str]:
     return _resolve(label, _to_lookup(index.filter(pl.col('label') == normalise_label(label))))
 
 
-def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataFrame:
+def ground_mechanisms(
+    mechanisms: pl.DataFrame, index: pl.DataFrame, class_level_genes: int = CLASS_LEVEL_GENES
+) -> pl.DataFrame:
     """Add ``targetIds``, ``grounding`` and ``class_level`` to the mechanisms.
 
     ``grounding`` is ``source`` when the name the text uses resolves, ``suggestion`` when only
@@ -250,4 +252,4 @@ def ground_mechanisms(mechanisms: pl.DataFrame, index: pl.DataFrame) -> pl.DataF
             [[symbol_of.get(g, g).upper() for g in genes] for genes in target_ids], dtype=pl.List(pl.String)
         ),
         grounding=pl.Series(grounding, dtype=pl.String),
-    ).with_columns(class_level=pl.col('targetIds').list.len() > CLASS_LEVEL_GENES)
+    ).with_columns(class_level=pl.col('targetIds').list.len() > class_level_genes)

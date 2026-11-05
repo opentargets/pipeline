@@ -45,8 +45,12 @@ def _phase_group(stage: pl.Expr) -> pl.Expr:
     )
 
 
-def link_pools(pools: pl.DataFrame, clinical_report: pl.DataFrame, molecule: pl.DataFrame) -> pl.DataFrame:
+def link_pools(
+    pools: pl.DataFrame, clinical_report: pl.DataFrame, molecule: pl.DataFrame, link_share: float = LINK_SHARE
+) -> pl.DataFrame:
     """Link each pool to a ChEMBL drug, its maximum clinical stage and its drug type.
+
+    A pool links when one drug covers at least ``link_share`` of its single-drug trials.
 
     Returns:
         pl.DataFrame: ``pool_id``, ``drugId``, ``link`` (``linked``, ``ambiguous`` or
@@ -85,7 +89,7 @@ def link_pools(pools: pl.DataFrame, clinical_report: pl.DataFrame, molecule: pl.
             link=pl
             .when(pl.col('share').is_null())
             .then(pl.lit('unlinked'))
-            .when(pl.col('share') >= LINK_SHARE)
+            .when(pl.col('share') >= link_share)
             .then(pl.lit('linked'))
             .otherwise(pl.lit('ambiguous')),
         )

@@ -6,10 +6,10 @@ import pytest
 from pts.schemas.disease import schema as disease_index_schema
 from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
 from pts.transformers.drug_molecule import (
-    _compute_max_phase_per_drug,
     _generate_description,
     _join_semantic,
     _process_clinical_report_indications,
+    compute_max_phase_per_drug,
     process_drug_index,
 )
 
@@ -170,20 +170,20 @@ def _by_id(frame: pl.DataFrame, column: str) -> dict:
     return dict(zip(frame['id'].to_list(), frame[column].to_list(), strict=True))
 
 
-# --- Tests for _compute_max_phase_per_drug ---
+# --- Tests for compute_max_phase_per_drug ---
 
 
 class TestComputeMaxPhasePerDrug:
     def test_basic_max_phase(self, clinical_report_df):
         """CHEMBL1 has APPROVAL and PHASE_3, so the max is APPROVAL."""
-        stages = _by_id(_compute_max_phase_per_drug(clinical_report_df), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(clinical_report_df), 'maximumClinicalStage')
         assert stages['CHEMBL1'] == 'APPROVAL'
         assert stages['CHEMBL2'] == 'PHASE_3'
         assert stages['CHEMBL3'] == 'PHASE_1'
 
     def test_null_drug_ids_are_excluded(self, clinical_report_df):
         """Drugs with a null drugId should not appear in the results."""
-        result = _compute_max_phase_per_drug(clinical_report_df)
+        result = compute_max_phase_per_drug(clinical_report_df)
         assert result['id'].null_count() == 0
         assert 'CHEMBL_MISSING' not in result['id'].to_list()
 
@@ -195,7 +195,7 @@ class TestComputeMaxPhasePerDrug:
             schema=CLINICAL_REPORT_SCHEMA,
             orient='row',
         )
-        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(report), 'maximumClinicalStage')
         assert stages['CHEMBL_W'] == 'APPROVAL'
 
     def test_unrecognised_stage_falls_back_to_unknown(self):
@@ -205,7 +205,7 @@ class TestComputeMaxPhasePerDrug:
             schema=CLINICAL_REPORT_SCHEMA,
             orient='row',
         )
-        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(report), 'maximumClinicalStage')
         assert stages['CHEMBL_U'] == 'UNKNOWN'
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, MOA, STOP_REASONS
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
 
 PIS_CONFIG = Path(__file__).resolve().parents[2] / 'pis' / 'config.yaml'
@@ -48,6 +48,7 @@ def test_pinned_tags_equal_the_code() -> None:
         assert scratchpad.get(key) == expected, f'set {key} in pis/config.yaml to {expected}'
     expected = EXTRACTION.release_tag()
     assert scratchpad.get('extraction_tag') == expected, f'set extraction_tag in pis/config.yaml to {expected}'
+    assert scratchpad.get('moa_tag') == MOA.tag(), f'set moa_tag in pis/config.yaml to {MOA.tag()}'
 
 
 def test_release_copy_paths_use_the_pinned_tags() -> None:
@@ -82,4 +83,15 @@ def test_release_copies_the_extraction_of_the_pinned_tag() -> None:
     scratchpad = _scratchpad()
     directory = f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
     sources = _copy_sources()['input/clinical_report/aact_trial_extraction']
+    assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
+
+
+def test_release_copies_the_moa_of_the_pinned_tag() -> None:
+    """The MoA snapshot the release copies is the one directory named by the pinned moa tag."""
+    scratchpad = _scratchpad()
+    directory = (
+        f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
+        f'/moa/{scratchpad["moa_tag"]}'
+    )
+    sources = _copy_sources()['input/drug_mechanism_of_action/aact_moa']
     assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
