@@ -25,7 +25,7 @@ run_name: "sz/platform-2612-2"
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.12.0rc26.dev2.run-credible-set-v4-coloc.a7a0adc"
-pts_version: "26.12.0rc39.dev3.run-credible-set-v4-coloc.4713be2"
+pts_version: "26.12.0rc39.dev4.run-credible-set-v4-coloc.9fc74ca"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 # 4.0.0-rc.2 reads the credible sets as CredibleSet and CredibleSetVariant.
@@ -517,9 +517,6 @@ steps:
       - pis_gwas_ppp
       - pis_molqtl_ppp
   pts_credible_set:
-    # validation sorts every credible set variant in genome order, which spills past the default vm
-    machine_type: n2d-standard-64
-    disk_size: 1000
     depends_on:
       - pts_study
   pts_credible_set_annotation:

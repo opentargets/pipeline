@@ -59,8 +59,8 @@ def test_polars_disk_budget_is_half_the_work_disk(dag_bag, config: UnifiedPipeli
         assert int(task.container_env['POLARS_OOC_DISK_BUDGET_MB']) == task.work_disk_size_gb * 1000 // 2, task.task_id
 
 
-def test_credible_set_validation_runs_on_a_large_vm(dag_bag) -> None:
-    """Validation sorts every credible set variant in genome order, which spills past the default vm."""
+def test_credible_set_validation_runs_on_the_default_vm(dag_bag, config: UnifiedPipelineConfig) -> None:
+    """Validation reads each input once and writes without sorting, so the shared vm holds it."""
     task = dag_bag.dags['unified_pipeline'].get_task('pts_credible_set.run_pts_credible_set')
-    assert task.machine_type == 'n2d-standard-64'
-    assert task.work_disk_size_gb == 1000
+    assert task.machine_type == config.pts_machine_type
+    assert task.work_disk_size_gb == config.pts_disk_size
