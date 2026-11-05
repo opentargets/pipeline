@@ -16,7 +16,7 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "sz/platform-2612-1"
+run_name: "sz/platform-2612-2"
 
 # Pipeline package versions
 #
@@ -517,6 +517,9 @@ steps:
       - pis_gwas_ppp
       - pis_molqtl_ppp
   pts_credible_set:
+    # validation sorts every credible set variant in genome order, which spills past the default vm
+    machine_type: n2d-standard-64
+    disk_size: 1000
     depends_on:
       - pts_study
   pts_credible_set_annotation:

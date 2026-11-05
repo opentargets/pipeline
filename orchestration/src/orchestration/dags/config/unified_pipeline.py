@@ -177,14 +177,16 @@ class UnifiedPipelineConfig:
         Polars 2 spills to disk when a query outgrows its memory budget. By default
         it spills into the OS temp dir, which on these vms is the 30 GB boot disk: a
         spill fills it and the step can hang instead of failing. Point it at the
-        work disk instead (polars creates the directory), and pin the disk budget
-        explicitly rather than rely on the polars default.
+        work disk instead (polars creates the directory), and set the disk budget to
+        half of the step's work disk, so a step given a larger disk can spill into it
+        and the other half holds the step's own data.
         """
+        work_disk_size = self.step_definition(step_name).get('disk_size') or self.pts_disk_size
         return {
             'PTS_STEP': step_name.removeprefix('pts_'),
             'PTS_CONFIG_PATH': '/config.yaml',
             'POLARS_OOC_SPILL_DIR': f'{self.pts.config["work_path"]}/.polars-spill',
-            'POLARS_OOC_DISK_BUDGET_MB': '64000',
+            'POLARS_OOC_DISK_BUDGET_MB': str(work_disk_size * 1000 // 2),
         }
 
     def steps(self, prefix: str = '') -> list[str]:
