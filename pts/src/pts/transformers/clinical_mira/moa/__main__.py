@@ -4,6 +4,8 @@ Each subcommand is one stage. It reads the files earlier stages wrote to ``--run
 the inputs its own flags name, and writes its results back to ``--run-dir``::
 
     texts -> pools -> link -> pilot -> extract -> ground -> judge -> evaluate
+
+``qc`` is separate: it checks a finished release.
 """
 
 from __future__ import annotations
@@ -16,7 +18,17 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 from loguru import logger
 
-from pts.transformers.clinical_mira.moa import benchmark, grounding, judge, pilot, pooling, quotes, report, vertex
+from pts.transformers.clinical_mira.moa import (
+    benchmark,
+    grounding,
+    judge,
+    pilot,
+    pooling,
+    qc,
+    quotes,
+    report,
+    vertex,
+)
 from pts.transformers.clinical_mira.moa.claude import run_batch_cached
 from pts.transformers.clinical_mira.moa.llm import run_cached
 from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict, MoaExtraction, load_prompt
@@ -270,6 +282,11 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
     logger.info(f'evaluate: report at {run / "report.md"}')
 
 
+def cmd_qc(_run: Path, args: argparse.Namespace) -> None:
+    go = qc.run_qc(args.release, args.without, args.out, args.min_confidence, args.exclude_stages)
+    logger.info(f'qc: {go}')
+
+
 def _usage(cache_path: Path) -> dict[str, int]:
     """Sum the token counts recorded in a cache (Claude batches record them; other providers do not)."""
     totals = {'requests': 0, 'with_usage': 0}
@@ -335,6 +352,14 @@ def build_parser() -> argparse.ArgumentParser:
         sub_parser.add_argument('--vertex-project', default=vertex.DEFAULT_PROJECT)
         sub_parser.add_argument('--vertex-location', default=vertex.DEFAULT_LOCATION)
 
+    qc_cmd = commands.add_parser('qc')
+    qc_cmd.add_argument('--release', required=True, type=Path, help='release output root with the aact source')
+    qc_cmd.add_argument('--without', required=True, type=Path, help='release output root without the aact source')
+    qc_cmd.add_argument('--out', required=True, type=Path)
+    qc_cmd.add_argument('--min-confidence', type=float, default=0.80)
+    qc_cmd.add_argument('--exclude-stages', nargs='*', default=['APPROVAL'])
+    qc_cmd.set_defaults(handler=cmd_qc, run_dir=None)
+
     command('evaluate', cmd_evaluate).add_argument('--seed', type=int, default=0)
     return parser
 
@@ -342,7 +367,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     """Run one stage."""
     args = build_parser().parse_args(argv)
-    args.run_dir.mkdir(parents=True, exist_ok=True)
+    if args.run_dir is not None:
+        args.run_dir.mkdir(parents=True, exist_ok=True)
     args.handler(args.run_dir, args)
 
 
