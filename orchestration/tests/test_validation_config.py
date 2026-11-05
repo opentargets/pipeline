@@ -5,7 +5,7 @@ import pytest
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 PPP_ONLY = ['sle_map', 'otar2077/microglia', 'eQTLGen/coeqtl', 'deCODE_proteomics']
-BOTH = ['eqtl_catalogue/r8', 'ukb_ppp_eur']
+BOTH = ['eqtl_catalogue', 'ukb_ppp_eur']
 
 
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
@@ -17,9 +17,9 @@ def test_validation_inputs_follow_the_run(monkeypatch, ppp, step, kind):
     [task] = config.pts.config['steps'][step]
     sources = task['source'][kind]
     for name in PPP_ONLY:
-        assert (f'input/molqtl/{kind}/{name}' in sources) is ppp
+        assert (f'input/molqtl/{name}/{kind}' in sources) is ppp
     for name in BOTH:
-        assert f'input/molqtl/{kind}/{name}' in sources
+        assert f'input/molqtl/{name}/{kind}' in sources
     assert task['source']['target'] == 'output/target'
     if step == 'credible_set':
         assert task['source']['disease'] == 'output/disease'
