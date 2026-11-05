@@ -1,13 +1,14 @@
 """Quality flags and confidence classes of the CredibleSet and CredibleSetVariant datasets."""
 
+from __future__ import annotations
+
 from enum import IntEnum, StrEnum
 
 
 class CredibleSetFlag(StrEnum):
     """Quality control flags recorded on credible sets.
 
-    The members shared with gentropy `StudyLocusQualityCheck` keep its text, which the
-    sources already write.
+    A flag the sources already write keeps the text they write.
     """
 
     WINDOW_CLUMPED = 'Explained by a more significant variant in the same window'
@@ -43,7 +44,7 @@ class CredibleSetFlag(StrEnum):
 class CredibleSetVariantFlag(StrEnum):
     """Quality control flags recorded on credible set variants.
 
-    The members shared with gentropy `CredibleSetVariantQualityCheck` keep its text.
+    A flag the sources already write keeps the text they write.
     """
 
     EAF_FROM_SOURCE = 'Allele frequency reported by the study'
@@ -68,7 +69,7 @@ class CredibleSetVariantFlag(StrEnum):
 
 
 class CredibleSetConfidenceClasses(IntEnum):
-    """Confidence of a credible set, from its fine-mapping method and LD reference, as in gentropy."""
+    """Confidence of a credible set, from its fine-mapping method and LD reference."""
 
     FINEMAPPED_IN_SAMPLE_LD = 4
     FINEMAPPED_OUT_OF_SAMPLE_LD = 3

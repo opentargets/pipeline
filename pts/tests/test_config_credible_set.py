@@ -112,7 +112,10 @@ def test_annotation_runs_in_its_own_step_after_the_variant_index() -> None:
         'credible_set_variant': 'intermediate/validated/credible_set_variant',
         'study': 'output/study',
         'variant': 'output/variant',
+        'target': 'output/target',
+        'disease': 'output/disease',
     }
+    assert annotation['settings'] == {'trans_qtl_threshold': 5_000_000}
     assert annotation['destination'] == {
         'credible_set': 'output/credible_set',
         'credible_set_variant': 'output/credible_set_variant',

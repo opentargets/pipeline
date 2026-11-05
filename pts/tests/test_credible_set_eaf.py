@@ -8,7 +8,7 @@ import pytest
 from pts.schemas.credible_set import credible_set_variant_schema
 from pts.schemas.study import study_schema
 from pts.schemas.variant import variant_schema
-from pts.transformers.credible_set.annotation import effect_allele_frequency
+from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 
 EAF_FLAGS = {
@@ -143,3 +143,11 @@ def test_every_row_has_exactly_one_origin_flag_and_the_rows_keep_their_order() -
     assert len(rows) == 5
     assert all(len(flags & EAF_FLAGS) == 1 for _, flags in rows)
     assert [eaf for eaf, _ in rows] == pytest.approx([0.25, 0.4, 0.25, None, 0.1])
+
+
+def test_the_origin_flags_are_added_like_every_other_flag_unique_and_sorted() -> None:
+    source = CredibleSetVariantFlag.EAF_FROM_SOURCE.value
+    pip = CredibleSetVariantFlag.ABNORMAL_PIP.value
+    variants = _variants(('v', 0.3)).with_columns(pl.lit([source, pip]).alias('qualityControls'))
+    [flags] = effect_allele_frequency(variants, SETS, _studies(NFE_EAS), _index(**GNOMAD)).collect()['qualityControls']
+    assert flags.to_list() == sorted({source, pip})

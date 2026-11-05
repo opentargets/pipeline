@@ -196,3 +196,16 @@ def test_variants_are_sorted_by_chromosome_position_alleles_then_credible_set() 
         ('a', '10_1_A_T'),
         ('a', 'MT_1_A_T'),
     ]
+
+
+def test_validation_scans_each_source_dataset_once(tmp_path: Path, monkeypatch) -> None:
+    scanned: list[str] = []
+
+    def counting_scan(path: str, **options):
+        scanned.append(path)
+        return scan_dataset(path, **options)
+
+    monkeypatch.setattr(validation_module, 'scan_dataset', counting_scan)
+    sets, variants = _write_source(tmp_path)
+    _validation(tmp_path, sets, variants)
+    assert sorted(scanned) == sorted([str(sets), str(variants)])

@@ -1,18 +1,20 @@
 """Fine-mapping methods, chromosomes and known genomic regions of credible sets."""
 
+from __future__ import annotations
+
 from enum import Enum, StrEnum
 from typing import NamedTuple
 
 
 class FinemappingMethod(StrEnum):
-    """Fine-mapping methods, as gentropy `FinemappingMethod`."""
+    """Fine-mapping methods."""
 
     PICS = 'PICS'
     SUSIE = 'SuSiE'
     SUSIE_INF = 'SuSiE-inf'
 
     @classmethod
-    def susie(cls) -> tuple['FinemappingMethod', ...]:
+    def susie(cls) -> tuple[FinemappingMethod, ...]:
         """The methods of the SuSiE family."""
         return (cls.SUSIE, cls.SUSIE_INF)
 
@@ -61,6 +63,6 @@ class GenomicRegion(NamedTuple):
 
 
 class KnownGenomicRegion(Enum):
-    """Known genomic regions, as gentropy `KnownGenomicRegions`."""
+    """Known genomic regions."""
 
     MHC = GenomicRegion(Chromosome.CHR_6, 25726063, 33400556)
