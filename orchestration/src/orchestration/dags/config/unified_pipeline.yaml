@@ -24,8 +24,8 @@ run_name: "sz/platform-2612-1"
 # not git refs. A tag that does not exist there fails at
 # container pull — after the VM is up, the disk is attached and the step is being
 # billed. Every tag set here was confirmed present in Artifact Registry first.
-pis_version: "26.12.0rc26.dev1.run-credible-set-v4-coloc.8185b64"
-pts_version: "26.12.0rc39.dev1.run-credible-set-v4-coloc.8185b64"
+pis_version: "26.12.0rc26.dev2.run-credible-set-v4-coloc.a7a0adc"
+pts_version: "26.12.0rc39.dev2.run-credible-set-v4-coloc.a7a0adc"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 # 4.0.0-rc.2 reads the credible sets as CredibleSet and CredibleSetVariant.
