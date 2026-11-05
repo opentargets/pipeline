@@ -32,7 +32,7 @@ steps:
         uniprot_variants: input/evidence/uniprot_variants.json.gz
         eva: input/evidence/eva.json.gz
         pharmacogenomics: output/pharmacogenomics
-        credible_set: output/credible_set
+        credible_set_variant: intermediate/validated/credible_set_variant
         fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
         gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
         gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw
@@ -221,14 +221,19 @@ steps:
         csv_row_invalid_qc_reasons:
           - EXCEEDS_COVERAGE_95
           - ORPHAN_VARIANT
+  ##################################################################################################
 
+  #: CREDIBLE SET ANNOTATION STEP :#################################################################
+  # Runs after the variant index: the effect allele frequency comes from its gnomAD frequencies, and
+  # the variant index reads the validated variants of the credible_set step.
+  credible_set_annotation:
     - name: transform annotate credible sets
-      requires:
-        - transform validate credible sets
       transformer: credible_set.annotation
       source:
         credible_set: intermediate/validated/credible_set
         credible_set_variant: intermediate/validated/credible_set_variant
+        study: output/study
+        variant: output/variant
       destination:
         credible_set: output/credible_set
         credible_set_variant: output/credible_set_variant

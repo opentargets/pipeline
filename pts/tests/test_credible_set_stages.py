@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import Mock
 
 import polars as pl
+import pytest
 from otter.config.model import Config
 
 from pts.schemas.credible_set import (
@@ -12,6 +13,8 @@ from pts.schemas.credible_set import (
     credible_set_variant_schema,
     validated_credible_set_schema,
 )
+from pts.schemas.study import study_schema
+from pts.schemas.variant import variant_schema
 from pts.transformers.credible_set.annotation import annotation
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import set_qc
@@ -26,12 +29,37 @@ from tests.credible_set_fixtures import (
     MHC_VARIANTS,
 )
 
+UNREPORTED = {**CLEAN_VARIANTS[-1], 'effectAlleleFrequency': None}
+"""A clean variant whose source frequency is dropped, so that annotation takes it from gnomAD."""
+FIN_ADJ = 0.42
+"""The gnomAD Finnish frequency of the unreported variant in the variant index."""
+
 SOURCES = {
     'gcca': ([ALT_CONTIG_SET], ALT_CONTIG_VARIANTS),
     'gcss_pics': ([MHC_SET], MHC_VARIANTS),
-    'finngen_gwas': ([CLEAN_SET], CLEAN_VARIANTS),
+    'finngen_gwas': ([CLEAN_SET], [*CLEAN_VARIANTS[:-1], UNREPORTED]),
 }
 """Each fixture set with its variants, under the source it was staged from."""
+
+
+def _write_indexes(root: Path) -> None:
+    """The study index, every study a Finnish GWAS, and the variant index, with the unreported variant's frequency."""
+    studies = [
+        {
+            name: {
+                'studyId': sets[0]['studyId'],
+                'studyType': 'gwas',
+                'qualityControls': [],
+                'ldPopulationStructure': [{'ldPopulation': 'fin', 'relativeSampleSize': 1.0}],
+            }.get(name)
+            for name in study_schema
+        }
+        for sets, _ in SOURCES.values()
+    ]
+    _write(studies, study_schema, root / 'output/study')
+    frequencies = [{'populationName': 'fin_adj', 'alleleFrequency': FIN_ADJ}]
+    variant = {'variantId': UNREPORTED['variantId'], 'alleleFrequencies': frequencies}
+    _write([{name: variant.get(name) for name in variant_schema}], variant_schema, root / 'output/variant')
 
 
 def _write(rows: list[dict[str, Any]], schema: pl.Schema, path: Path) -> None:
@@ -50,11 +78,7 @@ def _run_stages(root: Path) -> None:
     def path(name: str) -> str:
         return str(root / name)
 
-    studies = [
-        {'studyId': rows[0]['studyId'], 'studyType': 'gwas', 'qualityControls': []} for rows, _ in SOURCES.values()
-    ]
-    study_schema = {'studyId': pl.String, 'studyType': pl.String, 'qualityControls': pl.List(pl.String)}
-    _write(studies, pl.Schema(study_schema), root / 'output/study')
+    _write_indexes(root)
     for source, (sets, variants) in SOURCES.items():
         _write(sets, credible_set_schema, root / f'input/gwas/{source}/credible_set')
         _write(variants, credible_set_variant_schema, root / f'input/gwas/{source}/credible_set_variant')
@@ -93,6 +117,8 @@ def _run_stages(root: Path) -> None:
         source={
             'credible_set': path('intermediate/validated/credible_set'),
             'credible_set_variant': path('intermediate/validated/credible_set_variant'),
+            'study': path('output/study'),
+            'variant': path('output/variant'),
         },
         destination={
             'credible_set': path('output/credible_set'),
@@ -127,6 +153,19 @@ def test_the_valid_sets_of_every_source_are_published_together(tmp_path: Path) -
     assert published_sets['id'].to_list() == [CLEAN_SET['id']]
     assert published_sets['confidence'].to_list() == [CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD]
     assert sorted(published_variants['variantId']) == sorted(v['variantId'] for v in CLEAN_VARIANTS)
+
+
+def test_published_variants_take_the_source_frequency_or_else_the_gnomad_one(tmp_path: Path) -> None:
+    _run_stages(tmp_path)
+    published = {row['variantId']: row for row in _read(tmp_path / 'output/credible_set_variant').to_dicts()}
+
+    for reported in CLEAN_VARIANTS[:-1]:
+        row = published[reported['variantId']]
+        assert row['effectAlleleFrequency'] == pytest.approx(reported['effectAlleleFrequency'])
+        assert CredibleSetVariantFlag.EAF_FROM_SOURCE in row['qualityControls']
+    row = published[UNREPORTED['variantId']]
+    assert row['effectAlleleFrequency'] == pytest.approx(FIN_ADJ)
+    assert CredibleSetVariantFlag.EAF_FROM_GNOMAD in row['qualityControls']
 
 
 def test_every_stage_writes_the_new_schemas(tmp_path: Path) -> None:
