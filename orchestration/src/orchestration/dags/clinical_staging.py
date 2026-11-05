@@ -95,6 +95,7 @@ with DAG(
                 boot_disk_size_gb=config.boot_disk_size,
                 work_disk_size_gb=config.disk_size,
                 deferrable=True,
+                execution_timeout=config.execution_timeout_for(step_name),
             )
 
             t = DeleteInstanceOperator(

@@ -6,6 +6,7 @@ Required to initialise PIS and PTS steps.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -140,6 +141,18 @@ class ClinicalStagingConfig:
         """
         return self.step_definition(step_name).get('machine_type') or self.machine_type
 
+    def execution_timeout_for(self, step_name: str) -> timedelta | None:
+        """Return how long a step may run.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            timedelta | None: The step's ``execution_timeout_hours``, or None if it declares none.
+        """
+        hours = self.step_definition(step_name).get('execution_timeout_hours')
+        return timedelta(hours=hours) if hours is not None else None
+
     def step_config(self, step_name: str) -> dict[str, Any]:
         """Return the configuration to upload for a step.
 
@@ -174,19 +187,28 @@ class ClinicalStagingConfig:
     def step_env_vars(self, step_name: str) -> dict[str, str]:
         """Return the environment variables a step's container needs.
 
-        Both applications take the same pair, under their own prefix.
+        Both applications take the same pair, under their own prefix. The step's
+        ``container_env`` is added to it.
 
         Args:
             step_name: The name of the step, in the form ``{stage}_{step}``.
 
         Returns:
             dict[str, str]: The environment variables.
+
+        Raises:
+            ValueError: If the step's ``container_env`` redefines the step or config path variable.
         """
         stage, step = step_name.split('_', 1)
-        return {
+        env = {
             f'{stage.upper()}_STEP': step,
             f'{stage.upper()}_CONFIG_PATH': '/config.yaml',
         }
+        extra = self.step_definition(step_name).get('container_env') or {}
+        clash = sorted(env.keys() & extra.keys())
+        if clash:
+            raise ValueError(f'{step_name} container_env redefines {", ".join(clash)}')
+        return {**env, **extra}
 
     def config_uri(self, step_name: str) -> str:
         """Return the URI the config for a step is uploaded to.

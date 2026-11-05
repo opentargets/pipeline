@@ -1,5 +1,6 @@
 """Tests for the clinical staging pipeline config."""
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
         'pis_aact',
         'pts_aact_trial_extraction',
         'pts_aact_trial_models',
+        'pts_aact_moa',
         'pis_clinical_mining',
         'pts_clinical_mining_models',
     ]
@@ -58,6 +60,7 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
         ('pis_aact', aact),
         ('pts_aact_trial_extraction', aact),
         ('pts_aact_trial_models', aact),
+        ('pts_aact_moa', aact),
         ('pis_clinical_mining', mining),
         ('pts_clinical_mining_models', mining),
     ]:
@@ -115,3 +118,41 @@ def test_release_reads_nothing_from_ot_team() -> None:
     assert 'ot-team' not in text
     assert 'huggingface' not in text
     assert 'aact_data' not in text
+
+
+def test_step_execution_timeout_is_read_from_the_step(config: ClinicalStagingConfig) -> None:
+    """Only a step that declares ``execution_timeout_hours`` has a timeout."""
+    assert config.execution_timeout_for('pts_aact_moa') == timedelta(hours=30)
+    for step_name in config.steps():
+        if step_name != 'pts_aact_moa':
+            assert config.execution_timeout_for(step_name) is None
+
+
+def test_step_env_vars_include_the_steps_container_env(config: ClinicalStagingConfig) -> None:
+    """A step's ``container_env`` joins the step and config path pair; other steps get the pair only."""
+    assert config.step_env_vars('pts_aact_moa') == {
+        'PTS_STEP': 'aact_moa',
+        'PTS_CONFIG_PATH': '/config.yaml',
+        'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID': 'wrkspc_01PEuYsbEifFUZBttcpwP49Q',
+        'ANTHROPIC_GOOGLE_CLOUD_PROJECT': 'open-targets-eu-dev',
+    }
+    assert config.step_env_vars('pts_aact_trial_models') == {
+        'PTS_STEP': 'aact_trial_models',
+        'PTS_CONFIG_PATH': '/config.yaml',
+    }
+
+
+def test_container_env_cannot_override_the_step_pair(config: ClinicalStagingConfig, monkeypatch) -> None:
+    """A colliding ``container_env`` key is an error."""
+    monkeypatch.setitem(config._steps['pts_aact_moa'], 'container_env', {'PTS_STEP': 'other'})
+    with pytest.raises(ValueError, match='PTS_STEP'):
+        config.step_env_vars('pts_aact_moa')
+
+
+def test_aact_moa_step_config(config: ClinicalStagingConfig) -> None:
+    """The step uploads only aact_moa, pinned to the AACT version directory."""
+    uploaded = config.step_config('pts_aact_moa')
+    assert list(uploaded['steps']) == ['aact_moa']
+    assert uploaded['release_uri'] == f'gs://clinical_staging/aact/{config.staging_version}'
+    assert config.machine_type_for('pts_aact_moa') == 'n1-highmem-8'
+    assert not config.step_definition('pts_aact_moa').get('gce_secret_files')

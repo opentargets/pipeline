@@ -41,6 +41,17 @@ steps:
       - pts_aact_trial_extraction
     machine_type: 'n2d-standard-16'
 
+  # Extracts the mechanisms of action of the drugs in the AACT trials with Claude.
+  pts_aact_moa:
+    source: aact
+    depends_on:
+      - pts_aact_trial_extraction
+    machine_type: 'n1-highmem-8'
+    execution_timeout_hours: 30
+    container_env:
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: wrkspc_01PEuYsbEifFUZBttcpwP49Q
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: open-targets-eu-dev
+
   pis_clinical_mining:
     source: clinical_mining
 

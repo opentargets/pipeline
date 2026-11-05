@@ -1,5 +1,6 @@
 """Try to parse and validate the DAGs."""
 
+from datetime import timedelta
 from typing import cast
 
 from airflow.models import DagBag
@@ -73,3 +74,22 @@ def test_clinical_report_runs_on_a_vm(dag_bag: DagBag) -> None:
         dag.get_task('pts_clinical_report.run_pts_clinical_report'),
     )
     assert run.machine_type == 'n2d-standard-16'
+
+
+def test_aact_moa_runs_after_the_extraction(dag_bag: DagBag) -> None:
+    """aact_moa waits for the extraction, runs with its timeout and the Claude workspace, and gates nothing else."""
+    dag = dag_bag.dags['clinical_staging']
+    start = dag.get_task('pts_aact_moa.upload_config_pts_aact_moa')
+    assert start.upstream_task_ids == {'pts_aact_trial_extraction.end_pts_aact_trial_extraction'}
+    run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_aact_moa.run_pts_aact_moa'))
+    assert run.execution_timeout == timedelta(hours=30)
+    assert run.container_env is not None
+    assert run.container_env['PTS_STEP'] == 'aact_moa'
+    assert run.container_env['ANTHROPIC_GOOGLE_CLOUD_PROJECT'] == 'open-targets-eu-dev'
+    assert run.machine_type == 'n1-highmem-8'
+    assert not dag.get_task('pts_aact_moa.end_pts_aact_moa').downstream_task_ids
+    other = cast(
+        ComputeEngineRunContainerizedWorkloadSensor,
+        dag.get_task('pts_aact_trial_models.run_pts_aact_trial_models'),
+    )
+    assert other.execution_timeout is None
