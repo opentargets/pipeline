@@ -53,6 +53,11 @@ class CredibleSetVariantFlag(StrEnum):
     INVALID_CS_ID = 'Credible set identifier is not a 32-character hexadecimal md5'
     EXCEEDS_COVERAGE_95 = 'Variant is outside the 95% coverage of the credible set'
     ABNORMAL_PIP = 'Credible set PIPs do not sum to the expected coverage, or a PIP is not in (0, 1]'
+    EFFECT_DIRECTION_MISMATCH = 'Reported and conditional effects have opposite signs'
+    INCOMPLETE_REPORTED_STATS = 'Only one of the reported beta and standard error is present'
+    INCOMPLETE_CONDITIONAL_STATS = 'Only one of the conditional beta and standard error is present'
+    MISSING_PVALUE = 'P-value mantissa or exponent is missing'
+    MISSING_SAMPLE_SIZE = 'Sample size is missing'
 
 
 class CredibleSetConfidenceClasses(IntEnum):

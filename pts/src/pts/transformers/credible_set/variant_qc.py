@@ -126,6 +126,66 @@ def flag_abnormal_pip(frame: pl.LazyFrame, coverage: float, pip_tolerance: float
     return flag_rows(frame, abnormal, CredibleSetVariantFlag.ABNORMAL_PIP)
 
 
+def flag_effect_direction_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose reported and conditional effects are both present and have opposite signs.
+
+    A zero effect has no sign, so it never mismatches.
+
+    Examples:
+        >>> variants = pl.LazyFrame({
+        ...     'reportedBeta': [0.2, 0.2, 0.2, 0.0],
+        ...     'conditionalBeta': [-0.1, 0.1, None, -0.1],
+        ...     'qualityControls': [[]] * 4,
+        ... })
+        >>> flag_effect_direction_mismatch(variants).collect()['qualityControls'].list.len().to_list()
+        [1, 0, 0, 0]
+    """
+    opposite = pl.col('reportedBeta').sign() * pl.col('conditionalBeta').sign() == -1
+    return flag_rows(frame, opposite, CredibleSetVariantFlag.EFFECT_DIRECTION_MISMATCH)
+
+
+def flag_incomplete_stats(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants with exactly one of the beta and standard error, for the reported and the conditional effect.
+
+    Both missing is not incomplete: the effect is simply not reported.
+
+    Examples:
+        >>> variants = pl.LazyFrame({
+        ...     'reportedBeta': [0.2, None, 0.2, None],
+        ...     'reportedStandardError': [None, 0.01, 0.01, None],
+        ...     'conditionalBeta': [None] * 4,
+        ...     'conditionalStandardError': [None] * 4,
+        ...     'qualityControls': [[]] * 4,
+        ... }, schema_overrides={'conditionalBeta': pl.Float32, 'conditionalStandardError': pl.Float32})
+        >>> flag_incomplete_stats(variants).collect()['qualityControls'].list.len().to_list()
+        [1, 1, 0, 0]
+    """
+
+    def exactly_one_missing(beta: str, standard_error: str) -> pl.Expr:
+        return pl.col(beta).is_null() != pl.col(standard_error).is_null()
+
+    return frame.pipe(
+        flag_rows,
+        exactly_one_missing('reportedBeta', 'reportedStandardError'),
+        CredibleSetVariantFlag.INCOMPLETE_REPORTED_STATS,
+    ).pipe(
+        flag_rows,
+        exactly_one_missing('conditionalBeta', 'conditionalStandardError'),
+        CredibleSetVariantFlag.INCOMPLETE_CONDITIONAL_STATS,
+    )
+
+
+def flag_missing_pvalue(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants whose p-value mantissa or exponent is missing."""
+    missing = pl.col('pValueMantissa').is_null() | pl.col('pValueExponent').is_null()
+    return flag_rows(frame, missing, CredibleSetVariantFlag.MISSING_PVALUE)
+
+
+def flag_missing_sample_size(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag variants without a sample size; the rescaling falls back to the study sample size."""
+    return flag_rows(frame, pl.col('sampleSize').is_null(), CredibleSetVariantFlag.MISSING_SAMPLE_SIZE)
+
+
 def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) -> pl.LazyFrame:
     """Add every variant QC flag; the coverage cut runs before the PIP check, which uses it."""
     return (
@@ -134,6 +194,10 @@ def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) ->
         .pipe(flag_invalid_variant_id)
         .pipe(flag_exceeds_coverage, coverage)
         .pipe(flag_abnormal_pip, coverage, pip_tolerance)
+        .pipe(flag_effect_direction_mismatch)
+        .pipe(flag_incomplete_stats)
+        .pipe(flag_missing_pvalue)
+        .pipe(flag_missing_sample_size)
     )
 
 
