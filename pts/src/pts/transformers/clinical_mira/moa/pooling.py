@@ -20,6 +20,12 @@ MOA_VOCAB = (
 )
 """Words that suggest a trial text states a mechanism."""
 
+
+def mentions_mechanism(text: pl.Expr) -> pl.Expr:
+    """Whether a text matches :py:data:`MOA_VOCAB`, case-insensitively."""
+    return text.str.contains(MOA_VOCAB)
+
+
 TRIAL_SEPARATOR = '\n\n---\n\n'
 
 CLASS_NAME = (
@@ -129,7 +135,7 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
         trials
         .join(texts.select(pl.col('id').alias('nct_id'), 'prompt'), on='nct_id', how='inner')
         .with_columns(
-            has_vocab=pl.col('prompt').str.contains(MOA_VOCAB),
+            has_vocab=mentions_mechanism(pl.col('prompt')),
             length=pl.col('prompt').str.len_chars(),
             content=pl.col('prompt').map_elements(trial_content_sha256, return_dtype=pl.String),
         )

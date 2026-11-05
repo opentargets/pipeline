@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -62,6 +63,65 @@ def record_output(
 def parse_output(output: str) -> dict[str, Any]:
     """The fields of a record's ``output``."""
     return json.loads(output)
+
+
+def carry_forward(
+    trials: pl.DataFrame, texts: pl.DataFrame, records: pl.DataFrame, tag: str, run_id: str
+) -> pl.DataFrame:
+    """Carry a drug's latest output to its changed pool when the change has no mechanism wording.
+
+    A pool is carried when it has no ``ok`` record at ``tag``, an ``ok`` record at ``tag`` exists
+    for its drug name, and every trial added or edited since the latest such record has text
+    without :py:data:`pooling.MOA_VOCAB` terms.
+
+    Args:
+        trials: Output of :py:func:`pool_trials`.
+        texts: Trial prompts, ``id`` and ``prompt``.
+        records: The record store's records.
+        tag: The tag of the records to carry from.
+        run_id: The run the carried records are written under.
+
+    Returns:
+        pl.DataFrame: Records ready for ``write_run``, with the pool's current ``trials``,
+        the previous ``extraction``, no ``usage`` and ``carried_from`` the previous content key.
+    """
+    ok = records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag)).sort(
+        'computed_at', maintain_order=True
+    )
+    done = set(ok['text'].to_list())
+    latest: dict[str, dict] = {}
+    for record in ok.to_dicts():
+        parsed = parse_output(record['output'])
+        latest[parsed['drug_name']] = {**parsed, 'content_key': record['text']}
+
+    flagged = texts.select('id', mentions=pooling.mentions_mechanism(pl.col('prompt')))
+    mentions = dict(zip(flagged['id'].to_list(), flagged['mentions'].to_list(), strict=True))
+
+    now = datetime.now(UTC)
+    rows = []
+    for pool in trials.to_dicts():
+        previous = latest.get(pool['drug_name'])
+        if pool['content_key'] in done or previous is None or pool['trials'] is None:
+            continue
+        known = {t['nct_id']: t['content_sha256'] for t in previous['trials']}
+        changed = [t['nct_id'] for t in pool['trials'] if known.get(t['nct_id']) != t['content_sha256']]
+        if any(mentions.get(nct_id, True) for nct_id in changed):
+            continue
+        rows.append({
+            'text_sha256': text_sha256(pool['content_key']),
+            'text': pool['content_key'],
+            'model': MOA.name,
+            'model_revision': tag,
+            'output': record_output(
+                pool['drug_name'], pool['trials'], previous['extraction'], None, previous['content_key']
+            ),
+            'status': 'ok',
+            'error': None,
+            'computed_at': now,
+            'run_id': run_id,
+        })
+    logger.info(f'{len(rows)} of {trials.height} pools carried forward')
+    return pl.DataFrame(rows, schema=record_schema(pl.String()))
 
 
 def _read_cache_rows(cache_uri: str, config: Config) -> dict[str, dict]:
