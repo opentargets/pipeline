@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.14"
 
 [[package]]
@@ -807,7 +807,7 @@ wheels = [
 
 [[package]]
 name = "pis"
-version = "26.12.0rc26"
+version = "26.12.0rc26.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "jq" },
