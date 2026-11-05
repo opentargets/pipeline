@@ -121,6 +121,17 @@ def test_a_set_whose_lead_row_is_excluded_loses_its_lead_and_is_excluded() -> No
     }
 
 
+def test_an_invalid_member_beyond_the_coverage_does_not_exclude_its_set() -> None:
+    invalid = CredibleSetVariantFlag.INVALID_VARIANT_ID.value
+    valid_sets, valid_variants, excluded_sets, excluded_variants = _validate(
+        _sets(('a', '1', '1_1_A_T', [])), _variants(('a', '1_1_A_T', []), ('a', '1_2_A_A', [EXCEEDS, invalid]))
+    )
+    assert valid_sets == {'a': set()}
+    assert valid_variants.keys() == {'1_1_A_T'}
+    assert excluded_sets == {}
+    assert excluded_variants == {'1_2_A_A': {EXCEEDS, invalid}}
+
+
 def test_an_orphan_variant_is_excluded_without_excluding_any_set() -> None:
     valid_sets, valid_variants, _, excluded_variants = _validate(
         _sets(('a', '1', '1_1_A_T', [])), _variants(('a', '1_1_A_T', []), ('gone', '1_9_A_T', []))
