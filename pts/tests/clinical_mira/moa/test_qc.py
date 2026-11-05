@@ -205,7 +205,7 @@ def test_diff_snapshots_ignores_unchanged_drugs():
 def test_diff_snapshots_cli_writes_csv(tmp_path, capsys):
     for name, rows in {
         'old': [('a', ['X'], 'INHIBITOR', [])],
-        'new': [('a', ['Y'], 'INHIBITOR', []), ('b', ['Z'], 'INHIBITOR', [])],
+        'new': [('a', ['Y'], 'INHIBITOR', []), ('a', ['W'], 'INHIBITOR', []), ('b', ['Z'], 'INHIBITOR', [])],
     }.items():
         (tmp_path / name).mkdir()
         _snapshot(rows).write_parquet(tmp_path / name / 'data.parquet')
@@ -219,4 +219,22 @@ def test_diff_snapshots_cli_writes_csv(tmp_path, capsys):
         str(tmp_path / 'o'),
     ])
     out = pl.read_csv(tmp_path / 'o' / 'snapshot_diff.csv').sort('drugName')
-    assert out['drugName'].to_list() == ['a', 'b']
+    assert out.rows() == [
+        ('a', 'W|INHIBITOR;Y|INHIBITOR', 'X|INHIBITOR', 0),
+        ('b', 'Z|INHIBITOR', '', 0),
+    ]
+
+
+def test_diff_snapshots_compares_null_targets_and_actions():
+    old = _snapshot([('a', None, 'INHIBITOR', []), ('b', ['X'], None, [])])
+    new = _snapshot([('a', ['X'], 'INHIBITOR', []), ('b', ['X'], 'INHIBITOR', [])])
+    diff = qc.diff_snapshots(old, new)
+    assert diff.rows() == [('a', ['X|INHIBITOR'], ['|INHIBITOR'], 0), ('b', ['X|INHIBITOR'], ['X|'], 0)]
+
+
+def test_diff_snapshots_with_empty_snapshots():
+    empty = _snapshot([])
+    full = _snapshot([('a', ['X'], 'INHIBITOR', [_paper('1')])])
+    assert qc.diff_snapshots(empty, empty).is_empty()
+    assert qc.diff_snapshots(empty, full).rows() == [('a', ['X|INHIBITOR'], [], 1)]
+    assert qc.diff_snapshots(full, empty).rows() == [('a', [], ['X|INHIBITOR'], 0)]

@@ -173,7 +173,9 @@ def _pair_sets(snapshot: pl.DataFrame) -> pl.DataFrame:
         .select(
             'drugName',
             pair=pl.concat_str(
-                pl.col('targetSymbolSuggestion').list.sort().list.join(','), pl.col('actionType'), separator='|'
+                pl.col('targetSymbolSuggestion').fill_null([]).list.sort().list.join(','),
+                pl.col('actionType').fill_null(''),
+                separator='|',
             ),
         )
         .group_by('drugName')
