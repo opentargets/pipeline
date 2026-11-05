@@ -622,14 +622,15 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flag.height)
-    source_split = {
-        source: (
-            scan_dataset(credible_set),
-            scan_dataset(credible_set_variant),
-            *validate(scan_dataset(credible_set), scan_dataset(credible_set_variant), cross_set_flag.lazy(), options),
+    source_split = {}
+    for source_name, set_path, variant_path in source_pair:
+        # one scan per dataset, shared by the integrity counts and the validation plan
+        credible_set, credible_set_variant = scan_dataset(set_path), scan_dataset(variant_path)
+        source_split[source_name] = (
+            credible_set,
+            credible_set_variant,
+            *validate(credible_set, credible_set_variant, cross_set_flag.lazy(), options),
         )
-        for source, credible_set, credible_set_variant in source_pair
-    }
     integrity_count = pl.concat([integrity_checks(source, *split) for source, split in source_split.items()]).collect()
     if error_message := integrity_errors(integrity_count):
         raise ValueError('credible set validation failed its integrity checks:\n' + '\n'.join(error_message))
