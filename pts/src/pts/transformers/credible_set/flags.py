@@ -29,7 +29,6 @@ class CredibleSetFlag(StrEnum):
     INVALID_CHROMOSOME = 'Chromosome not in 1:22, X, Y, XY or MT'
     REDUNDANT_PICS_TOP_HIT = 'PICS results from summary statistics available for this same study'
     EXPLAINED_BY_SUSIE = 'Study locus in region explained by a SuSiE credible set'
-    ABNORMAL_PIPS = 'Study locus with a sum of PIPs that not in the expected range [0.95,1]'
     DUPLICATED_STUDYLOCUS_ID = 'Non-unique study locus identifier'
     INVALID_VARIANT_IN_SET = 'Credible set has a variant with an excluding quality flag'
     INVALID_CS_ID = 'Credible set identifier is not a 32-character hexadecimal md5'
