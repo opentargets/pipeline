@@ -116,11 +116,14 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets against the study index; the credible set keeps its own `studyType`.
+    """Flag credible sets against the study index, and fill a missing `studyType` from it.
+
+    A set without a `studyType` takes its study's from the index, with no flag; a set that has one
+    keeps it, so a mismatch stays visible.
 
     - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
-    - STUDY_TYPE_MISMATCH: the study is in the index, and the `studyType` of the set is missing or
-      differs from the study's.
+    - STUDY_TYPE_MISMATCH: the study is in the index, and the source `studyType` differs from the
+      study's.
     - FLAGGED_STUDY: the study carries at least one quality control flag.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
       SUMSTATS_NOT_AVAILABLE, so its summary statistics should give the set instead.
@@ -128,20 +131,21 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
 
     Examples:
         >>> credible_set = pl.LazyFrame({
-        ...     'studyId': ['s', 't', 'unknown'],
-        ...     'studyType': ['eQTL', 'gwas', 'gwas'],
-        ...     'qualityControls': [[], [], []],
+        ...     'studyId': ['s', 't', 'u', 'unknown'],
+        ...     'studyType': ['eQTL', 'gwas', None, 'gwas'],
+        ...     'qualityControls': [[], [], [], []],
         ... })
         >>> study = pl.LazyFrame({
-        ...     'studyId': ['s', 't'],
-        ...     'studyType': ['eqtl', 'gwas'],
-        ...     'qualityControls': [[], []],
+        ...     'studyId': ['s', 't', 'u'],
+        ...     'studyType': ['eqtl', 'gwas', 'pqtl'],
+        ...     'qualityControls': [[], [], []],
         ... })
         >>> for row in flag_study(credible_set, study).sort('studyId').collect().iter_rows(named=True):
-        ...     flag_enum = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
-        ...     print(row['studyId'], row['studyType'], flag_enum)
+        ...     flag_name = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
+        ...     print(row['studyId'], row['studyType'], flag_name)
         s eQTL ['INVALID_STUDY_TYPE', 'STUDY_TYPE_MISMATCH']
         t gwas []
+        u pqtl []
         unknown gwas ['MISSING_STUDY']
     """
     lookup = study.select(
@@ -151,7 +155,7 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
         pl.lit(True).alias('_study_found'),
     )
     found = pl.col('_study_found').is_not_null()
-    mismatch = found & (pl.col('studyType').is_null() | (pl.col('studyType') != pl.col('_study_type')))
+    mismatch = found & (pl.col('studyType') != pl.col('_study_type'))
     top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
     no_sumstats = pl.col('_study_qc').list.contains(StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value)
     return (
@@ -162,6 +166,7 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
         .pipe(flag_rows, pl.col('_study_qc').list.len() > 0, CredibleSetFlag.FLAGGED_STUDY)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
         .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)
+        .with_columns(pl.coalesce('studyType', '_study_type').alias('studyType'))
         .drop('_study_type', '_study_qc', '_study_found')
     )
 
