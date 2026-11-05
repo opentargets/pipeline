@@ -9,6 +9,7 @@ from pts.schemas.credible_set import credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 from pts.transformers.credible_set.variant_qc import (
     flag_abnormal_pip,
+    flag_duplicated_variant,
     flag_effect_direction_mismatch,
     flag_exceeds_coverage,
     flag_incomplete_stats,
@@ -181,3 +182,21 @@ def test_variant_qc_adds_the_metadata_flags() -> None:
         CredibleSetVariantFlag.MISSING_PVALUE,
         CredibleSetVariantFlag.MISSING_SAMPLE_SIZE,
     }
+
+
+DUPLICATED = CredibleSetVariantFlag.DUPLICATED_VARIANT
+
+
+def test_every_copy_of_a_variant_repeated_in_its_set_is_duplicated() -> None:
+    variants = _variants([0.5, 0.4, 0.1], names=['1_100_A_T', '1_100_A_T', '1_200_A_T'])
+    assert _with(flag_duplicated_variant(variants), DUPLICATED) == [0.5, 0.4]
+
+
+def test_the_same_variant_in_two_sets_is_not_duplicated() -> None:
+    variants = pl.concat([_variants([1.0], 'a' * 32, ['1_100_A_T']), _variants([1.0], 'b' * 32, ['1_100_A_T'])])
+    assert _with(flag_duplicated_variant(variants), DUPLICATED) == []
+
+
+def test_variant_qc_flags_duplicated_variants() -> None:
+    variants = _variants([0.5, 0.5], names=['1_100_A_T', '1_100_A_T'])
+    assert _with(flag_variants(variants, 0.95, 1e-4), DUPLICATED) == [0.5, 0.5]

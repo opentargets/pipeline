@@ -86,6 +86,24 @@ def flag_invalid_variant_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, invalid, CredibleSetVariantFlag.INVALID_VARIANT_ID)
 
 
+def flag_duplicated_variant(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag every copy of a variant that appears more than once in its credible set.
+
+    No copy can be told apart as the right one, so every copy is flagged.
+
+    Examples:
+        >>> credible_set_variant = pl.LazyFrame({
+        ...     'credibleSetId': ['a', 'a', 'a', 'b'],
+        ...     'variantId': ['1_1_A_T', '1_1_A_T', '1_2_A_T', '1_1_A_T'],
+        ...     'qualityControls': [[]] * 4,
+        ... })
+        >>> flag_duplicated_variant(credible_set_variant).collect()['qualityControls'].list.len().to_list()
+        [1, 1, 0, 0]
+    """
+    duplicated = pl.len().over('credibleSetId', 'variantId') > 1
+    return flag_rows(frame, duplicated, CredibleSetVariantFlag.DUPLICATED_VARIANT)
+
+
 def flag_exceeds_coverage(frame: pl.LazyFrame, coverage: float) -> pl.LazyFrame:
     """Flag the variants beyond the `coverage` of their credible set.
 
@@ -201,6 +219,7 @@ def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) ->
         frame
         .pipe(flag_invalid_cs_id)
         .pipe(flag_invalid_variant_id)
+        .pipe(flag_duplicated_variant)
         .pipe(flag_exceeds_coverage, coverage)
         .pipe(flag_abnormal_pip, coverage, pip_tolerance)
         .pipe(flag_effect_direction_mismatch)

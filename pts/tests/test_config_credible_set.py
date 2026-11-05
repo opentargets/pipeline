@@ -155,6 +155,7 @@ def test_validation_excludes_the_agreed_flags() -> None:
     assert set(settings.csv_set_invalid_qc_reasons) == {
         CredibleSetVariantFlag.INVALID_CS_ID,
         CredibleSetVariantFlag.INVALID_VARIANT_ID,
+        CredibleSetVariantFlag.DUPLICATED_VARIANT,
     }
     assert set(settings.csv_row_invalid_qc_reasons) == {
         CredibleSetVariantFlag.EXCEEDS_COVERAGE_95,

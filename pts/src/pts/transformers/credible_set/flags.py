@@ -55,6 +55,7 @@ class CredibleSetVariantFlag(StrEnum):
     RESCALED_FROM_MARGINAL = 'Rescaled effect derived from the marginal effect'
     NOT_IN_LOCUS = 'Variant in LD with the lead has no statistics in the locus'
     INVALID_VARIANT_ID = 'Variant identifier is not a valid chromosome_position_ref_alt'
+    DUPLICATED_VARIANT = 'Variant appears more than once in its credible set'
     CREDIBLE_SET_EXCLUDED = 'Credible set of the variant is excluded'
     INVALID_CS_ID = 'Credible set identifier is not a 32-character hexadecimal md5'
     EXCEEDS_COVERAGE_95 = 'Variant is outside the 95% coverage of the credible set'

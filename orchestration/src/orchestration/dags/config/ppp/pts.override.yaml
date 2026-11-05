@@ -195,6 +195,7 @@ steps:
         csv_set_invalid_qc_reasons:
           - INVALID_CS_ID
           - INVALID_VARIANT_ID
+          - DUPLICATED_VARIANT
         csv_row_invalid_qc_reasons:
           - EXCEEDS_COVERAGE_95
           - ORPHAN_VARIANT
