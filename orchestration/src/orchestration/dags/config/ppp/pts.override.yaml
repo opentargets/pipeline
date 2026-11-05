@@ -55,20 +55,20 @@ steps:
     - name: transform validate study
       source:
         study:
-          - input/gwas/study/gcca
-          - input/gwas/study/gcss_pics
-          - input/gwas/study/gcss_susie
-          - input/gwas/study/finngen
-          - input/molqtl/study/ukb_ppp_eur
-          - input/molqtl/study/sle_map
+          - input/gwas/gcca/study
+          - input/gwas/gcss_pics/study
+          - input/gwas/gcss_susie/study
+          - input/gwas/finngen_gwas/study
+          - input/molqtl/ukb_ppp_eur/study
+          - input/molqtl/sle_map/study
           # GWAS PPP
-          - input/gwas/study/finngen_ukb_mvp
+          - input/gwas/finngen_meta/study
           # molQTL PPP
-          - input/molqtl/study/eqtl_catalogue/r8
-          - input/molqtl/study/otar2077/microglia
-          - input/molqtl/study/eQTLGen/single_cell_eqtl
-          - input/molqtl/study/eQTLGen/coeqtl
-          - input/molqtl/study/deCODE_proteomics
+          - input/molqtl/eqtl_catalogue/study
+          - input/molqtl/otar2077/microglia/study
+          - input/molqtl/eQTLGen/single_cell_eqtl/study
+          - input/molqtl/eQTLGen/coeqtl/study
+          - input/molqtl/deCODE_proteomics/study
         target: output/target
         disease: output/disease
         biosample: output/biosample
@@ -97,20 +97,20 @@ steps:
     - name: transform validate credible set
       source:
         credible_set:
-          - input/gwas/credible_set/gcca
-          - input/gwas/credible_set/gcss_pics
-          - input/gwas/credible_set/gcss_susie
-          - input/gwas/credible_set/finngen
-          - input/molqtl/credible_set/ukb_ppp_eur
-          - input/molqtl/credible_set/sle_map
+          - input/gwas/gcca/credible_set
+          - input/gwas/gcss_pics/credible_set
+          - input/gwas/gcss_susie/credible_set
+          - input/gwas/finngen_gwas/credible_set
+          - input/molqtl/ukb_ppp_eur/credible_set
+          - input/molqtl/sle_map/credible_set
           # GWAS PPP
-          - input/gwas/credible_set/finngen_ukb_mvp
+          - input/gwas/finngen_meta/credible_set
           # molQTL PPP
-          - input/molqtl/credible_set/eqtl_catalogue/r8
-          - input/molqtl/credible_set/otar2077/microglia
-          - input/molqtl/credible_set/eQTLGen/single_cell_eqtl
-          - input/molqtl/credible_set/eQTLGen/coeqtl
-          - input/molqtl/credible_set/deCODE_proteomics
+          - input/molqtl/eqtl_catalogue/credible_set
+          - input/molqtl/otar2077/microglia/credible_set
+          - input/molqtl/eQTLGen/single_cell_eqtl/credible_set
+          - input/molqtl/eQTLGen/coeqtl/credible_set
+          - input/molqtl/deCODE_proteomics/credible_set
         study: output/study
         target: output/target
         disease: output/disease

@@ -93,12 +93,12 @@ steps:
     - name: transform validate study
       source:
         study:
-          - input/gwas/study/gcca
-          - input/gwas/study/gcss_pics
-          - input/gwas/study/gcss_susie
-          - input/gwas/study/finngen
-          - input/molqtl/study/eqtl_catalogue/r8
-          - input/molqtl/study/ukb_ppp_eur
+          - input/gwas/gcca/study
+          - input/gwas/gcss_pics/study
+          - input/gwas/gcss_susie/study
+          - input/gwas/finngen_gwas/study
+          - input/molqtl/eqtl_catalogue/study
+          - input/molqtl/ukb_ppp_eur/study
         target: output/target
         disease: output/disease
         biosample: output/biosample
@@ -136,12 +136,12 @@ steps:
     - name: transform validate credible set
       source:
         credible_set:
-          - input/gwas/credible_set/gcca
-          - input/gwas/credible_set/gcss_pics
-          - input/gwas/credible_set/gcss_susie
-          - input/gwas/credible_set/finngen
-          - input/molqtl/credible_set/eqtl_catalogue/r8
-          - input/molqtl/credible_set/ukb_ppp_eur
+          - input/gwas/gcca/credible_set
+          - input/gwas/gcss_pics/credible_set
+          - input/gwas/gcss_susie/credible_set
+          - input/gwas/finngen_gwas/credible_set
+          - input/molqtl/eqtl_catalogue/credible_set
+          - input/molqtl/ukb_ppp_eur/credible_set
         study: output/study
         target: output/target
         disease: output/disease
