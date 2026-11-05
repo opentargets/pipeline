@@ -15,6 +15,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
+from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
@@ -101,13 +102,132 @@ def _flag_matching_ids(
     return frame.join(marked, on=key, how='left').pipe(flag_rows, pl.col('_matched'), flag).drop('_matched')
 
 
+def redundant_pics_top_hits(sets: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids of curated top hits made redundant by PICS sets from summary statistics.
+
+    A set is a redundant top hit when it carries TOP_HIT and its study also has a PICS set without
+    TOP_HIT: the study has summary statistics, whose fine-mapped sets replace the curated hits.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['top', 'sumstats', 'top_alone'],
+        ...     'studyId': ['s', 's', 't'],
+        ...     'fineMappingMethod': ['PICS', 'PICS', 'PICS'],
+        ...     'qualityControls': [[CredibleSetFlag.TOP_HIT.value], [], [CredibleSetFlag.TOP_HIT.value]],
+        ... })
+        >>> redundant_pics_top_hits(sets).collect()['id'].to_list()
+        ['top']
+    """
+    top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
+    pics = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
+    studies_with_summary_statistics = sets.filter(pics & ~top_hit).select('studyId').unique()
+    return sets.filter(top_hit).join(studies_with_summary_statistics, on='studyId', how='semi').select('id').unique()
+
+
+def duplicated_ids(sets: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids that occur more than once; every copy of such an id is flagged.
+
+    Examples:
+        >>> sets = pl.LazyFrame({'id': ['dup', 'dup', 'unique']})
+        >>> duplicated_ids(sets).collect()['id'].to_list()
+        ['dup']
+    """
+    return sets.group_by('id').len().filter(pl.col('len') > 1).select('id')
+
+
+def explained_by_susie(sets: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids of sets that a SuSiE or SuSiE-inf set of the same study explains.
+
+    A set that is not SuSiE or SuSiE-inf is explained when one of its members, without
+    EXCEEDS_COVERAGE_95, lies inside `[locusStart, locusEnd]` of a SuSiE or SuSiE-inf set of the
+    same study and chromosome. A member position is the second field of its `variantId`; a member on
+    an alternate contig has none and never counts.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['inside', 'outside', 'susie'],
+        ...     'studyId': ['s', 's', 's'],
+        ...     'chromosome': ['1', '1', '1'],
+        ...     'locusStart': [None, None, 1000],
+        ...     'locusEnd': [None, None, 2000],
+        ...     'fineMappingMethod': ['PICS', 'PICS', 'SuSiE'],
+        ... }, schema_overrides={'locusStart': pl.Int32, 'locusEnd': pl.Int32})
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['inside', 'outside', 'susie'],
+        ...     'variantId': ['1_1500_A_T', '1_100_A_T', '1_1500_A_T'],
+        ...     'qualityControls': [[], [], []],
+        ... })
+        >>> explained_by_susie(sets, variants).collect()['id'].to_list()
+        ['inside']
+    """
+    susie = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
+    susie_regions = sets.filter(susie).select('studyId', 'chromosome', 'locusStart', 'locusEnd').unique()
+    other_sets = sets.filter(~susie).select('id', 'studyId', 'chromosome').unique()
+    members = (
+        variants
+        .filter(~pl.col('qualityControls').list.contains(CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value))
+        .select(
+            pl.col('credibleSetId').alias('id'),
+            pl.col('variantId').str.split('_').list.get(1).cast(pl.Int64, strict=False).alias('position'),
+        )
+        .drop_nulls('position')
+        .join(other_sets, on='id', how='inner')
+    )
+    return (
+        members
+        .join(susie_regions, on=['studyId', 'chromosome'], how='inner')
+        .filter(pl.col('position').is_between(pl.col('locusStart'), pl.col('locusEnd')))
+        .select('id')
+        .unique()
+    )
+
+
 def flag_across_sets(sets: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
     """The cross-set flags of the credible sets of every source, one row per flagged set.
 
-    REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE and DUPLICATED_STUDYLOCUS_ID compare sets across
-    sources. Their rules come with the set QC slice for cross-set flags; until then no set is flagged.
+    The flags compare credible sets across sources, so they are computed once, on the QC'd sets and
+    variants of every source, before any exclusion. The result is a lookup table, not the sets:
+    only flagged ids are listed, with their flags, and each source's validation adds them to its
+    own sets (`add_cross_set_flags`). An id that occurs twice is listed once, and the join gives
+    the flag to both copies.
+
+    - REDUNDANT_PICS_TOP_HIT: `redundant_pics_top_hits`.
+    - DUPLICATED_STUDYLOCUS_ID: `duplicated_ids`.
+    - EXPLAINED_BY_SUSIE: `explained_by_susie`.
+
+    Examples:
+        >>> sets = pl.LazyFrame({
+        ...     'id': ['top', 'pics', 'susie', 'dup', 'dup'],
+        ...     'studyId': ['s', 's', 's', 't', 'u'],
+        ...     'chromosome': ['1'] * 5,
+        ...     'locusStart': [None, None, 1000, None, None],
+        ...     'locusEnd': [None, None, 2000, None, None],
+        ...     'fineMappingMethod': ['PICS', 'PICS', 'SuSiE', 'PICS', 'PICS'],
+        ...     'qualityControls': [[CredibleSetFlag.TOP_HIT.value], [], [], [], []],
+        ... }, schema_overrides={'locusStart': pl.Int32, 'locusEnd': pl.Int32})
+        >>> variants = pl.LazyFrame({
+        ...     'credibleSetId': ['top', 'pics', 'susie'],
+        ...     'variantId': ['1_100_A_T', '1_1500_A_T', '1_1500_A_T'],
+        ...     'qualityControls': [[], [], []],
+        ... })
+        >>> for row in flag_across_sets(sets, variants).sort('id').collect().iter_rows(named=True):
+        ...     print(row['id'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
+        dup ['DUPLICATED_STUDYLOCUS_ID']
+        pics ['EXPLAINED_BY_SUSIE']
+        top ['REDUNDANT_PICS_TOP_HIT']
     """
-    return pl.LazyFrame(schema=cross_set_flags_schema)
+    flagged = [
+        (redundant_pics_top_hits(sets), CredibleSetFlag.REDUNDANT_PICS_TOP_HIT),
+        (duplicated_ids(sets), CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID),
+        (explained_by_susie(sets, variants), CredibleSetFlag.EXPLAINED_BY_SUSIE),
+    ]
+    return (
+        pl
+        .concat([ids.with_columns(pl.lit(flag.value).alias('flag')) for ids, flag in flagged])
+        .group_by('id')
+        .agg(pl.col('flag').unique().sort().alias('qualityControls'))
+        .match_to_schema(cross_set_flags_schema)
+    )
 
 
 def add_cross_set_flags(sets: pl.LazyFrame, cross_set_flags: pl.LazyFrame) -> pl.LazyFrame:
