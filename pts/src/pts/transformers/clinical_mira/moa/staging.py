@@ -12,10 +12,14 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
 from pts.transformers.clinical_mira.moa import llm, pooling, schemas
+from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
 from pts.transformers.clinical_mira.record_store import import_run, record_schema, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     from otter.config.model import Config
 
 TRIAL = pl.Struct({'nct_id': pl.String, 'content_sha256': pl.String})
@@ -187,3 +191,64 @@ def import_experiment_cache(
         return pl.DataFrame(rows, schema=record_schema(pl.String()))
 
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())
+
+
+def moa_compute(
+    pools: pl.DataFrame,
+    trials: pl.DataFrame,
+    system_prompt: str,
+    state_uri: str,
+    scratch: Path,
+    client: Any = None,
+    **batch_kwargs: Any,
+) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
+    """Build the ``compute`` of :py:func:`map_texts` that extracts mechanisms with Claude.
+
+    Args:
+        pools: Output of :py:func:`pooling.build_pools`.
+        trials: Output of :py:func:`pool_trials`.
+        system_prompt: The extraction prompt.
+        state_uri: Where the submitted batch ids are recorded, a path or URI.
+        scratch: Local directory for the result cache.
+        client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
+        **batch_kwargs: Passed to :py:func:`run_batch_cached`.
+
+    Returns:
+        A function from content keys to ``(output, error)`` in the order of the keys.
+    """
+    texts = dict(zip(pools['content_key'].to_list(), pools['text'].to_list(), strict=True))
+    listed = {row['content_key']: row for row in trials.to_dicts()}
+    cache_path = scratch / 'moa_cache.jsonl'
+
+    def compute(keys: list[str]) -> list[tuple[str | None, str | None]]:
+        results, errors = run_batch_cached(
+            [(key, texts[key]) for key in keys],
+            system_prompt=system_prompt,
+            response_model=schemas.MoaExtraction,
+            model=MOA.model,
+            effort=MOA.params['effort'],
+            cache_path=cache_path,
+            state_uri=state_uri,
+            client=client,
+            **batch_kwargs,
+        )
+        usage = read_usage(cache_path)
+        out: list[tuple[str | None, str | None]] = []
+        for key in keys:
+            if key not in results:
+                out.append((None, errors.get(key, 'missing')))
+                continue
+            result_key = llm.result_key(texts[key], system_prompt, schemas.MoaExtraction, MOA.model)
+            out.append((
+                record_output(
+                    listed[key]['drug_name'],
+                    listed[key]['trials'],
+                    results[key].model_dump(mode='json', by_alias=True),
+                    usage.get(result_key),
+                    None,
+                ),
+                None,
+            ))
+        return out
+
+    return compute

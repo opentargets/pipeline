@@ -254,5 +254,5 @@ def test_anthropic_provider_uses_batches_with_opus_by_default(tmp_path, inputs, 
 
     assert seen['model'] == 'claude-opus-5-5'
     assert seen['effort'] == 'low'
-    assert seen['state_path'] == run / 'extract_batches.json'
+    assert seen['state_uri'] == str(run / 'extract_batches.json')
     assert seen['n'] == 3

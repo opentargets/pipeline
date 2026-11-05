@@ -1,7 +1,7 @@
 """Structured extraction with Claude through the Message Batches API, with the shared result cache.
 
 Requests are sent as batches (half price, results within 24 hours), each held to the
-response model's JSON schema. Submitted batch ids are recorded in ``state_path`` before
+response model's JSON schema. Submitted batch ids are recorded in ``state_uri`` before
 polling, so an interrupted run resumes the batches it already paid for instead of
 submitting them again. Results land in the same cache as :py:func:`.llm.run_cached`.
 
@@ -16,9 +16,11 @@ import hashlib
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
 
 from pts.transformers.clinical_mira.llm_workflow import _patch_schema
 from pts.transformers.clinical_mira.moa.llm import _read_cache, _start_on_a_new_line, result_key
@@ -58,15 +60,31 @@ def _params(text: str, system_prompt: str, schema: dict, model: str, effort: str
     }
 
 
-def _read_state(state_path: Path) -> dict[str, list[str]]:
-    if state_path.exists():
-        return json.loads(state_path.read_text(encoding='utf-8'))
-    return {'pending': []}
+def _read_state(state_uri: str) -> dict[str, list[str]]:
+    try:
+        text, _ = StorageHandle(state_uri).read_text()
+    except NotFoundError:
+        return {'pending': []}
+    return json.loads(text)
 
 
-def _write_state(state_path: Path, state: dict[str, list[str]]) -> None:
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + '\n', encoding='utf-8')
+def _write_state(state_uri: str, state: dict[str, list[str]]) -> None:
+    StorageHandle(state_uri).write_text(json.dumps(state, indent=2) + '\n')
+
+
+def read_usage(cache_path: Path) -> dict[str, dict[str, int]]:
+    """The token usage recorded per cache key."""
+    usage = {}
+    if cache_path.exists():
+        for line in cache_path.read_text(encoding='utf-8').splitlines():
+            if line.strip():
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if 'usage' in row:
+                    usage[row['key']] = row['usage']
+    return usage
 
 
 def _chunks(requests: list[dict[str, Any]], max_requests: int, max_bytes: int) -> list[list[dict[str, Any]]]:
@@ -89,7 +107,7 @@ def run_batch_cached(
     response_model: type[BaseModel],
     model: str,
     cache_path: Path,
-    state_path: Path,
+    state_uri: str,
     effort: str = 'medium',
     client: Any = None,
     max_batch_requests: int = MAX_BATCH_REQUESTS,
@@ -105,9 +123,9 @@ def run_batch_cached(
         ``invalid_json``). Failures are not cached, so a rerun retries them.
     """
     if client is None:
-        from anthropic import AnthropicGoogleCloud  # ty: ignore[unresolved-import]
+        from anthropic import AnthropicGoogleCloud
 
-        client = AnthropicGoogleCloud()
+        client = cast('Any', AnthropicGoogleCloud())
 
     cached = _read_cache(cache_path)
     keys = {request_id: result_key(text, system_prompt, response_model, model) for request_id, text in requests}
@@ -150,12 +168,12 @@ def run_batch_cached(
                     row['usage'] = {field: getattr(usage, field, None) or 0 for field in USAGE_FIELDS}
                 cache.write(json.dumps(row) + '\n')
 
-    state = _read_state(state_path)
+    state = _read_state(state_uri)
     for batch_id in list(state['pending']):
         logger.info(f'resuming {batch_id}')
         collect(batch_id)
         state['pending'].remove(batch_id)
-        _write_state(state_path, state)
+        _write_state(state_uri, state)
 
     pending = [(request_id, text) for request_id, text in requests if request_id not in results]
     logger.info(f'{len(results)} of {len(requests)} requests cached, {len(pending)} to batch with {model}')
@@ -170,11 +188,11 @@ def run_batch_cached(
     for chunk in _chunks(batch_requests, max_batch_requests, max_batch_bytes):
         batch = client.messages.batches.create(requests=chunk)
         state['pending'].append(batch.id)
-        _write_state(state_path, state)
+        _write_state(state_uri, state)
         logger.info(f'submitted {batch.id} with {len(chunk)} requests')
     for batch_id in list(state['pending']):
         collect(batch_id)
         state['pending'].remove(batch_id)
-        _write_state(state_path, state)
+        _write_state(state_uri, state)
     logger.info(f'{len(results)} of {len(requests)} done, {len(errors)} failed')
     return results, errors

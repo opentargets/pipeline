@@ -1,9 +1,13 @@
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 
+import polars as pl
+import pytest
 from pydantic import BaseModel, ConfigDict
 
 from pts.transformers.clinical_mira.moa.claude import custom_id, run_batch_cached
+from pts.transformers.clinical_mira.moa.staging import moa_compute, parse_output
 
 
 class Echo(BaseModel):
@@ -15,7 +19,15 @@ class Echo(BaseModel):
 class FakeBatches:
     """Message Batches stand-in: each request echoes its user message, except ids in ``fail``."""
 
-    def __init__(self, fail: frozenset[str] = frozenset(), refuse: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self,
+        fail: frozenset[str] = frozenset(),
+        refuse: frozenset[str] = frozenset(),
+        respond: Callable[[str], dict] = lambda text: {'value': text},
+        stops: dict[str, str] | None = None,
+    ) -> None:
+        self.respond = respond
+        self.stops = stops or {}
         self.created: list[list[dict]] = []
         self.retrieved = 0
         self.fail = fail
@@ -40,10 +52,10 @@ class FakeBatches:
                 )
                 continue
             text = request['params']['messages'][0]['content']
-            stop = 'refusal' if cid in self.refuse else 'end_turn'
+            stop = 'refusal' if cid in self.refuse else self.stops.get(cid, 'end_turn')
             message = SimpleNamespace(
                 stop_reason=stop,
-                content=[SimpleNamespace(type='text', text=json.dumps({'value': text}))],
+                content=[SimpleNamespace(type='text', text=json.dumps(self.respond(text)))],
                 usage=SimpleNamespace(
                     input_tokens=10, output_tokens=5, cache_read_input_tokens=100, cache_creation_input_tokens=0
                 ),
@@ -62,7 +74,7 @@ def _run(batches: FakeBatches, tmp_path, requests=(('a', 'x'), ('b:1', 'y')), **
         response_model=Echo,
         model='claude-sonnet-5-5',
         cache_path=tmp_path / 'c.jsonl',
-        state_path=tmp_path / 'batches.json',
+        state_uri=str(tmp_path / 'batches.json'),
         client=_client(batches),
         sleep=lambda seconds: None,
         **kwargs,
@@ -142,3 +154,91 @@ def test_token_usage_is_recorded_per_request(tmp_path):
         'cache_read_input_tokens': 100,
         'cache_creation_input_tokens': 0,
     }
+
+
+class RunInterruptedError(Exception):
+    pass
+
+
+def test_batch_state_survives_in_the_bucket_uri(tmp_path):
+    state_uri = str(tmp_path / 'bucket' / 'state.json')
+    first = FakeBatches()
+    first.retrieve = lambda batch_id: (_ for _ in ()).throw(RunInterruptedError())  # ty: ignore[invalid-assignment]
+    second = FakeBatches()
+    second.created = first.created
+
+    def run(batches):
+        return run_batch_cached(
+            [('a', 'x')],
+            system_prompt='be precise',
+            response_model=Echo,
+            model='claude-sonnet-5-5',
+            cache_path=tmp_path / 'c.jsonl',
+            state_uri=state_uri,
+            client=_client(batches),
+            sleep=lambda seconds: None,
+        )
+
+    with pytest.raises(RunInterruptedError):
+        run(first)
+    results, _ = run(second)
+
+    assert len(first.created) == 1
+    assert len(second.created) == 1
+    assert results['a'] == Echo(value='x')
+    assert json.loads((tmp_path / 'bucket' / 'state.json').read_text())['pending'] == []
+
+
+MECHANISM = {
+    'targetFromSource': 'EGFR',
+    'targetSymbolSuggestion': ['EGFR'],
+    'isHumanTarget': True,
+    'actsOnReceptor': True,
+    'relation': 'direct',
+    'statementType': 'drug_description',
+    'targetType': 'single protein',
+    'actionType': 'INHIBITOR',
+    'mechanismOfAction': 'EGFR inhibitor',
+    'evidence': [{'nctId': 'NCT1', 'quote': 'an EGFR inhibitor'}],
+    'confidence': 0.9,
+}
+
+
+def _extraction(text: str) -> dict:
+    return {'drugName': text, 'notStated': False, 'mechanisms': [MECHANISM]}
+
+
+def test_compute_returns_record_outputs_in_input_order(tmp_path):
+    texts = {'ka': 'pool a', 'kb': 'pool b', 'kc': 'pool c'}
+    pools = pl.DataFrame({
+        'content_key': list(texts),
+        'drug_name': ['a', 'b', 'c'],
+        'text': list(texts.values()),
+    })
+    trials = pl.DataFrame({
+        'content_key': list(texts),
+        'drug_name': ['a', 'b', 'c'],
+        'trials': [[{'nct_id': f'NCT{i}', 'content_sha256': 'h'}] for i in range(3)],
+    })
+    batches = FakeBatches(respond=_extraction, stops={custom_id('kb'): 'max_tokens'})
+
+    compute = moa_compute(
+        pools,
+        trials,
+        'be precise',
+        str(tmp_path / 'state.json'),
+        tmp_path / 'scratch',
+        client=_client(batches),
+        sleep=lambda seconds: None,
+    )
+    out = compute(['kc', 'kb', 'ka'])
+
+    assert [o[1] for o in out] == [None, 'max_tokens', None]
+    assert out[1][0] is None
+    parsed = parse_output(out[0][0])
+    assert parsed['drug_name'] == 'c'
+    assert parsed['trials'] == [{'nct_id': 'NCT2', 'content_sha256': 'h'}]
+    assert parsed['extraction']['mechanisms'][0]['targetFromSource'] == 'EGFR'
+    assert parsed['usage']['input_tokens'] > 0
+    assert parsed['carried_from'] is None
+    assert parse_output(out[2][0])['drug_name'] == 'a'

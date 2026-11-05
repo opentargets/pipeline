@@ -73,7 +73,7 @@ def _run_llm(
             response_model=response_model,
             model=args.model or DEFAULT_MODELS[('anthropic', stage)],
             cache_path=run / f'{stage}_cache.jsonl',
-            state_path=run / f'{stage}_batches.json',
+            state_uri=str(run / f'{stage}_batches.json'),
             effort=args.effort,
         )
     return run_cached(
