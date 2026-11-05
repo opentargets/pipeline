@@ -6,10 +6,8 @@ import pytest
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.validation import (
-    ValidationSettings,
     cross_set_flags_schema,
     flag_across_sets,
-    validate,
 )
 
 TOP_HIT = CredibleSetFlag.TOP_HIT.value
@@ -75,14 +73,10 @@ def test_a_top_hit_is_not_redundant_without_a_summary_statistics_pics_set_of_its
     assert _flags(_sets(_pics('top', qualityControls=[TOP_HIT]), other)) == {}
 
 
-def test_every_copy_of_a_duplicated_id_is_flagged() -> None:
+def test_a_duplicated_id_is_not_a_cross_set_flag() -> None:
+    """Duplicated ids are decided among the valid sets, after validation (test_credible_set_duplicates)."""
     sets = _sets(_susie('dup', 1, 10), _susie('dup', 1, 10, studyId='t'), _susie('unique', 1, 10))
-    assert _flags(sets) == {'dup': {CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID}}
-    variants = _variants(('dup', '1_1_A_T', []), ('dup', '1_1_A_T', []), ('unique', '1_1_A_T', []))
-    settings = ValidationSettings(cs_invalid_qc_reasons=['DUPLICATED_STUDYLOCUS_ID'])
-    valid, _, excluded, _ = validate(sets, variants, flag_across_sets(sets, variants), settings)
-    assert sorted(excluded.collect()['id']) == ['dup', 'dup']
-    assert valid.collect()['id'].to_list() == ['unique']
+    assert _flags(sets) == {}
 
 
 def _explained(sets: pl.LazyFrame, members: list[tuple[str, list[str]]]) -> bool:
@@ -130,13 +124,11 @@ def test_susie_sets_are_never_explained() -> None:
 def test_a_set_gets_every_cross_set_flag_that_applies() -> None:
     sets = _sets(
         _pics('pics', qualityControls=[TOP_HIT]),
-        _pics('pics', qualityControls=[TOP_HIT]),
         _pics('sumstats'),
         _susie('susie', 1000, 2000),
     )
     variants = _variants(('pics', '1_1500_A_T', []), ('sumstats', '1_100_A_T', []), ('susie', '1_1500_A_T', []))
     assert _flags(sets, variants)['pics'] == {
         CredibleSetFlag.REDUNDANT_PICS_TOP_HIT,
-        CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID,
         CredibleSetFlag.EXPLAINED_BY_SUSIE,
     }

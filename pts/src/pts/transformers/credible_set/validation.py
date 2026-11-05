@@ -148,17 +148,6 @@ def redundant_pics_top_hits(credible_set: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def duplicated_ids(credible_set: pl.LazyFrame) -> pl.LazyFrame:
-    """The ids that occur more than once; every copy of such an id is flagged.
-
-    Examples:
-        >>> credible_set = pl.LazyFrame({'id': ['dup', 'dup', 'unique']})
-        >>> duplicated_ids(credible_set).collect()['id'].to_list()
-        ['dup']
-    """
-    return credible_set.group_by('id').len().filter(pl.col('len') > 1).select('id')
-
-
 def explained_by_susie(credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFrame) -> pl.LazyFrame:
     """The ids of sets that a SuSiE or SuSiE-inf set of the same study explains.
 
@@ -212,22 +201,21 @@ def flag_across_sets(credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFr
     The flags compare credible sets across sources, so they are computed once, on the QC'd sets and
     variants of every source, before any exclusion. The result is a lookup table, not the sets:
     only flagged ids are listed, with their flags, and each source's validation adds them to its
-    own sets (`add_cross_set_flags`). An id that occurs twice is listed once, and the join gives
-    the flag to both copies.
+    own sets (`add_cross_set_flags`). Duplicated ids are decided after validation, among the valid
+    sets (`flag_duplicated_ids`).
 
     - REDUNDANT_PICS_TOP_HIT: `redundant_pics_top_hits`.
-    - DUPLICATED_STUDYLOCUS_ID: `duplicated_ids`.
     - EXPLAINED_BY_SUSIE: `explained_by_susie`.
 
     Examples:
         >>> credible_set = pl.LazyFrame({
-        ...     'id': ['top', 'pics', 'susie', 'dup', 'dup'],
-        ...     'studyId': ['s', 's', 's', 't', 'u'],
-        ...     'chromosome': ['1'] * 5,
-        ...     'locusStart': [None, None, 1000, None, None],
-        ...     'locusEnd': [None, None, 2000, None, None],
-        ...     'fineMappingMethod': ['PICS', 'PICS', 'SuSiE', 'PICS', 'PICS'],
-        ...     'qualityControls': [[CredibleSetFlag.TOP_HIT.value], [], [], [], []],
+        ...     'id': ['top', 'pics', 'susie'],
+        ...     'studyId': ['s', 's', 's'],
+        ...     'chromosome': ['1'] * 3,
+        ...     'locusStart': [None, None, 1000],
+        ...     'locusEnd': [None, None, 2000],
+        ...     'fineMappingMethod': ['PICS', 'PICS', 'SuSiE'],
+        ...     'qualityControls': [[CredibleSetFlag.TOP_HIT.value], [], []],
         ... }, schema_overrides={'locusStart': pl.Int32, 'locusEnd': pl.Int32})
         >>> credible_set_variant = pl.LazyFrame({
         ...     'credibleSetId': ['top', 'pics', 'susie'],
@@ -236,13 +224,11 @@ def flag_across_sets(credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFr
         ... })
         >>> for row in flag_across_sets(credible_set, credible_set_variant).sort('id').collect().iter_rows(named=True):
         ...     print(row['id'], sorted(CredibleSetFlag(flag).name for flag in row['qualityControls']))
-        dup ['DUPLICATED_STUDYLOCUS_ID']
         pics ['EXPLAINED_BY_SUSIE']
         top ['REDUNDANT_PICS_TOP_HIT']
     """
     flagged = [
         (redundant_pics_top_hits(credible_set), CredibleSetFlag.REDUNDANT_PICS_TOP_HIT),
-        (duplicated_ids(credible_set), CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID),
         (explained_by_susie(credible_set, credible_set_variant), CredibleSetFlag.EXPLAINED_BY_SUSIE),
     ]
     return (
@@ -393,8 +379,8 @@ def validate(
 
     Then whole sets:
 
-    3. Add the cross-set flags (REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE,
-       DUPLICATED_STUDYLOCUS_ID).
+    3. Add the cross-set flags (REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE). Duplicated ids are
+       decided after every source is validated (`flag_duplicated_ids`).
     4. Flag `INVALID_VARIANT_IN_SET` on a set with any variant flagged in
        `csv_set_invalid_qc_reasons`.
     5. Flag `LEAD_VARIANT_MISSING` on a set whose lead variant is not among its remaining
@@ -481,6 +467,82 @@ def validate(
     variant_split = valid_rows(kept_variant, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
     excluded_credible_set_variant = pl.concat([row_split.invalid, variant_split.invalid])
     return set_split.valid, variant_split.valid, set_split.invalid, excluded_credible_set_variant
+
+
+def flag_duplicated_ids(
+    split: list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]], settings: ValidationSettings
+) -> list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]]:
+    """Flag DUPLICATED_STUDYLOCUS_ID on all but one copy of an id among the valid sets of every source.
+
+    As gentropy's credible set validation does, only the sets that pass the other checks are
+    compared, and the copy with the fewest valid variants is kept. Ties go to the copy of the
+    earlier source, then to the smaller hash of its row, so the kept copy does not depend on row
+    order. When the flag is in `cs_invalid_qc_reasons`, the flagged copies leave the valid sets of
+    their source, with their variants flagged `CREDIBLE_SET_EXCLUDED` unless the source keeps
+    another copy of the id.
+
+    Args:
+        split: The (valid sets, valid variants, excluded sets, excluded variants) of each source.
+        settings: The flags that exclude a set.
+
+    Returns:
+        The same four datasets of each source, in the same order.
+
+    Examples:
+        >>> def source(size):
+        ...     quality_control = pl.Series([[]], dtype=pl.List(pl.String))
+        ...     credible_set = pl.LazyFrame({'id': ['dup'], 'qualityControls': quality_control})
+        ...     variant_id = [f'1_{position}_A_T' for position in range(size)]
+        ...     variant = pl.LazyFrame({'credibleSetId': ['dup'] * size, 'variantId': variant_id})
+        ...     return credible_set, variant, credible_set.clear(), variant.clear()
+        >>> settings = ValidationSettings(cs_invalid_qc_reasons=['DUPLICATED_STUDYLOCUS_ID'])
+        >>> larger, smaller = flag_duplicated_ids([source(3), source(2)], settings)
+        >>> (a_set, _, a_excluded, _), (b_set, _, _, _) = larger, smaller
+        >>> a_set.collect().height, a_excluded.collect().height, b_set.collect().height
+        (0, 1, 1)
+    """
+    duplicated = CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID
+    source = pl.col('_source')
+    valid_set = pl.concat([
+        credible_set.with_columns(pl.lit(index, pl.UInt32).alias('_source'))
+        for index, (credible_set, _, _, _) in enumerate(split)
+    ])
+    size = pl.concat([
+        credible_set_variant
+        .group_by(pl.col('credibleSetId').alias('id'))
+        .len('_size')
+        .with_columns(pl.lit(index, pl.UInt32).alias('_source'))
+        for index, (_, credible_set_variant, _, _) in enumerate(split)
+    ])
+    ranked = (
+        valid_set
+        .join(size, on=['_source', 'id'], how='left')
+        .with_columns(pl.struct(pl.exclude('_source', '_size')).hash(seed=0).alias('_hash'))
+        .sort('id', '_size', '_source', '_hash', nulls_last=True)
+        .pipe(flag_rows, pl.int_range(pl.len()).over('id') > 0, duplicated)
+        .drop('_size', '_hash')
+    )
+    flagged_split = []
+    for index, (_, credible_set_variant, excluded_set, excluded_variant) in enumerate(split):
+        flagged_set = ranked.filter(source == index).drop('_source')
+        if duplicated not in settings.cs_invalid_qc_reasons:
+            flagged_split.append((flagged_set, credible_set_variant, excluded_set, excluded_variant))
+            continue
+        set_split = valid_rows(flagged_set, [duplicated])
+        removed_id = set_split.invalid.select('id').join(set_split.valid.select('id'), on='id', how='anti')
+        variant_split = valid_rows(
+            flag_matching_ids(
+                credible_set_variant, 'credibleSetId', removed_id, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
+            ),
+            [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED],
+        )
+        flagged_split.append((
+            set_split.valid,
+            variant_split.valid,
+            pl.concat([excluded_set, set_split.invalid]),
+            pl.concat([excluded_variant, variant_split.invalid]),
+        ))
+    return flagged_split
 
 
 def integrity_checks(
@@ -622,15 +684,16 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flag.height)
-    source_split = {}
+    source_input: dict[str, tuple[pl.LazyFrame, pl.LazyFrame]] = {}
+    validated = []
     for source_name, set_path, variant_path in source_pair:
         # one scan per dataset, shared by the integrity counts and the validation plan
-        credible_set, credible_set_variant = scan_dataset(set_path), scan_dataset(variant_path)
-        source_split[source_name] = (
-            credible_set,
-            credible_set_variant,
-            *validate(credible_set, credible_set_variant, cross_set_flag.lazy(), options),
-        )
+        source_input[source_name] = (scan_dataset(set_path), scan_dataset(variant_path))
+        validated.append(validate(*source_input[source_name], cross_set_flag.lazy(), options))
+    source_split = {
+        source_name: (*source_input[source_name], *split)
+        for source_name, split in zip(source_input, flag_duplicated_ids(validated, options), strict=True)
+    }
     integrity_count = pl.concat([integrity_checks(source, *split) for source, split in source_split.items()]).collect()
     if error_message := integrity_errors(integrity_count):
         raise ValueError('credible set validation failed its integrity checks:\n' + '\n'.join(error_message))
