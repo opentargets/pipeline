@@ -23,7 +23,6 @@ class CredibleSetFlag(StrEnum):
     TOP_HIT = 'Study locus from curated top hit'
     TRANS_QTL = 'Trans QTL'
     REPLICATED = 'Lead variant is replicated in an independent study'
-    FLAGGED_STUDY = 'Study has quality control flag(s)'
     MISSING_STUDY = 'Study not found in the study index'
     TOP_HIT_AND_SUMMARY_STATS = 'Curated top hit is flagged because summary statistics are available for study'
     IN_MHC = 'MHC region'
