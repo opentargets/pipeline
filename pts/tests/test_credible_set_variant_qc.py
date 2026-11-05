@@ -9,8 +9,12 @@ from pts.schemas.credible_set import credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 from pts.transformers.credible_set.variant_qc import (
     flag_abnormal_pip,
+    flag_effect_direction_mismatch,
     flag_exceeds_coverage,
+    flag_incomplete_stats,
     flag_invalid_cs_id,
+    flag_missing_pvalue,
+    flag_missing_sample_size,
     flag_variants,
 )
 
@@ -108,3 +112,72 @@ def test_flagging_keeps_rows_columns_and_existing_flags_and_is_idempotent() -> N
     assert once.drop('qualityControls').equals(frame.collect().drop('qualityControls'))
     assert once['qualityControls'].list.contains(CredibleSetVariantFlag.NOT_IN_LOCUS).all()
     assert twice.equals(once)
+
+
+def _row(**values: float | int | None) -> pl.LazyFrame:
+    """One variant row with the given statistics; the other columns are null."""
+    row = {'credibleSetId': CS_ID, 'variantId': '1_100_A_T', 'posteriorProbability': 1.0, 'qualityControls': []}
+    return pl.LazyFrame([{name: {**row, **values}.get(name) for name in credible_set_variant_schema}]).cast(
+        credible_set_variant_schema
+    )
+
+
+def _carries(frame: pl.LazyFrame, flag: str) -> bool:
+    return frame.select(pl.col('qualityControls').list.contains(flag)).collect().item()
+
+
+@pytest.mark.parametrize(
+    ('reported', 'conditional', 'mismatch'),
+    [
+        (0.2, -0.1, True),
+        (-0.2, 0.1, True),
+        (0.2, 0.1, False),
+        (0.2, None, False),
+        (None, -0.1, False),
+        (0.0, -0.1, False),
+    ],
+)
+def test_effect_direction_mismatch(reported: float | None, conditional: float | None, mismatch: bool) -> None:
+    frame = flag_effect_direction_mismatch(_row(reportedBeta=reported, conditionalBeta=conditional))
+    assert _carries(frame, CredibleSetVariantFlag.EFFECT_DIRECTION_MISMATCH) is mismatch
+
+
+@pytest.mark.parametrize(
+    ('beta', 'standard_error', 'incomplete'),
+    [(0.2, None, True), (None, 0.01, True), (0.2, 0.01, False), (None, None, False)],
+)
+def test_incomplete_reported_and_conditional_stats(
+    beta: float | None, standard_error: float | None, incomplete: bool
+) -> None:
+    reported = flag_incomplete_stats(_row(reportedBeta=beta, reportedStandardError=standard_error))
+    conditional = flag_incomplete_stats(_row(conditionalBeta=beta, conditionalStandardError=standard_error))
+    assert _carries(reported, CredibleSetVariantFlag.INCOMPLETE_REPORTED_STATS) is incomplete
+    assert _carries(reported, CredibleSetVariantFlag.INCOMPLETE_CONDITIONAL_STATS) is False
+    assert _carries(conditional, CredibleSetVariantFlag.INCOMPLETE_CONDITIONAL_STATS) is incomplete
+    assert _carries(conditional, CredibleSetVariantFlag.INCOMPLETE_REPORTED_STATS) is False
+
+
+@pytest.mark.parametrize(
+    ('mantissa', 'exponent', 'missing'),
+    [(None, -10, True), (5.0, None, True), (None, None, True), (5.0, -10, False)],
+)
+def test_missing_pvalue(mantissa: float | None, exponent: int | None, missing: bool) -> None:
+    frame = flag_missing_pvalue(_row(pValueMantissa=mantissa, pValueExponent=exponent))
+    assert _carries(frame, CredibleSetVariantFlag.MISSING_PVALUE) is missing
+
+
+@pytest.mark.parametrize(('sample_size', 'missing'), [(None, True), (1000, False)])
+def test_missing_sample_size(sample_size: int | None, missing: bool) -> None:
+    frame = flag_missing_sample_size(_row(sampleSize=sample_size))
+    assert _carries(frame, CredibleSetVariantFlag.MISSING_SAMPLE_SIZE) is missing
+
+
+def test_variant_qc_adds_the_metadata_flags() -> None:
+    frame = flag_variants(_row(reportedBeta=0.2, conditionalBeta=-0.1), coverage=0.95, pip_tolerance=1e-4).collect()
+    assert set(frame['qualityControls'].item()) == {
+        CredibleSetVariantFlag.EFFECT_DIRECTION_MISMATCH,
+        CredibleSetVariantFlag.INCOMPLETE_REPORTED_STATS,
+        CredibleSetVariantFlag.INCOMPLETE_CONDITIONAL_STATS,
+        CredibleSetVariantFlag.MISSING_PVALUE,
+        CredibleSetVariantFlag.MISSING_SAMPLE_SIZE,
+    }
