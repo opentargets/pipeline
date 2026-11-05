@@ -6,8 +6,15 @@ import pytest
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
-PPP_ONLY = ['sle_map', 'otar2077/microglia', 'eQTLGen/coeqtl', 'deCODE_proteomics']
-BOTH = ['eqtl_catalogue', 'ukb_ppp_eur']
+PPP_ONLY = [
+    'gwas/finngen_meta',
+    'molqtl/sle_map',
+    'molqtl/otar2077/microglia',
+    'molqtl/eQTLGen/single_cell_eqtl',
+    'molqtl/eQTLGen/coeqtl',
+    'molqtl/deCODE_proteomics',
+]
+BOTH = ['molqtl/eqtl_catalogue', 'molqtl/ukb_ppp_eur', 'molqtl/finngen_multiome']
 
 
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
@@ -18,9 +25,9 @@ def test_study_inputs_follow_the_run(monkeypatch, ppp):
     [task] = config.pts.config['steps']['study']
     sources = task['source']['study']
     for name in PPP_ONLY:
-        assert (f'input/molqtl/{name}/study' in sources) is ppp
+        assert (f'input/{name}/study' in sources) is ppp
     for name in BOTH:
-        assert f'input/molqtl/{name}/study' in sources
+        assert f'input/{name}/study' in sources
     assert task['source']['target'] == 'output/target'
 
 
@@ -34,9 +41,9 @@ def test_credible_set_sources_follow_the_run(monkeypatch, ppp):
     """PPP adds its sources to the explode and to validation; the platform reads only its own."""
     explode, validation = _credible_set_step(ppp, monkeypatch)
     for name in PPP_ONLY:
-        assert (f'molqtl/{name}' in explode['foreach']) is ppp
+        assert (name in explode['foreach']) is ppp
     for name in BOTH:
-        assert f'molqtl/{name}' in explode['foreach']
+        assert name in explode['foreach']
     assert validation['source']['credible_set'] == [f'intermediate/qc/{f}/credible_set' for f in explode['foreach']]
     assert validation['source']['credible_set_variant'] == [
         f'intermediate/qc/{f}/credible_set_variant' for f in explode['foreach']
