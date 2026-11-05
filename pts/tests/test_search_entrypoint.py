@@ -135,3 +135,33 @@ def test_search_emits_one_document_per_source_entity(tmp_path: Path) -> None:
     for name, identifier in expected.items():
         frame = pl.read_parquet(Path(destination[name]) / '**' / '*.parquet')
         assert frame['id'].to_list() == [identifier]
+
+
+def test_search_indexes_the_mechanism_of_a_drug_with_only_an_electronic_one(tmp_path: Path) -> None:
+    """CH2 has no ChEMBL mechanism; its electronic mechanism text is indexed like a manual one."""
+    root = tmp_path / 'output'
+    source = _build_release(root)
+    drug = pl.read_parquet(Path(source['drug']) / '00000000.parquet')
+    both = pl.concat([drug, drug.with_columns(id=pl.lit('CH2'), name=pl.lit('newdrug'))])
+    both.write_parquet(Path(source['drug']) / '00000000.parquet')
+    mechanism = pl.DataFrame(
+        [
+            {'chemblIds': ['CH1'], 'mechanismOfAction': 'COX', 'references': None, 'targetName': 'n',
+             'targets': [], 'actionType': 'INHIBITOR', 'targetType': 'protein', 'curation': 'manual'},
+            {'chemblIds': ['CH2'], 'mechanismOfAction': 'Zorbase inhibitor', 'references': None, 'targetName': 'n',
+             'targets': [], 'actionType': 'INHIBITOR', 'targetType': 'protein', 'curation': 'electronic'},
+        ],
+        schema={'chemblIds': LIST_STR, 'mechanismOfAction': pl.String, 'references': LIST_STR, 'targetName': pl.String,
+                'targets': LIST_STR, 'actionType': pl.String, 'targetType': pl.String, 'curation': pl.String},
+    )
+    mechanism.write_parquet(Path(source['mechanism']) / '00000000.parquet')
+    destination = {name: str(tmp_path / 'view' / f'search_{name}') for name in
+                   ('diseases', 'targets', 'drugs', 'variants', 'studies')}
+
+    search(source, destination, None, None)
+
+    drugs = pl.read_parquet(Path(destination['drugs']) / '**' / '*.parquet')
+    assert sorted(drugs['id'].to_list()) == ['CH1', 'CH2']
+    prefixes = dict(zip(drugs['id'].to_list(), drugs['prefixes'].to_list(), strict=True))
+    assert any('zorbase' in p.lower() for p in prefixes['CH2'])
+    assert not any('zorbase' in p.lower() for p in prefixes['CH1'])

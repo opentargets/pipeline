@@ -414,6 +414,23 @@ class TestProcessDrugIndex:
         assert stages['CHEMBL888'] == 'UNKNOWN'
         assert drug_index_result['maximumClinicalStage'].null_count() == 0
 
+    def test_drug_with_only_an_electronic_mechanism_qualifies(
+        self, molecule_df, chemical_probes_df, clinical_report_df, disease_df
+    ):
+        """CHEMBL999 has no drugbank xref, report or probe; an electronic mechanism makes it a drug."""
+        mechanisms = pl.DataFrame(
+            [
+                {'chemblIds': ['CHEMBL1'], 'actionType': 'INHIBITOR', 'curation': 'manual'},
+                {'chemblIds': ['CHEMBL999'], 'actionType': 'INHIBITOR', 'curation': 'electronic'},
+            ],
+            schema={**MECHANISM_SCHEMA, 'curation': pl.String},
+            orient='row',
+        )
+        result = process_drug_index(molecule_df.lazy(), chemical_probes_df, mechanisms, clinical_report_df, disease_df)
+        assert 'CHEMBL999' in result['id'].to_list()
+        assert _by_id(result, 'maximumClinicalStage')['CHEMBL999'] == 'UNKNOWN'
+        assert dict(result.schema) == drug_molecule_schema
+
     def test_output_matches_the_declared_schema(self, drug_index_result):
         assert dict(drug_index_result.schema) == drug_molecule_schema
 
