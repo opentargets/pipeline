@@ -189,6 +189,9 @@ def validate_target(studies: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame
 def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve foreground and background diseases and flag unresolved GWAS studies."""
     logger.info('Normalizing and validating study diseases')
+    # Some sources (gentropy v4 study index) already carry these columns; replace them, or the
+    # joins below would add `*_right` columns and leave the source values in place.
+    studies = studies.drop('diseaseIds', 'backgroundDiseaseIds', strict=False)
     result = studies
     for source, destination in [
         ('traitFromSourceMappedIds', 'diseaseIds'),
@@ -214,6 +217,8 @@ def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.Laz
 def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve source biosample IDs and flag unmatched non-GWAS studies."""
     logger.info('Validating study biosamples')
+    # Replace a source `biosampleId` (gentropy v4 study index) with the resolved one.
+    studies = studies.drop('biosampleId', strict=False)
     lookup = biosample.select(
         pl.col('biosampleId').alias('biosampleFromSourceId'),
         'biosampleId',
