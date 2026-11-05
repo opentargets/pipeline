@@ -74,9 +74,10 @@ def annotation(
     sources = AnnotationSource.model_validate(source)
     destinations = AnnotationDestination.model_validate(destination)
     options = AnnotationSettings.model_validate(settings)
-    validated_set = scan_dataset(sources.credible_set)
-    validated_variant = scan_dataset(sources.credible_set_variant)
-    study = scan_dataset(sources.study)
+    # cached, so every branch of the plan shares one read of each dataset instead of reading it again
+    validated_set = scan_dataset(sources.credible_set).cache()
+    validated_variant = scan_dataset(sources.credible_set_variant).cache()
+    study = scan_dataset(sources.study).cache()
     target = scan_dataset(sources.target)
     disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
     trans_set = trans_qtls(validated_set, validated_variant, study, target, options.trans_qtl_threshold)

@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import polars as pl
 import pytest
 from otter.config.model import Config
+from polars.io.plugins import register_io_source
 
 from pts.schemas.credible_set import (
     credible_set_schema,
@@ -16,12 +17,14 @@ from pts.schemas.credible_set import (
 from pts.schemas.study import study_schema
 from pts.schemas.target import GENOMIC_LOCATION
 from pts.schemas.variant import variant_schema
+from pts.transformers.credible_set import annotation as annotation_module
 from pts.transformers.credible_set.annotation import annotation
 from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import set_qc
 from pts.transformers.credible_set.validation import validation
 from pts.transformers.credible_set.variant_qc import variant_qc
 from pts.transformers.study import QualityFlag as StudyQualityFlag
+from pts.transformers.utils.dataset import scan_dataset
 from tests.credible_set_fixtures import (
     ALT_CONTIG_SET,
     ALT_CONTIG_VARIANTS,
@@ -212,3 +215,21 @@ def test_every_stage_writes_the_new_schemas(tmp_path: Path) -> None:
         'output/credible_set_variant',
     ):
         assert _read(tmp_path / name).schema == credible_set_variant_schema, name
+
+
+def test_annotation_reads_each_input_dataset_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every branch of the annotation plan shares one read of each dataset, instead of reading it again from storage."""
+    read: dict[str, int] = {}
+
+    def counting_scan(path: str, **options: Any) -> pl.LazyFrame:
+        frame = scan_dataset(path, **options).collect()
+
+        def source(with_columns, predicate, n_rows, batch_size):
+            read[Path(path).name] = read.get(Path(path).name, 0) + 1
+            yield frame
+
+        return register_io_source(source, schema=frame.schema, is_pure=True)
+
+    monkeypatch.setattr(annotation_module, 'scan_dataset', counting_scan)
+    _run_stages(tmp_path)
+    assert read == dict.fromkeys(('credible_set', 'credible_set_variant', 'study', 'target', 'disease', 'variant'), 1)
