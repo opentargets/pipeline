@@ -3188,7 +3188,7 @@ wheels = [
 
 [[package]]
 name = "orchestration"
-version = "26.12.0rc44"
+version = "26.12.0rc45"
 source = { editable = "." }
 dependencies = [
     { name = "apache-airflow" },
