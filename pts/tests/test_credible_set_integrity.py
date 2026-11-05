@@ -1,4 +1,4 @@
-"""Validation: integrity checks of the written datasets, and the output sort order."""
+"""Validation: integrity checks of the written datasets, and a write without a sort."""
 
 from pathlib import Path
 from unittest.mock import Mock
@@ -13,8 +13,6 @@ from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVari
 from pts.transformers.credible_set.validation import (
     integrity_checks,
     integrity_errors,
-    sort_sets,
-    sort_variants,
     validation,
     validation_check,
 )
@@ -141,75 +139,30 @@ def test_the_check_fails_when_a_written_row_is_lost(tmp_path: Path) -> None:
         _check(tmp_path, *source)
 
 
-def test_valid_variants_are_written_in_genome_order(tmp_path: Path) -> None:
-    sets, variants = _write_source(tmp_path)
-    _sets(('a', '1_1_A_T', 'gwas', [])).collect().write_parquet(sets / 'part-0.parquet')
-    written = (
-        ('a', 'X_3_A_T', []),
-        ('a', '10_2_A_T', []),
-        ('a', '1_1_A_T', []),
-        ('a', '2_7_A_T', []),
-        ('a', '1_10_A_T', []),
-    )
-    _variants(*written).collect().write_parquet(variants / 'part-0.parquet')
-    _validation(tmp_path, sets, variants)
-    valid = scan_dataset(str(tmp_path / 'out/valid_variant')).collect()
-    assert valid['variantId'].to_list() == ['1_1_A_T', '1_10_A_T', '2_7_A_T', '10_2_A_T', 'X_3_A_T']
-    assert valid.schema == credible_set_variant_schema
+def test_validation_writes_every_dataset_without_sorting(tmp_path: Path, monkeypatch) -> None:
+    """A global sort cannot stream: over every credible set variant it spills past the vm's disk budget.
+
+    The only sort is the ranking of duplicated ids, over the valid sets.
+    """
+    written: list[pl.LazyFrame] = []
+    collect_all = pl.collect_all
+
+    def capturing_collect_all(frames: list[pl.LazyFrame], **options) -> list[pl.DataFrame]:
+        written.extend(frames)
+        return collect_all(frames, **options)
+
+    monkeypatch.setattr(validation_module.pl, 'collect_all', capturing_collect_all)
+    _validation(tmp_path, *_write_source(tmp_path))
+    assert len(written) == len(DESTINATIONS)
+    ranking = 'SORT BY [nulls_last: [true, true, true, true]] [col("id"), col("_size"), col("_source"), col("_hash")]'
+    for frame in written:
+        sort = [line.strip() for line in frame.explain().splitlines() if 'SORT' in line]
+        assert all(line == ranking for line in sort), sort
 
 
-def test_sets_are_sorted_by_chromosome_rank_then_locus_then_lead() -> None:
-    rows = [
-        ('10', 5, 5, 'c'),
-        ('2', 5, 5, 'b'),
-        ('X', 1, 1, 'x'),
-        ('1', 9, 9, 'z'),
-        ('1', 1, 9, 'b'),
-        ('1', 1, 9, 'a'),
-        ('MT', 1, 1, 'm'),
-        ('1', 1, 2, 'y'),
-    ]
-    sets = pl.LazyFrame(
-        [{'chromosome': c, 'locusStart': s, 'locusEnd': e, 'leadVariantId': lead} for c, s, e, lead in rows],
-        schema={'chromosome': pl.String, 'locusStart': pl.Int32, 'locusEnd': pl.Int32, 'leadVariantId': pl.String},
-    )
-    ordered = sort_sets(sets).collect()
-    assert list(zip(ordered['chromosome'], ordered['leadVariantId'], strict=True)) == [
-        ('1', 'y'),
-        ('1', 'a'),
-        ('1', 'b'),
-        ('1', 'z'),
-        ('2', 'b'),
-        ('10', 'c'),
-        ('X', 'x'),
-        ('MT', 'm'),
-    ]
-
-
-def test_variants_are_sorted_by_chromosome_position_alleles_then_credible_set() -> None:
-    variants = pl.LazyFrame({
-        'credibleSetId': ['b', 'a', 'a', 'a', 'a', 'a', 'a', 'a'],
-        'variantId': [
-            '1_100_A_T',
-            'MT_1_A_T',
-            '1_100_A_T',
-            '10_1_A_T',
-            '1_100_A_C',
-            '1_20_G_A',
-            '2_1_A_T',
-            '1_100_AT_T',
-        ],
-    })
-    assert sort_variants(variants).collect().rows() == [
-        ('a', '1_20_G_A'),
-        ('a', '1_100_A_C'),
-        ('a', '1_100_A_T'),
-        ('b', '1_100_A_T'),
-        ('a', '1_100_AT_T'),
-        ('a', '2_1_A_T'),
-        ('a', '10_1_A_T'),
-        ('a', 'MT_1_A_T'),
-    ]
+def test_valid_variants_keep_the_credible_set_variant_schema(tmp_path: Path) -> None:
+    _validation(tmp_path, *_write_source(tmp_path))
+    assert scan_dataset(str(tmp_path / 'out/valid_variant')).collect().schema == credible_set_variant_schema
 
 
 def test_validation_scans_each_source_dataset_once(tmp_path: Path, monkeypatch) -> None:

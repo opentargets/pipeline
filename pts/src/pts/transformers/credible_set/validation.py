@@ -17,13 +17,11 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.credible_set import validated_credible_set_schema
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod
+from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.variant_id import (
-    variant_alternate_allele,
     variant_chromosome,
     variant_position,
-    variant_reference_allele,
 )
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import (
@@ -453,9 +451,9 @@ def validate(
     row_split = valid_rows(credible_set_variant, settings.csv_row_invalid_qc_reasons)
     # Whole sets: 3. cross-set flags, 4. invalid variant in set, 5. missing lead, 6. exclusion.
     flagged_set = add_cross_set_flags(credible_set, cross_set_flag)
-    sets_with_invalid_variant = row_split.valid.filter(
-        has_excluded_flag(settings.csv_set_invalid_qc_reasons)
-    ).select(pl.col('credibleSetId').alias('id'))
+    sets_with_invalid_variant = row_split.valid.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
+        pl.col('credibleSetId').alias('id')
+    )
     flagged_set = flag_matching_ids(
         flagged_set, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET
     )
@@ -605,57 +603,6 @@ def integrity_errors(integrity_count: pl.DataFrame) -> list[str]:
     return error_message
 
 
-def _chromosome_rank(chromosome: pl.Expr) -> pl.Expr:
-    """The rank of a chromosome in genome order, as in `Chromosome`; any other chromosome ranks last."""
-    order = {member.value: rank for rank, member in enumerate(Chromosome)}
-    return chromosome.cast(pl.String).replace_strict(order, default=len(order), return_dtype=pl.Int32)
-
-
-def sort_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Sort credible sets by chromosome in genome order, then `locusStart`, `locusEnd` and `leadVariantId`.
-
-    A chromosome outside `Chromosome` sorts last.
-
-    Examples:
-        >>> credible_set = pl.LazyFrame({
-        ...     'chromosome': ['X', '10', '2', '2'],
-        ...     'locusStart': [1, 1, 9, 1],
-        ...     'locusEnd': [1, 1, 9, 5],
-        ...     'leadVariantId': ['x', 'c', 'b', 'a'],
-        ... })
-        >>> sort_sets(credible_set).collect()['leadVariantId'].to_list()
-        ['a', 'b', 'c', 'x']
-    """
-    rank = _chromosome_rank(pl.col('chromosome'))
-    return frame.sort(rank, 'locusStart', 'locusEnd', 'leadVariantId', nulls_last=True)
-
-
-def sort_variants(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Sort credible set variants in genome order, by the fields of `variantId`, then by `credibleSetId`.
-
-    The chromosome ranks as in `Chromosome`, the position sorts as a number, then the reference and
-    alternate alleles. A variant whose position is not a number sorts last on its chromosome. The
-    variants of one chromosome are contiguous, for the join to the variant index.
-
-    Examples:
-        >>> credible_set_variant = pl.LazyFrame({
-        ...     'credibleSetId': ['b', 'a', 'a', 'a', 'a'],
-        ...     'variantId': ['1_100_A_T', '10_1_A_T', '1_100_A_C', '1_20_G_A', '1_100_A_T'],
-        ... })
-        >>> sort_variants(credible_set_variant).collect()['variantId'].to_list()
-        ['1_20_G_A', '1_100_A_C', '1_100_A_T', '1_100_A_T', '10_1_A_T']
-    """
-    variant_id = pl.col('variantId')
-    return frame.sort(
-        _chromosome_rank(variant_chromosome(variant_id)),
-        variant_position(variant_id),
-        variant_reference_allele(variant_id),
-        variant_alternate_allele(variant_id),
-        'credibleSetId',
-        nulls_last=True,
-    )
-
-
 def validation(
     source: dict[str, str | list[str]],
     destination: dict[str, str],
@@ -689,10 +636,10 @@ def validation(
     )
     logger.info('Validated the credible sets of {}', ', '.join(source_name for source_name, _, _ in source_pair))
     pl.collect_all([
-        sink_dataset(sort_sets(type_valid_sets(valid_set)), destinations.valid_set),
-        sink_dataset(sort_variants(valid_variant), destinations.valid_variant),
-        sink_dataset(sort_sets(excluded_set), destinations.excluded_set),
-        sink_dataset(sort_variants(excluded_variant), destinations.excluded_variant),
+        sink_dataset(type_valid_sets(valid_set), destinations.valid_set),
+        sink_dataset(valid_variant, destinations.valid_variant),
+        sink_dataset(excluded_set, destinations.excluded_set),
+        sink_dataset(excluded_variant, destinations.excluded_variant),
     ])
 
 
