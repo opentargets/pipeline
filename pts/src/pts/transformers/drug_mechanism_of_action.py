@@ -216,7 +216,7 @@ def merge_aact(
         deduplicated
         .select(
             '_row',
-            _drug_id=pl.concat_list(pl.col('parentChemblId').cast(pl.String), pl.col('chemblIds')),
+            _drug_id=pl.concat_list(pl.col('parentChemblId').cast(pl.String), pl.col('chemblIds').fill_null([])),
         )
         .explode('_drug_id')
         .unique()

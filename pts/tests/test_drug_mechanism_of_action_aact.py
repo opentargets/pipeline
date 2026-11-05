@@ -4,6 +4,7 @@ from pathlib import Path
 
 import polars as pl
 import yaml
+from loguru import logger
 
 from pts.transformers.clinical_mira.record_store import publish_snapshot
 from pts.transformers.clinical_mira.staged_outputs import MOA
@@ -158,6 +159,34 @@ def test_salt_link_publishes_under_the_parent() -> None:
     assert row['chemblIds'] == ['CHEMBL1', 'CHEMBL1SALT']
     assert row['drugType'] == 'Small molecule'
     assert row['maximumClinicalStage'] == 'PHASE_1'
+
+
+def test_a_parent_absent_from_the_molecules_still_lists_itself_in_chembl_ids() -> None:
+    molecule = pl.concat([
+        _molecule(),
+        pl.DataFrame(
+            {'id': ['CHEMBL5SALT'], 'parentId': ['CHEMBL5'], 'childChemblIds': [[]], 'drugType': ['Small molecule']},
+            schema=_molecule().schema,
+        ),
+    ])
+    report = _report([('NCT1', 'CHEMBL5SALT', 'PHASE_2'), ('NCT2', 'CHEMBL5SALT', 'PHASE_2')])
+
+    candidates = build_candidates(_moa(), report, molecule, _target(), **SETTINGS)
+
+    assert candidates.select('parentChemblId', 'chemblIds').rows() == [('CHEMBL5', ['CHEMBL5'])]
+
+
+def test_a_pool_linked_to_a_drug_absent_from_the_molecules_is_dropped_and_counted() -> None:
+    report = _report([('NCT1', 'CHEMBL404', 'PHASE_2'), ('NCT2', 'CHEMBL404', 'PHASE_2')])
+    messages: list[str] = []
+    handler = logger.add(lambda message: messages.append(message.record['message']))
+    try:
+        candidates = _build(_moa(), report)
+    finally:
+        logger.remove(handler)
+
+    assert candidates.is_empty()
+    assert any('1 linked pools' in m and 'chembl_molecule' in m for m in messages), messages
 
 
 def test_pool_with_split_trial_drugs_is_not_linked() -> None:

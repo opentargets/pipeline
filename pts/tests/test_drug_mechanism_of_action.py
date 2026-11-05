@@ -605,6 +605,13 @@ class TestMergeAact:
         assert report['category'].to_list() == ['extra_target']
         assert report['chemblCurrentTargets'].to_list() == [['ENSG1', 'ENSG2']]
 
+    def test_a_parent_with_a_chembl_mechanism_blocks_a_candidate_with_null_chembl_ids(
+        self, chembl: pl.DataFrame
+    ) -> None:
+        merged, report = self.merge(chembl, candidate(parentChemblId='CHEMBL3', chemblIds=None))
+        assert merged.equals(chembl)
+        assert report['category'].to_list() == ['extra_target']
+
     def test_a_chembl_mechanism_on_a_listed_salt_blocks_the_parent(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(chembl, candidate(parentChemblId='CHEMBL77', chemblIds=['CHEMBL77', 'CHEMBL1']))
         assert merged.equals(chembl)

@@ -103,7 +103,7 @@ def build_candidates(
         .rename({'drugName': 'pool_id', 'nctIds': 'nct_ids'})
     )
     molecules = _linking_molecules(chembl_molecule, clinical_report)
-    links = (
+    linked = (
         link_pools(
             pools,
             clinical_report,
@@ -114,13 +114,15 @@ def build_candidates(
         .join(
             molecules.select(pl.col('id').alias('drugId'), 'parentId'), on='drugId', how='left', maintain_order='left'
         )
-        .drop_nulls('parentId')
-        .select(
-            drugName='pool_id',
-            parentChemblId='parentId',
-            maximumClinicalStage='maximumClinicalStage',
-            drugType='drugType',
-        )
+    )
+    absent = linked.filter(pl.col('parentId').is_null()).height
+    if absent:
+        logger.warning(f'{absent} linked pools dropped: their linked drug is absent from chembl_molecule')
+    links = linked.drop_nulls('parentId').select(
+        drugName='pool_id',
+        parentChemblId='parentId',
+        maximumClinicalStage='maximumClinicalStage',
+        drugType='drugType',
     )
     family = chembl_molecule.select(
         parentChemblId='id',
@@ -145,7 +147,7 @@ def build_candidates(
         .join(family, on='parentChemblId', how='left', maintain_order='left')
         .select(
             'parentChemblId',
-            'chemblIds',
+            pl.coalesce('chemblIds', pl.concat_list('parentChemblId')).alias('chemblIds'),
             'maximumClinicalStage',
             'drugType',
             'targetFromSource',
