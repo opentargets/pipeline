@@ -1,0 +1,110 @@
+"""Variant QC: credible set id, coverage and PIP flags, on the worked examples of the PRD."""
+
+import math
+
+import polars as pl
+import pytest
+
+from pts.schemas.credible_set import credible_set_variant_schema
+from pts.transformers.credible_set.flags import CredibleSetVariantFlag
+from pts.transformers.credible_set.variant_qc import (
+    flag_abnormal_pip,
+    flag_exceeds_coverage,
+    flag_invalid_cs_id,
+    flag_variants,
+)
+
+CS_ID = '0' * 32
+EXCEEDS = CredibleSetVariantFlag.EXCEEDS_COVERAGE_95
+ABNORMAL = CredibleSetVariantFlag.ABNORMAL_PIP
+
+
+def _variants(pips: list[float], credible_set_id: str = CS_ID, names: list[str] | None = None) -> pl.LazyFrame:
+    names = names or [f'1_{100 + index}_A_T' for index in range(len(pips))]
+    rows = [
+        {'credibleSetId': credible_set_id, 'variantId': name, 'posteriorProbability': pip, 'qualityControls': []}
+        for name, pip in zip(names, pips, strict=True)
+    ]
+    return pl.LazyFrame([{name: row.get(name) for name in credible_set_variant_schema} for row in rows]).cast(
+        credible_set_variant_schema
+    )
+
+
+def _with(frame: pl.LazyFrame, flag: str) -> list[float]:
+    """The PIPs of the rows carrying `flag`, rounded for comparison."""
+    flagged = frame.filter(pl.col('qualityControls').list.contains(flag)).collect()
+    return [round(pip, 2) for pip in flagged['posteriorProbability']]
+
+
+def _qc(frame: pl.LazyFrame, coverage: float = 0.95, pip_tolerance: float = 1e-4) -> pl.LazyFrame:
+    return frame.pipe(flag_exceeds_coverage, coverage).pipe(flag_abnormal_pip, coverage, pip_tolerance)
+
+
+def test_the_cut_keeps_the_variant_that_reaches_coverage() -> None:
+    result = _qc(_variants([0.60, 0.30, 0.09, 0.01]))
+    assert _with(result, EXCEEDS) == [0.01]
+    assert _with(result, ABNORMAL) == []
+
+
+def test_a_variant_after_coverage_is_reached_exceeds_it() -> None:
+    result = _qc(_variants([0.97, 0.02]))
+    assert _with(result, EXCEEDS) == [0.02]
+    assert _with(result, ABNORMAL) == []
+
+
+def test_a_set_below_coverage_is_abnormal_on_every_row() -> None:
+    result = _qc(_variants([0.50, 0.30]))
+    assert _with(result, EXCEEDS) == []
+    assert _with(result, ABNORMAL) == [0.50, 0.30]
+
+
+def test_a_kept_sum_above_one_is_abnormal() -> None:
+    result = _qc(_variants([0.60, 0.60]))
+    assert _with(result, ABNORMAL) == [0.60, 0.60]
+
+
+@pytest.mark.parametrize('bad_pip', [math.nan, 0.0, -0.1, 1.1])
+def test_an_invalid_pip_makes_every_row_of_its_set_abnormal(bad_pip: float) -> None:
+    other = _variants([0.96], credible_set_id='1' * 32)
+    result = _qc(pl.concat([_variants([0.70, bad_pip, 0.30]), other]))
+    flagged = result.filter(pl.col('qualityControls').list.contains(ABNORMAL)).collect()
+    assert flagged['credibleSetId'].to_list() == [CS_ID] * 3
+
+
+@pytest.mark.parametrize('order', [['1_1_A_T', '1_2_A_T', '1_3_A_T'], ['1_3_A_T', '1_2_A_T', '1_1_A_T']])
+def test_equal_pips_at_the_cut_are_ordered_by_variant_id(order: list[str]) -> None:
+    pips = {'1_1_A_T': 0.90, '1_2_A_T': 0.06, '1_3_A_T': 0.06}
+    result = _qc(_variants([pips[name] for name in order], names=order))
+    exceeding = result.filter(pl.col('qualityControls').list.contains(EXCEEDS)).collect()
+    assert exceeding['variantId'].to_list() == ['1_3_A_T']
+
+
+def test_the_cut_compares_the_stored_pips_without_tolerance() -> None:
+    """0.90 + 0.05 in single precision is 0.94999998, below the coverage, so nothing is cut.
+
+    The sources store their 95% sets; a tolerance on the cut would remove members they kept.
+    """
+    result = _qc(_variants([0.90, 0.05, 0.05]))
+    assert _with(result, EXCEEDS) == []
+
+
+@pytest.mark.parametrize(
+    ('credible_set_id', 'invalid'),
+    [(CS_ID, False), ('0123456789abcdef' * 2, False), ('0123456789ABCDEF' * 2, True), ('0' * 31, True), ('', True)],
+)
+def test_invalid_cs_id(credible_set_id: str, invalid: bool) -> None:
+    result = flag_invalid_cs_id(_variants([1.0], credible_set_id=credible_set_id)).collect()
+    assert result['qualityControls'].list.contains(CredibleSetVariantFlag.INVALID_CS_ID).item() is invalid
+
+
+def test_flagging_keeps_rows_columns_and_existing_flags_and_is_idempotent() -> None:
+    frame = _variants([0.60, 0.30, 0.09, 0.01]).with_columns(
+        pl.lit([CredibleSetVariantFlag.NOT_IN_LOCUS.value]).alias('qualityControls')
+    )
+    once = flag_variants(frame, coverage=0.95, pip_tolerance=1e-4).collect()
+    twice = flag_variants(once.lazy(), coverage=0.95, pip_tolerance=1e-4).collect()
+
+    assert once.height == 4
+    assert once.drop('qualityControls').equals(frame.collect().drop('qualityControls'))
+    assert once['qualityControls'].list.contains(CredibleSetVariantFlag.NOT_IN_LOCUS).all()
+    assert twice.equals(once)
