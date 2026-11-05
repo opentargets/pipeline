@@ -3,6 +3,7 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -143,3 +144,91 @@ def test_cached_only_never_calls_the_model(tmp_path):
     assert set(results) == {'a'}
     assert errors == {}
     assert client.total == 2
+
+
+class FakeChatClient:
+    """Chat-completions client answering ``Echo(value=<last user message>)``."""
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        self.calls: list[dict] = []
+        self.fail_on = fail_on
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs: Any) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        text = kwargs['messages'][-1]['content']
+        if text == self.fail_on:
+            raise ValueError('boom')
+        message = SimpleNamespace(content=json.dumps({'value': text}))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    async def close(self) -> None:
+        return None
+
+
+def test_chat_api_sends_system_prompt_and_strict_schema(tmp_path):
+    client = FakeChatClient()
+
+    results, errors = run_cached(
+        [('a', 'x')],
+        system_prompt='be precise',
+        response_model=Echo,
+        model='openai/gpt-oss-120b-maas',
+        cache_path=tmp_path / 'c.jsonl',
+        api='chat',
+        client=client,
+    )
+
+    assert results['a'] == Echo(value='x')
+    assert errors == {}
+    call = client.calls[0]
+    assert call['messages'][0] == {'role': 'system', 'content': 'be precise'}
+    assert call['response_format']['type'] == 'json_schema'
+    assert call['response_format']['json_schema']['strict'] is True
+    assert call['response_format']['json_schema']['schema']['additionalProperties'] is False
+
+
+def test_chat_api_failures_are_reported_and_retried(tmp_path):
+    first, first_errors = run_cached(
+        [('a', 'x'), ('b', 'y')],
+        system_prompt='i',
+        response_model=Echo,
+        model='m',
+        cache_path=tmp_path / 'c.jsonl',
+        api='chat',
+        client=FakeChatClient(fail_on='y'),
+    )
+    second_client = FakeChatClient()
+    second, _ = run_cached(
+        [('a', 'x'), ('b', 'y')],
+        system_prompt='i',
+        response_model=Echo,
+        model='m',
+        cache_path=tmp_path / 'c.jsonl',
+        api='chat',
+        client=second_client,
+    )
+
+    assert set(first) == {'a'} and first_errors == {'b': 'ValueError'}
+    assert set(second) == {'a', 'b'} and len(second_client.calls) == 1
+
+
+def test_client_factory_is_called_once_per_chunk(tmp_path):
+    made: list[FakeChatClient] = []
+
+    def factory() -> FakeChatClient:
+        made.append(FakeChatClient())
+        return made[-1]
+
+    run_cached(
+        [('a', 'x'), ('b', 'y'), ('c', 'z')],
+        system_prompt='i',
+        response_model=Echo,
+        model='m',
+        cache_path=tmp_path / 'c.jsonl',
+        api='chat',
+        chunk_size=2,
+        client_factory=factory,
+    )
+
+    assert len(made) == 2

@@ -15,11 +15,32 @@ from pathlib import Path
 import polars as pl
 from loguru import logger
 
-from pts.transformers.clinical_mira.moa import benchmark, grounding, judge, pilot, pooling, quotes, report
+from pts.transformers.clinical_mira.moa import benchmark, grounding, judge, pilot, pooling, quotes, report, vertex
 from pts.transformers.clinical_mira.moa.llm import run_cached
 from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict, MoaExtraction, load_prompt
 
 STRATA = ('phase_group', 'maximumClinicalStage', 'drugType')
+DEFAULT_MODELS = {
+    ('openai', 'extract'): 'gpt-5-mini',
+    ('openai', 'judge'): 'gpt-5',
+    ('vertex', 'extract'): vertex.GPT_OSS_120B,
+    ('vertex', 'judge'): vertex.GPT_OSS_120B,
+}
+
+
+def _provider_options(args: argparse.Namespace, stage: str) -> dict:
+    """The ``run_cached`` options for the chosen provider."""
+    model = args.model or DEFAULT_MODELS[(args.provider, stage)]
+    if args.provider == 'vertex':
+        project, location = args.vertex_project, args.vertex_location
+        return {
+            'model': model,
+            'api': 'chat',
+            'client_factory': lambda: vertex.vertex_client(project, location),
+        }
+    return {'model': model}
+
+
 LABELS = ('relation', 'statementType', 'effect_wording', 'action_other')
 
 
@@ -94,10 +115,10 @@ def cmd_extract(run: Path, args: argparse.Namespace) -> None:
         requests,
         system_prompt=load_prompt('extract'),
         response_model=MoaExtraction,
-        model=args.model,
         cache_path=run / 'extract_cache.jsonl',
         concurrency=args.concurrency,
         cached_only=args.cached_only,
+        **_provider_options(args, 'extract'),
     )
     extractions = {k: v for k, v in results.items() if isinstance(v, MoaExtraction)}
     texts = pl.read_parquet(run / 'texts.parquet')
@@ -148,9 +169,9 @@ def cmd_judge(run: Path, args: argparse.Namespace) -> None:
         requests,
         system_prompt=load_prompt('judge'),
         response_model=JudgeVerdict,
-        model=args.model,
         cache_path=run / 'judge_cache.jsonl',
         concurrency=args.concurrency,
+        **_provider_options(args, 'judge'),
     )
     verdicts = [
         {
@@ -240,7 +261,6 @@ def build_parser() -> argparse.ArgumentParser:
     command('pilot', cmd_pilot).add_argument('--seed', type=int, default=0)
 
     extract = command('extract', cmd_extract)
-    extract.add_argument('--model', default='gpt-5-mini')
     extract.add_argument('--concurrency', type=int, default=20)
     extract.add_argument('--limit', type=int, default=None)
     extract.add_argument('--all', action='store_true', help='every pool, not only the pilot')
@@ -249,11 +269,16 @@ def build_parser() -> argparse.ArgumentParser:
     command('ground', cmd_ground).add_argument('--target-view', required=True)
 
     judge_cmd = command('judge', cmd_judge)
-    judge_cmd.add_argument('--model', default='gpt-5')
     judge_cmd.add_argument('--concurrency', type=int, default=20)
     judge_cmd.add_argument('--n-matches', type=int, default=100)
     judge_cmd.add_argument('--seed', type=int, default=0)
     judge_cmd.add_argument('--show-chembl', action='store_true', help='show the judge ChEMBL mechanisms')
+
+    for sub_parser in (extract, judge_cmd):
+        sub_parser.add_argument('--provider', choices=['openai', 'vertex'], default='openai')
+        sub_parser.add_argument('--model', default=None, help='default depends on the provider and the stage')
+        sub_parser.add_argument('--vertex-project', default=vertex.DEFAULT_PROJECT)
+        sub_parser.add_argument('--vertex-location', default=vertex.DEFAULT_LOCATION)
 
     command('evaluate', cmd_evaluate).add_argument('--seed', type=int, default=0)
     return parser
