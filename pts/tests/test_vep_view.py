@@ -96,63 +96,51 @@ class TestProcessCredibleSet:
     """Tests for process_credible_set."""
 
     @pytest.fixture
-    def credible_set(self) -> pl.LazyFrame:
-        """Single locus with two tag variants; the lead is the first one."""
-        return pl.from_dicts([
-            {
-                'studyLocusId': 'locus1',
-                'studyId': 'study1',
-                'variantId': '1_100_A_T',
-                'finemappingMethod': 'SuSiE',
-                'locus': [
-                    {
-                        'variantId': '1_100_A_T',
-                        'pValueMantissa': 5.0,
-                        'pValueExponent': -8,
-                        'beta': 0.1,
-                        'is95CredibleSet': True,
-                        'is99CredibleSet': True,
-                        'posteriorProbability': 0.8,
-                    },
-                    {
-                        'variantId': '1_200_C_G',
-                        'pValueMantissa': 1.0,
-                        'pValueExponent': -5,
-                        'beta': 0.05,
-                        'is95CredibleSet': True,
-                        'is99CredibleSet': True,
-                        'posteriorProbability': 0.2,
-                    },
-                ],
-            }
-        ]).lazy()
+    def credible_set(self) -> tuple[pl.LazyFrame, pl.LazyFrame]:
+        """One credible set with two variants; the lead is the first one."""
+        credible_set = pl.LazyFrame({
+            'id': ['cs1'],
+            'studyId': ['study1'],
+            'leadVariantId': ['1_100_A_T'],
+            'fineMappingMethod': ['SuSiE'],
+        })
+        credible_set_variant = pl.LazyFrame({
+            'credibleSetId': ['cs1', 'cs1'],
+            'variantId': ['1_100_A_T', '1_200_C_G'],
+            'pValueMantissa': [5.0, 1.0],
+            'pValueExponent': [-8, -5],
+            'reportedBeta': [0.1, 0.05],
+            'conditionalBeta': [0.09, None],
+            'posteriorProbability': [0.8, 0.2],
+        })
+        return credible_set, credible_set_variant
 
-    def test_lead_variant_is_flagged(self, credible_set: pl.LazyFrame) -> None:
+    def test_lead_variant_is_flagged(self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]) -> None:
         """The tag variant matching the locus lead variantId must have isLead=True."""
-        result = process_credible_set(credible_set).collect()
+        result = process_credible_set(*credible_set).collect()
         assert isinstance(result, pl.DataFrame)
         lead_rows = result.filter(pl.col('variantId') == '1_100_A_T')
         assert lead_rows['isLead'].to_list() == [True]
 
-    def test_tag_variant_not_flagged(self, credible_set: pl.LazyFrame) -> None:
+    def test_tag_variant_not_flagged(self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]) -> None:
         """A tag variant that is not the lead must have isLead=False."""
-        result = process_credible_set(credible_set).collect()
+        result = process_credible_set(*credible_set).collect()
         assert isinstance(result, pl.DataFrame)
         tag_rows = result.filter(pl.col('variantId') == '1_200_C_G')
         assert tag_rows['isLead'].to_list() == [False]
 
-    def test_row_count_equals_locus_size(self, credible_set: pl.LazyFrame) -> None:
-        """Output must have one row per tag variant in the locus array."""
-        result = process_credible_set(credible_set).collect()
+    def test_one_row_per_credible_set_variant(self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]) -> None:
+        """Output must have one row per variant of the credible set."""
+        result = process_credible_set(*credible_set).collect()
         assert isinstance(result, pl.DataFrame)
         assert len(result) == 2
 
-    def test_output_columns(self, credible_set: pl.LazyFrame) -> None:
+    def test_output_columns(self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]) -> None:
         """Output must contain exactly the expected columns."""
-        result = process_credible_set(credible_set).collect()
+        result = process_credible_set(*credible_set).collect()
         assert isinstance(result, pl.DataFrame)
         expected = {
-            'studyLocusId',
+            'credibleSetId',
             'studyId',
             'pValueMantissa',
             'pValueExponent',
@@ -166,6 +154,16 @@ class TestProcessCredibleSet:
         }
         assert set(result.columns) == expected
 
+    def test_beta_is_the_reported_effect_and_every_variant_is_in_the_credible_intervals(
+        self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]
+    ) -> None:
+        """The published variants are the 95% members, so both credible interval flags hold."""
+        result = process_credible_set(*credible_set).collect().sort('variantId')
+        assert result['beta'].to_list() == [0.1, 0.05]
+        assert result['is95CredibleSet'].to_list() == [True, True]
+        assert result['is99CredibleSet'].to_list() == [True, True]
+        assert result['finemappingMethod'].to_list() == ['SuSiE', 'SuSiE']
+
 
 class TestProcessL2G:
     """Tests for process_l2g."""
@@ -174,7 +172,7 @@ class TestProcessL2G:
     def l2g(self) -> pl.LazyFrame:
         """Three genes for one locus: top-scorer, a strong secondary (>= 0.5), and a weak one."""
         return pl.DataFrame({
-            'studyLocusId': ['locus1', 'locus1', 'locus1'],
+            'credibleSetId': ['cs1', 'cs1', 'cs1'],
             'geneId': ['GENE_A', 'GENE_B', 'GENE_C'],
             'score': [0.9, 0.6, 0.1],
         }).lazy()
