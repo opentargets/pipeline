@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from pts.transformers.clinical_mira.moa.benchmark import _phase_group, wilson
+from pts.transformers.clinical_mira.moa.benchmark import phase_group, wilson
 from pts.transformers.clinical_mira.moa.report import GO_PRECISION, markdown_table
 
 if TYPE_CHECKING:
@@ -31,22 +31,42 @@ def release_filter(candidates: pl.DataFrame, min_confidence: float, exclude_stag
 def score_candidates(candidates: pl.DataFrame, moa: pl.DataFrame) -> pl.DataFrame:
     """Score the released candidates against the manual mechanisms of their drug.
 
+    A candidate's drug is its parent and every molecule in its ``chemblIds``; its manual targets
+    are those of every manual mechanism listing any of them.
+
     Returns:
         pl.DataFrame: the candidates whose drug has a manual
-        mechanism, with ``phase_group`` and boolean ``correct``.
+        mechanism, with ``manualTargets``, ``phase_group`` and boolean ``correct``.
     """
     truth = (
         moa
         .filter(pl.col('curation') == 'manual')
+        .select('chemblIds', 'targets')
         .explode('chemblIds')
         .group_by('chemblIds')
-        .agg(manualTargets=pl.col('targets').explode().drop_nulls().unique())
+        .agg(_targets=pl.col('targets').explode().drop_nulls().unique())
+        .rename({'chemblIds': '_drug_id'})
     )
-    return candidates.join(
-        truth, left_on='parentChemblId', right_on='chemblIds', how='inner', maintain_order='left'
-    ).with_columns(
-        phase_group=_phase_group(pl.col('maximumClinicalStage')),
-        correct=pl.col('targets').list.set_intersection(pl.col('manualTargets')).list.len() > 0,
+    indexed = candidates.with_row_index('_row')
+    manual = (
+        indexed
+        .select(
+            '_row',
+            _drug_id=pl.concat_list(pl.col('parentChemblId'), pl.col('chemblIds').fill_null([])),
+        )
+        .explode('_drug_id')
+        .join(truth, on='_drug_id', how='inner')
+        .group_by('_row')
+        .agg(manualTargets=pl.col('_targets').explode().drop_nulls().unique().sort())
+    )
+    return (
+        indexed
+        .join(manual, on='_row', how='inner', maintain_order='left')
+        .drop('_row')
+        .with_columns(
+            phase_group=phase_group(pl.col('maximumClinicalStage')),
+            correct=pl.col('targets').list.set_intersection(pl.col('manualTargets')).list.len() > 0,
+        )
     )
 
 
@@ -66,17 +86,25 @@ def precision_table(scored: pl.DataFrame, by: str) -> pl.DataFrame:
     )
 
 
-def verdict(scored: pl.DataFrame) -> str:
-    """Return the go line from the early-phase strict precision."""
+def verdict(scored: pl.DataFrame, min_scorable: int) -> str:
+    """Return the go line from the early-phase strict precision.
+
+    ``GO`` or ``NO-GO`` when at least ``min_scorable`` early-phase candidates are scorable,
+    ``INCONCLUSIVE`` when fewer are, ``UNSCORED`` when none is.
+    """
     early = scored.filter(pl.col('phase_group') == 'early')
     if early.is_empty():
         return 'UNSCORED: no early-phase candidate has a ChEMBL mechanism to be scored against.'
     correct, n = int(early['correct'].sum()), early.height
     low, high = wilson(correct, n)
-    label = 'GO' if correct / n >= GO_PRECISION else 'NO-GO'
+    if n < min_scorable:
+        label = 'INCONCLUSIVE'
+    else:
+        label = 'GO' if correct / n >= GO_PRECISION else 'NO-GO'
     return (
         f'{label}: early-phase strict target precision {correct / n:.3f} ({correct}/{n}; '
-        f'Wilson 95% {low:.3f} to {high:.3f}) against a bar of {GO_PRECISION:.2f}.'
+        f'Wilson 95% {low:.3f} to {high:.3f}) against a bar of {GO_PRECISION:.2f} '
+        f'with at least {min_scorable} scorable.'
     )
 
 
@@ -91,6 +119,7 @@ def run_qc(
     out: Path,
     min_confidence: float,
     exclude_stages: list[str],
+    min_scorable: int,
 ) -> str:
     """Write ``qc.md`` and ``new_evidence_pairs.csv`` to ``out``; return the go line."""
     out.mkdir(parents=True, exist_ok=True)
@@ -98,7 +127,7 @@ def run_qc(
     candidates = read_dataset(release, 'intermediate/drug_mechanism_of_action_aact')
     released = release_filter(candidates, min_confidence, exclude_stages)
     scored = score_candidates(released, moa)
-    go = verdict(scored)
+    go = verdict(scored, min_scorable)
 
     precedence = {
         'release': read_dataset(release, 'output/evidence_clinical_precedence', PAIR),

@@ -27,6 +27,7 @@ from pts.transformers.clinical_mira.moa import (
     qc,
     quotes,
     report,
+    staging,
     vertex,
 )
 from pts.transformers.clinical_mira.moa.claude import run_batch_cached
@@ -166,7 +167,7 @@ def cmd_extract(run: Path, args: argparse.Namespace) -> None:
     if args.limit is not None:
         pools = pools.head(args.limit)
     requests = [
-        (pool_id, f'Drug: {name}\n\n{text}')
+        (pool_id, staging.request_text(name, text))
         for pool_id, name, text in pools.select('pool_id', 'drug_name', 'text').iter_rows()
     ]
     results, errors = _run_llm(args, run, 'extract', requests, MoaExtraction, cached_only=args.cached_only)
@@ -283,7 +284,7 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
 
 
 def cmd_qc(_run: Path, args: argparse.Namespace) -> None:
-    go = qc.run_qc(args.release, args.without, args.out, args.min_confidence, args.exclude_stages)
+    go = qc.run_qc(args.release, args.without, args.out, args.min_confidence, args.exclude_stages, args.min_scorable)
     logger.info(f'qc: {go}')
 
 
@@ -358,6 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     qc_cmd.add_argument('--out', required=True, type=Path)
     qc_cmd.add_argument('--min-confidence', type=float, default=0.80)
     qc_cmd.add_argument('--exclude-stages', nargs='*', default=['APPROVAL'])
+    qc_cmd.add_argument('--min-scorable', type=int, default=30, help='early-phase scorable candidates for a verdict')
     qc_cmd.set_defaults(handler=cmd_qc, run_dir=None)
 
     command('evaluate', cmd_evaluate).add_argument('--seed', type=int, default=0)

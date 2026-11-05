@@ -233,6 +233,32 @@ def test_vertex_provider_uses_chat_api_and_gpt_oss(tmp_path, inputs, monkeypatch
     assert seen['n'] == 3
 
 
+def test_extract_request_is_the_staging_request_text(tmp_path, inputs, monkeypatch):
+    seen = {}
+
+    def fake_batch(requests, **kwargs):
+        seen['requests'] = requests
+        return {}, {}
+
+    monkeypatch.setattr(cli, 'run_batch_cached', fake_batch)
+    monkeypatch.setattr(cli.staging, 'request_text', lambda name, text: f'staged {name}')
+    run = tmp_path / 'run'
+    run.mkdir()
+    pl.DataFrame({
+        'id': list(TRIALS),
+        'prompt': [t[1] for t in TRIALS.values()],
+        'prompt_sha256': ['h'] * 3,
+    }).write_parquet(run / 'texts.parquet')
+    cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
+
+    cli.main(['extract', '--run-dir', str(run), '--all', '--provider', 'anthropic'])
+
+    pools = pl.read_parquet(run / 'pools.parquet').sort('pool_id')
+    assert seen['requests'] == [
+        (pool_id, f'staged {name}') for pool_id, name in pools.select('pool_id', 'drug_name').rows()
+    ]
+
+
 def test_anthropic_provider_uses_batches_with_opus_by_default(tmp_path, inputs, monkeypatch):
     seen = {}
 

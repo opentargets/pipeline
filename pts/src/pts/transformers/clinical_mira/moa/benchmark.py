@@ -34,7 +34,8 @@ LATE_PHASES = frozenset({'PHASE_2_3', 'PHASE_3', 'PREAPPROVAL', 'APPROVAL'})
 BENCH_ROWS = pl.List(pl.Struct({'targets': pl.List(pl.String), 'actionType': pl.String}))
 
 
-def _phase_group(stage: pl.Expr) -> pl.Expr:
+def phase_group(stage: pl.Expr) -> pl.Expr:
+    """The phase group of a maximum clinical stage: ``early``, ``late`` or ``other``."""
     return (
         pl
         .when(stage.is_in(sorted(EARLY_PHASES)))
@@ -103,7 +104,7 @@ def link_pools(
                 pl.col('trial_rank').replace_strict(stage_names, default='UNKNOWN', return_dtype=pl.String),
             )
         )
-        .with_columns(phase_group=_phase_group(pl.col('maximumClinicalStage')))
+        .with_columns(phase_group=phase_group(pl.col('maximumClinicalStage')))
     )
     return links.select('pool_id', 'drugId', 'link', 'maximumClinicalStage', 'drugType', 'phase_group')
 
