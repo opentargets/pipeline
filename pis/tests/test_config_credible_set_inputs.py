@@ -19,32 +19,35 @@ DATASETS = ('study', 'credible_set', 'credible_set_variant')
 
 EXPECTED_RUNS = {
     'gwas': {
-        'gwas/gcca/{dataset}': 'gs://gwas_catalog_top_hits/prod/20261028T234317/output',
-        'gwas/gcss_pics/{dataset}': 'gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output',
-        'gwas/gcss_susie/{dataset}': 'gs://gwas_catalog_sumstats_susie/prod/20261101T152321/output',
-        'gwas/finngen_gwas/{dataset}': 'gs://finngen_data/gwas/prod/20261029T152531/output',
+        'gwas/gcca/{dataset}': 'gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output',
+        'gwas/gcss_pics/{dataset}': 'gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output',
+        'gwas/gcss_susie/{dataset}': 'gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output',
+        'gwas/finngen_gwas/{dataset}': 'gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output',
     },
     'gwas_ppp': {
-        'gwas/finngen_meta/{dataset}': 'gs://finngen_data/meta/three-way/prod/20261102T181409/output',
+        'gwas/finngen_meta/{dataset}': 'gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output',
     },
     'molqtl': {
-        'molqtl/eqtl_catalogue/{dataset}': 'gs://eqtl_catalogue_data/r8/prod/20261030T164426/output',
-        'molqtl/ukb_ppp_eur/{dataset}': 'gs://ukb_ppp_eur_data/prod/20261026T161010/output',
-        'molqtl/finngen_multiome/{dataset}': 'gs://finngen_data/multiome/prod/20261029T125742/output',
+        'molqtl/eqtl_catalogue/{dataset}': 'gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output',
+        'molqtl/ukb_ppp_eur/{dataset}': 'gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output',
+        'molqtl/finngen_multiome/{dataset}': 'gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output',
     },
     'molqtl_ppp': {
-        'molqtl/otar2077/microglia/{dataset}': 'gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/output',
-        'molqtl/eQTLGen/single_cell_eqtl/{dataset}': 'gs://eqtlgen_data/prod/20261103T135048/output/single_cell_eqtl',
-        'molqtl/eQTLGen/coeqtl/{dataset}': 'gs://eqtlgen_data/prod/20261103T135048/output/coeqtl',
-        'molqtl/deCODE_proteomics/{dataset}': 'gs://decode_data/prod/20261103T122701/output',
-        'molqtl/sle_map/{dataset}': 'gs://sle_map_data/prod/20261103T145657/output',
+        'molqtl/otar2077/microglia/{dataset}': 'gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output',
+        'molqtl/eQTLGen/single_cell_eqtl/{dataset}': 'gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/single_cell_eqtl',
+        'molqtl/eQTLGen/coeqtl/{dataset}': 'gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/coeqtl',
+        'molqtl/deCODE_proteomics/{dataset}': 'gs://decode_data/prod/${staging_decode_ts}/output',
+        'molqtl/sle_map/{dataset}': 'gs://sle_map_data/prod/${staging_sle_map_ts}/output',
     },
 }
 
 
 def _expected(step: str) -> dict[str, str]:
+    """The expected copies of a step, each run read through its source's own staging timestamp."""
+    scratchpad = parse_yaml(CONFIG_PATH)['scratchpad']
     expected = {}
-    for destination, run in EXPECTED_RUNS[step].items():
+    for destination, run_template in EXPECTED_RUNS[step].items():
+        run = Template(run_template).substitute(scratchpad)
         for dataset in DATASETS:
             # eQTL Catalogue keeps its study under `study_index`.
             folder = 'study_index' if run.startswith('gs://eqtl_catalogue_data') and dataset == 'study' else dataset
