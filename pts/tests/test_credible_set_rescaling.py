@@ -7,6 +7,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.credible_set import credible_set_variant_schema
+from pts.transformers.credible_set import rescaling
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 from pts.transformers.credible_set.rescaling import rescaled_effect_size
 from pts.transformers.study import QualityFlag as StudyQualityFlag
@@ -185,3 +186,17 @@ def test_a_non_finite_conditional_beta_falls_back_to_the_marginal_one(non_finite
     [row] = _rescale(_variants({'conditionalBeta': non_finite, 'reportedBeta': -0.2}))
     assert row['rescaledDirection'] == -1
     assert row['flags'] == {CredibleSetVariantFlag.RESCALED_FROM_MARGINAL}
+
+
+def test_the_chi_squared_statistic_is_computed_once_per_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The statistic is a Python function, which the query optimiser cannot share between its uses."""
+    evaluated: list[int] = []
+    isf = rescaling.chi2.isf
+
+    def counting_isf(p_value: Any, **options: Any) -> Any:
+        evaluated.append(len(p_value))
+        return isf(p_value, **options)
+
+    monkeypatch.setattr(rescaling.chi2, 'isf', counting_isf)
+    _rescale(_variants({}, {}, {'pValueExponent': -20}))
+    assert sum(evaluated) == 3

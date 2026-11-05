@@ -18,6 +18,18 @@ CHI2_APPROXIMATION_INTERCEPT = -5.367
 """The intercept of the linear approximation of the chi-squared statistic from -log10(p), a constant."""
 
 
+def _finite(value: pl.Expr) -> pl.Expr:
+    """`value` as a float, null when it is missing, NaN or infinite."""
+    value = value.cast(pl.Float64)
+    return pl.when(value.is_finite()).then(value)
+
+
+def _chi2_isf(p_value: pl.Series) -> pl.Series:
+    """The exact chi-squared statistic (1 degree of freedom) of each p-value, null when it is not finite."""
+    statistic = pl.Series(chi2.isf(p_value.to_numpy(), df=1))
+    return statistic.set(~statistic.is_finite(), None)
+
+
 def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
     """The chi-squared statistic (1 degree of freedom) of a p-value given as mantissa and exponent.
 
@@ -34,17 +46,9 @@ def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
     neglog = -(mantissa.cast(pl.Float64).log10() + exponent)
     approximation = neglog * CHI2_APPROXIMATION_SLOPE + CHI2_APPROXIMATION_INTERCEPT
     p_value = mantissa.cast(pl.Float64) * pl.lit(10.0).pow(exponent)
-    exact = p_value.map_batches(
-        lambda batch: pl.Series(chi2.isf(batch.to_numpy(), df=1)), return_dtype=pl.Float64, is_elementwise=True
-    )
-    statistic = pl.when(exponent < CHI2_EXACT_MIN_EXPONENT).then(approximation).otherwise(exact).fill_nan(None)
-    return pl.when(statistic.is_finite()).then(statistic).alias('chi2')
-
-
-def _finite(value: pl.Expr) -> pl.Expr:
-    """`value` as a float, null when it is missing, NaN or infinite."""
-    value = value.cast(pl.Float64)
-    return pl.when(value.is_finite()).then(value)
+    # the Python function appears once in the plan: the optimiser does not share it between uses
+    exact = p_value.map_batches(_chi2_isf, return_dtype=pl.Float64, is_elementwise=True)
+    return pl.when(exponent < CHI2_EXACT_MIN_EXPONENT).then(_finite(approximation)).otherwise(exact).alias('chi2')
 
 
 def rescaled_effect_size(
