@@ -1,16 +1,23 @@
 """Tests for drug_mechanism_of_action, which reads the raw ChEMBL tables straight from the dump."""
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import polars as pl
 import pytest
 
+from pts.transformers import drug_mechanism_of_action as module
 from pts.transformers.drug_mechanism_of_action import (
     ORDER_BY,
     TABLES,
     _chembl_target,
     _consolidate_duplicate_references,
     _with_target_chembl_id,
+    drug_mechanism_of_action,
+    merge_aact,
     process_mechanism_of_action,
 )
+from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 PROTEIN_ID = pl.Struct({'id': pl.String, 'source': pl.String})
 
@@ -527,3 +534,167 @@ class TestOrderIsDeterministic:
         baseline = process_mechanism_of_action(**prepare(None))
         for seed in (1, 2, 3):
             assert process_mechanism_of_action(**prepare(seed)).equals(baseline)
+
+
+CANDIDATE_SCHEMA = {
+    'parentChemblId': pl.String,
+    'chemblIds': pl.List(pl.String),
+    'maximumClinicalStage': pl.String,
+    'drugType': pl.String,
+    'targetFromSource': pl.String,
+    'targets': pl.List(pl.String),
+    'targetSymbols': pl.List(pl.String),
+    'targetType': pl.String,
+    'actionType': pl.String,
+    'mechanismOfAction': pl.String,
+    'confidence': pl.Float64,
+    'statementType': pl.String,
+    'nctIds': pl.List(pl.String),
+    'quote': pl.String,
+    'quoteNctId': pl.String,
+}
+
+
+def candidate(**overrides: object) -> dict:
+    row = {
+        'parentChemblId': 'CHEMBL90',
+        'chemblIds': ['CHEMBL90'],
+        'maximumClinicalStage': 'PHASE_2',
+        'drugType': 'Small molecule',
+        'targetFromSource': 'Kinase K',
+        'targets': ['ENSG9'],
+        'targetSymbols': ['K'],
+        'targetType': 'single protein',
+        'actionType': 'INHIBITOR',
+        'mechanismOfAction': 'Kinase K inhibitor',
+        'confidence': 0.9,
+        'statementType': 'explicit',
+        'nctIds': ['NCT01', 'NCT02'],
+        'quote': 'inhibits K',
+        'quoteNctId': 'NCT01',
+    }
+    return row | overrides
+
+
+def candidates_frame(*rows: dict) -> pl.DataFrame:
+    return pl.DataFrame(list(rows), schema=CANDIDATE_SCHEMA)
+
+
+class TestMergeAact:
+    @pytest.fixture
+    def chembl(self, tables: dict) -> pl.DataFrame:
+        return process_mechanism_of_action(**tables)
+
+    def merge(self, chembl: pl.DataFrame, *rows: dict, minimum: float = 0.8) -> tuple[pl.DataFrame, pl.DataFrame]:
+        return merge_aact(chembl, candidates_frame(*rows), minimum, ['APPROVAL'])
+
+    def test_without_aact_only_curation_is_added(self, tables: dict) -> None:
+        result = process_mechanism_of_action(**tables)
+        assert result.columns[-1] == 'curation'
+        assert result['curation'].to_list() == ['manual'] * result.height
+        assert set(result.columns) == set(MECHANISM_SCHEMA) - {'parentChemblId'} | {'curation'}
+
+    def test_drug_with_a_chembl_mechanism_gets_no_aact_row(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(chembl, candidate(parentChemblId='CHEMBL3', chemblIds=['CHEMBL3']))
+        assert merged.equals(chembl)
+
+    def test_a_sibling_salt_with_a_chembl_mechanism_blocks_the_parent(self, chembl: pl.DataFrame) -> None:
+        # CHEMBL1 is a salt of CHEMBL2 and carries the mechanism; the candidate lists the parent and another salt.
+        merged, report = self.merge(chembl, candidate(parentChemblId='CHEMBL2', chemblIds=['CHEMBL2', 'CHEMBL7']))
+        assert merged.equals(chembl)
+        assert report['category'].to_list() == ['extra_target']
+        assert report['chemblCurrentTargets'].to_list() == [['ENSG1', 'ENSG2']]
+
+    def test_a_chembl_mechanism_on_a_listed_salt_blocks_the_parent(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(chembl, candidate(parentChemblId='CHEMBL77', chemblIds=['CHEMBL77', 'CHEMBL1']))
+        assert merged.equals(chembl)
+
+    def test_approved_and_low_confidence_candidates_stay_out_but_reach_the_side_file(
+        self, chembl: pl.DataFrame
+    ) -> None:
+        merged, report = self.merge(
+            chembl,
+            candidate(parentChemblId='CHEMBL91', chemblIds=['CHEMBL91'], maximumClinicalStage='APPROVAL'),
+            candidate(parentChemblId='CHEMBL92', chemblIds=['CHEMBL92'], confidence=0.75),
+        )
+        assert merged.equals(chembl)
+        assert sorted(report['parentChemblId'].to_list()) == ['CHEMBL91', 'CHEMBL92']
+        assert set(report['category'].to_list()) == {'new_moa'}
+        assert report['chemblCurrentTargets'].to_list() == [[], []]
+        assert {'quote', 'confidence', 'nctIds'} <= set(report.columns)
+
+    def test_aact_row_cites_its_trials(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(chembl, candidate(chemblIds=['CHEMBL90', 'CHEMBL93']))
+        row = merged.tail(1).to_dicts()[0]
+        assert row['references'] == [
+            {
+                'source': 'ClinicalTrials',
+                'ids': ['NCT01', 'NCT02'],
+                'urls': ['https://clinicaltrials.gov/study/NCT01', 'https://clinicaltrials.gov/study/NCT02'],
+            }
+        ]
+        assert row['curation'] == 'electronic'
+        assert row['chemblIds'] == ['CHEMBL90', 'CHEMBL93']
+        assert row['targetName'] == 'Kinase K'
+        assert merged.schema == chembl.schema
+        assert merged.height == chembl.height + 1
+        assert merged.head(chembl.height).equals(chembl)
+
+    def test_duplicate_gene_set_keeps_the_most_confident(self, chembl: pl.DataFrame) -> None:
+        merged, report = self.merge(
+            chembl,
+            candidate(confidence=0.85, mechanismOfAction='weaker', targets=['ENSG9', 'ENSG8']),
+            candidate(confidence=0.95, mechanismOfAction='stronger', targets=['ENSG8', 'ENSG9']),
+        )
+        assert report['mechanismOfAction'].to_list() == ['stronger']
+        assert merged.tail(1)['mechanismOfAction'].to_list() == ['stronger']
+        assert merged.height == chembl.height + 1
+
+    def test_extra_target_is_reported_only_when_no_gene_overlaps(self, chembl: pl.DataFrame) -> None:
+        _, report = self.merge(
+            chembl,
+            candidate(parentChemblId='CHEMBL3', chemblIds=['CHEMBL3'], targets=['ENSG3', 'ENSG9']),
+            candidate(parentChemblId='CHEMBL3', chemblIds=['CHEMBL3'], targets=['ENSG9']),
+        )
+        assert report['category'].to_list() == ['extra_target']
+        assert report['targets'].to_list() == [['ENSG9']]
+        assert report['chemblCurrentTargets'].to_list() == [['ENSG3']]
+
+    def test_primary_key_is_unique_after_merge(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(parentChemblId='CHEMBL91', chemblIds=['CHEMBL91'], targets=['ENSG8']),
+            candidate(parentChemblId='CHEMBL92', chemblIds=['CHEMBL92'], targets=['ENSG8']),
+            candidate(parentChemblId='CHEMBL91', chemblIds=['CHEMBL91'], targets=['ENSG7'], mechanismOfAction='m2'),
+        )
+        assert merged.height == chembl.height + 3
+        assert not merged.select('chemblIds', 'mechanismOfAction', 'targets').is_duplicated().any()
+
+
+class TestEntryPoint:
+    @pytest.fixture
+    def staged(self, tables: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+        monkeypatch.setattr(module, 'read_dump_tables', lambda *_a, **_k: tables)
+        write_dataset(tables['gene_df'], str(tmp_path / 'target'))
+        write_dataset(candidates_frame(candidate()), str(tmp_path / 'aact'))
+        return {'target': tmp_path / 'target', 'aact': tmp_path / 'aact', 'root': tmp_path}
+
+    def test_a_plain_destination_without_aact_writes_the_chembl_rows(self, staged: dict) -> None:
+        out = staged['root'] / 'out'
+        drug_mechanism_of_action(
+            {'chembl': Path('dump'), 'target': staged['target']}, out, {}, SimpleNamespace(work_path=staged['root'])
+        )
+        result = scan_dataset(str(out)).collect()
+        assert result.height == 2
+        assert set(result['curation']) == {'manual'}
+
+    def test_aact_source_and_report_destination_write_both_outputs(self, staged: dict) -> None:
+        out, report = staged['root'] / 'out', staged['root'] / 'report'
+        drug_mechanism_of_action(
+            {'chembl': Path('dump'), 'target': staged['target'], 'aact': staged['aact']},
+            {'output': out, 'chembl_report': report},
+            {'release_min_confidence': 0.8, 'exclude_stages': ['APPROVAL']},
+            SimpleNamespace(work_path=staged['root']),
+        )
+        assert sorted(scan_dataset(str(out)).collect()['curation'].to_list()) == ['electronic', 'manual', 'manual']
+        assert scan_dataset(str(report)).collect()['category'].to_list() == ['new_moa']

@@ -900,7 +900,14 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         target: output/target
-      destination: output/drug_mechanism_of_action
+        aact: intermediate/drug_mechanism_of_action_aact
+      destination:
+        output: output/drug_mechanism_of_action
+        chembl_report: intermediate/drug_mechanism_of_action_aact_chembl_report
+      settings:
+        release_min_confidence: 0.80
+        exclude_stages:
+          - APPROVAL
   ##################################################################################################
 
   #: DRUG_MECHANISM_OF_ACTION_AACT STEP :##########################################################

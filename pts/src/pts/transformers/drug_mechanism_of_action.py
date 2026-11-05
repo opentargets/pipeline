@@ -40,11 +40,16 @@ ORDER_BY = {
 #: The `proteinIds` sources ChEMBL accessions are resolved through.
 UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
 
+CURATION_MANUAL = 'manual'
+CURATION_ELECTRONIC = 'electronic'
+CLINICAL_TRIALS_SOURCE = 'ClinicalTrials'
+CLINICAL_TRIALS_URL = 'https://clinicaltrials.gov/study/'
+
 
 def drug_mechanism_of_action(
     source: dict[str, Path],
-    destination: Path,
-    _settings: dict[str, Any],
+    destination: Path | dict[str, Path],
+    settings: dict[str, Any],
     config: Config,
 ) -> None:
     """Transform ChEMBL mechanism of action data into the Open Targets format.
@@ -53,8 +58,13 @@ def drug_mechanism_of_action(
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
             - target: Path to the target dataset.
-        destination: Path to write the output parquet file.
-        _settings: Custom settings (not used).
+            - aact: Optional path to the AACT candidate mechanisms.
+        destination: Path to write the output parquet file, or a dictionary with:
+            - output: Path to write the output parquet file.
+            - chembl_report: Optional path to the side file of AACT candidates for ChEMBL.
+        settings: Custom settings:
+            - release_min_confidence: Minimum confidence of an AACT mechanism to publish.
+            - exclude_stages: Maximum clinical stages whose AACT mechanisms are not published.
         config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
@@ -79,8 +89,22 @@ def drug_mechanism_of_action(
         gene_df,
     )
 
-    logger.info(f'Writing mechanism of action to {destination}')
-    write_dataset(output_df, str(destination))
+    output_path = destination['output'] if isinstance(destination, dict) else destination
+    if source.get('aact') is not None:
+        logger.info(f'Reading AACT candidates from {source["aact"]}')
+        candidates = scan_dataset(str(source['aact'])).collect()
+        output_df, report = merge_aact(
+            output_df,
+            candidates,
+            settings['release_min_confidence'],
+            settings['exclude_stages'],
+        )
+        if isinstance(destination, dict) and destination.get('chembl_report') is not None:
+            logger.info(f'Writing AACT report for ChEMBL to {destination["chembl_report"]}')
+            write_dataset(report, str(destination['chembl_report']))
+
+    logger.info(f'Writing mechanism of action to {output_path}')
+    write_dataset(output_df, str(output_path))
 
 
 def process_mechanism_of_action(
@@ -149,7 +173,97 @@ def process_mechanism_of_action(
         )
     )
 
-    return _consolidate_duplicate_references(result)
+    return _consolidate_duplicate_references(result).with_columns(curation=pl.lit(CURATION_MANUAL))
+
+
+def merge_aact(
+    chembl_rows: pl.DataFrame,
+    candidates: pl.DataFrame,
+    release_min_confidence: float,
+    exclude_stages: list[str],
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Append AACT-inferred mechanisms to the ChEMBL ones and build the side file for ChEMBL.
+
+    Args:
+        chembl_rows: Output of ``process_mechanism_of_action``.
+        candidates: AACT candidates, with the columns of ``drug_mechanism_of_action_aact``.
+        release_min_confidence: Minimum confidence of a ``new_moa`` candidate to publish.
+        exclude_stages: Maximum clinical stages whose ``new_moa`` candidates are not published.
+
+    Returns:
+        The mechanism table with the published candidates appended, and the side file: every
+        ``new_moa`` and non-overlapping ``extra_target`` candidate, with ``category`` and
+        ``chemblCurrentTargets``.
+    """
+    deduplicated = (
+        candidates
+        .with_columns(_targets_key=pl.col('targets').list.sort())
+        .sort('confidence', descending=True, maintain_order=True)
+        .unique(subset=['parentChemblId', '_targets_key'], keep='first', maintain_order=True)
+        .drop('_targets_key')
+        .with_row_index('_row')
+    )
+
+    chembl_targets = (
+        chembl_rows
+        .select('chemblIds', 'targets')
+        .explode('chemblIds')
+        .group_by('chemblIds')
+        .agg(pl.col('targets').explode().drop_nulls().unique().alias('chemblTargets'))
+        .rename({'chemblIds': '_drug_id'})
+    )
+    current = (
+        deduplicated
+        .select(
+            '_row',
+            _drug_id=pl.concat_list(pl.col('parentChemblId').cast(pl.String), pl.col('chemblIds')),
+        )
+        .explode('_drug_id')
+        .unique()
+        .join(chembl_targets, on='_drug_id', how='inner')
+        .group_by('_row')
+        .agg(pl.col('chemblTargets').explode().drop_nulls().unique().sort().alias('chemblCurrentTargets'))
+    )
+
+    classified = (
+        deduplicated
+        .join(current, on='_row', how='left', maintain_order='left')
+        .with_columns(_has_mechanism=pl.col('chemblCurrentTargets').is_not_null())
+        .with_columns(chemblCurrentTargets=pl.col('chemblCurrentTargets').fill_null([]))
+        .with_columns(
+            category=pl
+            .when(~pl.col('_has_mechanism'))
+            .then(pl.lit('new_moa'))
+            .when(pl.col('targets').list.set_intersection(pl.col('chemblCurrentTargets')).list.len() == 0)
+            .then(pl.lit('extra_target'))
+        )
+        .drop('_has_mechanism')
+    )
+
+    report = classified.filter(pl.col('category').is_not_null()).drop('_row')
+
+    published = classified.filter(
+        (pl.col('category') == 'new_moa')
+        & (pl.col('confidence') >= release_min_confidence)
+        & ~pl.col('maximumClinicalStage').is_in(exclude_stages).fill_null(False)
+    )
+    appended = published.select(
+        'chemblIds',
+        'mechanismOfAction',
+        'actionType',
+        pl.col('targetFromSource').alias('targetName'),
+        'targetType',
+        'targets',
+        pl.concat_list(
+            pl.struct(
+                pl.lit(CLINICAL_TRIALS_SOURCE).alias('source'),
+                pl.col('nctIds').alias('ids'),
+                pl.col('nctIds').list.eval(pl.lit(CLINICAL_TRIALS_URL) + pl.element()).alias('urls'),
+            )
+        ).alias('references'),
+        pl.lit(CURATION_ELECTRONIC).alias('curation'),
+    ).select([pl.col(name).cast(dtype) for name, dtype in chembl_rows.schema.items()])
+    return pl.concat([chembl_rows, appended]), report
 
 
 def _with_target_chembl_id(mechanism: pl.DataFrame, target_dictionary: pl.DataFrame) -> pl.DataFrame:
