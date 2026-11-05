@@ -967,6 +967,23 @@ steps:
         snapshot: '{{snapshot}}'
   ##################################################################################################
 
+  #: AACT_MOA STEP :###############################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG, with
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}; the record stores sit outside it
+  aact_moa:
+    - name: transform aact_moa
+      transformer: clinical_mira.aact_moa
+      source:
+        aact: input/aact.zip
+        extraction: extraction
+      destination:
+        moa: extraction
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
+        import_experiment_cache: gs://clinical_staging/store/moa/seed/extract_cache-2026-11-05.jsonl
+  ##################################################################################################
+
   #: CLINICAL_MINING_MODELS STEP :#################################################################
   # Not part of a release. Runs with release_uri pointed at
   # gs://clinical_staging/clinical_mining/${staging_version}; the record stores sit outside it

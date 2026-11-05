@@ -51,6 +51,11 @@ def pool_trials(pools: pl.DataFrame, texts: pl.DataFrame, trials: pl.DataFrame) 
     return pools.select('content_key', 'drug_name').join(hashed, on='drug_name', how='left', maintain_order='left')
 
 
+def request_text(drug_name: str, pool_text: str) -> str:
+    """The user message of a pool's extraction request."""
+    return f'Drug: {drug_name}\n\n{pool_text}'
+
+
 def record_output(
     drug_name: str, trials: list[dict], extraction: dict, usage: dict | None, carried_from: str | None
 ) -> str:
@@ -170,7 +175,8 @@ def import_experiment_cache(
         listed = {row['content_key']: row['trials'] for row in trials.to_dicts()}
         rows = []
         for pool in pools.to_dicts():
-            row = cached.get(llm.result_key(pool['text'], system_prompt, schemas.MoaExtraction, MOA.model))
+            request = request_text(pool['drug_name'], pool['text'])
+            row = cached.get(llm.result_key(request, system_prompt, schemas.MoaExtraction, MOA.model))
             if row is None:
                 continue
             output = record_output(
@@ -216,7 +222,10 @@ def moa_compute(
     Returns:
         A function from content keys to ``(output, error)`` in the order of the keys.
     """
-    texts = dict(zip(pools['content_key'].to_list(), pools['text'].to_list(), strict=True))
+    texts = {
+        row['content_key']: request_text(row['drug_name'], row['text'])
+        for row in pools.select('content_key', 'drug_name', 'text').iter_rows(named=True)
+    }
     listed = {row['content_key']: row for row in trials.to_dicts()}
     cache_path = scratch / 'moa_cache.jsonl'
 

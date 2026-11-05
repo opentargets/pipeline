@@ -13,6 +13,7 @@ from pts.transformers.clinical_mira.moa.staging import (
     parse_output,
     pool_trials,
     record_output,
+    request_text,
 )
 from pts.transformers.clinical_mira.record_store import read_records, record_schema, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA
@@ -40,7 +41,7 @@ def _inputs() -> tuple[pl.DataFrame, pl.DataFrame]:
 
 def _write_cache(path: Path, pools: pl.DataFrame, system_prompt: str, which: str) -> str:
     row = pools.filter(pl.col('drug_name') == which).row(0, named=True)
-    key = llm.result_key(row['text'], system_prompt, schemas.MoaExtraction, MOA.model)
+    key = llm.result_key(request_text(row['drug_name'], row['text']), system_prompt, schemas.MoaExtraction, MOA.model)
     path.write_text(json.dumps({'key': key, 'request_id': row['pool_id'], 'response': EXTRACTION}) + '\n')
     return str(path)
 
