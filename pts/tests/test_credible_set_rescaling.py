@@ -172,3 +172,16 @@ def test_a_source_rescaled_value_is_replaced_and_rows_keep_their_order() -> None
     rows = _rescale(variants)
     assert _not_rescaled(rows[0])
     assert rows[1]['rescaledAbsBeta'] < rows[2]['rescaledAbsBeta']
+
+
+@pytest.mark.parametrize('non_finite', [math.nan, math.inf, -math.inf], ids=['nan', 'inf', '-inf'])
+def test_a_non_finite_beta_is_missing(non_finite: float) -> None:
+    [row] = _rescale(_variants({'reportedBeta': non_finite, 'conditionalBeta': None}))
+    assert _not_rescaled(row)
+
+
+@pytest.mark.parametrize('non_finite', [math.nan, math.inf], ids=['nan', 'inf'])
+def test_a_non_finite_conditional_beta_falls_back_to_the_marginal_one(non_finite: float) -> None:
+    [row] = _rescale(_variants({'conditionalBeta': non_finite, 'reportedBeta': -0.2}))
+    assert row['rescaledDirection'] == -1
+    assert row['flags'] == {CredibleSetVariantFlag.RESCALED_FROM_MARGINAL}
